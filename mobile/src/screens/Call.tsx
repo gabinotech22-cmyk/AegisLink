@@ -57,12 +57,42 @@ export function CallScreen({ onClose }: Props) {
   }, [status, onClose]);
 
   const isVideo = media === 'video';
+  const peerColor = peer?.color ?? t.surface2;
 
   // Background: remote video for video calls, solid surface for audio.
   const showRemoteVideo = isVideo && remoteStream && status === 'in-call';
 
   return (
     <View style={[styles.screen, { backgroundColor: isVideo ? '#000' : t.bg }]}>
+      {/* Radial gradient background — visible in audio calls and video pre-connect */}
+      {(!showRemoteVideo) && (
+        <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+          <View
+            style={{
+              position: 'absolute',
+              top: -120,
+              left: -100,
+              width: 500,
+              height: 500,
+              borderRadius: 9999,
+              backgroundColor: peerColor,
+              opacity: 0.33,
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              bottom: -80,
+              right: -80,
+              width: 400,
+              height: 400,
+              borderRadius: 9999,
+              backgroundColor: t.accent,
+              opacity: 0.13,
+            }}
+          />
+        </View>
+      )}
       <RNStatusBar barStyle="light-content" />
       {showRemoteVideo && RTCView && (
         <RTCView
@@ -108,13 +138,13 @@ export function CallScreen({ onClose }: Props) {
               width: 100,
               height: 100,
               borderRadius: 50,
-              backgroundColor: t.surface2,
+              backgroundColor: peerColor,
               alignItems: 'center',
               justifyContent: 'center',
               marginBottom: 22,
             }}
           >
-            <Text style={{ fontFamily: t.fontDisplay, fontSize: 42, color: t.accent, fontWeight: '600' }}>
+            <Text style={{ fontFamily: t.fontDisplay, fontSize: 42, color: '#fff', fontWeight: '600' }}>
               {peerInitial}
             </Text>
           </View>
@@ -165,35 +195,6 @@ export function CallScreen({ onClose }: Props) {
           {labelFor(status, startedAt, i18nT)}
         </Text>
 
-        {/* Fingerprint card (show when in-call) */}
-        {status === 'in-call' && fingerprintWords.length === 8 ? (
-          <View
-            style={{
-              marginTop: 16,
-              marginHorizontal: 24,
-              padding: 12,
-              backgroundColor: t.surface,
-              borderWidth: 1,
-              borderColor: t.border,
-              borderRadius: t.radius,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1, marginBottom: 8 }}>
-              {i18nT('call.fingerprintTitle', 'CALL FINGERPRINT')}
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
-              {fingerprintWords.map((w, i) => (
-                <Text key={i} style={{ fontFamily: t.fontMono, fontSize: 12, color: t.text }}>
-                  {w}
-                </Text>
-              ))}
-            </View>
-            <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, marginTop: 8, textAlign: 'center' }}>
-              {i18nT('call.fingerprintDesc', 'Compare with your contact to verify')}
-            </Text>
-          </View>
-        ) : null}
       </View>
 
       {/* Flip camera button for video */}
@@ -221,6 +222,35 @@ export function CallScreen({ onClose }: Props) {
         >
           <I.FlipCamera size={22} color="#fff" />
         </Pressable>
+      ) : null}
+
+      {/* Fingerprint card — just above bottom controls */}
+      {status === 'in-call' && fingerprintWords.length >= 4 ? (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: insets.bottom + 120,
+            left: 24,
+            right: 24,
+            padding: 12,
+            backgroundColor: t.surface,
+            borderWidth: 1,
+            borderColor: t.border,
+            borderRadius: t.radius,
+            alignItems: 'center',
+            zIndex: 3,
+          }}
+        >
+          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1, marginBottom: 4 }}>
+            {i18nT('call.fingerprintTitle', 'CALL FINGERPRINT')}
+          </Text>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 16, color: '#fff', marginTop: 4, letterSpacing: 0.4 }}>
+            {fingerprintWords.slice(0, 4).join(' · ')}
+          </Text>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, marginTop: 6, textAlign: 'center' }}>
+            {i18nT('call.fingerprintDesc', 'Compare with your contact to verify')}
+          </Text>
+        </View>
       ) : null}
 
       {/* Bottom controls */}
