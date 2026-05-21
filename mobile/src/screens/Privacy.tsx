@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
-import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -40,6 +40,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const readReceipts = usePreferences((s) => s.readReceipts);
   const typing = usePreferences((s) => s.typingIndicator);
   const screenshot = usePreferences((s) => s.blockScreenshots);
+  const routeViaTor = usePreferences((s) => s.routeViaTor);
   const setPref = usePreferences((s) => s.set);
 
   // Shell already hydrates on mount; this is a belt-and-suspenders guard
@@ -129,41 +130,51 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
         </Section>
 
         <Section t={t} label={i18nT('privacy.networkSection')}>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingHorizontal: 16,
-              paddingVertical: 14,
-              gap: 14,
-              borderBottomWidth: 1,
-              borderBottomColor: t.border,
+          <Toggle
+            t={t}
+            label={i18nT('privacy.torLabel')}
+            sub={i18nT('privacy.torSub')}
+            value={routeViaTor}
+            onChange={(v) => {
+              void setPref('routeViaTor', v);
+              // Reconnect socket with new URL preference
+              if (identity) {
+                const { disconnect: sockDisconnect, connect: sockConnect } = require('../socket/client') as typeof import('../socket/client');
+                sockDisconnect();
+                sockConnect(identity);
+              }
             }}
-          >
-            <I.Shield size={20} color={t.textFaint} />
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={{ fontFamily: t.font, fontSize: 15, color: t.textFaint }}>
-                  {i18nT('privacy.routeViaTor')}
-                </Text>
-                <View
-                  style={{
-                    backgroundColor: t.surface2,
-                    borderRadius: 4,
-                    paddingHorizontal: 5,
-                    paddingVertical: 2,
-                  }}
-                >
-                  <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 0.5 }}>
-                    PRONTO
-                  </Text>
-                </View>
-              </View>
-              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textFaint, marginTop: 2 }}>
-                {i18nT('privacy.routeViaTorSub')}
+          />
+          {routeViaTor && (
+            <View style={{ paddingHorizontal: 16, paddingBottom: 12, gap: 10 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, lineHeight: 16 }}>
+                {i18nT('privacy.torOrbot')}
               </Text>
+              <Pressable
+                accessibilityLabel={i18nT('privacy.openOrbot')}
+                onPress={() => {
+                  void Linking.openURL('orbot://request/vpn').catch(() =>
+                    Linking.openURL('https://orbot.app')
+                  );
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  backgroundColor: t.surface2,
+                  borderRadius: t.radiusS,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  alignSelf: 'flex-start',
+                }}
+              >
+                <I.Shield size={14} color={t.accent} />
+                <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent, letterSpacing: 0.4 }}>
+                  {i18nT('privacy.openOrbot')}
+                </Text>
+              </Pressable>
             </View>
-          </View>
+          )}
           <Row
             t={t}
             icon={<I.Cloud size={20} color={t.textDim} />}
