@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import {
   View, Text, TextInput, Pressable, FlatList,
   KeyboardAvoidingView, Platform, StyleSheet, Alert,
   Linking, Image, Animated,
 } from 'react-native';
+import { FormattedText } from '../components/FormattedText';
+import { AudioWaveform } from '../components/AudioWaveform';
+import { GifPicker } from '../components/GifPicker';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
@@ -70,6 +73,9 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
   const [forwardBody, setForwardBody] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [searchActive, setSearchActive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [gifPickerVisible, setGifPickerVisible] = useState(false);
   const flatlistRef = useRef<FlatList>(null);
   const online = isConnected();
 
@@ -155,6 +161,30 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
     void toggleReaction(group.id, actionsMsg.id, emoji, identity.aegisId);
   }
 
+  const filteredList = useMemo(() => {
+    if (!searchQuery) return list;
+    const q = searchQuery.toLowerCase();
+    return list.filter((m) => !m.deleted && m.body.toLowerCase().includes(q));
+  }, [list, searchQuery]);
+
+  async function handleGifSelect(url: string) {
+    setGifPickerVisible(false);
+    if (!identity) return;
+    const plaintext = `[gif:${url}]`;
+    try {
+      const id = Crypto.randomUUID();
+      await appendMsg({ id, chatId: group.id, direction: 'out', body: plaintext, createdAt: Date.now(), type: 'text' });
+      await sendGroupMessage({ identity, groupId: group.id, plaintext });
+    } catch (e) {
+      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+    }
+  }
+
+  function handleStickerSelect(emoji: string) {
+    setGifPickerVisible(false);
+    setDraft((prev) => prev + emoji);
+  }
+
   async function handleSend() {
     if (!identity || !draft.trim() || sending) return;
     const text = draft.trim();
@@ -192,39 +222,80 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
           <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
             <I.ChevronL size={22} color={t.text} />
           </Pressable>
-          <Pressable
-            onPress={onGroupDetail}
-            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
-          >
-            <Avatar t={t} name={group.avatarImage || group.name} color={group.avatarColor || t.accent} size={36} />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 16, fontWeight: '600', color: t.text }}>
-                {group.name}
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                <I.Lock size={10} color={t.accent} />
-                <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5 }}>
-                  {i18nT('groupChat.membersCount', 'E2EE · {{count}} MEMBERS', { count: group.members.length })}
-                </Text>
-              </View>
-            </View>
-          </Pressable>
-          {onPoll && (
-            <Pressable onPress={onPoll} hitSlop={8} style={{ padding: 6 }}>
-              <I.Poll size={20} color={t.textDim} />
-            </Pressable>
-          )}
-          {onGroupDetail && (
-            <Pressable onPress={onGroupDetail} hitSlop={8} style={{ padding: 6 }}>
-              <I.More size={20} color={t.textDim} />
-            </Pressable>
+          {searchActive ? (
+            <>
+              <TextInput
+                autoFocus
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder={i18nT('chat.searchPlaceholder', 'Search messages…')}
+                placeholderTextColor={t.textFaint}
+                style={{
+                  flex: 1,
+                  fontFamily: t.font,
+                  fontSize: 15,
+                  color: t.text,
+                  backgroundColor: t.surface2,
+                  borderRadius: 20,
+                  paddingHorizontal: 14,
+                  paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+                }}
+                accessibilityLabel={i18nT('chat.searchPlaceholder', 'Search messages')}
+              />
+              <Pressable
+                onPress={() => { setSearchActive(false); setSearchQuery(''); }}
+                hitSlop={8}
+                style={{ padding: 6 }}
+                accessibilityLabel="Close search"
+              >
+                <I.X size={20} color={t.textDim} />
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable
+                onPress={onGroupDetail}
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
+              >
+                <Avatar t={t} name={group.avatarImage || group.name} color={group.avatarColor || t.accent} size={36} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 16, fontWeight: '600', color: t.text }}>
+                    {group.name}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    <I.Lock size={10} color={t.accent} />
+                    <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5 }}>
+                      {i18nT('groupChat.membersCount', 'E2EE · {{count}} MEMBERS', { count: group.members.length })}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={() => setSearchActive(true)}
+                hitSlop={8}
+                style={{ padding: 6 }}
+                accessibilityLabel={i18nT('chat.searchMessages', 'Search messages')}
+              >
+                <I.Search size={20} color={t.textDim} />
+              </Pressable>
+              {onPoll && (
+                <Pressable onPress={onPoll} hitSlop={8} style={{ padding: 6 }}>
+                  <I.Poll size={20} color={t.textDim} />
+                </Pressable>
+              )}
+              {onGroupDetail && (
+                <Pressable onPress={onGroupDetail} hitSlop={8} style={{ padding: 6 }}>
+                  <I.More size={20} color={t.textDim} />
+                </Pressable>
+              )}
+            </>
           )}
         </View>
 
         {/* Message List */}
         <FlatList
           ref={flatlistRef}
-          data={list}
+          data={filteredList}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12, gap: 10 }}
           onLayout={() => list.length > 0 && flatlistRef.current?.scrollToEnd({ animated: false })}
@@ -266,6 +337,16 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
 
         {/* Input Bar */}
         <View style={[styles.inputContainer, { borderTopColor: t.divider, paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <Pressable
+            onPress={() => setGifPickerVisible(true)}
+            hitSlop={6}
+            style={{ padding: 6 }}
+            accessibilityLabel="Open GIF picker"
+          >
+            <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
+              GIF
+            </Text>
+          </Pressable>
           <TextInput
             placeholder={i18nT('groupChat.messagePlaceholder', 'Group message…')}
             placeholderTextColor={t.textDim}
@@ -288,6 +369,12 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
       </View>
 
       <ForwardModal visible={forwardBody !== null} body={forwardBody ?? ''} onClose={() => setForwardBody(null)} />
+      <GifPicker
+        visible={gifPickerVisible}
+        onClose={() => setGifPickerVisible(false)}
+        onSelectGif={handleGifSelect}
+        onSelectSticker={handleStickerSelect}
+      />
       <MessageActionsSheet
         visible={!!actionsMsg}
         body={actionsMsg?.body ?? ''}
@@ -660,8 +747,42 @@ function GroupBubble({
     );
   }
 
+  // GIF bubble
+  const gifMatch = body.match(/^\[gif:(.+)\]$/);
+  if (gifMatch) {
+    const gifUrl = gifMatch[1];
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+        {sender ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: senderColor }}>{sender}</Text>
+          </View>
+        ) : null}
+        <Pressable
+          onLongPress={onLongPress}
+          style={({ pressed }) => ({
+            borderRadius: t.radius,
+            borderTopRightRadius: me ? t.radiusS : t.radius,
+            borderTopLeftRadius: me ? t.radius : t.radiusS,
+            overflow: 'hidden',
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <Image
+            source={{ uri: gifUrl }}
+            style={{ width: 200, height: 150, backgroundColor: t.surface2 }}
+            resizeMode="cover"
+          />
+        </Pressable>
+        <ReactionPills t={t} reactions={reactions} me={me} />
+        <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, alignSelf: me ? 'flex-end' : 'flex-start', marginTop: 3, paddingHorizontal: 4 }}>
+          {time}
+        </Text>
+      </View>
+    );
+  }
+
   // Text bubble
-  const parts = highlightMentions(body, Object.values(memberNames));
   return (
     <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
       {sender ? (
@@ -691,15 +812,11 @@ function GroupBubble({
           opacity: pressed ? 0.9 : 1,
         })}
       >
-        <Text style={{ fontFamily: t.font, fontSize: 15, lineHeight: 21, color: me ? t.bubbleOutText : t.text }}>
-          {parts.map((p, i) =>
-            p.mention ? (
-              <Text key={i} style={{ color: t.accent, fontWeight: '600' }}>{p.text}</Text>
-            ) : (
-              <Text key={i}>{p.text}</Text>
-            )
-          )}
-        </Text>
+        <FormattedText
+          body={body}
+          t={t}
+          style={{ fontFamily: t.font, fontSize: 15, lineHeight: 21, color: me ? t.bubbleOutText : t.text }}
+        />
       </Pressable>
       <ReactionPills t={t} reactions={reactions} me={me} />
       <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, alignSelf: me ? 'flex-end' : 'flex-start', marginTop: 3, paddingHorizontal: 4 }}>
@@ -772,17 +889,25 @@ function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: Stored
     } catch { setPlaying(false); }
   }
 
-  const progress = durSec > 0 ? Math.min(1, posMs / (durSec * 1000)) : 0;
+  const durMs = durSec * 1000;
   const elapsed = Math.floor(posMs / 1000);
   const display = playing
     ? `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
     : `${String(Math.floor(durSec / 60)).padStart(2, '0')}:${String(durSec % 60).padStart(2, '0')}`;
 
+  async function handleSeek(seekMs: number) {
+    if (!soundRef.current) return;
+    try {
+      await soundRef.current.setPositionAsync(seekMs);
+      setPosMs(seekMs);
+    } catch { /* ignore */ }
+  }
+
   return (
     <Pressable
       onLongPress={onLongPress}
       style={({ pressed }) => ({
-        flexDirection: 'row', alignItems: 'center', gap: 10, width: 210,
+        flexDirection: 'row', alignItems: 'center', gap: 10, width: 230,
         backgroundColor: me ? t.bubbleOut : t.bubbleIn,
         paddingHorizontal: 12, paddingVertical: 10, borderRadius: t.radius,
         opacity: pressed ? 0.9 : 1,
@@ -798,9 +923,15 @@ function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: Stored
           : <I.Play size={15} color={me ? t.bubbleOutText : t.bubbleInText} />}
       </Pressable>
       <View style={{ flex: 1, gap: 4 }}>
-        <View style={{ height: 3, borderRadius: 2, backgroundColor: me ? 'rgba(255,255,255,0.25)' : t.surface3, overflow: 'hidden' }}>
-          <View style={{ height: 3, borderRadius: 2, width: `${progress * 100}%`, backgroundColor: me ? 'rgba(255,255,255,0.8)' : t.accent }} />
-        </View>
+        <AudioWaveform
+          durMs={durMs}
+          posMs={posMs}
+          width={142}
+          maxBarHeight={22}
+          onSeek={handleSeek}
+          t={t}
+          isMe={me}
+        />
         <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? t.bubbleOutText : t.textDim }}>{display}</Text>
       </View>
       <I.Mic size={13} color={me ? t.bubbleOutText : t.textDim} />
