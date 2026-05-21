@@ -59,41 +59,36 @@ export function CallScreen({ onClose }: Props) {
   const isVideo = media === 'video';
   const peerColor = peer?.color ?? t.surface2;
 
-  // Background: remote video for video calls, solid surface for audio.
-  const showRemoteVideo = isVideo && remoteStream && status === 'in-call';
+  // Remote video ready (in-call + stream)
+  const showRemoteVideo = isVideo && !!remoteStream && status === 'in-call';
+  // Local video fills background while waiting for remote (pre-connect)
+  const showLocalFullscreen = isVideo && !!localStream && !cameraOff && !showRemoteVideo;
+  // Local PiP: once remote is visible
+  const showLocalPiP = isVideo && !!localStream && !cameraOff && showRemoteVideo;
 
   return (
-    <View style={[styles.screen, { backgroundColor: isVideo ? '#000' : t.bg }]}>
-      {/* Radial gradient background — visible in audio calls and video pre-connect */}
-      {(!showRemoteVideo) && (
+    <View style={[styles.screen, { backgroundColor: '#000' }]}>
+      <RNStatusBar barStyle="light-content" />
+
+      {/* ── AUDIO call: radial gradient background ── */}
+      {!isVideo && (
         <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
-          <View
-            style={{
-              position: 'absolute',
-              top: -120,
-              left: -100,
-              width: 500,
-              height: 500,
-              borderRadius: 9999,
-              backgroundColor: peerColor,
-              opacity: 0.33,
-            }}
-          />
-          <View
-            style={{
-              position: 'absolute',
-              bottom: -80,
-              right: -80,
-              width: 400,
-              height: 400,
-              borderRadius: 9999,
-              backgroundColor: t.accent,
-              opacity: 0.13,
-            }}
-          />
+          <View style={{ position: 'absolute', top: -120, left: -100, width: 500, height: 500, borderRadius: 9999, backgroundColor: peerColor, opacity: 0.33 }} />
+          <View style={{ position: 'absolute', bottom: -80, right: -80, width: 400, height: 400, borderRadius: 9999, backgroundColor: t.accent, opacity: 0.13 }} />
         </View>
       )}
-      <RNStatusBar barStyle="light-content" />
+
+      {/* ── VIDEO: local camera fills screen while connecting ── */}
+      {showLocalFullscreen && RTCView && (
+        <RTCView
+          style={StyleSheet.absoluteFillObject}
+          streamURL={(localStream as unknown as { toURL: () => string }).toURL()}
+          objectFit="cover"
+          mirror
+        />
+      )}
+
+      {/* ── VIDEO: remote camera fills screen when in-call ── */}
       {showRemoteVideo && RTCView && (
         <RTCView
           style={StyleSheet.absoluteFillObject}
@@ -102,8 +97,8 @@ export function CallScreen({ onClose }: Props) {
         />
       )}
 
-      {/* Local self-view (small, top-right) for video */}
-      {isVideo && localStream && !cameraOff && (
+      {/* ── VIDEO: local PiP (top-right) once remote is visible ── */}
+      {showLocalPiP && (
         <View
           style={{
             position: 'absolute',
@@ -115,8 +110,8 @@ export function CallScreen({ onClose }: Props) {
             overflow: 'hidden',
             backgroundColor: t.surface,
             borderWidth: 1,
-            borderColor: t.borderStrong,
-            zIndex: 3,
+            borderColor: 'rgba(255,255,255,0.2)',
+            zIndex: 10,
           }}
         >
           {RTCView && (
@@ -130,9 +125,32 @@ export function CallScreen({ onClose }: Props) {
         </View>
       )}
 
+      {/* ── VIDEO cameraOff: show avatar placeholder in PiP area ── */}
+      {isVideo && cameraOff && (
+        <View
+          style={{
+            position: 'absolute',
+            top: insets.top + 12,
+            right: 12,
+            width: 110,
+            height: 150,
+            borderRadius: 12,
+            backgroundColor: t.surface2,
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 1,
+            borderColor: 'rgba(255,255,255,0.1)',
+            zIndex: 10,
+          }}
+        >
+          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 0.6 }}>CAMERA OFF</Text>
+        </View>
+      )}
+
       {/* Top: peer name + status */}
       <View style={{ paddingTop: insets.top + 32, alignItems: 'center', zIndex: 2 }}>
-        {!showRemoteVideo && (
+        {/* Avatar: only for AUDIO calls */}
+        {!isVideo && (
           <View
             style={{
               width: 100,
@@ -197,8 +215,8 @@ export function CallScreen({ onClose }: Props) {
 
       </View>
 
-      {/* Flip camera button for video */}
-      {isVideo && localStream && !cameraOff ? (
+      {/* Flip camera button for video — bottom-left overlay */}
+      {(showLocalFullscreen || showLocalPiP) ? (
         <Pressable
           onPress={() => {
             try {
@@ -233,9 +251,9 @@ export function CallScreen({ onClose }: Props) {
             left: 24,
             right: 24,
             padding: 12,
-            backgroundColor: t.surface,
+            backgroundColor: isVideo ? 'rgba(0,0,0,0.55)' : t.surface,
             borderWidth: 1,
-            borderColor: t.border,
+            borderColor: isVideo ? 'rgba(255,255,255,0.1)' : t.border,
             borderRadius: t.radius,
             alignItems: 'center',
             zIndex: 3,
