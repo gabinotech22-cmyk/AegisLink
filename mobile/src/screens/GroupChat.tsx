@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import {
   View, Text, TextInput, Pressable, FlatList,
   KeyboardAvoidingView, Platform, StyleSheet, Alert,
-  Linking, Image, Animated,
+  Linking, Image, Animated, ActivityIndicator,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SwipeableMessage } from '../components/SwipeableMessage';
 import { FormattedText } from '../components/FormattedText';
 import { AudioWaveform } from '../components/AudioWaveform';
 import { LinkPreview } from '../components/LinkPreview';
@@ -54,9 +56,10 @@ interface Props {
   onBack: () => void;
   onGroupDetail?: () => void;
   onPoll?: () => void;
+  onAttach?: () => void;
 }
 
-export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props) {
+export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -70,8 +73,12 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
   const toggleReaction = useMessages((s) => s.toggleReaction);
   const appendMsg = useMessages((s) => s.append);
   const markRead = useMessages((s) => s.markRead);
+  const pendingMediaUri = useMessages((s) => s.pendingMediaUri);
+  const setPendingMedia = useMessages((s) => s.setPendingMedia);
 
   const [draft, setDraft] = useState('');
+  const [stagedImageUri, setStagedImageUri] = useState<string | null>(null);
+  const [imageProcessing, setImageProcessing] = useState(false);
   const [sending, setSending] = useState(false);
   const [replyTo, setReplyTo] = useState<StoredMessage | null>(null);
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
@@ -111,6 +118,25 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
     // Same reasoning as hydrate above — run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!pendingMediaUri) return;
+    const uri = pendingMediaUri;
+    setPendingMedia(null);
+    setImageProcessing(true);
+    void (async () => {
+      try {
+        const { manipulateAsync, SaveFormat } = require('expo-image-manipulator') as typeof import('expo-image-manipulator');
+        const compressed = await manipulateAsync(uri, [{ resize: { width: 400 } }], { compress: 0.55, format: SaveFormat.JPEG });
+        setStagedImageUri(compressed.uri);
+      } catch {
+        setStagedImageUri(uri);
+      } finally {
+        setImageProcessing(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingMediaUri]);
 
   async function handleVote(pollMessageId: string, optionIndex: number, totalOptions: number) {
     if (!identity) return;
@@ -191,35 +217,51 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
   }
 
   async function handleSend() {
-    if (!identity || !draft.trim() || sending) return;
+    if (!identity || sending) return;
+    const hasText = draft.trim().length > 0;
+    const hasImage = !!stagedImageUri;
+    if (!hasText && !hasImage) return;
+
     const text = draft.trim();
+    const imageUri = stagedImageUri;
     const replying = replyTo;
     setDraft('');
+    setStagedImageUri(null);
     setMentionQuery(null);
     setReplyTo(null);
     setSending(true);
+
     try {
-      // Optimistic append
-      const id = Crypto.randomUUID();
-      await appendMsg({
-        id,
-        chatId: group.id,
-        direction: 'out',
-        body: text,
-        createdAt: Date.now(),
-        type: 'text',
-        replyToId: replying?.id,
-      });
-      await sendGroupMessage({ identity, groupId: group.id, plaintext: text });
+      if (imageUri) {
+        const id = Crypto.randomUUID();
+        await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: imageUri });
+        const { encryptAndUploadMedia } = require('../crypto/media');
+        const blobUri = await encryptAndUploadMedia(imageUri);
+        await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]` });
+      }
+      if (hasText) {
+        const id = Crypto.randomUUID();
+        await appendMsg({
+          id,
+          chatId: group.id,
+          direction: 'out',
+          body: text,
+          createdAt: Date.now(),
+          type: 'text',
+          replyToId: replying?.id,
+        });
+        await sendGroupMessage({ identity, groupId: group.id, plaintext: text });
+      }
     } catch (e) {
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
-      setDraft(text);
+      if (!hasImage) setDraft(text);
     } finally {
       setSending(false);
     }
   }
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, backgroundColor: t.bg }}
@@ -308,18 +350,33 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
           contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12, gap: 10 }}
           onLayout={() => list.length > 0 && flatlistRef.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) => (
-            <GroupBubble
-              t={t}
-              m={item}
-              myAegisId={identity?.aegisId}
-              memberNames={memberNames}
-              adminId={group.adminId}
-              moderators={group.moderators}
-              onLongPress={() => setActionsMsg(item)}
-              pollResult={pollResults[item.id]}
-              onVote={(optionIndex, totalOptions) => void handleVote(item.id, optionIndex, totalOptions)}
-              onImagePress={setViewerUri}
-            />
+            <SwipeableMessage
+              disabled={item.deleted}
+              onReply={() => setReplyTo(item)}
+              onDelete={item.direction === 'out' ? () => {
+                Alert.alert(
+                  i18nT('groupChat.deleteMessage', 'Eliminar mensaje'),
+                  i18nT('groupChat.deleteMessageConfirm', '¿Eliminar este mensaje?'),
+                  [
+                    { text: i18nT('common.cancel', 'Cancelar'), style: 'cancel' },
+                    { text: i18nT('common.delete', 'Eliminar'), style: 'destructive', onPress: () => void softDelete(group.id, item.id) },
+                  ]
+                );
+              } : () => {}}
+            >
+              <GroupBubble
+                t={t}
+                m={item}
+                myAegisId={identity?.aegisId}
+                memberNames={memberNames}
+                adminId={group.adminId}
+                moderators={group.moderators}
+                onLongPress={() => setActionsMsg(item)}
+                pollResult={pollResults[item.id]}
+                onVote={(optionIndex, totalOptions) => void handleVote(item.id, optionIndex, totalOptions)}
+                onImagePress={setViewerUri}
+              />
+            </SwipeableMessage>
           )}
           onContentSizeChange={() => flatlistRef.current?.scrollToEnd({ animated: false })}
         />
@@ -368,8 +425,34 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
           </View>
         ) : null}
 
+        {/* Staged image preview */}
+        {imageProcessing && (
+          <View style={{ backgroundColor: t.surface2, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, borderTopColor: t.divider }}>
+            <ActivityIndicator size="small" color={t.accent} />
+            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.6 }}>
+              {i18nT('common.processingImage', 'Procesando imagen…')}
+            </Text>
+          </View>
+        )}
+        {stagedImageUri && !imageProcessing && (
+          <View style={{ backgroundColor: t.surface2, paddingHorizontal: 14, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, borderTopColor: t.divider }}>
+            <Image source={{ uri: stagedImageUri }} style={{ width: 48, height: 48, borderRadius: 8, backgroundColor: t.surface3 }} />
+            <Text style={{ flex: 1, fontFamily: t.font, fontSize: 13, color: t.textDim }}>
+              {i18nT('chat.imageReady', 'Imagen lista para enviar')}
+            </Text>
+            <Pressable onPress={() => setStagedImageUri(null)} hitSlop={8} style={{ padding: 4 }}>
+              <I.X size={18} color={t.textDim} />
+            </Pressable>
+          </View>
+        )}
+
         {/* Input Bar */}
         <View style={[styles.inputContainer, { borderTopColor: t.divider, paddingBottom: Math.max(insets.bottom, 12) }]}>
+          {onAttach && (
+            <Pressable onPress={onAttach} hitSlop={6} style={{ padding: 6 }} accessibilityLabel={i18nT('chat.attach', 'Attach file')}>
+              <I.Attach size={22} color={t.textDim} />
+            </Pressable>
+          )}
           <Pressable
             onPress={() => setGifPickerVisible(true)}
             hitSlop={6}
@@ -389,14 +472,18 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
             style={[styles.input, { color: t.text, backgroundColor: t.surface2, borderColor: t.border, fontFamily: t.font }]}
           />
           <Pressable
-            onPress={handleSend}
-            disabled={!draft.trim() || sending}
+            onPress={() => void handleSend()}
+            disabled={(!draft.trim() && !stagedImageUri) || sending || imageProcessing}
             style={({ pressed }) => [
               styles.sendBtn,
-              { backgroundColor: draft.trim() && online ? t.accent : t.surface2, opacity: pressed ? 0.8 : 1 },
+              { backgroundColor: (draft.trim() || stagedImageUri) && online ? t.accent : t.surface2, opacity: pressed ? 0.8 : 1 },
             ]}
           >
-            <I.Send size={18} color={draft.trim() && online ? t.accentInk : t.textDim} />
+            {sending ? (
+              <ActivityIndicator size="small" color={t.accentInk} />
+            ) : (
+              <I.Send size={18} color={(draft.trim() || stagedImageUri) && online ? t.accentInk : t.textDim} />
+            )}
           </Pressable>
         </View>
       </View>
@@ -422,6 +509,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
         onReact={handleReact}
       />
     </KeyboardAvoidingView>
+    </GestureHandlerRootView>
   );
 }
 
