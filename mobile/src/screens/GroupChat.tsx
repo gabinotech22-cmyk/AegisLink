@@ -22,7 +22,8 @@ import { ForwardModal } from '../components/ForwardModal';
 import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
 import { useContacts } from '../store/contacts';
-import { sendGroupMessage, sendGroupVote, isConnected } from '../socket/client';
+import { sendGroupMessage, sendGroupVote } from '../socket/client';
+import { useConnection } from '../store/connection';
 import { usePollsStore, type PollResult } from '../store/polls';
 import type { StoredGroup, StoredMessage } from '../db/local';
 
@@ -81,7 +82,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const flatlistRef = useRef<FlatList>(null);
-  const online = isConnected();
+  const online = useConnection((s) => s.online);
 
   // Build member name lookup
   const memberNames: Record<string, string> = {};
@@ -870,12 +871,6 @@ function GroupBubble({
 
 
 
-function highlightMentions(text: string, names: string[]): { text: string; mention: boolean }[] {
-  if (!text || names.length === 0) return [{ text, mention: false }];
-  const pattern = new RegExp(`(@(?:${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}))`, 'gi');
-  const split = text.split(pattern);
-  return split.map((s) => ({ text: s, mention: pattern.test(s) }));
-}
 
 function ReactionPills({ t, reactions, me }: { t: Theme; reactions: [string, string[]][]; me: boolean }) {
   if (reactions.length === 0) return null;
