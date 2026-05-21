@@ -89,11 +89,36 @@ export async function registerForPush(identity: Identity): Promise<void> {
       return;
     }
 
-    // Handle tapping a notification to open the right chat
+    // Handle notification action taps (Reply, Mark read) and default tap to open chat
     Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as Record<string, unknown>;
       const fromAegisId = data?.fromAegisId as string | undefined;
-      if (fromAegisId && _onOpenChat) {
+      const actionId = response.actionIdentifier;
+
+      if (actionId === 'REPLY') {
+        // User replied from notification — send the text via socket without opening app
+        const replyText = (response as { userText?: string }).userText;
+        if (replyText && fromAegisId) {
+          try {
+            const { sendMessage } = require('../socket/client') as { sendMessage: (to: string, text: string) => void };
+            sendMessage(fromAegisId, replyText);
+            void Notifications.dismissNotificationAsync(response.notification.request.identifier);
+          } catch (e) {
+            if (__DEV__) console.warn('[push] inline reply failed:', e);
+          }
+        }
+      } else if (actionId === 'MARK_READ') {
+        if (fromAegisId) {
+          try {
+            const { useMessages } = require('../store/messages') as { useMessages: { getState: () => { markRead: (id: string) => Promise<void> } } };
+            void useMessages.getState().markRead(fromAegisId);
+            void Notifications.dismissNotificationAsync(response.notification.request.identifier);
+          } catch (e) {
+            if (__DEV__) console.warn('[push] mark-read action failed:', e);
+          }
+        }
+      } else if (fromAegisId && _onOpenChat) {
+        // Default tap — open chat
         _onOpenChat(fromAegisId);
       }
     });
@@ -110,6 +135,37 @@ export async function registerForPush(identity: Identity): Promise<void> {
 
     registered = true;
     if (__DEV__) console.log('[push] registered for wake-ups');
+
+    // Register notification action categories (Reply + Mark as read)
+    await Notifications.setNotificationCategoryAsync('aegislink-message', [
+      {
+        identifier: 'REPLY',
+        buttonTitle: 'Responder',
+        textInput: {
+          submitButtonTitle: 'Enviar',
+          placeholder: 'Mensaje cifrado…',
+        },
+        options: { opensAppToForeground: false },
+      },
+      {
+        identifier: 'MARK_READ',
+        buttonTitle: 'Marcar leído',
+        options: { opensAppToForeground: false, isDestructive: false },
+      },
+    ]);
+
+    await Notifications.setNotificationCategoryAsync('aegislink-call', [
+      {
+        identifier: 'ACCEPT_CALL',
+        buttonTitle: 'Contestar',
+        options: { opensAppToForeground: true },
+      },
+      {
+        identifier: 'DECLINE_CALL',
+        buttonTitle: 'Rechazar',
+        options: { opensAppToForeground: false, isDestructive: true },
+      },
+    ]);
   } catch (e) {
     if (__DEV__) console.warn('[push] registration failed:', (e as Error).message);
   }
@@ -207,6 +263,7 @@ export async function showIncomingNotification(
         title,
         body: notificationBody,
         sound: prefs.notifSound ? 'default' : undefined,
+        categoryIdentifier: 'aegislink-message',
         data: { fromAegisId: senderAegisId, isGroup, groupName },
         // Android notification channel
         ...(Platform.OS === 'android' ? { channelId: 'aegislink-messages' } : {}),
@@ -274,6 +331,7 @@ export async function showIncomingCallNotification(
         body: isVideo ? 'Videollamada E2EE entrante' : 'Llamada de voz E2EE entrante',
         sound: 'default',
         priority: Notifications.AndroidNotificationPriority.MAX,
+        categoryIdentifier: 'aegislink-call',
         data: { fromAegisId: callerAegisId, type: 'call', isVideo },
         ...(Platform.OS === 'android' ? { channelId: 'aegislink-calls' } : {}),
       },
