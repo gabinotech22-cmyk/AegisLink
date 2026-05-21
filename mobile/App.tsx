@@ -55,6 +55,8 @@ import { IncomingCallScreen } from './src/screens/IncomingCall';
 import { NetworkErrorScreen } from './src/screens/NetworkError';
 import { LockSettingsScreen } from './src/screens/LockSettings';
 import { KeysScreen } from './src/screens/Keys';
+import { DistributionListsScreen } from './src/screens/DistributionLists';
+import { BroadcastComposeScreen } from './src/screens/BroadcastCompose';
 import { useIdentity } from './src/store/identity';
 import { usePreferences } from './src/store/preferences';
 
@@ -152,7 +154,9 @@ type PushRoute =
   | { name: 'subscription' }
   | { name: 'lockSettings' }
   | { name: 'workGeneration' }
-  | { name: 'keys' };
+  | { name: 'keys' }
+  | { name: 'distribution' }
+  | { name: 'broadcast'; list: import('./src/store/distribution').DistributionList };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -631,6 +635,20 @@ function Shell() {
         return <AppIconScreen onBack={pop} />;
       case 'keys':
         return <KeysScreen onBack={pop} />;
+      case 'distribution':
+        return (
+          <DistributionListsScreen
+            onBack={pop}
+            onOpenList={(list) => push({ name: 'broadcast', list })}
+          />
+        );
+      case 'broadcast':
+        return (
+          <BroadcastComposeScreen
+            list={top.list}
+            onBack={pop}
+          />
+        );
       case 'workDashboard':
         return <WorkDashboard onBack={pop} />;
       case 'subscription':
@@ -834,6 +852,7 @@ function Shell() {
             onSearch={() => push({ name: 'search' })}
             onProfile={() => push({ name: 'profile' })}
             onContacts={() => push({ name: 'contacts' })}
+            onDistribution={() => push({ name: 'distribution' })}
             onTab={setTab}
           />
           {/* Invisible tap target over the logo area for the 'tap' panic gesture.

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { WallpaperPicker, loadWallpaper, type WallpaperOption } from '../components/WallpaperPicker';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -37,6 +38,8 @@ export function ContactDetailScreen({
   const insets = useSafeAreaInsets();
   const [fp, setFp] = useState<string[]>([]);
   const [removing, setRemoving] = useState(false);
+  const [wallpaper, setWallpaper] = useState<WallpaperOption>(0);
+  const [wallpaperPickerOpen, setWallpaperPickerOpen] = useState(false);
 
   // Use live contact from store so muted/zeroTrust updates reflect instantly
   const { muteContact, setZeroTrust, setBlocked, removeContact, confirmKeyChange, markVerified } = useContacts();
@@ -58,6 +61,10 @@ export function ContactDetailScreen({
       setFp([]);
     }
   }, [contact.publicKeyB64]);
+
+  useEffect(() => {
+    void loadWallpaper(contact.aegisId).then(setWallpaper);
+  }, [contact.aegisId]);
 
   function handleMute() {
     if (muted) {
@@ -374,6 +381,13 @@ export function ContactDetailScreen({
           <Section t={t} label={i18nT('contactDetail.thisConversationSection').toUpperCase()}>
             <Row
               t={t}
+              icon={<I.Image size={18} color={t.textDim} />}
+              label="Chat wallpaper"
+              sub={wallpaper === 0 ? 'None' : `Option ${wallpaper}`}
+              onPress={() => setWallpaperPickerOpen(true)}
+            />
+            <Row
+              t={t}
               icon={<I.Timer size={18} color={t.textDim} />}
               label={i18nT('contactDetail.burnMessages')}
               sub={i18nT('contactDetail.burnMessagesSub')}
@@ -412,6 +426,14 @@ export function ContactDetailScreen({
           </Section>
         </ScrollView>
       )}
+
+      <WallpaperPicker
+        visible={wallpaperPickerOpen}
+        contactAegisId={contact.aegisId}
+        current={wallpaper}
+        onClose={() => setWallpaperPickerOpen(false)}
+        onSelect={(opt) => { setWallpaper(opt); setWallpaperPickerOpen(false); }}
+      />
     </View>
   );
 }

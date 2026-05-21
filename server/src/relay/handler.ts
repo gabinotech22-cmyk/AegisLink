@@ -248,6 +248,9 @@ export function attachRelay(io: SocketServer) {
     const set = sockets.get(me) ?? new Set<Socket>();
     set.add(socket);
     sockets.set(me, set);
+    // Join a named Socket.IO room so HTTP routes can emit to all devices of this
+    // identity without needing direct access to the relay's internal sockets Map.
+    void socket.join(`aegis:${me}`);
     // No identity-linked logs in production — zero metadata principle.
 
     // Drain offline queue. Sender identity is NOT stored in DB (FND-05) so the
@@ -631,4 +634,35 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
     }
     forward('call:reject', parsed.data);
   });
+
+  // ── Group call mesh signaling ────────────────────────────────────────────
+  // The relay blindly forwards offer/answer/ICE to the named peer inside the
+  // group call. SDPs and ICE candidates are never stored or inspected.
+  const GroupSignal = z.object({
+    callId: z.string().min(1).max(128),
+    toAegisId: z.string().regex(AEGIS_ID_RE),
+    sdp: z.string().min(1).max(16384).optional(),
+    candidate: z.string().min(1).max(4096).optional(),
+  });
+
+  function forwardGroupSignal(event: string, raw: unknown) {
+    const parsed = GroupSignal.safeParse(raw);
+    if (!parsed.success) {
+      socket.emit('error_msg', { code: 'invalid_payload', for: event });
+      return;
+    }
+    const { callId, toAegisId, ...rest } = parsed.data;
+    const target = sockets.get(toAegisId);
+    if (!target || target.size === 0) {
+      socket.emit('error_msg', { code: 'peer_offline', for: event });
+      return;
+    }
+    for (const s of target) {
+      s.emit(event, { callId, fromAegisId: me, ...rest });
+    }
+  }
+
+  socket.on('group_offer',  (raw) => forwardGroupSignal('group_offer',  raw));
+  socket.on('group_answer', (raw) => forwardGroupSignal('group_answer', raw));
+  socket.on('group_ice',    (raw) => forwardGroupSignal('group_ice',    raw));
 }

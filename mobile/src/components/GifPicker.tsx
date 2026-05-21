@@ -21,14 +21,26 @@ type GifTab = 'gifs' | 'stickers';
 
 // Sticker definitions — static unicode/emoji, bundled with app, no CDN
 const STICKERS = [
-  { id: 's1', emoji: '👍', label: 'Thumbs up' },
-  { id: 's2', emoji: '❤️', label: 'Heart' },
-  { id: 's3', emoji: '😂', label: 'Laughing' },
-  { id: 's4', emoji: '🔥', label: 'Fire' },
-  { id: 's5', emoji: '👀', label: 'Eyes' },
+  { id: 's1', emoji: '😂', label: 'Laughing' },
+  { id: 's2', emoji: '🔥', label: 'Fire' },
+  { id: 's3', emoji: '❤️', label: 'Heart' },
+  { id: 's4', emoji: '👍', label: 'Thumbs up' },
+  { id: 's5', emoji: '😭', label: 'Sobbing' },
   { id: 's6', emoji: '🙏', label: 'Hands' },
-  { id: 's7', emoji: '🛡️', label: 'Shield' },
-  { id: 's8', emoji: '⚡', label: 'Lightning' },
+  { id: 's7', emoji: '💀', label: 'Skull' },
+  { id: 's8', emoji: '😍', label: 'Heart eyes' },
+  { id: 's9', emoji: '🤣', label: 'ROFL' },
+  { id: 's10', emoji: '😢', label: 'Cry' },
+  { id: 's11', emoji: '🥺', label: 'Pleading' },
+  { id: 's12', emoji: '😎', label: 'Cool' },
+  { id: 's13', emoji: '🤔', label: 'Thinking' },
+  { id: 's14', emoji: '👀', label: 'Eyes' },
+  { id: 's15', emoji: '💯', label: '100' },
+  { id: 's16', emoji: '🎉', label: 'Party' },
+  { id: 's17', emoji: '😅', label: 'Sweat smile' },
+  { id: 's18', emoji: '🤦', label: 'Facepalm' },
+  { id: 's19', emoji: '💪', label: 'Muscle' },
+  { id: 's20', emoji: '✨', label: 'Sparkles' },
 ];
 
 interface TenorResult {
