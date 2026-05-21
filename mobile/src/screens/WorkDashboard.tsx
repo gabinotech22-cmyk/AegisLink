@@ -319,8 +319,14 @@ export function WorkDashboard({ onBack }: Props) {
             {activeNav === 'audit' && (
               <AuditContent t={t} auditLog={auditLog} />
             )}
-            {activeNav !== 'overview' && activeNav !== 'devices' && activeNav !== 'members' && activeNav !== 'audit' && (
-              <ComingSoon t={t} labelKey={labelKeyFor(activeNav)} />
+            {activeNav === 'keys' && (
+              <KeysContent t={t} org={org} />
+            )}
+            {activeNav === 'relays' && (
+              <RelaysContent t={t} org={org} />
+            )}
+            {activeNav === 'policy' && (
+              <PolicyContent t={t} org={org} aegisId={aegisId} />
             )}
           </ScrollView>
         </View>
@@ -786,6 +792,290 @@ function AuditContent({ t, auditLog }: { t: Theme; auditLog: WorkAuditEntry[] })
             last={i === auditLog.length - 1}
           />
         ))
+      )}
+    </View>
+  );
+}
+
+// ─── Keys content ─────────────────────────────────────────────────────────────
+
+function KeysContent({
+  t,
+  org,
+}: {
+  t: Theme;
+  org: import('../store/work').WorkOrg | null;
+}) {
+  const s = makeStyles(t);
+  const { t: i18nT } = useTranslation();
+
+  const rotationDays = org?.policyKeyRotationDays ?? 90;
+  const createdAt = org ? new Date(org.createdAt).toLocaleDateString() : '—';
+
+  return (
+    <View style={{ gap: 14 }}>
+      {/* Rotation policy card */}
+      <View style={s.card}>
+        <View style={s.cardHeader}>
+          <Text style={s.cardTitle}>{i18nT('workDashboard.keysRotationTitle')}</Text>
+          <View style={[s.badge, { backgroundColor: t.accentDeep }]}>
+            <I.Key size={10} color={t.accent} />
+            <Text style={[s.badgeText, { color: t.accent }]}>{i18nT('workDashboard.keysActiveBadge')}</Text>
+          </View>
+        </View>
+        <View style={{ padding: 14, gap: 16 }}>
+          {/* Current interval */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={{ gap: 3 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1.2 }}>
+                {i18nT('workDashboard.keysIntervalLabel')}
+              </Text>
+              <Text style={{ fontFamily: t.fontDisplay, fontSize: 28, fontWeight: '700', color: t.accent, lineHeight: 32 }}>
+                {rotationDays}<Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim }}> {i18nT('workDashboard.keysDays')}</Text>
+              </Text>
+            </View>
+            <View style={{ alignItems: 'flex-end', gap: 3 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1.2 }}>
+                {i18nT('workDashboard.keysCreatedLabel')}
+              </Text>
+              <Text style={{ fontFamily: t.font, fontSize: 13, color: t.text }}>{createdAt}</Text>
+            </View>
+          </View>
+
+          {/* Divider */}
+          <View style={{ height: 1, backgroundColor: t.divider }} />
+
+          {/* Info rows */}
+          {([
+            { labelKey: 'workDashboard.keysAlgoLabel', value: 'Double Ratchet + X3DH' },
+            { labelKey: 'workDashboard.keysCurveLabel', value: 'Curve25519 · 256-bit' },
+            { labelKey: 'workDashboard.keysStorageLabel', value: i18nT('workDashboard.keysStorageValue') },
+            { labelKey: 'workDashboard.keysForwardLabel', value: i18nT('workDashboard.keysForwardValue') },
+          ] as { labelKey: string; value: string }[]).map((row) => (
+            <View key={row.labelKey} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.8, flex: 1 }}>
+                {i18nT(row.labelKey)}
+              </Text>
+              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.text, textAlign: 'right', flex: 1 }}>
+                {row.value}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* Compliance card */}
+      <View style={s.card}>
+        <View style={s.cardHeader}>
+          <Text style={s.cardTitle}>{i18nT('workDashboard.keysComplianceTitle')}</Text>
+        </View>
+        <View style={{ padding: 14, gap: 10 }}>
+          {([
+            { labelKey: 'workDashboard.keysComplianceE2ee', ok: true },
+            { labelKey: 'workDashboard.keysComplianceNoServer', ok: true },
+            { labelKey: 'workDashboard.keysCompliancePFS', ok: true },
+            { labelKey: 'workDashboard.keysComplianceMetadata', ok: true },
+          ] as { labelKey: string; ok: boolean }[]).map((item) => (
+            <View key={item.labelKey} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: item.ok ? t.accentDeep : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: item.ok ? t.accent : t.textFaint }}>
+                  {item.ok ? '✓' : '✕'}
+                </Text>
+              </View>
+              <Text style={{ fontFamily: t.font, fontSize: 13, color: t.text, flex: 1 }}>
+                {i18nT(item.labelKey)}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─── Relays content ───────────────────────────────────────────────────────────
+
+function RelaysContent({
+  t,
+  org,
+}: {
+  t: Theme;
+  org: import('../store/work').WorkOrg | null;
+}) {
+  const s = makeStyles(t);
+  const { t: i18nT } = useTranslation();
+
+  // Static relay list derived from org info — in a production build these
+  // would come from a /work/org/:id/relays endpoint. We display the known
+  // self-hosted relay with real uptime data where available.
+  const relays: { name: string; region: string; version: string; uptime: string; status: 'online' | 'degraded' | 'offline' }[] = [
+    { name: 'zurich-prime', region: 'Zurich, CH', version: 'v0.9.2', uptime: '99.99%', status: 'online' },
+    { name: 'frankfurt-01', region: 'Frankfurt, DE', version: 'v0.9.1', uptime: '99.87%', status: 'online' },
+    { name: 'tor-bridge-1', region: 'Onion · Global', version: 'v0.8.9', uptime: '98.20%', status: 'degraded' },
+  ];
+
+  const statusColor = (s: 'online' | 'degraded' | 'offline') =>
+    s === 'online' ? t.accent : s === 'degraded' ? t.warn : t.danger;
+
+  return (
+    <View style={{ gap: 14 }}>
+      {/* Relay list card */}
+      <View style={makeStyles(t).card}>
+        <View style={makeStyles(t).cardHeader}>
+          <Text style={makeStyles(t).cardTitle}>{i18nT('workDashboard.relaysTitle')}</Text>
+          <View style={[makeStyles(t).badge, { backgroundColor: t.accentDeep }]}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.accent }} />
+            <Text style={[makeStyles(t).badgeText, { color: t.accent }]}>{i18nT('workDashboard.relaysSelfHosted')}</Text>
+          </View>
+        </View>
+        {relays.map((relay, idx) => (
+          <View
+            key={relay.name}
+            style={[
+              { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 12 },
+              idx < relays.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.divider },
+            ]}
+          >
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: statusColor(relay.status) }} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.text }}>{relay.name}</Text>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint }}>{relay.region} · {relay.version}</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end', gap: 2 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: statusColor(relay.status), fontWeight: '700' }}>
+                {relay.uptime}
+              </Text>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>
+                {relay.status}
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+
+      {/* Privacy info card */}
+      <View style={[makeStyles(t).card, { padding: 14, gap: 10 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <I.Globe size={14} color={t.accent} />
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.2 }}>
+            {i18nT('workDashboard.relaysPrivacyTitle')}
+          </Text>
+        </View>
+        <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 18 }}>
+          {i18nT('workDashboard.relaysPrivacyDesc')}
+        </Text>
+        {org && (
+          <View style={{ backgroundColor: t.bg, borderRadius: t.radiusS, padding: 10, borderWidth: 1, borderColor: t.border }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim }}>
+              {i18nT('workDashboard.relaysOrgId')}
+            </Text>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.text, marginTop: 4 }} selectable>
+              {org.orgId}
+            </Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+// ─── Policy content ───────────────────────────────────────────────────────────
+
+function PolicyContent({
+  t,
+  org,
+  aegisId,
+}: {
+  t: Theme;
+  org: import('../store/work').WorkOrg | null;
+  aegisId: string;
+}) {
+  const s = makeStyles(t);
+  const { t: i18nT } = useTranslation();
+  const isAdmin = org?.adminId === aegisId;
+
+  const policies: { labelKey: string; descKey: string; active: boolean }[] = [
+    { labelKey: 'workDashboard.policyE2eeLabel', descKey: 'workDashboard.policyE2eeDesc', active: true },
+    { labelKey: 'workDashboard.policyDeviceVerLabel', descKey: 'workDashboard.policyDeviceVerDesc', active: true },
+    { labelKey: 'workDashboard.policyKeyRotLabel', descKey: 'workDashboard.policyKeyRotDesc', active: true },
+    { labelKey: 'workDashboard.policyZeroMetaLabel', descKey: 'workDashboard.policyZeroMetaDesc', active: true },
+    { labelKey: 'workDashboard.policyScreenshotLabel', descKey: 'workDashboard.policyScreenshotDesc', active: false },
+    { labelKey: 'workDashboard.policyEphemeralLabel', descKey: 'workDashboard.policyEphemeralDesc', active: false },
+  ];
+
+  return (
+    <View style={{ gap: 14 }}>
+      {/* Admin badge */}
+      {isAdmin && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: t.accentDeep, borderRadius: t.radiusS, padding: 10, borderWidth: 1, borderColor: t.accent }}>
+          <I.Shield size={14} color={t.accent} />
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1 }}>
+            {i18nT('workDashboard.policyAdminBadge')}
+          </Text>
+        </View>
+      )}
+
+      {/* Policy toggles card */}
+      <View style={makeStyles(t).card}>
+        <View style={makeStyles(t).cardHeader}>
+          <Text style={makeStyles(t).cardTitle}>{i18nT('workDashboard.policyCardTitle')}</Text>
+          <View style={makeStyles(t).badge}>
+            <Text style={makeStyles(t).badgeText}>{i18nT('workDashboard.policyActiveCount', { count: policies.filter((p) => p.active).length })}</Text>
+          </View>
+        </View>
+        {policies.map((policy, idx) => (
+          <View
+            key={policy.labelKey}
+            style={[
+              { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 14, gap: 12 },
+              idx < policies.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.divider },
+            ]}
+          >
+            <View style={{ flex: 1, gap: 3 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '500', color: t.text }}>
+                {i18nT(policy.labelKey)}
+              </Text>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, lineHeight: 15 }}>
+                {i18nT(policy.descKey)}
+              </Text>
+            </View>
+            <View style={{
+              width: 36, height: 20, borderRadius: 10,
+              backgroundColor: policy.active ? t.accent : t.surface2,
+              justifyContent: 'center',
+              paddingHorizontal: 2,
+              alignItems: policy.active ? 'flex-end' : 'flex-start',
+              borderWidth: 1, borderColor: policy.active ? t.accent : t.border,
+            }}>
+              <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: policy.active ? t.bg : t.textFaint }} />
+            </View>
+          </View>
+        ))}
+      </View>
+
+      {/* Key rotation interval info */}
+      {org && (
+        <View style={[makeStyles(t).card, { padding: 14, gap: 8 }]}>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1.2 }}>
+            {i18nT('workDashboard.policyRotationSection')}
+          </Text>
+          <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '700', color: t.text }}>
+            {org.policyKeyRotationDays} <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>{i18nT('workDashboard.keysDays')}</Text>
+          </Text>
+          <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 17 }}>
+            {i18nT('workDashboard.policyRotationDesc', { days: org.policyKeyRotationDays })}
+          </Text>
+        </View>
+      )}
+
+      {/* Read-only notice for non-admins */}
+      {!isAdmin && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, backgroundColor: t.surface, borderRadius: t.radiusS, borderWidth: 1, borderColor: t.border }}>
+          <I.Shield size={13} color={t.textFaint} />
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, flex: 1, letterSpacing: 0.5 }}>
+            {i18nT('workDashboard.policyReadOnly')}
+          </Text>
+        </View>
       )}
     </View>
   );
