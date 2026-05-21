@@ -1386,7 +1386,17 @@ export async function sendGroupMessage(opts: {
 
 /**
  * Send an anonymous vote to all members of a group.
- * The payload is `[vote:messageId:optionIndex]` — no identity included.
+ *
+ * Wire-format guarantee (audited 2026-05):
+ *   The plaintext `[vote:<messageId>:<optionIndex>]` is wrapped in a
+ *   `group_msg` JSON payload and then encrypted per-recipient through the
+ *   Double Ratchet (`encryptMessage` → XSalsa20-Poly1305 secretbox over a
+ *   chain-key-derived message key). The object handed to `socket.emit`
+ *   contains ONLY: { id, to, ciphertext, nonce }. The optionIndex never
+ *   appears on the wire in cleartext, nor does any field named `vote`,
+ *   `optionIndex`, `pollId`, etc. Relay sees opaque bytes; only group
+ *   members holding the ratchet state can recover the vote.
+ *
  * The vote is NOT appended to the local chat history.
  */
 export async function sendGroupVote(opts: {

@@ -14,6 +14,8 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SwipeableMessage } from '../components/SwipeableMessage';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
@@ -349,6 +351,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   );
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, backgroundColor: t.bg }}
@@ -593,14 +596,28 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           keyExtractor={(m) => m.id}
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10 }}
           renderItem={({ item }) => (
-            <Bubble
-              t={t}
-              m={item}
-              online={online}
-              quotedMsg={item.replyToId ? msgById[item.replyToId] : undefined}
-              onLongPress={() => handleLongPress(item)}
-              onViewOnce={onViewOnce}
-            />
+            <SwipeableMessage
+              disabled={item.deleted || item.direction !== 'out'}
+              onDelete={() => {
+                Alert.alert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
+                  { text: i18nT('common.cancel'), style: 'cancel' },
+                  {
+                    text: i18nT('common.delete'),
+                    style: 'destructive',
+                    onPress: () => void softDelete(contact.aegisId, item.id),
+                  },
+                ]);
+              }}
+            >
+              <Bubble
+                t={t}
+                m={item}
+                online={online}
+                quotedMsg={item.replyToId ? msgById[item.replyToId] : undefined}
+                onLongPress={() => handleLongPress(item)}
+                onViewOnce={onViewOnce}
+              />
+            </SwipeableMessage>
           )}
           ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
           onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
@@ -740,6 +757,9 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 <I.Timer size={22} color={t.textDim} />
               </Pressable>
               <Pressable
+                testID="send-button"
+                accessibilityRole="button"
+                accessibilityLabel={i18nT('chat.sendAccessibilityLabel', 'Send message')}
                 disabled={(!draft.trim() && !stagedImageUri) || sending || imageProcessing}
                 onPress={handleSend}
                 style={({ pressed }) => ({
@@ -786,6 +806,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         onClose={() => setForwardBody(null)}
       />
     </KeyboardAvoidingView>
+    </GestureHandlerRootView>
   );
 }
 

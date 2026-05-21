@@ -1,8 +1,17 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, Animated, Easing, Modal, ScrollView } from 'react-native';
+import { View, Text, Pressable, Modal, ScrollView } from 'react-native';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  useReducedMotion,
+  Easing,
+} from 'react-native-reanimated';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
@@ -19,6 +28,7 @@ interface Props {
 /**
  * Full-screen incoming call ringing UI. Matches `ScreenIncoming` from the
  * prototype: pulsing avatar, encrypted badge, three action buttons.
+ * Animations run on the UI thread via Reanimated 3 worklets.
  */
 export function IncomingCallScreen({ onAccept, onReject }: Props) {
   const { t } = useTheme();
@@ -32,26 +42,43 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
 
   const { identity } = useIdentity();
   const [showReplies, setShowReplies] = useState(false);
-  const [pulse] = useState(new Animated.Value(0));
-  const [ringScale] = useState(new Animated.Value(1));
+  const reduceMotion = useReducedMotion() ?? false;
+
+  // pulse: opacity 1 → 0.5 → 1 on repeat (badge dot)
+  const pulseOpacity = useSharedValue(1);
+  // ringScale: scale 1 → 1.15 → 1 on repeat (avatar ring)
+  const ringScale = useSharedValue(1);
+
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ])
+    if (reduceMotion) return;
+
+    pulseOpacity.value = withRepeat(
+      withSequence(
+        withTiming(0.5, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 0 }),
+      ),
+      -1,
+      false,
     );
-    const ringLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(ringScale, { toValue: 1.15, duration: 600, useNativeDriver: true }),
-        Animated.timing(ringScale, { toValue: 1, duration: 600, useNativeDriver: true }),
-      ])
+
+    ringScale.value = withRepeat(
+      withSequence(
+        withTiming(1.15, { duration: 600 }),
+        withTiming(1, { duration: 600 }),
+      ),
+      -1,
+      false,
     );
-    loop.start();
-    ringLoop.start();
-    return () => { loop.stop(); ringLoop.stop(); };
-  }, [pulse, ringScale]);
-  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reduceMotion]);
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: pulseOpacity.value,
+  }));
+
+  const ringStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: ringScale.value }],
+  }));
 
   const quickReplies = [
     i18nT('incomingCall.quickReply1', 'Cannot talk now'),
@@ -92,25 +119,27 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
             borderRadius: 99,
           }}
         >
-          <Animated.View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: t.accent, opacity }} />
+          <Animated.View style={[{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: t.accent }, pulseStyle]} />
           <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.1 }}>
             {i18nT('incomingCall.e2eeCall', 'E2EE CALL · ENCRYPTED').toUpperCase()}
           </Text>
         </View>
 
         <Animated.View
-          style={{
-            width: 148,
-            height: 148,
-            borderRadius: 74,
-            borderWidth: 2,
-            borderColor: t.accent,
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginTop: 28,
-            marginBottom: 16,
-            transform: [{ scale: ringScale }],
-          }}
+          style={[
+            {
+              width: 148,
+              height: 148,
+              borderRadius: 74,
+              borderWidth: 2,
+              borderColor: t.accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginTop: 28,
+              marginBottom: 16,
+            },
+            ringStyle,
+          ]}
         >
           <View
             style={{
@@ -247,6 +276,8 @@ function ActionBtn({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
       style={({ pressed }) => ({
         alignItems: 'center',
         gap: 8,

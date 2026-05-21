@@ -1,7 +1,14 @@
 // Initialise i18n before anything else renders
 import './src/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator, AppState, Pressable, type AppStateStatus } from 'react-native';
+import { View, Text, ActivityIndicator, AppState, Pressable, type AppStateStatus, Dimensions } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  useReducedMotion,
+  Easing,
+} from 'react-native-reanimated';
 import { usePanicGesture } from './src/hooks/usePanicGesture';
 import * as SecureStore from 'expo-secure-store';
 import { I } from './src/components/icons';
@@ -146,6 +153,35 @@ type PushRoute =
   | { name: 'lockSettings' }
   | { name: 'workGeneration' }
   | { name: 'keys' };
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
+
+/**
+ * Wraps a pushed screen in a slide-in animation that runs on the UI thread.
+ * On pop the parent component unmounts the child — no explicit slide-out needed
+ * because React Native removes the element; we only animate push (enter).
+ * Respects reduceMotion: skips animation when the OS accessibility setting is on.
+ */
+function AnimatedScreen({ children, stackDepth }: { children: React.ReactNode; stackDepth: number }) {
+  const reduceMotion = useReducedMotion() ?? false;
+  const translateX = useSharedValue(reduceMotion ? 0 : SCREEN_WIDTH);
+
+  useEffect(() => {
+    translateX.value = withTiming(0, {
+      duration: reduceMotion ? 0 : 280,
+      easing: Easing.out(Easing.cubic),
+    });
+  // Only animate when stackDepth changes (new push)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stackDepth]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    flex: 1,
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  return <Animated.View style={animStyle}>{children}</Animated.View>;
+}
 
 function Shell() {
   const { t } = useTheme();
@@ -478,7 +514,9 @@ function Shell() {
   // Top of stack wins; otherwise show the current tab.
   const top = stack[stack.length - 1];
   if (top) {
-    switch (top.name) {
+    // eslint-disable-next-line no-inner-declarations
+    function renderTop() {
+      switch (top!.name) {
       case 'chat':
         return (
           <ChatScreen
@@ -763,6 +801,12 @@ function Shell() {
           />
         );
     }
+    }
+    return (
+      <AnimatedScreen stackDepth={stack.length}>
+        {renderTop() ?? null}
+      </AnimatedScreen>
+    );
   }
 
   // Tab destinations
