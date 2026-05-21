@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, type StoredContact } from '../db/local';
+import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, pinContact as dbPinContact, type StoredContact } from '../db/local';
 import { lookupIdentity, ApiError } from '../api';
 
 export type AddResult =
@@ -32,6 +32,7 @@ interface ContactsState {
   setZeroTrust: (aegisId: string, enabled: boolean) => Promise<void>;
   setBlocked: (aegisId: string, blocked: boolean) => Promise<void>;
   archiveContact: (aegisId: string, archived: boolean) => Promise<void>;
+  pinContact: (aegisId: string, pinned: boolean) => Promise<void>;
   removeContact: (aegisId: string) => Promise<void>;
 }
 
@@ -206,6 +207,11 @@ export const useContacts = create<ContactsState>((set, get) => ({
     const updated = { ...existing, archived };
     await saveContact(updated);
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
+  },
+
+  async pinContact(aegisId, pinned) {
+    await dbPinContact(aegisId, pinned);
+    set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, pinned } : c)) });
   },
 
   async removeContact(aegisId) {
