@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { FormattedText } from '../components/FormattedText';
 import { AudioWaveform } from '../components/AudioWaveform';
+import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -42,6 +43,22 @@ import { WEBRTC_AVAILABLE } from '../runtime';
 import type { StoredContact, StoredMessage } from '../db/local';
 
 const EMPTY_MSGS: StoredMessage[] = [];
+
+function formatLastSeen(ts: number): string {
+  const now = Date.now();
+  const diffMs = now - ts;
+  const diffMin = Math.floor(diffMs / 60_000);
+  const diffHours = Math.floor(diffMs / 3_600_000);
+  const diffDays = Math.floor(diffMs / 86_400_000);
+  if (diffMin < 1) return 'Visto hace un momento';
+  if (diffMin < 60) return `Visto hace ${diffMin}m`;
+  if (diffHours < 24) return `Visto hace ${diffHours}h`;
+  if (diffDays === 1) return 'Visto ayer';
+  const d = new Date(ts);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `Visto el ${dd}/${mm}`;
+}
 
 interface Props {
   contact: StoredContact;
@@ -450,6 +467,17 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                       <Text style={{ fontFamily: t.font, fontSize: 11, color: t.accent, fontStyle: 'italic' }}>
                         {i18nT('home.typing')}
                       </Text>
+                    ) : contact.online ? (
+                      <Text style={{ fontFamily: t.font, fontSize: 11, color: t.accent }}>
+                        {i18nT('chat.online', 'En línea')}
+                      </Text>
+                    ) : contact.lastSeenAt ? (
+                      <Text
+                        numberOfLines={1}
+                        style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, flex: 1 }}
+                      >
+                        {formatLastSeen(contact.lastSeenAt)}
+                      </Text>
                     ) : contact.status ? (
                       <>
                         <Text
@@ -673,7 +701,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10 }}
           renderItem={({ item }) => (
             <SwipeableMessage
-              disabled={item.deleted || item.direction !== 'out'}
+              disabled={item.deleted}
               onDelete={() => {
                 Alert.alert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
                   { text: i18nT('common.cancel'), style: 'cancel' },
@@ -684,6 +712,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                   },
                 ]);
               }}
+              onReply={() => setReplyTo(item)}
             >
               <Bubble
                 t={t}
@@ -1287,13 +1316,15 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
     );
   }
 
-  // Text bubble
+  // Text bubble — extract first URL to show link preview card
+  const urlMatch = /\bhttps?:\/\/[^\s<>"')\]]+/.exec(m.body ?? '');
+  const previewUrl = urlMatch?.[0] ?? null;
+
   return (
-    <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+    <View style={{ alignItems: me ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
       <Pressable
         onLongPress={onLongPress}
         style={({ pressed }) => ({
-          maxWidth: '80%',
           backgroundColor: me ? t.bubbleOut : t.bubbleIn,
           paddingHorizontal: 13,
           paddingTop: quotedMsg ? 8 : 10,
@@ -1329,6 +1360,8 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
           t={t}
           style={{ color: me ? t.bubbleOutText : t.bubbleInText, fontFamily: t.font, fontSize: 15, lineHeight: 20 }}
         />
+        {/* Open Graph link preview card */}
+        {previewUrl ? <LinkPreview url={previewUrl} t={t} /> : null}
       </Pressable>
       <ReactionPills t={t} reactions={reactions} me={me} />
       <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
@@ -1401,6 +1434,8 @@ function TimestampRow({
   );
 }
 
+const PLAYBACK_RATES: number[] = [1.0, 1.5, 2.0, 0.5];
+
 function AudioBubble({
   t, m, me, queued, time, reactions, onLongPress,
 }: {
@@ -1414,6 +1449,7 @@ function AudioBubble({
 }) {
   const [playing, setPlaying] = useState(false);
   const [posMs, setPosMs] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1.0);
   const soundRef = useRef<any>(null);
 
   // Parse duration from body "[audio:30s]"
@@ -1435,7 +1471,7 @@ function AudioBubble({
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
       const { sound } = await Audio.Sound.createAsync(
         { uri: m.mediaUri },
-        { shouldPlay: true },
+        { shouldPlay: true, rate: playbackRate, shouldCorrectPitch: true },
         (status: any) => {
           if (!status.isLoaded) return;
           setPosMs(status.positionMillis ?? 0);
@@ -1451,6 +1487,17 @@ function AudioBubble({
     } catch { setPlaying(false); }
   }
 
+  async function cycleRate() {
+    const currentIndex = PLAYBACK_RATES.indexOf(playbackRate);
+    const nextRate = PLAYBACK_RATES[(currentIndex + 1) % PLAYBACK_RATES.length];
+    setPlaybackRate(nextRate);
+    if (soundRef.current) {
+      try {
+        await soundRef.current.setRateAsync(nextRate, true);
+      } catch { /* ignore */ }
+    }
+  }
+
   async function handleSeek(seekMs: number) {
     if (!soundRef.current) return;
     try {
@@ -1463,6 +1510,8 @@ function AudioBubble({
   const display = playing
     ? `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
     : `${String(Math.floor(durSec / 60)).padStart(2, '0')}:${String(durSec % 60).padStart(2, '0')}`;
+
+  const rateLabel = playbackRate === 1.0 ? '1×' : `${playbackRate}×`;
 
   return (
     <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
@@ -1506,6 +1555,24 @@ function AudioBubble({
             {display}
           </Text>
         </View>
+        <Pressable
+          onPress={cycleRate}
+          accessibilityLabel={`Playback speed ${rateLabel}`}
+          hitSlop={8}
+          style={{
+            paddingHorizontal: 5,
+            paddingVertical: 3,
+            borderRadius: 4,
+            backgroundColor: me ? 'rgba(255,255,255,0.15)' : t.surface3,
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: 28,
+          }}
+        >
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? t.bubbleOutText : t.textDim, fontWeight: '700' }}>
+            {rateLabel}
+          </Text>
+        </Pressable>
         <I.Mic size={14} color={me ? t.bubbleOutText : t.textDim} />
       </Pressable>
       <ReactionPills t={t} reactions={reactions} me={me} />

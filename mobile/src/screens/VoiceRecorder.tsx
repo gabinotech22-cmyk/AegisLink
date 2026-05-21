@@ -24,11 +24,13 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
   const [durationMs, setDurationMs] = useState(0);
   const [playbackMs, setPlaybackMs] = useState(0);
   const [uri, setUri] = useState<string | null>(null);
-  const [bars] = useState(() => Array.from({ length: 32 }, () => 0.15 + Math.random() * 0.85));
+  // Real-time waveform bars — 30 normalized amplitude values from metering
+  const [waveformBars, setWaveformBars] = useState<number[]>(Array(30).fill(0.15));
 
   const recordingRef = useRef<Audio.Recording | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const meteringIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     return () => {
@@ -42,6 +44,10 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
+    }
+    if (meteringIntervalRef.current) {
+      clearInterval(meteringIntervalRef.current);
+      meteringIntervalRef.current = null;
     }
   }
 
@@ -57,12 +63,36 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
         playsInSilentModeIOS: true,
       });
       const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      // Enable metering so getStatusAsync() returns dB amplitude values
+      const recordingOptions: Audio.RecordingOptions = {
+        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        isMeteringEnabled: true,
+      };
+      await rec.prepareToRecordAsync(recordingOptions);
       await rec.startAsync();
       recordingRef.current = rec;
       setElapsedMs(0);
+      setWaveformBars(Array(30).fill(0.15));
       setStage('recording');
       intervalRef.current = setInterval(() => setElapsedMs((p) => p + 100), 100);
+      // Poll metering every 80ms to update waveform bars with real mic amplitude
+      meteringIntervalRef.current = setInterval(() => {
+        void (async () => {
+          try {
+            const status = await rec.getStatusAsync();
+            if (!status.isRecording) return;
+            const metering: number = (status as Record<string, unknown>).metering as number ?? -60;
+            // Normalize dB (-60 to 0) to [0, 1]; clamp to valid range
+            const normalized = Math.max(0, Math.min(1, (metering + 60) / 60));
+            setWaveformBars((prev) => {
+              const next = [...prev.slice(1), normalized];
+              return next;
+            });
+          } catch {
+            // Ignore transient errors during metering poll
+          }
+        })();
+      }, 80);
     } catch (e) {
       Alert.alert(i18nT('common.error'), (e as Error).message);
     }
@@ -152,18 +182,27 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
       />
 
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 40 }}>
-        {/* Waveform */}
+        {/* Waveform — real mic amplitude during recording, static seed during playback */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, height: 64 }}>
-          {bars.map((h, i) => {
-            const barProgress = (i + 1) / bars.length;
-            const active = isRecording ? (i / bars.length) < ((elapsedMs % 3000) / 3000) :
-                           hasRecording ? barProgress <= progress : false;
+          {waveformBars.map((h, i) => {
+            // During playback, use a deterministic height based on bar index and duration
+            const displayH = isRecording
+              ? h
+              : hasRecording
+                ? Math.max(0.18, Math.abs(Math.sin(durationMs * 9301 + i * 49297 + 233280) * 233280) % 1)
+                : 0.15;
+            const barProgress = (i + 1) / waveformBars.length;
+            const active = isRecording
+              ? h > 0.18
+              : hasRecording
+                ? barProgress <= progress
+                : false;
             return (
               <View
                 key={i}
                 style={{
                   width: 3,
-                  height: Math.max(4, h * 56),
+                  height: Math.max(4, displayH * 56),
                   borderRadius: 2,
                   backgroundColor: active
                     ? (isPlaying ? t.accent : (isRecording ? t.danger : t.accent))
