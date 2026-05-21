@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, Alert, PanResponder } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,8 @@ import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
+import { wipeDatabase } from '../db/local';
+import { usePanicGesture } from '../hooks/usePanicGesture';
 import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
 import { useTyping } from '../store/typing';
@@ -46,6 +48,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   const contacts = useContacts((s) => s.contacts);
   const hydrate = useContacts((s) => s.hydrate);
   const archiveContact = useContacts((s) => s.archiveContact);
+  const pinContact = useContacts((s) => s.pinContact);
   const removeContact = useContacts((s) => s.removeContact);
   const previews = useMessages((s) => s.previews);
   const loadChat = useMessages((s) => s.loadChat);
@@ -53,6 +56,15 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   const loadAllUnreads = useMessages((s) => s.loadAllUnreads);
   const clearChat = useMessages((s) => s.clearChat);
   const [showArchived, setShowArchived] = useState(false);
+
+  // ── Panic gesture ─────────────────────────────────────────────────────────
+  const handlePanicTrigger = useCallback(async () => {
+    try {
+      await wipeDatabase();
+      await useIdentity.getState().reset();
+    } catch { /* non-recoverable */ }
+  }, []);
+  const { registerTap } = usePanicGesture(handlePanicTrigger);
 
   useEffect(() => {
     void hydrate();
@@ -65,6 +77,11 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
 
   const allSorted = useMemo(() => {
     return [...contacts].sort((a, b) => {
+      // Pinned chats always first
+      const aPinned = a.pinned ? 1 : 0;
+      const bPinned = b.pinned ? 1 : 0;
+      if (bPinned !== aPinned) return bPinned - aPinned;
+      // Then by last message time
       const aTs = previews[a.aegisId]?.createdAt ?? a.addedAt;
       const bTs = previews[b.aegisId]?.createdAt ?? b.addedAt;
       return bTs - aTs;
@@ -78,10 +95,15 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
 
   function handleLongPressContact(contact: StoredContact) {
     const isArchived = contact.archived ?? false;
+    const isPinned = contact.pinned ?? false;
     Alert.alert(
       contact.name,
       undefined,
       [
+        {
+          text: isPinned ? i18nT('home.unpin', 'Desfijar') : i18nT('home.pin', 'Fijar'),
+          onPress: () => void pinContact(contact.aegisId, !isPinned),
+        },
         {
           text: isArchived ? i18nT('home.archive') : i18nT('home.archive'),
           onPress: () => void archiveContact(contact.aegisId, !isArchived),
@@ -131,7 +153,8 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         }}
       >
         <Pressable
-          onPress={onProfile}
+          onPress={() => { registerTap(); onProfile(); }}
+          accessibilityLabel="AegisLink home"
           style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
         >
           <AegisMark t={t} size={26} />
@@ -325,6 +348,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
               onPress={() => onOpenChat(item)}
               onLongPress={() => handleLongPressContact(item)}
               onArchive={() => void archiveContact(item.aegisId, true)}
+              onPin={() => void pinContact(item.aegisId, !(item.pinned ?? false))}
             />
           )}
           ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: t.divider, marginLeft: 72 }} />}
@@ -477,6 +501,7 @@ function ContactRow({
   onPress,
   onLongPress,
   onArchive,
+  onPin,
 }: {
   t: Theme;
   contact: StoredContact;
@@ -485,21 +510,23 @@ function ContactRow({
   onPress: () => void;
   onLongPress?: () => void;
   onArchive?: () => void;
+  onPin?: () => void;
 }) {
   const { t: i18nT } = useTranslation();
   const isTyping = useTyping((s) => s.typing[contact.aegisId] ?? false);
   const translateX = useRef(new Animated.Value(0)).current;
   const [swipeOpen, setSwipeOpen] = useState(false);
+  const isPinned = contact.pinned ?? false;
 
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gs) => Math.abs(gs.dx) > 8 && Math.abs(gs.dy) < 20,
       onPanResponderMove: (_, gs) => {
-        if (gs.dx < 0) translateX.setValue(Math.max(gs.dx, -84));
+        if (gs.dx < 0) translateX.setValue(Math.max(gs.dx, -144));
       },
       onPanResponderRelease: (_, gs) => {
         if (gs.dx < -80) {
-          Animated.timing(translateX, { toValue: -84, duration: 150, useNativeDriver: true }).start(() => setSwipeOpen(true));
+          Animated.timing(translateX, { toValue: -144, duration: 150, useNativeDriver: true }).start(() => setSwipeOpen(true));
         } else {
           Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start(() => setSwipeOpen(false));
         }
@@ -528,25 +555,38 @@ function ContactRow({
 
   return (
     <View style={{ overflow: 'hidden' }}>
-      {/* Archive action behind the row */}
+      {/* Swipe actions behind the row: Pin + Archive */}
       {swipeOpen && (
-        <Pressable
-          onPress={() => { closeSwipe(); onArchive?.(); }}
-          accessibilityLabel="Archivar conversación"
-          style={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: 84,
-            backgroundColor: '#ef4444',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <I.Archive size={18} color="#fff" />
-          <Text style={{ color: '#fff', fontFamily: t.fontMono, fontSize: 9, letterSpacing: 0.4, marginTop: 3 }}>{i18nT('home.archiveAction')}</Text>
-        </Pressable>
+        <View style={{ position: 'absolute', right: 0, top: 0, bottom: 0, flexDirection: 'row' }}>
+          <Pressable
+            onPress={() => { closeSwipe(); onPin?.(); }}
+            accessibilityLabel={isPinned ? 'Desfijar conversación' : 'Fijar conversación'}
+            style={{
+              width: 72,
+              backgroundColor: t.accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 18 }}>📌</Text>
+            <Text style={{ color: t.accentInk, fontFamily: t.fontMono, fontSize: 9, letterSpacing: 0.4, marginTop: 3 }}>
+              {isPinned ? i18nT('home.unpin', 'Desfijar') : i18nT('home.pin', 'Fijar')}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => { closeSwipe(); onArchive?.(); }}
+            accessibilityLabel="Archivar conversación"
+            style={{
+              width: 72,
+              backgroundColor: '#ef4444',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <I.Archive size={18} color="#fff" />
+            <Text style={{ color: '#fff', fontFamily: t.fontMono, fontSize: 9, letterSpacing: 0.4, marginTop: 3 }}>{i18nT('home.archiveAction')}</Text>
+          </Pressable>
+        </View>
       )}
       <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
         <Pressable
@@ -577,6 +617,7 @@ function ContactRow({
               >
                 {contact.name}
               </Text>
+              {isPinned ? <Text style={{ fontSize: 11 }}>📌</Text> : null}
               {contact.verified ? <I.Check size={12} color={t.accent} /> : null}
               {isMuted ? <I.BellOff size={13} color={t.textFaint} /> : null}
             </View>

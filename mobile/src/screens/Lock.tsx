@@ -97,21 +97,26 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       const stored = await hasStoredPIN();
       setHasPIN(stored);
 
+      // Always detect hardware availability regardless of user preference.
+      // `biometricsEnabled` controls auto-launch behaviour, not whether the
+      // button is shown.
       let bio = false;
-      if (biometricsEnabled) {
-        try {
-          // expo-local-authentication works perfectly in modern Expo Go builds
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
-          const hasHw = await LA.hasHardwareAsync();
-          const enrolled = await LA.isEnrolledAsync();
-          bio = hasHw && enrolled;
-        } catch { /* module not available in this build */ }
-      }
+      try {
+        // expo-local-authentication works perfectly in modern Expo Go builds
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
+        const hasHw = await LA.hasHardwareAsync();
+        const enrolled = await LA.isEnrolledAsync();
+        bio = hasHw && enrolled;
+      } catch { /* module not available in this build */ }
+
       setBioAvailable(bio);
       setBioStatus(i18nT('lock.tapToUnlock'));
 
-      if (bio) {
+      // Auto-launch biometric UI only when the user has enabled it AND hardware
+      // is present. If the preference is off but hardware exists, we show PIN
+      // by default and surface a "Use Face ID / Fingerprint" button instead.
+      if (bio && biometricsEnabled) {
         setMode('biometric');
         // auto-trigger after mode is set via the effect below
       } else {
