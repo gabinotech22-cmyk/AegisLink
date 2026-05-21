@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, StyleSheet, ActivityIndicator, Share } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -584,6 +584,19 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
                   },
                 ]
               );
+            }}
+          />
+          <Row
+            t={t}
+            icon={<I.Forward size={18} color={t.textDim} />}
+            label={i18nT('profile.shareMyId', 'Compartir mi ID')}
+            sub={i18nT('profile.shareMyIdSub', 'Comparte tu contacto AegisLink')}
+            onPress={async () => {
+              if (!identity) return;
+              await Share.share({
+                title: i18nT('profile.shareMyId', 'Compartir mi ID'),
+                message: `${i18nT('verify.shareMessage', 'Agregame en AegisLink:')}\naegislink:v1:${identity.aegisId}:${identity.publicKeyB64}\n\n${i18nT('verify.shareId', 'O usa mi ID:')} ${identity.aegisId}`,
+              });
             }}
           />
           <Row

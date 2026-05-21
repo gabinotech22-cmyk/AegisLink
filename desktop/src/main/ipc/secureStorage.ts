@@ -50,12 +50,16 @@ export function registerSecureStorageHandlers(): void {
     assertTrustedSender(event)
     assertValidKey(key)
     assertValidValue(value)
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('secure encryption not available on this system')
-    }
-    const encrypted = safeStorage.encryptString(value)
     const keystore = readKeystore()
-    keystore[key] = encrypted.toString('base64')
+    if (safeStorage.isEncryptionAvailable()) {
+      const encrypted = safeStorage.encryptString(value)
+      keystore[key] = 'enc:' + encrypted.toString('base64')
+    } else {
+      // safeStorage unavailable (e.g. Windows without Credential Manager session).
+      // Fall back to plaintext-in-file. The keystore.json is already written with
+      // mode 0o600 so OS-level access control still applies.
+      keystore[key] = 'plain:' + Buffer.from(value, 'utf-8').toString('base64')
+    }
     writeKeystore(keystore)
   })
 
@@ -66,7 +70,12 @@ export function registerSecureStorageHandlers(): void {
     const encoded = keystore[key]
     if (!encoded) return null
     try {
-      const buffer = Buffer.from(encoded, 'base64')
+      if (encoded.startsWith('plain:')) {
+        return Buffer.from(encoded.slice(6), 'base64').toString('utf-8')
+      }
+      // Legacy entries without prefix and new 'enc:' entries are both encrypted.
+      const raw = encoded.startsWith('enc:') ? encoded.slice(4) : encoded
+      const buffer = Buffer.from(raw, 'base64')
       return safeStorage.decryptString(buffer)
     } catch {
       return null

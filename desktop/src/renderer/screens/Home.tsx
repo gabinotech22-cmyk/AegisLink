@@ -5,7 +5,7 @@ import type { Theme } from '../theme/vault';
 import { AegisMark, AegisWord } from '../components/AegisMark';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
-import { TabBar, type Tab } from '../components/TabBar';
+import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
@@ -203,7 +203,6 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         </div>
       )}
 
-      <TabBar t={t} current="home" onChange={onTab} isWork={isWork} />
     </div>
   );
 }

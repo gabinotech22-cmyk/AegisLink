@@ -1,18 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
-import { TabBar, type Tab } from '../components/TabBar';
-
-// ---------------------------------------------------------------------------
-// Stub types
-// ---------------------------------------------------------------------------
-
-interface Identity {
-  aegisId: string;
-  publicKey: Uint8Array;
-  publicKeyB64: string;
-}
+import type { Tab } from '../components/TabBar';
+import { useIdentity } from '../store/identity';
 
 interface Props {
   onBack: () => void;
@@ -39,25 +30,25 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
   const { t } = useTheme();
   const asTab = !!onTab;
 
-  // Stub identity
-  const [identity] = useState<Identity>({
-    aegisId: 'ABC-1234-5678',
-    publicKey: new Uint8Array(32).fill(0x42),
-    publicKeyB64: btoa('stub-public-key-data-for-display'),
-  });
+  const storedIdentity = useIdentity((s) => s.identity);
 
-  const [words, setWords] = useState<string[]>([]);
-  const [hex, setHex] = useState<string[]>([]);
+  const identity = useMemo<Identity | null>(() => {
+    if (!storedIdentity) return null;
+    const raw = storedIdentity as { aegisId: string; publicKeyB64: string };
+    const publicKey = Uint8Array.from(atob(raw.publicKeyB64), c => c.charCodeAt(0));
+    return { aegisId: raw.aegisId, publicKey, publicKeyB64: raw.publicKeyB64 };
+  }, [storedIdentity]);
+
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  const [shareMsg, setShareMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    setWords(fingerprintWords(identity.publicKey));
-    setHex(fingerprintHex(identity.publicKey));
-  }, [identity.publicKey]);
+  const words = useMemo(() => identity ? fingerprintWords(identity.publicKey) : [], [identity]);
+  const hex   = useMemo(() => identity ? fingerprintHex(identity.publicKey)   : [], [identity]);
 
-  const qrPayload = encodeIdentityQR(identity.aegisId, identity.publicKeyB64);
+  const qrPayload = identity ? encodeIdentityQR(identity.aegisId, identity.publicKeyB64) : '';
 
   async function handleCopyId() {
+    if (!identity) return;
     try {
       await navigator.clipboard.writeText(identity.aegisId);
       setCopyMsg('AegisLink ID copied!');
@@ -65,6 +56,19 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
     } catch {
       setCopyMsg('Copy failed — use Ctrl+C');
       setTimeout(() => setCopyMsg(null), 2000);
+    }
+  }
+
+  async function handleShareContact() {
+    if (!identity) return;
+    const shareText = `Agregame en AegisLink:\naegislink:v1:${identity.aegisId}:${identity.publicKeyB64}\n\nO usa mi ID: ${identity.aegisId}`;
+    try {
+      await navigator.clipboard.writeText(shareText);
+      setShareMsg('¡Copiado!');
+      setTimeout(() => setShareMsg(null), 2000);
+    } catch {
+      setShareMsg('Copy failed');
+      setTimeout(() => setShareMsg(null), 2000);
     }
   }
 
@@ -114,10 +118,22 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
           </button>
         </div>
 
+        {/* Share contact link button */}
+        <button
+          onClick={() => void handleShareContact()}
+          aria-label="Copiar link de contacto"
+          style={{ marginTop: 14, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, paddingLeft: 16, paddingRight: 16, paddingTop: 9, paddingBottom: 9, backgroundColor: 'transparent', cursor: 'pointer' }}
+        >
+          <I.Copy size={15} color={t.textDim} />
+          <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5 }}>
+            {shareMsg ?? 'COPIAR LINK DE CONTACTO'}
+          </span>
+        </button>
+
         {/* AegisLink ID */}
         <div style={{ marginTop: 18, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <span style={{ fontFamily: t.fontMono, fontSize: 14, color: t.text, letterSpacing: 0.6 }}>
-            {identity.aegisId}
+            {identity?.aegisId ?? '—'}
           </span>
           <button onClick={() => void handleCopyId()} aria-label="Copy AegisLink ID" style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4 }}>
             <I.Copy size={16} color={t.accent} />
@@ -173,7 +189,6 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
         </div>
       </div>
 
-      {onTab && <TabBar t={t} current="verify" onChange={onTab} />}
     </div>
   );
 }

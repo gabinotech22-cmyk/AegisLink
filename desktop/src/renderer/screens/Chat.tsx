@@ -330,6 +330,13 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
         </div>
       )}
 
+      {/* Unverified contact banner */}
+      {!contact.verified && (
+        <div style={{ padding: '8px 16px', backgroundColor: '#1a1200', borderTop: `1px solid #ff9500`, color: '#ff9500', fontSize: 12, fontFamily: t.fontMono, flexShrink: 0 }}>
+          Contacto no verificado. El envio esta habilitado pero verifica su identidad para maxima seguridad.
+        </div>
+      )}
+
       {/* Composer */}
       {contact.blocked ? (
         <div style={{ padding: '14px 12px', backgroundColor: t.surface, borderTop: `1px solid ${t.divider}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>

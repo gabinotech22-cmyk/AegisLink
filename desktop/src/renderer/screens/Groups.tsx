@@ -5,7 +5,7 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
-import { TabBar, type Tab } from '../components/TabBar';
+import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { useGroups } from '../store/groups';
 import { useContacts } from '../store/contacts';
@@ -266,7 +266,6 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
         </div>
       )}
 
-      <TabBar t={t} current="groups" onChange={onTab} isWork={isWork} />
     </div>
   );
 }
