@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { FormattedText } from '../components/FormattedText';
 import { AudioWaveform } from '../components/AudioWaveform';
+import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 import Svg, { Path } from 'react-native-svg';
@@ -71,6 +72,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
 
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [replyTo, setReplyTo] = useState<StoredMessage | null>(null);
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
   const [forwardBody, setForwardBody] = useState<string | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -190,8 +192,10 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
   async function handleSend() {
     if (!identity || !draft.trim() || sending) return;
     const text = draft.trim();
+    const replying = replyTo;
     setDraft('');
     setMentionQuery(null);
+    setReplyTo(null);
     setSending(true);
     try {
       // Optimistic append
@@ -203,6 +207,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
         body: text,
         createdAt: Date.now(),
         type: 'text',
+        replyToId: replying?.id,
       });
       await sendGroupMessage({ identity, groupId: group.id, plaintext: text });
     } catch (e) {
@@ -338,6 +343,30 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
           </View>
         )}
 
+        {/* Reply banner */}
+        {replyTo ? (
+          <View
+            style={{
+              backgroundColor: t.surface2,
+              borderTopWidth: 1,
+              borderTopColor: t.border,
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              gap: 8,
+            }}
+          >
+            <I.Reply size={14} color={t.accent} />
+            <Text numberOfLines={1} style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.textDim }}>
+              {replyTo.deleted ? i18nT('chat.deletedMessage') : replyTo.body || (replyTo.type === 'image' ? '📷 Imagen' : '…')}
+            </Text>
+            <Pressable onPress={() => setReplyTo(null)} hitSlop={8}>
+              <I.X size={16} color={t.textDim} />
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* Input Bar */}
         <View style={[styles.inputContainer, { borderTopColor: t.divider, paddingBottom: Math.max(insets.bottom, 12) }]}>
           <Pressable
@@ -385,7 +414,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
         starred={actionsMsg?.starred ?? false}
         canDelete={actionsMsg?.direction === 'out'}
         onClose={() => setActionsMsg(null)}
-        onReply={() => setActionsMsg(null)}
+        onReply={() => { if (actionsMsg) setReplyTo(actionsMsg); setActionsMsg(null); }}
         onForward={() => { setForwardBody(actionsMsg?.body ?? ''); setActionsMsg(null); }}
         onStar={handleStar}
         onDelete={handleDelete}
@@ -824,6 +853,11 @@ function GroupBubble({
           t={t}
           style={{ fontFamily: t.font, fontSize: 15, lineHeight: 21, color: me ? t.bubbleOutText : t.text }}
         />
+        {/* Open Graph link preview card */}
+        {(() => {
+          const match = /\bhttps?:\/\/[^\s<>"')\]]+/.exec(body ?? '');
+          return match ? <LinkPreview url={match[0]} t={t} /> : null;
+        })()}
       </Pressable>
       <ReactionPills t={t} reactions={reactions} me={me} />
       <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, alignSelf: me ? 'flex-end' : 'flex-start', marginTop: 3, paddingHorizontal: 4 }}>
@@ -865,9 +899,12 @@ function ReactionPills({ t, reactions, me }: { t: Theme; reactions: [string, str
   );
 }
 
+const GROUP_PLAYBACK_RATES: number[] = [1.0, 1.5, 2.0, 0.5];
+
 function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: StoredMessage; me: boolean; body: string; onLongPress: () => void }) {
   const [playing, setPlaying] = useState(false);
   const [posMs, setPosMs] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1.0);
   const soundRef = useRef<any>(null);
   const durSec = parseInt(body.match(/\[audio:(\d+)s/)?.[1] ?? '0', 10);
 
@@ -884,7 +921,7 @@ function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: Stored
       const { Audio } = require('expo-av');
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
       const { sound } = await Audio.Sound.createAsync(
-        { uri: m.mediaUri }, { shouldPlay: true },
+        { uri: m.mediaUri }, { shouldPlay: true, rate: playbackRate, shouldCorrectPitch: true },
         (s: any) => {
           if (!s.isLoaded) return;
           setPosMs(s.positionMillis ?? 0);
@@ -894,6 +931,15 @@ function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: Stored
       soundRef.current = sound;
       setPlaying(true);
     } catch { setPlaying(false); }
+  }
+
+  async function cycleRate() {
+    const currentIndex = GROUP_PLAYBACK_RATES.indexOf(playbackRate);
+    const nextRate = GROUP_PLAYBACK_RATES[(currentIndex + 1) % GROUP_PLAYBACK_RATES.length];
+    setPlaybackRate(nextRate);
+    if (soundRef.current) {
+      try { await soundRef.current.setRateAsync(nextRate, true); } catch { /* ignore */ }
+    }
   }
 
   const durMs = durSec * 1000;
@@ -909,6 +955,8 @@ function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: Stored
       setPosMs(seekMs);
     } catch { /* ignore */ }
   }
+
+  const rateLabel = playbackRate === 1.0 ? '1×' : `${playbackRate}×`;
 
   return (
     <Pressable
@@ -941,6 +989,24 @@ function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: Stored
         />
         <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? t.bubbleOutText : t.textDim }}>{display}</Text>
       </View>
+      <Pressable
+        onPress={cycleRate}
+        accessibilityLabel={`Playback speed ${rateLabel}`}
+        hitSlop={8}
+        style={{
+          paddingHorizontal: 4,
+          paddingVertical: 3,
+          borderRadius: 4,
+          backgroundColor: me ? 'rgba(255,255,255,0.15)' : t.surface3,
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: 26,
+        }}
+      >
+        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? t.bubbleOutText : t.textDim, fontWeight: '700' }}>
+          {rateLabel}
+        </Text>
+      </Pressable>
       <I.Mic size={13} color={me ? t.bubbleOutText : t.textDim} />
     </Pressable>
   );

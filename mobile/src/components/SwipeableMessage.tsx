@@ -1,15 +1,15 @@
 /**
  * SwipeableMessage
- * Wraps a single chat bubble with a swipe-left gesture that reveals a
- * "Delete" action button. Uses Reanimated 3 (worklet) + GestureDetector.
+ * Wraps a single chat bubble with a swipe-left gesture that triggers reply.
+ * Uses Reanimated 3 (worklet) + GestureDetector.
  *
  * Rules:
- *  – Swipe < 80 px → snaps back
- *  – Swipe ≥ 80 px → Alert.alert confirmation, then onDelete()
+ *  – Swipe < 64 px → snaps back
+ *  – Swipe ≥ 64 px → snaps to hint position, calls onReply(), then snaps back
  *  – useReduceMotion() → skip all spring/timing animations
  */
 import React, { useCallback } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -22,67 +22,51 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useTheme } from '../theme/ThemeContext';
 
-const DELETE_THRESHOLD = 80;
-const DELETE_BTN_WIDTH = 80;
+const REPLY_THRESHOLD = 64;
+const HINT_WIDTH = 56;
 
 interface Props {
   children: React.ReactNode;
   onDelete: () => void;
+  onReply?: () => void;
   /** If true the row is not swipeable (e.g. deleted/tombstone bubbles). */
   disabled?: boolean;
 }
 
-export function SwipeableMessage({ children, onDelete, disabled }: Props) {
+export function SwipeableMessage({ children, onDelete: _onDelete, onReply, disabled }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const translateX = useSharedValue(0);
   const reduceMotion = useReducedMotion() ?? false;
 
-  const showConfirm = useCallback(() => {
-    Alert.alert(
-      i18nT('chat.deleteMessageTitle', 'Delete message'),
-      i18nT('chat.deleteMessageConfirm', 'Are you sure you want to delete this message?'),
-      [
-        {
-          text: i18nT('common.cancel', 'Cancel'),
-          style: 'cancel',
-          onPress: () => {
-            translateX.value = reduceMotion ? 0 : withSpring(0);
-          },
-        },
-        {
-          text: i18nT('chat.delete', 'Delete'),
-          style: 'destructive',
-          onPress: () => {
-            translateX.value = reduceMotion ? 0 : withTiming(0, { duration: 200 });
-            onDelete();
-          },
-        },
-      ]
-    );
-  }, [onDelete, translateX, reduceMotion, i18nT]);
+  const triggerReply = useCallback(() => {
+    onReply?.();
+  }, [onReply]);
+
+  const snapBack = useCallback(() => {
+    translateX.value = reduceMotion ? 0 : withSpring(0, { damping: 20, stiffness: 200 });
+  }, [translateX, reduceMotion]);
 
   const panGesture = Gesture.Pan()
     .enabled(!disabled)
     .activeOffsetX([-10, 10])
     .failOffsetY([-15, 15])
     .onUpdate((e) => {
-      // Only allow left swipe (negative translation)
-      const clampedX = Math.min(0, e.translationX);
-      if (reduceMotion) {
-        translateX.value = clampedX;
-      } else {
-        translateX.value = clampedX;
-      }
+      // Only allow left swipe (negative translation), clamp at -HINT_WIDTH * 1.5
+      translateX.value = Math.max(-HINT_WIDTH * 1.5, Math.min(0, e.translationX));
     })
     .onEnd((e) => {
-      const committed = e.translationX <= -DELETE_THRESHOLD;
+      const committed = e.translationX <= -REPLY_THRESHOLD;
       if (committed) {
-        // Snap to reveal the delete button, then wait for user confirmation
+        // Snap to hint, fire reply, then snap back
         translateX.value = reduceMotion
-          ? -DELETE_BTN_WIDTH
-          : withSpring(-DELETE_BTN_WIDTH, { damping: 20, stiffness: 200 });
-        runOnJS(showConfirm)();
+          ? -HINT_WIDTH
+          : withSpring(-HINT_WIDTH, { damping: 18, stiffness: 220 });
+        runOnJS(triggerReply)();
+        // Snap back after a short visual pause
+        setTimeout(() => {
+          runOnJS(snapBack)();
+        }, 300);
       } else {
         translateX.value = reduceMotion ? 0 : withSpring(0, { damping: 20, stiffness: 200 });
       }
@@ -92,17 +76,18 @@ export function SwipeableMessage({ children, onDelete, disabled }: Props) {
     transform: [{ translateX: translateX.value }],
   }));
 
-  const btnOpacity = useAnimatedStyle(() => {
-    const progress = Math.min(1, -translateX.value / DELETE_BTN_WIDTH);
+  const hintOpacity = useAnimatedStyle(() => {
+    const progress = Math.min(1, -translateX.value / HINT_WIDTH);
     return { opacity: progress };
   });
 
   return (
     <View style={styles.container}>
-      {/* Delete button revealed behind the bubble */}
-      <Animated.View style={[styles.deleteBtn, btnOpacity, { backgroundColor: t.danger }]}>
-        <Text style={[styles.deleteBtnText, { fontFamily: t.font }]}>
-          {i18nT('chat.delete', 'Delete')}
+      {/* Reply hint revealed behind the bubble */}
+      <Animated.View style={[styles.replyHint, hintOpacity, { backgroundColor: t.accent }]}>
+        {/* Curved reply arrow using Unicode */}
+        <Text style={[styles.replyIcon, { color: t.accentInk }]}>
+          {i18nT('chat.replyIcon', '↩')}
         </Text>
       </Animated.View>
 
@@ -118,19 +103,18 @@ const styles = StyleSheet.create({
   container: {
     overflow: 'hidden',
   },
-  deleteBtn: {
+  replyHint: {
     position: 'absolute',
     right: 0,
     top: 0,
     bottom: 0,
-    width: DELETE_BTN_WIDTH,
+    width: HINT_WIDTH,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
   },
-  deleteBtnText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 13,
+  replyIcon: {
+    fontSize: 22,
+    fontWeight: '700',
   },
 });
