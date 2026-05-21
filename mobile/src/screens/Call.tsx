@@ -396,28 +396,32 @@ export function CallScreen({ onClose }: Props) {
           </View>
         ) : (
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 4, width: '100%', paddingLeft: 24, paddingRight: 24 }}>
+            {/* Mic — filled+warn+MicOff icon when muted, outlined+Mic when active */}
             <CircleBtn
               t={t}
               color={muted ? t.warn : t.surface2}
               onPress={toggleMute}
               icon="Mic"
               label={muted ? i18nT('call.unmute', 'Unmute') : i18nT('call.mute', 'Mute')}
-              accessibilityLabel={muted ? i18nT('call.muteA11y', 'Mute: active') : i18nT('call.muteA11yOff', 'Mute: inactive')}
+              accessibilityLabel={muted ? i18nT('call.muteA11y', 'Muted') : i18nT('call.muteA11yOff', 'Mic on')}
               accessibilityState={{ selected: muted }}
-              outlined
+              outlined={!muted}
+              active={muted}
             />
+            {/* Camera — filled+warn when off, outlined when on */}
             {isVideo && (
               <CircleBtn
                 t={t}
                 color={cameraOff ? t.warn : t.surface2}
                 onPress={toggleCamera}
                 icon="Video"
-                label={cameraOff ? i18nT('call.cameraOn', 'Camera on') : i18nT('call.cameraOff', 'Camera off')}
-                accessibilityLabel={cameraOff ? i18nT('call.cameraA11yOff', 'Camera: off') : i18nT('call.cameraA11yOn', 'Camera: on')}
+                label={cameraOff ? i18nT('call.cameraOn', 'Cam on') : i18nT('call.cameraOff', 'Cam off')}
+                accessibilityLabel={cameraOff ? i18nT('call.cameraA11yOff', 'Camera off') : i18nT('call.cameraA11yOn', 'Camera on')}
                 accessibilityState={{ selected: cameraOff }}
-                outlined
+                outlined={!cameraOff}
               />
             )}
+            {/* Speaker — filled+accent when on, outlined when off */}
             <CircleBtn
               t={t}
               color={speakerOn ? t.accent : t.surface2}
@@ -476,6 +480,7 @@ function CircleBtn({
   label,
   outlined = false,
   large = false,
+  active = false,
   accessibilityLabel: a11yLabel,
   accessibilityState,
 }: {
@@ -486,6 +491,7 @@ function CircleBtn({
   label: string;
   outlined?: boolean;
   large?: boolean;
+  active?: boolean;
   accessibilityLabel?: string;
   accessibilityState?: { selected?: boolean; disabled?: boolean };
 }) {
@@ -514,7 +520,7 @@ function CircleBtn({
           justifyContent: 'center',
         }}
       >
-        <IconGlyph name={icon} color={outlined ? '#fff' : t.bg} />
+        <IconGlyph name={icon} color={outlined ? '#fff' : t.bg} active={active} />
       </View>
       <Text
         style={{
@@ -531,14 +537,15 @@ function CircleBtn({
   );
 }
 
-function IconGlyph({ name, color }: { name: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker' | 'More'; color: string }) {
-  // Inline tiny glyphs avoiding wider Icon imports.
+function IconGlyph({ name, color, active }: { name: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker' | 'More'; color: string; active?: boolean }) {
   if (name === 'More') return <I.More size={22} color={color} />;
   if (name === 'X') return <I.X size={26} color={color} />;
   if (name === 'Check') return <I.Check size={26} color={color} />;
   if (name === 'Speaker') return <I.Volume size={22} color={color} />;
-  // Use simple text glyphs for mic/video/hangup to avoid expanding the icon set further.
-  const ch = name === 'Mic' ? '🎙' : name === 'Video' ? '📷' : '☎';
+  // Mic: show MicOff when active (muted state)
+  if (name === 'Mic') return active ? <I.MicOff size={22} color={color} /> : <I.Mic size={22} color={color} />;
+  // Video/Hangup: emoji fallback
+  const ch = name === 'Video' ? '📷' : '☎';
   return (
     <Text style={{ fontSize: 22, color, transform: name === 'Hangup' ? [{ rotate: '135deg' }] : undefined }}>
       {ch}
