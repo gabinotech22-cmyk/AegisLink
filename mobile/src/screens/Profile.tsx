@@ -24,6 +24,9 @@ interface Props {
   onKeys: () => void;
   onSubscription?: () => void;
   onWorkGeneration?: () => void;
+  onNotifications?: () => void;
+  onLockConfig?: () => void;
+  onExport?: () => void;
 }
 
 const PROFILE_COLORS = [
@@ -36,20 +39,8 @@ const PROFILE_COLORS = [
   '#6366f1', // Indigo
 ];
 
-const PROFILE_EMOJIS = [
-  { label: 'Inicial', val: null },
-  { label: 'Escudo', val: '🛡️' },
-  { label: 'Candado', val: '🔒' },
-  { label: 'Llave', val: '🔑' },
-  { label: 'Rayo', val: '⚡' },
-  { label: 'Búho', val: '🦉' },
-  { label: 'Zorro', val: '🦊' },
-  { label: 'Cubo', val: '🧊' },
-  { label: 'OVNI', val: '🛸' },
-  { label: 'Robot', val: '🤖' },
-];
 
-export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDashboard, onSwitchToPersonal, onKeys, onSubscription, onWorkGeneration }: Props) {
+export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDashboard, onSwitchToPersonal, onKeys, onSubscription, onWorkGeneration, onNotifications, onLockConfig, onExport }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -352,7 +343,43 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
               );
             })}
             <Pressable
-              onPress={() => Alert.alert(i18nT('profile.multiIdentityAlert'), i18nT('profile.multiIdentityDesc'))}
+              accessibilityLabel="Crear nueva identidad"
+              onPress={() => {
+                Alert.alert(
+                  i18nT('profile.createIdentityTitle'),
+                  i18nT('profile.createIdentityDesc'),
+                  [
+                    { text: i18nT('common.cancel'), style: 'cancel' },
+                    {
+                      text: i18nT('common.add'),
+                      onPress: async () => {
+                        try {
+                          const newSlotId = await useIdentity.getState().createSlot();
+                          Alert.alert(
+                            i18nT('profile.identityCreated'),
+                            i18nT('profile.identityCreatedDesc', { slotId: newSlotId }),
+                            [
+                              { text: i18nT('common.done') },
+                              {
+                                text: i18nT('profile.switchToNew'),
+                                onPress: async () => {
+                                  try {
+                                    await useIdentity.getState().switchSlot(newSlotId);
+                                  } catch (e) {
+                                    Alert.alert(i18nT('common.error'), (e as Error).message);
+                                  }
+                                },
+                              },
+                            ]
+                          );
+                        } catch (e) {
+                          Alert.alert(i18nT('common.error'), (e as Error).message);
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
               style={{ paddingHorizontal: 12, paddingVertical: 8 }}
             >
               <Text style={{ color: t.textFaint, fontSize: 14 }}>+</Text>
@@ -507,6 +534,30 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
               label={i18nT('profile.anonSubscription')}
               sub={i18nT('profile.anonSubscriptionSub')}
               onPress={onSubscription}
+            />
+          )}
+          {onNotifications && (
+            <Row
+              t={t}
+              icon={<I.Bell size={18} color={t.textDim} />}
+              label="Notificaciones"
+              onPress={onNotifications}
+            />
+          )}
+          {onLockConfig && (
+            <Row
+              t={t}
+              icon={<I.Lock size={18} color={t.textDim} />}
+              label="Pantalla de bloqueo"
+              onPress={onLockConfig}
+            />
+          )}
+          {onExport && (
+            <Row
+              t={t}
+              icon={<I.Forward size={18} color={t.textDim} />}
+              label="Exportar datos"
+              onPress={onExport}
             />
           )}
           <Row
@@ -693,35 +744,6 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
                 })}
               </View>
 
-              <Text style={{ color: t.textDim, fontFamily: t.font, fontSize: 12, marginBottom: 6 }}>
-                {i18nT('profile.avatarIcon')}
-              </Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 6, marginBottom: 24 }}>
-                {PROFILE_EMOJIS.map((e) => {
-                  const isSel = editImage === e.val;
-                  return (
-                    <Pressable
-                      key={e.label}
-                      onPress={() => setEditImage(e.val)}
-                      style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: t.radiusS,
-                        backgroundColor: isSel ? t.accent : t.bg,
-                        borderWidth: 1,
-                        borderColor: isSel ? t.accent : t.borderStrong,
-                        minWidth: 50,
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Text style={{ fontSize: 13, color: isSel ? t.accentInk : t.text, fontFamily: t.font }}>
-                        {e.val || 'A-Z'}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Pressable
                   onPress={handleSaveProfile}
@@ -739,9 +761,9 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
                 </Pressable>
                 <Pressable
                   onPress={() => {
-                    setEditName(displayName);
-                    setEditColor(avatarColor);
-                    setEditImage(avatarImage);
+                    setEditName(identityId === 'personal' ? displayName : workDisplayName);
+                    setEditColor(identityId === 'personal' ? avatarColor : workAvatarColor);
+                    setEditImage(identityId === 'personal' ? avatarImage : workAvatarImage);
                     setIsEditing(false);
                   }}
                   style={{
