@@ -244,6 +244,7 @@
     "jurisdictionAlert": "Jurisdiction",
     "jurisdictionAlertDesc": "Legal details available soon.",
     "modeLight": "Light",
+    "modeAuto": "Auto",
     "modeDark": "Dark",
     "modeDesc": "Changes the colors while preserving the Vault identity. Fonts, shapes and accents are preserved.",
     "languageSection": "LANGUAGE / LINGUA",

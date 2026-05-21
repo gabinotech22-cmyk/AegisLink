@@ -46,7 +46,7 @@ const DEFAULTS: Preferences = {
   readReceipts: false,
   typingIndicator: false,
   blockScreenshots: true,
-  routeViaTor: true,
+  routeViaTor: false,
   notifMaster: true,
   notifPreview: false,
   notifSound: true,
