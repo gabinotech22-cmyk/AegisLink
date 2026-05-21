@@ -69,6 +69,14 @@ export const useContacts = create<ContactsState>((set, get) => ({
       if (e instanceof ApiError && e.status === 404) {
         throw new Error(`No identity found for ${aegisId}. Has your peer opened the app yet?`);
       }
+      const raw = (e as Error).message ?? '';
+      if (
+        raw.toLowerCase().includes('network') ||
+        raw.toLowerCase().includes('failed to fetch') ||
+        raw.toLowerCase().includes('network request failed')
+      ) {
+        throw new Error('Could not connect to the server. Check your internet connection and try again.');
+      }
       throw e;
     }
 

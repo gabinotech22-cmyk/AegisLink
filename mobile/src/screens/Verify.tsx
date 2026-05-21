@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, Share } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, Share, ActivityIndicator } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -35,7 +35,16 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
     }
   }, [identity]);
 
-  if (!identity) return null;
+  if (!identity) {
+    return (
+      <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={t.accent} />
+        <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 12 }}>
+          {i18nT('verify.loading', 'Loading identity…')}
+        </Text>
+      </View>
+    );
+  }
 
   const qrPayload = encodeIdentityQR(identity.aegisId, identity.publicKeyB64);
   const asTab = !!onTab;
@@ -199,7 +208,7 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
           onPress={async () => {
             await Share.share({
               title: i18nT('verify.shareTitle', 'Mi contacto AegisLink'),
-              message: `${i18nT('verify.shareMessage', 'Agregame en AegisLink:')}\naegislink:v1:${identity.aegisId}:${identity.publicKeyB64}\n\n${i18nT('verify.shareId', 'O usa mi ID:')} ${identity.aegisId}`,
+              message: `${i18nT('verify.shareMessage', 'Add me on AegisLink:')}\naegislink://v1/${identity.aegisId}/${encodeURIComponent(identity.publicKeyB64)}\n\n${i18nT('verify.shareId', 'Or use my ID:')} ${identity.aegisId}`,
             });
           }}
           style={({ pressed }) => ({

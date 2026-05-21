@@ -430,7 +430,7 @@ function Shell() {
               keyChanged={top.keyChanged}
               onChat={() => { setStack([]); push({ name: 'chat', contact: top.contact }); }}
               onCall={(_media) => push({ name: 'chat', contact: top.contact })}
-              onVerify={() => push({ name: 'scan' })}
+              onVerify={() => { setStack([]); setTab('verify'); }}
               onEphemeral={() => push({ name: 'ephemeral' })}
             />
           );
@@ -439,7 +439,7 @@ function Shell() {
         case 'scan':
           return <ScanQRScreen onCancel={pop} onAdded={(contact) => { pop(); push({ name: 'firstContact', contact }); }} />;
         case 'invite':
-          return <InviteAddScreen onBack={pop} onShowMyQR={() => push({ name: 'scan' })} onPasteId={() => push({ name: 'add' })} onScanQR={() => push({ name: 'scan' })} />;
+          return <InviteAddScreen onBack={pop} onShowMyQR={() => { setStack([]); setTab('verify'); }} onPasteId={() => push({ name: 'add' })} onScanQR={() => push({ name: 'scan' })} />;
         case 'profile':
           return (
             <ProfileScreen
