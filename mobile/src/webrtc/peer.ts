@@ -42,30 +42,68 @@ export async function createPeer(
       ? { audio: true, video: { facingMode: 'user' } }
       : { audio: true, video: false };
   const localStream = (await mediaDevices.getUserMedia(constraints)) as unknown as MediaStream;
-  for (const track of localStream.getTracks()) {
-    (pc as any).addTrack(track, localStream);
+
+  // react-native-webrtc supports addTrack in recent versions; fall back to
+  // addStream for older native builds that only expose the legacy API.
+  const pcAny = pc as any;
+  if (typeof pcAny.addTrack === 'function') {
+    for (const track of localStream.getTracks()) {
+      pcAny.addTrack(track, localStream);
+    }
+  } else if (typeof pcAny.addStream === 'function') {
+    pcAny.addStream(localStream);
   }
-  handlers.onLocalStream(localStream);
 
   let remoteStream: MediaStream | null = null;
-  (pc as any).addEventListener('track', (event: { streams: MediaStream[] }) => {
+
+  // Set both the property AND addEventListener — react-native-webrtc dispatches
+  // events via the property assignment path in many versions; addEventListener
+  // alone is unreliable for 'track' and 'icecandidate'.
+  const onTrack = (event: { streams?: MediaStream[]; track?: unknown }) => {
     if (event.streams?.[0]) {
       remoteStream = event.streams[0];
       handlers.onRemoteStream(remoteStream);
     }
-  });
+  };
+  pcAny.ontrack = onTrack;
+  pcAny.addEventListener?.('track', onTrack);
 
-  (pc as any).addEventListener('icecandidate', (event: { candidate: RTCIceCandidateT | null }) => {
+  // Legacy: react-native-webrtc also fires onaddstream for addStream path
+  pcAny.onaddstream = (event: { stream?: MediaStream }) => {
+    if (event.stream) {
+      remoteStream = event.stream;
+      handlers.onRemoteStream(remoteStream);
+    }
+  };
+
+  const onIce = (event: { candidate: RTCIceCandidateT | null }) => {
     if (event.candidate) handlers.onIceCandidate(event.candidate);
-  });
+  };
+  pcAny.onicecandidate = onIce;
+  pcAny.addEventListener?.('icecandidate', onIce);
 
-  (pc as any).addEventListener('connectionstatechange', () => {
-    handlers.onConnectionStateChange((pc as any).connectionState);
-  });
+  const onConnState = () => {
+    handlers.onConnectionStateChange(pcAny.connectionState ?? pcAny.iceConnectionState);
+  };
+  pcAny.onconnectionstatechange = onConnState;
+  pcAny.addEventListener?.('connectionstatechange', onConnState);
+
+  // Also listen to iceconnectionstatechange as a fallback — some RN-WebRTC
+  // builds only fire this and not connectionstatechange.
+  const onIceConnState = () => {
+    const state: string = pcAny.iceConnectionState ?? '';
+    if (state === 'connected' || state === 'completed') {
+      handlers.onConnectionStateChange('connected');
+    } else if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+      handlers.onConnectionStateChange(state);
+    }
+  };
+  pcAny.oniceconnectionstatechange = onIceConnState;
+  pcAny.addEventListener?.('iceconnectionstatechange', onIceConnState);
 
   const cleanup = () => {
     try { for (const t of localStream.getTracks()) t.stop(); } catch { /* ignore */ }
-    try { (pc as any).close(); } catch { /* ignore */ }
+    try { pcAny.close(); } catch { /* ignore */ }
   };
 
   return { pc: pc as unknown as RTCPeerConnectionT, localStream, remoteStream, cleanup };
