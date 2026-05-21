@@ -66,6 +66,7 @@ import { useConnection } from './src/store/connection';
 import { isPicking } from './src/utils/pickingGuard';
 import { attachCallHandlers, acceptCall, endCall } from './src/socket/calls';
 import { registerForPush, setNotificationOpenChatHandler } from './src/notifications/push';
+import { initCallKeep } from './src/calls/callkeep';
 import { WEBRTC_AVAILABLE } from './src/runtime';
 import { clearTurnCache } from './src/webrtc/ice';
 
@@ -379,6 +380,7 @@ function Shell() {
         if (contact) { setStack([]); push({ name: 'chat', contact }); }
       });
       void registerForPush(identity);
+      initCallKeep();
     } else if (!identity && status === 'idle') {
       disconnectSocket();
       clearTurnCache();

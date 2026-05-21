@@ -21,7 +21,8 @@
         "NSMicrophoneUsageDescription": "AegisLink uses the microphone for encrypted voice and video calls.",
         "NSPhotoLibraryUsageDescription": "AegisLink accesses your photo library to send encrypted attachments.",
         "NSFaceIDUsageDescription": "AegisLink uses Face ID to protect your messages. Your biometric data never leaves the device.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["voip", "audio", "remote-notification"]
       },
       "bitcode": false
     },
@@ -60,11 +61,21 @@
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.WAKE_LOCK",
-        "android.permission.BLUETOOTH"
+        "android.permission.BLUETOOTH",
+        "android.permission.MANAGE_OWN_CALLS",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.READ_PHONE_NUMBERS",
+        "android.permission.CALL_PHONE"
       ]
     },
     "plugins": [
       "./app.plugin.js",
+      [
+        "react-native-callkeep",
+        {
+          "appName": "AegisLink"
+        }
+      ],
       "expo-secure-store",
       "expo-sqlite",
       [

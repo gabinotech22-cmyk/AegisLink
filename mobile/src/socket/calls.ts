@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { getSocket, isConnected } from './client';
 import { useCall } from '../store/call';
+import { displayIncomingCall, endNativeCall, reportCallConnected, setNativeMuted } from '../calls/callkeep';
 import { saveCall } from '../db/local';
 import {
   createPeer,
@@ -83,6 +84,15 @@ export function attachCallHandlers(): void {
       return;
     }
     state.startIncoming(msg.from, msg.callId, msg.media, msg.offer);
+
+    // Show native incoming call UI (CallKit on iOS, ConnectionService on Android)
+    const callerName = (() => {
+      try {
+        const { useContacts } = require('../store/contacts') as { useContacts: { getState: () => { get: (id: string) => { name: string } | undefined } } };
+        return useContacts.getState().get(msg.from)?.name ?? msg.from;
+      } catch { return msg.from; }
+    })();
+    displayIncomingCall(msg.callId, msg.from, callerName, msg.media === 'video');
   });
 
   socket.on('call:answer', async (msg: CallAnswerPayload) => {
@@ -144,7 +154,11 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
       });
     },
     onConnectionStateChange: (state) => {
-      if (state === 'connected') useCall.getState().setStatus('in-call');
+      if (state === 'connected') {
+        useCall.getState().setStatus('in-call');
+        const { callId: cid } = useCall.getState();
+        if (cid) reportCallConnected(cid);
+      }
       if (state === 'failed' || state === 'closed') endCall('rtc_failure');
     },
   }, turnConfig);
@@ -197,7 +211,11 @@ export async function acceptCall(): Promise<void> {
       });
     },
     onConnectionStateChange: (state) => {
-      if (state === 'connected') useCall.getState().setStatus('in-call');
+      if (state === 'connected') {
+        useCall.getState().setStatus('in-call');
+        const { callId: cid } = useCall.getState();
+        if (cid) reportCallConnected(cid);
+      }
       if (state === 'failed' || state === 'closed') endCall('rtc_failure');
     },
   }, turnConfig);
@@ -261,6 +279,11 @@ export function endCall(reason: string = 'hangup'): void {
   } catch { /* no-op */ }
 
   activePeer?.cleanup();
+
+  // Dismiss native call UI
+  const { callId: cid } = useCall.getState();
+  if (cid) endNativeCall(cid);
+
   useCall.getState().setStatus('ended');
   setTimeout(() => useCall.getState().reset(), 600);
 }
@@ -271,6 +294,8 @@ export function toggleMute(): void {
   const newMuted = !muted;
   for (const track of activePeer.localStream.getAudioTracks()) track.enabled = !newMuted;
   useCall.getState().setMuted(newMuted);
+  const { callId: cid } = useCall.getState();
+  if (cid) setNativeMuted(cid, newMuted);
 }
 
 export function toggleCamera(): void {
