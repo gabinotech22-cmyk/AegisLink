@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Pitch Deck</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,500&display=swap"/>
+  <script src="deck-stage.js"></script>
+  <style>
+    :root {
+      --bg: #07090a;
+      --bg-2: #0c1112;
+      --surface: #11181a;
+      --surface-2: #1a2326;
+      --border: rgba(255,255,255,0.10);
+      --border-strong: rgba(255,255,255,0.20);
+      --text: #e8f0ec;
+      --dim: rgba(232,240,236,0.62);
+      --faint: rgba(232,240,236,0.36);
+      --accent: #5bf2b9;
+      --accent-deep: #1f8a5b;
+      --accent-ink: #06231a;
+      --danger: #ff6b6b;
+      --warn: #f0c674;
+      --serif: 'EB Garamond', Garamond, serif;
+      --sans:  'Space Grotesk', system-ui, sans-serif;
+      --mono:  'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #000; height: 100%; }
+    body { font-family: var(--sans); color: var(--text); }
+
+    deck-stage section {
+      width: 1920px; height: 1080px;
+      background: var(--bg);
+      padding: 100px 120px;
+      display: flex; flex-direction: column;
+      position: relative; overflow: hidden;
+    }
+
+    /* Shared chrome */
+    .slide-head {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 56px;
+      font-family: var(--mono); font-size: 16px;
+      color: var(--faint); letter-spacing: 0.12em;
+    }
+    .slide-head .brand { display: flex; align-items: center; gap: 12px; color: var(--text); }
+    .slide-head .brand .nm { font-family: var(--serif); font-size: 22px;
+                             font-weight: 500; letter-spacing: -0.01em;
+                             color: var(--text); }
+
+    .grid-bg {
+      position: absolute; inset: 0; pointer-events: none; opacity: 0.4;
+      background-image:
+        linear-gradient(rgba(91,242,185,0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(91,242,185,0.05) 1px, transparent 1px);
+      background-size: 80px 80px;
+      mask-image: radial-gradient(ellipse at 50% 30%, black, transparent 75%);
+      -webkit-mask-image: radial-gradient(ellipse at 50% 30%, black, transparent 75%);
+    }
+
+    .eyebrow {
+      font-family: var(--mono); font-size: 16px; color: var(--accent);
+      letter-spacing: 0.16em; text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+
+    h1.title {
+      font-family: var(--serif); font-weight: 500;
+      font-size: 156px; line-height: 0.9; letter-spacing: -0.025em;
+      margin: 0 0 28px;
+    }
+    h1.title em { font-style: italic; color: var(--accent); }
+    h2.bigtitle {
+      font-family: var(--serif); font-weight: 500;
+      font-size: 96px; line-height: 0.95; letter-spacing: -0.025em;
+      margin: 0 0 24px;
+    }
+    h2.bigtitle em { font-style: italic; color: var(--accent); }
+    p.lead { font-size: 28px; color: var(--dim); max-width: 1100px;
+             line-height: 1.45; margin: 0 0 32px; }
+
+    .ftr {
+      position: absolute; bottom: 56px; left: 120px; right: 120px;
+      display: flex; justify-content: space-between; align-items: center;
+      font-family: var(--mono); font-size: 14px; color: var(--faint);
+      letter-spacing: 0.1em;
+    }
+
+    /* Phone mock — simplified, used in demo slides */
+    .phone {
+      width: 380px; height: 800px;
+      border-radius: 52px; padding: 14px;
+      background: linear-gradient(180deg, #11181a, #0a0e0d);
+      box-shadow: 0 60px 120px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+    .phone-screen {
+      width: 100%; height: 100%;
+      border-radius: 40px; overflow: hidden;
+      background: #06090a;
+      position: relative;
+      display: flex; flex-direction: column;
+      padding: 50px 22px 22px;
+    }
+    .phone-screen .notch {
+      position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+      width: 110px; height: 28px; background: #000; border-radius: 20px;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 9px; border-radius: 99px;
+      font-family: var(--mono); font-size: 11px;
+      letter-spacing: 0.08em;
+    }
+    .pill.accent { border: 1px solid var(--accent); color: var(--accent); }
+    .pill.warn   { border: 1px solid var(--warn); color: var(--warn); }
+    .pill.danger { border: 1px solid var(--danger); color: var(--danger); }
+
+    /* Section dividers + numbered list */
+    .num-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+    .num-list .item { padding: 32px 28px; background: var(--surface);
+                      border: 1px solid var(--border); border-radius: 14px; }
+    .num-list .n { font-family: var(--mono); font-size: 18px; color: var(--accent);
+                   letter-spacing: 0.1em; margin-bottom: 24px; }
+    .num-list h3 { font-family: var(--serif); font-weight: 500; font-size: 38px;
+                   letter-spacing: -0.01em; margin: 0 0 14px; line-height: 1.05; }
+    .num-list p  { font-size: 19px; color: var(--dim); line-height: 1.5; margin: 0; }
+
+    /* Demo slide layout */
+    .demo {
+      display: grid; grid-template-columns: 1fr 460px; gap: 80px;
+      align-items: center; flex: 1;
+    }
+    .demo-text .step { font-family: var(--mono); font-size: 18px;
+                       color: var(--accent); letter-spacing: 0.16em;
+                       margin-bottom: 18px; text-transform: uppercase; }
+    .demo-text h2 { font-family: var(--serif); font-weight: 500; font-size: 92px;
+                    letter-spacing: -0.02em; line-height: 0.95; margin: 0 0 32px; }
+    .demo-text h2 em { font-style: italic; color: var(--accent); }
+    .demo-text p { font-size: 24px; color: var(--dim); line-height: 1.5; margin: 0 0 28px;
+                   max-width: 700px; }
+    .demo-text ul { margin: 0; padding: 0; list-style: none; }
+    .demo-text li { padding: 10px 0; font-size: 19px; color: var(--text);
+                    display: flex; gap: 14px; align-items: flex-start; }
+    .demo-text li::before {
+      content: ''; width: 8px; height: 8px; background: var(--accent);
+      border-radius: 50%; margin-top: 13px; flex-shrink: 0;
+    }
+
+    /* Comparison table */
+    .ctable { width: 100%; border-collapse: collapse; }
+    .ctable th, .ctable td { padding: 18px 20px; text-align: left;
+                             border-bottom: 1px solid var(--border); }
+    .ctable thead th { font-family: var(--mono); font-size: 14px;
+                       color: var(--dim); letter-spacing: 0.1em;
+                       text-transform: uppercase; }
+    .ctable thead th.us { color: var(--accent);
+                          background: rgba(91,242,185,0.05); }
+    .ctable td { font-size: 19px; color: var(--text); }
+    .ctable td.us { background: rgba(91,242,185,0.04); color: var(--accent);
+                    font-weight: 600; }
+    .ctable td .y { color: var(--accent); font-weight: 600; }
+    .ctable td .n { color: var(--danger); }
+    .ctable td .p { color: var(--warn); }
+
+    /* KPI cards */
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; }
+    .kpi { padding: 32px 28px; background: var(--surface);
+           border: 1px solid var(--border); border-radius: 16px; }
+    .kpi .l { font-family: var(--mono); font-size: 14px; color: var(--faint);
+              letter-spacing: 0.12em; margin-bottom: 18px; }
+    .kpi .v { font-family: var(--serif); font-weight: 500; font-size: 88px;
+              line-height: 1; letter-spacing: -0.03em; color: var(--text); }
+    .kpi .v.accent { color: var(--accent); }
+    .kpi .d { font-size: 16px; color: var(--dim); margin-top: 14px; }
+
+    /* Roadmap */
+    .timeline { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px;
+                position: relative; }
+    .timeline::before {
+      content: ''; position: absolute; left: 40px; right: 40px; top: 32px;
+      height: 1px; background: var(--border);
+    }
+    .ms { padding: 28px 24px; background: var(--surface);
+          border: 1px solid var(--border); border-radius: 14px;
+          position: relative; }
+    .ms .dot { position: absolute; top: -12px; left: 24px;
+               width: 24px; height: 24px; border-radius: 50%;
+               background: var(--bg); border: 2px solid var(--accent);
+               display: flex; align-items: center; justify-content: center; }
+    .ms .dot::after {
+      content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--accent);
+    }
+    .ms.live .dot::after { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.4); opacity: 0.5; } }
+    .ms .when { font-family: var(--mono); font-size: 14px; color: var(--accent);
+                letter-spacing: 0.12em; margin-top: 16px; margin-bottom: 10px; }
+    .ms h4 { font-family: var(--serif); font-weight: 500; font-size: 32px;
+             letter-spacing: -0.01em; margin: 0 0 12px; line-height: 1.1; }
+    .ms ul { margin: 0; padding: 0 0 0 18px; }
+    .ms li { font-size: 17px; color: var(--dim); padding: 4px 0; line-height: 1.4; }
+
+    /* Mark helper for inline use */
+    .mark-svg { display: inline-block; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <deck-stage>
+
+    <!-- 01 · COVER ────────────────────────────────────────── -->
+    <section data-screen-label="01 Cover">
+      <div class="grid-bg"></div>
+      <div class="slide-head">
+        <div class="brand">
+          <svg class="mark-svg" width="32" height="32" viewBox="0 0 40 40" fill="none">
+            <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+            <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+            <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+          </svg>
+          <span class="nm">AegisLink</span>
+        </div>
+        <span>PITCH · 18.05.2026 · ES · v1</span>
+      </div>
+
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+        <div class="eyebrow">SECURE COMMUNICATION · ZURICH 🇨🇭</div>
+        <h1 class="title">Messaging<br/><em>without</em> a trace.</h1>
+        <p class="lead">
+          Mensajería cifrada de extremo a extremo, anónima por defecto,
+          sin metadatos. Construida para el usuario que entiende criptografía
+          y exige no confiar en su proveedor.
+        </p>
+        <div style="display: flex; gap: 18px; margin-top: 20px;">
+          <span class="pill accent" style="font-size: 14px; padding: 6px 14px;">● E2EE BY DESIGN</span>
+          <span class="pill accent" style="font-size: 14px; padding: 6px 14px;">● 0 METADATA</span>
+          <span class="pill accent" style="font-size: 14px; padding: 6px 14px;">● OPEN SOURCE</span>
+          <span class="pill accent" style="font-size: 14px; padding: 6px 14px;">● SWISS JURISDICTION</span>
+        </div>
+      </div>
+
+      <div class="ftr"><span>01 · COVER</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 02 · PROBLEM ───────────────────────────────────────── -->
+    <section data-screen-label="02 Problem">
+      <div class="slide-head">
+        <div class="brand">
+          <span class="nm">AegisLink</span>
+        </div>
+        <span>02 / 15 · EL PROBLEMA</span>
+      </div>
+
+      <div class="eyebrow">EL PROBLEMA</div>
+      <h2 class="bigtitle">Hoy, <em>privacy</em> es marketing.</h2>
+      <p class="lead">
+        Las apps "privadas" piden tu teléfono o tu email. Cuando se pierde la
+        clave, el proveedor puede recuperarla. Cuando un gobierno pregunta, hay
+        algo que entregar. Ese "algo" se llama metadato.
+      </p>
+
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 56px;">
+        <div style="padding: 36px 32px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px;">
+          <div style="font-family: var(--serif); font-size: 96px; font-weight: 500; color: var(--danger); line-height: 1; letter-spacing: -0.03em;">2.4 B</div>
+          <div style="font-family: var(--mono); font-size: 14px; color: var(--faint); letter-spacing: 0.1em; margin: 14px 0 8px;">USUARIOS QUE COMPARTEN…</div>
+          <div style="font-size: 19px; color: var(--dim); line-height: 1.4;">su número de teléfono real para "chatear seguro".</div>
+        </div>
+        <div style="padding: 36px 32px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px;">
+          <div style="font-family: var(--serif); font-size: 96px; font-weight: 500; color: var(--warn); line-height: 1; letter-spacing: -0.03em;">∞</div>
+          <div style="font-family: var(--mono); font-size: 14px; color: var(--faint); letter-spacing: 0.1em; margin: 14px 0 8px;">METADATOS RETENIDOS POR…</div>
+          <div style="font-size: 19px; color: var(--dim); line-height: 1.4;">los proveedores: quién habla con quién, cuándo, desde dónde.</div>
+        </div>
+        <div style="padding: 36px 32px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px;">
+          <div style="font-family: var(--serif); font-size: 96px; font-weight: 500; color: var(--danger); line-height: 1; letter-spacing: -0.03em;">0</div>
+          <div style="font-family: var(--mono); font-size: 14px; color: var(--faint); letter-spacing: 0.1em; margin: 14px 0 8px;">FORMAS DE VERIFICAR…</div>
+          <div style="font-size: 19px; color: var(--dim); line-height: 1.4;">si tu proveedor cumple lo que promete. Hay que creerle.</div>
+        </div>
+      </div>
+
+      <div class="ftr"><span>02 · PROBLEM</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 03 · OPPORTUNITY ──────────────────────────────────── -->
+    <section data-screen-label="03 Opportunity">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>03 / 15 · OPORTUNIDAD</span>
+      </div>
+
+      <div class="eyebrow">OPORTUNIDAD</div>
+      <h2 class="bigtitle">Hay un público <em>que ya pagó</em><br/>por privacidad.</h2>
+      <p class="lead">
+        50M+ usuarios cripto/Web3 manejan claves a diario. Saben qué es una
+        seed phrase. Entienden por qué no compartir un fingerprint es peligroso.
+        Necesitan una app de mensajería que hable su idioma.
+      </p>
+
+      <div class="kpis" style="margin-top: 64px;">
+        <div class="kpi">
+          <div class="l">PRIVACY MESSAGING TAM</div>
+          <div class="v">$3.2B</div>
+          <div class="d">por 2028 · CAGR 14%</div>
+        </div>
+        <div class="kpi">
+          <div class="l">USUARIOS WEB3 ACTIVOS</div>
+          <div class="v">52M</div>
+          <div class="d">wallets mensuales activas</div>
+        </div>
+        <div class="kpi">
+          <div class="l">SEÑAL DE DEMANDA</div>
+          <div class="v">+340%</div>
+          <div class="d">"signal alternative" YoY</div>
+        </div>
+        <div class="kpi">
+          <div class="l">PRECIO QUE PAGAN</div>
+          <div class="v accent">$4–9</div>
+          <div class="d">por hardware wallet/mes</div>
+        </div>
+      </div>
+
+      <div class="ftr"><span>03 · OPPORTUNITY</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 04 · SOLUTION ─────────────────────────────────────── -->
+    <section data-screen-label="04 Solution">
+      <div class="grid-bg"></div>
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>04 / 15 · SOLUCIÓN</span>
+      </div>
+
+      <div class="eyebrow">SOLUCIÓN · UNA FRASE</div>
+      <h2 class="bigtitle" style="margin-bottom: 56px;">
+        Una <em>llave</em> en tu dispositivo.<br/>
+        Cero datos en el nuestro.
+      </h2>
+
+      <div class="num-list">
+        <div class="item">
+          <div class="n">01</div>
+          <h3>Anónimo por defecto</h3>
+          <p>Tu identidad es una llave Curve25519 generada en local. No teléfono, no email, no nombre real.</p>
+        </div>
+        <div class="item">
+          <div class="n">02</div>
+          <h3>Cero metadatos</h3>
+          <p>Los servidores nunca ven con quién hablas, ni cuándo. No hay registro que entregar.</p>
+        </div>
+        <div class="item">
+          <div class="n">03</div>
+          <h3>Abierto y auditado</h3>
+          <p>Código público, MIT licence. Cure53 2026 Q1 sin findings críticos. Reproducible build.</p>
+        </div>
+        <div class="item">
+          <div class="n">04</div>
+          <h3>Verifica humanamente</h3>
+          <p>Trust se establece por QR + 8 palabras. Si la clave cambia, el chat se interrumpe.</p>
+        </div>
+      </div>
+
+      <div class="ftr"><span>04 · SOLUTION</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 05 · DEMO ANONYMOUS ID ─────────────────────────────── -->
+    <section data-screen-label="05 Demo Identity">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>05 / 15 · DEMO · IDENTIDAD</span>
+      </div>
+
+      <div class="demo">
+        <div class="demo-text">
+          <div class="step">DEMO · IDENTIDAD ANÓNIMA</div>
+          <h2>30 segundos.<br/><em>Sin dar nada.</em></h2>
+          <p>
+            Al abrir AegisLink por primera vez, el dispositivo genera una llave
+            Curve25519 y un ID anónimo de 12 caracteres. No se envía nada al
+            servidor. La clave privada nunca cruza el cable.
+          </p>
+          <ul>
+            <li>Generación on-device — sin red durante el proceso</li>
+            <li>ID + fingerprint para compartir cara a cara</li>
+            <li>Múltiples identidades — personal + trabajo · claves separadas</li>
+          </ul>
+        </div>
+
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="notch"></div>
+            <!-- Identity card -->
+            <div style="font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: 0.1em; margin-bottom: 14px;">YOUR IDENTITY</div>
+            <div style="font-family: var(--serif); font-size: 38px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.05; margin-bottom: 24px;">
+              This is yours.<br/>Nobody else has it.
+            </div>
+            <div style="border: 1px solid rgba(255,255,255,0.18); border-radius: 14px; padding: 22px; background: var(--surface);">
+              <div style="font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: 0.1em; margin-bottom: 8px;">AEGIS ID</div>
+              <div style="font-family: var(--mono); font-size: 22px; margin-bottom: 16px;">7K9-PQ2M-X4VR</div>
+              <div style="font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: 0.1em; margin-bottom: 8px;">PUBLIC KEY FINGERPRINT</div>
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+                <div style="font-family: var(--mono); font-size: 12px; padding: 6px 4px; background: #1a2326; border-radius: 6px; text-align: center;">a7f3</div>
+                <div style="font-family: var(--mono); font-size: 12px; padding: 6px 4px; background: #1a2326; border-radius: 6px; text-align: center;">92e1</div>
+                <div style="font-family: var(--mono); font-size: 12px; padding: 6px 4px; background: #1a2326; border-radius: 6px; text-align: center;">b4c8</div>
+                <div style="font-family: var(--mono); font-size: 12px; padding: 6px 4px; background: #1a2326; border-radius: 6px; text-align: center;">5d0a</div>
+                <div style="font-family: var(--mono); font-size: 12px; padding: 6px 4px; background: #1a2326; border-radius: 6px; text-align: center;">6f12</div>
+                <div style="font-family: var(--mono); font-size: 12px; padding: 6px 4px; background: #1a2326; border-radius: 6px; text-align: center;">eb73</div>
+                <div style="font-family: var(--mono); font-size: 12px; padding: 6px 4px; background: #1a2326; border-radius: 6px; text-align: center;">8c9d</div>
+                <div style="font-family: var(--mono); font-size: 12px; padding: 6px 4px; background: #1a2326; border-radius: 6px; text-align: center;">1a45</div>
+              </div>
+            </div>
+            <button style="margin-top: auto; background: var(--accent); color: var(--accent-ink); border: none; padding: 16px; border-radius: 14px; font-family: var(--sans); font-weight: 600; font-size: 16px;">Enter AegisLink</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ftr"><span>05 · DEMO · IDENTIDAD</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 06 · DEMO CONVERSATION ──────────────────────────── -->
+    <section data-screen-label="06 Demo Conversation">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>06 / 15 · DEMO · CONVERSACIÓN</span>
+      </div>
+
+      <div class="demo">
+        <div class="phone" style="grid-column: 1;">
+          <div class="phone-screen">
+            <div class="notch"></div>
+            <!-- header -->
+            <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--border);">
+              <div style="width: 38px; height: 38px; border-radius: 22px; background: #8b5cf6; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px;">S</div>
+              <div style="flex: 1;">
+                <div style="font-family: var(--mono); font-weight: 600; font-size: 15px;">satoshi.eth</div>
+                <div style="font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.06em; margin-top: 2px;">◆ VERIFIED · KEY a7f3-92e1</div>
+              </div>
+            </div>
+            <div style="margin: 14px auto 8px; padding: 5px 12px; background: #1a2326; border-radius: 99px; font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: 0.06em; align-self: center;">◆ END-TO-END ENCRYPTED · TODAY</div>
+            <!-- messages -->
+            <div style="flex: 1; padding: 8px 0; display: flex; flex-direction: column; gap: 8px;">
+              <div style="background: #1a2326; padding: 10px 13px; border-radius: 14px; border-top-left-radius: 6px; font-size: 14px; max-width: 78%; align-self: flex-start;">Bridge confirmed.</div>
+              <div style="background: #1a2326; padding: 10px 13px; border-radius: 14px; border-top-left-radius: 6px; font-size: 14px; max-width: 78%; align-self: flex-start;">Sending the tx hash now.</div>
+              <div style="background: var(--accent); color: var(--accent-ink); padding: 10px 13px; border-radius: 14px; border-top-right-radius: 6px; font-size: 14px; max-width: 78%; align-self: flex-end;">standing by 👍</div>
+              <div style="background: #1a2326; padding: 10px 13px; border-radius: 14px; border-top-left-radius: 6px; font-family: var(--mono); font-size: 12px; max-width: 78%; align-self: flex-start;">0x4f8a…c21d · signed by 3/5</div>
+              <div style="background: var(--accent); color: var(--accent-ink); padding: 10px 13px; border-radius: 14px; border-top-right-radius: 6px; font-size: 14px; max-width: 78%; align-self: flex-end;">received. checking on-chain.</div>
+            </div>
+            <div style="display: flex; gap: 8px; padding: 10px 0; align-items: center; border-top: 1px solid var(--border);">
+              <div style="flex: 1; padding: 10px 14px; background: #1a2326; border-radius: 99px; font-size: 13px; color: var(--dim);">Encrypted message…</div>
+              <div style="width: 38px; height: 38px; border-radius: 50%; background: var(--accent);"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="demo-text" style="grid-column: 2;">
+          <div class="step">DEMO · CONVERSACIÓN VERIFICADA</div>
+          <h2>Verificada.<br/>O <em>no envía</em>.</h2>
+          <p>
+            Cada mensaje muestra el fingerprint de la clave del contacto. Si la
+            clave cambia, AegisLink pausa el envío hasta re-verificación humana.
+          </p>
+          <ul>
+            <li>Perfect forward secrecy · doble ratchet</li>
+            <li>Confirmaciones de lectura opcionales por chat</li>
+            <li>Modo confianza-cero: bloqueo automático si clave cambia</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="ftr"><span>06 · DEMO · CONVERSACIÓN</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 07 · DEMO EPHEMERAL ──────────────────────────────── -->
+    <section data-screen-label="07 Demo Ephemeral">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>07 / 15 · DEMO · MENSAJES QUE SE QUEMAN</span>
+      </div>
+
+      <div class="demo">
+        <div class="demo-text">
+          <div class="step">DEMO · AUTODESTRUCCIÓN</div>
+          <h2>Los mensajes<br/>se <em>queman solos</em>.</h2>
+          <p>
+            Timer por chat: 30 segundos a 30 días. Al expirar, el mensaje se
+            borra de los dispositivos y de la cola del servidor. El medio
+            "ver-una-vez" no se puede reenviar ni capturar.
+          </p>
+          <ul>
+            <li>Ver-una-vez para imágenes y audio</li>
+            <li>Captura bloqueada a nivel de sistema</li>
+            <li>EXIF + metadata limpios automáticamente</li>
+            <li>Mensajes programados con cifrado diferido</li>
+          </ul>
+        </div>
+
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="notch"></div>
+            <div style="text-align: center; padding: 24px 0;">
+              <div style="margin: 0 auto 18px; width: 80px; height: 80px; border-radius: 50%; background: var(--surface); border: 1px solid rgba(255,255,255,0.18); display: flex; align-items: center; justify-content: center; color: var(--accent);">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/>
+                </svg>
+              </div>
+              <div style="font-family: var(--serif); font-size: 26px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 10px;">Messages burn themselves</div>
+              <div style="font-size: 14px; color: var(--dim); line-height: 1.45; max-width: 300px; margin: 0 auto;">
+                New messages in this chat will delete from every device after the timer.
+              </div>
+            </div>
+            <div style="background: var(--surface); border-radius: 14px; border: 1px solid var(--border); overflow: hidden; margin-top: 12px;">
+              <div style="padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px;">
+                <div style="width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border-strong);"></div>
+                <span style="font-size: 14px;">Off</span>
+              </div>
+              <div style="padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px;">
+                <div style="width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border-strong);"></div>
+                <span style="font-size: 14px;">5 minutes</span>
+              </div>
+              <div style="padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: rgba(91,242,185,0.06);">
+                <div style="width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--accent); display: flex; align-items: center; justify-content: center;">
+                  <div style="width: 10px; height: 10px; border-radius: 50%; background: var(--accent);"></div>
+                </div>
+                <span style="font-size: 14px; font-weight: 600;">24 hours · recommended</span>
+              </div>
+              <div style="padding: 14px 16px; display: flex; align-items: center; gap: 12px;">
+                <div style="width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border-strong);"></div>
+                <span style="font-size: 14px;">7 days</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ftr"><span>07 · DEMO · EPHEMERAL</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 08 · DEMO GROUP ─────────────────────────────────── -->
+    <section data-screen-label="08 Demo Group">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>08 / 15 · DEMO · GRUPOS</span>
+      </div>
+
+      <div class="demo">
+        <div class="phone" style="grid-column: 1;">
+          <div class="phone-screen">
+            <div class="notch"></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+              <div style="width: 36px; height: 36px; border-radius: 18px; background: rgba(245,158,11,0.13); color: #f59e0b; display: flex; align-items: center; justify-content: center;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+              </div>
+              <div style="flex: 1;">
+                <div style="font-weight: 600; font-size: 15px;">DAO · Treasury</div>
+                <div style="font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.06em; margin-top: 2px;">◆ E2EE · MLS · 5 MEMBERS</div>
+              </div>
+            </div>
+            <div style="padding: 14px 0; flex: 1;">
+              <div style="background: var(--surface); border-radius: 14px; border: 1px solid rgba(255,255,255,0.18); padding: 16px;">
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 12px;">
+                  <span class="pill accent" style="font-size: 9px;">ANONYMOUS POLL</span>
+                </div>
+                <div style="font-family: var(--serif); font-size: 20px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 14px; line-height: 1.2;">
+                  ¿Qué firma para el audit Q3?
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  <div style="position: relative; padding: 10px 14px; background: #1a2326; border: 1px solid var(--accent); border-radius: 12px; overflow: hidden;">
+                    <div style="position: absolute; inset: 0; width: 42%; background: rgba(91,242,185,0.18);"></div>
+                    <div style="position: relative; display: flex; justify-content: space-between; align-items: center;">
+                      <span style="font-size: 13px; font-weight: 600;">Cure53</span>
+                      <span style="font-family: var(--mono); font-size: 11px; color: var(--dim);">42% · 9</span>
+                    </div>
+                  </div>
+                  <div style="position: relative; padding: 10px 14px; background: #1a2326; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;">
+                    <div style="position: absolute; inset: 0; width: 28%; background: rgba(91,242,185,0.06);"></div>
+                    <div style="position: relative; display: flex; justify-content: space-between; align-items: center;">
+                      <span style="font-size: 13px;">Trail of Bits</span>
+                      <span style="font-family: var(--mono); font-size: 11px; color: var(--dim);">28% · 6</span>
+                    </div>
+                  </div>
+                  <div style="position: relative; padding: 10px 14px; background: #1a2326; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;">
+                    <div style="position: absolute; inset: 0; width: 19%; background: rgba(91,242,185,0.06);"></div>
+                    <div style="position: relative; display: flex; justify-content: space-between; align-items: center;">
+                      <span style="font-size: 13px;">Quarkslab</span>
+                      <span style="font-family: var(--mono); font-size: 11px; color: var(--dim);">19% · 4</span>
+                    </div>
+                  </div>
+                </div>
+                <div style="margin-top: 12px; padding: 8px 10px; background: #1a2326; border-radius: 8px; font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: 0.04em;">
+                  ⌘ Tu voto no se vincula a tu identidad.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="demo-text" style="grid-column: 2;">
+          <div class="step">DEMO · GRUPOS Y GOBERNANZA</div>
+          <h2>Grupos<br/>con <em>roles reales</em>.</h2>
+          <p>
+            MLS hasta 256 miembros. Roles admin/mod/member. Temas privados.
+            Encuestas anónimas que no vinculan voto e identidad — útil
+            para DAOs y gobernanza on-chain.
+          </p>
+          <ul>
+            <li>Multisig de coordinación sin Discord/Telegram</li>
+            <li>Aprobaciones de nuevos miembros con expiración</li>
+            <li>Auditoría de unión + cambios de rol</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="ftr"><span>08 · DEMO · GROUPS</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 09 · DEMO PANIC + MITM ──────────────────────────── -->
+    <section data-screen-label="09 Demo Threat">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>09 / 15 · DEMO · ESCENARIOS DE AMENAZA</span>
+      </div>
+
+      <div class="eyebrow">DEMO · CUANDO ALGO VA MAL</div>
+      <h2 class="bigtitle">Diseñada para el <em>peor día</em>.</h2>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 56px; margin-top: 48px; flex: 1;">
+        <div style="padding: 40px 36px; background: rgba(255,107,107,0.05); border: 1px solid rgba(255,107,107,0.30); border-radius: 16px; display: flex; flex-direction: column; gap: 18px;">
+          <span class="pill danger" style="font-size: 14px; padding: 5px 12px; align-self: flex-start;">⚠ ALERTA MITM</span>
+          <div style="font-family: var(--serif); font-size: 44px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.05;">
+            La clave del contacto cambió
+          </div>
+          <p style="font-size: 19px; color: var(--dim); line-height: 1.5; margin: 0;">
+            AegisLink corta el envío automáticamente y exige re-verificación.
+            Cambio de dispositivo legítimo o ataque MITM — el usuario decide
+            con información completa.
+          </p>
+          <div style="margin-top: auto; display: flex; gap: 12px;">
+            <span style="padding: 7px 14px; background: var(--danger); color: #fff; border-radius: 8px; font-size: 14px; font-weight: 600;">Re-verificar</span>
+            <span style="padding: 7px 14px; background: transparent; color: var(--text); border: 1px solid var(--border-strong); border-radius: 8px; font-size: 14px;">Confiar igualmente</span>
+          </div>
+        </div>
+
+        <div style="padding: 40px 36px; background: rgba(240,198,116,0.05); border: 1px solid rgba(240,198,116,0.30); border-radius: 16px; display: flex; flex-direction: column; gap: 18px;">
+          <span class="pill warn" style="font-size: 14px; padding: 5px 12px; align-self: flex-start;">⚡ MODO PÁNICO</span>
+          <div style="font-family: var(--serif); font-size: 44px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.05;">
+            Si te obligan a abrir la app
+          </div>
+          <p style="font-size: 19px; color: var(--dim); line-height: 1.5; margin: 0;">
+            Gesto físico (sacudir o triple-toque) borra los chats al instante.
+            PIN señuelo abre una cuenta vacía — bajo coacción, lo que ven
+            es nada.
+          </p>
+          <div style="margin-top: auto; display: flex; gap: 18px; flex-wrap: wrap;">
+            <div>
+              <div style="font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0.08em;">GESTO</div>
+              <div style="font-family: var(--mono); font-size: 14px; color: var(--text); margin-top: 4px;">Sacudir 3 veces</div>
+            </div>
+            <div>
+              <div style="font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0.08em;">PIN DECOY</div>
+              <div style="font-family: var(--mono); font-size: 14px; color: var(--text); margin-top: 4px;">●●●●●●</div>
+            </div>
+            <div>
+              <div style="font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0.08em;">AUTO-WIPE</div>
+              <div style="font-family: var(--mono); font-size: 14px; color: var(--text); margin-top: 4px;">10 intentos fallidos</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ftr"><span>09 · DEMO · THREAT</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 10 · WORK ─────────────────────────────────────────── -->
+    <section data-screen-label="10 Work">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>10 / 15 · AEGISLINK WORK</span>
+      </div>
+
+      <div class="eyebrow">AEGISLINK WORK · EMPRESARIAL</div>
+      <h2 class="bigtitle">Privacidad <em>para equipos</em>.</h2>
+      <p class="lead">
+        Auto-hospedaje opcional, gestión de dispositivos, rotación de claves,
+        políticas por equipo. Cumple GDPR y nDSG sin recopilar metadatos.
+      </p>
+
+      <div class="kpis" style="margin-top: 56px;">
+        <div class="kpi">
+          <div class="l">ACTIVE MEMBERS</div>
+          <div class="v">54</div>
+          <div class="d">+3 esta semana</div>
+        </div>
+        <div class="kpi">
+          <div class="l">VERIFIED DEVICES</div>
+          <div class="v">82</div>
+          <div class="d">de 82 enrolados</div>
+        </div>
+        <div class="kpi">
+          <div class="l">AVG. KEY AGE</div>
+          <div class="v">21d</div>
+          <div class="d">política: rotar &lt;90d</div>
+        </div>
+        <div class="kpi">
+          <div class="l">METADATA STORED</div>
+          <div class="v accent">0 B</div>
+          <div class="d">by design</div>
+        </div>
+      </div>
+
+      <div style="margin-top: 48px; padding: 24px 28px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; display: flex; align-items: center; gap: 18px;">
+        <span style="color: var(--accent);">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z"/></svg>
+        </span>
+        <span style="flex: 1; font-size: 19px;">
+          <b>Política aplicada.</b>
+          <span style="color: var(--dim);"> Devices requieren key-verification antes de unirse a cualquier grupo;
+          mensajes &gt;30 días auto-quemados para Treasury Ops.</span>
+        </span>
+        <span style="font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: 0.06em;">VER POLÍTICA →</span>
+      </div>
+
+      <div class="ftr"><span>10 · WORK</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 11 · COMPARISON ─────────────────────────────────── -->
+    <section data-screen-label="11 Compare">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>11 / 15 · COMPETENCIA</span>
+      </div>
+
+      <div class="eyebrow">¿POR QUÉ NO SIGNAL O THREEMA?</div>
+      <h2 class="bigtitle" style="font-size: 76px; margin-bottom: 36px;">Toman <em>lo mejor</em>. Añadimos <em>lo que falta</em>.</h2>
+
+      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;">
+        <table class="ctable">
+          <thead>
+            <tr>
+              <th>Capacidad</th>
+              <th class="us">AegisLink</th>
+              <th>Signal</th>
+              <th>Threema</th>
+              <th>WhatsApp</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Sin teléfono ni email</td><td class="us"><span class="y">✓</span></td><td><span class="n">✗</span></td><td><span class="y">✓</span></td><td><span class="n">✗</span></td></tr>
+            <tr><td>Cero metadatos retenidos</td><td class="us"><span class="y">✓</span></td><td><span class="p">parcial</span></td><td><span class="y">✓</span></td><td><span class="n">✗</span></td></tr>
+            <tr><td>Múltiples identidades</td><td class="us"><span class="y">✓</span></td><td><span class="n">✗</span></td><td><span class="n">✗</span></td><td><span class="n">✗</span></td></tr>
+            <tr><td>Modo pánico + PIN señuelo</td><td class="us"><span class="y">✓</span></td><td><span class="n">✗</span></td><td><span class="n">✗</span></td><td><span class="n">✗</span></td></tr>
+            <tr><td>Mensajes programados</td><td class="us"><span class="y">✓</span></td><td><span class="n">✗</span></td><td><span class="n">✗</span></td><td><span class="n">✗</span></td></tr>
+            <tr><td>Encuestas anónimas en grupo</td><td class="us"><span class="y">✓</span></td><td><span class="n">✗</span></td><td><span class="n">✗</span></td><td><span class="p">no anon.</span></td></tr>
+            <tr><td>Versión empresarial (MDM)</td><td class="us"><span class="y">Work</span></td><td><span class="n">✗</span></td><td><span class="y">Work</span></td><td><span class="y">Business</span></td></tr>
+            <tr><td>Jurisdicción no-USA</td><td class="us"><span class="y">Suiza 🇨🇭</span></td><td><span class="n">USA</span></td><td><span class="y">Suiza 🇨🇭</span></td><td><span class="n">USA</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="ftr"><span>11 · COMPARE</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 12 · TRUST ───────────────────────────────────────── -->
+    <section data-screen-label="12 Trust">
+      <div class="grid-bg"></div>
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>12 / 15 · MODELO DE CONFIANZA</span>
+      </div>
+
+      <div class="eyebrow">MODELO DE CONFIANZA · AUDITABLE</div>
+      <h2 class="bigtitle">No nos creas — <em>verifícalo</em>.</h2>
+      <p class="lead">
+        Cada decisión de seguridad es comprobable por un tercero. Código,
+        infraestructura, auditorías — todo público.
+      </p>
+
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; margin-top: 48px;">
+        <div style="padding: 28px 30px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; display: flex; gap: 18px; align-items: flex-start;">
+          <span style="width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px; flex-shrink: 0;">✓</span>
+          <div>
+            <div style="font-family: var(--serif); font-size: 28px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 6px;">Código abierto · MIT</div>
+            <div style="font-size: 18px; color: var(--dim);">Cliente + servidor + protocolo. Reproducible build.</div>
+          </div>
+        </div>
+        <div style="padding: 28px 30px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; display: flex; gap: 18px; align-items: flex-start;">
+          <span style="width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px; flex-shrink: 0;">✓</span>
+          <div>
+            <div style="font-family: var(--serif); font-size: 28px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 6px;">Auditoría anual externa</div>
+            <div style="font-size: 18px; color: var(--dim);">Cure53 · 2026 Q1 · sin findings críticos.</div>
+          </div>
+        </div>
+        <div style="padding: 28px 30px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; display: flex; gap: 18px; align-items: flex-start;">
+          <span style="width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px; flex-shrink: 0;">✓</span>
+          <div>
+            <div style="font-family: var(--serif); font-size: 28px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 6px;">Infra propia · Zurich 🇨🇭</div>
+            <div style="font-size: 18px; color: var(--dim);">4 relays en Zurich + 1 en Berlín. nDSG + GDPR.</div>
+          </div>
+        </div>
+        <div style="padding: 28px 30px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; display: flex; gap: 18px; align-items: flex-start;">
+          <span style="width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px; flex-shrink: 0;">✓</span>
+          <div>
+            <div style="font-family: var(--serif); font-size: 28px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 6px;">Sin venta de datos · jamás</div>
+            <div style="font-size: 18px; color: var(--dim);">Modelo: pago único + AegisLink Work.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ftr"><span>12 · TRUST</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 13 · BUSINESS MODEL ─────────────────────────────── -->
+    <section data-screen-label="13 Business">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>13 / 15 · MODELO DE NEGOCIO</span>
+      </div>
+
+      <div class="eyebrow">MODELO DE NEGOCIO</div>
+      <h2 class="bigtitle">Tres niveles. <em>Ninguno</em> vende tus datos.</h2>
+
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 56px;">
+        <div style="padding: 36px 32px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px;">
+          <div style="font-family: var(--mono); font-size: 14px; color: var(--faint); letter-spacing: 0.12em; margin-bottom: 16px;">PERSONAL · FREE</div>
+          <div style="font-family: var(--serif); font-size: 72px; font-weight: 500; line-height: 1; letter-spacing: -0.03em; margin-bottom: 20px;">$0</div>
+          <div style="font-size: 18px; color: var(--dim); margin-bottom: 24px;">Mensajería, llamadas, grupos.</div>
+          <ul style="margin: 0; padding: 0; list-style: none; font-size: 16px;">
+            <li style="padding: 6px 0; color: var(--text);">✓ E2EE completo</li>
+            <li style="padding: 6px 0; color: var(--text);">✓ Cero metadatos</li>
+            <li style="padding: 6px 0; color: var(--text);">✓ Hasta 1 identidad</li>
+            <li style="padding: 6px 0; color: var(--faint);">— Sin backup cifrado</li>
+          </ul>
+        </div>
+
+        <div style="padding: 36px 32px; background: rgba(91,242,185,0.06); border: 1px solid var(--accent); border-radius: 16px; transform: scale(1.04);">
+          <div style="font-family: var(--mono); font-size: 14px; color: var(--accent); letter-spacing: 0.12em; margin-bottom: 16px;">PRO · PAGO ÚNICO ★</div>
+          <div style="font-family: var(--serif); font-size: 72px; font-weight: 500; line-height: 1; letter-spacing: -0.03em; margin-bottom: 20px;">$4.99</div>
+          <div style="font-size: 18px; color: var(--dim); margin-bottom: 24px;">Una sola vez. Para siempre.</div>
+          <ul style="margin: 0; padding: 0; list-style: none; font-size: 16px;">
+            <li style="padding: 6px 0; color: var(--text);">✓ Todo lo de Personal</li>
+            <li style="padding: 6px 0; color: var(--text);">✓ Backup cifrado</li>
+            <li style="padding: 6px 0; color: var(--text);">✓ Identidades múltiples</li>
+            <li style="padding: 6px 0; color: var(--text);">✓ Mensajes programados</li>
+          </ul>
+        </div>
+
+        <div style="padding: 36px 32px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px;">
+          <div style="font-family: var(--mono); font-size: 14px; color: var(--faint); letter-spacing: 0.12em; margin-bottom: 16px;">WORK · POR USUARIO</div>
+          <div style="font-family: var(--serif); font-size: 72px; font-weight: 500; line-height: 1; letter-spacing: -0.03em; margin-bottom: 20px;">$8<span style="font-size: 28px; color: var(--dim);">/mes</span></div>
+          <div style="font-size: 18px; color: var(--dim); margin-bottom: 24px;">Equipos &gt; 5. Anual desc. -20%.</div>
+          <ul style="margin: 0; padding: 0; list-style: none; font-size: 16px;">
+            <li style="padding: 6px 0; color: var(--text);">✓ MDM · gestión devices</li>
+            <li style="padding: 6px 0; color: var(--text);">✓ Auto-hosting opcional</li>
+            <li style="padding: 6px 0; color: var(--text);">✓ Políticas + auditoría</li>
+            <li style="padding: 6px 0; color: var(--text);">✓ Soporte prioritario</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="ftr"><span>13 · BUSINESS</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 14 · ROADMAP ────────────────────────────────────── -->
+    <section data-screen-label="14 Roadmap">
+      <div class="slide-head">
+        <div class="brand"><span class="nm">AegisLink</span></div>
+        <span>14 / 15 · ROADMAP</span>
+      </div>
+
+      <div class="eyebrow">ROADMAP · 12 MESES</div>
+      <h2 class="bigtitle">De <em>privado beta</em> a <em>launch público</em>.</h2>
+
+      <div class="timeline" style="margin-top: 72px;">
+        <div class="ms">
+          <div class="dot"></div>
+          <div class="when">2026 · Q2 · AHORA</div>
+          <h4>Private beta</h4>
+          <ul>
+            <li>500 invitados cripto/Web3</li>
+            <li>iOS · Android · macOS</li>
+            <li>Cure53 audit cerrada</li>
+            <li>1 relay Zurich live</li>
+          </ul>
+        </div>
+        <div class="ms live">
+          <div class="dot"></div>
+          <div class="when">2026 · Q3</div>
+          <h4>Public launch v1.0</h4>
+          <ul>
+            <li>App Store + Play release</li>
+            <li>Landing + onboarding</li>
+            <li>AegisLink Work GA</li>
+            <li>4 relays · 99.99% SLA</li>
+          </ul>
+        </div>
+        <div class="ms">
+          <div class="dot"></div>
+          <div class="when">2026 · Q4</div>
+          <h4>Federation + Wallet</h4>
+          <ul>
+            <li>Self-hosted relays</li>
+            <li>Wallet integration · ETH/SOL</li>
+            <li>Linux desktop GA</li>
+            <li>Pen-test Trail of Bits</li>
+          </ul>
+        </div>
+        <div class="ms">
+          <div class="dot"></div>
+          <div class="when">2027 · Q1</div>
+          <h4>Scale + SDK</h4>
+          <ul>
+            <li>SDK público · bots/integraciones</li>
+            <li>50K usuarios · break-even</li>
+            <li>Apple Watch + widgets iOS</li>
+            <li>Idiomas: ES · IT · DE · JA</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="ftr"><span>14 · ROADMAP</span><span>AEGISLINK.CH</span></div>
+    </section>
+
+    <!-- 15 · ASK / CLOSE ───────────────────────────────── -->
+    <section data-screen-label="15 Ask">
+      <div class="grid-bg"></div>
+      <div class="slide-head">
+        <div class="brand">
+          <svg class="mark-svg" width="32" height="32" viewBox="0 0 40 40" fill="none">
+            <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+            <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+            <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+          </svg>
+          <span class="nm">AegisLink</span>
+        </div>
+        <span>15 / 15 · CIERRE</span>
+      </div>
+
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+        <div class="eyebrow">EL ASK</div>
+        <h2 class="bigtitle" style="font-size: 124px; margin-bottom: 36px;">
+          $2.4M seed.<br/><em>18 meses de runway</em>.
+        </h2>
+        <p class="lead" style="font-size: 30px; max-width: 1200px;">
+          Para llevar AegisLink de beta privado a launch público en 12 meses,
+          escalar la infra suiza, y entregar AegisLink Work a las primeras
+          50 organizaciones cripto/Web3.
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; margin-top: 56px;">
+          <div style="padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;">
+            <div style="font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0.1em; margin-bottom: 10px;">42%</div>
+            <div style="font-size: 18px; color: var(--text);">Ingeniería · audits · relays</div>
+          </div>
+          <div style="padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;">
+            <div style="font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0.1em; margin-bottom: 10px;">28%</div>
+            <div style="font-size: 18px; color: var(--text);">Go-to-market · DevRel</div>
+          </div>
+          <div style="padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;">
+            <div style="font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0.1em; margin-bottom: 10px;">18%</div>
+            <div style="font-size: 18px; color: var(--text);">Operaciones · legal · Suiza</div>
+          </div>
+          <div style="padding: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;">
+            <div style="font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: 0.1em; margin-bottom: 10px;">12%</div>
+            <div style="font-size: 18px; color: var(--text);">Reserva</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 72px; padding: 32px 40px; background: var(--surface); border: 1px solid var(--accent); border-radius: 14px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-family: var(--mono); font-size: 14px; color: var(--accent); letter-spacing: 0.12em; margin-bottom: 8px;">CONTACTO</div>
+            <div style="font-family: var(--serif); font-size: 36px; font-weight: 500; letter-spacing: -0.01em;">hola@aegislink.ch</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-family: var(--mono); font-size: 14px; color: var(--faint); letter-spacing: 0.12em; margin-bottom: 8px;">DECK PIN (verificación)</div>
+            <div style="font-family: var(--mono); font-size: 22px; color: var(--text);">7K9-PQ2M-X4VR</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ftr"><span>15 · ASK</span><span>AEGISLINK.CH · ZURICH 🇨🇭</span></div>
+    </section>
+
+  </deck-stage>
+</body>
+</html>

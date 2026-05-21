@@ -1,0 +1,91 @@
+# AegisLink — Production Docker Compose
+#
+# Required environment variables (set in a .env file beside this file, or injected by CI):
+#   TURN_SECRET        — HMAC-SHA1 seed for coturn time-limited tokens (rotate every 24 h)
+#   CORS_ORIGIN        — Allowed relay origins, e.g. https://aegislink.duckdns.org
+#   FCM_SERVER_KEY     — FCM server key (wake-up push only — no message payload)
+#   APNS_KEY_ID        — APNs key ID
+#   APNS_TEAM_ID       — Apple Developer team ID
+#   PORT               — Relay listen port (default 3001)
+#   TRUST_PROXY        — Number of trusted proxy hops in front of relay (default 1)
+#
+# AegisLink privacy guarantees enforced at this layer:
+#   - relay: access logs omit IPs (middleware in app code + log driver cap)
+#   - coturn: no-cli flag + no IP logging directive in turnserver.conf
+#   - log rotation capped at 10 MB × 3 files to limit disk exposure
+
+version: '3.9'
+
+services:
+  # ── Relay (Node.js 22 + Socket.IO) ────────────────────────────────────────
+  relay:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: aegislink-relay:latest
+    container_name: aegislink-relay
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-3001}
+      DB_PATH: /data/aegis.db
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      # TURN_SECRET is used server-side to sign ephemeral TURN credentials (TTL 24 h).
+      # It never leaves the server and is NOT logged anywhere.
+      TURN_SECRET: ${TURN_SECRET:?TURN_SECRET must be set in environment or .env}
+      FCM_SERVER_KEY: ${FCM_SERVER_KEY:-}
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+    volumes:
+      # Persistent SQLite database
+      - relay_data:/data
+      # Encrypted blob uploads — purged after 24 h by relay scheduler
+      - relay_uploads:/app/uploads
+    ports:
+      - "${PORT:-3001}:${PORT:-3001}"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-3001}/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        # Relay middleware strips client IPs before they reach stdout.
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - aegis_internal
+
+  # ── coturn TURN/STUN ──────────────────────────────────────────────────────
+  # host network mode is required so coturn can advertise the correct public IP
+  # in ICE candidates and open arbitrary UDP ports for media relay.
+  coturn:
+    image: coturn/coturn:latest
+    container_name: aegislink-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      # Config is pre-processed by deploy.sh (envsubst for TURN_SECRET)
+      - ./infra/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # TLS certificates managed on the host (certbot / Caddy)
+      - /etc/ssl/aegislink:/etc/ssl/aegislink:ro
+    command: -c /etc/coturn/turnserver.conf
+    logging:
+      driver: "json-file"
+      options:
+        # turnserver.conf disables IP logging — only aggregate stats flow here
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  relay_data:
+    driver: local
+  relay_uploads:
+    driver: local
+
+networks:
+  aegis_internal:
+    driver: bridge

@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Animaciones</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:wght@400;500;600&display=swap"/>
+  <style>
+    html, body { margin: 0; padding: 0; background: #07090a; color: #e8f0ec;
+                 font-family: 'Space Grotesk', system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    .page { padding: 48px 56px; max-width: 1100px; margin: 0 auto; }
+    .head { padding-bottom: 22px; border-bottom: 1px solid rgba(255,255,255,0.08);
+            margin-bottom: 36px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .head h1 { font-family: 'EB Garamond', serif; font-weight: 500; font-size: 64px;
+               margin: 0; letter-spacing: -0.01em; line-height: 0.95; }
+    .head p { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.1em;
+              color: rgba(232,240,236,0.5); margin: 0; text-transform: uppercase; }
+    .scene-card { margin-bottom: 44px; border: 1px solid rgba(255,255,255,0.08);
+                  border-radius: 16px; overflow: hidden; background: #0c1011; }
+    .scene-head { padding: 18px 24px; border-bottom: 1px solid rgba(255,255,255,0.06);
+                  display: flex; justify-content: space-between; align-items: center; }
+    .scene-head .l { font-family: 'EB Garamond', serif; font-size: 22px; font-weight: 500;
+                     letter-spacing: -0.01em; }
+    .scene-head .r { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+                     color: rgba(232,240,236,0.5); letter-spacing: 0.08em; }
+    .stage-wrap { background: #000; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="animations.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { Stage, Sprite, useSprite, useTime, Easing, interpolate } = window;
+
+    const C = {
+      bg: '#000',
+      surface: '#0c1011',
+      text: '#e8f0ec',
+      dim: 'rgba(232,240,236,0.55)',
+      faint: 'rgba(232,240,236,0.32)',
+      accent: '#5bf2b9',
+      accentDeep: '#0d8f5f',
+      danger: '#ff6b6b',
+      warn: '#f0c674',
+      mono: '"JetBrains Mono", ui-monospace, monospace',
+      sans: '"Space Grotesk", system-ui, sans-serif',
+      serif: '"EB Garamond", Garamond, serif',
+    };
+
+    // ───────────────────────────────────────────────────────────────
+    // SCENE 1 — Key generation
+    // ───────────────────────────────────────────────────────────────
+    function KeygenScene() {
+      return (
+        <>
+          <BackgroundGrid/>
+          <Sprite start={0.0} end={9}>
+            <CentralMark/>
+          </Sprite>
+          <Sprite start={1.0} end={9}>
+            <BinaryRain/>
+          </Sprite>
+          <Sprite start={1.8} end={9}>
+            <CaptionBlock title="Generating keypair" sub="CURVE25519 · 256-BIT · ON-DEVICE" y={300}/>
+          </Sprite>
+          <Sprite start={3.0} end={9}>
+            <ProgressBar/>
+          </Sprite>
+          <Sprite start={6.5} end={9}>
+            <FingerprintReveal/>
+          </Sprite>
+          <Sprite start={8.0} end={9}>
+            <ReadyBadge/>
+          </Sprite>
+        </>
+      );
+    }
+
+    function CentralMark() {
+      const { progress } = useSprite();
+      const t = useTime();
+      const scale  = interpolate([0, 0.15, 1], [0.4, 1.05, 1], Easing.easeOutBack)(progress);
+      const op     = interpolate([0, 0.15], [0, 1], Easing.easeOutQuad)(progress);
+      const pulse  = 1 + 0.04 * Math.sin(t * 5);
+      const glow   = 0.25 + 0.25 * Math.sin(t * 4);
+      return (
+        <div style={{
+          position: 'absolute', left: '50%', top: 130,
+          transform: `translate(-50%, 0) scale(${scale * pulse})`,
+          opacity: op,
+        }}>
+          <div style={{
+            filter: `drop-shadow(0 0 ${30 + 20*glow}px ${C.accent}80)`,
+          }}>
+            <svg width="120" height="120" viewBox="0 0 40 40" fill="none">
+              <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z"
+                    stroke={C.accent} strokeWidth="2" strokeLinejoin="round"
+                    strokeDasharray="100" strokeDashoffset={`${100 - 100*progress}`}/>
+              <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill={C.accent}
+                    opacity={progress > 0.6 ? (progress - 0.6) / 0.4 : 0}/>
+              <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill={C.accent}
+                    opacity={progress > 0.75 ? (progress - 0.75) / 0.25 * 0.55 : 0}/>
+            </svg>
+          </div>
+        </div>
+      );
+    }
+
+    function BinaryRain() {
+      const t = useTime();
+      const cols = 24;
+      const rows = [];
+      // Two columns of binary streams scrolling under the mark
+      for (let i = 0; i < cols; i++) {
+        const charCount = 18;
+        const offset = (t * 80 + i * 37) % (charCount * 18);
+        for (let j = 0; j < charCount; j++) {
+          const y = 40 + j * 18 - offset;
+          if (y < 0 || y > 280) continue;
+          const x = 60 + i * 32;
+          const bit = (((i * 13) + (j * 7) + Math.floor(t * 4)) & 1);
+          const fade = 1 - Math.abs((y - 140) / 140);
+          rows.push(
+            <span key={`${i}-${j}`} style={{
+              position: 'absolute', left: x, top: y,
+              fontFamily: C.mono, fontSize: 12, color: C.accent,
+              opacity: Math.max(0, fade) * 0.45,
+            }}>{bit}</span>
+          );
+        }
+      }
+      return (
+        <div style={{
+          position: 'absolute', left: 0, right: 0, top: 80, height: 260,
+          pointerEvents: 'none', maskImage: 'linear-gradient(to bottom, transparent, black 30%, black 70%, transparent)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent, black 30%, black 70%, transparent)',
+        }}>{rows}</div>
+      );
+    }
+
+    function CaptionBlock({ title, sub, y = 320 }) {
+      const { progress } = useSprite();
+      const op = interpolate([0, 0.15, 0.85, 1], [0, 1, 1, 0], Easing.easeOutQuad)(progress);
+      const dy = interpolate([0, 0.2], [10, 0], Easing.easeOutQuad)(progress);
+      return (
+        <div style={{
+          position: 'absolute', left: 0, right: 0, top: y, textAlign: 'center',
+          opacity: op, transform: `translateY(${dy}px)`,
+        }}>
+          <div style={{
+            fontFamily: C.serif, fontSize: 38, fontWeight: 500, letterSpacing: '-0.02em',
+            color: C.text, lineHeight: 1,
+          }}>{title}</div>
+          <div style={{
+            fontFamily: C.mono, fontSize: 12, letterSpacing: '0.1em', color: C.dim, marginTop: 10,
+          }}>{sub}</div>
+        </div>
+      );
+    }
+
+    function ProgressBar() {
+      const { progress } = useSprite();
+      const w = interpolate([0, 1], [0, 1])(progress);
+      return (
+        <div style={{
+          position: 'absolute', left: '50%', top: 430, width: 360,
+          transform: 'translateX(-50%)',
+        }}>
+          <div style={{
+            height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 99,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%', width: `${w * 100}%`, background: C.accent,
+              boxShadow: `0 0 16px ${C.accent}`,
+            }}/>
+          </div>
+          <div style={{
+            fontFamily: C.mono, fontSize: 11, color: C.dim, marginTop: 8,
+            letterSpacing: '0.06em', textAlign: 'center',
+          }}>{Math.round(w * 100).toString().padStart(3, '0')}%</div>
+        </div>
+      );
+    }
+
+    function FingerprintReveal() {
+      const { progress } = useSprite();
+      const fp = ['a7f3', '92e1', 'b4c8', '5d0a', '6f12', 'eb73', '8c9d', '1a45'];
+      return (
+        <div style={{
+          position: 'absolute', left: '50%', bottom: 88,
+          transform: 'translateX(-50%)',
+          display: 'grid', gridTemplateColumns: 'repeat(8, 60px)', gap: 8,
+        }}>
+          {fp.map((f, i) => {
+            const segStart = i / fp.length * 0.8;
+            const local = Math.max(0, Math.min(1, (progress - segStart) / 0.18));
+            const op = local;
+            const dy = (1 - local) * 12;
+            return (
+              <div key={f} style={{
+                fontFamily: C.mono, fontSize: 14, color: C.accent,
+                padding: '8px 0', textAlign: 'center',
+                background: 'rgba(91,242,185,0.06)',
+                border: `1px solid ${C.accent}33`,
+                borderRadius: 6,
+                opacity: op, transform: `translateY(${dy}px)`,
+              }}>{f}</div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function ReadyBadge() {
+      const { progress } = useSprite();
+      const s = interpolate([0, 0.4], [0.5, 1], Easing.easeOutBack)(progress);
+      return (
+        <div style={{
+          position: 'absolute', left: '50%', top: 28,
+          transform: `translateX(-50%) scale(${s})`,
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          padding: '6px 14px', background: 'rgba(91,242,185,0.12)',
+          border: `1px solid ${C.accent}`,
+          borderRadius: 99,
+        }}>
+          <span style={{
+            width: 14, height: 14, borderRadius: '50%', background: C.accent,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#06231a', fontFamily: C.sans, fontWeight: 700, fontSize: 10,
+          }}>✓</span>
+          <span style={{ fontFamily: C.mono, fontSize: 11, color: C.accent,
+                         letterSpacing: '0.1em' }}>IDENTITY READY</span>
+        </div>
+      );
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // SCENE 2 — Self-destructing message
+    // ───────────────────────────────────────────────────────────────
+    function BurnScene() {
+      return (
+        <>
+          <BackgroundGrid/>
+          <ChatFrame/>
+          <Sprite start={0.4} end={8}>
+            <IncomingBubble/>
+          </Sprite>
+          <Sprite start={1.6} end={6}>
+            <BurnTimer/>
+          </Sprite>
+          <Sprite start={6.0} end={8}>
+            <BurnedNotice/>
+          </Sprite>
+        </>
+      );
+    }
+
+    function ChatFrame() {
+      return (
+        <div style={{
+          position: 'absolute', left: '50%', top: 40,
+          transform: 'translateX(-50%)',
+          width: 460, height: 460,
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid rgba(255,255,255,0.06)',
+          borderRadius: 24, padding: 22,
+          display: 'flex', flexDirection: 'column',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            paddingBottom: 12, borderBottom: '1px solid rgba(255,255,255,0.05)',
+          }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: 18,
+              background: '#8b5cf6', color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: C.sans, fontWeight: 600, fontSize: 13,
+            }}>S</div>
+            <div>
+              <div style={{ fontFamily: C.mono, fontSize: 12, color: C.text }}>satoshi.eth</div>
+              <div style={{ fontFamily: C.mono, fontSize: 9, color: C.accent,
+                            letterSpacing: '0.08em', marginTop: 1 }}>
+                ◆ E2EE · BURN AFTER READ
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function IncomingBubble() {
+      const { progress } = useSprite();
+      const t = useTime();
+      // appear: 0-0.08, idle, burn 0.65→1
+      const opIn = interpolate([0, 0.08], [0, 1], Easing.easeOutQuad)(progress);
+      const dy = interpolate([0, 0.08], [16, 0], Easing.easeOutQuad)(progress);
+
+      const burnStart = 0.65;
+      const burn = Math.max(0, Math.min(1, (progress - burnStart) / (1 - burnStart)));
+      // disintegrate: scale up + opacity down + blur + scatter chars
+      const op = burn === 0 ? 1 : 1 - burn;
+      const scale = 1 + burn * 0.04;
+      const blur = burn * 6;
+
+      const txt = 'Bridge confirmed. Sending the tx hash now.';
+      // scatter individual letters as burn progresses
+      const letters = txt.split('').map((ch, i) => {
+        const charBurnStart = burnStart + (i / txt.length) * 0.05;
+        const charBurn = Math.max(0, Math.min(1, (progress - charBurnStart) / 0.4));
+        const dx = charBurn * (Math.sin(i * 1.3 + t) * 60);
+        const dyL = -charBurn * (20 + (i % 5) * 8);
+        const rot = charBurn * (i % 2 ? 12 : -12);
+        const cop = 1 - charBurn;
+        return (
+          <span key={i} style={{
+            display: 'inline-block', whiteSpace: 'pre',
+            transform: `translate(${dx}px, ${dyL}px) rotate(${rot}deg)`,
+            opacity: cop, color: `rgba(255,107,107,${charBurn * 0.7 + (1 - charBurn) * 0})`,
+            transition: 'none',
+          }}>
+            <span style={{ color: charBurn < 0.3 ? '#06231a' : `rgba(255,107,107,${1 - charBurn})` }}>{ch}</span>
+          </span>
+        );
+      });
+
+      return (
+        <div style={{
+          position: 'absolute', left: '50%', top: 180,
+          transform: `translate(calc(-50% - 70px), ${dy}px) scale(${scale})`,
+          maxWidth: 320,
+          opacity: opIn * 0.9 + (op - 1) * 0.5 + 0.5, // smooth blend; keep above 0
+          filter: `blur(${blur}px)`,
+        }}>
+          <div style={{
+            background: C.accent, color: '#06231a',
+            padding: '12px 16px', borderRadius: 16,
+            borderTopLeftRadius: 6,
+            fontFamily: C.sans, fontSize: 15, lineHeight: 1.35,
+            boxShadow: `0 8px 30px rgba(91,242,185,${0.25 + burn * 0.4})`,
+            position: 'relative',
+            overflow: 'hidden',
+          }}>
+            {/* burning embers overlay */}
+            {burn > 0.05 && (
+              <div style={{
+                position: 'absolute', inset: 0,
+                background: `radial-gradient(circle at 30% 60%, rgba(255,107,107,${burn * 0.55}), transparent 70%),
+                             radial-gradient(circle at 70% 40%, rgba(240,198,116,${burn * 0.45}), transparent 70%)`,
+                mixBlendMode: 'lighten',
+                pointerEvents: 'none',
+              }}/>
+            )}
+            <div style={{ position: 'relative' }}>
+              {letters}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function BurnTimer() {
+      const { progress, duration, localTime } = useSprite();
+      const remain = Math.max(0, 4.4 - localTime);
+      const tNum = remain.toFixed(1);
+      const op = interpolate([0, 0.1, 0.9, 1], [0, 1, 1, 0], Easing.easeOutQuad)(progress);
+      return (
+        <div style={{
+          position: 'absolute', right: 80, top: 196,
+          opacity: op,
+          padding: '5px 11px', borderRadius: 99,
+          background: 'rgba(255,107,107,0.16)',
+          border: `1px solid ${C.danger}66`,
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%', background: C.danger,
+            animation: 'pulse-burn 0.8s ease-in-out infinite',
+          }}/>
+          <span style={{
+            fontFamily: C.mono, fontSize: 11, color: C.danger,
+            letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums',
+          }}>SE BORRA EN {tNum}s</span>
+        </div>
+      );
+    }
+
+    function BurnedNotice() {
+      const { progress } = useSprite();
+      const op = interpolate([0, 0.2, 0.8, 1], [0, 1, 1, 1], Easing.easeOutQuad)(progress);
+      const dy = interpolate([0, 0.2], [10, 0], Easing.easeOutQuad)(progress);
+      return (
+        <div style={{
+          position: 'absolute', left: '50%', top: 210,
+          transform: `translate(-50%, ${dy}px)`, opacity: op,
+          textAlign: 'center',
+        }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '6px 14px', background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 99,
+            fontFamily: C.mono, fontSize: 11, color: C.dim,
+            letterSpacing: '0.08em',
+          }}>QUEMADO · SIN RASTRO LOCAL · SIN RASTRO EN SERVIDOR</div>
+        </div>
+      );
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // SCENE 3 — MITM alert (key changed)
+    // ───────────────────────────────────────────────────────────────
+    function MitmScene() {
+      return (
+        <>
+          <BackgroundGrid/>
+          <Sprite start={0} end={9}>
+            <Avatars/>
+          </Sprite>
+          <Sprite start={0.4} end={9}>
+            <Link/>
+          </Sprite>
+          <Sprite start={5.5} end={9}>
+            <Alert/>
+          </Sprite>
+        </>
+      );
+    }
+
+    function Avatars() {
+      const t = useTime();
+      // a wobble starts at t=2 (key changing)
+      const wobble = t > 1.8 && t < 5 ? Math.sin((t - 1.8) * 20) * (1 - Math.max(0, t - 4) / 1) * 6 : 0;
+
+      return (
+        <>
+          {/* Me */}
+          <div style={{
+            position: 'absolute', left: 110, top: 200,
+          }}>
+            <Avatar label="YOU" color={C.accent} ink="#06231a" letter="Y"/>
+          </div>
+          {/* Them */}
+          <div style={{
+            position: 'absolute', right: 110, top: 200,
+            transform: `translateX(${wobble}px)`,
+          }}>
+            <Avatar label="0xC3F…91A" color="#06b6d4" ink="#fff" letter="C" mono/>
+          </div>
+        </>
+      );
+    }
+
+    function Avatar({ color, ink, letter, label, mono }) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 90, height: 90, borderRadius: '50%',
+            background: color, color: ink,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: C.sans, fontWeight: 600, fontSize: 36,
+            boxShadow: `0 8px 28px ${color}55`,
+          }}>{letter}</div>
+          <span style={{
+            fontFamily: mono ? C.mono : C.sans, fontSize: 12, color: C.text,
+            letterSpacing: mono ? '0.04em' : 0,
+          }}>{label}</span>
+        </div>
+      );
+    }
+
+    function Link() {
+      const t = useTime();
+      // green link until t=2; then key changes; then red shake; then break at 4.5
+      const stage = t < 2 ? 'ok' : t < 4.5 ? 'changing' : 'broken';
+      const color = stage === 'ok' ? C.accent : stage === 'changing' ? C.warn : C.danger;
+      const shake = stage === 'changing' ? Math.sin(t * 28) * 3 : 0;
+
+      // Fingerprint changes at t=2 (from a7f3 to 9b41) 
+      const fp1 = t < 2 ? 'a7f3 · 92e1 · b4c8 · 5d0a' : '9b41 · d0c2 · 7e3a · f51b';
+
+      // line broken: animate gap appearing
+      const breakProgress = stage === 'broken' ? Math.min(1, (t - 4.5) / 0.5) : 0;
+
+      return (
+        <>
+          {/* Line */}
+          <div style={{
+            position: 'absolute', left: 200, top: 244,
+            width: 'calc(100% - 400px)', height: 2,
+            transform: `translateY(${shake}px)`,
+            display: 'flex', alignItems: 'center',
+          }}>
+            <div style={{
+              flex: `0 0 ${50 - breakProgress * 16}%`,
+              height: 2,
+              background: color,
+              boxShadow: `0 0 12px ${color}80`,
+              transition: 'background 0.3s',
+              borderRadius: 2,
+            }}/>
+            {breakProgress > 0 && (
+              <div style={{
+                flex: `0 0 ${breakProgress * 32}%`,
+                height: 24, position: 'relative',
+              }}>
+                <div style={{
+                  position: 'absolute', left: 0, top: '50%',
+                  width: '40%', height: 2, background: color,
+                  transform: `translateY(${-breakProgress * 8}px) rotate(${-breakProgress * 12}deg)`,
+                  transformOrigin: '0 50%', boxShadow: `0 0 8px ${color}`,
+                }}/>
+                <div style={{
+                  position: 'absolute', right: 0, top: '50%',
+                  width: '40%', height: 2, background: color,
+                  transform: `translateY(${breakProgress * 8}px) rotate(${breakProgress * 12}deg)`,
+                  transformOrigin: '100% 50%', boxShadow: `0 0 8px ${color}`,
+                }}/>
+              </div>
+            )}
+            <div style={{
+              flex: `0 0 ${50 - breakProgress * 16}%`,
+              height: 2,
+              background: color,
+              boxShadow: `0 0 12px ${color}80`,
+              borderRadius: 2,
+            }}/>
+          </div>
+
+          {/* Key badge in the middle */}
+          <div style={{
+            position: 'absolute', left: '50%', top: 196,
+            transform: `translate(-50%, ${shake}px)`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+          }}>
+            <div style={{
+              padding: '6px 12px', background: stage === 'ok' ? 'rgba(91,242,185,0.12)' :
+                                              stage === 'changing' ? 'rgba(240,198,116,0.12)' :
+                                              'rgba(255,107,107,0.14)',
+              border: `1px solid ${color}`,
+              borderRadius: 6,
+              fontFamily: C.mono, fontSize: 12, color: color,
+              letterSpacing: '0.04em',
+              transition: 'background 0.3s, border-color 0.3s, color 0.3s',
+              whiteSpace: 'nowrap',
+            }}>
+              KEY {fp1}
+            </div>
+            <span style={{
+              fontFamily: C.mono, fontSize: 9, color: C.faint,
+              letterSpacing: '0.08em',
+            }}>{stage === 'ok' ? 'VERIFIED · 8 DAYS' :
+                  stage === 'changing' ? 'KEY MUTATING…' :
+                  'CHANNEL BROKEN'}</span>
+          </div>
+        </>
+      );
+    }
+
+    function Alert() {
+      const { progress, localTime } = useSprite();
+      const op = interpolate([0, 0.15], [0, 1], Easing.easeOutQuad)(progress);
+      const s = interpolate([0, 0.2], [0.85, 1], Easing.easeOutBack)(progress);
+      // shake the panel briefly
+      const shake = localTime < 0.6 ? Math.sin(localTime * 40) * (1 - localTime / 0.6) * 6 : 0;
+      return (
+        <div style={{
+          position: 'absolute', left: '50%', bottom: 60,
+          transform: `translate(-50%, 0) scale(${s}) translateX(${shake}px)`,
+          opacity: op,
+          width: 540, padding: '20px 24px',
+          background: 'rgba(255,107,107,0.10)',
+          border: `1px solid ${C.danger}`,
+          borderRadius: 14,
+          display: 'flex', gap: 16, alignItems: 'flex-start',
+          boxShadow: `0 16px 60px rgba(255,107,107,0.35)`,
+        }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: '50%',
+            background: C.danger, color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: C.sans, fontWeight: 700, fontSize: 20, flexShrink: 0,
+          }}>!</div>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontFamily: C.serif, fontSize: 24, fontWeight: 500,
+              color: C.danger, letterSpacing: '-0.01em', marginBottom: 4,
+            }}>La clave de este contacto cambió</div>
+            <div style={{
+              fontFamily: C.sans, fontSize: 13, color: C.dim, lineHeight: 1.45,
+            }}>
+              Cambió de dispositivo — o alguien intenta interponerse. AegisLink
+              cortó el envío hasta que vuelvas a verificar.
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button style={{
+                background: C.danger, color: '#fff', border: 'none',
+                borderRadius: 6, padding: '7px 14px',
+                fontFamily: C.sans, fontWeight: 600, fontSize: 12,
+              }}>Re-verificar</button>
+              <button style={{
+                background: 'transparent', color: C.text,
+                border: '1px solid rgba(255,255,255,0.18)',
+                borderRadius: 6, padding: '7px 14px',
+                fontFamily: C.sans, fontSize: 12,
+              }}>Más tarde</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function BackgroundGrid() {
+      const t = useTime();
+      const x = (t * 12) % 40;
+      return (
+        <div style={{
+          position: 'absolute', inset: 0,
+          backgroundImage: `linear-gradient(rgba(91,242,185,0.06) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(91,242,185,0.06) 1px, transparent 1px)`,
+          backgroundSize: '40px 40px',
+          backgroundPosition: `${x}px 0`,
+          opacity: 0.5,
+          maskImage: 'radial-gradient(circle at 50% 50%, black, transparent 75%)',
+          WebkitMaskImage: 'radial-gradient(circle at 50% 50%, black, transparent 75%)',
+        }}/>
+      );
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // Layout
+    // ───────────────────────────────────────────────────────────────
+    function App() {
+      return (
+        <div className="page">
+          <div className="head">
+            <div>
+              <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11,
+                            letterSpacing: '0.1em', color: 'rgba(232,240,236,0.5)',
+                            marginBottom: 8 }}>MOTION · 03 SCENES</div>
+              <h1>Animaciones de AegisLink</h1>
+            </div>
+            <p>VAULT · 60fps · MIT licence</p>
+          </div>
+
+          <div className="scene-card">
+            <div className="scene-head">
+              <div>
+                <div className="l">01 · Generación de identidad</div>
+                <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11,
+                              color: 'rgba(232,240,236,0.5)', letterSpacing: '0.06em', marginTop: 4 }}>
+                  Onboarding · keypair Curve25519
+                </div>
+              </div>
+              <div className="r">9.0 s</div>
+            </div>
+            <div className="stage-wrap">
+              <Stage width={960} height={540} duration={9} background="#000" persistKey="aegis-keygen">
+                <KeygenScene/>
+              </Stage>
+            </div>
+          </div>
+
+          <div className="scene-card">
+            <div className="scene-head">
+              <div>
+                <div className="l">02 · Mensaje que se quema</div>
+                <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11,
+                              color: 'rgba(232,240,236,0.5)', letterSpacing: '0.06em', marginTop: 4 }}>
+                  Ephemeral · auto-destruct
+                </div>
+              </div>
+              <div className="r">8.0 s</div>
+            </div>
+            <div className="stage-wrap">
+              <Stage width={960} height={540} duration={8} background="#000" persistKey="aegis-burn">
+                <BurnScene/>
+              </Stage>
+            </div>
+          </div>
+
+          <div className="scene-card">
+            <div className="scene-head">
+              <div>
+                <div className="l">03 · Alerta MITM</div>
+                <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11,
+                              color: 'rgba(232,240,236,0.5)', letterSpacing: '0.06em', marginTop: 4 }}>
+                  Key changed · channel break · re-verify
+                </div>
+              </div>
+              <div className="r">9.0 s</div>
+            </div>
+            <div className="stage-wrap">
+              <Stage width={960} height={540} duration={9} background="#000" persistKey="aegis-mitm">
+                <MitmScene/>
+              </Stage>
+            </div>
+          </div>
+
+          <div style={{ height: 60 }}/>
+        </div>
+      );
+    }
+
+    // styles for inline anims
+    if (!document.getElementById('aegis-anim-page')) {
+      const s = document.createElement('style');
+      s.id = 'aegis-anim-page';
+      s.textContent = `
+        @keyframes pulse-burn { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.6); opacity: 0.4; } }
+      `;
+      document.head.appendChild(s);
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>

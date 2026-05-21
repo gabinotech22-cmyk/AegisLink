@@ -1,0 +1,15 @@
+node_modules
+dist
+dev-dist
+*.log
+.env
+.env.local
+.DS_Store
+.idea/workspace.xml
+
+# Secrets — never commit these
+google-service-account.json
+*.p8
+*.pem
+*.key
+/infra/coturn/turnserver.conf.rendered

@@ -1,0 +1,5 @@
+<!-- Add these to res/values/colors.xml -->
+    <color name="ic_launcher_dark_bg">#06090a</color>
+    <color name="ic_launcher_light_bg">#efece4</color>
+    <color name="ic_launcher_tinted_bg">#14161c</color>
+    <color name="ic_launcher_work_bg">#1c1f55</color>

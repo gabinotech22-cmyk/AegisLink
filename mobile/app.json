@@ -1,0 +1,88 @@
+{
+  "expo": {
+    "name": "AegisLink",
+    "slug": "aegislink",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "aegislink",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0e0d"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.aegislink.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "AegisLink uses the camera to scan verification QR codes and send encrypted photos.",
+        "NSMicrophoneUsageDescription": "AegisLink uses the microphone for encrypted voice and video calls.",
+        "NSPhotoLibraryUsageDescription": "AegisLink accesses your photo library to send encrypted attachments.",
+        "NSFaceIDUsageDescription": "AegisLink uses Face ID to protect your messages. Your biometric data never leaves the device.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bitcode": false
+    },
+    "android": {
+      "package": "com.aegislink.app",
+      "versionCode": 1,
+      "compileSdkVersion": 35,
+      "targetSdkVersion": 35,
+      "buildToolsVersion": "35.0.0",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0e0d"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ]
+    },
+    "plugins": [
+      "./app.plugin.js",
+      "expo-secure-store",
+      "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "AegisLink uses the camera to scan QR codes and send encrypted photos."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "AegisLink uses the microphone for encrypted voice and video calls."
+        }
+      ],
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Allow AegisLink to access the camera for end-to-end encrypted video calls.",
+          "microphonePermission": "Allow AegisLink to access the microphone for end-to-end encrypted calls."
+        }
+      ],
+      "expo-localization"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f658c210-cfa9-482e-85ae-610cc76152af"
+      }
+    },
+    "owner": "crowfn"
+  }
+}

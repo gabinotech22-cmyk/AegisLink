@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:wght@400;500;600&display=swap"/>
+  <style>
+    :root { --bg: #07090a; --surface: #11181a; --text: #e8f0ec;
+            --dim: rgba(232,240,236,0.62); --accent: #5bf2b9;
+            --border: rgba(255,255,255,0.08); }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+           font-family: 'Space Grotesk', system-ui, sans-serif;
+           min-height: 100vh; -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 80px 32px; }
+    .head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+    .head svg { display: block; }
+    .head span { font-family: 'EB Garamond', serif; font-weight: 500; font-size: 36px;
+                 letter-spacing: -0.01em; }
+    h1 { font-family: 'EB Garamond', serif; font-weight: 500;
+         font-size: clamp(54px, 7vw, 92px); line-height: 0.95; letter-spacing: -0.025em;
+         margin: 0 0 18px; }
+    h1 em { font-style: italic; color: var(--accent); }
+    .lead { font-size: 18px; color: var(--dim); max-width: 580px; margin: 0 0 60px; }
+    .badge { display: inline-flex; align-items: center; gap: 8px;
+             padding: 6px 12px; border-radius: 999px;
+             background: rgba(91,242,185,0.10);
+             border: 1px solid rgba(91,242,185,0.30);
+             font-family: 'JetBrains Mono', monospace; font-size: 11px;
+             color: var(--accent); letter-spacing: 0.1em; margin-bottom: 22px; }
+    .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .card { display: block; padding: 28px 26px;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 16px; text-decoration: none; color: inherit;
+            transition: border-color 0.2s, transform 0.2s; position: relative; overflow: hidden; }
+    .card:hover { border-color: rgba(91,242,185,0.4); transform: translateY(-2px); }
+    .card .n { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+               color: var(--accent); letter-spacing: 0.1em; margin-bottom: 16px; }
+    .card h3 { font-family: 'EB Garamond', serif; font-weight: 500; font-size: 32px;
+               letter-spacing: -0.02em; margin: 0 0 8px; line-height: 1.1; }
+    .card p  { font-size: 14px; color: var(--dim); margin: 0 0 18px; line-height: 1.55; }
+    .card .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .card .tag { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+                 padding: 3px 8px; background: rgba(255,255,255,0.04);
+                 border: 1px solid var(--border); border-radius: 99px;
+                 color: var(--dim); letter-spacing: 0.05em; text-transform: uppercase; }
+    .card .arrow { position: absolute; right: 22px; bottom: 22px; color: var(--accent);
+                   opacity: 0; transform: translateX(-6px); transition: opacity 0.15s, transform 0.15s; }
+    .card:hover .arrow { opacity: 1; transform: translateX(0); }
+    .foot { margin-top: 56px; padding-top: 24px;
+            border-top: 1px solid var(--border);
+            display: flex; justify-content: space-between;
+            font-family: 'JetBrains Mono', monospace; font-size: 11px;
+            color: rgba(232,240,236,0.4); letter-spacing: 0.06em; }
+    @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="badge"><span class="dot"></span>ENTREGABLES · 4 ARCHIVOS</div>
+    <h1>AegisLink — <em>todo entregado</em>.</h1>
+    <p class="lead">
+      Hub de los cuatro entregables del proyecto. Cada archivo es independiente
+      y se abre por separado.
+    </p>
+
+    <div class="grid">
+      <a class="card" href="AegisLink.html">
+        <div class="n">01 · PROTOTIPO</div>
+        <h3>AegisLink.html</h3>
+        <p>Canvas comparativo con 24 pantallas iOS navegables, 13 secciones, modo claro/oscuro desde dentro de la app. Tweaks de densidad, acento y tipos en la barra superior.</p>
+        <div class="tags">
+          <span class="tag">24 pantallas</span>
+          <span class="tag">clickable</span>
+          <span class="tag">light + dark</span>
+          <span class="tag">tweaks</span>
+        </div>
+        <span class="arrow">→</span>
+      </a>
+
+      <a class="card" href="Landing.html">
+        <div class="n">02 · WEB</div>
+        <h3>Landing.html</h3>
+        <p>Página de presentación del producto. Hero editorial, 4 pilares, cómo funciona, 9 features, panel de auditorías, tabla comparativa vs Signal/Threema/WhatsApp, descarga.</p>
+        <div class="tags">
+          <span class="tag">marketing</span>
+          <span class="tag">responsive</span>
+          <span class="tag">compare table</span>
+        </div>
+        <span class="arrow">→</span>
+      </a>
+
+      <a class="card" href="App Icons.html">
+        <div class="n">03 · MARCA</div>
+        <h3>App Icons.html</h3>
+        <p>Ícono principal (1024) + tamaños iOS, 4 variantes iOS 18 (dark/light/tinted/Work), Android adaptive (foreground + background + 5 máscaras), monocromo y push en contexto home-screen.</p>
+        <div class="tags">
+          <span class="tag">iOS · 7 sizes</span>
+          <span class="tag">Android adaptive</span>
+          <span class="tag">monocromo</span>
+        </div>
+        <span class="arrow">→</span>
+      </a>
+
+      <a class="card" href="Animations.html">
+        <div class="n">04 · MOTION</div>
+        <h3>Animations.html</h3>
+        <p>Tres escenas animadas con timeline scrubable: generación de identidad (9s), mensaje que se quema (8s), alerta MITM con ruptura del canal (9s).</p>
+        <div class="tags">
+          <span class="tag">3 escenas</span>
+          <span class="tag">scrub timeline</span>
+          <span class="tag">60fps</span>
+        </div>
+        <span class="arrow">→</span>
+      </a>
+    </div>
+
+    <div class="foot">
+      <span>VAULT · DIRECCIÓN ÚNICA</span>
+      <span>v0.9.2 · 18.05.2026</span>
+    </div>
+  </div>
+</body>
+</html>

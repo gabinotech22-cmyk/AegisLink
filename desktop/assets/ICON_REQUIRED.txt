@@ -1,0 +1,7 @@
+Place icon.ico (256x256, multi-resolution ICO) here before running `npm run make`.
+
+Tools to create icon.ico from a PNG:
+  - ImageMagick: magick convert icon.png -define icon:auto-resize=256,128,64,48,32,16 icon.ico
+  - Online: https://convertico.com
+
+The file must be named exactly: icon.ico

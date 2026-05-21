@@ -1,0 +1,52 @@
+{
+  "name": "aegislink-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "package": "electron-builder"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.4.0",
+    "better-sqlite3": "^11.9.1",
+    "electron-updater": "^6.3.9",
+    "i18next": "^23.11.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^14.1.2",
+    "socket.io-client": "^4.7.5",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
+    "zustand": "^4.5.4"
+  },
+  "build": {
+    "appId": "com.aegislink.desktop",
+    "productName": "AegisLink",
+    "icon": "assets/icon",
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [{ "target": "portable", "arch": ["x64"] }],
+      "sign": null,
+      "signDlls": false
+    },
+    "mac": { "icon": "assets/icon.png" },
+    "linux": { "icon": "assets/icon.png" }
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^31.6.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.5.2",
+    "vite": "^5.3.1"
+  }
+}
