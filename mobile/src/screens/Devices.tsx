@@ -423,6 +423,19 @@ export function DevicesScreen({ onBack }: Props) {
           <ActivityIndicator color={t.accent} style={{ marginTop: 24 }} />
         )}
 
+        {/* Empty state */}
+        {!loadingList && linkedDevices.length === 0 && (
+          <View style={{ paddingVertical: 40, alignItems: 'center', paddingHorizontal: 32 }}>
+            <I.Monitor size={40} color={t.textFaint} style={{ marginBottom: 16 }} />
+            <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text, marginBottom: 6 }}>
+              {i18nT('devices.emptyTitle', 'No linked devices')}
+            </Text>
+            <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, textAlign: 'center', lineHeight: 20 }}>
+              {i18nT('devices.emptyDesc', 'Link your desktop to sync conversations securely without sharing keys')}
+            </Text>
+          </View>
+        )}
+
         {/* Linked devices */}
         {linkedDevices.map((device) => (
           <View
