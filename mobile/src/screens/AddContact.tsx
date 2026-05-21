@@ -48,7 +48,18 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
       const contact = await addByAegisId(trimmedId, name);
       onAdded(contact);
     } catch (e) {
-      Alert.alert(i18nT('addContact.errorTitle'), (e as Error).message);
+      const raw = (e as Error).message ?? '';
+      // Translate low-level network errors into something actionable.
+      const message =
+        raw.toLowerCase().includes('network') ||
+        raw.toLowerCase().includes('failed to fetch') ||
+        raw.toLowerCase().includes('network request failed')
+          ? i18nT(
+              'addContact.networkError',
+              'Could not connect to the server. Check your internet connection and try again.',
+            )
+          : raw;
+      Alert.alert(i18nT('addContact.errorTitle', 'Could not add contact'), message);
     } finally {
       setSubmitting(false);
     }
