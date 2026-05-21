@@ -1277,9 +1277,16 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
           {/* Divider + action */}
           <View style={{ borderTopWidth: 1, borderTopColor: me ? 'rgba(255,255,255,0.12)' : t.divider }}>
             <Pressable
-              onPress={() => {
-                const Clipboard = require('@react-native-clipboard/clipboard').default as { setString(s: string): void };
-                Clipboard.setString(cardAegisId);
+              onPress={async () => {
+                try {
+                  await useContacts.getState().addByAegisId(cardAegisId);
+                  Alert.alert(i18nT('chat.contactAdded', 'Contacto añadido'), cardName);
+                } catch {
+                  // Fallback: copy ID to clipboard
+                  const Clipboard = require('expo-clipboard');
+                  await Clipboard.setStringAsync(cardAegisId).catch(() => {});
+                  Alert.alert(i18nT('chat.contactAddFailed', 'No se pudo añadir'), i18nT('chat.idCopied', 'ID copiado al portapapeles'));
+                }
               }}
               style={({ pressed }) => ({
                 paddingVertical: 9,
