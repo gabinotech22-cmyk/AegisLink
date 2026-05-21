@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, TextInput, FlatList } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { withPickingGuard } from '../utils/pickingGuard';
 import Svg, { Circle, Line, G, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -82,14 +84,21 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
       Alert.alert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedGallery'));
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
+    const result = await withPickingGuard(() =>
+      ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'] as ImagePicker.MediaType[],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      })
+    );
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      setGroupImage(result.assets[0].uri);
+      const compressed = await manipulateAsync(
+        result.assets[0].uri,
+        [{ resize: { width: 256 } }],
+        { compress: 0.7, format: SaveFormat.JPEG }
+      );
+      setGroupImage(compressed.uri);
     }
   }
 
@@ -99,14 +108,21 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
       Alert.alert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedCamera'));
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
+    const result = await withPickingGuard(() =>
+      ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'] as ImagePicker.MediaType[],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      })
+    );
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      setGroupImage(result.assets[0].uri);
+      const compressed = await manipulateAsync(
+        result.assets[0].uri,
+        [{ resize: { width: 256 } }],
+        { compress: 0.7, format: SaveFormat.JPEG }
+      );
+      setGroupImage(compressed.uri);
     }
   }
 

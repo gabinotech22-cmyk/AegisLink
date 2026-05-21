@@ -45,6 +45,7 @@ import { startCall } from '../socket/calls';
 import { WEBRTC_AVAILABLE } from '../runtime';
 import { SoundFX } from '../hooks/useSoundFX';
 import type { StoredContact, StoredMessage } from '../db/local';
+import { parseLocationMessage } from '../utils/parseLocationMessage';
 
 const EMPTY_MSGS: StoredMessage[] = [];
 
@@ -383,6 +384,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       }
       void SoundFX.msgSent();
     } catch (e) {
+      setDraft(text);
       Alert.alert(i18nT('chat.sendError'), (e as Error).message);
     } finally {
       setSending(false);
@@ -476,7 +478,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={{ flex: 1, backgroundColor: t.bg }}
     >
       <View style={{ flex: 1, paddingTop: insets.top }}>
@@ -851,6 +853,13 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
           }}
           scrollEventThrottle={100}
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 40 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim }}>
+                Sin mensajes aún. Todo cifrado de extremo a extremo.
+              </Text>
+            </View>
+          }
         />
 
         {/* Composer */}
@@ -976,6 +985,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 onChangeText={handleDraftChange}
                 placeholder={online ? i18nT('chat.messagePlaceholder') : i18nT('chat.messageOfflinePlaceholder')}
                 placeholderTextColor={t.textFaint}
+                accessibilityLabel="Campo de mensaje"
                 multiline
                 style={{
                   flex: 1,
@@ -1055,20 +1065,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 }
 
 // ─── Location message parser ─────────────────────────────────────────────────
-
-function parseLocationMessage(body: string) {
-  if (!body.startsWith('📍')) return null;
-  const regex = /📍 Ubicación compartida \(([^,]+), durante ([^)]+)\):\s*([^(]+?)(?:\s*\(Lat:\s*([-\d.]+),\s*Lon:\s*([-\d.]+)\))?$/i;
-  const match = body.match(regex);
-  if (!match) return null;
-  return {
-    precision: match[1],
-    duration: match[2],
-    address: match[3].trim(),
-    latitude: match[4] ? parseFloat(match[4]) : null,
-    longitude: match[5] ? parseFloat(match[5]) : null,
-  };
-}
+// Defined in mobile/src/utils/parseLocationMessage.ts — imported above
 
 // ─── Bubble ──────────────────────────────────────────────────────────────────
 
@@ -1577,7 +1574,15 @@ function AudioBubble({
   const [playing, setPlaying] = useState(false);
   const [posMs, setPosMs] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1.0);
-  const soundRef = useRef<any>(null);
+  type AudioSound = import('expo-av').Audio.Sound;
+  type AVPlaybackStatus = import('expo-av').AVPlaybackStatus;
+  const soundRef = useRef<AudioSound | null>(null);
+
+  useEffect(() => {
+    return () => {
+      void soundRef.current?.unloadAsync().catch(() => {});
+    };
+  }, []);
 
   // Parse duration from body "[audio:30s]"
   const durSec = parseInt(m.body.match(/\[audio:(\d+)s/)?.[1] ?? '0', 10);
@@ -1599,7 +1604,7 @@ function AudioBubble({
       const { sound } = await Audio.Sound.createAsync(
         { uri: m.mediaUri },
         { shouldPlay: true, rate: playbackRate, shouldCorrectPitch: true },
-        (status: any) => {
+        (status: AVPlaybackStatus) => {
           if (!status.isLoaded) return;
           setPosMs(status.positionMillis ?? 0);
           if (status.didJustFinish) {

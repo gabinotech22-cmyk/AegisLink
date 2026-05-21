@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell, session } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { registerSecureStorageHandlers } from './ipc/secureStorage'
@@ -19,7 +19,7 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   })
 
@@ -31,6 +31,14 @@ function createWindow(): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // H-1: Block all navigations to external origins
+  win.webContents.on('will-navigate', (ev, url) => {
+    const allowed =
+      url.startsWith('file://') ||
+      (is.dev && url.startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'http://localhost'))
+    if (!allowed) ev.preventDefault()
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -46,6 +54,18 @@ registerDatabaseHandlers()
 registerNotificationHandlers()
 
 app.whenReady().then(() => {
+  // C-2: Enforce Content-Security-Policy via response header injection
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* wss://localhost:*; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none';"
+        ]
+      }
+    })
+  })
+
   createWindow()
 
   app.on('activate', () => {
