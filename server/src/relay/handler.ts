@@ -2,7 +2,7 @@ import type { Server as SocketServer, Socket } from 'socket.io';
 import { z } from 'zod';
 import { messageRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
-import { notifyRecipient } from '../push/expo.js';
+import { notifyRecipient, sendCallWakeUp, type CallMedia } from '../push/expo.js';
 
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
@@ -550,7 +550,18 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
       socket.emit('error_msg', { code: 'rate_limited', for: 'call:invite' });
       return;
     }
-    forward('call:invite', parsed.data);
+    const delivered = forward('call:invite', parsed.data);
+    if (!delivered) {
+      // Recipient offline — fire high-priority push so the OS wakes their app.
+      // The call:invite will be re-delivered via socket once they reconnect and
+      // emit call:invite again, or they can answer from the CallKit/Notification UI.
+      void sendCallWakeUp(
+        parsed.data.to,
+        me,
+        parsed.data.media as CallMedia,
+        parsed.data.callId,
+      ).catch(() => { /* push subsystem unavailable — call will be missed */ });
+    }
   });
   socket.on('call:answer', (raw) => {
     const parsed = CallAnswer.safeParse(raw);
@@ -583,6 +594,13 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
     const target = sockets.get(parsed.data.to);
     if (!target || target.size === 0) {
       socket.emit('error_msg', { code: 'peer_offline', for: 'call:offer' });
+      // Fire push wake-up so the OS wakes the callee's app for the SDP-style flow.
+      void sendCallWakeUp(
+        parsed.data.to,
+        me,
+        (parsed.data.media ?? 'audio') as CallMedia,
+        parsed.data.callId,
+      ).catch(() => { /* push subsystem unavailable */ });
       return;
     }
     const { to: _to, ...rest } = parsed.data;

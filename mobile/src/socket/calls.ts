@@ -121,6 +121,18 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
   const turnConfig = await fetchTurnConfig(ownAegisId);
 
+  // Set audio mode for call — earpiece for audio, speakerphone for video
+  try {
+    const { Audio } = require('expo-av') as typeof import('expo-av');
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: media !== 'video',
+    });
+  } catch { /* expo-av not available in this context */ }
+
   const peer = await createPeer(media, {
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
@@ -161,6 +173,18 @@ export async function acceptCall(): Promise<void> {
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
   const turnConfig = await fetchTurnConfig(ownAegisId);
+
+  // Set audio mode for call — earpiece for audio, speakerphone for video
+  try {
+    const { Audio } = require('expo-av') as typeof import('expo-av');
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: media !== 'video',
+    });
+  } catch { /* expo-av not available in this context */ }
 
   const peer = await createPeer(media, {
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
@@ -223,6 +247,18 @@ export function endCall(reason: string = 'hangup'): void {
       });
     }
   }
+
+  // Restore normal audio mode
+  try {
+    const { Audio } = require('expo-av') as typeof import('expo-av');
+    void Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: false,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    });
+  } catch { /* no-op */ }
 
   activePeer?.cleanup();
   useCall.getState().setStatus('ended');

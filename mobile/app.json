@@ -92,6 +92,7 @@
         {
           "icon": "./assets/notification-icon.png",
           "color": "#5bf2b9",
+          "iosDisplayInForeground": true,
           "sounds": [
             "./assets/sounds/msg_received.mp3",
             "./assets/sounds/call_incoming.mp3"
