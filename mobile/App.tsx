@@ -535,6 +535,17 @@ function Shell() {
             onBack={pop}
             onGroupDetail={() => push({ name: 'groupadmin', group: top.group })}
             onPoll={() => push({ name: 'poll', group: top.group })}
+            onAttach={async () => {
+              const ImagePicker = require('expo-image-picker');
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                quality: 1,
+              });
+              if (!result.canceled && result.assets?.[0]?.uri) {
+                const { useMessages } = require('./src/store/messages');
+                useMessages.getState().setPendingMedia(result.assets[0].uri);
+              }
+            }}
           />
         );
       case 'contact':

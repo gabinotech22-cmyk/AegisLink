@@ -29,9 +29,24 @@
     "icon": "assets/icon",
     "win": {
       "icon": "assets/icon.ico",
-      "target": [{ "target": "portable", "arch": ["x64"] }],
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
       "sign": null,
       "signDlls": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AegisLink",
+      "license": "assets/LICENSE.txt"
     },
     "mac": { "icon": "assets/icon.png" },
     "linux": { "icon": "assets/icon.png" }
