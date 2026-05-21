@@ -40,6 +40,8 @@ import { useTyping } from '../store/typing';
 
 const DEV = import.meta.env.DEV;
 
+const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
+
 // ── SecureStore shim: delegates to window.aegis.secureStorage via Electron IPC ──
 const SecureStore = {
   getItemAsync: (key: string): Promise<string | null> => window.aegis.secureStorage.get(key),
@@ -918,7 +920,7 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
 
   if (matchedContact?.blocked) return;
 
-  if (!matchedContact && env.from) {
+  if (!matchedContact && env.from && AEGIS_ID_RE.test(env.from)) {
     try {
       matchedContact = await useContacts.getState().addByAegisId(env.from);
     } catch (e) {
