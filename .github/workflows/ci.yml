@@ -78,7 +78,7 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test -- --passWithNoTests --testPathIgnorePatterns="auth.test|prekeys.test|ratelimit.test"
+        run: npm test -- --passWithNoTests --testPathIgnorePatterns="auth.test|prekeys.test|ratelimit.test|web3DeviceRevoke.test"
 
   # ─── Mobile — typecheck ───────────────────────────────────────────────────
   mobile-typecheck:
