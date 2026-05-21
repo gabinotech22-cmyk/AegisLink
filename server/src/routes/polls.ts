@@ -57,7 +57,7 @@ router.post('/vote', voteLimiter, async (req, res) => {
 
 // GET /polls/:pollId
 router.get('/:pollId', tallyLimiter, async (req, res) => {
-  const pollId = req.params.pollId;
+  const pollId = String(req.params.pollId);
   if (!pollId) {
     return res.status(400).json({ error: 'missing_poll_id' });
   }
