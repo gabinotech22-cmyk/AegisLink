@@ -19,6 +19,35 @@ import { fetchTurnConfig } from '../webrtc/ice';
 // ---------------------------------------------------------------------------
 let _ringTimeout: ReturnType<typeof setTimeout> | null = null;
 
+// ---------------------------------------------------------------------------
+// Pending ICE candidate queue — candidates can arrive before setRemoteDescription
+// is called (e.g. while the callee is still ringing). Buffer them and flush once
+// the remote description is set.
+// ---------------------------------------------------------------------------
+let _pendingIceCandidates: string[] = [];
+let _remoteDescriptionSet = false;
+
+function bufferOrApplyIce(pc: import('../webrtc/peer').ActivePeer['pc'], candidate: string): void {
+  if (_remoteDescriptionSet) {
+    void addRemoteIce(pc, candidate);
+  } else {
+    _pendingIceCandidates.push(candidate);
+  }
+}
+
+async function flushPendingIce(pc: import('../webrtc/peer').ActivePeer['pc']): Promise<void> {
+  _remoteDescriptionSet = true;
+  const queued = _pendingIceCandidates.splice(0);
+  for (const c of queued) {
+    await addRemoteIce(pc, c);
+  }
+}
+
+function resetIceQueue(): void {
+  _pendingIceCandidates = [];
+  _remoteDescriptionSet = false;
+}
+
 function clearRingTimeout(): void {
   if (_ringTimeout !== null) {
     clearTimeout(_ringTimeout);
@@ -100,19 +129,25 @@ export function attachCallHandlers(): void {
     const { activePeer, callId } = useCall.getState();
     if (!activePeer || callId !== msg.callId) return;
     await setRemoteAnswer(activePeer.pc, msg.answer);
+    // Flush any ICE candidates that arrived before the remote description was set
+    await flushPendingIce(activePeer.pc);
     useCall.getState().setStatus('connecting');
   });
 
   socket.on('call:ice', async (msg: CallIcePayload) => {
     const { activePeer, callId } = useCall.getState();
     if (!activePeer || callId !== msg.callId) return;
-    await addRemoteIce(activePeer.pc, msg.candidate);
+    // Buffer candidates if remote description is not yet set
+    bufferOrApplyIce(activePeer.pc, msg.candidate);
   });
 
   socket.on('call:hangup', (msg: CallHangupPayload) => {
     const { callId, activePeer } = useCall.getState();
     if (callId !== msg.callId) return;
     activePeer?.cleanup();
+    // Dismiss native CallKit / ConnectionService UI for remote-initiated hangups
+    endNativeCall(msg.callId);
+    resetIceQueue();
     useCall.getState().setStatus('ended');
     setTimeout(() => useCall.getState().reset(), 800);
   });
@@ -143,6 +178,9 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     });
   } catch { /* expo-av not available in this context */ }
 
+  // Reset the ICE queue for this new call
+  resetIceQueue();
+
   const peer = await createPeer(media, {
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
@@ -162,6 +200,8 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
       if (state === 'failed' || state === 'closed') endCall('rtc_failure');
     },
   }, turnConfig);
+  // setActivePeer BEFORE createOffer so toggleMute/toggleCamera always see a
+  // valid peer reference from this point forward.
   useCall.getState().setActivePeer(peer);
 
   const offer = await createOffer(peer.pc);
@@ -188,7 +228,13 @@ export async function acceptCall(): Promise<void> {
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
   const turnConfig = await fetchTurnConfig(ownAegisId);
 
-  // Set audio mode for call — earpiece for audio, speakerphone for video
+  // Reset the ICE queue for this new call leg
+  resetIceQueue();
+
+  // Set audio mode for call — earpiece for audio, speakerphone for video.
+  // On iOS this is called before CallKit activates the session; the
+  // didActivateAudioSession handler in callkeep.ts will re-apply the routing
+  // once CallKit hands over the audio session.
   try {
     const { Audio } = require('expo-av') as typeof import('expo-av');
     await Audio.setAudioModeAsync({
@@ -219,18 +265,23 @@ export async function acceptCall(): Promise<void> {
       if (state === 'failed' || state === 'closed') endCall('rtc_failure');
     },
   }, turnConfig);
+  // setActivePeer BEFORE setRemoteOffer so toggleMute/toggleCamera never see null
   useCall.getState().setActivePeer(peer);
 
   await setRemoteOffer(peer.pc, pendingOffer);
+  // Flush ICE candidates that arrived while we were still ringing
+  await flushPendingIce(peer.pc);
   const answer = await createAnswer(peer.pc);
   socket.emit('call:answer', { callId, to: peerId, answer });
+  // Clear pendingOffer — direction is already stored in the call store.
   useCall.getState().setPendingOffer(null);
 }
 
 /** Reject an incoming call or end an active one. */
 export function endCall(reason: string = 'hangup'): void {
   clearRingTimeout(); // always cancel the no-answer timer, regardless of call direction
-  const { peer: peerId, callId, activePeer, status, media, startedAt, pendingOffer } = useCall.getState();
+  resetIceQueue();
+  const { peer: peerId, callId, activePeer, status, media, startedAt, direction } = useCall.getState();
   const socket = getSocket();
   if (socket && peerId && callId) {
     socket.emit('call:hangup', { callId, to: peerId, reason });
@@ -238,7 +289,8 @@ export function endCall(reason: string = 'hangup'): void {
 
   // Persist call history
   if (callId && peerId) {
-    const wasIncoming = status === 'incoming-ringing' || (status === 'in-call' && pendingOffer !== null);
+    // Use the direction field set at call start — reliable even after pendingOffer is cleared.
+    const wasIncoming = direction === 'in';
     const wasAnswered = status === 'in-call';
     const callStatus: 'missed' | 'answered' | 'declined' =
       reason === 'declined' ? 'declined' : wasAnswered ? 'answered' : 'missed';

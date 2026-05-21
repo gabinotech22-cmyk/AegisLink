@@ -18,6 +18,8 @@ export interface CallState {
   pendingOffer: string | null;
   media: CallMedia;
   status: CallStatus;
+  /** Direction of the call — needed for history logging even after pendingOffer is cleared. */
+  direction: 'in' | 'out' | null;
   startedAt: number | null;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
@@ -52,6 +54,7 @@ const initial: Omit<
   peer: null,
   pendingOffer: null,
   media: 'audio',
+  direction: null,
   status: 'idle',
   startedAt: null,
   localStream: null,
@@ -63,7 +66,13 @@ const initial: Omit<
 
 export const useCall = create<CallState>((set) => ({
   ...initial,
-  setStatus: (s) => set({ status: s, startedAt: s === 'in-call' ? Date.now() : undefined }),
+  // Only overwrite startedAt when actually entering in-call; leave it unchanged
+  // for all other transitions so duration calculation remains accurate.
+  setStatus: (s) =>
+    set((prev) => ({
+      status: s,
+      startedAt: s === 'in-call' ? Date.now() : prev.startedAt,
+    })),
   setStreams: (local, remote) => set({ localStream: local, remoteStream: remote }),
   setActivePeer: (p) => set({ activePeer: p }),
   setPendingOffer: (offer) => set({ pendingOffer: offer }),
@@ -71,7 +80,7 @@ export const useCall = create<CallState>((set) => ({
   setCameraOff: (off) => set({ cameraOff: off }),
   reset: () => set({ ...initial }),
   startOutgoing: (peer, callId, media) =>
-    set({ ...initial, peer, callId, media, status: 'outgoing-ringing' }),
+    set({ ...initial, peer, callId, media, direction: 'out', status: 'outgoing-ringing' }),
   startIncoming: (peer, callId, media, offer) =>
-    set({ ...initial, peer, callId, media, status: 'incoming-ringing', pendingOffer: offer }),
+    set({ ...initial, peer, callId, media, direction: 'in', status: 'incoming-ringing', pendingOffer: offer }),
 }));

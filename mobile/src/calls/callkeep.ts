@@ -49,10 +49,22 @@ export function initCallKeep(): void {
     }
   });
 
-  // Required by iOS — must call when audio session is activated
+  // Required by iOS — CallKit takes ownership of the audio session and activates
+  // it asynchronously. We must re-apply expo-av routing here, AFTER the session
+  // is activated, or the audio mode set before CallKit answered is overridden.
   RNCallKeep.addEventListener('didActivateAudioSession', () => {
-    // Audio session activated by CallKit — no additional action needed
-    // expo-av routing is handled in calls.ts
+    const state = useCall.getState();
+    if (state.status === 'idle' || state.status === 'ended') return;
+    try {
+      const { Audio } = require('expo-av') as typeof import('expo-av');
+      void Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: state.media !== 'video',
+      });
+    } catch { /* expo-av unavailable */ }
   });
 
   RNCallKeep.addEventListener('didDisplayIncomingCall', ({ callUUID, error }: { callUUID: string; error?: string }) => {
