@@ -20,7 +20,7 @@ interface Props {
 }
 
 export function PrivacyScreen({ onTab, onNav }: Props) {
-  const { t, toggle, setDark } = useTheme();
+  const { t, setDark, autoMode, setAutoMode } = useTheme();
   const { t: i18nT } = useTranslation();
   const { locale, setLocale } = useLocale();
   const insets = useSafeAreaInsets();
@@ -40,7 +40,6 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const readReceipts = usePreferences((s) => s.readReceipts);
   const typing = usePreferences((s) => s.typingIndicator);
   const screenshot = usePreferences((s) => s.blockScreenshots);
-  const tor = usePreferences((s) => s.routeViaTor);
   const setPref = usePreferences((s) => s.set);
 
   // Shell already hydrates on mount; this is a belt-and-suspenders guard
@@ -52,7 +51,6 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const setRR = (v: boolean) => void setPref('readReceipts', v);
   const setTyping = (v: boolean) => void setPref('typingIndicator', v);
   const setSS = (v: boolean) => void setPref('blockScreenshots', v);
-  const setTor = (v: boolean) => void setPref('routeViaTor', v);
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
@@ -96,7 +94,13 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
         </Pressable>
 
         <Section t={t} label={i18nT('privacy.appearanceSection')}>
-          <ModePicker t={t} value={t.dark ? 'dark' : 'light'} onChange={setDark} onToggle={toggle} />
+          <ModePicker
+            t={t}
+            value={t.dark ? 'dark' : 'light'}
+            autoMode={autoMode}
+            onChange={setDark}
+            onSetAuto={() => setAutoMode(true)}
+          />
         </Section>
 
         <Section t={t} label={i18nT('privacy.dataSharingSection')}>
@@ -125,13 +129,41 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
         </Section>
 
         <Section t={t} label={i18nT('privacy.networkSection')}>
-          <Toggle
-            t={t}
-            label={i18nT('privacy.routeViaTor')}
-            sub={i18nT('privacy.routeViaTorSub')}
-            value={tor}
-            onChange={setTor}
-          />
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 16,
+              paddingVertical: 14,
+              gap: 14,
+              borderBottomWidth: 1,
+              borderBottomColor: t.border,
+            }}
+          >
+            <I.Shield size={20} color={t.textFaint} />
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ fontFamily: t.font, fontSize: 15, color: t.textFaint }}>
+                  {i18nT('privacy.routeViaTor')}
+                </Text>
+                <View
+                  style={{
+                    backgroundColor: t.surface2,
+                    borderRadius: 4,
+                    paddingHorizontal: 5,
+                    paddingVertical: 2,
+                  }}
+                >
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 0.5 }}>
+                    PRONTO
+                  </Text>
+                </View>
+              </View>
+              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textFaint, marginTop: 2 }}>
+                {i18nT('privacy.routeViaTorSub')}
+              </Text>
+            </View>
+          </View>
           <Row
             t={t}
             icon={<I.Cloud size={20} color={t.textDim} />}
@@ -273,18 +305,32 @@ function LanguagePicker({ t, locale, onSelect }: { t: Theme; locale: SupportedLo
 function ModePicker({
   t,
   value,
+  autoMode,
   onChange,
+  onSetAuto,
 }: {
   t: Theme;
   value: 'dark' | 'light';
+  autoMode: boolean;
   onChange: (dark: boolean) => void;
-  onToggle: () => void;
+  onSetAuto: () => void;
 }) {
   const { t: i18nT } = useTranslation();
-  const opts = [
-    { id: 'light' as const, label: i18nT('privacy.modeLight') },
-    { id: 'dark' as const, label: i18nT('privacy.modeDark') },
+  const opts: { id: 'light' | 'auto' | 'dark'; label: string }[] = [
+    { id: 'light', label: i18nT('privacy.modeLight') },
+    { id: 'auto', label: i18nT('privacy.modeAuto') },
+    { id: 'dark', label: i18nT('privacy.modeDark') },
   ];
+  const activeId: 'light' | 'auto' | 'dark' = autoMode ? 'auto' : value;
+
+  const handlePress = (id: 'light' | 'auto' | 'dark') => {
+    if (id === 'auto') {
+      onSetAuto();
+    } else {
+      onChange(id === 'dark');
+    }
+  };
+
   return (
     <View style={{ padding: 14 }}>
       <View
@@ -297,11 +343,12 @@ function ModePicker({
         }}
       >
         {opts.map((o) => {
-          const active = o.id === value;
+          const active = o.id === activeId;
           return (
             <Pressable
               key={o.id}
-              onPress={() => onChange(o.id === 'dark')}
+              onPress={() => handlePress(o.id)}
+              accessibilityLabel={o.label}
               style={{
                 flex: 1,
                 paddingVertical: 10,
