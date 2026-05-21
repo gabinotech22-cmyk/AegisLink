@@ -3,7 +3,8 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { SERVER_URL } from '../config';
+import { SERVER_URL, ONION_URL } from '../config';
+import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope } from '../crypto/messaging';
 import type { Identity } from '../crypto/identity';
 import { useContacts } from '../store/contacts';
@@ -310,7 +311,12 @@ export function connect(identity: Identity): Socket {
   if (socket) socket.disconnect();
 
   authenticated = false;
-  socket = io(SERVER_URL, {
+
+  // Read Tor preference synchronously from Zustand store (no hook needed outside React)
+  const { routeViaTor } = usePreferences.getState();
+  const relayUrl = routeViaTor && ONION_URL ? ONION_URL : SERVER_URL;
+
+  socket = io(relayUrl, {
     transports: ['websocket'],
     auth: { aegisId: identity.aegisId },
     reconnection: true,
