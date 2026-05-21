@@ -17,6 +17,7 @@ import {
 import { FormattedText } from '../components/FormattedText';
 import { AudioWaveform } from '../components/AudioWaveform';
 import { GifPicker } from '../components/GifPicker';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import Svg, { Path } from 'react-native-svg';
@@ -81,6 +82,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [replyTo, setReplyTo] = useState<StoredMessage | null>(null);
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
@@ -690,6 +692,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 quotedMsg={item.replyToId ? msgById[item.replyToId] : undefined}
                 onLongPress={() => handleLongPress(item)}
                 onViewOnce={onViewOnce}
+                onImagePress={setViewerUri}
               />
             </SwipeableMessage>
           )}
@@ -896,6 +899,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         onSelectGif={handleGifSelect}
         onSelectSticker={handleStickerSelect}
       />
+      <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
     </KeyboardAvoidingView>
     </GestureHandlerRootView>
   );
@@ -926,9 +930,10 @@ interface BubbleProps {
   quotedMsg?: StoredMessage;
   onLongPress: () => void;
   onViewOnce?: (mediaUri: string, messageId: string) => void;
+  onImagePress?: (uri: string) => void;
 }
 
-function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProps) {
+function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress }: BubbleProps) {
   const { t: i18nT } = useTranslation();
   const me = m.direction === 'out';
   const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1125,6 +1130,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProp
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         <Pressable
+          onPress={() => onImagePress?.(m.mediaUri!)}
           onLongPress={onLongPress}
           style={({ pressed }) => ({
             borderRadius: t.radius,

@@ -7,6 +7,7 @@ import {
 import { FormattedText } from '../components/FormattedText';
 import { AudioWaveform } from '../components/AudioWaveform';
 import { GifPicker } from '../components/GifPicker';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
@@ -76,6 +77,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
   const [searchActive, setSearchActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
   const flatlistRef = useRef<FlatList>(null);
   const online = isConnected();
 
@@ -310,6 +312,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
               onLongPress={() => setActionsMsg(item)}
               pollResult={pollResults[item.id]}
               onVote={(optionIndex, totalOptions) => void handleVote(item.id, optionIndex, totalOptions)}
+              onImagePress={setViewerUri}
             />
           )}
           onContentSizeChange={() => flatlistRef.current?.scrollToEnd({ animated: false })}
@@ -375,6 +378,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
         onSelectGif={handleGifSelect}
         onSelectSticker={handleStickerSelect}
       />
+      <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
       <MessageActionsSheet
         visible={!!actionsMsg}
         body={actionsMsg?.body ?? ''}
@@ -413,6 +417,7 @@ interface GroupBubbleProps {
   onLongPress: () => void;
   pollResult?: PollResult;
   onVote: (optionIndex: number, totalOptions: number) => void;
+  onImagePress?: (uri: string) => void;
 }
 
 function GroupBubble({
@@ -425,6 +430,7 @@ function GroupBubble({
   onLongPress,
   pollResult,
   onVote,
+  onImagePress,
 }: GroupBubbleProps) {
   const { t: i18nT } = useTranslation();
   const me = m.direction === 'out';
@@ -724,6 +730,7 @@ function GroupBubble({
           </View>
         ) : null}
         <Pressable
+          onPress={() => onImagePress?.(m.mediaUri!)}
           onLongPress={onLongPress}
           style={({ pressed }) => ({
             borderRadius: t.radius,
