@@ -6,16 +6,13 @@ import { AegisMark } from '../components/AegisMark';
 import { KeySpinner, ProgressBar } from '../components/AegisMark';
 import { I } from '../components/icons';
 import { PrimaryButton, GhostButton } from '../components/Button';
-
-// ---------------------------------------------------------------------------
-// Stubs — real stores and crypto will be wired by another agent
-// ---------------------------------------------------------------------------
-const identity: null = null;
-const status: 'idle' = 'idle';
+import { useIdentity } from '../store/identity';
 
 interface Props {
   onDone: () => void;
   onRestore: () => void;
+  /** Skip the welcome step and jump directly to this step. Default: 'welcome'. */
+  initialStep?: 'welcome' | 'generating' | 'show';
 }
 
 type Step = 'welcome' | 'generating' | 'show';
@@ -24,29 +21,62 @@ type Step = 'welcome' | 'generating' | 'show';
 const LOCALES = ['EN', 'IT', 'ES'] as const;
 type LocaleCode = (typeof LOCALES)[number];
 
-export function OnboardingScreen({ onDone, onRestore }: Props) {
+export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }: Props) {
   const { t } = useTheme();
-  const [step, setStep] = useState<Step>('welcome');
+  const [step, setStep] = useState<Step>(initialStep);
   const [localeIdx, setLocaleIdx] = useState(0);
   const locale = LOCALES[localeIdx];
 
+  const identity = useIdentity((s) => s.identity);
   const [fingerprint] = useState<string[]>([]);
   const [did] = useState<string | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
 
   type RegState = 'idle' | 'registering' | 'error';
   const [regState, setRegState] = useState<RegState>('idle');
   const [regError, setRegError] = useState<string | null>(null);
   const registeredRef = useRef(false);
 
-  function handleGenerate() {
+  // Track whether we've already fired the generate call so it doesn't run twice.
+  const generatingFiredRef = useRef(false);
+
+  async function handleGenerate() {
     if (step !== 'welcome') return;
     setStep('generating');
+    setGenError(null);
+    const minDelay = new Promise<void>(resolve => setTimeout(resolve, 2500));
+    try {
+      await Promise.all([useIdentity.getState().generate(), minDelay]);
+      setStep('show');
+    } catch (e) {
+      setGenError((e as Error).message ?? 'Key generation failed.');
+      await minDelay;
+      setStep('show');
+    }
   }
 
-  // Auto-transition generating → show after 10 s
+  // When initialStep='generating' (skipped welcome via Entry), auto-fire keygen once.
+  // Promise.all ensures the animation shows for at least 2.5s regardless of how fast generate() runs.
+  useEffect(() => {
+    if (initialStep === 'generating' && step === 'generating' && !generatingFiredRef.current) {
+      generatingFiredRef.current = true;
+      setGenError(null);
+      const minDelay = new Promise<void>(resolve => setTimeout(resolve, 2500));
+      void Promise.all([useIdentity.getState().generate(), minDelay])
+        .then(() => { setStep('show'); })
+        .catch((e: unknown) => {
+          setGenError((e as Error).message ?? 'Key generation failed.');
+          void minDelay.then(() => setStep('show'));
+        });
+    }
+  // Only run on mount — intentional single-fire
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Safety net: if generate() never resolves in 15 s, advance anyway
   useEffect(() => {
     if (step === 'generating') {
-      const timer = setTimeout(() => setStep('show'), 10000);
+      const timer = setTimeout(() => setStep('show'), 15000);
       return () => clearTimeout(timer);
     }
   }, [step]);
@@ -360,7 +390,24 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
         Your private key never leaves this device. Back up your identity phrase to restore access.
       </p>
 
-      {/* Error banner */}
+      {/* Key generation error banner */}
+      {genError !== null && (
+        <div
+          style={{
+            backgroundColor: '#1a0500',
+            border: '1px solid #ff8800',
+            borderRadius: 8,
+            padding: 12,
+            marginBottom: 12,
+          }}
+        >
+          <span style={{ fontFamily: t.fontMono, fontSize: 11, color: '#ffaa44', lineHeight: '16px' }}>
+            Key generation warning: {genError}. Your keys may be stored without OS-level encryption.
+          </span>
+        </div>
+      )}
+
+      {/* Registration error banner */}
       {regState === 'error' && regError !== null && (
         <div
           style={{

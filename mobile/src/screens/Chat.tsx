@@ -891,26 +891,29 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 {i18nT('chat.blockedContact')}
               </Text>
             </View>
-          ) : (contact.zeroTrust && mismatchKey) ? (
-            <View
-              style={{
-                flex: 1,
-                alignItems: 'center',
-                justifyContent: 'center',
-                paddingVertical: 14,
-                paddingHorizontal: 16,
-                backgroundColor: t.surface2,
-                borderRadius: t.radius,
-                marginHorizontal: 12,
-                marginVertical: 4,
-              }}
-            >
-              <Text style={{ fontFamily: t.font, fontSize: 13, color: t.danger, fontWeight: '500', textAlign: 'center' }}>
-                {i18nT('chat.zeroTrustBlock')}
-              </Text>
-            </View>
           ) : (
             <>
+              {/* Unverified contact warning banner — non-blocking, send always allowed */}
+              {!contact.verified && (
+                <View
+                  style={{
+                    width: '100%',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    backgroundColor: `${t.warn}18`,
+                    borderTopWidth: 1,
+                    borderTopColor: `${t.warn}44`,
+                  }}
+                >
+                  <I.Lock size={13} color={t.warn} />
+                  <Text style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.warn, lineHeight: 17 }}>
+                    {i18nT('chat.unverifiedContact', 'Contacto no verificado. Verifica su identidad para maxima seguridad.')}
+                  </Text>
+                </View>
+              )}
               {/* Reply banner */}
               {replyTo ? (
                 <View

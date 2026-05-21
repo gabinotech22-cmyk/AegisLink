@@ -86,16 +86,15 @@ let schemaPromise: Promise<void> | null = null;
 async function ensureSchema(): Promise<void> {
   if (!schemaPromise) {
     schemaPromise = (async () => {
-      await db().exec(`
-        CREATE TABLE IF NOT EXISTS identity (
+      const statements = [
+        `CREATE TABLE IF NOT EXISTS identity (
           slot                    TEXT PRIMARY KEY,
           aegis_id                TEXT NOT NULL,
           public_key_b64          TEXT NOT NULL,
           signing_public_key_b64  TEXT NOT NULL,
           created_at              INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS contacts (
+        )`,
+        `CREATE TABLE IF NOT EXISTS contacts (
           aegis_id                TEXT PRIMARY KEY,
           public_key_b64          TEXT NOT NULL,
           signing_public_key_b64  TEXT NOT NULL DEFAULT '',
@@ -111,9 +110,8 @@ async function ensureSchema(): Promise<void> {
           blocked                 INTEGER NOT NULL DEFAULT 0,
           archived                INTEGER NOT NULL DEFAULT 0,
           profile                 TEXT NOT NULL DEFAULT 'personal'
-        );
-
-        CREATE TABLE IF NOT EXISTS messages (
+        )`,
+        `CREATE TABLE IF NOT EXISTS messages (
           id              TEXT PRIMARY KEY,
           chat_id         TEXT NOT NULL,
           direction       TEXT NOT NULL,
@@ -128,15 +126,13 @@ async function ensureSchema(): Promise<void> {
           pinned          INTEGER NOT NULL DEFAULT 0,
           delivery_status TEXT NOT NULL DEFAULT 'sent',
           expires_at      INTEGER
-        );
-        CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
-
-        CREATE TABLE IF NOT EXISTS ratchet_sessions (
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at)`,
+        `CREATE TABLE IF NOT EXISTS ratchet_sessions (
           aegis_id TEXT PRIMARY KEY,
           state_json TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS groups (
+        )`,
+        `CREATE TABLE IF NOT EXISTS groups (
           id                    TEXT PRIMARY KEY,
           name                  TEXT NOT NULL,
           members               TEXT NOT NULL,
@@ -147,15 +143,13 @@ async function ensureSchema(): Promise<void> {
           moderate_new_members  INTEGER NOT NULL DEFAULT 0,
           admin_id              TEXT,
           admin_sig             TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS chat_state (
+        )`,
+        `CREATE TABLE IF NOT EXISTS chat_state (
           chat_id      TEXT PRIMARY KEY,
           draft        TEXT,
           unread_count INTEGER NOT NULL DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS call_history (
+        )`,
+        `CREATE TABLE IF NOT EXISTS call_history (
           id          TEXT PRIMARY KEY,
           contact_id  TEXT NOT NULL,
           direction   TEXT NOT NULL,
@@ -163,9 +157,12 @@ async function ensureSchema(): Promise<void> {
           status      TEXT NOT NULL,
           started_at  INTEGER NOT NULL,
           duration_s  INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_calls_contact ON call_history(contact_id, started_at);
-      `);
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_calls_contact ON call_history(contact_id, started_at)`,
+      ];
+      for (const sql of statements) {
+        await db().run(sql, []);
+      }
     })();
   }
   return schemaPromise;
@@ -223,15 +220,9 @@ export async function loadIdentity(): Promise<StoredIdentity | null> {
 export async function clearIdentity(): Promise<void> {
   await secureStorage().delete(getSecretKeySlot());
   await secureStorage().delete(getSignSecretKeySlot());
-  await db().exec(`
-    DELETE FROM identity;
-    DELETE FROM contacts;
-    DELETE FROM messages;
-    DELETE FROM ratchet_sessions;
-    DELETE FROM groups;
-    DELETE FROM chat_state;
-    DELETE FROM call_history;
-  `);
+  for (const table of ['identity', 'contacts', 'messages', 'ratchet_sessions', 'groups', 'chat_state', 'call_history']) {
+    await db().run(`DELETE FROM ${table}`, []);
+  }
 }
 
 // ─── Contacts ────────────────────────────────────────────────────────────────

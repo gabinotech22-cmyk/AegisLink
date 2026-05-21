@@ -6,7 +6,7 @@ import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
-import { TabBar, type Tab } from '../components/TabBar';
+import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
 
@@ -140,7 +140,6 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
         </Section>
       </div>
 
-      <TabBar t={t} current="settings" onChange={onTab} isWork={isWork} />
     </div>
   );
 }

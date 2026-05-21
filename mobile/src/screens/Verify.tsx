@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, Share } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -187,10 +187,38 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
             alignItems: 'center',
             gap: 10,
           })}
+          accessibilityLabel={i18nT('verify.scanPeer', "Scan a peer's QR")}
         >
           <I.QR size={18} color={t.text} />
           <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text, fontWeight: '500' }}>
             {i18nT('verify.scanPeer', "Scan a peer's QR")}
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={async () => {
+            await Share.share({
+              title: i18nT('verify.shareTitle', 'Mi contacto AegisLink'),
+              message: `${i18nT('verify.shareMessage', 'Agregame en AegisLink:')}\naegislink:v1:${identity.aegisId}:${identity.publicKeyB64}\n\n${i18nT('verify.shareId', 'O usa mi ID:')} ${identity.aegisId}`,
+            });
+          }}
+          style={({ pressed }) => ({
+            marginTop: 12,
+            backgroundColor: pressed ? t.surface2 : 'transparent',
+            borderWidth: 1,
+            borderColor: t.borderStrong,
+            borderRadius: t.radius,
+            paddingVertical: 14,
+            paddingHorizontal: 22,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+          })}
+          accessibilityLabel={i18nT('verify.shareContactLabel', 'Compartir mi contacto')}
+        >
+          <I.Forward size={18} color={t.text} />
+          <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text, fontWeight: '500' }}>
+            {i18nT('verify.shareContact', 'Compartir mi contacto')}
           </Text>
         </Pressable>
       </ScrollView>
