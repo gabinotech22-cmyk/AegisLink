@@ -345,40 +345,24 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
             <Pressable
               accessibilityLabel="Crear nueva identidad"
               onPress={() => {
-                Alert.alert(
-                  i18nT('profile.createIdentityTitle'),
-                  i18nT('profile.createIdentityDesc'),
-                  [
-                    { text: i18nT('common.cancel'), style: 'cancel' },
-                    {
-                      text: i18nT('common.add'),
-                      onPress: async () => {
-                        try {
-                          const newSlotId = await useIdentity.getState().createSlot();
-                          Alert.alert(
-                            i18nT('profile.identityCreated'),
-                            i18nT('profile.identityCreatedDesc', { slotId: newSlotId }),
-                            [
-                              { text: i18nT('common.done') },
-                              {
-                                text: i18nT('profile.switchToNew'),
-                                onPress: async () => {
-                                  try {
-                                    await useIdentity.getState().switchSlot(newSlotId);
-                                  } catch (e) {
-                                    Alert.alert(i18nT('common.error'), (e as Error).message);
-                                  }
-                                },
-                              },
-                            ]
-                          );
-                        } catch (e) {
-                          Alert.alert(i18nT('common.error'), (e as Error).message);
-                        }
+                if (!slotsList.includes('work')) {
+                  Alert.alert(
+                    i18nT('profile.activateWorkTitle'),
+                    i18nT('profile.activateWorkDesc'),
+                    [
+                      { text: i18nT('common.cancel'), style: 'cancel' },
+                      {
+                        text: i18nT('profile.activateWorkConfirm'),
+                        onPress: () => { onWorkGeneration?.(); },
                       },
-                    },
-                  ]
-                );
+                    ]
+                  );
+                } else {
+                  Alert.alert(
+                    'Modo Work ya activo',
+                    'Tu identidad Work ya está generada. Selecciona la pestaña Work para acceder a ella.',
+                  );
+                }
               }}
               style={{ paddingHorizontal: 12, paddingVertical: 8 }}
             >

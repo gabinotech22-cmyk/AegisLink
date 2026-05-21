@@ -377,7 +377,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         {/* Live Database Stats Card */}
         <View
           style={{
-            padding: 22,
+            padding: 16,
             borderWidth: 1,
             borderColor: t.borderStrong,
             borderRadius: t.radius,
@@ -385,17 +385,17 @@ export function BackupScreen({ onBack, onRestored }: Props) {
             marginBottom: 16,
           }}
         >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center', marginBottom: 16 }}>
             <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: lastBackupAt ? t.accent : t.warn, letterSpacing: 1.1 }}>{lastBackupLabel}</Text>
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim }}>{i18nT('backup.realtimeStats')}</Text>
           </View>
-          <Text style={{ fontFamily: t.fontDisplay, fontSize: 32, fontWeight: '600', letterSpacing: -0.6, color: t.text }}>
+          <Text style={{ fontFamily: t.fontDisplay, fontSize: 28, fontWeight: '600', letterSpacing: -0.6, color: t.text, flexShrink: 1 }}>
             {totalMessages.toLocaleString()} messages
           </Text>
           <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.textDim, marginTop: 2 }}>
             {i18nT('backup.dbEncrypted')}
           </Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 18, gap: 10 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 18, columnGap: 8, rowGap: 10 }}>
             <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.conversations')} val={totalConversations.toString()} /></View>
             <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.groups')} val={totalGroups.toString()} /></View>
             <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.media')} val={totalMedia.toString()} /></View>
