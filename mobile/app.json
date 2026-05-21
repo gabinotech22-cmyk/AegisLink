@@ -25,12 +25,22 @@
       },
       "bitcode": false
     },
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#5bf2b9"
+    },
     "android": {
       "package": "com.aegislink.app",
       "versionCode": 1,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "buildToolsVersion": "35.0.0",
+      "notification": {
+        "icon": "./assets/notification-icon.png",
+        "color": "#5bf2b9",
+        "androidMode": "default",
+        "androidCollapsedTitle": "AegisLink · #{unread_notifications} mensajes"
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0a0e0d"
@@ -76,7 +86,18 @@
           "microphonePermission": "Allow AegisLink to access the microphone for end-to-end encrypted calls."
         }
       ],
-      "expo-localization"
+      "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#5bf2b9",
+          "sounds": [
+            "./assets/sounds/msg_received.mp3",
+            "./assets/sounds/call_incoming.mp3"
+          ]
+        }
+      ]
     ],
     "extra": {
       "eas": {
