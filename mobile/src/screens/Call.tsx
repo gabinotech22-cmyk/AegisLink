@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, StyleSheet, StatusBar as RNStatusBar, Alert } from 'react-native';
 import { sha256 } from '@noble/hashes/sha256';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +13,7 @@ import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { acceptCall, endCall, toggleMute, toggleCamera } from '../socket/calls';
+import { useProximitySensor } from '../hooks/useProximitySensor';
 import { WORDLIST_256 } from '../crypto/wordlist';
 
 interface Props {
@@ -56,8 +57,28 @@ export function CallScreen({ onClose }: Props) {
     if (status === 'idle') onClose();
   }, [status, onClose]);
 
+  const [speakerOn, setSpeakerOn] = useState(false);
+
+  const toggleSpeaker = useCallback(async () => {
+    const next = !speakerOn;
+    setSpeakerOn(next);
+    try {
+      const { Audio } = require('expo-av') as typeof import('expo-av');
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: !next, // false = speaker, true = earpiece
+      });
+    } catch { /* no-op */ }
+  }, [speakerOn]);
+
   const isVideo = media === 'video';
   const peerColor = peer?.color ?? t.surface2;
+
+  const callActive = status === 'in-call' || status === 'connecting';
+  useProximitySensor(!isVideo && callActive);
 
   // Remote video ready (in-call + stream)
   const showRemoteVideo = isVideo && !!remoteStream && status === 'in-call';
@@ -311,6 +332,16 @@ export function CallScreen({ onClose }: Props) {
                 outlined
               />
             )}
+            <CircleBtn
+              t={t}
+              color={speakerOn ? t.accent : t.surface2}
+              onPress={() => void toggleSpeaker()}
+              icon="Speaker"
+              label={speakerOn ? i18nT('call.speakerOn', 'Speaker') : i18nT('call.speakerOff', 'Earpiece')}
+              accessibilityLabel={speakerOn ? 'Speaker: on' : 'Speaker: off'}
+              accessibilityState={{ selected: speakerOn }}
+              outlined={!speakerOn}
+            />
             <CircleBtn t={t} color={t.danger} onPress={() => endCall('hangup')} icon="Hangup" label={i18nT('call.end', 'End')} />
           </View>
         )}
@@ -356,7 +387,7 @@ function CircleBtn({
   t: Theme;
   color: string;
   onPress: () => void;
-  icon: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup';
+  icon: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker';
   label: string;
   outlined?: boolean;
   accessibilityLabel?: string;
@@ -402,10 +433,11 @@ function CircleBtn({
   );
 }
 
-function IconGlyph({ name, color }: { name: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup'; color: string }) {
+function IconGlyph({ name, color }: { name: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker'; color: string }) {
   // Inline tiny glyphs avoiding wider Icon imports.
   if (name === 'X') return <I.X size={26} color={color} />;
   if (name === 'Check') return <I.Check size={26} color={color} />;
+  if (name === 'Speaker') return <I.Volume size={22} color={color} />;
   // Use simple text glyphs for mic/video/hangup to avoid expanding the icon set further.
   const ch = name === 'Mic' ? '🎙' : name === 'Video' ? '📷' : '☎';
   return (

@@ -117,6 +117,17 @@ export async function registerForPush(identity: Identity): Promise<void> {
             if (__DEV__) console.warn('[push] mark-read action failed:', e);
           }
         }
+      } else if ((data?.type as string) === 'call_invite') {
+        // App was woken by a call push — reconnect socket so the relay can
+        // re-deliver call:invite once the authenticated socket is established.
+        try {
+          const { reconnect } = require('../socket/client') as { reconnect: () => void };
+          reconnect();
+        } catch { /* socket module not yet loaded — no-op */ }
+        // Also surface the incoming call screen if caller info is available
+        if (fromAegisId && _onOpenChat) {
+          _onOpenChat(fromAegisId);
+        }
       } else if (fromAegisId && _onOpenChat) {
         // Default tap — open chat
         _onOpenChat(fromAegisId);
@@ -128,7 +139,16 @@ export async function registerForPush(identity: Identity): Promise<void> {
     if (lastResponse) {
       const data = lastResponse.notification.request.content.data as Record<string, unknown>;
       const fromAegisId = data?.fromAegisId as string | undefined;
-      if (fromAegisId && _onOpenChat) {
+      if ((data?.type as string) === 'call_invite') {
+        // Cold-start from a call push — reconnect socket first, then navigate
+        try {
+          const { reconnect } = require('../socket/client') as { reconnect: () => void };
+          reconnect();
+        } catch { /* socket module not yet loaded — no-op */ }
+        if (fromAegisId && _onOpenChat) {
+          setTimeout(() => _onOpenChat?.(fromAegisId), 500);
+        }
+      } else if (fromAegisId && _onOpenChat) {
         setTimeout(() => _onOpenChat?.(fromAegisId), 500);
       }
     }
