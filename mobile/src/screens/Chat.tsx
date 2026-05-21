@@ -32,6 +32,8 @@ import { Avatar } from '../components/Avatar';
 import { MessageActionsSheet } from '../components/MessageActionsSheet';
 import { ForwardModal } from '../components/ForwardModal';
 import { useIdentity } from '../store/identity';
+import { wipeDatabase } from '../db/local';
+import { usePanicGesture } from '../hooks/usePanicGesture';
 import { useMessages } from '../store/messages';
 import { useTyping } from '../store/typing';
 import { useConnection } from '../store/connection';
@@ -74,6 +76,15 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
+
+  // ── Panic gesture (shake) ─────────────────────────────────────────────────
+  const handlePanicTrigger = useCallback(async () => {
+    try {
+      await wipeDatabase();
+      await useIdentity.getState().reset();
+    } catch { /* non-recoverable */ }
+  }, []);
+  usePanicGesture(handlePanicTrigger);
   // GAP 1 FIX: Read contact reactively from store so profile updates from peers
   // (name, photo, color, status) are reflected live without leaving the chat
   const contact = useContacts((s) => s.contacts.find(c => c.aegisId === initialContact.aegisId)) ?? initialContact;
