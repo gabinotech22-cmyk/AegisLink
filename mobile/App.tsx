@@ -601,6 +601,9 @@ function Shell() {
             onSwitchToPersonal={() => { pop(); setTab('home'); }}
             onSubscription={() => push({ name: 'subscription' })}
             onWorkGeneration={() => push({ name: 'workGeneration' })}
+            onNotifications={() => push({ name: 'notifs' })}
+            onLockConfig={() => push({ name: 'lockConfig' })}
+            onExport={() => push({ name: 'export' })}
           />
         );
       case 'workGeneration':
