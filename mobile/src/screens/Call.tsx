@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { View, Text, Pressable, StyleSheet, StatusBar as RNStatusBar, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, StatusBar as RNStatusBar, Alert, Modal } from 'react-native';
 import { sha256 } from '@noble/hashes/sha256';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -58,6 +58,7 @@ export function CallScreen({ onClose }: Props) {
   }, [status, onClose]);
 
   const [speakerOn, setSpeakerOn] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const toggleSpeaker = useCallback(async () => {
     const next = !speakerOn;
@@ -292,6 +293,93 @@ export function CallScreen({ onClose }: Props) {
         </View>
       ) : null}
 
+      {/* More options bottom sheet */}
+      <Modal
+        transparent
+        visible={moreOpen}
+        animationType="slide"
+        onRequestClose={() => setMoreOpen(false)}
+      >
+        <Pressable
+          onPress={() => setMoreOpen(false)}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation?.()}
+            style={{
+              backgroundColor: t.surface,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              borderTopWidth: 1,
+              borderColor: t.border,
+              paddingTop: 12,
+              paddingBottom: insets.bottom + 20,
+            }}
+          >
+            {/* Handle */}
+            <View style={{ alignItems: 'center', paddingBottom: 14 }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.border }} />
+            </View>
+
+            {/* Option: Teclado */}
+            <Pressable
+              onPress={() => { setMoreOpen(false); /* keypad TODO */ }}
+              accessibilityRole="button"
+              accessibilityLabel={i18nT('call.keypad', 'Teclado')}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 16,
+                paddingHorizontal: 24, paddingVertical: 16,
+                backgroundColor: pressed ? t.surface2 : 'transparent',
+              })}
+            >
+              <Text style={{ fontSize: 18, color: t.text, letterSpacing: 3 }}>···</Text>
+              <Text style={{ fontFamily: t.font, fontSize: 16, color: t.text }}>
+                {i18nT('call.keypad', 'Teclado')}
+              </Text>
+            </Pressable>
+
+            {/* Option: Añadir al grupo */}
+            <Pressable
+              onPress={() => { setMoreOpen(false); /* group add TODO */ }}
+              accessibilityRole="button"
+              accessibilityLabel={i18nT('call.addToGroup', 'Añadir al grupo')}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 16,
+                paddingHorizontal: 24, paddingVertical: 16,
+                backgroundColor: pressed ? t.surface2 : 'transparent',
+              })}
+            >
+              <I.Users size={22} color={t.text} />
+              <Text style={{ fontFamily: t.font, fontSize: 16, color: t.text }}>
+                {i18nT('call.addToGroup', 'Añadir al grupo')}
+              </Text>
+            </Pressable>
+
+            {/* Option: Verificar huella */}
+            <Pressable
+              onPress={() => { setMoreOpen(false); /* show fingerprint */ }}
+              accessibilityRole="button"
+              accessibilityLabel={i18nT('call.verifyFingerprint', 'Verificar huella')}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 16,
+                paddingHorizontal: 24, paddingVertical: 16,
+                backgroundColor: pressed ? t.surface2 : 'transparent',
+              })}
+            >
+              <I.Shield size={22} color={t.accent} />
+              <View>
+                <Text style={{ fontFamily: t.font, fontSize: 16, color: t.text }}>
+                  {i18nT('call.verifyFingerprint', 'Verificar huella')}
+                </Text>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, marginTop: 2 }}>
+                  {fingerprintWords.slice(0, 4).join(' · ')}
+                </Text>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Bottom controls */}
       <View
         style={{
@@ -342,6 +430,14 @@ export function CallScreen({ onClose }: Props) {
               accessibilityState={{ selected: speakerOn }}
               outlined={!speakerOn}
             />
+            <CircleBtn
+              t={t}
+              color={t.surface2}
+              onPress={() => setMoreOpen(true)}
+              icon="More"
+              label={i18nT('call.more', 'Más')}
+              outlined
+            />
             <CircleBtn t={t} color={t.danger} onPress={() => endCall('hangup')} icon="Hangup" label={i18nT('call.end', 'End')} />
           </View>
         )}
@@ -387,7 +483,7 @@ function CircleBtn({
   t: Theme;
   color: string;
   onPress: () => void;
-  icon: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker';
+  icon: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker' | 'More';
   label: string;
   outlined?: boolean;
   accessibilityLabel?: string;
@@ -433,8 +529,9 @@ function CircleBtn({
   );
 }
 
-function IconGlyph({ name, color }: { name: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker'; color: string }) {
+function IconGlyph({ name, color }: { name: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker' | 'More'; color: string }) {
   // Inline tiny glyphs avoiding wider Icon imports.
+  if (name === 'More') return <I.More size={22} color={color} />;
   if (name === 'X') return <I.X size={26} color={color} />;
   if (name === 'Check') return <I.Check size={26} color={color} />;
   if (name === 'Speaker') return <I.Volume size={22} color={color} />;
