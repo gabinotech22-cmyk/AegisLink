@@ -85,8 +85,6 @@ export function CallScreen({ onClose }: Props) {
   const showRemoteVideo = isVideo && !!remoteStream && status === 'in-call';
   // Local video fills background while waiting for remote (pre-connect)
   const showLocalFullscreen = isVideo && !!localStream && !cameraOff && !showRemoteVideo;
-  // Local PiP: once remote is visible
-  const showLocalPiP = isVideo && !!localStream && !cameraOff && showRemoteVideo;
 
   return (
     <View style={[styles.screen, { backgroundColor: '#000' }]}>
@@ -119,55 +117,6 @@ export function CallScreen({ onClose }: Props) {
         />
       )}
 
-      {/* ── VIDEO: local PiP overlay (only when remote fills screen) ── */}
-      {showLocalPiP && (
-        <View
-          style={{
-            position: 'absolute',
-            top: insets.top + 12,
-            right: 12,
-            width: 90,
-            height: 130,
-            borderRadius: 10,
-            overflow: 'hidden',
-            backgroundColor: t.surface,
-            borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.15)',
-            zIndex: 10,
-          }}
-        >
-          {RTCView && (
-            <RTCView
-              style={StyleSheet.absoluteFillObject}
-              streamURL={(localStream as unknown as { toURL: () => string }).toURL()}
-              objectFit="cover"
-              mirror
-            />
-          )}
-        </View>
-      )}
-
-      {/* ── VIDEO cameraOff: show avatar placeholder in PiP area ── */}
-      {isVideo && cameraOff && (
-        <View
-          style={{
-            position: 'absolute',
-            top: insets.top + 12,
-            right: 12,
-            width: 90,
-            height: 130,
-            borderRadius: 10,
-            backgroundColor: t.surface2,
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.1)',
-            zIndex: 10,
-          }}
-        >
-          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 0.6 }}>CAMERA OFF</Text>
-        </View>
-      )}
 
       {/* Top: peer info (left) + self-preview (right) — matches JSX design */}
       <View
@@ -284,7 +233,7 @@ export function CallScreen({ onClose }: Props) {
       </View>
 
       {/* Flip camera button for video — bottom-left overlay */}
-      {(showLocalFullscreen || showLocalPiP) ? (
+      {(isVideo && !!localStream) ? (
         <Pressable
           onPress={() => {
             try {
