@@ -1,0 +1,12 @@
+AegisLink Desktop — End User License Agreement
+
+Copyright (c) 2026 AegisLink. All rights reserved.
+
+AegisLink is privacy-first, end-to-end encrypted messaging software.
+Your keys never leave your device. No metadata is collected or stored.
+
+Permission is granted to install and use this software for personal
+and commercial communication. Redistribution of this installer without
+explicit permission from AegisLink is prohibited.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
