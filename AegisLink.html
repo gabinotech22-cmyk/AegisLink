@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Vault</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&family=EB+Garamond:wght@400;500;600&display=swap"/>
+  <style>
+    html, body { margin: 0; padding: 0; background: #efece4; }
+    body { font-family: 'Geist', system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="ios-frame.jsx"></script>
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="theme.jsx"></script>
+  <script type="text/babel" src="icons.jsx"></script>
+  <script type="text/babel" src="logo.jsx"></script>
+  <script type="text/babel" src="screens.jsx"></script>
+  <script type="text/babel" src="screens-extra.jsx"></script>
+  <script type="text/babel" src="screens-phase2.jsx"></script>
+  <script type="text/babel" src="screens-states.jsx"></script>
+  <script type="text/babel" src="screens-empty.jsx"></script>
+  <script type="text/babel" src="phone.jsx"></script>
+  <script type="text/babel" src="brand.jsx"></script>
+  <script type="text/babel" src="enterprise.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { DesignCanvas, DCSection, DCArtboard,
+            BrandSheet, Phone, WorkDashboard,
+            VAULT, VAULT_LIGHT,
+            TweaksPanel, useTweaks, TweakSection, TweakRadio,
+            TweakColor, TweakSelect } = window;
+
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "accent": "#5bf2b9",
+      "density": "regular",
+      "fontPair": "grotesk-mono"
+    }/*EDITMODE-END*/;
+
+    const FONT_PAIRS = {
+      'grotesk-mono': { font: '"Space Grotesk", sans-serif', mono: '"JetBrains Mono", monospace', display: '"Space Grotesk", sans-serif' },
+      'geist-mono':   { font: '"Geist", sans-serif',         mono: '"Geist Mono", monospace',     display: '"Geist", sans-serif' },
+      'all-mono':     { font: '"JetBrains Mono", monospace', mono: '"JetBrains Mono", monospace', display: '"JetBrains Mono", monospace' },
+    };
+
+    function applyTweaks(base, accent, fonts) {
+      const f = FONT_PAIRS[fonts] || FONT_PAIRS['grotesk-mono'];
+      return {
+        ...base,
+        accent,
+        bubbleOut: base.dark ? accent : accent,
+        logoStroke: accent,
+        font: f.font,
+        fontMono: f.mono,
+        fontDisplay: f.display,
+      };
+    }
+
+    function App() {
+      const [tw, setTw] = useTweaks(TWEAK_DEFAULTS);
+      const vt  = React.useMemo(() => applyTweaks(VAULT,       tw.accent, tw.fontPair), [tw.accent, tw.fontPair]);
+      // Light variant: don't override accent (the dark mint doesn't read on light)
+      const vtL = React.useMemo(() => applyTweaks(VAULT_LIGHT, VAULT_LIGHT.accent, tw.fontPair), [tw.fontPair]);
+
+      const PH = (p) => <Phone t={vt} density={tw.density} {...p}/>;
+
+      return (
+        <>
+          <DesignCanvas>
+
+            <DCSection id="intro" title="DIRECTION · VAULT" subtitle="Comunicación segura, anónima, sin metadatos. Cripto · Web3.">
+              <DCArtboard id="brief" label="Brief" width={760} height={460}>
+                <Brief vt={vt}/>
+              </DCArtboard>
+            </DCSection>
+
+            <DCSection id="identity" title="01 · Identidad" subtitle="Marca, paleta, tipografía, principios — dark + light en el mismo sistema.">
+              <DCArtboard id="brand-dark"  label="Vault · Dark"  width={720} height={920}>
+                <BrandSheet t={vt}/>
+              </DCArtboard>
+              <DCArtboard id="brand-light" label="Vault · Light" width={720} height={920}>
+                <BrandSheet t={vtL}/>
+              </DCArtboard>
+            </DCSection>
+
+            <DCSection id="onboarding" title="02 · Onboarding anónimo" subtitle="Sin teléfono ni email. Llave generada en el dispositivo.">
+              <DCArtboard id="onb" label="Generar identidad · 3 pasos" width={372} height={808}>
+                {PH({ initial: 'onboarding' })}
+              </DCArtboard>
+            </DCSection>
+
+            <DCSection id="home-search" title="03 · Inicio + búsqueda" subtitle="Lista de chats, modo claro y búsqueda global con filtros.">
+              <DCArtboard id="home"        label="Home · Dark"   width={372} height={808}>{PH({ initial: 'home' })}</DCArtboard>
+              <DCArtboard id="home-light"  label="Home · Light"  width={372} height={808}>
+                <Phone t={vtL} initial="home" density={tw.density}/>
+              </DCArtboard>
+              <DCArtboard id="search"      label="Búsqueda global" width={372} height={808}>{PH({ initial: 'search' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="chat-flow" title="04 · Conversación + adjuntos" subtitle="Chat 1:1, sheet de adjuntos, ver-una-vez, programados, efímeros.">
+              <DCArtboard id="chat"      label="Chat 1:1"        width={372} height={808}>{PH({ initial: 'chat' })}</DCArtboard>
+              <DCArtboard id="attach"    label="Adjuntar (sheet)" width={372} height={808}>{PH({ initial: 'attach' })}</DCArtboard>
+              <DCArtboard id="viewonce"  label="Ver una vez (recibir)"     width={372} height={808}>{PH({ initial: 'viewonce' })}</DCArtboard>
+              <DCArtboard id="viewoncesend" label="Ver una vez (enviar)" width={372} height={808}>{PH({ initial: 'viewoncesend' })}</DCArtboard>
+              <DCArtboard id="ephem"     label="Mensajes que se queman" width={372} height={808}>{PH({ initial: 'ephemeral' })}</DCArtboard>
+              <DCArtboard id="sched"     label="Programados"      width={372} height={808}>{PH({ initial: 'scheduled' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="location" title="05 · Ubicación temporal" subtitle="Compartir cifrada, con duración explícita y auto-borrado.">
+              <DCArtboard id="loc" label="Compartir ubicación" width={372} height={808}>{PH({ initial: 'location' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="verify" title="06 · Verificación + alerta MITM" subtitle="QR + 8 palabras. Cambio de clave = bloqueo del chat.">
+              <DCArtboard id="verify"  label="Verify por QR + palabras"  width={372} height={808}>{PH({ initial: 'verify' })}</DCArtboard>
+              <DCArtboard id="contact" label="Contacto · alerta de clave" width={372} height={808}>{PH({ initial: 'contact' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="calls" title="07 · Llamadas cifradas" subtitle="Entrante full-screen, activa con fingerprint en vivo.">
+              <DCArtboard id="incoming" label="Llamada entrante" width={372} height={808}>{PH({ initial: 'incoming' })}</DCArtboard>
+              <DCArtboard id="call"     label="Llamada activa"   width={372} height={808}>{PH({ initial: 'call' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="groups-all" title="08 · Grupos" subtitle="Lista, info con roles (admin/mod/member), votación anónima.">
+              <DCArtboard id="groups"     label="Grupos"            width={372} height={808}>{PH({ initial: 'groups' })}</DCArtboard>
+              <DCArtboard id="groupadmin" label="Group info · roles" width={372} height={808}>{PH({ initial: 'groupadmin' })}</DCArtboard>
+              <DCArtboard id="poll"       label="Encuesta anónima"  width={372} height={808}>{PH({ initial: 'poll' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="profile-identity" title="09 · Tu identidad + dispositivos" subtitle="Múltiples perfiles personal/trabajo. Dispositivos revocables.">
+              <DCArtboard id="profile" label="Profile + identidades múltiples" width={372} height={808}>{PH({ initial: 'profile' })}</DCArtboard>
+              <DCArtboard id="devices" label="Dispositivos vinculados"        width={372} height={808}>{PH({ initial: 'devices' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="privacy-all" title="10 · Privacidad, alertas, datos" subtitle="Ajustes, notificaciones, exportación + eliminar cuenta.">
+              <DCArtboard id="settings" label="Privacy settings"   width={372} height={808}>{PH({ initial: 'settings' })}</DCArtboard>
+              <DCArtboard id="notifs"   label="Notificaciones"     width={372} height={808}>{PH({ initial: 'notifs' })}</DCArtboard>
+              <DCArtboard id="export"   label="Tus datos · GDPR"   width={372} height={808}>{PH({ initial: 'export' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="security" title="11 · Seguridad — bloqueo, pánico, backup" subtitle="Face ID, gesto de pánico con PIN señuelo, recovery phrase.">
+              <DCArtboard id="lock-config" label="Configuración bloqueo" width={372} height={808}>{PH({ initial: 'lockConfig' })}</DCArtboard>
+              <DCArtboard id="lock"   label="App lock · Face ID"   width={372} height={808}>{PH({ initial: 'lock' })}</DCArtboard>
+              <DCArtboard id="panic"  label="Modo pánico"          width={372} height={808}>{PH({ initial: 'panic' })}</DCArtboard>
+              <DCArtboard id="backup" label="Backup cifrado"       width={372} height={808}>{PH({ initial: 'backup' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="states" title="12 · Estados de red y errores" subtitle="Offline, mensaje fallido, en cola, sin acceso a relays.">
+              <DCArtboard id="chat-offline" label="Chat sin conexión · failed + queued" width={372} height={808}>{PH({ initial: 'offline' })}</DCArtboard>
+              <DCArtboard id="net-error"    label="Sin relays accesibles" width={372} height={808}>{PH({ initial: 'netError' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="empty" title="13 · Empty states + primer uso" subtitle="Lo que ve un usuario nuevo. Donde la mayoría de apps pierden al usuario.">
+              <DCArtboard id="empty-home"   label="Home vacío · post-onboarding"  width={372} height={808}>{PH({ initial: 'emptyHome' })}</DCArtboard>
+              <DCArtboard id="invite-add"   label="Añadir primer contacto · 3 vías" width={372} height={808}>{PH({ initial: 'inviteAdd' })}</DCArtboard>
+              <DCArtboard id="first-contact" label="Verificado · success state"   width={372} height={808}>{PH({ initial: 'firstContact' })}</DCArtboard>
+              <DCArtboard id="empty-groups" label="Groups vacío"                  width={372} height={808}>{PH({ initial: 'emptyGroups' })}</DCArtboard>
+            </DCSection>
+
+            <DCSection id="work" title="14 · AegisLink Work — panel admin" subtitle="Versión empresarial. Métricas sin metadatos de conversación.">
+              <DCArtboard id="work-dark"  label="Work · Dark"  width={1280} height={820}>
+                <WorkDashboard t={vt}/>
+              </DCArtboard>
+              <DCArtboard id="work-light" label="Work · Light" width={1280} height={820}>
+                <WorkDashboard t={vtL}/>
+              </DCArtboard>
+            </DCSection>
+
+          </DesignCanvas>
+
+          <TweaksPanel title="Tweaks">
+            <TweakSection label="Densidad de listas"/>
+            <TweakRadio label="Modo"
+              value={tw.density}
+              options={['compact', 'regular', 'comfy']}
+              onChange={(v) => setTw('density', v)}/>
+
+            <TweakSection label="Acento de marca (dark)"/>
+            <TweakColor label="Color"
+              value={tw.accent}
+              options={['#5bf2b9', '#7c5cff', '#f0c674', '#67e8f9', '#ff8b95']}
+              onChange={(v) => setTw('accent', v)}/>
+
+            <TweakSection label="Pareja tipográfica"/>
+            <TweakSelect label="Tipos"
+              value={tw.fontPair}
+              options={[
+                { value: 'grotesk-mono', label: 'Space Grotesk + JetBrains' },
+                { value: 'geist-mono',   label: 'Geist + Geist Mono' },
+                { value: 'all-mono',     label: 'Todo mono (terminal)' },
+              ]}
+              onChange={(v) => setTw('fontPair', v)}/>
+          </TweaksPanel>
+        </>
+      );
+    }
+
+    function Brief({ vt }) {
+      return (
+        <div style={{
+          width: 760, padding: '48px 56px', background: '#fff',
+          color: '#1a1a1a', fontFamily: '"Geist", sans-serif',
+          minHeight: 460, display: 'flex', flexDirection: 'column', gap: 18,
+        }}>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+          }}>
+            <div style={{
+              fontFamily: '"JetBrains Mono", monospace', fontSize: 11,
+              letterSpacing: '0.1em', color: '#888',
+            }}>BRIEF · 18.05.2026 · ES · v2</div>
+            <div style={{
+              fontFamily: '"JetBrains Mono", monospace', fontSize: 11,
+              letterSpacing: '0.1em', color: vt.accent,
+              padding: '4px 10px', border: `1px solid ${vt.accent}`,
+              borderRadius: 99,
+            }}>● DIRECCIÓN ÚNICA · VAULT</div>
+          </div>
+
+          <div style={{
+            fontFamily: '"EB Garamond", Garamond, serif', fontSize: 80, lineHeight: 0.95,
+            letterSpacing: '-0.01em', fontWeight: 500, marginTop: 8,
+          }}>AegisLink</div>
+
+          <div style={{ fontSize: 17, lineHeight: 1.5, color: '#444', maxWidth: 600 }}>
+            Mensajería cifrada de extremo a extremo, anónima por defecto,
+            sin metadatos. Dirección visual: <b>Vault</b> — cripto, terminal afinada,
+            menta sobre negro. Disponible en claro y oscuro desde dentro de la app.
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginTop: 12 }}>
+            {[
+              { n: '24', l: 'pantallas\nnavegables' },
+              { n: '2',  l: 'modos\nclaro + oscuro' },
+              { n: '0',  l: 'metadatos\nguardados' },
+              { n: '1',  l: 'identidad\nde marca' },
+            ].map(s => (
+              <div key={s.l} style={{
+                padding: '14px 16px', background: '#fafaf6',
+                border: '1px solid #e5e2da', borderRadius: 10,
+              }}>
+                <div style={{
+                  fontFamily: '"EB Garamond", serif', fontSize: 44, fontWeight: 500,
+                  letterSpacing: '-0.02em', lineHeight: 1, color: vt.accent === '#5bf2b9' ? '#0d8f5f' : vt.accent,
+                }}>{s.n}</div>
+                <div style={{
+                  fontFamily: '"JetBrains Mono", monospace', fontSize: 10,
+                  letterSpacing: '0.06em', color: '#666', marginTop: 8,
+                  whiteSpace: 'pre-line', lineHeight: 1.3,
+                }}>{s.l.toUpperCase()}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{
+            marginTop: 'auto', paddingTop: 16,
+            borderTop: '1px solid #eee', display: 'flex', gap: 14,
+            fontFamily: '"JetBrains Mono", monospace', fontSize: 11, color: '#888',
+            letterSpacing: '0.04em',
+          }}>
+            <span>12 SECCIONES</span><span>·</span>
+            <span>CLICKABLE iOS</span><span>·</span>
+            <span>TWEAKS EN BARRA SUPERIOR ▸</span>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>

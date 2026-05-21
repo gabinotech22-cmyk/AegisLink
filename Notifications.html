@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Notifications</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:wght@400;500;600&display=swap"/>
+  <style>
+    :root {
+      --bg: #07090a;
+      --surface: #11181a;
+      --text: #e8f0ec;
+      --dim: rgba(232,240,236,0.62);
+      --faint: rgba(232,240,236,0.36);
+      --accent: #5bf2b9;
+      --border: rgba(255,255,255,0.10);
+      --danger: #ff6b6b;
+      --warn: #f0c674;
+      --serif: 'EB Garamond', Garamond, serif;
+      --sans: 'Space Grotesk', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+                 font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+    .page { max-width: 1280px; margin: 0 auto; padding: 64px 56px 120px; }
+    .head { padding-bottom: 24px; border-bottom: 1px solid var(--border);
+            margin-bottom: 48px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .head .l { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+              color: var(--faint); margin-bottom: 8px; text-transform: uppercase; }
+    .head h1 { font-family: var(--serif); font-weight: 500; font-size: 72px;
+               margin: 0; letter-spacing: -0.01em; line-height: 0.95; }
+    .head .r { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+               color: var(--faint); text-transform: uppercase; }
+    h2 { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
+         color: var(--faint); text-transform: uppercase; margin: 0 0 22px; }
+
+    .lead { font-size: 18px; color: var(--dim); max-width: 720px; margin: -24px 0 56px;
+            line-height: 1.5; }
+    .lead em { font-style: italic; color: var(--accent); }
+
+    .section { margin-bottom: 72px; }
+    .cell { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+    .cap { font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+           color: var(--faint); text-transform: uppercase; }
+    .cap b { color: var(--text); font-weight: 600; }
+
+    /* ── iOS Lock screen ──────────────────────────── */
+    .ios-lock {
+      width: 380px; height: 740px;
+      border-radius: 50px; padding: 12px;
+      background: linear-gradient(180deg, #11181a, #06090a);
+      box-shadow: 0 40px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+    }
+    .ios-lock .screen {
+      width: 100%; height: 100%;
+      border-radius: 40px;
+      overflow: hidden;
+      position: relative;
+      background:
+        radial-gradient(80% 60% at 30% 20%, #1c2a3a, #0a0e14 70%),
+        linear-gradient(180deg, #0a0e14, #04060a);
+    }
+    .ios-lock .notch {
+      position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+      width: 110px; height: 28px; background: #000; border-radius: 20px; z-index: 2;
+    }
+    /* time */
+    .lock-time {
+      position: absolute; top: 70px; left: 0; right: 0; text-align: center;
+      color: #fff; font-family: var(--sans); font-weight: 200;
+      font-size: 96px; line-height: 1; letter-spacing: -0.04em;
+    }
+    .lock-date {
+      position: absolute; top: 50px; left: 0; right: 0; text-align: center;
+      color: #fff; font-family: var(--sans); font-weight: 500; font-size: 15px;
+      opacity: 0.9;
+    }
+    .lock-flashlight, .lock-cam {
+      position: absolute; bottom: 60px; width: 50px; height: 50px;
+      background: rgba(0,0,0,0.4); border-radius: 50%;
+      backdrop-filter: blur(10px);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+    }
+    .lock-flashlight { left: 26px; }
+    .lock-cam { right: 26px; }
+    .lock-bar {
+      position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+      width: 130px; height: 5px; background: rgba(255,255,255,0.7); border-radius: 99px;
+    }
+    /* notification */
+    .lock-notif {
+      position: absolute; left: 10px; right: 10px;
+      background: rgba(40,42,48,0.62);
+      backdrop-filter: blur(18px) saturate(180%);
+      -webkit-backdrop-filter: blur(18px) saturate(180%);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 12px;
+      display: flex; gap: 10px; align-items: flex-start;
+      color: #fff;
+    }
+    .lock-notif .ic {
+      width: 38px; height: 38px; border-radius: 9px;
+      background: radial-gradient(140% 110% at 30% 20%, #1a2326 0%, #06090a 70%);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .lock-notif .body { flex: 1; min-width: 0; }
+    .lock-notif .ttl { display: flex; justify-content: space-between; align-items: baseline; }
+    .lock-notif .ttl b { font-family: var(--sans); font-weight: 600; font-size: 14px; }
+    .lock-notif .ttl span { font-family: var(--sans); font-size: 11px; opacity: 0.7; }
+    .lock-notif .from { font-family: var(--sans); font-size: 14px; font-weight: 600; margin-top: 2px; }
+    .lock-notif .from.mono { font-family: var(--mono); font-size: 13px; }
+    .lock-notif .msg { font-family: var(--sans); font-size: 13.5px;
+                       margin-top: 2px; line-height: 1.35; }
+    .lock-notif .e2ee {
+      font-family: var(--mono); font-size: 9px; color: #5bf2b9;
+      letter-spacing: 0.06em; padding: 1px 6px;
+      border: 1px solid #5bf2b9; border-radius: 99px;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .lock-notif .e2ee::before {
+      content: ''; width: 4px; height: 4px; border-radius: 50%; background: #5bf2b9;
+    }
+    .lock-notif.hidden .msg { color: rgba(255,255,255,0.5); font-style: italic; }
+    .lock-notif.group .ic { background: radial-gradient(140% 110% at 30% 20%, #f59e0b22 0%, #06090a 80%); color: #f59e0b; }
+
+    /* iOS banner (top notif while in-app) */
+    .ios-banner {
+      width: 380px;
+      background: rgba(40,42,48,0.84);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 22px;
+      padding: 12px 14px;
+      display: flex; gap: 10px; align-items: flex-start;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      color: #fff;
+    }
+
+    /* iOS small status bar with badge */
+    .ios-app-icon-badge {
+      width: 80px; height: 80px;
+      border-radius: 18px;
+      background: radial-gradient(140% 110% at 30% 20%, #1a2326 0%, #06090a 70%);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .ios-app-icon-badge::after {
+      content: '3';
+      position: absolute; top: -6px; right: -6px;
+      min-width: 26px; height: 26px;
+      background: #ff3b30; color: #fff;
+      border-radius: 13px; padding: 0 8px;
+      font-family: var(--sans); font-weight: 600; font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      border: 2.5px solid #0a0e14;
+    }
+
+    /* ── Android shade ────────────────────────────── */
+    .andr {
+      width: 380px;
+      border-radius: 28px;
+      background: #1a1a1d;
+      padding: 14px 12px 16px;
+      box-shadow: 0 30px 70px rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    .andr .row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0 10px 12px;
+      font-family: var(--mono); font-size: 11px; color: rgba(255,255,255,0.6);
+    }
+    .andr .quick {
+      display: flex; justify-content: space-around; padding: 10px 4px 18px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .andr .q {
+      width: 44px; height: 44px; border-radius: 22px;
+      background: #3a3d44; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .andr .q.on { background: #5bf2b9; color: #06231a; }
+    .andr-notif {
+      margin-top: 10px;
+      background: #2a2c33;
+      border-radius: 18px;
+      padding: 12px 14px;
+      display: flex; gap: 12px; align-items: flex-start;
+      color: #fff;
+    }
+    .andr-notif .ic-wrap {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: radial-gradient(140% 110% at 30% 20%, #1a2326 0%, #06090a 70%);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .andr-notif .body { flex: 1; min-width: 0; }
+    .andr-notif .hd { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+    .andr-notif .hd .app { color: rgba(255,255,255,0.7); }
+    .andr-notif .hd .dot { width: 3px; height: 3px; background: rgba(255,255,255,0.4); border-radius: 50%; }
+    .andr-notif .hd .ago { color: rgba(255,255,255,0.5); }
+    .andr-notif .from { font-family: var(--sans); font-weight: 600; font-size: 14px; margin-top: 2px; }
+    .andr-notif .from.mono { font-family: var(--mono); font-size: 13px; }
+    .andr-notif .msg { font-size: 13.5px; color: rgba(255,255,255,0.85); margin-top: 2px; line-height: 1.35; }
+    .andr-notif .acts {
+      display: flex; gap: 4px; margin-top: 10px;
+    }
+    .andr-notif .act { padding: 7px 14px; border-radius: 99px;
+                       background: transparent; color: #5bf2b9;
+                       font-family: var(--sans); font-weight: 600; font-size: 12.5px; }
+    .andr-notif .act:hover { background: rgba(91,242,185,0.1); }
+
+    /* ── Watch ───────────────────────────────────── */
+    .watch {
+      width: 200px; height: 240px;
+      border-radius: 40px;
+      padding: 8px;
+      background: #1a1a1d;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+    }
+    .watch .face {
+      width: 100%; height: 100%; border-radius: 32px;
+      background: #000; overflow: hidden;
+      position: relative; padding: 14px 12px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .watch .hd {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--sans); font-size: 11px;
+      padding-bottom: 4px;
+    }
+    .watch .hd .nm { color: #5bf2b9; font-weight: 600; font-size: 11px; }
+    .watch .hd .t { margin-left: auto; color: rgba(255,255,255,0.5); font-size: 10px; }
+    .watch .from { font-family: var(--mono); font-size: 11px; color: rgba(255,255,255,0.85); }
+    .watch .msg { font-family: var(--sans); font-size: 12.5px; color: #fff; line-height: 1.35; }
+    .watch .acts { margin-top: auto; display: flex; gap: 6px; }
+    .watch .acts .a { flex: 1; padding: 6px 0; border-radius: 99px;
+                      background: #2a2c33; color: #fff;
+                      font-family: var(--sans); font-size: 10px; text-align: center; }
+    .watch .acts .a.ok { background: #5bf2b9; color: #06231a; font-weight: 600; }
+
+    /* ── macOS notif ─────────────────────────────── */
+    .mac {
+      width: 360px;
+      background: rgba(36,36,38,0.85);
+      backdrop-filter: blur(24px) saturate(160%);
+      border: 0.5px solid rgba(255,255,255,0.12);
+      border-radius: 14px;
+      padding: 12px 14px;
+      display: flex; gap: 10px; align-items: flex-start;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+      color: #fff;
+    }
+    .mac .ic-wrap {
+      width: 36px; height: 36px; border-radius: 9px;
+      background: radial-gradient(140% 110% at 30% 20%, #1a2326 0%, #06090a 70%);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .mac .hd { display: flex; gap: 6px; align-items: center;
+               font-family: var(--sans); font-size: 12px;
+               color: rgba(255,255,255,0.7); }
+    .mac .from { font-family: var(--sans); font-weight: 600; font-size: 14px;
+                 color: #fff; margin-top: 2px; }
+    .mac .msg { font-size: 13px; color: rgba(255,255,255,0.85);
+                margin-top: 2px; line-height: 1.4; }
+
+    /* Note callouts */
+    .note {
+      padding: 14px 18px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 12px;
+      font-size: 14px; color: var(--dim); line-height: 1.5;
+      max-width: 380px;
+    }
+    .note b { color: var(--text); font-weight: 600; }
+    .note .em { color: var(--accent); font-weight: 600; font-style: italic; }
+
+    /* Side-by-side row */
+    .row-cells { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <div class="head">
+      <div>
+        <div class="l">brand · push & lock</div>
+        <h1>Notificaciones</h1>
+      </div>
+      <span class="r">iOS · ANDROID · WATCH · macOS</span>
+    </div>
+
+    <p class="lead">
+      Las notificaciones son <em>donde se filtra la mayoría de las apps de mensajería privada</em>.
+      AegisLink lo trata como parte del producto: cifrado mostrado siempre, contenido
+      opcional, badge específico para E2EE, sin previsualización para los push sensibles.
+    </p>
+
+    <!-- ─── iOS LOCK SCREEN ─── -->
+    <section class="section">
+      <h2>01 · iOS · pantalla bloqueada · Dynamic Island</h2>
+      <div class="row-cells">
+
+        <!-- Visible content -->
+        <div class="cell">
+          <div class="ios-lock">
+            <div class="screen">
+              <div class="notch"></div>
+              <div class="lock-date">jueves 14 de mayo</div>
+              <div class="lock-time">9:41</div>
+
+              <!-- Two notifs stacked -->
+              <div class="lock-notif" style="top: 280px;">
+                <div class="ic">
+                  <svg width="22" height="22" viewBox="0 0 40 40" fill="none">
+                    <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+                    <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+                    <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+                  </svg>
+                </div>
+                <div class="body">
+                  <div class="ttl"><b>AegisLink</b><span>hace 2 min</span></div>
+                  <div class="from mono">satoshi.eth</div>
+                  <div class="msg">Bridge confirmed. Sending the tx hash now.</div>
+                  <div style="margin-top: 6px;"><span class="e2ee">E2EE</span></div>
+                </div>
+              </div>
+
+              <div class="lock-notif" style="top: 416px; opacity: 0.7; transform: scale(0.95);">
+                <div class="ic">
+                  <svg width="22" height="22" viewBox="0 0 40 40" fill="none">
+                    <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+                    <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+                  </svg>
+                </div>
+                <div class="body">
+                  <div class="ttl"><b>AegisLink</b><span>hace 14 min</span></div>
+                  <div class="msg" style="opacity: 0.8;">2 mensajes más</div>
+                </div>
+              </div>
+
+              <div class="lock-flashlight">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M9 2h6l-1 4-1 16-1 2-1-2-1-16z"/></svg>
+              </div>
+              <div class="lock-cam">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
+              </div>
+              <div class="lock-bar"></div>
+            </div>
+          </div>
+          <div class="cap"><b>Contenido visible</b> · default · señal E2EE arriba</div>
+        </div>
+
+        <!-- Hidden content -->
+        <div class="cell">
+          <div class="ios-lock">
+            <div class="screen">
+              <div class="notch"></div>
+              <div class="lock-date">jueves 14 de mayo</div>
+              <div class="lock-time">9:41</div>
+
+              <div class="lock-notif hidden" style="top: 280px;">
+                <div class="ic">
+                  <svg width="22" height="22" viewBox="0 0 40 40" fill="none">
+                    <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+                    <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+                  </svg>
+                </div>
+                <div class="body">
+                  <div class="ttl"><b>AegisLink</b><span>hace 2 min</span></div>
+                  <div class="msg">3 nuevos mensajes cifrados.</div>
+                  <div style="margin-top: 6px;"><span class="e2ee">E2EE</span></div>
+                </div>
+              </div>
+
+              <div class="lock-notif hidden group" style="top: 386px;">
+                <div class="ic">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                </div>
+                <div class="body">
+                  <div class="ttl"><b>AegisLink · DAO · Treasury</b><span>5 min</span></div>
+                  <div class="msg">1 mensaje en un grupo.</div>
+                </div>
+              </div>
+
+              <div class="lock-flashlight">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M9 2h6l-1 4-1 16-1 2-1-2-1-16z"/></svg>
+              </div>
+              <div class="lock-cam">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
+              </div>
+              <div class="lock-bar"></div>
+            </div>
+          </div>
+          <div class="cap"><b>Contenido oculto</b> · privacy · solo "nuevo mensaje cifrado"</div>
+        </div>
+
+        <div class="cell" style="max-width: 380px;">
+          <div class="note">
+            <b>Cómo decidir.</b> El interruptor "Mostrar contenido" en Settings →
+            Notifications cambia entre los dos estados. AegisLink siempre añade
+            el badge <span class="em">E2EE</span> — para que recuerdes que la
+            previsualización fue desencriptada localmente para mostrarse.
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ─── BANNER + BADGE ─── -->
+    <section class="section">
+      <h2>02 · iOS · banner in-app + insignia</h2>
+      <div class="row-cells">
+
+        <div class="cell">
+          <div class="ios-banner">
+            <div style="width: 38px; height: 38px; border-radius: 9px;
+                        background: radial-gradient(140% 110% at 30% 20%, #1a2326 0%, #06090a 70%);
+                        display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <svg width="22" height="22" viewBox="0 0 40 40" fill="none">
+                <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+                <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+                <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+              </svg>
+            </div>
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <span style="font-weight: 600; font-size: 14px;">AegisLink</span>
+                <span style="font-size: 11px; opacity: 0.7;">ahora</span>
+              </div>
+              <div style="font-family: var(--mono); font-size: 13px; font-weight: 600; margin-top: 2px;">satoshi.eth</div>
+              <div style="font-size: 13.5px; margin-top: 2px; line-height: 1.35;">
+                received. checking on-chain.
+              </div>
+              <div style="margin-top: 6px;">
+                <span class="e2ee" style="display: inline-flex; padding: 1px 6px; border: 1px solid #5bf2b9; border-radius: 99px; font-family: var(--mono); font-size: 9px; color: #5bf2b9; letter-spacing: 0.06em;">● E2EE</span>
+              </div>
+            </div>
+          </div>
+          <div class="cap"><b>Banner</b> · cae desde dynamic island</div>
+        </div>
+
+        <div class="cell">
+          <div class="ios-app-icon-badge">
+            <svg width="46" height="46" viewBox="0 0 40 40" fill="none"
+                 style="filter: drop-shadow(0 0 6px rgba(91,242,185,0.4));">
+              <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+              <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+              <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+            </svg>
+          </div>
+          <div class="cap"><b>Badge</b> · contador rojo · 3 unread</div>
+        </div>
+
+        <div class="cell">
+          <!-- Critical alert: key changed -->
+          <div class="ios-banner" style="background: rgba(80,30,30,0.72); border-color: rgba(255,107,107,0.30);">
+            <div style="width: 38px; height: 38px; border-radius: 9px;
+                        background: rgba(255,107,107,0.18); border: 1px solid #ff6b6b;
+                        display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+                        color: #ff6b6b; font-family: var(--sans); font-weight: 700; font-size: 18px;">!</div>
+            <div style="flex: 1;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <span style="font-weight: 600; font-size: 14px; color: #ff8b95;">AegisLink · Seguridad</span>
+                <span style="font-size: 11px; opacity: 0.7;">ahora</span>
+              </div>
+              <div style="font-family: var(--sans); font-weight: 600; font-size: 14px; margin-top: 2px;">
+                La clave de un contacto cambió.
+              </div>
+              <div style="font-size: 13px; opacity: 0.85; margin-top: 2px; line-height: 1.35;">
+                Re-verifica a 0xC3F…91A antes de continuar.
+              </div>
+            </div>
+          </div>
+          <div class="cap"><b>Crítico</b> · MITM alert · no se silencia</div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ─── ANDROID ─── -->
+    <section class="section">
+      <h2>03 · Android · panel de notificaciones</h2>
+      <div class="row-cells">
+        <div class="cell">
+          <div class="andr">
+            <div class="row">
+              <span>9:41</span>
+              <span>● jueves 14</span>
+            </div>
+            <div class="quick">
+              <div class="q on">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M19 7l5 5-5 5"/></svg>
+              </div>
+              <div class="q">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6"/></svg>
+              </div>
+              <div class="q">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+              </div>
+              <div class="q">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h3l4-8 4 16 4-12 3 4h2"/></svg>
+              </div>
+            </div>
+
+            <div class="andr-notif">
+              <div class="ic-wrap">
+                <svg width="18" height="18" viewBox="0 0 40 40" fill="none">
+                  <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.6" stroke-linejoin="round"/>
+                  <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+                </svg>
+              </div>
+              <div class="body">
+                <div class="hd">
+                  <span class="app">AegisLink</span>
+                  <span class="dot"></span>
+                  <span class="app" style="color:#5bf2b9;">● E2EE</span>
+                  <span class="dot"></span>
+                  <span class="ago">2m</span>
+                </div>
+                <div class="from mono">satoshi.eth</div>
+                <div class="msg">Bridge confirmed. Sending the tx hash now.</div>
+                <div class="acts">
+                  <button class="act">Responder</button>
+                  <button class="act">Marcar leído</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="andr-notif">
+              <div class="ic-wrap" style="background: radial-gradient(140% 110% at 30% 20%, #f59e0b22 0%, #06090a 80%); color: #f59e0b;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+              </div>
+              <div class="body">
+                <div class="hd">
+                  <span class="app">AegisLink · DAO · Treasury</span>
+                  <span class="dot"></span>
+                  <span class="ago">14m</span>
+                </div>
+                <div class="from">Alex</div>
+                <div class="msg">multisig signed by 3/5 — Maya pending</div>
+              </div>
+            </div>
+          </div>
+          <div class="cap"><b>Material You</b> · acciones inline · E2EE badge</div>
+        </div>
+
+        <div class="cell" style="max-width: 380px;">
+          <div class="note">
+            <b>Acciones rápidas.</b> Responder desde la notificación abre el
+            chat directamente — el mensaje no se redacta en la shade del SO
+            para evitar fuga del texto a otros procesos. La burbuja entra
+            cifrada al hilo.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── WATCH ─── -->
+    <section class="section">
+      <h2>04 · Apple Watch · glance</h2>
+      <div class="row-cells">
+        <div class="cell">
+          <div class="watch">
+            <div class="face">
+              <div class="hd">
+                <svg width="14" height="14" viewBox="0 0 40 40" fill="none">
+                  <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.6" stroke-linejoin="round"/>
+                </svg>
+                <span class="nm">AegisLink</span>
+                <span class="t">9:41</span>
+              </div>
+              <div class="from">satoshi.eth</div>
+              <div class="msg">Bridge confirmed. Sending the tx hash now — give me a sec.</div>
+              <div class="acts">
+                <div class="a">Dismiss</div>
+                <div class="a ok">Open</div>
+              </div>
+            </div>
+          </div>
+          <div class="cap"><b>Apple Watch</b> · cifrado descifrado on-device</div>
+        </div>
+
+        <div class="cell">
+          <div class="watch">
+            <div class="face">
+              <div class="hd">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" stroke-width="2"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg>
+                <span class="nm" style="color: #ff6b6b;">Security</span>
+                <span class="t">ahora</span>
+              </div>
+              <div class="from">0xC3F…91A</div>
+              <div class="msg" style="color: #ffd0d0;">Key cambió. Re-verifica antes de hablar.</div>
+              <div class="acts">
+                <div class="a ok" style="background: #ff6b6b; color: #fff;">Re-verify</div>
+              </div>
+            </div>
+          </div>
+          <div class="cap"><b>Crítico</b> · alerta MITM en watch</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── macOS ─── -->
+    <section class="section">
+      <h2>05 · macOS · notification center</h2>
+      <div class="row-cells">
+        <div class="cell">
+          <div class="mac">
+            <div class="ic-wrap">
+              <svg width="22" height="22" viewBox="0 0 40 40" fill="none">
+                <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+                <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+                <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+              </svg>
+            </div>
+            <div style="flex: 1;">
+              <div class="hd">
+                <span style="color: rgba(255,255,255,0.85); font-weight: 500;">AegisLink</span>
+                <span style="opacity: 0.5;">●</span>
+                <span style="color: #5bf2b9; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;">E2EE</span>
+                <span style="margin-left: auto; opacity: 0.5; font-size: 11px;">hace 2 min</span>
+              </div>
+              <div class="from" style="font-family: var(--mono);">satoshi.eth</div>
+              <div class="msg">Bridge confirmed. Sending the tx hash now.</div>
+            </div>
+          </div>
+          <div class="cap"><b>macOS</b> · notification center · sin preview de imagen</div>
+        </div>
+
+        <div class="cell" style="max-width: 380px;">
+          <div class="note">
+            <b>Sin medios en la previsualización.</b> Las imágenes y archivos
+            adjuntos nunca aparecen en la notificación — sólo se ven al
+            abrir la app. Esto evita que el contenido visual filtre por
+            espejo del Mac, Handoff o screenshots automáticos.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Critical alerts ─── -->
+    <section class="section">
+      <h2>06 · Alertas críticas · siempre se muestran</h2>
+      <div class="row-cells">
+        <div class="cell" style="max-width: 600px;">
+          <div class="note" style="max-width: none;">
+            <b>Tres eventos saltan el modo silencio</b> — incluso si tienes
+            las notificaciones apagadas o el dispositivo en No-Molestar:
+            <ul style="margin: 10px 0 0 18px; padding: 0; color: var(--dim);">
+              <li><span class="em">Cambio de clave de un contacto</span> — posible MITM</li>
+              <li><span class="em">Revocación remota de tu dispositivo</span> — sesión cerrada por otra instancia</li>
+              <li><span class="em">Auto-wipe inminente</span> — 10s antes del borrado por intento fallido</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

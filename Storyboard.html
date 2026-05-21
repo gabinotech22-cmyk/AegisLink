@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Storyboard (45s)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:wght@400;500;600&display=swap"/>
+  <style>
+    :root {
+      --bg: #07090a;
+      --surface: #11181a;
+      --text: #e8f0ec;
+      --dim: rgba(232,240,236,0.62);
+      --faint: rgba(232,240,236,0.36);
+      --accent: #5bf2b9;
+      --danger: #ff6b6b;
+      --warn: #f0c674;
+      --border: rgba(255,255,255,0.10);
+      --serif: 'EB Garamond', Garamond, serif;
+      --sans: 'Space Grotesk', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+                 font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+    .page { max-width: 1280px; margin: 0 auto; padding: 56px 56px 100px; }
+    .head { padding-bottom: 24px; border-bottom: 1px solid var(--border);
+            margin-bottom: 40px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .head h1 { font-family: var(--serif); font-weight: 500; font-size: 64px;
+               margin: 0; letter-spacing: -0.01em; line-height: 0.95; }
+    .head .meta { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+                  color: var(--faint); text-transform: uppercase; }
+
+    .stage-card {
+      margin-bottom: 48px; border: 1px solid var(--border);
+      border-radius: 18px; overflow: hidden; background: #000;
+    }
+    .stage-card .top {
+      padding: 16px 22px; background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .stage-card .top b { font-family: var(--serif); font-size: 22px; font-weight: 500;
+                         letter-spacing: -0.01em; }
+    .stage-card .top span { font-family: var(--mono); font-size: 11px;
+                            color: var(--faint); letter-spacing: 0.08em; }
+
+    .panels {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px;
+      margin-bottom: 40px;
+    }
+    .panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .panel-img { aspect-ratio: 16/9; background: #000; position: relative; overflow: hidden; }
+    .panel-body { padding: 18px 20px; }
+    .panel-tc {
+      font-family: var(--mono); font-size: 11px; color: var(--accent);
+      letter-spacing: 0.1em; margin-bottom: 8px;
+    }
+    .panel h3 { font-family: var(--serif); font-weight: 500; font-size: 24px;
+                margin: 0 0 8px; line-height: 1.1; letter-spacing: -0.01em; }
+    .panel h3 em { font-style: italic; color: var(--accent); }
+    .panel p { margin: 0 0 8px; font-size: 13.5px; color: var(--dim); line-height: 1.5; }
+    .panel .vo { font-family: var(--mono); font-size: 11px; color: var(--faint);
+                 letter-spacing: 0.04em; line-height: 1.5;
+                 padding: 10px; background: rgba(255,255,255,0.03);
+                 border-radius: 6px; margin-top: 10px;
+                 border-left: 2px solid var(--accent); }
+    .panel .vo .lbl { color: var(--accent); font-weight: 600;
+                      letter-spacing: 0.1em; margin-bottom: 4px; display: block; }
+
+    /* Mini scene illustrations (static snapshots, similar to live scenes) */
+    .scene-mini {
+      width: 100%; height: 100%; position: relative;
+      background: #000; display: flex; align-items: center; justify-content: center;
+    }
+    .grid-mini {
+      position: absolute; inset: 0; opacity: 0.3;
+      background-image:
+        linear-gradient(rgba(91,242,185,0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(91,242,185,0.1) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: radial-gradient(circle at center, black, transparent 70%);
+      -webkit-mask-image: radial-gradient(circle at center, black, transparent 70%);
+    }
+
+    /* Script table */
+    .script-table {
+      margin-top: 24px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; overflow: hidden;
+    }
+    .script-table table { width: 100%; border-collapse: collapse; }
+    .script-table th, .script-table td {
+      padding: 14px 18px; text-align: left; border-bottom: 1px solid var(--border);
+      font-size: 13px; vertical-align: top;
+    }
+    .script-table thead th {
+      font-family: var(--mono); font-size: 10px; color: var(--dim);
+      letter-spacing: 0.1em; text-transform: uppercase;
+      background: rgba(91,242,185,0.04);
+    }
+    .script-table td.tc { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+    .script-table td.scene { font-weight: 600; color: var(--text); }
+    .script-table tbody tr:last-child td { border-bottom: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="animations.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { Stage, Sprite, useSprite, useTime, Easing, interpolate } = window;
+
+    const C = {
+      bg: '#000', surface: '#0c1011',
+      text: '#e8f0ec', dim: 'rgba(232,240,236,0.6)',
+      faint: 'rgba(232,240,236,0.32)',
+      accent: '#5bf2b9', danger: '#ff6b6b', warn: '#f0c674',
+      mono: '"JetBrains Mono", monospace',
+      sans: '"Space Grotesk", sans-serif',
+      serif: '"EB Garamond", serif',
+    };
+
+    // ─── Reusable bits ───────────────────────────────
+    function GridBg({ opacity = 0.4 }) {
+      const t = useTime();
+      const x = (t * 14) % 50;
+      return <div style={{
+        position: 'absolute', inset: 0, opacity,
+        backgroundImage: `linear-gradient(rgba(91,242,185,0.06) 1px, transparent 1px),
+                          linear-gradient(90deg, rgba(91,242,185,0.06) 1px, transparent 1px)`,
+        backgroundSize: '50px 50px',
+        backgroundPosition: `${x}px 0`,
+        maskImage: 'radial-gradient(circle at 50% 50%, black, transparent 75%)',
+        WebkitMaskImage: 'radial-gradient(circle at 50% 50%, black, transparent 75%)',
+      }}/>;
+    }
+
+    function Mark({ size = 64, glow = 0.5 }) {
+      return (
+        <div style={{ filter: `drop-shadow(0 0 ${20*glow}px rgba(91,242,185,${0.4 + 0.3*glow}))` }}>
+          <svg width={size} height={size} viewBox="0 0 40 40" fill="none">
+            <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z"
+                  stroke={C.accent} strokeWidth="2.4" strokeLinejoin="round"/>
+            <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill={C.accent}/>
+            <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill={C.accent} opacity="0.55"/>
+          </svg>
+        </div>
+      );
+    }
+
+    // ─── 01 · Brand entrance (0-6s) ──────────────────
+    function S1_Brand() {
+      const { progress, localTime } = useSprite();
+      const t = useTime();
+      // 0-1: mark appears
+      // 1-3: wordmark types in
+      // 3-5: tagline fades in
+      // 5-6: fade out
+      const markScale = interpolate([0, 0.18], [0.4, 1], Easing.easeOutBack)(progress);
+      const markOp    = interpolate([0, 0.15, 0.85, 1], [0, 1, 1, 0], Easing.easeOutQuad)(progress);
+      const text = 'AegisLink';
+      const lettersShown = Math.max(0, Math.min(text.length, Math.floor((localTime - 1) * 5)));
+      const taglineOp = interpolate([3/6, 3.4/6, 5.4/6, 1], [0, 1, 1, 0], Easing.easeOutQuad)(progress);
+      const taglineDy = interpolate([3/6, 3.4/6], [10, 0], Easing.easeOutQuad)(progress);
+
+      return (
+        <>
+          <GridBg/>
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            opacity: markOp,
+          }}>
+            <div style={{ transform: `scale(${markScale})`, marginBottom: 32 }}>
+              <Mark size={140} glow={1}/>
+            </div>
+            <div style={{
+              fontFamily: C.serif, fontWeight: 500, fontSize: 120,
+              letterSpacing: '-0.025em', color: C.text, lineHeight: 1,
+              minHeight: 110,
+            }}>
+              {text.slice(0, lettersShown)}
+              {lettersShown < text.length && localTime > 1 && localTime < 3 && (
+                <span style={{ color: C.accent, animation: 'caret 0.8s steps(2) infinite' }}>|</span>
+              )}
+            </div>
+            <div style={{
+              fontFamily: C.mono, fontSize: 18, color: C.dim,
+              letterSpacing: '0.16em', marginTop: 18,
+              opacity: taglineOp, transform: `translateY(${taglineDy}px)`,
+              textTransform: 'uppercase',
+            }}>
+              Mensajería · sin rastro
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    // ─── 02 · The problem (6-15s) ──────────────────
+    function S2_Problem() {
+      const { progress, localTime } = useSprite();
+      // 0-1: question fades in
+      // 1-6: phone number / email / metadata bubbles drop in one by one
+      // 6-9: red X marks slash through them
+
+      const qOp = interpolate([0, 0.08, 0.92, 1], [0, 1, 1, 0])(progress);
+      const qDy = interpolate([0, 0.08], [12, 0], Easing.easeOutQuad)(progress);
+
+      const items = [
+        { label: '+34 612 ●● ●● 28', sub: 'TELÉFONO', delay: 1.0 },
+        { label: 'maria@gmail.com',  sub: 'EMAIL',    delay: 2.0 },
+        { label: '15:42 · Madrid · iOS', sub: 'METADATOS', delay: 3.0 },
+      ];
+
+      return (
+        <>
+          <GridBg opacity={0.2}/>
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            padding: '0 100px',
+          }}>
+            <div style={{
+              fontFamily: C.serif, fontWeight: 500, fontSize: 84,
+              letterSpacing: '-0.02em', color: C.text, lineHeight: 1.05,
+              opacity: qOp, transform: `translateY(${qDy}px)`,
+              textAlign: 'center', marginBottom: 56, maxWidth: 1100,
+            }}>
+              Para hablar contigo, otras apps necesitan saber <em style={{ color: C.danger, fontStyle: 'italic' }}>todo</em>.
+            </div>
+
+            <div style={{
+              display: 'flex', gap: 24, justifyContent: 'center', alignItems: 'center',
+            }}>
+              {items.map((it, i) => {
+                const lt = localTime - it.delay;
+                const opIn = Math.max(0, Math.min(1, lt / 0.4));
+                const dy = (1 - opIn) * 24;
+                // strike-through at localTime 6
+                const struck = localTime > 6 + i * 0.4;
+                const strikeProgress = Math.max(0, Math.min(1, (localTime - (6 + i * 0.4)) / 0.5));
+
+                return (
+                  <div key={i} style={{
+                    position: 'relative',
+                    padding: '20px 24px',
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.10)',
+                    borderRadius: 14,
+                    minWidth: 280,
+                    opacity: opIn, transform: `translateY(${dy}px)`,
+                  }}>
+                    <div style={{ fontFamily: C.mono, fontSize: 12,
+                                  color: C.faint, letterSpacing: '0.1em',
+                                  marginBottom: 8 }}>{it.sub}</div>
+                    <div style={{
+                      fontFamily: C.mono, fontSize: 24, color: struck ? C.faint : C.text,
+                      transition: 'color 0.3s', position: 'relative',
+                    }}>
+                      {it.label}
+                      {struck && (
+                        <div style={{
+                          position: 'absolute', left: 0, top: '50%',
+                          height: 3, background: C.danger,
+                          width: `${strikeProgress * 100}%`,
+                          boxShadow: `0 0 8px ${C.danger}88`,
+                          transform: 'translateY(-50%) rotate(-2deg)',
+                        }}/>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    // ─── 03 · Solution: key generation (15-25s) ──
+    function S3_Key() {
+      const { progress, localTime } = useSprite();
+
+      const titleOp = interpolate([0, 0.06, 0.94, 1], [0, 1, 1, 0])(progress);
+      const titleDy = interpolate([0, 0.06], [10, 0], Easing.easeOutQuad)(progress);
+
+      // Mark pulses + binary rain from 1s to 6s
+      const showKey = localTime > 6;
+      const keyOp = Math.max(0, Math.min(1, (localTime - 6) / 0.5));
+
+      return (
+        <>
+          <GridBg/>
+          <div style={{
+            position: 'absolute', top: 80, left: 0, right: 0,
+            textAlign: 'center', opacity: titleOp,
+            transform: `translateY(${titleDy}px)`,
+          }}>
+            <div style={{ fontFamily: C.mono, fontSize: 14, color: C.accent,
+                          letterSpacing: '0.16em', marginBottom: 12 }}>AEGISLINK</div>
+            <div style={{ fontFamily: C.serif, fontWeight: 500, fontSize: 72,
+                          letterSpacing: '-0.02em', color: C.text, lineHeight: 1.05 }}>
+              Sólo necesita <em style={{ color: C.accent, fontStyle: 'italic' }}>una llave</em> — que <em style={{ color: C.accent, fontStyle: 'italic' }}>tú</em> generas.
+            </div>
+          </div>
+
+          {/* binary rain */}
+          {(() => {
+            const cols = 30;
+            const out = [];
+            for (let i = 0; i < cols; i++) {
+              const charCount = 24;
+              const offset = (localTime * 100 + i * 41) % (charCount * 20);
+              for (let j = 0; j < charCount; j++) {
+                const y = 280 + j * 20 - offset;
+                if (y < 200 || y > 800) continue;
+                const x = 200 + i * 50;
+                const bit = (((i * 11) + (j * 7) + Math.floor(localTime * 5)) & 1);
+                const fade = 1 - Math.abs((y - 500) / 300);
+                out.push(
+                  <span key={`${i}-${j}`} style={{
+                    position: 'absolute', left: x, top: y,
+                    fontFamily: C.mono, fontSize: 16, color: C.accent,
+                    opacity: Math.max(0, fade) * 0.4,
+                  }}>{bit}</span>
+                );
+              }
+            }
+            return <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>{out}</div>;
+          })()}
+
+          {/* Center mark */}
+          <div style={{
+            position: 'absolute', left: '50%', top: '50%',
+            transform: `translate(-50%, -50%) scale(${1 + 0.04 * Math.sin(localTime * 4)})`,
+          }}>
+            <Mark size={160} glow={0.8}/>
+          </div>
+
+          {/* Key card reveal */}
+          {showKey && (
+            <div style={{
+              position: 'absolute', left: '50%', bottom: 120,
+              transform: `translateX(-50%) translateY(${(1-keyOp)*20}px)`,
+              opacity: keyOp,
+              padding: '24px 32px',
+              background: 'rgba(91,242,185,0.06)',
+              border: `1px solid ${C.accent}`,
+              borderRadius: 16,
+              backdropFilter: 'blur(12px)',
+            }}>
+              <div style={{ fontFamily: C.mono, fontSize: 14, color: C.accent,
+                            letterSpacing: '0.12em', marginBottom: 10, textAlign: 'center' }}>
+                AEGIS ID
+              </div>
+              <div style={{ fontFamily: C.mono, fontSize: 40, color: C.text,
+                            letterSpacing: '0.04em', textAlign: 'center' }}>
+                7K9-PQ2M-X4VR
+              </div>
+            </div>
+          )}
+        </>
+      );
+    }
+
+    // ─── 04 · Burn (25-33s) ─────────────────────
+    function S4_Burn() {
+      const { progress, localTime } = useSprite();
+
+      const titleOp = interpolate([0, 0.06, 0.94, 1], [0, 1, 1, 0])(progress);
+
+      // bubble appears, then burns
+      const bubbleIn = Math.min(1, localTime / 0.5);
+      const burnStart = 3;
+      const burnEnd = 6;
+      const burn = Math.max(0, Math.min(1, (localTime - burnStart) / (burnEnd - burnStart)));
+
+      const txt = 'Bridge confirmed.';
+
+      return (
+        <>
+          <GridBg opacity={0.2}/>
+          <div style={{
+            position: 'absolute', top: 100, left: 0, right: 0,
+            textAlign: 'center', opacity: titleOp,
+          }}>
+            <div style={{ fontFamily: C.serif, fontWeight: 500, fontSize: 72,
+                          letterSpacing: '-0.02em', color: C.text, lineHeight: 1.05 }}>
+              Y los mensajes <em style={{ color: C.accent, fontStyle: 'italic' }}>se queman</em> solos.
+            </div>
+          </div>
+
+          {/* burning bubble */}
+          <div style={{
+            position: 'absolute', left: '50%', top: '50%',
+            transform: `translate(-50%, -50%) scale(${1 + burn * 0.06})`,
+            opacity: bubbleIn * (1 - burn * 0.6),
+            filter: `blur(${burn * 5}px)`,
+          }}>
+            <div style={{
+              background: C.accent, color: '#06231a',
+              padding: '24px 32px', borderRadius: 24,
+              borderTopLeftRadius: 8,
+              fontFamily: C.sans, fontSize: 36, fontWeight: 500,
+              boxShadow: `0 16px 60px rgba(91,242,185,${0.3 + burn * 0.4})`,
+              position: 'relative', overflow: 'hidden',
+            }}>
+              {/* embers overlay */}
+              {burn > 0.05 && (
+                <div style={{
+                  position: 'absolute', inset: 0,
+                  background: `radial-gradient(circle at 30% 60%, rgba(255,107,107,${burn * 0.6}), transparent 70%),
+                               radial-gradient(circle at 70% 40%, rgba(240,198,116,${burn * 0.5}), transparent 70%)`,
+                  mixBlendMode: 'lighten',
+                }}/>
+              )}
+              <div style={{ position: 'relative' }}>
+                {txt.split('').map((ch, i) => {
+                  const charBurnStart = burnStart + (i / txt.length) * 0.6;
+                  const cb = Math.max(0, Math.min(1, (localTime - charBurnStart) / 0.6));
+                  const dx = cb * (Math.sin(i * 1.3 + localTime) * 80);
+                  const dy = -cb * (30 + (i % 5) * 12);
+                  const rot = cb * (i % 2 ? 18 : -18);
+                  return (
+                    <span key={i} style={{
+                      display: 'inline-block',
+                      transform: `translate(${dx}px, ${dy}px) rotate(${rot}deg)`,
+                      opacity: 1 - cb,
+                      color: cb > 0.3 ? `rgba(255,107,107,${1-cb})` : '#06231a',
+                      whiteSpace: 'pre',
+                    }}>{ch}</span>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* burn timer */}
+          {burn > 0 && burn < 1 && (
+            <div style={{
+              position: 'absolute', right: 200, top: '46%',
+              padding: '8px 16px', background: 'rgba(255,107,107,0.18)',
+              border: `1px solid ${C.danger}`, borderRadius: 99,
+              fontFamily: C.mono, fontSize: 14, color: C.danger,
+              letterSpacing: '0.08em',
+            }}>
+              ● SE BORRA EN {(3 - burn * 3).toFixed(1)}s
+            </div>
+          )}
+        </>
+      );
+    }
+
+    // ─── 05 · Trust (33-40s) ──────────────────────
+    function S5_Trust() {
+      const { progress, localTime } = useSprite();
+
+      const titleOp = interpolate([0, 0.08, 0.92, 1], [0, 1, 1, 0])(progress);
+      const titleDy = interpolate([0, 0.08], [10, 0], Easing.easeOutQuad)(progress);
+
+      const checks = [
+        { l: 'Código abierto · MIT',     delay: 1.0 },
+        { l: 'Auditado · Cure53 2026 Q1', delay: 1.6 },
+        { l: 'Zurich, Switzerland 🇨🇭',   delay: 2.2 },
+        { l: 'Cero metadatos retenidos', delay: 2.8 },
+      ];
+
+      return (
+        <>
+          <GridBg/>
+          <div style={{
+            position: 'absolute', top: 100, left: 0, right: 0,
+            textAlign: 'center', opacity: titleOp,
+            transform: `translateY(${titleDy}px)`,
+          }}>
+            <div style={{ fontFamily: C.serif, fontWeight: 500, fontSize: 80,
+                          letterSpacing: '-0.02em', color: C.text, lineHeight: 1.05 }}>
+              Y no nos crees a nosotros — <em style={{ color: C.accent, fontStyle: 'italic' }}>lo verificas</em>.
+            </div>
+          </div>
+
+          <div style={{
+            position: 'absolute', left: '50%', top: '50%',
+            transform: 'translate(-50%, -30%)',
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 22,
+            width: 1100,
+          }}>
+            {checks.map((c, i) => {
+              const lt = localTime - c.delay;
+              const op = Math.max(0, Math.min(1, lt / 0.4));
+              const dx = (1 - op) * -30;
+              return (
+                <div key={i} style={{
+                  padding: '24px 28px',
+                  background: 'rgba(91,242,185,0.05)',
+                  border: `1px solid ${C.accent}33`,
+                  borderRadius: 12,
+                  display: 'flex', alignItems: 'center', gap: 16,
+                  opacity: op, transform: `translateX(${dx}px)`,
+                }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: C.accent, color: '#06231a',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontFamily: C.sans, fontWeight: 700, fontSize: 20,
+                    flexShrink: 0,
+                  }}>✓</div>
+                  <span style={{ fontFamily: C.sans, fontWeight: 500, fontSize: 24, color: C.text }}>{c.l}</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      );
+    }
+
+    // ─── 06 · End card (40-45s) ──────────────────
+    function S6_End() {
+      const { progress, localTime } = useSprite();
+
+      const op = interpolate([0, 0.1, 1], [0, 1, 1], Easing.easeOutQuad)(progress);
+      const markScale = interpolate([0, 0.2], [0.6, 1], Easing.easeOutBack)(progress);
+
+      return (
+        <>
+          <GridBg/>
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            opacity: op,
+          }}>
+            <div style={{ transform: `scale(${markScale})`, marginBottom: 24 }}>
+              <Mark size={120} glow={1 + 0.3 * Math.sin(localTime * 3)}/>
+            </div>
+            <div style={{
+              fontFamily: C.serif, fontWeight: 500, fontSize: 140,
+              letterSpacing: '-0.025em', color: C.text, lineHeight: 1,
+              marginBottom: 24,
+            }}>AegisLink</div>
+            <div style={{
+              fontFamily: C.mono, fontSize: 22, color: C.accent,
+              letterSpacing: '0.16em', textTransform: 'uppercase',
+              marginBottom: 36,
+            }}>aegislink.ch</div>
+            <div style={{
+              display: 'flex', gap: 18, alignItems: 'center',
+              fontFamily: C.mono, fontSize: 13, color: C.faint,
+              letterSpacing: '0.1em',
+            }}>
+              <span>iOS</span><span>·</span>
+              <span>ANDROID</span><span>·</span>
+              <span>macOS</span><span>·</span>
+              <span>LINUX</span>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    // Background scene swap (smooth cross-fade between scenes)
+    function MainTimeline() {
+      return (
+        <>
+          <Sprite start={0}  end={6}>  <S1_Brand/>   </Sprite>
+          <Sprite start={6}  end={15}> <S2_Problem/> </Sprite>
+          <Sprite start={15} end={25}> <S3_Key/>     </Sprite>
+          <Sprite start={25} end={33}> <S4_Burn/>    </Sprite>
+          <Sprite start={33} end={40}> <S5_Trust/>   </Sprite>
+          <Sprite start={40} end={45}> <S6_End/>     </Sprite>
+        </>
+      );
+    }
+
+    // ─── Static thumbnails for storyboard panels ──
+    function ThumbBrand() {
+      return (
+        <div className="scene-mini" style={{
+          background: '#000',
+        }}>
+          <div className="grid-mini"/>
+          <div style={{ position: 'relative', textAlign: 'center', zIndex: 2 }}>
+            <div style={{ marginBottom: 8 }}><Mark size={36} glow={1}/></div>
+            <div style={{ fontFamily: C.serif, fontSize: 36, fontWeight: 500,
+                          letterSpacing: '-0.02em', lineHeight: 1, color: C.text }}>AegisLink</div>
+            <div style={{ fontFamily: C.mono, fontSize: 8, color: C.dim,
+                          letterSpacing: '0.16em', marginTop: 4 }}>MENSAJERÍA · SIN RASTRO</div>
+          </div>
+        </div>
+      );
+    }
+    function ThumbProblem() {
+      return (
+        <div className="scene-mini">
+          <div style={{ position: 'relative', textAlign: 'center' }}>
+            <div style={{ fontFamily: C.serif, fontSize: 18, fontWeight: 500,
+                          letterSpacing: '-0.02em', lineHeight: 1.1, color: C.text,
+                          marginBottom: 14, maxWidth: 280 }}>
+              Otras apps necesitan saber <em style={{ color: C.danger, fontStyle: 'italic' }}>todo</em>.
+            </div>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+              {['+34 612 ●●', 'maria@…', '15:42 · Madrid'].map(t => (
+                <div key={t} style={{
+                  padding: '6px 9px', background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4,
+                  fontFamily: C.mono, fontSize: 9, color: C.faint,
+                  position: 'relative',
+                }}>{t}
+                  <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 2,
+                                background: C.danger, transform: 'translateY(-50%) rotate(-2deg)' }}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    function ThumbKey() {
+      return (
+        <div className="scene-mini">
+          <div className="grid-mini"/>
+          <div style={{ position: 'relative', textAlign: 'center' }}>
+            <div style={{ marginBottom: 14 }}><Mark size={48} glow={0.7}/></div>
+            <div style={{
+              padding: '8px 14px',
+              background: 'rgba(91,242,185,0.06)',
+              border: `1px solid ${C.accent}`, borderRadius: 8,
+              fontFamily: C.mono, fontSize: 14, color: C.text,
+              letterSpacing: '0.04em',
+            }}>7K9-PQ2M-X4VR</div>
+          </div>
+        </div>
+      );
+    }
+    function ThumbBurn() {
+      return (
+        <div className="scene-mini">
+          <div style={{
+            background: C.accent, color: '#06231a',
+            padding: '12px 16px', borderRadius: 10,
+            fontFamily: C.sans, fontSize: 16, fontWeight: 500,
+            opacity: 0.7, transform: 'scale(1.04)',
+            position: 'relative', overflow: 'hidden',
+          }}>
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: `radial-gradient(circle at 30% 60%, rgba(255,107,107,0.4), transparent 70%),
+                           radial-gradient(circle at 70% 40%, rgba(240,198,116,0.3), transparent 70%)`,
+              mixBlendMode: 'lighten',
+            }}/>
+            <span style={{ position: 'relative' }}>Bridge confirmed.</span>
+          </div>
+          <div style={{
+            position: 'absolute', right: 10, bottom: 14,
+            padding: '4px 10px', background: 'rgba(255,107,107,0.2)',
+            border: `1px solid ${C.danger}`, borderRadius: 99,
+            fontFamily: C.mono, fontSize: 9, color: C.danger,
+            letterSpacing: '0.06em',
+          }}>● 1.2s</div>
+        </div>
+      );
+    }
+    function ThumbTrust() {
+      return (
+        <div className="scene-mini">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: 16 }}>
+            {['MIT', 'Cure53', 'Zurich 🇨🇭', '0 metadata'].map(l => (
+              <div key={l} style={{
+                padding: '6px 10px', background: 'rgba(91,242,185,0.06)',
+                border: `1px solid ${C.accent}55`, borderRadius: 4,
+                display: 'flex', alignItems: 'center', gap: 6,
+                fontFamily: C.mono, fontSize: 9, color: C.text, letterSpacing: '0.04em',
+              }}>
+                <span style={{ color: C.accent }}>✓</span>{l}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    function ThumbEnd() {
+      return (
+        <div className="scene-mini">
+          <div className="grid-mini"/>
+          <div style={{ position: 'relative', textAlign: 'center' }}>
+            <div style={{ marginBottom: 8 }}><Mark size={32} glow={1}/></div>
+            <div style={{ fontFamily: C.serif, fontSize: 32, fontWeight: 500,
+                          letterSpacing: '-0.02em', lineHeight: 1, color: C.text }}>AegisLink</div>
+            <div style={{ fontFamily: C.mono, fontSize: 9, color: C.accent,
+                          letterSpacing: '0.16em', marginTop: 6 }}>AEGISLINK.CH</div>
+          </div>
+        </div>
+      );
+    }
+
+    const PANELS = [
+      { tc: '00:00 — 00:06', h: 'Brand entrance', desc: 'Mark pulsa. Wordmark se escribe carácter a carácter. Tagline aparece y se desvanece.', vo: '(silencio · solo sound design — un latido grave + un chime cuando el wordmark cierra)', Thumb: ThumbBrand },
+      { tc: '00:06 — 00:15', h: 'El problema',     desc: 'Question grande. Tres bubbles caen: teléfono, email, metadatos. A los 6s, una línea roja los tacha.', vo: 'VO · "Para hablar contigo, otras apps necesitan saber todo: tu número, tu email, dónde estás. AegisLink no."', Thumb: ThumbProblem },
+      { tc: '00:15 — 00:25', h: 'La solución',     desc: 'Llovizna binaria sobre la marca. La keypair se forma. El Aegis ID aparece como card final.', vo: 'VO · "Una sola llave, generada en tu dispositivo. Sin teléfono, sin email — solo doce caracteres que no llevan a nadie."', Thumb: ThumbKey },
+      { tc: '00:25 — 00:33', h: 'Mensajes que se queman', desc: 'Burbuja mint aparece. Contador rojo. Las letras se dispersan como ceniza. Burn final con flare.', vo: 'VO · "Y todo lo que se dice puede durar lo que tú decidas — desde una hora hasta nunca."', Thumb: ThumbBurn },
+      { tc: '00:33 — 00:40', h: 'Confianza',       desc: 'Quattro checks aparecen en cascada: MIT, Cure53, Suiza, cero metadatos.', vo: 'VO · "Código abierto. Auditado. Servidores en Suiza. Sin metadatos. No nos creas — verifícalo."', Thumb: ThumbTrust },
+      { tc: '00:40 — 00:45', h: 'End card',        desc: 'Mark glow. Wordmark gigante. URL. Plataformas en pequeño.', vo: 'VO · "AegisLink. Mensajería sin rastro." · sound: chime de cierre', Thumb: ThumbEnd },
+    ];
+
+    function App() {
+      return (
+        <div className="page">
+          <div className="head">
+            <div>
+              <div style={{ fontFamily: 'JetBrains Mono', fontSize: 11,
+                            letterSpacing: '0.1em', color: 'rgba(232,240,236,0.36)',
+                            marginBottom: 8, textTransform: 'uppercase' }}>
+                STORYBOARD · LAUNCH VIDEO · v1
+              </div>
+              <h1>Video de lanzamiento — 45s</h1>
+            </div>
+            <span className="meta">6 ESCENAS · 1920×1080 · 60fps</span>
+          </div>
+
+          <p style={{ fontSize: 18, color: 'rgba(232,240,236,0.62)', maxWidth: 720,
+                      margin: '-20px 0 40px', lineHeight: 1.5 }}>
+            Guion visual completo del spot de lanzamiento.
+            Ábrelo, dale play. El timeline arriba es continuo — abajo, cada panel
+            tiene timecode, descripción y voz-en-off propuesta para producción.
+          </p>
+
+          <div className="stage-card">
+            <div className="top">
+              <b>Timeline completo · 45s</b>
+              <span>SPACE PARA PAUSAR · DRAG O CLICK EN LA BARRA PARA SCRUB</span>
+            </div>
+            <Stage width={1920} height={1080} duration={45} background="#000" persistKey="aegis-storyboard">
+              <MainTimeline/>
+            </Stage>
+          </div>
+
+          <h2 style={{ fontFamily: 'JetBrains Mono', fontSize: 11,
+                       letterSpacing: '0.12em', color: 'rgba(232,240,236,0.36)',
+                       textTransform: 'uppercase', margin: '0 0 22px' }}>
+            Paneles · uno por escena
+          </h2>
+
+          <div className="panels">
+            {PANELS.map((p, i) => {
+              const Thumb = p.Thumb;
+              return (
+                <div key={i} className="panel">
+                  <div className="panel-img">
+                    <Thumb/>
+                  </div>
+                  <div className="panel-body">
+                    <div className="panel-tc">SCENE 0{i+1} · {p.tc}</div>
+                    <h3>{p.h}</h3>
+                    <p>{p.desc}</p>
+                    <div className="vo">
+                      <span className="lbl">VOZ EN OFF</span>
+                      {p.vo}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Script table for handoff */}
+          <h2 style={{ fontFamily: 'JetBrains Mono', fontSize: 11,
+                       letterSpacing: '0.12em', color: 'rgba(232,240,236,0.36)',
+                       textTransform: 'uppercase', margin: '48px 0 22px' }}>
+            Hoja de rodaje · timecode + assets
+          </h2>
+
+          <div className="script-table">
+            <table>
+              <thead>
+                <tr><th>TC</th><th>Escena</th><th>Visual</th><th>Audio</th><th>Assets</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="tc">00:00–06</td>
+                  <td className="scene">Brand entrance</td>
+                  <td>Mark pulse · wordmark typing · grid bg sutil</td>
+                  <td>Heartbeat bajo · chime al cerrar</td>
+                  <td>Logo SVG · EB Garamond · animation timing</td>
+                </tr>
+                <tr>
+                  <td className="tc">00:06–15</td>
+                  <td className="scene">Problem</td>
+                  <td>Title · 3 chips (teléfono/email/meta) · strike-through</td>
+                  <td>VO · subtle tension drone</td>
+                  <td>Mock data · sin marca de competidor</td>
+                </tr>
+                <tr>
+                  <td className="tc">00:15–25</td>
+                  <td className="scene">Solution</td>
+                  <td>Binary rain · mark glow · key card aparece</td>
+                  <td>VO · subtle whoosh + tick on key reveal</td>
+                  <td>Aegis ID · monospace · accent glow</td>
+                </tr>
+                <tr>
+                  <td className="tc">00:25–33</td>
+                  <td className="scene">Burn</td>
+                  <td>Mint bubble · countdown · letters scatter</td>
+                  <td>VO · paper-crisp / ember sound</td>
+                  <td>Bubble component · particles · radial gradients</td>
+                </tr>
+                <tr>
+                  <td className="tc">00:33–40</td>
+                  <td className="scene">Trust</td>
+                  <td>4 checkmarks en cascada · 2×2 grid</td>
+                  <td>VO · upward chimes per check</td>
+                  <td>Logo Cure53 · Swiss flag · MIT badge</td>
+                </tr>
+                <tr>
+                  <td className="tc">00:40–45</td>
+                  <td className="scene">End card</td>
+                  <td>Mark pulse · giant wordmark · URL · platforms</td>
+                  <td>VO closing · chime · 2s silence al final</td>
+                  <td>Logo full · URL · platform list</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    if (!document.getElementById('aegis-storyboard-anim')) {
+      const s = document.createElement('style');
+      s.id = 'aegis-storyboard-anim';
+      s.textContent = `
+        @keyframes caret { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+      `;
+      document.head.appendChild(s);
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>

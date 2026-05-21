@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Manifesto</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap"/>
+  <style>
+    :root {
+      --bg: #07090a;
+      --paper: #f5f1e6;
+      --paper-dim: rgba(245,241,230,0.72);
+      --paper-faint: rgba(245,241,230,0.42);
+      --rule: rgba(245,241,230,0.16);
+      --rule-strong: rgba(245,241,230,0.32);
+      --accent: #5bf2b9;
+      --serif: 'EB Garamond', Garamond, serif;
+      --sans: 'Space Grotesk', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--paper);
+      font-family: var(--serif);
+      font-size: 22px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: geometricPrecision;
+    }
+    a { color: inherit; text-decoration: underline;
+        text-decoration-color: var(--paper-faint);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 4px;
+        transition: text-decoration-color 0.15s; }
+    a:hover { text-decoration-color: var(--accent); }
+
+    /* ── Page chrome ──────────────────────────────── */
+    .nav {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      background: rgba(7,9,10,0.7);
+      border-bottom: 1px solid var(--rule);
+    }
+    .nav-inner {
+      max-width: 920px; margin: 0 auto; padding: 14px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-family: var(--mono); font-size: 12px;
+      color: var(--paper-dim); letter-spacing: 0.08em;
+    }
+    .nav-inner .brand { display: flex; align-items: center; gap: 10px; }
+    .nav-inner .brand span { font-family: var(--serif); font-size: 19px;
+                             font-weight: 500; letter-spacing: -0.01em;
+                             color: var(--paper); }
+
+    .page { max-width: 720px; margin: 0 auto; padding: 80px 32px 120px; }
+
+    /* ── Title block ─────────────────────────────── */
+    .lockup {
+      display: flex; align-items: center; gap: 10px;
+      font-family: var(--mono); font-size: 12px;
+      color: var(--paper-faint); letter-spacing: 0.1em;
+      margin-bottom: 28px; text-transform: uppercase;
+    }
+    .lockup .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+
+    h1.declaration {
+      font-family: var(--serif); font-weight: 500;
+      font-size: clamp(72px, 11vw, 132px); line-height: 0.92;
+      letter-spacing: -0.025em;
+      margin: 0 0 32px;
+    }
+    h1.declaration em { font-style: italic; color: var(--accent); }
+
+    .subtitle {
+      font-family: var(--serif); font-style: italic; font-weight: 400;
+      font-size: 28px; line-height: 1.4;
+      color: var(--paper-dim);
+      margin: 0 0 16px; max-width: 560px;
+    }
+    .meta {
+      font-family: var(--mono); font-size: 12px; color: var(--paper-faint);
+      letter-spacing: 0.06em; margin: 24px 0 0;
+    }
+
+    hr.rule {
+      border: 0; height: 1px; background: var(--rule);
+      margin: 56px 0 56px;
+    }
+    hr.ornament {
+      border: 0; margin: 64px 0; text-align: center;
+      font-family: var(--serif); font-size: 32px; color: var(--paper-faint);
+      letter-spacing: 1em; padding-left: 1em;
+    }
+    hr.ornament::before { content: '◇   ◇   ◇'; }
+
+    /* ── Lede ─────────────────────────────────────── */
+    p.lede::first-line {
+      font-variant: small-caps;
+      letter-spacing: 0.02em;
+    }
+    p.lede {
+      font-size: 26px; line-height: 1.5;
+      max-width: 640px;
+      color: var(--paper);
+      margin: 0 0 24px;
+    }
+    p.lede::first-letter {
+      font-family: var(--serif);
+      font-size: 92px;
+      line-height: 0.85;
+      float: left;
+      margin: 8px 12px 0 -4px;
+      color: var(--accent);
+      font-style: italic;
+      font-weight: 500;
+    }
+
+    /* ── Principle blocks ─────────────────────────── */
+    .principle { margin: 84px 0 64px; }
+    .principle-head {
+      display: flex; align-items: baseline; gap: 18px;
+      margin-bottom: 24px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--rule);
+    }
+    .principle .n {
+      font-family: var(--mono); font-size: 13px;
+      color: var(--accent); letter-spacing: 0.16em;
+      flex-shrink: 0;
+    }
+    .principle h2 {
+      font-family: var(--serif); font-weight: 500;
+      font-size: clamp(44px, 5.5vw, 68px); line-height: 1;
+      letter-spacing: -0.02em;
+      margin: 0;
+      flex: 1;
+    }
+    .principle h2 em { font-style: italic; color: var(--accent); }
+
+    .principle p { margin: 0 0 22px; }
+    .principle p strong { font-weight: 600; color: var(--paper); }
+    .principle p em { font-style: italic; color: var(--paper-dim); }
+
+    blockquote {
+      margin: 28px 0; padding: 0 0 0 28px;
+      border-left: 2px solid var(--accent);
+      font-family: var(--serif); font-style: italic;
+      font-size: 24px; line-height: 1.45;
+      color: var(--paper-dim);
+    }
+    blockquote cite {
+      display: block; font-style: normal;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--paper-faint); letter-spacing: 0.08em;
+      margin-top: 14px;
+    }
+
+    /* Code-ish callout */
+    .code {
+      font-family: var(--mono); font-size: 14px;
+      padding: 18px 22px;
+      background: rgba(245,241,230,0.04);
+      border-left: 2px solid var(--paper-faint);
+      color: var(--paper-dim);
+      margin: 28px 0;
+      line-height: 1.6;
+    }
+    .code .k { color: var(--accent); }
+    .code .x { color: #ff8b95; }
+
+    /* Sign-off */
+    .signoff { margin-top: 96px; padding-top: 36px;
+               border-top: 1px solid var(--rule); }
+    .signoff p { font-size: 22px; line-height: 1.55; }
+    .signature {
+      margin-top: 36px;
+      font-family: var(--serif); font-style: italic; font-weight: 500;
+      font-size: 38px; color: var(--accent);
+      letter-spacing: -0.01em;
+    }
+    .signed-by {
+      font-family: var(--mono); font-size: 12px;
+      color: var(--paper-faint); letter-spacing: 0.08em;
+      margin-top: 4px;
+    }
+
+    .colophon {
+      margin-top: 80px; padding: 24px 0; border-top: 1px solid var(--rule);
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--paper-faint); letter-spacing: 0.06em;
+    }
+    .colophon a { color: var(--paper-dim); }
+
+    /* small screens */
+    @media (max-width: 640px) {
+      body { font-size: 19px; }
+      .principle p, .signoff p { font-size: 19px; }
+      blockquote { font-size: 20px; }
+      p.lede { font-size: 22px; }
+      p.lede::first-letter { font-size: 72px; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="Landing.html">
+        <svg width="22" height="22" viewBox="0 0 40 40" fill="none">
+          <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z"
+                stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+          <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+          <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+        </svg>
+        <span>AegisLink</span>
+      </a>
+      <span>MANIFESTO · 2026</span>
+    </div>
+  </nav>
+
+  <article class="page">
+
+    <div class="lockup">
+      <span class="dot"></span>
+      <span>MANIFESTO · ZURICH · 18.05.2026 · v1</span>
+    </div>
+
+    <h1 class="declaration">Una llave.<br/><em>Cero confianza.</em></h1>
+    <p class="subtitle">
+      Por qué construimos AegisLink en Suiza, sin tu número, sin tu nombre, sin
+      saber con quién hablas — y por qué creemos que es la única forma honesta.
+    </p>
+    <div class="meta">7 PRINCIPIOS · LECTURA DE 8 MINUTOS</div>
+
+    <hr class="rule"/>
+
+    <p class="lede">
+      Llevamos veinte años aceptando un pacto extraño: para hablar en privado,
+      damos a un intermediario las llaves de todas nuestras conversaciones.
+      Le decimos quiénes somos, dónde estamos, con quién hablamos, cuándo
+      callamos. Le pedimos, a cambio, que no mire. Y le creemos.
+    </p>
+
+    <p>
+      AegisLink existe porque ese pacto está roto. No porque los intermediarios
+      sean malos — algunos son notablemente buenos — sino porque la única
+      garantía honesta de privacidad es <em>técnica</em>, no contractual. Si
+      podemos ver tus mensajes, alguien terminará viéndolos. Si guardamos un
+      registro de con quién hablas, ese registro terminará en un subpoena.
+      Si conocemos tu número de teléfono, tu identidad real está a una orden
+      judicial de distancia.
+    </p>
+
+    <p>
+      Hicimos AegisLink eliminando esas posibilidades — no prometiendo no
+      usarlas. Lo que sigue son los siete principios que están en la raíz
+      del código.
+    </p>
+
+    <!-- ─── 01 ─── -->
+    <div class="principle">
+      <div class="principle-head">
+        <span class="n">01</span>
+        <h2>Tu identidad <em>es una llave</em>, no un dato.</h2>
+      </div>
+      <p>
+        No te pedimos tu número de teléfono. No te pedimos tu email. No te
+        pedimos tu nombre real. La primera vez que abres AegisLink, tu
+        dispositivo genera una llave Curve25519 y un ID anónimo de doce
+        caracteres. <strong>Eso es todo lo que somos para nosotros.</strong>
+      </p>
+      <p>
+        La diferencia no es cosmética. Un número de teléfono te conecta con
+        tu nombre real en cinco bases de datos comerciales. Te conecta con tu
+        operador, con tu banco, con tu carrier de salud. Cuando una app de
+        mensajería "anónima" lo guarda, es la app la que es anónima — tú no.
+      </p>
+      <blockquote>
+        Si la única forma de hablar conmigo es saber quién soy fuera de la
+        conversación, entonces la conversación no es privada — sólo el contenido lo es.
+        <cite>Cypherpunk axiom · adaptado</cite>
+      </blockquote>
+    </div>
+
+    <!-- ─── 02 ─── -->
+    <div class="principle">
+      <div class="principle-head">
+        <span class="n">02</span>
+        <h2>Lo que no guardamos <em>no puede filtrarse</em>.</h2>
+      </div>
+      <p>
+        Cero metadatos no es un slogan — es un compromiso arquitectónico.
+        Nuestros servidores enrutan paquetes opacos. No sabemos quién envía
+        ni quién recibe. No registramos cuándo te conectas. No conservamos
+        IPs después del enrutamiento. No tenemos analytics sobre tu uso.
+      </p>
+      <p>
+        Cuando alguien nos pregunta, con buena fe, "¿y si la policía les
+        pide los registros?", la respuesta es la misma que damos a un atacante:
+        <em>no hay registros</em>. No por mala voluntad — por imposibilidad
+        técnica. El servidor no procesa nada que pueda generarlos.
+      </p>
+      <div class="code">
+        <span class="x">// lo que tradicionalmente guardamos</span><br/>
+        message_from = "+34 ...";<br/>
+        message_to   = "+41 ...";<br/>
+        timestamp    = 1747584000;<br/>
+        ip_origin    = "85.214.x.x";<br/>
+        <br/>
+        <span class="k">// lo que AegisLink guarda</span><br/>
+        ciphertext = opaque_blob;<br/>
+        // (nada más)
+      </div>
+    </div>
+
+    <!-- ─── 03 ─── -->
+    <div class="principle">
+      <div class="principle-head">
+        <span class="n">03</span>
+        <h2>El código es <em>verificable</em> o no es seguro.</h2>
+      </div>
+      <p>
+        AegisLink es código abierto bajo MIT — cliente, servidor, protocolo,
+        infraestructura. Cualquier desarrolladora con un compilador puede
+        reproducir nuestros binarios desde el código público y confirmar que
+        son idénticos a lo que distribuimos.
+      </p>
+      <p>
+        Esto no es generosidad. Es la única manera de decir <em>"confía en
+        nosotros"</em> sin que sea una broma. Si la app que descargas no
+        coincide con el código auditado, la promesa se rompe — y tú lo
+        puedes ver. Auditores externos comprueban el protocolo cada año:
+        Cure53 cerró 2026 Q1 sin findings críticos.
+      </p>
+    </div>
+
+    <!-- ─── 04 ─── -->
+    <div class="principle">
+      <div class="principle-head">
+        <span class="n">04</span>
+        <h2>La confianza se <em>verifica</em>. No se asume.</h2>
+      </div>
+      <p>
+        Cifrar tu mensaje no sirve de nada si el destinatario es otra persona
+        que la que crees. Por eso AegisLink incluye verificación humana de
+        contactos — comparas un QR o ocho palabras de seguridad con tu
+        interlocutor. Si la huella coincide, son ellos.
+      </p>
+      <p>
+        Cuando la clave de un contacto cambia — porque cambió de dispositivo,
+        o porque alguien intenta interponerse — AegisLink no oculta el evento.
+        <strong>Detiene el envío y pide re-verificación.</strong> No tomamos
+        esa decisión por ti. Te damos la información para tomarla con
+        contexto completo.
+      </p>
+      <blockquote>
+        El sistema más seguro del mundo no es el que evita decisiones
+        humanas. Es el que pone la decisión donde corresponde — frente a un
+        humano que pueda mirarse a los ojos con su interlocutor.
+        <cite>Carmela Troncoso · IMDEA Networks</cite>
+      </blockquote>
+    </div>
+
+    <!-- ─── 05 ─── -->
+    <div class="principle">
+      <div class="principle-head">
+        <span class="n">05</span>
+        <h2>El peor día <em>también lo diseñamos</em>.</h2>
+      </div>
+      <p>
+        AegisLink no asume que vives en un país tranquilo. Asume que alguien
+        puede pedirte que abras la app delante suyo, sea con autoridad
+        legítima o sin ella. Para ese día, integramos un PIN señuelo — abre
+        una cuenta limpia, vacía, plausible. Un gesto físico (sacudir el
+        dispositivo, una secuencia de volumen) borra los chats al instante.
+      </p>
+      <p>
+        Esto es controvertido. Lo entendemos. <em>Es deliberado.</em> La
+        misma propiedad que protege a una periodista en un puesto fronterizo
+        protege a un disidente delante de su captor. Si la herramienta no
+        funciona bajo presión, no funciona.
+      </p>
+    </div>
+
+    <!-- ─── 06 ─── -->
+    <div class="principle">
+      <div class="principle-head">
+        <span class="n">06</span>
+        <h2>Pagar es <em>más honesto</em> que vender.</h2>
+      </div>
+      <p>
+        Las apps gratuitas que no venden tu atención venden tus datos. Las
+        que prometen no hacer ninguna de las dos cosas suelen estar quemando
+        capital de riesgo hasta que pivoten. AegisLink cuesta cuatro euros y
+        noventa y nueve céntimos. Una sola vez. Para siempre.
+      </p>
+      <p>
+        Las empresas con necesidades complejas pagan AegisLink Work — ocho
+        euros por usuario al mes, con auto-hosting, MDM y políticas. Esos
+        son los dos ingresos. No hay un tercero. Eso te lo podemos prometer
+        sin ambigüedad: <strong>tu privacidad no es nuestro producto, es
+        nuestro producto</strong>.
+      </p>
+    </div>
+
+    <!-- ─── 07 ─── -->
+    <div class="principle">
+      <div class="principle-head">
+        <span class="n">07</span>
+        <h2>Zurich <em>no es un slogan</em>.</h2>
+      </div>
+      <p>
+        AegisLink AG está incorporada en el cantón de Zurich. Nuestros
+        servidores están en datacenters suizos. Nuestros backups, también.
+        Estamos sujetos al nDSG suizo y al GDPR europeo — los dos marcos de
+        privacidad más estrictos del mundo. No estamos sujetos a la CLOUD
+        Act estadounidense, ni a la Investigatory Powers Act británica.
+      </p>
+      <p>
+        Esto importa porque <em>la jurisdicción es destino</em>. Una app
+        técnicamente impecable bajo una ley hostil sigue siendo vulnerable
+        a esa ley. Suiza no es una garantía absoluta — pero ofrece un piso
+        de protección legal que combinado con cero-metadatos hace muy
+        difícil convertirnos en una herramienta de vigilancia, incluso si
+        quisiéramos.
+      </p>
+    </div>
+
+    <hr class="ornament"/>
+
+    <!-- ─── Closing ─── -->
+    <div class="signoff">
+      <p>
+        Estos siete principios no son aspiracionales. Son la estructura del
+        código. Cada uno se traduce en líneas concretas que puedes auditar,
+        en propiedades del protocolo que puedes verificar matemáticamente,
+        en decisiones de infraestructura que puedes inspeccionar.
+      </p>
+      <p>
+        AegisLink no es la solución perfecta a la privacidad. Es una
+        herramienta más honesta. Una que no te miente sobre lo que sabe de ti,
+        porque ha hecho todo lo posible para no saber casi nada.
+      </p>
+      <p>
+        Si esto coincide con cómo crees que la mensajería privada debería
+        funcionar — gracias. Bájate la app. Verifica el código. Habla con
+        quien necesites hablar sin que ningún tercero — incluidos nosotros —
+        tenga que estar en medio.
+      </p>
+
+      <p style="margin-top: 32px; font-family: var(--mono); font-size: 14px;
+                color: var(--paper-faint); letter-spacing: 0.06em;">
+        ◆ El equipo de AegisLink
+      </p>
+      <p class="signature">— Zurich, 18 de mayo de 2026.</p>
+      <p class="signed-by">FIRMA DE LA RELEASE · 7K9-PQ2M-X4VR · a7f3 92e1 b4c8 5d0a</p>
+    </div>
+
+    <div class="colophon">
+      <span>Manifesto distribuido bajo CC-BY-SA 4.0</span>
+      <span><a href="Landing.html">aegislink.ch</a></span>
+    </div>
+
+  </article>
+
+</body>
+</html>
