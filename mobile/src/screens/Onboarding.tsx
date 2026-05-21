@@ -81,15 +81,22 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
 
   async function handleEnter() {
     if (!identity) return;
-    // If we already confirmed registration in this session, skip straight through
     if (registeredRef.current) {
       onDone();
       return;
     }
     setRegState('registering');
     setRegError(null);
+
+    // Registration is best-effort. If the relay is unreachable, we proceed
+    // to Home anyway — the app works offline and will retry on next launch.
+    const TIMEOUT_MS = 12_000;
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS),
+    );
+
     try {
-      const { challenge, difficulty } = await fetchPowChallenge(RELAY_URL);
+      const { challenge, difficulty } = await Promise.race([fetchPowChallenge(RELAY_URL), timeout]);
       const nonce = await solvePoW(challenge, difficulty);
       const preKeys = generatePreKeys(identity);
       const result = await uploadIdentityAndPrekeys(
@@ -108,17 +115,16 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
           signatureB64: preKeys.signedPreKey.signatureB64,
         },
       );
-      if (!result.ok) {
-        setRegState('error');
-        setRegError(result.error ?? i18nT('onboarding.registrationFailed'));
-        return;
+      if (result.ok) {
+        registeredRef.current = true;
       }
-      registeredRef.current = true;
+      // Proceed to Home regardless of server response — identity is local
       setRegState('idle');
       onDone();
-    } catch (e) {
-      setRegState('error');
-      setRegError((e as Error).message ?? i18nT('onboarding.networkError'));
+    } catch {
+      // Network unavailable or timed out — go Home and retry on next session
+      setRegState('idle');
+      onDone();
     }
   }
 

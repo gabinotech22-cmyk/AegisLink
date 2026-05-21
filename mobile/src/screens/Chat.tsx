@@ -14,6 +14,9 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
+import { FormattedText } from '../components/FormattedText';
+import { AudioWaveform } from '../components/AudioWaveform';
+import { GifPicker } from '../components/GifPicker';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import Svg, { Path } from 'react-native-svg';
@@ -75,6 +78,9 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   // Image staged for sending — shown as preview in composer until user taps Send
   const [stagedImageUri, setStagedImageUri] = useState<string | null>(null);
   const [imageProcessing, setImageProcessing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchActive, setSearchActive] = useState(false);
+  const [gifPickerVisible, setGifPickerVisible] = useState(false);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [replyTo, setReplyTo] = useState<StoredMessage | null>(null);
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
@@ -350,6 +356,33 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     [list],
   );
 
+  const filteredList = useMemo(() => {
+    if (!searchQuery) return list;
+    const q = searchQuery.toLowerCase();
+    return list.filter((m) => !m.deleted && m.body.toLowerCase().includes(q));
+  }, [list, searchQuery]);
+
+  async function handleGifSelect(url: string) {
+    setGifPickerVisible(false);
+    if (!identity) return;
+    const plaintext = `[gif:${url}]`;
+    try {
+      await sendMessage({
+        identity,
+        recipientAegisId: contact.aegisId,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext,
+      });
+    } catch (e) {
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+    }
+  }
+
+  function handleStickerSelect(emoji: string) {
+    setGifPickerVisible(false);
+    setDraft((prev) => prev + emoji);
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <KeyboardAvoidingView
@@ -362,70 +395,111 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
             <I.ChevronL size={22} color={t.text} />
           </Pressable>
-          <Pressable
-            onPress={onContactDetail}
-            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
-          >
-            <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={36} />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text
-                numberOfLines={1}
+          {searchActive ? (
+            <>
+              <TextInput
+                autoFocus
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder={i18nT('chat.searchPlaceholder', 'Search messages…')}
+                placeholderTextColor={t.textFaint}
                 style={{
-                  fontFamily: /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(contact.name) ? t.fontMono : t.font,
-                  fontWeight: '600',
+                  flex: 1,
+                  fontFamily: t.font,
                   fontSize: 15,
                   color: t.text,
+                  backgroundColor: t.surface2,
+                  borderRadius: 20,
+                  paddingHorizontal: 14,
+                  paddingVertical: Platform.OS === 'ios' ? 8 : 4,
                 }}
+                accessibilityLabel={i18nT('chat.searchPlaceholder', 'Search messages')}
+              />
+              <Pressable
+                onPress={() => { setSearchActive(false); setSearchQuery(''); }}
+                hitSlop={8}
+                style={{ padding: 6 }}
+                accessibilityLabel="Close search"
               >
-                {contact.name}
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                {isContactTyping ? (
-                  <Text style={{ fontFamily: t.font, fontSize: 11, color: t.accent, fontStyle: 'italic' }}>
-                    {i18nT('home.typing')}
+                <I.X size={20} color={t.textDim} />
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable
+                onPress={onContactDetail}
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
+              >
+                <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={36} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily: /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(contact.name) ? t.fontMono : t.font,
+                      fontWeight: '600',
+                      fontSize: 15,
+                      color: t.text,
+                    }}
+                  >
+                    {contact.name}
                   </Text>
-                ) : contact.status ? (
-                  <>
-                    <Text
-                      numberOfLines={1}
-                      style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, flex: 1 }}
-                    >
-                      {contact.status}
-                    </Text>
-                    <I.Lock size={8} color={contact.verified ? t.accent : t.warn} />
-                  </>
-                ) : (
-                  <>
-                    <I.Lock size={10} color={contact.verified ? t.accent : t.warn} />
-                    <Text
-                      style={{
-                        fontFamily: t.fontMono,
-                        fontSize: 10,
-                        color: contact.verified ? t.accent : t.warn,
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      {contact.verified ? i18nT('chat.e2eVerified') : i18nT('chat.e2eNotVerified')}
-                    </Text>
-                  </>
-                )}
-              </View>
-            </View>
-          </Pressable>
-          <Pressable
-            onPress={() => void handleCall('audio')}
-            hitSlop={8}
-            style={{ padding: 6, opacity: WEBRTC_AVAILABLE ? 1 : 0.4 }}
-          >
-            <I.Phone size={20} color={t.text} />
-          </Pressable>
-          <Pressable
-            onPress={() => void handleCall('video')}
-            hitSlop={8}
-            style={{ padding: 6, opacity: WEBRTC_AVAILABLE ? 1 : 0.4 }}
-          >
-            <I.Video size={20} color={t.text} />
-          </Pressable>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    {isContactTyping ? (
+                      <Text style={{ fontFamily: t.font, fontSize: 11, color: t.accent, fontStyle: 'italic' }}>
+                        {i18nT('home.typing')}
+                      </Text>
+                    ) : contact.status ? (
+                      <>
+                        <Text
+                          numberOfLines={1}
+                          style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, flex: 1 }}
+                        >
+                          {contact.status}
+                        </Text>
+                        <I.Lock size={8} color={contact.verified ? t.accent : t.warn} />
+                      </>
+                    ) : (
+                      <>
+                        <I.Lock size={10} color={contact.verified ? t.accent : t.warn} />
+                        <Text
+                          style={{
+                            fontFamily: t.fontMono,
+                            fontSize: 10,
+                            color: contact.verified ? t.accent : t.warn,
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          {contact.verified ? i18nT('chat.e2eVerified') : i18nT('chat.e2eNotVerified')}
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={() => setSearchActive(true)}
+                hitSlop={8}
+                style={{ padding: 6 }}
+                accessibilityLabel={i18nT('chat.searchMessages', 'Search messages')}
+              >
+                <I.Search size={20} color={t.textDim} />
+              </Pressable>
+              <Pressable
+                onPress={() => void handleCall('audio')}
+                hitSlop={8}
+                style={{ padding: 6, opacity: WEBRTC_AVAILABLE ? 1 : 0.4 }}
+              >
+                <I.Phone size={20} color={t.text} />
+              </Pressable>
+              <Pressable
+                onPress={() => void handleCall('video')}
+                hitSlop={8}
+                style={{ padding: 6, opacity: WEBRTC_AVAILABLE ? 1 : 0.4 }}
+              >
+                <I.Video size={20} color={t.text} />
+              </Pressable>
+            </>
+          )}
         </View>
 
         {/* Offline banner */}
@@ -592,7 +666,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
         <FlatList
           ref={flatlistRef}
-          data={list}
+          data={filteredList}
           keyExtractor={(m) => m.id}
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10 }}
           renderItem={({ item }) => (
@@ -735,6 +809,16 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               <Pressable onPress={onAttach} hitSlop={6} style={{ padding: 6 }}>
                 <I.Attach size={22} color={t.textDim} />
               </Pressable>
+              <Pressable
+                onPress={() => setGifPickerVisible(true)}
+                hitSlop={6}
+                style={{ padding: 6 }}
+                accessibilityLabel="Open GIF picker"
+              >
+                <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
+                  GIF
+                </Text>
+              </Pressable>
               <TextInput
                 value={draft}
                 onChangeText={handleDraftChange}
@@ -804,6 +888,13 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         visible={forwardBody !== null}
         body={forwardBody ?? ''}
         onClose={() => setForwardBody(null)}
+      />
+
+      <GifPicker
+        visible={gifPickerVisible}
+        onClose={() => setGifPickerVisible(false)}
+        onSelectGif={handleGifSelect}
+        onSelectSticker={handleStickerSelect}
       />
     </KeyboardAvoidingView>
     </GestureHandlerRootView>
@@ -1162,6 +1253,34 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProp
     );
   }
 
+  // GIF bubble
+  const gifMatch = m.body?.match(/^\[gif:(.+)\]$/);
+  if (gifMatch) {
+    const gifUrl = gifMatch[1];
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+        <Pressable
+          onLongPress={onLongPress}
+          style={({ pressed }) => ({
+            borderRadius: t.radius,
+            borderTopRightRadius: me ? t.radiusS : t.radius,
+            borderTopLeftRadius: me ? t.radius : t.radiusS,
+            overflow: 'hidden',
+            opacity: queued ? 0.55 : pressed ? 0.9 : 1,
+          })}
+        >
+          <Image
+            source={{ uri: gifUrl }}
+            style={{ width: 220, height: 160, backgroundColor: t.surface2 }}
+            resizeMode="cover"
+          />
+        </Pressable>
+        <ReactionPills t={t} reactions={reactions} me={me} />
+        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+      </View>
+    );
+  }
+
   // Text bubble
   return (
     <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
@@ -1199,9 +1318,11 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProp
             </Text>
           </View>
         ) : null}
-        <Text style={{ color: me ? t.bubbleOutText : t.bubbleInText, fontFamily: t.font, fontSize: 15, lineHeight: 20 }}>
-          {m.body}
-        </Text>
+        <FormattedText
+          body={m.body}
+          t={t}
+          style={{ color: me ? t.bubbleOutText : t.bubbleInText, fontFamily: t.font, fontSize: 15, lineHeight: 20 }}
+        />
       </Pressable>
       <ReactionPills t={t} reactions={reactions} me={me} />
       <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
@@ -1291,6 +1412,7 @@ function AudioBubble({
 
   // Parse duration from body "[audio:30s]"
   const durSec = parseInt(m.body.match(/\[audio:(\d+)s/)?.[1] ?? '0', 10);
+  const durMs = durSec * 1000;
 
   async function togglePlay() {
     if (!m.mediaUri) return;
@@ -1323,7 +1445,14 @@ function AudioBubble({
     } catch { setPlaying(false); }
   }
 
-  const progress = durSec > 0 ? Math.min(1, posMs / (durSec * 1000)) : 0;
+  async function handleSeek(seekMs: number) {
+    if (!soundRef.current) return;
+    try {
+      await soundRef.current.setPositionAsync(seekMs);
+      setPosMs(seekMs);
+    } catch { /* ignore */ }
+  }
+
   const elapsed = Math.floor(posMs / 1000);
   const display = playing
     ? `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
@@ -1337,7 +1466,7 @@ function AudioBubble({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 10,
-          width: 220,
+          width: 240,
           backgroundColor: me ? t.bubbleOut : t.bubbleIn,
           paddingHorizontal: 12,
           paddingVertical: 10,
@@ -1358,9 +1487,15 @@ function AudioBubble({
           }
         </Pressable>
         <View style={{ flex: 1, gap: 5 }}>
-          <View style={{ height: 3, borderRadius: 2, backgroundColor: me ? 'rgba(255,255,255,0.25)' : t.surface3, overflow: 'hidden' }}>
-            <View style={{ height: 3, borderRadius: 2, width: `${progress * 100}%`, backgroundColor: me ? 'rgba(255,255,255,0.8)' : t.accent }} />
-          </View>
+          <AudioWaveform
+            durMs={durMs}
+            posMs={posMs}
+            width={148}
+            maxBarHeight={24}
+            onSeek={handleSeek}
+            t={t}
+            isMe={me}
+          />
           <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? t.bubbleOutText : t.textDim }}>
             {display}
           </Text>
