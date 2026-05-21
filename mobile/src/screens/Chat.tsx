@@ -43,6 +43,7 @@ import { useContacts } from '../store/contacts';
 import { sendMessage, emitTyping, sendReadReceipts, sendDeleteForEveryone } from '../socket/client';
 import { startCall } from '../socket/calls';
 import { WEBRTC_AVAILABLE } from '../runtime';
+import { SoundFX } from '../hooks/useSoundFX';
 import type { StoredContact, StoredMessage } from '../db/local';
 
 const EMPTY_MSGS: StoredMessage[] = [];
@@ -170,6 +171,24 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     if (list.length > 0 && isNearBottomRef.current) {
       requestAnimationFrame(() => flatlistRef.current?.scrollToEnd({ animated: true }));
     }
+  }, [list.length]);
+
+  // Play received-message tone only for incoming messages we did not send,
+  // and only when the chat is not currently the active (focused) screen.
+  // The active chat ID is already set via setActiveChatNotificationId above,
+  // which suppresses push banners; we mirror the same guard here for sound.
+  const prevListLengthRef = useRef(list.length);
+  useEffect(() => {
+    const prev = prevListLengthRef.current;
+    prevListLengthRef.current = list.length;
+    if (list.length <= prev) return;
+    // Check if any of the new items are incoming messages
+    const newItems = list.slice(prev);
+    const hasIncoming = newItems.some((m) => m.direction === 'in');
+    if (hasIncoming) {
+      void SoundFX.msgReceived();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list.length]);
 
   // Search hits — debounced filter + scroll to active hit
@@ -362,6 +381,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           replyToId: replying?.id,
         });
       }
+      void SoundFX.msgSent();
     } catch (e) {
       Alert.alert(i18nT('chat.sendError'), (e as Error).message);
     } finally {

@@ -35,6 +35,33 @@ export async function registerForPush(identity: Identity): Promise<void> {
   if (registered) return;
 
   try {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('aegislink-messages', {
+        name: 'Mensajes',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#5bf2b9',
+        sound: 'default',
+        showBadge: true,
+      });
+      await Notifications.setNotificationChannelAsync('aegislink-calls', {
+        name: 'Llamadas',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 500, 200, 500],
+        lightColor: '#5bf2b9',
+        sound: 'default',
+        bypassDnd: true,
+      });
+      await Notifications.setNotificationChannelAsync('aegislink-security', {
+        name: 'Seguridad',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 100, 100, 100, 100, 100],
+        lightColor: '#ff6b6b',
+        sound: 'default',
+        bypassDnd: true,
+      });
+    }
+
     const perm = await Notifications.getPermissionsAsync();
     let granted = perm.granted || perm.status === 'granted';
     if (!granted && perm.canAskAgain) {
@@ -181,6 +208,8 @@ export async function showIncomingNotification(
         body: notificationBody,
         sound: prefs.notifSound ? 'default' : undefined,
         data: { fromAegisId: senderAegisId, isGroup, groupName },
+        // Android notification channel
+        ...(Platform.OS === 'android' ? { channelId: 'aegislink-messages' } : {}),
       },
       trigger: null,
     });
@@ -224,10 +253,33 @@ export async function showCriticalSecurityNotification(
         body,
         sound: 'default',
         priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === 'android' ? { channelId: 'aegislink-security' } : {}),
       },
       trigger: null,
     });
   } catch (err) {
     if (__DEV__) console.warn('[push] showCriticalSecurityNotification failed:', err);
+  }
+}
+
+export async function showIncomingCallNotification(
+  callerAegisId: string,
+  callerName: string,
+  isVideo: boolean
+): Promise<void> {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `AegisLink · ${isVideo ? '📹' : '📞'} ${callerName}`,
+        body: isVideo ? 'Videollamada E2EE entrante' : 'Llamada de voz E2EE entrante',
+        sound: 'default',
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        data: { fromAegisId: callerAegisId, type: 'call', isVideo },
+        ...(Platform.OS === 'android' ? { channelId: 'aegislink-calls' } : {}),
+      },
+      trigger: null,
+    });
+  } catch (err) {
+    if (__DEV__) console.warn('[push] showIncomingCallNotification failed:', err);
   }
 }
