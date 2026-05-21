@@ -13,3 +13,9 @@ google-service-account.json
 *.pem
 *.key
 /infra/coturn/turnserver.conf.rendered
+
+aegislink-server.zip
+*.zip
+desktop/node_modules/
+server/node_modules/
+promo-video/node_modules/
