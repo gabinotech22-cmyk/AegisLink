@@ -123,11 +123,104 @@ jobs:
       - name: Run tests
         run: npm test -- --passWithNoTests
 
+  # ─── Permissions audit — Android + iOS native manifests ─────────────────
+  permissions-audit:
+    name: Permissions audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect native directories
+        id: check_native
+        run: |
+          if [ -f "mobile/android/app/src/main/AndroidManifest.xml" ]; then
+            echo "has_android=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_android=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f "mobile/ios/AegisLink/Info.plist" ] || \
+             compgen -G "mobile/ios/*.xcodeproj" > /dev/null 2>&1; then
+            echo "has_ios=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_ios=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Android ──────────────────────────────────────────────────────────────
+      - name: Audit AndroidManifest.xml permissions
+        if: steps.check_native.outputs.has_android == 'true'
+        run: |
+          MANIFEST="mobile/android/app/src/main/AndroidManifest.xml"
+          ALLOWED="CAMERA RECORD_AUDIO POST_NOTIFICATIONS INTERNET ACCESS_NETWORK_STATE VIBRATE RECEIVE_BOOT_COMPLETED WAKE_LOCK"
+
+          # Extract every android.permission.* value declared in the manifest
+          FOUND=$(grep -oP '(?<=android\.permission\.)\w+' "$MANIFEST" | sort -u)
+
+          FAILED=0
+          for PERM in $FOUND; do
+            OK=0
+            for A in $ALLOWED; do
+              [ "$PERM" = "$A" ] && OK=1 && break
+            done
+            if [ "$OK" -eq 0 ]; then
+              echo "::error file=$MANIFEST::Unauthorized permission: android.permission.$PERM"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "Audit FAILED — one or more unauthorized Android permissions found."
+            exit 1
+          fi
+          echo "Android permissions audit PASSED. Declared: $(echo $FOUND | tr '\n' ' ')"
+
+      - name: Android audit skipped (no native dir)
+        if: steps.check_native.outputs.has_android != 'true'
+        run: echo "mobile/android not present — skipping Android permissions audit."
+
+      # ── iOS ───────────────────────────────────────────────────────────────────
+      - name: Audit Info.plist privacy keys
+        if: steps.check_native.outputs.has_ios == 'true'
+        run: |
+          # Locate the first Info.plist inside mobile/ios/
+          PLIST=$(find mobile/ios -name "Info.plist" | head -1)
+          if [ -z "$PLIST" ]; then
+            echo "::warning::has_ios detected but no Info.plist found — skipping."
+            exit 0
+          fi
+
+          # Blocked privacy keys (location, contacts, etc.)
+          BLOCKED="NSLocationUsageDescription NSLocationWhenInUseUsageDescription \
+                   NSLocationAlwaysUsageDescription NSLocationAlwaysAndWhenInUseUsageDescription \
+                   NSContactsUsageDescription NSPhotoLibraryUsageDescription \
+                   NSPhotoLibraryAddUsageDescription NSMotionUsageDescription \
+                   NSHealthShareUsageDescription NSHealthUpdateUsageDescription \
+                   NSBluetoothAlwaysUsageDescription NSBluetoothPeripheralUsageDescription \
+                   NFCReaderUsageDescription NSSpeechRecognitionUsageDescription \
+                   NSFaceIDUsageDescription"
+
+          FAILED=0
+          for KEY in $BLOCKED; do
+            if grep -q "<key>$KEY</key>" "$PLIST"; then
+              echo "::error file=$PLIST::Unauthorized privacy key in Info.plist: $KEY"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "Audit FAILED — one or more unauthorized privacy keys found in $PLIST."
+            exit 1
+          fi
+          echo "iOS Info.plist privacy audit PASSED ($PLIST)."
+
+      - name: iOS audit skipped (no native dir)
+        if: steps.check_native.outputs.has_ios != 'true'
+        run: echo "mobile/ios not present — skipping iOS permissions audit."
+
   # ─── EAS Build — preview (APK + iOS simulator) on push to main ───────────
   eas-build-preview:
     name: EAS Build — preview
     runs-on: ubuntu-latest
-    needs: [server-typecheck, mobile-typecheck]
+    needs: [server-typecheck, mobile-typecheck, permissions-audit]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     defaults:
       run:

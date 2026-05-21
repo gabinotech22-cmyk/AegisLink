@@ -228,6 +228,8 @@ export function PanicScreen({ onBack }: Props) {
 
         <View style={{ paddingHorizontal: 18 }}>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={i18nT('panic.activatePanic')}
             onPress={() => {
               Alert.alert(
                 i18nT('panic.activatePanicTitle'),
@@ -294,6 +296,7 @@ export function PanicScreen({ onBack }: Props) {
               keyboardType="numeric"
               maxLength={6}
               secureTextEntry
+              autoFocus
               style={{
                 color: t.text,
                 backgroundColor: t.bg,

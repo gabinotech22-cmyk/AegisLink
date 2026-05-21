@@ -247,6 +247,8 @@ export function CallScreen({ onClose }: Props) {
               onPress={toggleMute}
               icon="Mic"
               label={muted ? i18nT('call.unmute', 'Unmute') : i18nT('call.mute', 'Mute')}
+              accessibilityLabel={muted ? i18nT('call.muteA11y', 'Mute: active') : i18nT('call.muteA11yOff', 'Mute: inactive')}
+              accessibilityState={{ selected: muted }}
               outlined
             />
             {isVideo && (
@@ -256,6 +258,8 @@ export function CallScreen({ onClose }: Props) {
                 onPress={toggleCamera}
                 icon="Video"
                 label={cameraOff ? i18nT('call.cameraOn', 'Camera on') : i18nT('call.cameraOff', 'Camera off')}
+                accessibilityLabel={cameraOff ? i18nT('call.cameraA11yOff', 'Camera: off') : i18nT('call.cameraA11yOn', 'Camera: on')}
+                accessibilityState={{ selected: cameraOff }}
                 outlined
               />
             )}
@@ -298,6 +302,8 @@ function CircleBtn({
   icon,
   label,
   outlined = false,
+  accessibilityLabel: a11yLabel,
+  accessibilityState,
 }: {
   t: Theme;
   color: string;
@@ -305,10 +311,15 @@ function CircleBtn({
   icon: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup';
   label: string;
   outlined?: boolean;
+  accessibilityLabel?: string;
+  accessibilityState?: { selected?: boolean; disabled?: boolean };
 }) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={a11yLabel ?? label}
+      accessibilityState={accessibilityState}
       style={({ pressed }) => ({
         alignItems: 'center',
         opacity: pressed ? 0.7 : 1,

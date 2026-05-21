@@ -7,25 +7,30 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "channel": "development",
       "android": { "buildType": "apk" },
       "ios": { "simulator": true },
       "env": {
         "EXPO_PUBLIC_RELAY_URL": "http://localhost:3001",
-        "EXPO_PUBLIC_TURN_URL": "turn:localhost:3478"
+        "EXPO_PUBLIC_TURN_URL": "turn:localhost:3478",
+        "AEGIS_EXPO_GO": "0"
       }
     },
     "preview": {
       "developmentClient": false,
       "distribution": "internal",
+      "channel": "preview",
       "android": { "buildType": "apk" },
       "ios": { "simulator": false },
       "env": {
         "EXPO_PUBLIC_RELAY_URL": "https://aegislink.duckdns.org",
-        "EXPO_PUBLIC_TURN_URL": "turn:aegislink.duckdns.org:3478"
+        "EXPO_PUBLIC_TURN_URL": "turn:aegislink.duckdns.org:3478",
+        "AEGIS_EXPO_GO": "0"
       }
     },
     "production": {
       "autoIncrement": true,
+      "channel": "production",
       "android": { "buildType": "app-bundle" },
       "env": {
         "EXPO_PUBLIC_RELAY_URL": "https://aegislink.duckdns.org",
