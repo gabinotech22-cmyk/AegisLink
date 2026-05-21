@@ -397,7 +397,11 @@ function Shell() {
 
   // ── Active call overlay ───────────────────────────────────────────────────
   if (callOverlay) {
-    return <CallScreen onClose={() => endCall('hangup')} />;
+    return (
+      <div style={{ display: 'flex', height: '100vh', width: '100vw', backgroundColor: t.bg, overflow: 'hidden' }}>
+        <CallScreen onClose={() => endCall('hangup')} />
+      </div>
+    );
   }
 
   // ── Helper: open a chat from the sidebar ─────────────────────────────────────
@@ -464,7 +468,20 @@ function Shell() {
         case 'lock':
           return <LockScreen onUnlock={() => { setAppLocked(false); pop(); }} onPanic={() => push({ name: 'panic' })} />;
         case 'panic':
-          return <PanicScreen onBack={pop} />;
+          return (
+            <PanicScreen
+              onBack={pop}
+              onWipe={async () => {
+                // Clear the stack FIRST so no screen tries to render stale state
+                // while identity is being wiped (prevents green-screen race).
+                setStack([]);
+                await triggerPanic();
+                // identity is now null — the showEntry effect will fire on next
+                // render. Explicitly set it here to be safe.
+                setShowEntry(true);
+              }}
+            />
+          );
         case 'ephemeral':
           return <EphemeralScreen onBack={pop} />;
         case 'export':
