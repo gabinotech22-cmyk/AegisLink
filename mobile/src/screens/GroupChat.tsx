@@ -28,20 +28,9 @@ import { sendGroupMessage, sendGroupVote } from '../socket/client';
 import { useConnection } from '../store/connection';
 import { usePollsStore, type PollResult } from '../store/polls';
 import type { StoredGroup, StoredMessage } from '../db/local';
+import { parseLocationMessage } from '../utils/parseLocationMessage';
 
 const EMPTY_MSGS: StoredMessage[] = [];
-
-function parseLocationMessage(body: string) {
-  if (!body.startsWith('📍')) return null;
-  const regex = /📍 Ubicación compartida \(([^,]+), durante ([^)]+)\):\s*([^(]+?)(?:\s*\(Lat:\s*([-\d.]+),\s*Lon:\s*([-\d.]+)\))?$/i;
-  const match = body.match(regex);
-  if (!match) return null;
-  return {
-    precision: match[1], duration: match[2], address: match[3].trim(),
-    latitude: match[4] ? parseFloat(match[4]) : null,
-    longitude: match[5] ? parseFloat(match[5]) : null,
-  };
-}
 
 // Deterministic color from string
 function colorFromId(id: string) {
@@ -89,6 +78,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const flatlistRef = useRef<FlatList>(null);
+  const isNearBottomRef = useRef(true);
   const online = useConnection((s) => s.online);
 
   // Build member name lookup
@@ -149,7 +139,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
   }
 
   useEffect(() => {
-    if (list.length > 0) {
+    if (list.length > 0 && isNearBottomRef.current) {
       requestAnimationFrame(() => flatlistRef.current?.scrollToEnd({ animated: true }));
     }
   }, [list.length]);
@@ -253,8 +243,9 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
         await sendGroupMessage({ identity, groupId: group.id, plaintext: text });
       }
     } catch (e) {
+      setDraft(text);
+      if (imageUri) setStagedImageUri(imageUri);
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
-      if (!hasImage) setDraft(text);
     } finally {
       setSending(false);
     }
@@ -348,7 +339,19 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
           data={filteredList}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12, gap: 10 }}
-          onLayout={() => list.length > 0 && flatlistRef.current?.scrollToEnd({ animated: false })}
+          onLayout={() => list.length > 0 && isNearBottomRef.current && flatlistRef.current?.scrollToEnd({ animated: false })}
+          onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
+            isNearBottomRef.current =
+              contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+          }}
+          scrollEventThrottle={100}
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 40 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim }}>
+                Sin mensajes aún. Todo cifrado de extremo a extremo.
+              </Text>
+            </View>
+          }
           renderItem={({ item }) => (
             <SwipeableMessage
               disabled={item.deleted}
@@ -378,7 +381,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
               />
             </SwipeableMessage>
           )}
-          onContentSizeChange={() => flatlistRef.current?.scrollToEnd({ animated: false })}
+          onContentSizeChange={() => isNearBottomRef.current && flatlistRef.current?.scrollToEnd({ animated: false })}
         />
 
         {/* @ mention autocomplete */}
@@ -468,6 +471,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
             placeholderTextColor={t.textDim}
             value={draft}
             onChangeText={handleDraftChange}
+            accessibilityLabel="Campo de mensaje"
             multiline
             style={[styles.input, { color: t.text, backgroundColor: t.surface2, borderColor: t.border, fontFamily: t.font }]}
           />
@@ -555,20 +559,34 @@ function GroupBubble({
   const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const reactions = m.reactions ? Object.entries(m.reactions).filter(([, ids]) => ids.length > 0) : [];
 
-  // Parse "SenderName: text" format for incoming group messages
+  // Parse "SenderName: text" format for incoming group messages.
+  // senderId is only considered verified when it resolves to a known memberNames
+  // aegisId — if the name is not found in the map the id is unverifiable
+  // (spoofable by body content) and badges are suppressed.
+  // TODO: usar senderAegisId del sobre cifrado cuando el protocolo lo exponga.
   let sender = '';
   let body = m.body;
   let senderId = '';
+  let senderVerified = false;
   if (!me && body.includes(': ')) {
     const colonIdx = body.indexOf(': ');
     sender = body.substring(0, colonIdx);
     body = body.substring(colonIdx + 2);
-    senderId = Object.entries(memberNames).find(([, n]) => n === sender)?.[0] ?? sender;
+    const found = Object.entries(memberNames).find(([, n]) => n === sender);
+    if (found) {
+      senderId = found[0];
+      senderVerified = true;
+    } else {
+      senderId = sender;
+      senderVerified = false;
+    }
   }
 
   const senderColor = senderId ? colorFromId(senderId) : t.accent;
-  const senderIsAdmin = senderId && adminId ? senderId === adminId : false;
-  const senderIsMod = senderId && moderators ? moderators.includes(senderId) : false;
+  // Only show ADMIN/MOD badges when senderId is resolved from the authenticated
+  // member map — prevents display-name spoofing attacks.
+  const senderIsAdmin = senderVerified && senderId && adminId ? senderId === adminId : false;
+  const senderIsMod = senderVerified && senderId && moderators ? moderators.includes(senderId) : false;
 
   if (m.deleted) {
     return (
@@ -988,8 +1006,16 @@ function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: Stored
   const [playing, setPlaying] = useState(false);
   const [posMs, setPosMs] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1.0);
-  const soundRef = useRef<any>(null);
+  type AudioSound = import('expo-av').Audio.Sound;
+  type AVPlaybackStatus = import('expo-av').AVPlaybackStatus;
+  const soundRef = useRef<AudioSound | null>(null);
   const durSec = parseInt(body.match(/\[audio:(\d+)s/)?.[1] ?? '0', 10);
+
+  useEffect(() => {
+    return () => {
+      void soundRef.current?.unloadAsync().catch(() => {});
+    };
+  }, []);
 
   async function togglePlay() {
     if (!m.mediaUri) return;
@@ -1005,7 +1031,7 @@ function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: Stored
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
       const { sound } = await Audio.Sound.createAsync(
         { uri: m.mediaUri }, { shouldPlay: true, rate: playbackRate, shouldCorrectPitch: true },
-        (s: any) => {
+        (s: AVPlaybackStatus) => {
           if (!s.isLoaded) return;
           setPosMs(s.positionMillis ?? 0);
           if (s.didJustFinish) { setPlaying(false); setPosMs(0); soundRef.current = null; }

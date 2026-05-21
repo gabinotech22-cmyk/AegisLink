@@ -15,8 +15,6 @@ contextBridge.exposeInMainWorld('aegis', {
       ipcRenderer.invoke('secureStorage:delete', key)
   },
   db: {
-    exec: (sql: string): Promise<void> =>
-      ipcRenderer.invoke('db:exec', sql),
     run: (sql: string, params?: unknown[]): Promise<import('better-sqlite3').RunResult> =>
       ipcRenderer.invoke('db:run', sql, params ?? []),
     all: (sql: string, params?: unknown[]): Promise<unknown[]> =>

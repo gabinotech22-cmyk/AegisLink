@@ -1,8 +1,27 @@
 import { ipcMain, safeStorage, app } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
+import { is } from '@electron-toolkit/utils'
 import fs from 'fs'
 import path from 'path'
 
 type Keystore = Record<string, string>
+
+function assertTrustedSender(e: IpcMainInvokeEvent): void {
+  const url = e.senderFrame?.url ?? ''
+  const trusted =
+    url.startsWith('file://') ||
+    (is.dev && url.startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'http://localhost'))
+  if (!trusted) throw new Error('untrusted IPC sender')
+}
+
+function assertValidKey(key: unknown): asserts key is string {
+  if (typeof key !== 'string' || key.length === 0 || key.length > 512)
+    throw new Error('invalid key')
+}
+
+function assertValidValue(value: unknown): asserts value is string {
+  if (typeof value !== 'string' || value.length > 65536) throw new Error('invalid value')
+}
 
 function getKeystorePath(): string {
   return path.join(app.getPath('userData'), 'keystore.json')
@@ -27,14 +46,22 @@ function writeKeystore(keystore: Keystore): void {
 }
 
 export function registerSecureStorageHandlers(): void {
-  ipcMain.handle('secureStorage:set', (_event, key: string, value: string): void => {
+  ipcMain.handle('secureStorage:set', (event, key: string, value: string): void => {
+    assertTrustedSender(event)
+    assertValidKey(key)
+    assertValidValue(value)
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('secure encryption not available on this system')
+    }
     const encrypted = safeStorage.encryptString(value)
     const keystore = readKeystore()
     keystore[key] = encrypted.toString('base64')
     writeKeystore(keystore)
   })
 
-  ipcMain.handle('secureStorage:get', (_event, key: string): string | null => {
+  ipcMain.handle('secureStorage:get', (event, key: string): string | null => {
+    assertTrustedSender(event)
+    assertValidKey(key)
     const keystore = readKeystore()
     const encoded = keystore[key]
     if (!encoded) return null
@@ -46,7 +73,9 @@ export function registerSecureStorageHandlers(): void {
     }
   })
 
-  ipcMain.handle('secureStorage:delete', (_event, key: string): void => {
+  ipcMain.handle('secureStorage:delete', (event, key: string): void => {
+    assertTrustedSender(event)
+    assertValidKey(key)
     const keystore = readKeystore()
     delete keystore[key]
     writeKeystore(keystore)
