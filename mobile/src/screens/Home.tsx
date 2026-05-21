@@ -25,9 +25,10 @@ interface Props {
   onProfile: () => void;
   onContacts: () => void;
   onTab: (tab: Tab) => void;
+  onDistribution?: () => void;
 }
 
-export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onContacts, onTab }: Props) {
+export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onContacts, onTab, onDistribution }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -199,13 +200,18 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
           ) : null}
         </Pressable>
         <View style={{ flexDirection: 'row', gap: 4 }}>
-          <Pressable onPress={onSearch} hitSlop={8} style={{ padding: 8 }}>
+          <Pressable onPress={onSearch} hitSlop={8} style={{ padding: 8 }} accessibilityLabel="Search">
             <I.Search size={20} color={t.textDim} />
           </Pressable>
-          <Pressable onPress={onContacts} hitSlop={8} style={{ padding: 8 }}>
+          <Pressable onPress={onContacts} hitSlop={8} style={{ padding: 8 }} accessibilityLabel="Contacts">
             <I.Person size={20} color={t.textDim} />
           </Pressable>
-          <Pressable onPress={onAddContact} hitSlop={8} style={{ padding: 8 }}>
+          {onDistribution ? (
+            <Pressable onPress={onDistribution} hitSlop={8} style={{ padding: 8 }} accessibilityLabel="Distribution lists">
+              <I.Broadcast size={20} color={t.textDim} />
+            </Pressable>
+          ) : null}
+          <Pressable onPress={onAddContact} hitSlop={8} style={{ padding: 8 }} accessibilityLabel="Add contact">
             <I.Plus size={22} color={t.accent} />
           </Pressable>
         </View>

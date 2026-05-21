@@ -19,6 +19,7 @@ interface Props {
   body: string;
   t: Theme;
   style?: TextStyle;
+  selectable?: boolean;
 }
 
 type Segment =
@@ -77,11 +78,11 @@ function parse(body: string): Segment[] {
   return segments;
 }
 
-export function FormattedText({ body, t, style }: Props) {
+export function FormattedText({ body, t, style, selectable }: Props) {
   const segments = parse(body);
 
   return (
-    <Text style={style}>
+    <Text selectable={selectable} style={style}>
       {segments.map((seg, i) => {
         switch (seg.kind) {
           case 'plain':
@@ -114,13 +115,14 @@ export function FormattedText({ body, t, style }: Props) {
                 key={i}
                 style={{
                   fontFamily: t.fontMono,
-                  backgroundColor: t.surface,
-                  // Inline code: slight padding is not possible on RN Text, but
-                  // letterSpacing gives a monospace feel. The background tint is
-                  // applied via the Text backgroundColor prop (works on both platforms).
+                  backgroundColor: t.surface2,
+                  borderRadius: 3,
+                  // paddingHorizontal on inline Text is not supported on RN;
+                  // we approximate the inset with letter spacing.
+                  letterSpacing: 0.2,
                 }}
               >
-                {seg.text}
+                {'​'}{seg.text}{'​'}
               </Text>
             );
 

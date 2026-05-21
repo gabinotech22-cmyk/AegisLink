@@ -19,6 +19,7 @@ import { AudioWaveform } from '../components/AudioWaveform';
 import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
 import { ImageViewerModal } from '../components/ImageViewerModal';
+import { loadWallpaper, wallpaperBg, type WallpaperOption } from '../components/WallpaperPicker';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import Svg, { Path } from 'react-native-svg';
@@ -104,11 +105,15 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
   const [draft, setDraft] = useState(savedDraft);
   const [sending, setSending] = useState(false);
+  const [chatWallpaper, setChatWallpaper] = useState<WallpaperOption>(0);
   // Image staged for sending — shown as preview in composer until user taps Send
   const [stagedImageUri, setStagedImageUri] = useState<string | null>(null);
   const [imageProcessing, setImageProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
+  const [searchHits, setSearchHits] = useState<string[]>([]);
+  const [searchIdx, setSearchIdx] = useState(0);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,6 +147,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     return () => { active = false; };
   }, [contact.aegisId, contact.publicKeyB64]);
 
+  // Load wallpaper for this contact
+  useEffect(() => {
+    void loadWallpaper(contact.aegisId).then(setChatWallpaper);
+  }, [contact.aegisId]);
+
   useEffect(() => {
     void loadChat(contact.aegisId);
     void markRead(contact.aegisId);
@@ -161,6 +171,36 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       requestAnimationFrame(() => flatlistRef.current?.scrollToEnd({ animated: true }));
     }
   }, [list.length]);
+
+  // Search hits — debounced filter + scroll to active hit
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!searchQuery.trim()) {
+      setSearchHits([]);
+      setSearchIdx(0);
+      return;
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      const q = searchQuery.toLowerCase();
+      const hits = list
+        .filter((m) => !m.deleted && m.body.toLowerCase().includes(q))
+        .map((m) => m.id);
+      setSearchHits(hits);
+      setSearchIdx(0);
+    }, 200);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, list]);
+
+  useEffect(() => {
+    if (searchHits.length === 0) return;
+    const targetId = searchHits[searchIdx];
+    const idx = list.findIndex((m) => m.id === targetId);
+    if (idx >= 0) {
+      try {
+        flatlistRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+      } catch { /* list may not be ready */ }
+    }
+  }, [searchIdx, searchHits, list]);
 
   const sentReceiptIdsRef = useRef<Set<string>>(new Set());
 
@@ -446,7 +486,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 accessibilityLabel={i18nT('chat.searchPlaceholder', 'Search messages')}
               />
               <Pressable
-                onPress={() => { setSearchActive(false); setSearchQuery(''); }}
+                onPress={() => { setSearchActive(false); setSearchQuery(''); setSearchHits([]); setSearchIdx(0); }}
                 hitSlop={8}
                 style={{ padding: 6 }}
                 accessibilityLabel="Close search"
@@ -543,6 +583,46 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           )}
         </View>
 
+        {/* Search navigation row */}
+        {searchActive && searchQuery.trim().length > 0 ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 14,
+              paddingVertical: 6,
+              gap: 8,
+              backgroundColor: t.surface,
+              borderBottomWidth: StyleSheet.hairlineWidth,
+              borderBottomColor: t.divider,
+            }}
+          >
+            <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, flex: 1 }}>
+              {searchHits.length > 0
+                ? `${searchIdx + 1} of ${searchHits.length}`
+                : i18nT('chat.noResults', 'No results')}
+            </Text>
+            <Pressable
+              onPress={() => setSearchIdx((prev) => Math.max(0, prev - 1))}
+              disabled={searchHits.length === 0 || searchIdx === 0}
+              hitSlop={8}
+              style={{ padding: 4, opacity: searchIdx === 0 ? 0.35 : 1 }}
+              accessibilityLabel={i18nT('chat.searchPrev', 'Previous result')}
+            >
+              <I.ChevronL size={18} color={t.textDim} />
+            </Pressable>
+            <Pressable
+              onPress={() => setSearchIdx((prev) => Math.min(searchHits.length - 1, prev + 1))}
+              disabled={searchHits.length === 0 || searchIdx >= searchHits.length - 1}
+              hitSlop={8}
+              style={{ padding: 4, opacity: searchIdx >= searchHits.length - 1 ? 0.35 : 1 }}
+              accessibilityLabel={i18nT('chat.searchNext', 'Next result')}
+            >
+              <I.Chevron size={18} color={t.textDim} />
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* Offline banner */}
         {!online ? (
           <View
@@ -550,13 +630,13 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             style={{
               paddingHorizontal: 16,
               paddingVertical: 8,
-              backgroundColor: '#f59e0b',
+              backgroundColor: t.warn,
               flexDirection: 'row',
               alignItems: 'center',
               gap: 10,
             }}
           >
-            <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: '#000', fontWeight: '700', letterSpacing: 0.5 }}>
+            <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: t.inkOnWarn ?? t.bg, fontWeight: '700', letterSpacing: 0.5 }}>
               {i18nT('common.offline')}
             </Text>
             <Pressable
@@ -709,8 +789,16 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           ref={flatlistRef}
           data={filteredList}
           keyExtractor={(m) => m.id}
+          style={{ backgroundColor: wallpaperBg(chatWallpaper, t) ?? t.bg }}
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10 }}
           renderItem={({ item }) => (
+            <View
+              style={
+                searchHits.length > 0 && searchHits[searchIdx] === item.id
+                  ? { backgroundColor: t.accentDeep, borderRadius: t.radiusS, marginHorizontal: -4, paddingHorizontal: 4 }
+                  : undefined
+              }
+            >
             <SwipeableMessage
               disabled={item.deleted}
               onDelete={() => {
@@ -735,6 +823,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 onImagePress={setViewerUri}
               />
             </SwipeableMessage>
+            </View>
           )}
           ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
           onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
@@ -1040,7 +1129,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
           <View
             style={{
               height: 100,
-              backgroundColor: t.dark ? '#1e282d' : '#e6e3d8',
+              backgroundColor: t.surface2,
               alignItems: 'center',
               justifyContent: 'center',
               position: 'relative',

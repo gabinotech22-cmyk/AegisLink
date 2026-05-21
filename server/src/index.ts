@@ -10,6 +10,8 @@ import blobRoutes from './routes/blob.js';
 import pollsRoutes from './routes/polls.js';
 import turnRoutes from './routes/turn.js';
 import workRoutes from './routes/work.js';
+import { createGroupCallsRouter } from './routes/groupCalls.js';
+import { createDeviceLinkRouter } from './routes/deviceLink.js';
 import { attachRelay } from './relay/handler.js';
 import { initDb, messageRepo } from './db/client.js';
 
@@ -64,6 +66,10 @@ const io = new SocketServer(httpServer, {
 });
 
 attachRelay(io);
+
+// Routes that require access to the Socket.IO server for real-time events.
+app.use('/calls/group', createGroupCallsRouter(io));
+app.use('/devices', createDeviceLinkRouter(io));
 
 // Bootstrap DB then start server.
 initDb().then(() => {

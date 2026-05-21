@@ -342,4 +342,11 @@ export const I = {
       <Path d="M6 2v14a2 2 0 002 2h14M18 22V8a2 2 0 00-2-2H2" />
     </IconBase>
   ),
+  Broadcast: (p: IconProps) => (
+    <IconBase {...p}>
+      <Circle cx={12} cy={12} r={3} />
+      <Path d="M6.3 6.3a8 8 0 000 11.4M17.7 6.3a8 8 0 010 11.4" />
+      <Path d="M3.5 3.5a12 12 0 000 17M20.5 3.5a12 12 0 010 17" />
+    </IconBase>
+  ),
 };

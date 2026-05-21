@@ -1,0 +1,105 @@
+import React from 'react';
+import { render } from '@testing-library/react-native';
+import { FormattedText } from '../FormattedText';
+import { VAULT_DARK } from '../../theme/vault';
+
+const t = VAULT_DARK;
+
+describe('FormattedText', () => {
+  it('renders plain text without modification', () => {
+    const { getByText } = render(<FormattedText body="Hello world" t={t} />);
+    expect(getByText('Hello world')).toBeTruthy();
+  });
+
+  it('renders *bold* text with fontWeight 700', () => {
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText body="this is *bold* text" t={t} />,
+    );
+    const { Text } = require('react-native');
+    const boldTexts = UNSAFE_getAllByType(Text).filter(
+      (node: any) => node.props.style?.fontWeight === '700',
+    );
+    expect(boldTexts.length).toBeGreaterThan(0);
+    expect(boldTexts[0].props.children).toBe('bold');
+  });
+
+  it('renders _italic_ text with fontStyle italic', () => {
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText body="this is _italic_ text" t={t} />,
+    );
+    const { Text } = require('react-native');
+    const italicTexts = UNSAFE_getAllByType(Text).filter(
+      (node: any) => node.props.style?.fontStyle === 'italic',
+    );
+    expect(italicTexts.length).toBeGreaterThan(0);
+    expect(italicTexts[0].props.children).toBe('italic');
+  });
+
+  it('renders `code` with fontFamily monospace', () => {
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText body="run `npm install` now" t={t} />,
+    );
+    const { Text } = require('react-native');
+    const codeTexts = UNSAFE_getAllByType(Text).filter(
+      (node: any) => node.props.style?.fontFamily === t.fontMono,
+    );
+    expect(codeTexts.length).toBeGreaterThan(0);
+  });
+
+  it('renders ~strike~ with textDecorationLine line-through', () => {
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText body="this is ~deleted~ text" t={t} />,
+    );
+    const { Text } = require('react-native');
+    const strikeTexts = UNSAFE_getAllByType(Text).filter(
+      (node: any) => node.props.style?.textDecorationLine === 'line-through',
+    );
+    expect(strikeTexts.length).toBeGreaterThan(0);
+    expect(strikeTexts[0].props.children).toBe('deleted');
+  });
+
+  it('renders multiple formats in the same string', () => {
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText body="*bold* and _italic_ and ~strike~" t={t} />,
+    );
+    const { Text } = require('react-native');
+    const allTexts = UNSAFE_getAllByType(Text);
+
+    const hasBold = allTexts.some(
+      (node: any) => node.props.style?.fontWeight === '700',
+    );
+    const hasItalic = allTexts.some(
+      (node: any) => node.props.style?.fontStyle === 'italic',
+    );
+    const hasStrike = allTexts.some(
+      (node: any) => node.props.style?.textDecorationLine === 'line-through',
+    );
+
+    expect(hasBold).toBe(true);
+    expect(hasItalic).toBe(true);
+    expect(hasStrike).toBe(true);
+  });
+
+  it('renders URL with accent color and underline', () => {
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText body="visit https://aegislink.io today" t={t} />,
+    );
+    const { Text } = require('react-native');
+    const urlTexts = UNSAFE_getAllByType(Text).filter(
+      (node: any) =>
+        node.props.style?.color === t.accent &&
+        node.props.style?.textDecorationLine === 'underline',
+    );
+    expect(urlTexts.length).toBeGreaterThan(0);
+  });
+
+  it('passes selectable prop to root Text', () => {
+    const { UNSAFE_getByType } = render(
+      <FormattedText body="selectable text" t={t} selectable />,
+    );
+    const { Text } = require('react-native');
+    // The root Text is the first one
+    const root = UNSAFE_getByType(Text);
+    expect(root.props.selectable).toBe(true);
+  });
+});
