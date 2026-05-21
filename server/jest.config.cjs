@@ -6,7 +6,6 @@ module.exports = {
   extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
-    '^node:sqlite$': '<rootDir>/src/__mocks__/sqlite.cjs',
   },
   transform: {
     '^.+\\.ts$': [
