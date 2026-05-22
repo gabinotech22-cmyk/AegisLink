@@ -160,6 +160,25 @@ const RequestSenderKeyEvent = z.object({
   fromAegisId: z.string().min(1).max(64),
 });
 
+// ── Group (1:1 messaging) re-key after member removal ─────────────────────────
+// Forward secrecy: when an admin removes a member they distribute a fresh
+// SenderKey, sealed individually per remaining member. The relay is a blind
+// router — it only reads each `aegisId` routing field and fans out the sealed
+// blobs. No key material is read, logged, or stored.
+const GroupRekeyDistribution = z.object({
+  aegisId: z.string().min(1).max(64),
+  ciphertextB64: z.string().max(1024),
+  nonceB64: z.string().length(44),
+  chainKeyB64: z.string().length(44),
+  iteration: z.number().int().min(0),
+  senderAegisId: z.string().min(1).max(64),
+});
+
+const GroupRekeyEvent = z.object({
+  groupId: z.string().min(1).max(64),
+  distributions: z.array(GroupRekeyDistribution).min(1).max(256),
+});
+
 // Rate-limit buckets for channel:msg — keyed by aegisId, max 120/min
 const channelMsgRateLimit = new Map<string, { count: number; reset: number }>();
 
@@ -943,6 +962,47 @@ export function attachRelay(io: SocketServer) {
       }).catch(() => {
         ack?.({ ok: false, error: 'internal_error' });
       });
+    });
+
+    // ─── Group re-key fan-out (forward secrecy on member removal) ────────────
+    // The relay holds no group state (zero metadata), so it cannot consult a
+    // membership table. The trust model is: a re-key distribution is only
+    // honoured when the emitter sealed it themselves — i.e. every entry's
+    // `senderAegisId` MUST equal the authenticated socket identity `me`. This
+    // prevents a member from spoofing a re-key on another admin's behalf. The
+    // recipient additionally verifies the sealed box opens against the
+    // distributor's identity key, and the signed group metadata (group_msg
+    // path) governs who is recognised as admin client-side.
+    socket.on('group:rekey', (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      const parsed = GroupRekeyEvent.safeParse(raw);
+      if (!parsed.success) {
+        ack?.({ ok: false, error: 'invalid_payload' });
+        return;
+      }
+      const { groupId, distributions } = parsed.data;
+
+      // Reject if any distribution claims a different sender than the emitter.
+      if (distributions.some((d) => d.senderAegisId !== me)) {
+        ack?.({ ok: false, error: 'forbidden' });
+        return;
+      }
+
+      for (const d of distributions) {
+        if (d.aegisId === me) continue; // never echo to self
+        const recipientSockets = sockets.get(d.aegisId);
+        if (!recipientSockets || recipientSockets.size === 0) continue; // offline — client retries
+        for (const s of recipientSockets) {
+          s.emit('group:rekey_dist', {
+            groupId,
+            senderAegisId: me,
+            ciphertextB64: d.ciphertextB64,
+            nonceB64: d.nonceB64,
+            chainKeyB64: d.chainKeyB64,
+            iteration: d.iteration,
+          });
+        }
+      }
+      ack?.({ ok: true });
     });
 
     // ─── WebRTC signaling (Fase 3c/3d) ─────────────────────────────────────

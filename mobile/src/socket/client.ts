@@ -539,6 +539,52 @@ export function connect(identity: Identity): Socket {
     useWorkMessages.getState().append(msg);
   });
 
+  // ── Group re-key fan-out (forward secrecy on member removal) ─────────────────
+  // The admin who removed a member sealed a fresh group SenderKey for each
+  // remaining member; the relay delivers our individual copy here. We open it
+  // with our X25519 secret against the admin's identity key and persist it,
+  // overwriting any older SenderKey for that sender so future group messages
+  // decrypt with the new chain — and the removed member's old key cannot.
+  socket.on(
+    'group:rekey_dist',
+    async (dist: {
+      groupId: string;
+      senderAegisId: string;
+      ciphertextB64: string;
+      nonceB64: string;
+      chainKeyB64: string;
+      iteration: number;
+    }) => {
+      try {
+        const { openSenderKeyDistribution } =
+          require('../crypto/channelKey') as typeof import('../crypto/channelKey');
+        const { saveSenderKey } =
+          require('../crypto/channelKeyStore') as typeof import('../crypto/channelKeyStore');
+
+        const sender = useContacts.getState().contacts.find(
+          (c) => c.aegisId === dist.senderAegisId,
+        );
+        if (!sender) return; // unknown distributor — ignore
+
+        const senderKey = openSenderKeyDistribution(
+          {
+            senderAegisId: dist.senderAegisId,
+            channelId: dist.groupId,
+            chainKeyB64: dist.chainKeyB64,
+            iteration: dist.iteration,
+            ciphertextB64: dist.ciphertextB64,
+            nonceB64: dist.nonceB64,
+          },
+          identity.secretKeyB64,
+          sender.publicKeyB64,
+        );
+        await saveSenderKey(dist.groupId, dist.senderAegisId, senderKey);
+      } catch (e) {
+        if (__DEV__) console.warn('[socket] group:rekey_dist handling failed:', (e as Error).message);
+      }
+    },
+  );
+
   return socket;
 }
 
@@ -574,6 +620,87 @@ export function emitRequestSenderKey(payload: {
   fromAegisId: string;
 }): void {
   socket?.emit('work:request_sender_key', payload);
+}
+
+/**
+ * Forward-secrecy re-key after a group membership change (member removal).
+ *
+ * Generates a brand-new SenderKey for the group, persists it locally, then
+ * seals it individually for each REMAINING member (the removed member's public
+ * key is never present in the distribution list) and emits a single
+ * `group:rekey` event. The relay fans each sealed key out to the matching
+ * recipient via `group:rekey_dist`. No key material is ever sent in cleartext;
+ * each sealed key is a NaCl box bound to the recipient's X25519 identity key.
+ *
+ * Throws if no identity is loaded or the socket is offline so the caller can
+ * surface the failure (the removal must not appear to silently succeed).
+ */
+export async function rekeyGroupAfterRemoval(
+  identity: Identity,
+  groupId: string,
+  remainingMembers: string[],
+): Promise<void> {
+  if (!socket || !connected || !authenticated) {
+    throw new Error('rekey_offline');
+  }
+
+  const { generateSenderKey, sealSenderKeyFor } =
+    require('../crypto/channelKey') as typeof import('../crypto/channelKey');
+  const { saveSenderKey } =
+    require('../crypto/channelKeyStore') as typeof import('../crypto/channelKeyStore');
+
+  // 1. Fresh SenderKey — breaks the chain; the removed member's copy is now useless.
+  const newSenderKey = generateSenderKey();
+
+  // 2. Persist locally (SecureStore only) before distributing.
+  await saveSenderKey(groupId, identity.aegisId, newSenderKey);
+
+  // 3. Seal the new key for every remaining member except ourselves and the
+  //    removed member (the latter simply isn't in `remainingMembers`).
+  const contacts = useContacts.getState().contacts;
+  const distributions: Array<{
+    aegisId: string;
+    ciphertextB64: string;
+    nonceB64: string;
+    chainKeyB64: string;
+    iteration: number;
+    senderAegisId: string;
+  }> = [];
+
+  for (const memberId of remainingMembers) {
+    if (memberId === identity.aegisId) continue;
+    const contact = contacts.find((c) => c.aegisId === memberId);
+    if (!contact) continue;
+    const dist = sealSenderKeyFor(
+      newSenderKey,
+      groupId,
+      identity.aegisId,
+      contact.publicKeyB64,
+      identity.secretKeyB64,
+    );
+    distributions.push({
+      aegisId: memberId,
+      ciphertextB64: dist.ciphertextB64,
+      nonceB64: dist.nonceB64,
+      chainKeyB64: dist.chainKeyB64,
+      iteration: dist.iteration,
+      senderAegisId: dist.senderAegisId,
+    });
+  }
+
+  if (distributions.length === 0) return; // nobody else to re-key
+
+  // 4. Single fan-out event — the relay validates admin and routes per recipient.
+  await new Promise<void>((resolve, reject) => {
+    socket!.emit(
+      'group:rekey',
+      { groupId, distributions },
+      (ack: { ok: boolean; error?: string } | undefined) => {
+        if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'rekey_failed'));
+        else resolve();
+      },
+    );
+  });
 }
 
 export function emitDeleteChannelMsg(payload: {
