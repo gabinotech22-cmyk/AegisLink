@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { sha256 } from '@noble/hashes/sha256';
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
+import { loadPolls, updatePollVotes } from '../db/local';
 
 /**
  * Local poll vote state.
@@ -151,6 +152,8 @@ export const usePollsStore = create<PollState>((set, get) => ({
     // Deduplicate by commitment hash.
     if (state.seenCommitments.has(commitment)) return;
 
+    let updatedCounts: number[] = [];
+
     set((s) => {
       // Double-check inside setter to avoid races.
       if (s.seenCommitments.has(commitment)) return s;
@@ -159,6 +162,7 @@ export const usePollsStore = create<PollState>((set, get) => ({
       const counts = existing?.counts ? [...existing.counts] : [];
       while (counts.length <= optionIndex) counts.push(0);
       counts[optionIndex] = counts[optionIndex] + 1;
+      updatedCounts = counts;
 
       return {
         results: {
@@ -168,10 +172,27 @@ export const usePollsStore = create<PollState>((set, get) => ({
         seenCommitments: new Set([...s.seenCommitments, commitment]),
       };
     });
+
+    // Persist updated vote counts to SQLite (fire-and-forget — counts are
+    // non-sensitive aggregate data; a failed write is recoverable on next vote).
+    if (updatedCounts.length > 0) {
+      void updatePollVotes(messageId, updatedCounts);
+    }
   },
 
   async hydrate() {
-    // Votes are no longer persisted — nothing to hydrate.
-    // Method retained for API compatibility with existing callers.
+    const rows = await loadPolls();
+    if (rows.length === 0) return;
+    set((s) => {
+      const merged: Record<string, { counts: number[]; myVote?: number }> = { ...s.results };
+      for (const row of rows) {
+        // Only seed counts if not already tracked in memory (in-memory is authoritative
+        // for the current session; SQLite provides the baseline on cold start).
+        if (!merged[row.id]) {
+          merged[row.id] = { counts: row.votes };
+        }
+      }
+      return { results: merged };
+    });
   },
 }));

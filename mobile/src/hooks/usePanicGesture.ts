@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Alert } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
 const PANIC_KEY = 'aegis.panic.v1';
@@ -86,7 +87,19 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
                 now - lastShakeRef.current > SHAKE_DEBOUNCE_MS
               ) {
                 lastShakeRef.current = now;
-                onTriggerRef.current();
+                Alert.alert(
+                  '¿Borrar todo?',
+                  'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.',
+                  [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                      text: 'Borrar',
+                      style: 'destructive',
+                      onPress: () => onTriggerRef.current(),
+                    },
+                  ],
+                  { cancelable: true }
+                );
               }
             }
           );
@@ -130,7 +143,19 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
         clearTimeout(tapTimerRef.current);
         tapTimerRef.current = null;
       }
-      onTriggerRef.current();
+      Alert.alert(
+        '¿Borrar todo?',
+        'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Borrar',
+            style: 'destructive',
+            onPress: () => onTriggerRef.current(),
+          },
+        ],
+        { cancelable: true }
+      );
     }
   }
 

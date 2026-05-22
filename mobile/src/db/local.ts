@@ -167,6 +167,16 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
           duration_s  INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_calls_contact ON call_history(contact_id, started_at);
+
+        -- Poll vote counts (aggregate only — no voter identity)
+        CREATE TABLE IF NOT EXISTS polls (
+          id         TEXT PRIMARY KEY,
+          question   TEXT NOT NULL,
+          options    TEXT NOT NULL,   -- JSON array of option strings
+          votes      TEXT NOT NULL,   -- JSON array of vote counts (number[])
+          created_at INTEGER NOT NULL,
+          group_id   TEXT NOT NULL
+        );
       `);
 
       // ─── Schema versioning via PRAGMA user_version ──────────────────────────
@@ -811,6 +821,7 @@ export async function wipeDatabase(): Promise<void> {
   await d.runAsync('DELETE FROM ratchet_sessions');
   await d.runAsync('DELETE FROM chat_state');
   await d.runAsync('DELETE FROM call_history');
+  await d.runAsync('DELETE FROM polls');
   // clearIdentity deletes SECRET_KEY_SLOT + SIGN_SECRET_KEY_SLOT and the identity table row.
   await clearIdentity();
   // SQLite DELETE only removes pages from free-list — VACUUM overwrites freed
@@ -957,4 +968,62 @@ export async function getCallHistory(contactId: string, limit = 50): Promise<Sto
     status: r.status as 'missed' | 'answered' | 'declined',
     startedAt: r.started_at, durationS: r.duration_s,
   }));
+}
+
+// ─── Polls ────────────────────────────────────────────────────────────────────
+
+export interface StoredPoll {
+  id: string;
+  question: string;
+  options: string[];
+  votes: number[];
+  createdAt: number;
+  groupId: string;
+}
+
+type PollRow = {
+  id: string;
+  question: string;
+  options: string;
+  votes: string;
+  created_at: number;
+  group_id: string;
+};
+
+function rowToPoll(r: PollRow): StoredPoll {
+  return {
+    id: r.id,
+    question: r.question,
+    options: JSON.parse(r.options) as string[],
+    votes: JSON.parse(r.votes) as number[],
+    createdAt: r.created_at,
+    groupId: r.group_id,
+  };
+}
+
+export async function savePoll(p: StoredPoll): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `INSERT OR REPLACE INTO polls (id, question, options, votes, created_at, group_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    p.id,
+    p.question,
+    JSON.stringify(p.options),
+    JSON.stringify(p.votes),
+    p.createdAt,
+    p.groupId
+  );
+}
+
+export async function loadPolls(): Promise<StoredPoll[]> {
+  const d = await db();
+  const rows = await d.getAllAsync<PollRow>(
+    'SELECT id, question, options, votes, created_at, group_id FROM polls ORDER BY created_at DESC'
+  );
+  return rows.map(rowToPoll);
+}
+
+export async function updatePollVotes(id: string, votes: number[]): Promise<void> {
+  const d = await db();
+  await d.runAsync('UPDATE polls SET votes = ? WHERE id = ?', JSON.stringify(votes), id);
 }
