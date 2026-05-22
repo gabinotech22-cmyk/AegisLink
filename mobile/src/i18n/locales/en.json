@@ -314,7 +314,16 @@
     "pinSaved": "Panic Mode",
     "pinSavedDesc": "Decoy PIN set correctly.",
     "pinSaveError": "Panic Mode",
-    "pinSaveErrorDesc": "Could not save the decoy PIN."
+    "pinSaveErrorDesc": "Could not save the decoy PIN.",
+    "gestureAction": "Immediately wipes all data",
+    "duressPinAction": "Opens empty decoy account — data preserved",
+    "remoteTriggerSection": "REMOTE TRIGGER",
+    "remoteTriggerDesc": "Store this link outside the phone (password manager, trusted device). Opening it instantly wipes all data.",
+    "copyLink": "Copy Link",
+    "copied": "Copied!",
+    "regenerate": "Regenerate",
+    "regenerateConfirmTitle": "Regenerate trigger link?",
+    "regenerateConfirmDesc": "The previous link will stop working immediately."
   },
   "networkError": {
     "status": "NO RELAY ACCESS",

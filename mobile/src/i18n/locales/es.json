@@ -314,7 +314,16 @@
     "pinSaved": "Modo pánico",
     "pinSavedDesc": "PIN señuelo configurado correctamente.",
     "pinSaveError": "Modo pánico",
-    "pinSaveErrorDesc": "No se pudo guardar el PIN señuelo."
+    "pinSaveErrorDesc": "No se pudo guardar el PIN señuelo.",
+    "gestureAction": "Borra todos los datos inmediatamente",
+    "duressPinAction": "Abre cuenta señuelo vacía — datos conservados",
+    "remoteTriggerSection": "ACTIVACIÓN REMOTA",
+    "remoteTriggerDesc": "Guarda este enlace fuera del teléfono (gestor de contraseñas, dispositivo de confianza). Abrirlo borra todos los datos al instante.",
+    "copyLink": "Copiar enlace",
+    "copied": "¡Copiado!",
+    "regenerate": "Regenerar",
+    "regenerateConfirmTitle": "¿Regenerar enlace de activación?",
+    "regenerateConfirmDesc": "El enlace anterior dejará de funcionar inmediatamente."
   },
   "networkError": {
     "status": "SIN ACCESO AL RELAY",

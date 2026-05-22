@@ -813,6 +813,9 @@ export async function wipeDatabase(): Promise<void> {
   await d.runAsync('DELETE FROM call_history');
   // clearIdentity deletes SECRET_KEY_SLOT + SIGN_SECRET_KEY_SLOT and the identity table row.
   await clearIdentity();
+  // SQLite DELETE only removes pages from free-list — VACUUM overwrites freed
+  // pages with zeros so a forensic read of the raw database file finds nothing.
+  await d.execAsync('VACUUM');
   // Also purge the at-rest DB encryption key so recovered storage cannot be decrypted.
   cachedDbKey = null;
   await SecureStore.deleteItemAsync(getDbEncKeySlot());

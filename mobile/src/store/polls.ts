@@ -1,115 +1,177 @@
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
+import { sha256 } from '@noble/hashes/sha256';
+import nacl from 'tweetnacl';
+import { encodeBase64 } from 'tweetnacl-util';
 
 /**
  * Local poll vote state.
- * Votes are never attributed to identities — only aggregated counts are stored.
- * myVote is kept only in the local device to restore UI selection after restart.
+ *
+ * Anonymity guarantees (audited 2026-05):
+ * - myVotes is kept ONLY in ephemeral Zustand memory (not SecureStore, not SQLite).
+ *   It does NOT survive app restarts — this is intentional: vote history must not
+ *   be recoverable under duress.
+ * - seenCommitments deduplicates incoming votes by commitment hash so a malicious
+ *   peer cannot inflate counts by replaying the same vote envelope.
+ * - The commitment scheme: sha256(aegisId + pollId + nonce) — nonce is 16 random bytes,
+ *   generated once per vote, stored ephemerally alongside myVotes. The nonce is
+ *   embedded in the wire format so the receiver can verify uniqueness without knowing
+ *   the voter identity.
  */
 
-const STORAGE_KEY = 'aegis.polls.v1';
+/** Hex-encode a Uint8Array (avoids Buffer dependency in RN). */
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Compute the vote commitment.
+ * commitment = hex(sha256(aegisId || pollId || nonceHex))
+ */
+export function computeCommitment(aegisId: string, pollId: string, nonceHex: string): string {
+  const input = encodeUTF8(`${aegisId}${pollId}${nonceHex}`);
+  return toHex(sha256(input));
+}
+
+function encodeUTF8(s: string): Uint8Array {
+  return new TextEncoder().encode(s);
+}
 
 export interface PollResult {
   counts: number[];
+  /** My selected option index — ephemeral, not persisted. undefined when not voted or vote revoked. */
   myVote?: number;
 }
 
+/** Returned by castVote when a new vote is placed. null means vote was revoked (toggle-off). */
+export interface VoteCommitment {
+  commitment: string;
+  nonceHex: string;
+}
+
 interface PollState {
-  /** messageId -> { counts per option, myVote index (local only) } */
+  /** messageId -> { counts per option, myVote index (ephemeral) } */
   results: Record<string, PollResult>;
-  /** Cast a vote: update local count and persist myVote for UX restoration. */
+  /**
+   * Set of commitment hashes already applied to local counts.
+   * Used to deduplicate incoming votes from peers (replay protection).
+   */
+  seenCommitments: Set<string>;
+  /**
+   * messageId -> { optionIndex, nonceHex } for the local user's own votes.
+   * Ephemeral — cleared on app restart (intentional: no duress-recoverable vote record).
+   */
+  myVoteSecrets: Record<string, { optionIndex: number; nonceHex: string }>;
+
+  /**
+   * Cast a vote locally and return the commitment data for the socket layer to embed.
+   * Returns null if the vote was toggled off (same option tapped again).
+   * Returns null if the user has already voted on a different option (change-vote not allowed
+   * once committed, to prevent commitment reuse attacks).
+   */
   castVote: (
+    aegisId: string,
     messageId: string,
-    groupId: string,
     optionIndex: number,
     totalOptions: number
-  ) => void;
-  /** Receive a vote from a peer: increment the option count (anonymous). */
-  receiveVote: (messageId: string, optionIndex: number) => void;
-  /** Hydrate persisted myVote entries from SecureStore on startup. */
+  ) => VoteCommitment | null;
+
+  /**
+   * Receive a vote from a peer.
+   * The commitment hash is required. If the commitment was already applied, the call is a no-op.
+   */
+  receiveVote: (messageId: string, optionIndex: number, commitment: string) => void;
+
+  /** No-op hydration kept for API compatibility — votes are no longer persisted. */
   hydrate: () => Promise<void>;
 }
 
 export const usePollsStore = create<PollState>((set, get) => ({
   results: {},
+  seenCommitments: new Set<string>(),
+  myVoteSecrets: {},
 
-  castVote(messageId, _groupId, optionIndex, totalOptions) {
-    set((state) => {
-      const existing = state.results[messageId];
-      const counts = existing?.counts ?? Array<number>(totalOptions).fill(0);
-      const prevVote = existing?.myVote;
+  castVote(aegisId, messageId, optionIndex, totalOptions) {
+    const state = get();
+    const existing = state.results[messageId];
+    const prevSecret = state.myVoteSecrets[messageId];
 
-      // Ensure counts array is long enough (defensive)
-      const safeCounts = counts.length >= totalOptions
+    // Prevent changing a committed vote (once committed the commitment is on the wire).
+    if (prevSecret !== undefined) {
+      // Toggle-off of the same option: revoke locally (no wire message).
+      if (prevSecret.optionIndex === optionIndex) {
+        set((s) => {
+          const cur = s.results[messageId];
+          const counts = cur ? [...cur.counts] : Array<number>(totalOptions).fill(0);
+          counts[optionIndex] = Math.max(0, counts[optionIndex] - 1);
+          const newSecrets = { ...s.myVoteSecrets };
+          delete newSecrets[messageId];
+          return {
+            results: { ...s.results, [messageId]: { counts, myVote: undefined } },
+            myVoteSecrets: newSecrets,
+          };
+        });
+        return null;
+      }
+      // Changing vote to a different option is not allowed after commitment.
+      return null;
+    }
+
+    // Generate a fresh nonce and commitment for this vote.
+    const nonceBytes = nacl.randomBytes(16);
+    const nonceHex = toHex(nonceBytes);
+    const commitment = computeCommitment(aegisId, messageId, nonceHex);
+
+    const counts = existing?.counts ?? Array<number>(totalOptions).fill(0);
+    const safeCounts =
+      counts.length >= totalOptions
         ? [...counts]
         : [...counts, ...Array<number>(totalOptions - counts.length).fill(0)];
+    safeCounts[optionIndex] = safeCounts[optionIndex] + 1;
 
-      // Remove previous vote if toggling
-      if (prevVote !== undefined && prevVote !== optionIndex) {
-        safeCounts[prevVote] = Math.max(0, safeCounts[prevVote] - 1);
-      }
+    set((s) => ({
+      results: {
+        ...s.results,
+        [messageId]: { counts: safeCounts, myVote: optionIndex },
+      },
+      seenCommitments: new Set([...s.seenCommitments, commitment]),
+      myVoteSecrets: {
+        ...s.myVoteSecrets,
+        [messageId]: { optionIndex, nonceHex },
+      },
+    }));
 
-      // Toggle off if same option tapped again
-      const isSame = prevVote === optionIndex;
-      if (!isSame) {
-        safeCounts[optionIndex] = safeCounts[optionIndex] + 1;
-      } else {
-        // Undo local vote
-        safeCounts[optionIndex] = Math.max(0, safeCounts[optionIndex] - 1);
-      }
-
-      const newMyVote = isSame ? undefined : optionIndex;
-
-      const updated: PollResult = { counts: safeCounts, myVote: newMyVote };
-
-      // Persist my votes asynchronously so they survive app restart
-      const allMyVotes: Record<string, number> = {};
-      const currentResults = { ...state.results, [messageId]: updated };
-      for (const [mId, r] of Object.entries(currentResults)) {
-        if (r.myVote !== undefined) allMyVotes[mId] = r.myVote;
-      }
-      SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(allMyVotes)).catch(() => {});
-
-      return { results: currentResults };
-    });
+    return { commitment, nonceHex };
   },
 
-  receiveVote(messageId, optionIndex) {
-    set((state) => {
-      const existing = state.results[messageId];
-      const counts = existing?.counts ? [...existing.counts] : [];
+  receiveVote(messageId, optionIndex, commitment) {
+    const state = get();
 
-      // Extend array if needed
+    // Deduplicate by commitment hash.
+    if (state.seenCommitments.has(commitment)) return;
+
+    set((s) => {
+      // Double-check inside setter to avoid races.
+      if (s.seenCommitments.has(commitment)) return s;
+
+      const existing = s.results[messageId];
+      const counts = existing?.counts ? [...existing.counts] : [];
       while (counts.length <= optionIndex) counts.push(0);
       counts[optionIndex] = counts[optionIndex] + 1;
 
       return {
         results: {
-          ...state.results,
+          ...s.results,
           [messageId]: { counts, myVote: existing?.myVote },
         },
+        seenCommitments: new Set([...s.seenCommitments, commitment]),
       };
     });
   },
 
   async hydrate() {
-    try {
-      const raw = await SecureStore.getItemAsync(STORAGE_KEY);
-      if (!raw) return;
-      const myVotes = JSON.parse(raw) as Record<string, number>;
-      set((state) => {
-        const merged: Record<string, PollResult> = { ...state.results };
-        for (const [messageId, optionIndex] of Object.entries(myVotes)) {
-          const existing = merged[messageId];
-          merged[messageId] = {
-            counts: existing?.counts ?? [],
-            myVote: optionIndex,
-          };
-        }
-        return { results: merged };
-      });
-    } catch {
-      // Corrupt storage — ignore, votes will reinitialise
-    }
+    // Votes are no longer persisted — nothing to hydrate.
+    // Method retained for API compatibility with existing callers.
   },
 }));

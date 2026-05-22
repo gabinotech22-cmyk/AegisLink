@@ -992,17 +992,25 @@ export function attachRelay(io: SocketServer) {
 }
 
 const CallTo = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().min(1).max(128) });
+// Sealed call signaling: SDP offers/answers and ICE candidates are E2EE-encrypted
+// by the client (NaCl box, sealed-sender) BEFORE they reach the relay. The relay
+// only ever sees opaque ciphertext + nonce and forwards them verbatim. It never
+// inspects, parses, or stores SDP or ICE content. `media` stays in cleartext only
+// so the relay can fire the correct (audio/video) CallKit push wake-up.
+const SealedSignal = z.object({
+  ciphertext: z.string().min(1).max(32768),
+  nonce: z.string().min(1).max(64),
+});
 const CallInvite = CallTo.extend({
   media: z.enum(['audio', 'video']),
-  offer: z.string().min(1).max(16384),
-});
+}).merge(SealedSignal);
 const CallOffer = CallTo.extend({
   sdp: z.string().min(1).max(16384),
   media: z.enum(['audio', 'video']).optional(),
 });
-const CallAnswer = CallTo.extend({ answer: z.string().min(1).max(16384) });
+const CallAnswer = CallTo.merge(SealedSignal);
 const CallAnswerSdp = CallTo.extend({ sdp: z.string().min(1).max(16384) });
-const CallIce = CallTo.extend({ candidate: z.string().min(1).max(4096) });
+const CallIce = CallTo.merge(SealedSignal);
 const CallHangup = CallTo.extend({ reason: z.string().max(64).optional() });
 const CallEnd = CallTo.extend({ reason: z.string().max(64).optional() });
 const CallReject = CallTo.extend({ reason: z.string().max(64).optional() });

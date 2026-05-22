@@ -235,6 +235,7 @@ function Shell() {
 
   // ── App lock state ──────────────────────────────────────────────────────────
   const [appLocked, setAppLocked] = useState(false);
+  const [showWipeOverlay, setShowWipeOverlay] = useState(false);
   const lastBgTimeRef = useRef<number | null>(null);
   const didColdLockRef = useRef(false);
 
@@ -436,6 +437,9 @@ function Shell() {
 
   // ── Panic gesture ───────────────────────────────────────────────────────────
   const triggerPanic = useCallback(async () => {
+    setShowWipeOverlay(true);
+    // Allow the overlay to render before blocking with async I/O
+    await new Promise<void>((resolve) => setTimeout(resolve, 600));
     try {
       const { wipeDatabase } = require('./src/db/local') as typeof import('./src/db/local');
       await wipeDatabase();
@@ -444,6 +448,7 @@ function Shell() {
     } catch {
       /* wipe failure: app state is now invalid — identity reset forces re-onboarding */
     }
+    setShowWipeOverlay(false);
   }, []);
 
   const { registerTap } = usePanicGesture(triggerPanic);
@@ -485,7 +490,7 @@ function Shell() {
   }, []);
 
   // ── Deep link handling ──────────────────────────────────────────────────────
-  const handleDeepLink = useCallback((url: string) => {
+  const handleDeepLink = useCallback(async (url: string) => {
     try {
       const parsed = new URL(url);
       if (parsed.hostname === 'work' && parsed.pathname === '/join') {
@@ -493,11 +498,24 @@ function Shell() {
         if (token && identity) {
           push({ name: 'workDashboard', prefillJoinToken: token });
         }
+      } else if (parsed.hostname === 'panic') {
+        const incoming = parsed.searchParams.get('token');
+        if (incoming) {
+          try {
+            const raw = await SecureStore.getItemAsync('aegis.panic.v1');
+            if (raw) {
+              const config = JSON.parse(raw) as { remoteToken?: string };
+              if (config.remoteToken && config.remoteToken === incoming) {
+                void triggerPanic();
+              }
+            }
+          } catch { /* SecureStore unavailable — ignore */ }
+        }
       }
     } catch {
       /* invalid url — ignore */
     }
-  }, [identity, push]);
+  }, [identity, push, triggerPanic]);
 
   useEffect(() => {
     Linking.getInitialURL().then((url: string | null) => {

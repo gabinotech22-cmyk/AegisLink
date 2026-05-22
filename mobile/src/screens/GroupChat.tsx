@@ -130,10 +130,19 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
 
   async function handleVote(pollMessageId: string, optionIndex: number, totalOptions: number) {
     if (!identity) return;
-    castVote(pollMessageId, group.id, optionIndex, totalOptions);
+    // castVote returns null when the vote is toggled off or a duplicate is blocked.
+    const voteCommitment = castVote(identity.aegisId, pollMessageId, optionIndex, totalOptions);
+    if (!voteCommitment) return; // toggled off or already voted — no wire message
     try {
-      await sendGroupVote({ identity, groupId: group.id, pollMessageId, optionIndex });
-    } catch (e) {
+      await sendGroupVote({
+        identity,
+        groupId: group.id,
+        pollMessageId,
+        optionIndex,
+        commitment: voteCommitment.commitment,
+        nonceHex: voteCommitment.nonceHex,
+      });
+    } catch {
       // Vote queued offline or silently failed — local count already updated
     }
   }

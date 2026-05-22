@@ -314,7 +314,16 @@
     "pinSaved": "Modalità panico",
     "pinSavedDesc": "PIN esca configurato correttamente.",
     "pinSaveError": "Modalità panico",
-    "pinSaveErrorDesc": "Impossibile salvare il PIN esca."
+    "pinSaveErrorDesc": "Impossibile salvare il PIN esca.",
+    "gestureAction": "Cancella immediatamente tutti i dati",
+    "duressPinAction": "Apre account esca vuoto — dati conservati",
+    "remoteTriggerSection": "ATTIVAZIONE REMOTA",
+    "remoteTriggerDesc": "Salva questo link fuori dal telefono (gestore password, dispositivo fidato). Aprirlo cancella immediatamente tutti i dati.",
+    "copyLink": "Copia link",
+    "copied": "Copiato!",
+    "regenerate": "Rigenera",
+    "regenerateConfirmTitle": "Rigenerare il link di attivazione?",
+    "regenerateConfirmDesc": "Il link precedente smetterà di funzionare immediatamente."
   },
   "networkError": {
     "status": "NESSUN ACCESSO AI RELAY",
