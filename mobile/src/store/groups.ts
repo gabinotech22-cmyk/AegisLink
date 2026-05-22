@@ -132,6 +132,26 @@ export const useGroups = create<GroupsState>((set, get) => ({
     }
     await saveGroup(updated);
     set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
+
+    // Forward secrecy: rotate the group SenderKey so the removed member, who
+    // still holds the previous chain key, cannot decrypt any future message.
+    // The new key is sealed individually for each REMAINING member only — the
+    // removed `aegisId` is excluded from `updated.members`, so it is never in
+    // the distribution list. Best-effort if offline: the rotation re-attempts
+    // on the next removal/admin action, and the removed member receives no
+    // further messages until then because senders use the new local key.
+    const { useIdentity } = require('./identity') as typeof import('./identity');
+    const identity = useIdentity.getState().identity;
+    if (identity) {
+      try {
+        const { rekeyGroupAfterRemoval } =
+          require('../socket/client') as typeof import('../socket/client');
+        await rekeyGroupAfterRemoval(identity, id, updated.members);
+      } catch {
+        // Swallow — removal already persisted locally and signed metadata
+        // propagates via the normal group_msg path; re-key will retry later.
+      }
+    }
   },
 
   async updateGroupPermissions(id, patch) {
