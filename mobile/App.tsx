@@ -144,7 +144,7 @@ type PushRoute =
   | { name: 'lockConfig' }
   | { name: 'lock' }
   | { name: 'panic' }
-  | { name: 'ephemeral' }
+  | { name: 'ephemeral'; chatId: string }
   | { name: 'export' }
   | { name: 'attach'; contact: StoredContact }
   | { name: 'voice'; contact: StoredContact }
@@ -289,9 +289,38 @@ function Shell() {
     return () => sub.remove();
   }, [hideRecents]);
 
+  // Purge plaintext media cache 30 s after going to background to reduce forensic window
+  useEffect(() => {
+    let purgeTimer: ReturnType<typeof setTimeout> | null = null;
+    const handler = (nextState: AppStateStatus) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        purgeTimer = setTimeout(() => {
+          const { purgeCachedDecryptedMedia } = require('./src/crypto/media');
+          void (purgeCachedDecryptedMedia as () => Promise<void>)().catch(() => {});
+        }, 30_000);
+      } else if (nextState === 'active') {
+        if (purgeTimer !== null) {
+          clearTimeout(purgeTimer);
+          purgeTimer = null;
+        }
+      }
+    };
+    const sub = AppState.addEventListener('change', handler);
+    return () => {
+      sub.remove();
+      if (purgeTimer !== null) clearTimeout(purgeTimer);
+    };
+  }, []);
+
   useEffect(() => {
     void hydrate();
     void hydratePrefs();
+    // Startup: prune messages that expired while the app was closed,
+    // and restore per-chat ephemeral timers from SQLite.
+    const { deleteExpiredMessages: pruneDb } = require('./src/db/local');
+    void (pruneDb as () => Promise<void>)();
+    const { useMessages: msgStore } = require('./src/store/messages');
+    void (msgStore.getState().loadAllEphemeralTimers as () => Promise<void>)();
   }, [hydrate, hydratePrefs]);
 
   // Enforce screenshot / screen-recording block
@@ -567,7 +596,7 @@ function Shell() {
             onBack={pop}
             onContactDetail={() => push({ name: 'contact', contact: top.contact })}
             onAttach={() => push({ name: 'attach', contact: top.contact })}
-            onEphemeral={() => push({ name: 'ephemeral' })}
+            onEphemeral={() => push({ name: 'ephemeral', chatId: top.contact.aegisId })}
             onViewOnce={(mediaUri, messageId) => push({ name: 'viewonce', contact: top.contact, mediaUri, messageId })}
           />
         );
@@ -611,7 +640,7 @@ function Shell() {
               }, 400);
             }}
             onVerify={() => popAllTo('verify')}
-            onEphemeral={() => push({ name: 'ephemeral' })}
+            onEphemeral={() => push({ name: 'ephemeral', chatId: top.contact.aegisId })}
           />
         );
       case 'add':
@@ -802,7 +831,7 @@ function Shell() {
       case 'panic':
         return <PanicScreen onBack={pop} />;
       case 'ephemeral':
-        return <EphemeralScreen onBack={pop} />;
+        return <EphemeralScreen onBack={pop} chatId={top.chatId} />;
       case 'export':
         return <DataExportScreen onBack={pop} />;
       case 'attach':

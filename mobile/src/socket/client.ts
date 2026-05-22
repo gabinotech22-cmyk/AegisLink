@@ -1557,7 +1557,7 @@ export async function sendMessage(opts: {
   let expiresAt = opts.expiresAt ?? null;
   const msgType = opts.type ?? 'direct_msg';
   if (msgType === 'direct_msg' && !expiresAt) {
-    const timer = useMessages.getState().ephemeralTimer;
+    const timer = useMessages.getState().getEphemeralTimer(opts.recipientAegisId);
     if (timer > 0) {
       expiresAt = createdAt + timer * 1000;
     }

@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
+import { secretKeySlot, signSecretKeySlot, dbEncKeySlot } from '../crypto/types';
 
 // ─── Identity (Keychain / Keystore) ──────────────────────────────────────────
 //
@@ -18,15 +19,15 @@ export function getActiveDbSlot(): string {
 }
 
 export function getSecretKeySlot(slot = activeSlot): string {
-  return slot === 'self' ? 'aegis.secretKey.b64' : `aegis.${slot}.secretKey.b64`;
+  return secretKeySlot(slot);
 }
 
 export function getSignSecretKeySlot(slot = activeSlot): string {
-  return slot === 'self' ? 'aegis.signSecretKey.b64' : `aegis.${slot}.signSecretKey.b64`;
+  return signSecretKeySlot(slot);
 }
 
 export function getDbEncKeySlot(slot = activeSlot): string {
-  return slot === 'self' ? 'aegis.dbEncKey.b64' : `aegis.${slot}.dbEncKey.b64`;
+  return dbEncKeySlot(slot);
 }
 
 export function setActiveDbSlot(slot: string): void {
@@ -238,6 +239,16 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
       try { await d.execAsync('ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
       try { await d.execAsync('ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
       try { await d.execAsync('ALTER TABLE messages ADD COLUMN expires_at INTEGER;'); } catch (e) {}
+      try { await d.execAsync('ALTER TABLE chat_state ADD COLUMN ephemeral_timer INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
+
+      // Purge messages that expired while the app was closed.
+      // This ensures ephemeral messages are removed on every cold start,
+      // not only when foreground pruning runs.
+      await d.runAsync(
+        'DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?',
+        Date.now()
+      );
+
       return d;
     });
   }
@@ -478,7 +489,7 @@ export async function encryptBody(body: string): Promise<string> {
     };
     return 'encv1:' + JSON.stringify(result);
   } catch (e) {
-    return body;
+    throw new Error(`encryptBody: SecureStore unavailable — ${(e as Error).message}`);
   }
 }
 
@@ -597,7 +608,7 @@ export async function updateMessageDelivery(id: string, status: 'sent' | 'delive
 export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[]> {
   const d = await db();
   const rows = await d.getAllAsync<MessageRow>(
-    `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status
+    `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
      FROM messages WHERE chat_id = ? ORDER BY created_at ASC`,
     chatId
   );
@@ -607,7 +618,7 @@ export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[
 export async function getMessage(id: string): Promise<StoredMessage | null> {
   const d = await db();
   const row = await d.getFirstAsync<MessageRow>(
-    `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status
+    `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
      FROM messages WHERE id = ?`,
     id
   );
@@ -864,25 +875,47 @@ export async function getAllUnreadCounts(): Promise<Record<string, number>> {
   return result;
 }
 
+// ─── Per-chat ephemeral timer ─────────────────────────────────────────────────
+
+export async function setChatEphemeralTimer(chatId: string, seconds: number): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `INSERT INTO chat_state (chat_id, ephemeral_timer, unread_count)
+     VALUES (?, ?, COALESCE((SELECT unread_count FROM chat_state WHERE chat_id = ?), 0))
+     ON CONFLICT(chat_id) DO UPDATE SET ephemeral_timer = excluded.ephemeral_timer`,
+    chatId, seconds, chatId
+  );
+}
+
+export async function getChatEphemeralTimer(chatId: string): Promise<number> {
+  const d = await db();
+  const row = await d.getFirstAsync<{ ephemeral_timer: number }>(
+    'SELECT ephemeral_timer FROM chat_state WHERE chat_id = ?', chatId
+  );
+  return row?.ephemeral_timer ?? 0;
+}
+
+export async function getAllChatEphemeralTimers(): Promise<Record<string, number>> {
+  const d = await db();
+  const rows = await d.getAllAsync<{ chat_id: string; ephemeral_timer: number }>(
+    'SELECT chat_id, ephemeral_timer FROM chat_state WHERE ephemeral_timer > 0'
+  );
+  const result: Record<string, number> = {};
+  for (const r of rows) result[r.chat_id] = r.ephemeral_timer;
+  return result;
+}
+
 // ─── Ephemeral cleanup ────────────────────────────────────────────────────────
 
-export async function deleteExpiredMessages(timerSeconds: number): Promise<void> {
+export async function deleteExpiredMessages(_timerSeconds?: number): Promise<void> {
   const d = await db();
   const now = Date.now();
-  // 1. Delete explicitly expired messages (location/ephemeral)
+  // Only delete messages that have an explicit expiresAt set and have passed it.
+  // The global timer is no longer used — expiresAt is authoritative.
   await d.runAsync(
-    'DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < ?',
+    'DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?',
     now
   );
-
-  // 2. Delete traditional global ephemeral messages if applicable
-  if (timerSeconds > 0) {
-    const cutoff = now - timerSeconds * 1000;
-    await d.runAsync(
-      'DELETE FROM messages WHERE created_at < ? AND expires_at IS NULL AND deleted = 0',
-      cutoff
-    );
-  }
 }
 
 // ─── Call history ─────────────────────────────────────────────────────────────

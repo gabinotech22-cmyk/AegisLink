@@ -41,6 +41,9 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
   const { identity, generate } = useIdentity();
   const [fingerprint, setFingerprint] = useState<string[]>([]);
   const [did, setDid] = useState<string | null>(null);
+  // Tracks when the 'generating' step started so we can enforce a minimum
+  // animation duration of 2 s even on fast devices.
+  const generatingStartRef = useRef<number>(0);
 
   type RegistrationState = 'idle' | 'registering' | 'error';
   const [regState, setRegState] = useState<RegistrationState>('idle');
@@ -50,6 +53,7 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
 
   async function handleGenerate() {
     if (step !== 'welcome') return;
+    generatingStartRef.current = Date.now();
     setStep('generating');
     try {
       await generate();
@@ -59,11 +63,23 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
     }
   }
 
-  // Auto-transition from generating → show after 10s (matches prototype)
+  // Advance to 'show' as soon as identity is ready AND at least 2 s of
+  // animation have elapsed (so the spinner never flashes by on fast devices).
+  useEffect(() => {
+    if (step === 'generating' && identity) {
+      const elapsed = Date.now() - generatingStartRef.current;
+      const minDelay = Math.max(0, 2000 - elapsed);
+      const t = setTimeout(() => setStep('show'), minDelay);
+      return () => clearTimeout(t);
+    }
+  }, [step, identity]);
+
+  // Hard fallback: if generate() takes longer than 10 s (very slow device),
+  // advance anyway so the user is not stuck on the spinner indefinitely.
   useEffect(() => {
     if (step === 'generating') {
-      const timer = setTimeout(() => setStep('show'), 10000);
-      return () => clearTimeout(timer);
+      const fallback = setTimeout(() => setStep('show'), 10000);
+      return () => clearTimeout(fallback);
     }
   }, [step]);
 
