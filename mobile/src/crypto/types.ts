@@ -181,6 +181,36 @@ export const SECURE_STORE_KEYS = {
   PIN_HASH: 'aegis.pin.v1',
 } as const;
 
+/**
+ * Per-profile (slot) SecureStore slot names — the SINGLE SOURCE OF TRUTH for
+ * where each profile's secret material lives. Other modules (db/local.ts,
+ * crypto/identity.ts) MUST derive their slot names from these helpers instead
+ * of hardcoding strings, so multi-profile isolation can never silently break.
+ *
+ * The primary profile (slotId 'self') keeps the legacy un-suffixed names for
+ * backward compatibility with identities created before multi-profile support.
+ */
+export const SLOT_KEY_PREFIX = {
+  SECRET: 'aegis.secretKey.b64',
+  SIGN_SECRET: 'aegis.signSecretKey.b64',
+  DB_ENC: 'aegis.dbEncKey.b64',
+} as const;
+
+/** X25519 box secret key slot for a given profile/slot id. */
+export function secretKeySlot(slotId: string): string {
+  return slotId === 'self' ? SLOT_KEY_PREFIX.SECRET : `aegis.${slotId}.secretKey.b64`;
+}
+
+/** Ed25519 signing secret key slot for a given profile/slot id. */
+export function signSecretKeySlot(slotId: string): string {
+  return slotId === 'self' ? SLOT_KEY_PREFIX.SIGN_SECRET : `aegis.${slotId}.signSecretKey.b64`;
+}
+
+/** Per-slot SQLite encryption key slot for a given profile/slot id. */
+export function dbEncKeySlot(slotId: string): string {
+  return slotId === 'self' ? SLOT_KEY_PREFIX.DB_ENC : `aegis.${slotId}.dbEncKey.b64`;
+}
+
 // ---------------------------------------------------------------------------
 // 7. Public API surface — re-exports for consumers
 // ---------------------------------------------------------------------------

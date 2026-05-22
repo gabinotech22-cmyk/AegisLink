@@ -226,7 +226,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
         const id = Crypto.randomUUID();
         await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: imageUri });
         const { encryptAndUploadMedia } = require('../crypto/media');
-        const blobUri = await encryptAndUploadMedia(imageUri);
+        const blobUri = await encryptAndUploadMedia(imageUri, 'image/jpeg');
         await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]` });
       }
       if (hasText) {

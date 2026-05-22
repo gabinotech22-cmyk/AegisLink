@@ -240,6 +240,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     await SecureStore.deleteItemAsync('aegis.activeSlotId').catch(() => {});
     await SecureStore.deleteItemAsync('aegis.slotsList').catch(() => {});
 
+    // Purge any plaintext-decrypted media from the filesystem cache
+    const { purgeCachedDecryptedMedia } = require('../crypto/media');
+    await (purgeCachedDecryptedMedia as () => Promise<void>)().catch(() => {});
+
     // Reset all other Zustand stores — DB is already empty, bring memory in sync
     const { useContacts } = require('./contacts');
     const { useGroups } = require('./groups');

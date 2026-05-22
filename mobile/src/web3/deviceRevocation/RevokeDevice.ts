@@ -59,7 +59,9 @@ function buildSigningPayload(didHash: string, revokedAt: number): Uint8Array {
  * Creates a signed RevocationPayload for the given DID.
  *
  * @param did - The full DID string to revoke (e.g. did:key:z6Mk...).
- * @param profileId - The aegisId of the profile that owns this DID.
+ * @param profileId - The slot id of the profile that owns this DID
+ *   ('self' for the primary profile, or e.g. 'work' / 'slot_1'). This selects
+ *   which per-profile signing key in SecureStore is used, preserving isolation.
  * @param signingPublicKeyB64 - Base64 public key of the signing key (for verification).
  * @returns A RevocationPayload ready to POST to /web3/device/revoke.
  */

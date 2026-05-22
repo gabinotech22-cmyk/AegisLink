@@ -363,7 +363,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           mediaUri: imageUri,
         });
         const { encryptAndUploadMedia } = require('../crypto/media');
-        const blobUri = await encryptAndUploadMedia(imageUri);
+        const blobUri = await encryptAndUploadMedia(imageUri, 'image/jpeg');
         await sendMessage({
           identity,
           recipientAegisId: contact.aegisId,
@@ -457,13 +457,46 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   async function handleGifSelect(url: string) {
     setGifPickerVisible(false);
     if (!identity) return;
-    const plaintext = `[gif:${url}]`;
+
+    // Privacy fix: never send the raw Giphy URL.
+    // Download the GIF locally, encrypt it like any other image attachment,
+    // and send [image:...] so the receiver never contacts Giphy servers.
+    const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+    const cacheDir = FS.cacheDirectory ?? '';
+    const gifId = url.split('/').pop()?.split('?')[0] ?? Crypto.randomUUID();
+    const tmpPath = `${cacheDir}gif_tmp_${gifId}.gif`;
+
+    let blobUri: string;
+    try {
+      // Enforce a 10 MB size guard by checking after download
+      const downloadResult = await FS.downloadAsync(url, tmpPath);
+      if (!downloadResult.uri) throw new Error('GIF download failed');
+
+      const info = await FS.getInfoAsync(downloadResult.uri);
+      const fileSize = (info as { size?: number }).size ?? 0;
+      if (fileSize > 10 * 1024 * 1024) {
+        await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
+        Alert.alert(i18nT('chat.sendError'), 'GIF demasiado grande (máx. 10 MB)');
+        return;
+      }
+
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      blobUri = await encryptAndUploadMedia(tmpPath, 'image/gif');
+    } catch (e) {
+      await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      return;
+    }
+
+    // Clean up the temporary file regardless of send outcome
+    await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
+
     try {
       await sendMessage({
         identity,
         recipientAegisId: contact.aegisId,
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
-        plaintext,
+        plaintext: `[image:${blobUri}]`,
       });
     } catch (e) {
       Alert.alert(i18nT('chat.sendError'), (e as Error).message);
@@ -1415,27 +1448,35 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
     );
   }
 
-  // GIF bubble
+  // GIF bubble — legacy format [gif:url] kept for historical messages only.
+  // New GIFs are sent as [image:...] after being downloaded and encrypted.
+  // DO NOT load from the remote URL here — that would reveal IP to Giphy.
   const gifMatch = m.body?.match(/^\[gif:(.+)\]$/);
   if (gifMatch) {
-    const gifUrl = gifMatch[1];
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         <Pressable
           onLongPress={onLongPress}
           style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+            backgroundColor: me ? t.bubbleOut : t.bubbleIn,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
             borderRadius: t.radius,
             borderTopRightRadius: me ? t.radiusS : t.radius,
             borderTopLeftRadius: me ? t.radius : t.radiusS,
-            overflow: 'hidden',
+            borderWidth: 1,
+            borderColor: `${t.border}`,
             opacity: queued ? 0.55 : pressed ? 0.9 : 1,
+            maxWidth: 260,
           })}
         >
-          <Image
-            source={{ uri: gifUrl }}
-            style={{ width: 220, height: 160, backgroundColor: t.surface2 }}
-            resizeMode="cover"
-          />
+          <I.Globe size={18} color={t.textDim} />
+          <Text style={{ flex: 1, fontFamily: t.font, fontSize: 13, color: me ? t.bubbleOutText : t.textDim, fontStyle: 'italic' }}>
+            GIF (formato legacy)
+          </Text>
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
