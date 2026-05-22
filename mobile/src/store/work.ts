@@ -60,6 +60,27 @@ function getOwnSecretKeyB64(): string | null {
   return useIdentity.getState().identity?.secretKeyB64 ?? null;
 }
 
+/** Get the own identity's signingSecretKeyB64 from the identity store (sync). */
+function getSigningSecretKeyB64(): string | null {
+  const { useIdentity } = require('./identity') as { useIdentity: { getState: () => { identity: { signingSecretKeyB64: string } | null } } };
+  return useIdentity.getState().identity?.signingSecretKeyB64 ?? null;
+}
+
+/**
+ * Sign an admin action so the server can verify it.
+ * Message format mirrors server: `${orgId}:${action}:${timeBucket}`
+ * Returns { sig, ts } ready to spread into the request body.
+ */
+export function signAdminAction(orgId: string, action: string): { sig: string; ts: number } | null {
+  const skB64 = getSigningSecretKeyB64();
+  if (!skB64) return null;
+  const ts = Date.now();
+  const timeBucket = Math.floor(ts / 30_000);
+  const message = new TextEncoder().encode(`${orgId}:${action}:${timeBucket}`);
+  const sigBytes = nacl.sign.detached(message, decodeBase64(skB64));
+  return { sig: encodeBase64(sigBytes), ts };
+}
+
 /** Try to decrypt an org name from the server; falls back to the raw value if decryption fails
  *  (supports plaintext org names from orgs created before encryption was added). */
 function maybeDecryptOrgName(nameFromServer: string): string {
@@ -74,8 +95,16 @@ export interface WorkMember {
   org_id: string;
   aegis_id: string;
   team: string;
-  role: 'admin' | 'member';
+  role: 'owner' | 'admin' | 'member';
   joined_at: number;
+}
+
+export interface ChannelPermission {
+  channelId: string;
+  role: import('../utils/workPermissions').WorkRole;
+  canSend: boolean;
+  canReact: boolean;
+  canUpload: boolean;
 }
 
 export interface WorkDevice {
@@ -91,10 +120,14 @@ export interface WorkDevice {
 
 export interface WorkAuditEntry {
   id: string;
-  org_id: string;
-  kind: 'info' | 'warn' | 'ok';
+  orgId: string;
+  kind: string;
   message: string;
-  created_at: number;
+  actorId: string | null;
+  targetId: string | null;
+  channelId: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: number;
 }
 
 export interface WorkOrg {
@@ -111,24 +144,56 @@ export interface WorkOrg {
   };
 }
 
+export interface WorkChannel {
+  channelId: string;
+  orgId: string;
+  name: string;
+  isAnnouncements: boolean;
+  createdAt: number;
+}
+
 interface WorkState {
   org: WorkOrg | null;
   members: WorkMember[];
   devices: WorkDevice[];
   auditLog: WorkAuditEntry[];
+  channels: WorkChannel[];
+  /** Channel permissions keyed by channelId. Each array has one entry per role. */
+  channelPermissions: Record<string, ChannelPermission[]>;
   loading: boolean;
   error: string | null;
+  auditHasMore: boolean;
+  auditLoading: boolean;
+  auditFilters: { kind: string | null; actorId: string | null };
+
+  /** All org IDs the user belongs to (persisted in SecureStore). */
+  knownOrgIds: string[];
+  /** The org ID currently loaded/active. */
+  activeOrgId: string | null;
 
   // Actions
+  fetchAuditPage: (orgId: string, opts?: { before?: number; kind?: string; actorId?: string }) => Promise<void>;
+  setAuditFilters: (filters: { kind: string | null; actorId: string | null }) => Promise<void>;
+  fetchChannelPermissions: (orgId: string, channelId: string) => Promise<void>;
   fetchOrg: (orgId: string, requesterId: string) => Promise<void>;
   createOrg: (name: string, adminId: string) => Promise<string>;
+  fetchChannels: (orgId: string) => Promise<void>;
+  createChannel: (orgId: string, name: string, adminId: string, isAnnouncements?: boolean) => Promise<string>;
   createInvite: (orgId: string, requesterId: string, team: string, role: 'admin' | 'member') => Promise<string>;
   joinOrg: (token: string, aegisId: string, deviceId: string, deviceName: string, platform: string) => Promise<{ orgId: string; team: string }>;
   revokeDevice: (orgId: string, deviceId: string, requesterId: string) => Promise<void>;
   verifyDevice: (orgId: string, deviceId: string, requesterId: string) => Promise<void>;
   removeMember: (orgId: string, aegisId: string, requesterId: string) => Promise<void>;
-  /** Remove self from the org and wipe local org state + SecureStore entry. */
+  /** Remove self from the org and wipe local org state + SecureStore entries. */
   leaveWorkspace: (orgId: string, aegisId: string) => Promise<void>;
+  /** Read SecureStore and populate knownOrgIds + activeOrgId. Migrates the legacy single-key. */
+  loadKnownOrgs: () => Promise<void>;
+  /** Append an orgId to the persisted list and mark it active. */
+  addKnownOrg: (orgId: string) => Promise<void>;
+  /** Remove an orgId from the persisted list; resets activeOrgId if it was the active one. */
+  removeKnownOrg: (orgId: string) => Promise<void>;
+  /** Load a different workspace: persist active, fetch org data. */
+  switchWorkspace: (orgId: string, requesterId: string) => Promise<void>;
   clear: () => void;
 }
 
@@ -139,17 +204,104 @@ export const useWork = create<WorkState>((set, get) => ({
   members: [],
   devices: [],
   auditLog: [],
+  channels: [],
+  channelPermissions: {},
   loading: false,
   error: null,
+  auditHasMore: false,
+  auditLoading: false,
+  auditFilters: { kind: null, actorId: null },
+  knownOrgIds: [],
+  activeOrgId: null,
+
+  async fetchAuditPage(orgId, opts = {}) {
+    set({ auditLoading: true });
+    try {
+      const adminSig = signAdminAction(orgId, 'list_audit');
+      const { useIdentity } = require('./identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
+      const aegisId = useIdentity.getState().identity?.aegisId;
+      if (!aegisId || !adminSig) { set({ auditLoading: false }); return; }
+
+      const params = new URLSearchParams({
+        aegisId,
+        sig: adminSig.sig,
+        ts: String(adminSig.ts),
+        limit: '50',
+      });
+      if (opts.before !== undefined) params.set('before', String(opts.before));
+      if (opts.kind) params.set('kind', opts.kind);
+      if (opts.actorId) params.set('actorId', opts.actorId);
+
+      const res = await fetch(`${SERVER_URL}/work/org/${orgId}/audit?${params.toString()}`);
+      if (!res.ok) { set({ auditLoading: false }); return; }
+      const body = await res.json() as { log: WorkAuditEntry[]; hasMore?: boolean };
+      const incoming: WorkAuditEntry[] = (body.log ?? []).map((e) => ({
+        id: e.id,
+        orgId: (e as unknown as Record<string, unknown>)['org_id'] as string ?? e.orgId,
+        kind: e.kind,
+        message: e.message,
+        actorId: (e as unknown as Record<string, unknown>)['actor_id'] as string | null ?? e.actorId ?? null,
+        targetId: (e as unknown as Record<string, unknown>)['target_id'] as string | null ?? e.targetId ?? null,
+        channelId: (e as unknown as Record<string, unknown>)['channel_id'] as string | null ?? e.channelId ?? null,
+        metadata: e.metadata ?? null,
+        createdAt: (e as unknown as Record<string, unknown>)['created_at'] as number ?? e.createdAt,
+      }));
+      const isPage = opts.before !== undefined;
+      set((s) => ({
+        auditLog: isPage ? [...s.auditLog, ...incoming] : incoming,
+        auditHasMore: body.hasMore ?? false,
+        auditLoading: false,
+      }));
+    } catch {
+      set({ auditLoading: false });
+    }
+  },
+
+  async setAuditFilters(filters) {
+    set({ auditFilters: filters, auditLog: [], auditHasMore: false });
+    const orgId = get().org?.orgId;
+    if (!orgId) return;
+    const opts: { kind?: string; actorId?: string } = {};
+    if (filters.kind) opts.kind = filters.kind;
+    if (filters.actorId) opts.actorId = filters.actorId;
+    await get().fetchAuditPage(orgId, opts);
+  },
+
+  async fetchChannelPermissions(orgId, channelId) {
+    try {
+      const adminSig = signAdminAction(orgId, 'get_channel_permissions');
+      const { useIdentity } = require('./identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
+      const aegisId = useIdentity.getState().identity?.aegisId;
+      if (!aegisId || !adminSig) return;
+      const query = `aegisId=${encodeURIComponent(aegisId)}&sig=${encodeURIComponent(adminSig.sig)}&ts=${adminSig.ts}`;
+      const res = await fetch(`${SERVER_URL}/work/org/${orgId}/channels/${channelId}/permissions?${query}`);
+      if (!res.ok) return;
+      const { permissions } = await res.json() as { permissions: ChannelPermission[] };
+      set((s) => ({
+        channelPermissions: { ...s.channelPermissions, [channelId]: permissions },
+      }));
+    } catch {
+      // Non-fatal — default permissions apply
+    }
+  },
 
   async fetchOrg(orgId, requesterId) {
     set({ loading: true, error: null });
     try {
+      const membersSig = signAdminAction(orgId, 'list_members');
+      const devicesSig = signAdminAction(orgId, 'list_devices');
+      const auditSig   = signAdminAction(orgId, 'list_audit');
+
+      function adminQuery(sig: { sig: string; ts: number } | null) {
+        if (!sig) return `aegisId=${encodeURIComponent(requesterId)}`;
+        return `aegisId=${encodeURIComponent(requesterId)}&sig=${encodeURIComponent(sig.sig)}&ts=${sig.ts}`;
+      }
+
       const [orgRes, membersRes, devicesRes, auditRes] = await Promise.all([
         fetch(`${SERVER_URL}/work/org/${orgId}`),
-        fetch(`${SERVER_URL}/work/org/${orgId}/members?requesterId=${encodeURIComponent(requesterId)}`),
-        fetch(`${SERVER_URL}/work/org/${orgId}/devices?requesterId=${encodeURIComponent(requesterId)}`),
-        fetch(`${SERVER_URL}/work/org/${orgId}/audit?requesterId=${encodeURIComponent(requesterId)}&limit=50`),
+        fetch(`${SERVER_URL}/work/org/${orgId}/members?${adminQuery(membersSig)}`),
+        fetch(`${SERVER_URL}/work/org/${orgId}/devices?${adminQuery(devicesSig)}`),
+        fetch(`${SERVER_URL}/work/org/${orgId}/audit?${adminQuery(auditSig)}&limit=50`),
       ]);
       if (!orgRes.ok) throw new Error('Org not found');
       const rawOrg: WorkOrg = await orgRes.json();
@@ -157,8 +309,23 @@ export const useWork = create<WorkState>((set, get) => ({
       const org: WorkOrg = { ...rawOrg, name: maybeDecryptOrgName(rawOrg.name) };
       const { members } = membersRes.ok ? await membersRes.json() : { members: [] };
       const { devices } = devicesRes.ok ? await devicesRes.json() : { devices: [] };
-      const { log } = auditRes.ok ? await auditRes.json() : { log: [] };
-      set({ org, members, devices, auditLog: log, loading: false });
+      const rawLog: WorkAuditEntry[] = auditRes.ok
+        ? ((await auditRes.json() as { log: unknown[] }).log ?? []).map((e) => {
+            const r = e as Record<string, unknown>;
+            return {
+              id: r['id'] as string,
+              orgId: r['org_id'] as string ?? r['orgId'] as string ?? orgId,
+              kind: r['kind'] as string,
+              message: r['message'] as string,
+              actorId: r['actor_id'] as string | null ?? r['actorId'] as string | null ?? null,
+              targetId: r['target_id'] as string | null ?? r['targetId'] as string | null ?? null,
+              channelId: r['channel_id'] as string | null ?? r['channelId'] as string | null ?? null,
+              metadata: r['metadata'] as Record<string, unknown> | null ?? null,
+              createdAt: r['created_at'] as number ?? r['createdAt'] as number ?? 0,
+            } satisfies WorkAuditEntry;
+          })
+        : [];
+      set({ org, members, devices, auditLog: rawLog, loading: false });
     } catch (e) {
       set({ loading: false, error: (e as Error).message });
     }
@@ -181,14 +348,57 @@ export const useWork = create<WorkState>((set, get) => ({
     const { orgId } = await res.json();
     set({ loading: false });
     await get().fetchOrg(orgId, adminId);
+    // Auto-create default channels — non-fatal if server doesn't support it yet
+    await Promise.allSettled([
+      get().createChannel(orgId as string, 'general', adminId, false),
+      get().createChannel(orgId as string, 'comunicados', adminId, true),
+    ]);
     return orgId as string;
   },
 
+  async fetchChannels(orgId) {
+    try {
+      const res = await fetch(`${SERVER_URL}/work/org/${orgId}/channels`);
+      if (!res.ok) throw new Error('not found');
+      const { channels } = await res.json();
+      set({ channels: channels as WorkChannel[] });
+    } catch {
+      set({
+        channels: [
+          { channelId: `${orgId}-general`, orgId, name: 'general', isAnnouncements: false, createdAt: Date.now() },
+          { channelId: `${orgId}-comunicados`, orgId, name: 'comunicados', isAnnouncements: true, createdAt: Date.now() },
+        ],
+      });
+    }
+  },
+
+  async createChannel(orgId, name, adminId, isAnnouncements = false) {
+    try {
+      const res = await fetch(`${SERVER_URL}/work/org/${orgId}/channels`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, adminId, isAnnouncements }),
+      });
+      if (!res.ok) throw new Error('Failed to create channel');
+      const { channelId } = await res.json();
+      const newChannel: WorkChannel = { channelId: channelId as string, orgId, name, isAnnouncements, createdAt: Date.now() };
+      set((s) => ({ channels: [...s.channels, newChannel] }));
+      return channelId as string;
+    } catch {
+      const channelId = `${orgId}-${name}-${Date.now()}`;
+      const newChannel: WorkChannel = { channelId, orgId, name, isAnnouncements, createdAt: Date.now() };
+      set((s) => ({ channels: [...s.channels.filter((c) => c.name !== name), newChannel] }));
+      return channelId;
+    }
+  },
+
   async createInvite(orgId, requesterId, team, role) {
+    const adminSig = signAdminAction(orgId, 'create_invite');
+    if (!adminSig) throw new Error('Identity not loaded — cannot sign invite');
     const res = await fetch(`${SERVER_URL}/work/org/${orgId}/invite`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ createdBy: requesterId, team, role }),
+      body: JSON.stringify({ aegisId: requesterId, sig: adminSig.sig, ts: adminSig.ts, team, role }),
     });
     if (!res.ok) throw new Error('Failed to create invite');
     const { token } = await res.json();
@@ -210,10 +420,12 @@ export const useWork = create<WorkState>((set, get) => ({
   },
 
   async revokeDevice(orgId, deviceId, requesterId) {
+    const adminSig = signAdminAction(orgId, 'set_device_status');
+    if (!adminSig) throw new Error('Identity not loaded');
     const res = await fetch(`${SERVER_URL}/work/org/${orgId}/device/${deviceId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'revoked', requesterId }),
+      body: JSON.stringify({ aegisId: requesterId, sig: adminSig.sig, ts: adminSig.ts, status: 'revoked' }),
     });
     if (!res.ok) throw new Error('Failed to revoke device');
     set((s) => ({
@@ -222,10 +434,12 @@ export const useWork = create<WorkState>((set, get) => ({
   },
 
   async verifyDevice(orgId, deviceId, requesterId) {
+    const adminSig = signAdminAction(orgId, 'set_device_status');
+    if (!adminSig) throw new Error('Identity not loaded');
     const res = await fetch(`${SERVER_URL}/work/org/${orgId}/device/${deviceId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'verified', requesterId }),
+      body: JSON.stringify({ aegisId: requesterId, sig: adminSig.sig, ts: adminSig.ts, status: 'verified' }),
     });
     if (!res.ok) throw new Error('Failed to verify device');
     set((s) => ({
@@ -234,8 +448,11 @@ export const useWork = create<WorkState>((set, get) => ({
   },
 
   async removeMember(orgId, aegisId, requesterId) {
+    const adminSig = signAdminAction(orgId, 'remove_member');
+    if (!adminSig) throw new Error('Identity not loaded');
+    const query = `aegisId=${encodeURIComponent(requesterId)}&sig=${encodeURIComponent(adminSig.sig)}&ts=${adminSig.ts}`;
     const res = await fetch(
-      `${SERVER_URL}/work/org/${orgId}/members/${aegisId}?requesterId=${encodeURIComponent(requesterId)}`,
+      `${SERVER_URL}/work/org/${orgId}/members/${aegisId}?${query}`,
       { method: 'DELETE' }
     );
     if (!res.ok) throw new Error('Failed to remove member');
@@ -244,13 +461,65 @@ export const useWork = create<WorkState>((set, get) => ({
 
   async leaveWorkspace(orgId, aegisId) {
     await get().removeMember(orgId, aegisId, aegisId);
-    // Remove the stored orgId from SecureStore so the dashboard shows the empty state.
+    await get().removeKnownOrg(orgId);
+    set({ org: null, members: [], devices: [], auditLog: [], channels: [], error: null, auditHasMore: false, auditLoading: false, auditFilters: { kind: null, actorId: null } });
+  },
+
+  async loadKnownOrgs() {
     const SecureStore = await import('expo-secure-store');
-    await SecureStore.deleteItemAsync('aegis.work.orgId').catch(() => {});
-    set({ org: null, members: [], devices: [], auditLog: [], error: null });
+    const raw = await SecureStore.getItemAsync('aegis.work.orgIds').catch(() => null);
+    const ids: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+
+    // Migrate legacy single-org key if present
+    const oldSingle = await SecureStore.getItemAsync('aegis.work.orgId').catch(() => null);
+    if (oldSingle && !ids.includes(oldSingle)) {
+      ids.push(oldSingle);
+      await SecureStore.setItemAsync('aegis.work.orgIds', JSON.stringify(ids));
+      await SecureStore.deleteItemAsync('aegis.work.orgId').catch(() => {});
+    }
+
+    const activeId = await SecureStore.getItemAsync('aegis.work.activeOrgId').catch(() => null);
+    set({ knownOrgIds: ids, activeOrgId: activeId ?? ids[0] ?? null });
+  },
+
+  async addKnownOrg(orgId) {
+    const SecureStore = await import('expo-secure-store');
+    const raw = await SecureStore.getItemAsync('aegis.work.orgIds').catch(() => null);
+    const existing: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+    if (!existing.includes(orgId)) {
+      const updated = [...existing, orgId];
+      await SecureStore.setItemAsync('aegis.work.orgIds', JSON.stringify(updated));
+    }
+    await SecureStore.setItemAsync('aegis.work.activeOrgId', orgId);
+    set((s) => ({ knownOrgIds: [...new Set([...s.knownOrgIds, orgId])], activeOrgId: orgId }));
+  },
+
+  async removeKnownOrg(orgId) {
+    const SecureStore = await import('expo-secure-store');
+    const raw = await SecureStore.getItemAsync('aegis.work.orgIds').catch(() => null);
+    const existing: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+    const updated = existing.filter((id) => id !== orgId);
+    await SecureStore.setItemAsync('aegis.work.orgIds', JSON.stringify(updated));
+
+    const currentActive = get().activeOrgId;
+    const newActive = currentActive === orgId ? (updated[0] ?? null) : currentActive;
+    if (newActive) {
+      await SecureStore.setItemAsync('aegis.work.activeOrgId', newActive);
+    } else {
+      await SecureStore.deleteItemAsync('aegis.work.activeOrgId').catch(() => {});
+    }
+    set({ knownOrgIds: updated, activeOrgId: newActive });
+  },
+
+  async switchWorkspace(orgId, requesterId) {
+    const SecureStore = await import('expo-secure-store');
+    await SecureStore.setItemAsync('aegis.work.activeOrgId', orgId);
+    set({ activeOrgId: orgId });
+    await get().fetchOrg(orgId, requesterId);
+    await get().fetchChannels(orgId);
   },
 
   clear() {
-    set({ org: null, members: [], devices: [], auditLog: [], loading: false, error: null });
+    set({ org: null, members: [], devices: [], auditLog: [], channels: [], channelPermissions: {}, loading: false, error: null, auditHasMore: false, auditLoading: false, auditFilters: { kind: null, actorId: null }, knownOrgIds: [], activeOrgId: null });
   },
 }));

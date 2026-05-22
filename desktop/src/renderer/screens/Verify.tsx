@@ -5,6 +5,8 @@ import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
+import { useContacts } from '../store/contacts';
+import type { StoredContact } from '../db/local';
 
 interface Identity {
   aegisId: string;
@@ -16,6 +18,8 @@ interface Props {
   onBack: () => void;
   onScan: () => void;
   onTab?: (tab: Tab) => void;
+  /** Called when a peer scans this QR and is auto-added as a new contact. */
+  onContactAdded?: (contact: StoredContact) => void;
 }
 
 // Stub fingerprint functions
@@ -30,14 +34,15 @@ function fingerprintHex(key: Uint8Array): string[] {
           padded.slice(16, 20), padded.slice(20, 24), padded.slice(24, 28), padded.slice(28, 32)].map((s) => s.toUpperCase());
 }
 function encodeIdentityQR(aegisId: string, pubKeyB64: string): string {
-  return `aegislink:v1:${aegisId}:${pubKeyB64}`;
+  return `aegislink://v1/${aegisId}/${encodeURIComponent(pubKeyB64)}`;
 }
 
-export function VerifyScreen({ onBack, onScan, onTab }: Props) {
+export function VerifyScreen({ onBack, onScan, onTab, onContactAdded }: Props) {
   const { t } = useTheme();
   const asTab = !!onTab;
 
   const storedIdentity = useIdentity((s) => s.identity);
+  const contacts = useContacts((s) => s.contacts);
 
   const identity = useMemo<Identity | null>(() => {
     if (!storedIdentity) return null;
@@ -45,6 +50,28 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
     const publicKey = Uint8Array.from(atob(raw.publicKeyB64), c => c.charCodeAt(0));
     return { aegisId: raw.aegisId, publicKey, publicKeyB64: raw.publicKeyB64 };
   }, [storedIdentity]);
+
+  // When a peer scans our QR → they get auto-added as a contact by the socket
+  // handler. Detect that here and navigate to chat with them.
+  const prevCountRef = useRef(contacts.length);
+  useEffect(() => {
+    const prev = prevCountRef.current;
+    prevCountRef.current = contacts.length;
+    if (contacts.length > prev) {
+      // The newest contact is always prepended at index 0.
+      const newest = contacts[0];
+      if (newest) {
+        if (onContactAdded) {
+          onContactAdded(newest);
+        } else if (onTab) {
+          onTab('home');
+        } else {
+          onBack();
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts.length]);
 
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
@@ -68,7 +95,7 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
 
   async function handleShareContact() {
     if (!identity) return;
-    const shareText = `Agregame en AegisLink:\naegislink:v1:${identity.aegisId}:${identity.publicKeyB64}\n\nO usa mi ID: ${identity.aegisId}`;
+    const shareText = `Agregame en AegisLink:\naegislink://v1/${identity.aegisId}/${encodeURIComponent(identity.publicKeyB64)}\n\nO usa mi ID: ${identity.aegisId}`;
     try {
       await navigator.clipboard.writeText(shareText);
       setShareMsg('¡Copiado!');

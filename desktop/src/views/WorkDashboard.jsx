@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../store/index.js';
 
+import WorkSearchPanel from './WorkSearchPanel';
+
 const NAV_ITEMS = [
   { label: 'Overview',   icon: BuildingIcon },
   { label: 'Contacts',   icon: UsersIcon },
   { label: 'Keys',       icon: KeyIcon },
   { label: 'Audit log',  icon: BellIcon },
   { label: 'Policy',     icon: ShieldIcon },
+  { label: 'Search',     icon: SearchIcon },
 ];
 
 function useClock() {
@@ -248,6 +251,11 @@ export default function WorkDashboard({ t }) {
         {activeNav === 'Policy' && (
           <PolicyPanel t={t} />
         )}
+
+        {/* ── Search tab ── */}
+        {activeNav === 'Search' && (
+          <WorkSearchPanel t={t} orgId={identity?.aegisId} />
+        )}
       </main>
     </div>
   );
@@ -453,3 +461,12 @@ function BellIcon({ size = 15, color = 'currentColor' }) {
     </svg>
   );
 }
+function SearchIcon({ size = 15, color = 'currentColor' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8" />
+      <path d="M21 21l-4.35-4.35" />
+    </svg>
+  );
+}
+

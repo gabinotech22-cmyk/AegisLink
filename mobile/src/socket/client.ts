@@ -11,7 +11,7 @@ import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
 import { performX3DH, performX3DHReceiver, generatePreKeys, type PreKeyBundle } from '../crypto/signal/x3dh';
-import { initRatchet, ratchetDecrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
+import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
 import { loadRatchetSession, saveRatchetSession } from '../db/local';
 
 const getSlotPrefix = () => {
@@ -33,7 +33,20 @@ interface WireSealedEnvelope {
   ciphertext: string;
   nonce: string;
   createdAt?: number;
+  /**
+   * Multi-device "self-encrypted copy" marker. Set by the sender when an
+   * envelope is addressed to its OWN aegisId so this user's other devices
+   * can render the message as outbound. The relay sees this flag (because
+   * `to === from === myAegisId` already trivially reveals self-routing),
+   * but the flag is ALSO duplicated inside the encrypted inner payload so
+   * a malicious relay cannot strip it without invalidating the MAC.
+   */
+  selfCopy?: boolean;
 }
+
+/** SecureStore slot for the long-term self-ratchet session (per identity). */
+const SECURE_SELF_RATCHET_KEY = (myAegisId: string) =>
+  `aegis.${getSlotPrefix()}self.ratchet.${myAegisId}`;
 
 interface WireChallenge {
   ephemeralPubKey: string;
@@ -216,7 +229,7 @@ export function isConnected(): boolean {
   return connected && authenticated;
 }
 
-async function uploadPreKeys(identity: Identity) {
+async function uploadPreKeys(identity: Identity, deviceId: string) {
   if (!socket) return;
 
   // SPK keyId must be monotonic per Signal X3DH spec — read the previous
@@ -287,6 +300,7 @@ async function uploadPreKeys(identity: Identity) {
 
   return new Promise<void>((resolve, reject) => {
     socket!.emit('prekeys:upload', {
+      deviceId,
       signedPreKey: {
         keyId: preKeys.signedPreKey.keyId,
         publicKeyB64: preKeys.signedPreKey.publicKeyB64,
@@ -316,9 +330,29 @@ export function connect(identity: Identity): Socket {
   const { routeViaTor } = usePreferences.getState();
   const relayUrl = routeViaTor && ONION_URL ? ONION_URL : SERVER_URL;
 
+  // ── Stable per-slot deviceId ────────────────────────────────────────────────
+  // Resolved asynchronously; socket creation and event wiring happen immediately
+  // with a placeholder, then replaced once the SecureStore read completes. The
+  // deviceId is only consumed inside async callbacks (auth:ok, uploadPreKeys) so
+  // by then the promise will have resolved and `resolvedDeviceId` will be set.
+  let resolvedDeviceId = '';
+  const deviceIdReady: Promise<string> = (async () => {
+    const { getActiveDbSlot } = require('../db/local') as { getActiveDbSlot: () => string };
+    const slot = getActiveDbSlot();
+    const slotSuffix = slot && slot !== 'self' ? `.${slot}` : '';
+    const slotKey = `aegis.deviceId${slotSuffix}`;
+    let id = await SecureStore.getItemAsync(slotKey);
+    if (!id) {
+      id = Crypto.randomUUID();
+      await SecureStore.setItemAsync(slotKey, id);
+    }
+    resolvedDeviceId = id;
+    return id;
+  })();
+
   socket = io(relayUrl, {
     transports: ['websocket'],
-    auth: { aegisId: identity.aegisId },
+    auth: { aegisId: identity.aegisId, platform: 'mobile' },
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 8000,
@@ -400,22 +434,47 @@ export function connect(identity: Identity): Socket {
   socket.on('auth:ok', async (res?: { opkCount?: number }) => {
     authenticated = true;
     if (__DEV__) console.log('[socket] authenticated');
+
+    // Ensure deviceId is resolved before using it below
+    const deviceId = resolvedDeviceId || await deviceIdReady;
+
+    // Patch the auth object on the live socket so reconnection attempts also carry deviceId
+    if (socket) {
+      (socket.auth as Record<string, unknown>).deviceId = deviceId;
+    }
+
     // Flush any messages queued while offline
     void flushOfflineQueue(identity);
     void flushGroupOfflineQueue(identity);
 
-    // Register push token for silent wake-ups (best-effort, non-blocking)
+    // ── Register push token for silent wake-ups ──────────────────────────────
+    // Called AFTER auth:ok so we have an authenticated socket connection.
+    // De-duplicate: only emit push:register when the token has changed since
+    // the last registration. Expo Go tokens are simulated — never forwarded.
     void (async () => {
       try {
+        const { IS_EXPO_GO } = require('../runtime') as { IS_EXPO_GO: boolean };
+        if (IS_EXPO_GO) return; // simulated token — do not forward to server
+
+        const { registerForPush } = require('../notifications/push') as typeof import('../notifications/push');
+        await registerForPush(identity);
+
+        // After registerForPush succeeds, check if token changed and emit to relay
         const Notifications = require('expo-notifications');
-        const { status } = await Notifications.getPermissionsAsync();
-        if (status === 'granted') {
-          const tokenData = await Notifications.getExpoPushTokenAsync();
-          const os = require('react-native').Platform.OS;
+        const perm = await Notifications.getPermissionsAsync();
+        if (!perm.granted && perm.status !== 'granted') return;
+
+        const tokenData = await Notifications.getExpoPushTokenAsync();
+        const freshToken: string = tokenData.data;
+        const savedToken = await SecureStore.getItemAsync('aegis.pushToken');
+
+        if (savedToken !== freshToken) {
+          const { Platform } = require('react-native');
           socket!.emit('push:register', {
-            token: tokenData.data,
-            platform: os === 'ios' ? 'ios' : os === 'android' ? 'android' : 'unknown',
+            token: freshToken,
+            platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'unknown',
           });
+          await SecureStore.setItemAsync('aegis.pushToken', freshToken);
         }
       } catch (e) {
         if (__DEV__) console.warn('[socket] push token registration failed:', e);
@@ -425,7 +484,7 @@ export function connect(identity: Identity): Socket {
     const count = res?.opkCount ?? 0;
     if (count < 20) {
       try {
-        await uploadPreKeys(identity);
+        await uploadPreKeys(identity, deviceId);
         if (__DEV__) console.log('[socket] prekeys uploaded (refilled count from', count, ')');
       } catch (err) {
         if (__DEV__) console.error('[socket] prekey upload error:', err);
@@ -475,7 +534,54 @@ export function connect(identity: Identity): Socket {
     await handleIncoming(env, identity);
   });
 
+  socket.on('channel:msg', (msg: import('../store/workMessages').WorkMessage) => {
+    const { useWorkMessages } = require('../store/workMessages') as typeof import('../store/workMessages');
+    useWorkMessages.getState().append(msg);
+  });
+
   return socket;
+}
+
+export function joinChannel(channelId: string, orgId: string): void {
+  socket?.emit('channel:join', { channelId, orgId });
+}
+
+export function emitChannelMsg(payload: {
+  id: string;
+  channelId: string;
+  orgId: string;
+  body: string;
+  type: string;
+  encrypted?: boolean;
+  nonce?: string;
+  keyIteration?: number;
+}): void {
+  socket?.emit('channel:msg', payload);
+}
+
+export function emitSenderKeyDist(payload: {
+  channelId: string;
+  orgId: string;
+  toAegisId: string;
+  dist: object;
+}): void {
+  socket?.emit('work:sender_key_dist', payload);
+}
+
+export function emitRequestSenderKey(payload: {
+  channelId: string;
+  orgId: string;
+  fromAegisId: string;
+}): void {
+  socket?.emit('work:request_sender_key', payload);
+}
+
+export function emitDeleteChannelMsg(payload: {
+  channelId: string;
+  orgId: string;
+  messageId: string;
+}): void {
+  socket?.emit('channel:delete_msg', payload);
 }
 
 async function getOrCreateSession(contactAegisId: string, contactPublicKeyB64: string, identity: Identity): Promise<RatchetState> {
@@ -1012,6 +1118,14 @@ async function decryptAndAppend(
 }
 
 async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
+  // Multi-device self-copy fast path — routed BEFORE contact matching so a
+  // self-copy never falls through to the regular incoming-message handler
+  // (which would re-trigger profile/group flows and never decrypt correctly).
+  if (env.selfCopy === true && env.to === identity.aegisId) {
+    await handleSelfCopy(env, identity);
+    return;
+  }
+
   const contacts = useContacts.getState().contacts;
   let matchedContact = env.from ? contacts.find(c => c.aegisId === env.from) : null;
 
@@ -1070,6 +1184,345 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
   }
 
   if (__DEV__) console.warn('[socket] envelope from unknown sender — add the peer as a contact first to decrypt their messages');
+}
+
+// ─── Self-encrypted copy (multi-device sync) ─────────────────────────────────
+//
+// When the user sends a message to Contact B from device A, the ciphertext is
+// sealed for B's identity key — so device A2 (e.g. desktop) of the same user
+// cannot read it. To make outbound messages visible across the user's own
+// devices we additionally send a second envelope addressed to `myAegisId`,
+// cifrado via an INDEPENDENT Double Ratchet session ("self-session") whose
+// X3DH handshake runs against the user's OWN published prekeys.
+//
+// Privacy/safety properties enforced below:
+//   - Plaintext NEVER appears on the wire — the self-copy is a normal E2EE
+//     envelope; the relay only re-routes ciphertext.
+//   - View-once messages do NOT generate a self-copy (the view-once invariant
+//     is "exists exactly once, on the original device").
+//   - Very short ephemeral timers (< 5 s) suppress self-copy: the round-trip
+//     would race the expiration.
+//   - Receiver of a self-copy NEVER emits another self-copy — `handleSelfCopy`
+//     never calls `sendSelfCopy`, and the wire flag prevents the regular
+//     contact-decrypt code path from re-triggering send logic.
+//
+// Known multi-device limitation: each device generates its own SPK/OPKs and
+// uploads them under the same aegisId, so the prekey bundle returned for
+// `myAegisId` is whichever device refilled last. If device A fetches its own
+// uploaded SPK, only device A holds the SPK secret to perform the receiver-
+// side X3DH; device A2 will be unable to derive the same root key. Fixing
+// this requires sharing SPK secrets across the user's devices (out of scope
+// for this module). The flow degrades gracefully: handleSelfCopy logs a
+// warning and drops the message; the recipient still received it correctly.
+
+async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(SECURE_SELF_RATCHET_KEY(myAegisId));
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    s.RK = reviveBytes(s.RK);
+    s.CKs = reviveBytes(s.CKs);
+    s.CKr = reviveBytes(s.CKr);
+    s.DHr = reviveBytes(s.DHr);
+    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
+    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
+    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    return s as RatchetState;
+  } catch (e) {
+    if (__DEV__) console.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
+    return null;
+  }
+}
+
+async function saveSelfRatchet(myAegisId: string, state: RatchetState): Promise<void> {
+  trimOldSkippedKeys(state, MAX_SKIPPED_KEYS);
+  const serialized = {
+    RK: state.RK,
+    DHs: state.DHs,
+    DHr: state.DHr,
+    CKs: state.CKs,
+    CKr: state.CKr,
+    Ns: state.Ns,
+    Nr: state.Nr,
+    PN: state.PN,
+    MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
+    x3dhInit: state.x3dhInit,
+  };
+  await SecureStore.setItemAsync(
+    SECURE_SELF_RATCHET_KEY(myAegisId),
+    JSON.stringify(serialized),
+  );
+}
+
+/**
+ * Build a fresh self-ratchet (Alice side) by performing X3DH against the
+ * user's own published prekey bundle. The resulting state is stamped with
+ * `x3dhInit` so the FIRST self-copy envelope carries handshake headers and
+ * the receiving device can run the receiver-side X3DH.
+ */
+async function initSelfSession(identity: Identity, sock: Socket): Promise<RatchetState> {
+  type PreKeyFetchAck = { ok: true; bundle: PreKeyBundle } | { ok: false; error?: string };
+  const bundle = await new Promise<PreKeyBundle>((resolve, reject) => {
+    sock.emit('prekeys:fetch', { aegisId: identity.aegisId }, (ack: PreKeyFetchAck) => {
+      if (!ack?.ok) reject(new Error(ack?.error ?? 'self_prekeys_fetch_failed'));
+      else resolve(ack.bundle);
+    });
+  });
+
+  // SPK signature verification uses our OWN signing public key — we trust
+  // it absolutely (it was loaded from SecureStore at app start), so a relay
+  // that swaps the SPK cannot pass verification.
+  bundle.signingPublicKeyB64 = identity.signingPublicKeyB64;
+  bundle.identityKeyB64 = identity.publicKeyB64;
+
+  const x3dh = performX3DH(identity, bundle);
+  const ratchetState = initRatchet(
+    x3dh.rootKey,
+    decodeBase64(bundle.signedPreKey.publicKeyB64),
+    true,
+  );
+  ratchetState.x3dhInit = {
+    aliceEKB64: x3dh.myEphemeralPublicKeyB64,
+    spkId: bundle.signedPreKey.keyId,
+    opkId: bundle.oneTimePreKey ? bundle.oneTimePreKey.keyId : null,
+  };
+  return ratchetState;
+}
+
+interface SelfCopyMeta {
+  viewOnce?: boolean;
+  ephemeralSeconds?: number;
+}
+
+/**
+ * Send a self-encrypted copy of an outbound message so the user's other
+ * devices can render it as direction:'out'. Safe to call after every regular
+ * send; failures are swallowed (the primary recipient already received the
+ * message — the secondary device sync is best-effort).
+ */
+async function sendSelfCopy(
+  sock: Socket,
+  identity: Identity,
+  recipientAegisId: string,
+  msgId: string,
+  innerPayloadJson: string,
+  meta: SelfCopyMeta,
+): Promise<void> {
+  if (meta.viewOnce) return; // view-once never leaves the originating device
+  if (meta.ephemeralSeconds !== undefined && meta.ephemeralSeconds > 0 && meta.ephemeralSeconds < 5) return;
+
+  try {
+    let ratchet = await getSelfRatchet(identity.aegisId);
+    if (!ratchet) {
+      ratchet = await initSelfSession(identity, sock);
+    }
+
+    // The plaintext sent to ourselves embeds the original recipient aegisId
+    // (so the receiving device can file the message in the correct chat),
+    // the original message id (so dedupe works against any locally-known
+    // outbound), and a `selfCopy: true` marker that the receiver verifies
+    // against the wire flag for defence-in-depth.
+    const selfPayloadObj = {
+      type: 'self_copy',
+      selfCopy: true,
+      msgId,
+      chatId: recipientAegisId,
+      // `inner` is the SAME stringified JSON that was sent to the recipient,
+      // so all media tags / view-once markers / vote bodies survive verbatim.
+      inner: innerPayloadJson,
+      sentAt: Date.now(),
+    };
+    const selfPayload = JSON.stringify(selfPayloadObj);
+
+    const { ciphertext, nonce, header } = ratchetEncrypt(ratchet, new TextEncoder().encode(selfPayload));
+    await saveSelfRatchet(identity.aegisId, ratchet);
+
+    // Build the sealed inner via encryptMessage-equivalent: outer NaCl box
+    // sealed for our own identity key. We can call nacl.box(plain, nonce,
+    // myPub, mySec) — X25519 DH(mySec, myPub) is well-defined.
+    const innerPayload: Record<string, unknown> = {
+      v: 2,
+      from: identity.aegisId,
+      selfCopy: true,
+      ratchet: {
+        ratchetKeyB64: encodeBase64(header.ratchetKey),
+        n: header.n,
+        pn: header.pn,
+        ciphertextB64: encodeBase64(ciphertext),
+        nonceB64: encodeBase64(nonce),
+      },
+    };
+    if (ratchet.x3dhInit) {
+      innerPayload.x3dh = ratchet.x3dhInit;
+    }
+    // Clear x3dhInit after the first message so subsequent self-copies
+    // carry only ratchet headers (matches the regular session flow).
+    if (ratchet.x3dhInit) {
+      delete ratchet.x3dhInit;
+      await saveSelfRatchet(identity.aegisId, ratchet);
+    }
+
+    const { stripAndPad } = require('../crypto/metadata') as typeof import('../crypto/metadata');
+    const innerBytes = stripAndPad(innerPayload);
+    const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
+    const outerCiphertext = nacl.box(innerBytes, outerNonce, identity.publicKey, identity.secretKey);
+
+    sock.emit('envelope', {
+      id: Crypto.randomUUID(),
+      to: identity.aegisId,
+      ciphertext: encodeBase64(outerCiphertext),
+      nonce: encodeBase64(outerNonce),
+      selfCopy: true,
+    });
+  } catch (e) {
+    if (__DEV__) console.warn('[socket] sendSelfCopy failed (non-fatal):', (e as Error).message);
+  }
+}
+
+/**
+ * Handle an inbound envelope flagged as a self-copy. Decrypts via the
+ * self-ratchet, validates `parsed.from === identity.aegisId`, and appends
+ * the carried message into the local store as direction:'out'.
+ *
+ * NEVER triggers another self-copy (no recursion into sendSelfCopy).
+ */
+async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Promise<void> {
+  // Decrypt outer sealed envelope using our own keypair on both sides
+  // (DH(mySec, myPub) is symmetric — nacl.box.open accepts it).
+  const parsed = openEnvelope(
+    { ciphertextB64: env.ciphertext, nonceB64: env.nonce },
+    identity.publicKey,
+    identity.secretKey,
+  );
+  if (!parsed) {
+    if (__DEV__) console.warn('[socket] self-copy outer decrypt failed');
+    return;
+  }
+  if (parsed.from !== identity.aegisId) {
+    if (__DEV__) console.warn('[socket] self-copy from mismatch — dropping');
+    return;
+  }
+  // Defence-in-depth: the inner payload MUST also self-declare as a self-copy.
+  if ((parsed as { selfCopy?: unknown }).selfCopy !== true) {
+    if (__DEV__) console.warn('[socket] self-copy inner flag missing — dropping');
+    return;
+  }
+
+  let ratchet = await getSelfRatchet(identity.aegisId);
+  if (!ratchet) {
+    // First self-copy received on this device — derive the session as Bob
+    // using OUR OWN SPK secret. If we don't have an SPK secret stored
+    // (e.g. desktop hasn't run uploadPreKeys yet) we cannot decrypt; drop.
+    if (!parsed.x3dh) {
+      if (__DEV__) console.warn('[socket] self-copy: no session and no X3DH headers — dropping');
+      return;
+    }
+    const spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    if (!spkSec) {
+      if (__DEV__) console.warn('[socket] self-copy: missing local SPK secret — dropping (multi-device SPK sync not implemented)');
+      return;
+    }
+    const mySpkSecret = decodeBase64(spkSec);
+
+    let myOpkSecret: Uint8Array | null = null;
+    const x3dhInit = parsed.x3dh as { aliceEKB64: string; spkId: number; opkId: number | null };
+    if (x3dhInit.opkId !== null) {
+      const opkB64 = await SecureStore.getItemAsync(opkSecretKey(x3dhInit.opkId));
+      if (opkB64) {
+        myOpkSecret = decodeBase64(opkB64);
+        void SecureStore.deleteItemAsync(opkSecretKey(x3dhInit.opkId));
+      }
+    }
+    const rootKey = performX3DHReceiver(
+      identity,
+      mySpkSecret,
+      myOpkSecret,
+      identity.publicKey,
+      decodeBase64(x3dhInit.aliceEKB64),
+    );
+    const spkPub = nacl.scalarMult.base(mySpkSecret);
+    const rHeader = parsed.ratchet as { ratchetKeyB64: string };
+    ratchet = initRatchet(rootKey, decodeBase64(rHeader.ratchetKeyB64), false, {
+      publicKey: spkPub,
+      secretKey: mySpkSecret,
+    });
+  }
+
+  const r = parsed.ratchet as { ratchetKeyB64: string; n: number; pn: number; ciphertextB64: string; nonceB64: string };
+  let plaintextBytes: Uint8Array | null;
+  try {
+    plaintextBytes = ratchetDecrypt(
+      ratchet,
+      { ratchetKey: decodeBase64(r.ratchetKeyB64), n: r.n, pn: r.pn },
+      decodeBase64(r.ciphertextB64),
+      decodeBase64(r.nonceB64),
+    );
+  } catch (e) {
+    if (__DEV__) console.warn('[socket] self-copy ratchet decrypt threw:', (e as Error).message);
+    return;
+  }
+  if (!plaintextBytes) {
+    if (__DEV__) console.warn('[socket] self-copy ratchet decrypt failed (null)');
+    return;
+  }
+  await saveSelfRatchet(identity.aegisId, ratchet);
+
+  let selfBody: string;
+  try {
+    selfBody = encodeUTF8(plaintextBytes);
+  } catch {
+    return;
+  }
+
+  let selfObj: {
+    type?: string;
+    msgId?: string;
+    chatId?: string;
+    inner?: string;
+    sentAt?: number;
+  };
+  try {
+    selfObj = JSON.parse(selfBody);
+  } catch {
+    if (__DEV__) console.warn('[socket] self-copy body is not JSON — dropping');
+    return;
+  }
+  if (selfObj.type !== 'self_copy' || !selfObj.msgId || !selfObj.chatId || !selfObj.inner) {
+    if (__DEV__) console.warn('[socket] self-copy malformed payload — dropping');
+    return;
+  }
+
+  // Dedup: if we already have this msgId in the target chat, skip.
+  const existing = useMessages.getState().byChat[selfObj.chatId];
+  if (existing && existing.some((m) => m.id === selfObj.msgId)) {
+    return;
+  }
+
+  // Recover the original outbound payload to reconstruct body / type / media.
+  let originalPayload: {
+    type?: string;
+    text?: string;
+    replyToId?: string;
+    expiresAt?: number | null;
+  } = {};
+  try {
+    originalPayload = JSON.parse(selfObj.inner);
+  } catch {
+    if (__DEV__) console.warn('[socket] self-copy inner payload not JSON — falling back to raw');
+  }
+
+  const displayBody = typeof originalPayload.text === 'string' ? originalPayload.text : selfObj.inner;
+
+  await useMessages.getState().append({
+    id: selfObj.msgId,
+    chatId: selfObj.chatId,
+    direction: 'out',
+    body: displayBody,
+    createdAt: selfObj.sentAt ?? Date.now(),
+    replyToId: originalPayload.replyToId ?? null,
+    type: (originalPayload.type as 'text' | 'location' | 'view_once' | undefined) ?? 'text',
+    expiresAt: originalPayload.expiresAt ?? null,
+  });
 }
 
 export function disconnect(): void {
@@ -1167,6 +1620,22 @@ export async function sendMessage(opts: {
       }
     );
   });
+
+  // Multi-device sync: also push a self-encrypted copy so the user's other
+  // devices can render this message as direction:'out'. Best-effort — never
+  // throws, never blocks the primary send result.
+  const ephemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
+  void sendSelfCopy(
+    socket!,
+    opts.identity,
+    opts.recipientAegisId,
+    id,
+    payload,
+    {
+      viewOnce: msgType === 'view_once',
+      ephemeralSeconds,
+    },
+  );
 }
 
 /**

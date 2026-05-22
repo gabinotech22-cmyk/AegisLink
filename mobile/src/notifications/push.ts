@@ -31,8 +31,8 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export async function registerForPush(identity: Identity): Promise<void> {
-  if (registered) return;
+export async function registerForPush(identity: Identity): Promise<{ token: string | null }> {
+  if (registered) return { token: null };
 
   try {
     if (Platform.OS === 'android') {
@@ -70,7 +70,7 @@ export async function registerForPush(identity: Identity): Promise<void> {
     }
     if (!granted) {
       if (__DEV__) console.log('[push] notification permission denied — wake-ups disabled');
-      return;
+      return { token: null };
     }
 
     const tokenResponse = await Notifications.getExpoPushTokenAsync();
@@ -86,7 +86,7 @@ export async function registerForPush(identity: Identity): Promise<void> {
     });
     if (!res.ok) {
       if (__DEV__) console.warn('[push] server rejected token registration', res.status);
-      return;
+      return { token: null };
     }
 
     // Handle notification action taps (Reply, Mark read) and default tap to open chat
@@ -154,7 +154,7 @@ export async function registerForPush(identity: Identity): Promise<void> {
     }
 
     registered = true;
-    if (__DEV__) console.log('[push] registered for wake-ups');
+    if (__DEV__) console.log('[push] registered for wake-ups, token:', expoToken);
 
     // Register notification action categories (Reply + Mark as read)
     await Notifications.setNotificationCategoryAsync('aegislink-message', [
@@ -186,8 +186,11 @@ export async function registerForPush(identity: Identity): Promise<void> {
         options: { opensAppToForeground: false, isDestructive: true },
       },
     ]);
+
+    return { token: expoToken };
   } catch (e) {
     if (__DEV__) console.warn('[push] registration failed:', (e as Error).message);
+    return { token: null };
   }
 }
 

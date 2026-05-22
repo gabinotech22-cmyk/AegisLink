@@ -28,6 +28,13 @@ interface ContactsState {
     publicKeyB64: string,
     displayName?: string,
   ) => Promise<AddResult>;
+  /**
+   * Save a contact directly from data embedded in an incoming envelope.
+   * Used as fallback when the identity-directory API is unreachable.
+   * Sets verified=false; the contact's profile will be updated when their
+   * first profile_update envelope is decrypted.
+   */
+  addFromEnvelope: (aegisId: string, publicKeyB64: string) => Promise<StoredContact>;
   markVerified: (aegisId: string, verified: boolean) => Promise<void>;
   confirmKeyChange: (aegisId: string, newPublicKeyB64: string) => Promise<StoredContact | null>;
   get: (aegisId: string) => StoredContact | undefined;
@@ -65,6 +72,41 @@ export const useContacts = create<ContactsState>((set, get) => ({
     } catch (e) {
       set({ loading: false, error: (e as Error).message });
     }
+  },
+
+  async addFromEnvelope(aegisId, publicKeyB64) {
+    // Return existing contact if we already know them.
+    const existing = await getContact(aegisId);
+    if (existing) return existing;
+
+    const { useIdentity } = await import('./identity');
+    const profile = useIdentity.getState().activeProfile as 'personal' | 'work';
+    const contact: StoredContact = {
+      aegisId,
+      publicKeyB64,
+      name: aegisId, // will be replaced by senderName once profile_update decrypts
+      verified: false,
+      addedAt: Date.now(),
+      profile,
+    };
+    await saveContact(contact);
+    set({ contacts: [contact, ...get().contacts] });
+
+    // Best-effort: enrich with signing key and proper display name from the
+    // directory in the background (non-blocking).
+    void lookupIdentity(aegisId)
+      .then((record) => {
+        if (!record.signingPublicKey) return;
+        const enriched: StoredContact = {
+          ...contact,
+          signingPublicKeyB64: record.signingPublicKey,
+        };
+        void saveContact(enriched);
+        set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? enriched : c)) });
+      })
+      .catch(() => { /* server unreachable — leave as-is, profile_update will enrich */ });
+
+    return contact;
   },
 
   async addByAegisId(aegisId, displayName) {

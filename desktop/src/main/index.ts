@@ -43,6 +43,7 @@ function createWindow(): void {
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    win.webContents.openDevTools()
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
@@ -60,7 +61,9 @@ app.whenReady().then(() => {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* wss://localhost:*; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none';"
+          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+          "connect-src 'self' ws://localhost:* wss://localhost:* https://aegislink.duckdns.org wss://aegislink.duckdns.org; " +
+          "img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none';"
         ]
       }
     })

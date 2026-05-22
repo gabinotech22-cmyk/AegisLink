@@ -194,7 +194,7 @@ export function EntryScreen({ onNewIdentity, onRestore, onLinkMobile }: Props) {
           <CardButton
             icon={<I.QR size={20} stroke={1.8} />}
             label="Vincular con móvil"
-            description="ESCANEAR QR DESDE LA APP"
+            description="GENERAR IDENTIDAD Y MOSTRAR QR"
             primary
             onClick={onLinkMobile}
             accent={t.accent}

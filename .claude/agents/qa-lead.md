@@ -116,6 +116,7 @@ grep -rn "router\.\(post\|put\|patch\)\|socket\.on" server/src/ --include="*.ts"
 - [expo-native-security](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/expo-native-security.md): Guías de seguridad móvil nativa de Expo 54 y trituración de datos.
 - [secure-webrtc-signaling](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/secure-webrtc-signaling.md): Auditoría de señalización WebRTC e IP leaks.
 - [did-onchain](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/did-onchain.md): Auditoría de anonimato en transacciones Lightning y DID.
+- [a11y-mobile](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/a11y-mobile.md): Auditoría de accesibilidad WCAG 2.2 — roles, contraste, focus, VoiceOver/TalkBack. Ejecutar en pantallas de modo pánico, onboarding y llamadas antes de cualquier release.
 
 ## Checklist de seguridad por tipo de feature
 

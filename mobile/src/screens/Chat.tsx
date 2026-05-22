@@ -658,7 +658,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               gap: 10,
             }}
           >
-            <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: t.inkOnWarn ?? t.bg, fontWeight: '700', letterSpacing: 0.5 }}>
+            <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: t.bg, fontWeight: '700', letterSpacing: 0.5 }}>
               {i18nT('common.offline')}
             </Text>
             <Pressable

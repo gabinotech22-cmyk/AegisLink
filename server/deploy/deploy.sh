@@ -24,7 +24,17 @@ VM_USER="${VM_USER:-root}"
 VM_PORT="${VM_PORT:-22}"
 APP_DIR="${APP_DIR:-/home/aegis/app}"
 REMOTE="${VM_USER}@${SERVER_IP}"
-SSH_OPTS="-p ${VM_PORT} -o StrictHostKeyChecking=accept-new"
+SSH_KEY="${SSH_KEY:-}"
+# Build option arrays to correctly handle paths with spaces
+SSH_OPTS_ARR=(-p "${VM_PORT}" -o StrictHostKeyChecking=accept-new)
+SCP_OPTS_ARR=(-P "${VM_PORT}" -o StrictHostKeyChecking=accept-new)
+if [ -n "${SSH_KEY}" ]; then
+  SSH_OPTS_ARR=(-i "${SSH_KEY}" "${SSH_OPTS_ARR[@]}")
+  SCP_OPTS_ARR=(-i "${SSH_KEY}" "${SCP_OPTS_ARR[@]}")
+fi
+# Legacy scalar kept for the heredoc ssh call (uses "${SSH_OPTS_ARR[@]}" directly)
+SSH_OPTS="-p ${VM_PORT} -o StrictHostKeyChecking=accept-new${SSH_KEY:+ -i ${SSH_KEY}}"
+SCP_OPTS="${SSH_OPTS}"  # unused now — arrays used below
 
 ARCHIVE="/tmp/aegislink-server-$(date +%s).tar.gz"
 
@@ -51,13 +61,11 @@ echo "    Archive: ${ARCHIVE} ($(du -sh "${ARCHIVE}" | cut -f1))"
 
 # ── Subir al VPS ──────────────────────────────────────────────────────────────
 echo "==> Uploading to VM..."
-# shellcheck disable=SC2086
-scp ${SSH_OPTS} "${ARCHIVE}" "${REMOTE}:/tmp/aegislink-server.tar.gz"
+scp "${SCP_OPTS_ARR[@]}" "${ARCHIVE}" "${REMOTE}:/tmp/aegislink-server.tar.gz"
 
 # ── Desplegar en la VM ────────────────────────────────────────────────────────
 echo "==> Deploying on VM..."
-# shellcheck disable=SC2086
-ssh ${SSH_OPTS} "${REMOTE}" bash << ENDSSH
+ssh "${SSH_OPTS_ARR[@]}" "${REMOTE}" bash << ENDSSH
 set -euo pipefail
 
 APP_DIR="${APP_DIR}"
@@ -104,12 +112,41 @@ curl -sf http://localhost:3001/health && echo " OK" || echo " FAILED — check: 
 
 ENDSSH
 
+# ── Desplegar nginx config ────────────────────────────────────────────────────
+echo ""
+echo "==> Deploying nginx config..."
+NGINX_CONF="$(dirname "$0")/../../infra/nginx/aegislink.conf"
+if [ -f "${NGINX_CONF}" ]; then
+  scp "${SCP_OPTS_ARR[@]}" "${NGINX_CONF}" "${REMOTE}:/tmp/aegislink-nginx.conf"
+  ssh "${SSH_OPTS_ARR[@]}" "${REMOTE}" bash << 'NGINX_EOF'
+set -euo pipefail
+echo "  --> Installing nginx config..."
+sudo cp /tmp/aegislink-nginx.conf /etc/nginx/sites-available/aegislink
+
+# Activar el sitio si no está ya enlazado
+if [ ! -L /etc/nginx/sites-enabled/aegislink ]; then
+  sudo ln -sf /etc/nginx/sites-available/aegislink /etc/nginx/sites-enabled/aegislink
+fi
+
+# Eliminar default si existe (evita conflictos de listen)
+[ -L /etc/nginx/sites-enabled/default ] && sudo rm -f /etc/nginx/sites-enabled/default || true
+
+echo "  --> Testing nginx config..."
+sudo nginx -t
+
+echo "  --> Reloading nginx..."
+sudo systemctl reload nginx
+echo "  nginx: OK"
+NGINX_EOF
+else
+  echo "  ⚠  infra/nginx/aegislink.conf not found — skipping nginx deploy"
+fi
+
 # ── Reiniciar coturn si se pide ───────────────────────────────────────────────
 if [ "${RESTART_COTURN}" = "true" ]; then
   echo ""
   echo "==> Restarting coturn..."
-  # shellcheck disable=SC2086
-  ssh ${SSH_OPTS} "${REMOTE}" "sudo systemctl restart coturn && sudo systemctl status coturn --no-pager"
+  ssh "${SSH_OPTS_ARR[@]}" "${REMOTE}" "sudo systemctl restart coturn && sudo systemctl status coturn --no-pager"
 fi
 
 # ── Limpieza local ────────────────────────────────────────────────────────────

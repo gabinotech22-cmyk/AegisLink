@@ -56,8 +56,13 @@ export function registerSecureStorageHandlers(): void {
       keystore[key] = 'enc:' + encrypted.toString('base64')
     } else {
       // safeStorage unavailable (e.g. Windows without Credential Manager session).
-      // Fall back to plaintext-in-file. The keystore.json is already written with
-      // mode 0o600 so OS-level access control still applies.
+      if (app.isPackaged) {
+        // Production: never write keys in plaintext — fail loudly.
+        throw new Error(
+          'AegisLink: safeStorage unavailable on production build. Cannot store keys securely.'
+        )
+      }
+      // Dev-only fallback: base64 encoding (NOT encrypted) for local development.
       keystore[key] = 'plain:' + Buffer.from(value, 'utf-8').toString('base64')
     }
     writeKeystore(keystore)
@@ -71,6 +76,12 @@ export function registerSecureStorageHandlers(): void {
     if (!encoded) return null
     try {
       if (encoded.startsWith('plain:')) {
+        if (app.isPackaged) {
+          // A plaintext entry must never exist in production. Refuse to serve it.
+          throw new Error(
+            'AegisLink: plaintext keystore entry found in production build. Key storage is compromised.'
+          )
+        }
         return Buffer.from(encoded.slice(6), 'base64').toString('utf-8')
       }
       // Legacy entries without prefix and new 'enc:' entries are both encrypted.

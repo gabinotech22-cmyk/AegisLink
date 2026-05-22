@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useLocale } from '../i18n/useLocale';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { AegisMark } from '../components/AegisMark';
@@ -17,15 +19,11 @@ interface Props {
 
 type Step = 'welcome' | 'generating' | 'show';
 
-// Locale cycle for the language toggle button (no i18n dependency in renderer yet)
-const LOCALES = ['EN', 'IT', 'ES'] as const;
-type LocaleCode = (typeof LOCALES)[number];
-
 export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
+  const { locale, setLocale } = useLocale();
   const [step, setStep] = useState<Step>(initialStep);
-  const [localeIdx, setLocaleIdx] = useState(0);
-  const locale = LOCALES[localeIdx];
 
   const identity = useIdentity((s) => s.identity);
   const [fingerprint] = useState<string[]>([]);
@@ -121,8 +119,16 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
         {/* Language toggle */}
         <div style={{ position: 'absolute', top: 16, right: 24, zIndex: 10 }}>
           <button
-            onClick={() => setLocaleIdx((i) => (i + 1) % LOCALES.length)}
-            aria-label="Toggle language"
+            onClick={() => {
+              if (locale === 'en') {
+                void setLocale('it');
+              } else if (locale === 'it') {
+                void setLocale('es');
+              } else {
+                void setLocale('en');
+              }
+            }}
+            aria-label={i18nT('onboarding.langToggle')}
             style={{
               paddingLeft: 10,
               paddingRight: 10,
@@ -135,7 +141,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             }}
           >
             <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.8 }}>
-              {locale === 'EN' ? 'EN | IT | ES' : locale === 'IT' ? 'IT | ES | EN' : 'ES | EN | IT'}
+              {locale === 'en' ? 'EN | IT | ES' : locale === 'it' ? 'IT | ES | EN' : 'ES | EN | IT'}
             </span>
           </button>
         </div>
@@ -156,7 +162,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             marginTop: 0,
           }}
         >
-          Private by design.
+          {i18nT('onboarding.tagline')}
         </h1>
 
         <p
@@ -170,12 +176,12 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             flex: 1,
           }}
         >
-          Zero metadata. No phone number. No email. Your identity lives only on your device.
+          {i18nT('onboarding.lead')}
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 24 }}>
-          <PrimaryButton t={t} label="Generate my identity" onPress={handleGenerate} />
-          <GhostButton t={t} label="Restore from backup" onPress={onRestore} />
+          <PrimaryButton t={t} label={i18nT('onboarding.generateBtn')} onPress={handleGenerate} />
+          <GhostButton t={t} label={i18nT('onboarding.restoreBtn')} onPress={onRestore} />
         </div>
 
         <p
@@ -188,7 +194,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             letterSpacing: 0.6,
           }}
         >
-          No account required · Open source · E2EE
+          {i18nT('onboarding.footer')}
         </p>
       </div>
     );
@@ -217,7 +223,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             textAlign: 'center',
           }}
         >
-          Generating your keys…
+          {i18nT('onboarding.generatingTitle')}
         </h2>
 
         <p
@@ -230,7 +236,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             textAlign: 'center',
           }}
         >
-          Entropy sampling · Curve25519 · Double Ratchet
+          {i18nT('onboarding.generatingSubtitle')}
         </p>
 
         <div style={{ marginTop: 28, width: '100%' }}>
@@ -248,7 +254,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
           aria-label="Skip animation"
         >
           <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 1.0 }}>
-            SKIP →
+            {i18nT('onboarding.skipAnimation')}
           </span>
         </button>
       </div>
@@ -268,7 +274,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
           display: 'block',
         }}
       >
-        YOUR IDENTITY
+        {i18nT('onboarding.yourIdentityLabel')}
       </span>
 
       <h2
@@ -282,7 +288,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
           marginTop: 0,
         }}
       >
-        Identity created
+        {i18nT('onboarding.identityTitle')}
       </h2>
 
       {/* AegisID + fingerprint card */}
@@ -295,7 +301,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
           backgroundColor: t.surface,
         }}
       >
-        <Label t={t}>AEGIS ID</Label>
+        <Label t={t}>{i18nT('onboarding.aegisIdLabel')}</Label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
           <span style={{ fontFamily: t.fontMono, fontSize: 22, color: t.text }}>
             {identity != null ? (identity as { aegisId: string }).aegisId : '— — —'}
@@ -315,7 +321,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
           )}
         </div>
 
-        <Label t={t}>FINGERPRINT</Label>
+        <Label t={t}>{i18nT('onboarding.fingerprintLabel')}</Label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {(fingerprint.length === 0 ? Array(8).fill('····') : fingerprint).map((f, i) => (
             <div
@@ -348,7 +354,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             backgroundColor: t.surface,
           }}
         >
-          <Label t={t}>DECENTRALIZED ID</Label>
+          <Label t={t}>{i18nT('onboarding.decentralizedIdLabel')}</Label>
           <span
             style={{
               fontFamily: t.fontMono,
@@ -372,7 +378,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
               display: 'block',
             }}
           >
-            Your DID is derived locally. It is never sent to any server automatically.
+            {i18nT('onboarding.didDescription')}
           </span>
         </div>
       )}
@@ -387,7 +393,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
           flex: 1,
         }}
       >
-        Your private key never leaves this device. Back up your identity phrase to restore access.
+        {i18nT('onboarding.identityWarning')}
       </p>
 
       {/* Key generation error banner */}
@@ -428,10 +434,10 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
         t={t}
         label={
           regState === 'registering'
-            ? 'Securing…'
+            ? i18nT('onboarding.securingBtn')
             : regState === 'error'
-            ? 'Retry'
-            : 'Enter AegisLink'
+            ? i18nT('onboarding.retryBtn')
+            : i18nT('onboarding.enterBtn')
         }
         onPress={handleEnter}
         disabled={regState === 'registering'}

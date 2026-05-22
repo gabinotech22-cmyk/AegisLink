@@ -38,12 +38,18 @@ import { PollScreen } from './screens/Poll';
 import { FirstContactScreen } from './screens/FirstContact';
 import { AppIconScreen } from './screens/AppIcon';
 import { WorkDashboard } from './screens/WorkDashboard';
+import { WorkJoinSuccess } from './screens/WorkJoinSuccess';
+import { WorkChannels } from './screens/WorkChannels';
+import { WorkChannelChat } from './screens/WorkChannelChat';
+import { WorkSearch } from './screens/WorkSearch';
+import { WorkDirectory } from './screens/WorkDirectory';
 import { SubscriptionScreen } from './screens/Subscription';
 import { WorkGenerationScreen } from './screens/WorkGeneration';
 import { CallScreen } from './screens/Call';
 import { IncomingCallScreen } from './screens/IncomingCall';
 import { NetworkErrorScreen } from './screens/NetworkError';
 import { useIdentity } from './store/identity';
+import { useWork } from './store/work';
 import { usePreferences } from './store/preferences';
 import { useCall } from './store/call';
 import { useConnection } from './store/connection';
@@ -85,9 +91,27 @@ type PushRoute =
   | { name: 'contacts' }
   | { name: 'appIcon' }
   | { name: 'workDashboard' }
+  | { name: 'workChannels' }
+  | { name: 'workJoinSuccess' }
   | { name: 'subscription' }
   | { name: 'lockSettings' }
   | { name: 'workGeneration' };
+
+// ─── WorkJoinSuccessWrapper ───────────────────────────────────────────────────
+function WorkJoinSuccessWrapper({ onContinue }: { onContinue: () => void }) {
+  const org = useWork((s) => s.org);
+  const channels = useWork((s) => s.channels);
+  const identity = useIdentity((s) => s.identity);
+  const role = org?.adminId === identity?.aegisId ? 'admin' : 'member';
+  return (
+    <WorkJoinSuccess
+      orgName={org?.name ?? 'Workspace'}
+      role={role}
+      channels={channels.slice(0, 5)}
+      onContinue={onContinue}
+    />
+  );
+}
 
 // ─── Placeholder — used for screens not yet ported to desktop ────────────────
 function PlaceholderScreen({ name, onBack }: { name: string; onBack: () => void }) {
@@ -121,11 +145,15 @@ function Shell() {
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const [onboardingRestore, setOnboardingRestore] = useState(false);
   const [onboardingMode, setOnboardingMode] = useState<'generate' | 'restore'>('generate');
+  const [pendingLinkAfterOnboarding, setPendingLinkAfterOnboarding] = useState(false);
   const [netError, setNetError] = useState(false);
   const [appLocked, setAppLocked] = useState(false);
   const [isBackgroundShieldActive, setIsBackgroundShieldActive] = useState(false);
 
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [activeWorkChannelId, setActiveWorkChannelId] = useState<string | null>(null);
+  const [showWorkDirectory, setShowWorkDirectory] = useState(false);
+  const [showWorkSearch, setShowWorkSearch] = useState(false);
 
   // Refs so callbacks never go stale.
   const identityRef = useRef(identity);
@@ -168,6 +196,13 @@ function Shell() {
   useEffect(() => {
     if (activeProfile === 'work' && tab === 'home') setTab('dashboard');
     if (activeProfile === 'personal' && tab === 'dashboard') setTab('home');
+    if (activeProfile === 'work' && identity) {
+      useWork.getState().loadKnownOrgs();
+      const { activeOrgId } = useWork.getState();
+      if (activeOrgId) {
+        void useWork.getState().switchWorkspace(activeOrgId, identity.aegisId);
+      }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProfile]);
 
@@ -279,6 +314,21 @@ function Shell() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Cmd+K / Ctrl+K — workspace search ──────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const isMeta = e.metaKey || e.ctrlKey;
+      if (isMeta && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (activeProfile === 'work') {
+          setShowWorkSearch((v) => !v);
+        }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [activeProfile]);
+
   // ── Dynamic document.title ──────────────────────────────────────────────────
   const callStatus = useCall((s) => s.status);
   useEffect(() => {
@@ -306,6 +356,19 @@ function Shell() {
     }
   }, []);
 
+  // ── ALL useCallbacks MUST be here — before ANY early return (Rules of Hooks) ─
+  const openChat = useCallback((contact: StoredContact) => {
+    setActiveChatId(contact.aegisId);
+    setStack([{ name: 'chat', contact }]);
+    setTab('home');
+  }, []);
+
+  const handleNavigate = useCallback((newTab: Tab) => {
+    setStack([]);
+    setActiveChatId(null);
+    setTab(newTab);
+  }, []);
+
   // ── Call overlays ────────────────────────────────────────────────────────────
   const callOverlay =
     callStatus === 'outgoing-ringing' ||
@@ -315,7 +378,11 @@ function Shell() {
   const incomingCall = callStatus === 'incoming-ringing';
 
   // ── Loading (hydration) — only blocks if splash already gone ────────────────
-  const isLoading = !showSplash && (status === 'loading' || showOnboarding === null);
+  // Do NOT include `showOnboarding === null` here: that flag resolves in a
+  // useEffect tick after hydration completes, so gating on it causes a brief
+  // black-screen frame where isLoading=true blocks showEntry from rendering.
+  // status === 'loading' already covers the hydration-in-progress case.
+  const isLoading = !showSplash && status === 'loading';
 
   // ── Derive the main content to render (behind splash overlay if needed) ──────
   const mainContent = (() => {
@@ -356,10 +423,9 @@ function Shell() {
           setShowOnboarding(true);
         }}
         onLinkMobile={() => {
-          // Link-with-mobile: for now treat as new identity flow; a QR pairing
-          // screen can be swapped in here by another agent when ready.
           setShowEntry(false);
           setOnboardingMode('generate');
+          setPendingLinkAfterOnboarding(true);
           setShowOnboarding(true);
         }}
       />
@@ -373,45 +439,22 @@ function Shell() {
     }
     return (
       <OnboardingScreen
-        onDone={() => setShowOnboarding(false)}
+        onDone={() => {
+          setShowOnboarding(false);
+          if (pendingLinkAfterOnboarding) {
+            setPendingLinkAfterOnboarding(false);
+            setTab('verify');
+          }
+        }}
         onRestore={() => { setOnboardingRestore(true); setOnboardingMode('restore'); }}
         initialStep={onboardingMode === 'generate' ? 'generating' : 'welcome'}
       />
     );
   }
 
-  // ── App lock overlay ─────────────────────────────────────────────────────────
-  if (appLocked) {
-    return <LockScreen onUnlock={() => setAppLocked(false)} onPanic={() => push({ name: 'panic' })} />;
-  }
-
-  // ── Background privacy shield ─────────────────────────────────────────────
-  if (isBackgroundShieldActive) {
-    return <div style={{ position: 'fixed', inset: 0, background: '#0a0e0d', zIndex: 9999 }} />;
-  }
-
-  // ── Incoming call overlay ─────────────────────────────────────────────────
-  if (incomingCall) {
-    return <IncomingCallScreen onAccept={acceptCall} onReject={() => endCall('declined')} />;
-  }
-
-  // ── Active call overlay ───────────────────────────────────────────────────
-  if (callOverlay) {
-    return (
-      <div style={{ display: 'flex', height: '100vh', width: '100vw', backgroundColor: t.bg, overflow: 'hidden' }}>
-        <CallScreen onClose={() => endCall('hangup')} />
-      </div>
-    );
-  }
-
-  // ── Helper: open a chat from the sidebar ─────────────────────────────────────
-  const openChat = useCallback((contact: StoredContact) => {
-    setActiveChatId(contact.aegisId);
-    setStack([{ name: 'chat', contact }]);
-    setTab('home');
-  }, []);
-
   // ── Helper: render the right-panel content ────────────────────────────────────
+  // This is a plain function (not a hook) so it can safely appear here before
+  // early returns — it is only *called* from the final return block.
   function renderContent(): ReactNode {
     const top = stack[stack.length - 1];
     if (top) {
@@ -451,8 +494,9 @@ function Shell() {
               onDevices={() => push({ name: 'devices' })}
               onPanic={() => push({ name: 'panic' })}
               onAppIcon={() => push({ name: 'appIcon' })}
-              onWorkDashboard={() => push({ name: 'workDashboard' })}
+              onWorkDashboard={() => push({ name: 'workChannels' })}
               onSwitchToPersonal={pop}
+              onWorkGeneration={() => push({ name: 'workGeneration' })}
             />
           );
         case 'notifs':
@@ -528,8 +572,19 @@ function Shell() {
           );
         case 'appIcon':
           return <AppIconScreen onBack={pop} />;
+        case 'workChannels':
+          return (
+            <WorkChannels
+              onBack={pop}
+              onOpenAdmin={() => push({ name: 'workDashboard' })}
+              onCreateOrg={() => push({ name: 'workGeneration' })}
+              onOpenChannel={(ch) => { setActiveWorkChannelId(ch.channelId); pop(); }}
+            />
+          );
         case 'workDashboard':
-          return <WorkDashboard onBack={pop} />;
+          return <WorkDashboard onBack={pop} onJoinSuccess={() => push({ name: 'workJoinSuccess' })} />;
+        case 'workJoinSuccess':
+          return <WorkJoinSuccessWrapper onContinue={() => { setStack([]); setTab('dashboard'); }} />;
         case 'subscription':
           return <SubscriptionScreen onBack={pop} />;
         case 'workGeneration':
@@ -558,6 +613,10 @@ function Shell() {
             onBack={() => setTab('home')}
             onScan={() => push({ name: 'scan' })}
             onTab={setTab}
+            onContactAdded={(contact) => {
+              // Peer scanned our QR and was auto-added — navigate to their chat.
+              openChat(contact);
+            }}
           />
         );
       case 'settings':
@@ -567,19 +626,52 @@ function Shell() {
             onNav={(name) => push({ name } as PushRoute)}
           />
         );
-      case 'dashboard':
-        return <WorkDashboard onBack={() => setTab('groups')} />;
+      case 'dashboard': {
+        if (activeWorkChannelId) {
+          const { useWork: _useWork } = require('./store/work') as typeof import('./store/work');
+          const { useIdentity: _useIdentity } = require('./store/identity') as typeof import('./store/identity');
+          const _channel = _useWork.getState().channels.find((c) => c.channelId === activeWorkChannelId);
+          const _isAdmin = _useWork.getState().org?.adminId === _useIdentity.getState().identity?.aegisId;
+          if (_channel) {
+            return (
+              <WorkChannelChat
+                channel={_channel}
+                onBack={() => setActiveWorkChannelId(null)}
+                isAdmin={_isAdmin ?? false}
+              />
+            );
+          }
+        }
+        return <WorkDashboard onBack={() => setTab('home')} onJoinSuccess={() => push({ name: 'workJoinSuccess' })} />;
+      }
       default:
         return null;
     }
   }
 
-  // ── Two-panel layout (Telegram-style) ─────────────────────────────────────────
-  const handleNavigate = useCallback((newTab: Tab) => {
-    setStack([]);
-    setActiveChatId(null);
-    setTab(newTab);
-  }, []);
+  // ── App lock overlay ─────────────────────────────────────────────────────────
+  if (appLocked) {
+    return <LockScreen onUnlock={() => setAppLocked(false)} onPanic={() => push({ name: 'panic' })} />;
+  }
+
+  // ── Background privacy shield ─────────────────────────────────────────────
+  if (isBackgroundShieldActive) {
+    return <div style={{ position: 'fixed', inset: 0, background: '#0a0e0d', zIndex: 9999 }} />;
+  }
+
+  // ── Incoming call overlay ─────────────────────────────────────────────────
+  if (incomingCall) {
+    return <IncomingCallScreen onAccept={acceptCall} onReject={() => endCall('declined')} />;
+  }
+
+  // ── Active call overlay ───────────────────────────────────────────────────
+  if (callOverlay) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', width: '100vw', backgroundColor: t.bg, overflow: 'hidden' }}>
+        <CallScreen onClose={() => endCall('hangup')} />
+      </div>
+    );
+  }
 
   return (
     <>
@@ -591,6 +683,13 @@ function Shell() {
           onNavigate={handleNavigate}
           onSelectChat={openChat}
           onNewChat={() => push({ name: 'invite' })}
+          isWork={activeProfile === 'work'}
+          onOpenChannel={(id) => setActiveWorkChannelId(id)}
+          onSwitchWorkspace={(orgId) => {
+            const id = useIdentity.getState().identity;
+            if (id) void useWork.getState().switchWorkspace(orgId, id.aegisId);
+          }}
+          onOpenDirectory={activeProfile === 'work' ? () => setShowWorkDirectory(true) : undefined}
         />
         {/* Right: content area */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -599,6 +698,40 @@ function Shell() {
       </div>
       {/* Splash overlaid on top — already mounted content shows instantly when it lifts */}
       {showSplash && <SplashScreen onDone={handleSplashDone} />}
+      {/* Work search overlay — Cmd+K */}
+      {showWorkSearch && activeProfile === 'work' && (
+        <WorkSearch
+          onClose={() => setShowWorkSearch(false)}
+          onOpenChannel={(channelId) => {
+            setShowWorkSearch(false);
+            setActiveWorkChannelId(channelId);
+            setTab('dashboard');
+          }}
+        />
+      )}
+      {/* Work directory overlay */}
+      {showWorkDirectory && (
+        <WorkDirectory
+          onClose={() => setShowWorkDirectory(false)}
+          onStartDM={async (aegisId) => {
+            setShowWorkDirectory(false);
+            // Find or fetch the contact, then open DM
+            const { useContacts: _uc } = await import('./store/contacts');
+            const existing = _uc.getState().contacts.find((c: StoredContact) => c.aegisId === aegisId);
+            if (existing) {
+              openChat(existing);
+              return;
+            }
+            try {
+              const contact = await _uc.getState().addByAegisId(aegisId);
+              openChat(contact);
+            } catch {
+              // eslint-disable-next-line no-alert
+              alert(`No se pudo abrir DM con ${aegisId.slice(0, 12)}…\nPuedes añadirlo manualmente por AegisID.`);
+            }
+          }}
+        />
+      )}
     </>
   );
 }

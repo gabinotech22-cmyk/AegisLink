@@ -11,10 +11,12 @@
     "noUnusedParameters": false,
     "skipLibCheck": true,
     "types": [],
-    "outDir": "out"
+    "outDir": "out",
+    "resolveJsonModule": true
   },
   "include": [
     "src/renderer/**/*.ts",
-    "src/renderer/**/*.tsx"
+    "src/renderer/**/*.tsx",
+    "src/renderer/**/*.json"
   ]
 }
