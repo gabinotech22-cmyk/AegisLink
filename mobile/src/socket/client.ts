@@ -911,16 +911,23 @@ async function decryptAndAppend(
         }
 
         // ── Vote intercept ─────────────────────────────────────────────────────
-        // [vote:messageId:optionIndex] — never shown as chat bubble
+        // Wire format: [vote:<pollId>:<optionIndex>:<commitment>:<nonceHex>]
+        // Never shown as a chat bubble.
+        // The senderId present in the outer group_msg payload is intentionally
+        // NOT used to attribute the vote — anonymity is enforced by the
+        // commitment scheme (sha256(aegisId + pollId + nonceHex)) which lets
+        // receivers deduplicate without learning who voted for what.
         if (msgBody.startsWith('[vote:') && msgBody.endsWith(']')) {
           const inner = msgBody.slice(6, -1); // strip '[vote:' and ']'
-          const colonIdx = inner.indexOf(':');
-          if (colonIdx !== -1) {
-            const voteMessageId = inner.slice(0, colonIdx);
-            const voteOptionIndex = parseInt(inner.slice(colonIdx + 1), 10);
+          const parts = inner.split(':');
+          // Support both old 2-part format (no commitment) and new 4-part format.
+          if (parts.length >= 2) {
+            const voteMessageId = parts[0];
+            const voteOptionIndex = parseInt(parts[1], 10);
+            const commitment = parts.length >= 4 ? `${parts[2]}` : `legacy:${inner}`;
             if (voteMessageId && Number.isFinite(voteOptionIndex)) {
               const { usePollsStore } = require('../store/polls');
-              usePollsStore.getState().receiveVote(voteMessageId, voteOptionIndex);
+              usePollsStore.getState().receiveVote(voteMessageId, voteOptionIndex, commitment);
             }
           }
           await saveSessionState(contact.aegisId, ratchetState);
@@ -1879,8 +1886,16 @@ export async function sendGroupVote(opts: {
   groupId: string;
   pollMessageId: string;
   optionIndex: number;
+  /** Commitment and nonce produced by usePollsStore.castVote — required for anonymity. */
+  commitment: string;
+  nonceHex: string;
 }): Promise<void> {
-  const plaintext = `[vote:${opts.pollMessageId}:${opts.optionIndex}]`;
+  // Wire format: [vote:<pollId>:<optionIndex>:<commitment>:<nonceHex>]
+  // The commitment = sha256(aegisId + pollId + nonceHex) lets receivers deduplicate
+  // without learning the voter identity.  senderId is still present in the outer
+  // group_msg envelope (needed for ratchet state attribution) but is NOT used to
+  // attribute the vote — receivers MUST ignore senderId for vote counting purposes.
+  const plaintext = `[vote:${opts.pollMessageId}:${opts.optionIndex}:${opts.commitment}:${opts.nonceHex}]`;
 
   if (!socket || !connected || !authenticated) {
     groupOfflineQueue.push({ groupId: opts.groupId, plaintext });

@@ -234,6 +234,12 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         if (config.duressPin && typeof config.pinHash === 'string' && config.pinHash.length > 0) {
           const candidate = await hashPinWithSalt(pin, DURESS_PIN_SALT);
           if (candidate === config.pinHash) {
+            // Wipe first — if interrupted mid-wipe, real data is already gone.
+            // Only after a successful wipe do we surface the decoy UI.
+            try {
+              await wipeDatabase();
+              await useIdentity.getState().reset();
+            } catch { /* wipe failure is non-recoverable; decoy still shown */ }
             usePreferences.setState({ duressActive: true });
             setPinCode('');
             onUnlock();

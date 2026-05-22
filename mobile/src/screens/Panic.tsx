@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
+import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -27,13 +28,15 @@ export function PanicScreen({ onBack }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const [gesture, setGesture] = useState<string>('shake');
+  const [gesture, setGesture] = useState<string>('off');
   const [duressPin, setDuressPin] = useState(true);
   const [hidePin, setHidePin] = useState(false);
   const [autoWipe, setAutoWipe] = useState(false);
   const [pinLength, setPinLength] = useState(0);
   const [isEditingPin, setIsEditingPin] = useState(false);
   const [tempPin, setTempPin] = useState('');
+  const [remoteToken, setRemoteToken] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const resetIdentity = useIdentity((s) => s.reset);
 
@@ -63,18 +66,42 @@ export function PanicScreen({ onBack }: Props) {
     } catch { /* storage unavailable */ }
   }, []);
 
+  const generateAndSaveToken = useCallback(async () => {
+    const { randomUUID } = require('expo-crypto') as typeof import('expo-crypto');
+    const token = randomUUID();
+    setRemoteToken(token);
+    await persist({ remoteToken: token });
+  }, [persist]);
+
+  const copyLink = useCallback(async () => {
+    if (!remoteToken) return;
+    await Clipboard.setStringAsync(`aegislink://panic?token=${remoteToken}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [remoteToken]);
+
   useEffect(() => {
     SecureStore.getItemAsync(PANIC_KEY).then((raw) => {
-      if (!raw) return;
+      if (!raw) {
+        void generateAndSaveToken();
+        return;
+      }
       try {
-        const s = JSON.parse(raw) as { gesture?: string; duressPin?: boolean; hidePin?: boolean; autoWipe?: boolean; pinLength?: number };
+        const s = JSON.parse(raw) as { gesture?: string; duressPin?: boolean; hidePin?: boolean; autoWipe?: boolean; pinLength?: number; remoteToken?: string };
         if (s.gesture !== undefined) setGesture(s.gesture);
         if (s.duressPin !== undefined) setDuressPin(s.duressPin);
         if (s.hidePin !== undefined) setHidePin(s.hidePin);
         if (s.autoWipe !== undefined) setAutoWipe(s.autoWipe);
         if (typeof s.pinLength === 'number') setPinLength(s.pinLength);
+        if (typeof s.remoteToken === 'string' && s.remoteToken) {
+          setRemoteToken(s.remoteToken);
+        } else {
+          void generateAndSaveToken();
+        }
       } catch { /* corrupt */ }
     }).catch(() => {});
+  // generateAndSaveToken is stable (useCallback with stable dep)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -115,9 +142,14 @@ export function PanicScreen({ onBack }: Props) {
         </View>
 
         <View style={{ paddingHorizontal: 18 }}>
-          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 10 }}>
-            {i18nT('panic.gestureSection')}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>
+              {i18nT('panic.gestureSection')}
+            </Text>
+            <Text style={{ fontFamily: t.font, fontSize: 11, color: t.danger }}>
+              {i18nT('panic.gestureAction')}
+            </Text>
+          </View>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             {GESTURES.map((o) => {
               const selected = gesture === o.id;
@@ -152,11 +184,85 @@ export function PanicScreen({ onBack }: Props) {
           </View>
         </View>
 
+        <Section t={t} label={i18nT('panic.remoteTriggerSection')}>
+          <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+            <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 17, marginBottom: 12 }}>
+              {i18nT('panic.remoteTriggerDesc')}
+            </Text>
+            <View
+              style={{
+                backgroundColor: t.surface2,
+                borderRadius: t.radiusS,
+                padding: 10,
+                marginBottom: 10,
+              }}
+            >
+              <Text
+                style={{ fontFamily: t.fontMono, fontSize: 11, color: t.text, letterSpacing: 0.2 }}
+                selectable
+              >
+                {remoteToken ? `aegislink://panic?token=${remoteToken}` : '...'}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void copyLink()}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  backgroundColor: copied ? t.accent : t.surface2,
+                  borderRadius: t.radiusS,
+                  paddingVertical: 10,
+                  alignItems: 'center',
+                  opacity: pressed ? 0.8 : 1,
+                })}
+              >
+                <Text
+                  style={{
+                    fontFamily: t.font,
+                    fontSize: 13,
+                    fontWeight: '500',
+                    color: copied ? t.accentInk : t.text,
+                  }}
+                >
+                  {copied ? i18nT('panic.copied') : i18nT('panic.copyLink')}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  Alert.alert(
+                    i18nT('panic.regenerateConfirmTitle'),
+                    i18nT('panic.regenerateConfirmDesc'),
+                    [
+                      { text: i18nT('common.cancel'), style: 'cancel' },
+                      { text: i18nT('panic.regenerate'), style: 'destructive', onPress: () => void generateAndSaveToken() },
+                    ]
+                  )
+                }
+                style={({ pressed }) => ({
+                  borderWidth: 1,
+                  borderColor: t.borderStrong,
+                  borderRadius: t.radiusS,
+                  paddingVertical: 10,
+                  paddingHorizontal: 14,
+                  alignItems: 'center',
+                  opacity: pressed ? 0.8 : 1,
+                })}
+              >
+                <Text style={{ fontFamily: t.font, fontSize: 13, color: t.danger }}>
+                  {i18nT('panic.regenerate')}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </Section>
+
         <Section t={t} label={i18nT('panic.duressPinSection')}>
           <Toggle
             t={t}
             label={i18nT('panic.activateDecoyPin')}
-            sub={i18nT('panic.activateDecoyPinSub')}
+            sub={i18nT('panic.duressPinAction')}
             value={duressPin}
             onChange={(v) => { setDuressPin(v); void persist({ duressPin: v }); }}
           />

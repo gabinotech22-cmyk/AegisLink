@@ -1,4 +1,6 @@
 import * as Crypto from 'expo-crypto';
+import nacl from 'tweetnacl';
+import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { getSocket, isConnected } from './client';
 import { useCall } from '../store/call';
 import { displayIncomingCall, endNativeCall, reportCallConnected, setNativeMuted } from '../calls/callkeep';
@@ -13,6 +15,118 @@ import {
   type CallMedia,
 } from '../webrtc/peer';
 import { fetchTurnConfig } from '../webrtc/ice';
+
+// ---------------------------------------------------------------------------
+// Sealed WebRTC signaling
+// ---------------------------------------------------------------------------
+// SDP offers/answers and ICE candidates leak DTLS fingerprints, codecs, and —
+// critically — both peers' real IP addresses. To honour the zero-metadata
+// principle they are E2EE-sealed with NaCl box (the same XSalsa20-Poly1305
+// authenticated box used for 1:1 chat) addressed to the peer's static X25519
+// public key BEFORE being handed to the relay. The relay only ever forwards an
+// opaque { ciphertext, nonce } pair; it can neither read nor tamper with the
+// payload (Poly1305 MAC verified on open). The signed inner JSON also carries
+// `from` (sealed-sender) so the receiver can bind the payload to a known peer.
+//
+// Privacy note: signaling here is NOT yet sealed-sender at the routing layer —
+// the relay still sees who calls whom (it routes by `to` and stamps `from`).
+// What this change guarantees is that the relay can no longer observe SDP/ICE
+// content, i.e. real IPs, DTLS fingerprints, and media capabilities.
+
+const SIGNAL_VERSION = 1;
+
+interface SealedSignalWire {
+  ciphertext: string; // Base64 NaCl box output
+  nonce: string;      // Base64, 24 random bytes
+}
+
+interface SignalInner {
+  v: number;
+  from: string;
+  /** The original signaling payload (SDP JSON or ICE candidate JSON). */
+  payload: string;
+}
+
+/** Resolve a peer's static X25519 public key from the local contacts store. */
+function peerPublicKey(aegisId: string): Uint8Array | null {
+  try {
+    const { useContacts } = require('../store/contacts') as {
+      useContacts: { getState: () => { get: (id: string) => { publicKeyB64: string } | undefined } };
+    };
+    const b64 = useContacts.getState().get(aegisId)?.publicKeyB64;
+    if (!b64) return null;
+    const key = decodeBase64(b64);
+    return key.length === nacl.box.publicKeyLength ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Our long-term X25519 secret + public keys and aegisId, loaded from the in-memory identity. */
+function ownKeys(): { secretKey: Uint8Array; aegisId: string } | null {
+  try {
+    const { useIdentity } = require('../store/identity') as {
+      useIdentity: { getState: () => { identity: { secretKey: Uint8Array; aegisId: string } | null } };
+    };
+    const id = useIdentity.getState().identity;
+    if (!id) return null;
+    return { secretKey: id.secretKey, aegisId: id.aegisId };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Seal a signaling payload for `recipientAegisId`. Returns null if we cannot
+ * resolve the peer's public key or our own identity (caller must abort the
+ * emit — never fall back to plaintext).
+ */
+function sealSignal(recipientAegisId: string, payload: string): SealedSignalWire | null {
+  const recipientPub = peerPublicKey(recipientAegisId);
+  const me = ownKeys();
+  if (!recipientPub || !me) return null;
+
+  const inner: SignalInner = { v: SIGNAL_VERSION, from: me.aegisId, payload };
+  const innerBytes = new TextEncoder().encode(JSON.stringify(inner));
+  const nonce = nacl.randomBytes(nacl.box.nonceLength);
+  const ciphertext = nacl.box(innerBytes, nonce, recipientPub, me.secretKey);
+  return { ciphertext: encodeBase64(ciphertext), nonce: encodeBase64(nonce) };
+}
+
+/**
+ * Open a sealed signaling envelope. Verifies the Poly1305 MAC (open returns
+ * null on tamper), the protocol version, and that the embedded `from` matches
+ * the expected sender. Returns the inner payload string or null on any failure.
+ */
+function openSignal(senderAegisId: string, wire: SealedSignalWire): string | null {
+  const senderPub = peerPublicKey(senderAegisId);
+  const me = ownKeys();
+  if (!senderPub || !me) return null;
+
+  let ciphertext: Uint8Array;
+  let nonce: Uint8Array;
+  try {
+    ciphertext = decodeBase64(wire.ciphertext);
+    nonce = decodeBase64(wire.nonce);
+  } catch {
+    return null;
+  }
+  if (nonce.length !== nacl.box.nonceLength) return null;
+
+  const opened = nacl.box.open(ciphertext, nonce, senderPub, me.secretKey);
+  if (!opened) return null;
+
+  let inner: SignalInner;
+  try {
+    inner = JSON.parse(new TextDecoder().decode(opened)) as SignalInner;
+  } catch {
+    return null;
+  }
+  if (inner.v !== SIGNAL_VERSION) return null;
+  if (inner.from !== senderAegisId) return null;
+  if (typeof inner.payload !== 'string') return null;
+  return inner.payload;
+}
 
 // ---------------------------------------------------------------------------
 // Ring timeout — cleared whenever the call advances past outgoing-ringing
@@ -55,23 +169,23 @@ function clearRingTimeout(): void {
   }
 }
 
-interface CallInvitePayload {
+interface CallInvitePayload extends SealedSignalWire {
   callId: string;
   from: string;
   media: CallMedia;
-  offer: string; // SDP JSON
+  // `ciphertext`/`nonce` seal the SDP offer (see SealedSignalWire).
 }
 
-interface CallAnswerPayload {
+interface CallAnswerPayload extends SealedSignalWire {
   callId: string;
   from: string;
-  answer: string;
+  // `ciphertext`/`nonce` seal the SDP answer.
 }
 
-interface CallIcePayload {
+interface CallIcePayload extends SealedSignalWire {
   callId: string;
   from: string;
-  candidate: string;
+  // `ciphertext`/`nonce` seal the ICE candidate JSON.
 }
 
 interface CallHangupPayload {
@@ -93,6 +207,13 @@ export function attachCallHandlers(): void {
   if (!socket) return;
 
   socket.on('call:invite', async (msg: CallInvitePayload) => {
+    // Decrypt the sealed SDP offer before doing anything else. A failed open
+    // (unknown sender, tampered ciphertext, missing identity) drops the invite.
+    const offer = openSignal(msg.from, msg);
+    if (!offer) {
+      if (__DEV__) console.warn('[calls] call:invite signal decrypt failed — dropping');
+      return;
+    }
     const state = useCall.getState();
     if (state.status !== 'idle' && state.status !== 'ended') {
       // Busy — auto-reject; log as declined
@@ -112,7 +233,7 @@ export function attachCallHandlers(): void {
       }
       return;
     }
-    state.startIncoming(msg.from, msg.callId, msg.media, msg.offer);
+    state.startIncoming(msg.from, msg.callId, msg.media, offer);
 
     // Show native incoming call UI (CallKit on iOS, ConnectionService on Android)
     const callerName = (() => {
@@ -128,7 +249,12 @@ export function attachCallHandlers(): void {
     clearRingTimeout(); // callee answered — cancel the no-answer timeout
     const { activePeer, callId } = useCall.getState();
     if (!activePeer || callId !== msg.callId) return;
-    await setRemoteAnswer(activePeer.pc, msg.answer);
+    const answer = openSignal(msg.from, msg);
+    if (!answer) {
+      if (__DEV__) console.warn('[calls] call:answer signal decrypt failed — dropping');
+      return;
+    }
+    await setRemoteAnswer(activePeer.pc, answer);
     // Flush any ICE candidates that arrived before the remote description was set
     await flushPendingIce(activePeer.pc);
     useCall.getState().setStatus('connecting');
@@ -137,8 +263,13 @@ export function attachCallHandlers(): void {
   socket.on('call:ice', async (msg: CallIcePayload) => {
     const { activePeer, callId } = useCall.getState();
     if (!activePeer || callId !== msg.callId) return;
+    const candidate = openSignal(msg.from, msg);
+    if (!candidate) {
+      if (__DEV__) console.warn('[calls] call:ice signal decrypt failed — dropping');
+      return;
+    }
     // Buffer candidates if remote description is not yet set
-    bufferOrApplyIce(activePeer.pc, msg.candidate);
+    bufferOrApplyIce(activePeer.pc, candidate);
   });
 
   socket.on('call:hangup', (msg: CallHangupPayload) => {
@@ -164,7 +295,9 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
-  const turnConfig = await fetchTurnConfig(ownAegisId);
+  // forceRelay: true keeps both peers' real IPs out of the signaling exchange
+  // (relay-only ICE). Requires a reachable TURN server; degrades gracefully.
+  const turnConfig = await fetchTurnConfig(ownAegisId, true);
 
   // Set audio mode for call — earpiece for audio, speakerphone for video
   try {
@@ -185,11 +318,12 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
     onIceCandidate: (candidate) => {
-      socket.emit('call:ice', {
-        callId,
-        to: toAegisId,
-        candidate: JSON.stringify(candidate.toJSON?.() ?? candidate),
-      });
+      const sealed = sealSignal(toAegisId, JSON.stringify(candidate.toJSON?.() ?? candidate));
+      if (!sealed) {
+        if (__DEV__) console.warn('[calls] cannot seal outgoing ICE — peer key missing');
+        return;
+      }
+      socket.emit('call:ice', { callId, to: toAegisId, ...sealed });
     },
     onConnectionStateChange: (state) => {
       if (state === 'connected') {
@@ -205,7 +339,13 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   useCall.getState().setActivePeer(peer);
 
   const offer = await createOffer(peer.pc);
-  socket.emit('call:invite', { callId, to: toAegisId, media, offer });
+  const sealedOffer = sealSignal(toAegisId, offer);
+  if (!sealedOffer) {
+    // Cannot encrypt the offer — abort rather than leak plaintext SDP to the relay.
+    endCall('encrypt_failure');
+    throw new Error('cannot_seal_offer');
+  }
+  socket.emit('call:invite', { callId, to: toAegisId, media, ...sealedOffer });
 
   // Auto-end if callee does not answer within 45 seconds
   _ringTimeout = setTimeout(() => {
@@ -226,7 +366,9 @@ export async function acceptCall(): Promise<void> {
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
-  const turnConfig = await fetchTurnConfig(ownAegisId);
+  // forceRelay: true keeps both peers' real IPs out of the signaling exchange
+  // (relay-only ICE). Requires a reachable TURN server; degrades gracefully.
+  const turnConfig = await fetchTurnConfig(ownAegisId, true);
 
   // Reset the ICE queue for this new call leg
   resetIceQueue();
@@ -250,11 +392,12 @@ export async function acceptCall(): Promise<void> {
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
     onIceCandidate: (candidate) => {
-      socket.emit('call:ice', {
-        callId,
-        to: peerId,
-        candidate: JSON.stringify(candidate.toJSON?.() ?? candidate),
-      });
+      const sealed = sealSignal(peerId, JSON.stringify(candidate.toJSON?.() ?? candidate));
+      if (!sealed) {
+        if (__DEV__) console.warn('[calls] cannot seal outgoing ICE — peer key missing');
+        return;
+      }
+      socket.emit('call:ice', { callId, to: peerId, ...sealed });
     },
     onConnectionStateChange: (state) => {
       if (state === 'connected') {
@@ -272,7 +415,13 @@ export async function acceptCall(): Promise<void> {
   // Flush ICE candidates that arrived while we were still ringing
   await flushPendingIce(peer.pc);
   const answer = await createAnswer(peer.pc);
-  socket.emit('call:answer', { callId, to: peerId, answer });
+  const sealedAnswer = sealSignal(peerId, answer);
+  if (!sealedAnswer) {
+    // Cannot encrypt the answer — abort rather than leak plaintext SDP.
+    endCall('encrypt_failure');
+    throw new Error('cannot_seal_answer');
+  }
+  socket.emit('call:answer', { callId, to: peerId, ...sealedAnswer });
   // Clear pendingOffer — direction is already stored in the call store.
   useCall.getState().setPendingOffer(null);
 }

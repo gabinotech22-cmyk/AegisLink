@@ -109,27 +109,21 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     try {
       const { usePreferences } = require('./preferences');
       if (usePreferences.getState().duressActive) {
-        const decoyIdentity = {
-          aegisId: 'AEGIS-MOCK',
-          publicKey: new Uint8Array(32),
-          secretKey: new Uint8Array(32),
-          publicKeyB64: 'mockPublicKeyB64String',
-          secretKeyB64: 'mockSecretKeyB64String',
-          signingPublicKey: new Uint8Array(32),
-          signingSecretKey: new Uint8Array(64),
-          signingPublicKeyB64: 'mockSigningPublicKeyB64String',
-          signingSecretKeyB64: 'mockSigningSecretKeyB64String',
-          createdAt: Date.now(),
-        };
+        // Generate a cryptographically random throwaway identity so the decoy
+        // looks indistinguishable from a real account: real AegisID, real key
+        // material, real createdAt. All-zero keys are trivially detectable under
+        // forensic analysis and must never be used here.
+        const decoyIdentity = createIdentity();
+        const decoyName = decoyIdentity.aegisId.toLowerCase().replace(/-/g, '');
         set({
           identity: decoyIdentity,
           activeSlotId: 'self',
           slotsList: ['self'],
           activeProfile: 'personal',
-          displayName: 'anon.aegis',
+          displayName: decoyName,
           avatarColor: '#5bf2b9',
           avatarImage: null,
-          profileStatus: 'Safe & Protected',
+          profileStatus: '',
           status: 'ready',
           hydrated: true,
         });

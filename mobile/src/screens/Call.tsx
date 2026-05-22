@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet, StatusBar as RNStatusBar, Alert, Modal } from 'react-native';
 import { sha256 } from '@noble/hashes/sha256';
+import { bytesToHex } from '@noble/hashes/utils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { WEBRTC_AVAILABLE } from '../runtime';
@@ -11,10 +12,8 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
-import { useIdentity } from '../store/identity';
 import { acceptCall, endCall, toggleMute, toggleCamera } from '../socket/calls';
 import { useProximitySensor } from '../hooks/useProximitySensor';
-import { WORDLIST_256 } from '../crypto/wordlist';
 
 interface Props {
   onClose: () => void;
@@ -32,25 +31,46 @@ export function CallScreen({ onClose }: Props) {
   const muted = useCall((s) => s.muted);
   const cameraOff = useCall((s) => s.cameraOff);
   const startedAt = useCall((s) => s.startedAt);
+  const activePeer = useCall((s) => s.activePeer);
 
   const peer = useContacts((s) => (peerId ? s.get(peerId) : undefined));
-  const { identity } = useIdentity();
   const peerName = peer?.name ?? peerId ?? 'unknown';
   const peerInitial = peerName.trim()[0]?.toUpperCase() ?? '?';
 
-  // Derive 8 safety words from sha256(myId + peerId)
-  const fingerprintWords = useMemo<string[]>(() => {
-    if (!identity?.aegisId || !peerId) return [];
-    try {
-      const hash = sha256(new TextEncoder().encode(identity.aegisId + peerId));
-      return Array.from({ length: 8 }, (_, i) => {
-        const idx = (hash[i * 4] + hash[i * 4 + 1] * 256) % 256;
-        return WORDLIST_256[idx] ?? '???';
-      });
-    } catch {
-      return [];
+  // Session fingerprint derived from DTLS certificate fingerprints in the SDP.
+  // This is session-specific: a new fingerprint is computed per call.
+  // null = not yet available (loading state); string = ready.
+  const [sessionFingerprint, setSessionFingerprint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (status !== 'in-call' || !activePeer) {
+      setSessionFingerprint(null);
+      return;
     }
-  }, [identity?.aegisId, peerId]);
+    const pc = activePeer.pc as unknown as {
+      localDescription?: { sdp?: string } | null;
+      remoteDescription?: { sdp?: string } | null;
+    };
+    const extractDTLS = (sdp: string): string | null => {
+      const match = /a=fingerprint:(\S+)\s+(\S+)/i.exec(sdp);
+      return match ? match[2] : null;
+    };
+    const localSdp = pc.localDescription?.sdp ?? '';
+    const remoteSdp = pc.remoteDescription?.sdp ?? '';
+    const local = extractDTLS(localSdp);
+    const remote = extractDTLS(remoteSdp);
+    if (!local || !remote) {
+      setSessionFingerprint(null);
+      return;
+    }
+    // Sort so both peers derive the same value regardless of caller/callee role.
+    const sorted = [local, remote].sort();
+    const hash = sha256(new TextEncoder().encode(sorted.join('|')));
+    const hex = bytesToHex(hash);
+    // Format as 8 groups of 4 chars: "A1B2 C3D4 …"
+    const groups = Array.from({ length: 8 }, (_, i) => hex.slice(i * 4, i * 4 + 4).toUpperCase());
+    setSessionFingerprint(groups.join(' '));
+  }, [status, activePeer]);
 
   // Auto-close after a brief "ended" state.
   useEffect(() => {
@@ -259,8 +279,8 @@ export function CallScreen({ onClose }: Props) {
         </Pressable>
       ) : null}
 
-      {/* Fingerprint card — just above bottom controls */}
-      {status === 'in-call' && fingerprintWords.length >= 4 ? (
+      {/* Session fingerprint card — just above bottom controls */}
+      {status === 'in-call' ? (
         <View
           style={{
             position: 'absolute',
@@ -276,18 +296,29 @@ export function CallScreen({ onClose }: Props) {
             zIndex: 3,
           }}
         >
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1 }}>
-              {i18nT('call.fingerprintTitle', 'CALL FINGERPRINT')}
+              {i18nT('call.sessionFingerprintTitle', 'SESSION FINGERPRINT')}
             </Text>
-            <I.Check size={14} color={t.accent} />
+            {sessionFingerprint ? <I.Check size={14} color={t.accent} /> : null}
           </View>
-          <Text style={{ fontFamily: t.fontMono, fontSize: 16, color: '#fff', marginTop: 8, letterSpacing: 0.6, textAlign: 'center' }}>
-            {fingerprintWords.slice(0, 4).join(' · ')}
-          </Text>
-          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginTop: 6, textAlign: 'center' }}>
-            {i18nT('call.fingerprintDesc', 'Compare with your contact to verify')}
-          </Text>
+          {sessionFingerprint ? (
+            <>
+              <Text
+                style={{ fontFamily: t.fontMono, fontSize: 13, color: '#fff', marginTop: 8, letterSpacing: 1.2, textAlign: 'center' }}
+                accessibilityLabel={`Session fingerprint: ${sessionFingerprint}`}
+              >
+                {sessionFingerprint}
+              </Text>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginTop: 6, textAlign: 'center' }}>
+                {i18nT('call.fingerprintDesc', 'Compare with your contact to verify')}
+              </Text>
+            </>
+          ) : (
+            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, marginTop: 8, textAlign: 'center' }}>
+              {i18nT('call.fingerprintPending', 'Deriving session fingerprint…')}
+            </Text>
+          )}
         </View>
       ) : null}
 
@@ -370,7 +401,9 @@ export function CallScreen({ onClose }: Props) {
                   {i18nT('call.verifyFingerprint', 'Verificar huella')}
                 </Text>
                 <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, marginTop: 2 }}>
-                  {fingerprintWords.slice(0, 4).join(' · ')}
+                  {sessionFingerprint
+                    ? sessionFingerprint.slice(0, 19)
+                    : i18nT('call.fingerprintPending', 'Deriving session fingerprint…')}
                 </Text>
               </View>
             </Pressable>
