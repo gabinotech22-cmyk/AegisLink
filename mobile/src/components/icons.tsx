@@ -349,4 +349,27 @@ export const I = {
       <Path d="M3.5 3.5a12 12 0 000 17M20.5 3.5a12 12 0 010 17" />
     </IconBase>
   ),
+  Download: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+      <Path d="M7 10l5 5 5-5" />
+      <Path d="M12 15V3" />
+    </IconBase>
+  ),
+  Hash: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" />
+    </IconBase>
+  ),
+  MessageSquare: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </IconBase>
+  ),
+  User: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+      <Circle cx={12} cy={7} r={4} />
+    </IconBase>
+  ),
 };

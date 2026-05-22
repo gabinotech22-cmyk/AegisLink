@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,13 +10,23 @@ import {
   TextInput,
   Modal,
   ActivityIndicator,
+  Share,
+  FlatList,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import QRCode from 'react-native-qrcode-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import type { Theme } from '../theme/vault';
-import { useWork, type WorkDevice, type WorkMember, type WorkAuditEntry } from '../store/work';
+import { useWork, type WorkDevice, type WorkMember, type WorkAuditEntry, signAdminAction } from '../store/work';
+import * as Sharing from 'expo-sharing';
+import { SERVER_URL } from '../config';
+import { useWorkPresence } from '../store/workPresence';
+import { getPermissions } from '../utils/workPermissions';
+import { getSocket } from '../socket/client';
+import { WorkspacePicker } from './WorkspacePicker';
 import { useIdentity } from '../store/identity';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -56,11 +66,14 @@ function fmtTime(ts: number): string {
 
 interface Props {
   onBack: () => void;
+  onJoinSuccess?: () => void;
+  prefillJoinToken?: string;
+  onSearch?: () => void;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function WorkDashboard({ onBack }: Props) {
+export function WorkDashboard({ onBack, onJoinSuccess, prefillJoinToken, onSearch }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -72,22 +85,65 @@ export function WorkDashboard({ onBack }: Props) {
   const [setupModal, setSetupModal] = useState(false);
   const [joinModal, setJoinModal] = useState(false);
   const [inviteModal, setInviteModal] = useState(false);
+  const [pickerVisible, setPickerVisible] = useState(false);
   const [orgNameInput, setOrgNameInput] = useState('');
   const [joinTokenInput, setJoinTokenInput] = useState('');
   const [inviteTeam, setInviteTeam] = useState('General');
   const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
 
   const identity = useIdentity((s) => s.identity);
-  const { org, members, devices, auditLog, loading, fetchOrg, createOrg, createInvite, revokeDevice, verifyDevice } = useWork();
+  const { org, members, devices, auditLog, loading, fetchOrg, createOrg, createInvite, revokeDevice, verifyDevice, fetchChannels, knownOrgIds, activeOrgId } = useWork();
   const aegisId = identity?.aegisId ?? '';
 
-  // Auto-load org stored in SecureStore if present
+  // Pre-fill join token from deep link and open modal automatically
   useEffect(() => {
+    if (prefillJoinToken) {
+      setJoinTokenInput(prefillJoinToken);
+      setJoinModal(true);
+    }
+  }, [prefillJoinToken]);
+
+  // Load known orgs and auto-load the active one on mount
+  useEffect(() => {
+    if (!aegisId) return;
     (async () => {
-      const SecureStore = await import('expo-secure-store');
-      const stored = await SecureStore.getItemAsync('aegis.work.orgId').catch(() => null);
-      if (stored && aegisId) void fetchOrg(stored, aegisId);
+      await useWork.getState().loadKnownOrgs();
+      const { activeOrgId: loaded } = useWork.getState();
+      if (loaded) {
+        await useWork.getState().switchWorkspace(loaded, aegisId);
+      }
     })();
+
+    // Register presence socket listeners
+    const sock = getSocket();
+    if (sock) {
+      const onPresenceSync = (data: { onlineIds: string[] }) => {
+        useWorkPresence.getState().setOnline(data.onlineIds);
+      };
+      const onPresenceJoin = (data: { aegisId: string }) => {
+        useWorkPresence.getState().addOnline(data.aegisId);
+      };
+      const onPresenceLeave = (data: { aegisId: string }) => {
+        useWorkPresence.getState().removeOnline(data.aegisId);
+      };
+      const onTyping = (data: { channelId: string; from: string; isTyping: boolean }) => {
+        useWorkPresence.getState().setTyping(data.channelId, data.from, data.isTyping);
+      };
+
+      sock.on('work:presence_sync', onPresenceSync);
+      sock.on('work:presence_join', onPresenceJoin);
+      sock.on('work:presence_leave', onPresenceLeave);
+      sock.on('typing', onTyping);
+
+      return () => {
+        sock.off('work:presence_sync', onPresenceSync);
+        sock.off('work:presence_join', onPresenceJoin);
+        sock.off('work:presence_leave', onPresenceLeave);
+        sock.off('typing', onTyping);
+      };
+    }
+    return undefined;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aegisId]);
 
   const s = makeStyles(t);
@@ -98,8 +154,7 @@ export function WorkDashboard({ onBack }: Props) {
     if (!orgNameInput.trim() || !aegisId) return;
     try {
       const orgId = await createOrg(orgNameInput.trim(), aegisId);
-      const SecureStore = await import('expo-secure-store');
-      await SecureStore.setItemAsync('aegis.work.orgId', orgId);
+      await useWork.getState().addKnownOrg(orgId);
       setSetupModal(false);
       setOrgNameInput('');
     } catch (e) {
@@ -109,14 +164,15 @@ export function WorkDashboard({ onBack }: Props) {
 
   async function handleJoin(): Promise<void> {
     if (!joinTokenInput.trim() || !aegisId) return;
-    const SecureStore = await import('expo-secure-store');
     const deviceId = `${aegisId}-primary`;
     try {
       const { orgId } = await useWork.getState().joinOrg(joinTokenInput.trim(), aegisId, deviceId, 'AegisLink Mobile', 'mobile');
-      await SecureStore.setItemAsync('aegis.work.orgId', orgId);
+      await useWork.getState().addKnownOrg(orgId);
       setJoinModal(false);
       setJoinTokenInput('');
-      void fetchOrg(orgId, aegisId);
+      await fetchOrg(orgId, aegisId);
+      await fetchChannels(orgId);
+      onJoinSuccess?.();
     } catch (e) {
       Alert.alert(i18nT('workDashboard.joinFailed'), (e as Error).message);
     }
@@ -267,10 +323,17 @@ export function WorkDashboard({ onBack }: Props) {
                   <View style={[s.hLine, { marginTop: 4 }]} />
                 </Pressable>
               )}
-              <View>
-                <Text style={s.orgLabel}>{org?.name.toUpperCase() ?? ''}</Text>
+              <Pressable
+                onPress={() => setPickerVisible(true)}
+                style={{ gap: 2 }}
+                accessibilityLabel="Cambiar workspace activo"
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={s.orgLabel}>{org?.name.toUpperCase() ?? i18nT('workDashboard.title').toUpperCase()}</Text>
+                  <I.Chevron size={12} color={t.textDim} />
+                </View>
                 <Text style={s.pageTitle}>{i18nT(labelKeyFor(activeNav))}</Text>
-              </View>
+              </Pressable>
             </View>
             <View style={s.mainHeaderRight}>
               {loading && <ActivityIndicator size="small" color={t.accent} />}
@@ -281,6 +344,11 @@ export function WorkDashboard({ onBack }: Props) {
                 >
                   <I.Plus size={14} color={t.bg} />
                   <Text style={s.inviteBtnText}>{i18nT('workDashboard.inviteMember')}</Text>
+                </Pressable>
+              )}
+              {onSearch && (
+                <Pressable onPress={onSearch} hitSlop={8} style={{ marginRight: 8 }}>
+                  <I.Search size={20} color={t.textDim} />
                 </Pressable>
               )}
               <Pressable onPress={onBack} hitSlop={8}>
@@ -314,10 +382,10 @@ export function WorkDashboard({ onBack }: Props) {
               />
             )}
             {activeNav === 'members' && (
-              <MembersContent t={t} members={members} />
+              <MembersContent t={t} members={members} devices={devices} org={org} currentAegisId={aegisId} />
             )}
             {activeNav === 'audit' && (
-              <AuditContent t={t} auditLog={auditLog} />
+              <AuditContent t={t} />
             )}
             {activeNav === 'keys' && (
               <KeysContent t={t} org={org} />
@@ -332,6 +400,36 @@ export function WorkDashboard({ onBack }: Props) {
         </View>
       </View>
 
+      {/* ── Workspace picker modal ── */}
+      <Modal
+        visible={pickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickerVisible(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', paddingHorizontal: 24 }}>
+          <WorkspacePicker
+            orgIds={knownOrgIds}
+            activeOrgId={activeOrgId}
+            onClose={() => setPickerVisible(false)}
+            onSelect={(orgId) => {
+              setPickerVisible(false);
+              if (orgId !== activeOrgId && aegisId) {
+                void useWork.getState().switchWorkspace(orgId, aegisId);
+              }
+            }}
+            onCreateNew={() => {
+              setPickerVisible(false);
+              setSetupModal(true);
+            }}
+            onJoinExisting={() => {
+              setPickerVisible(false);
+              setJoinModal(true);
+            }}
+          />
+        </View>
+      </Modal>
+
       {/* ── Invite modal ── */}
       <Modal visible={inviteModal} transparent animationType="fade" onRequestClose={() => { setInviteModal(false); setPendingInviteToken(null); }}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', paddingHorizontal: 24 }}>
@@ -342,10 +440,40 @@ export function WorkDashboard({ onBack }: Props) {
                 <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 18 }}>
                   {i18nT('workDashboard.inviteTokenDesc')}
                 </Text>
-                <View style={{ backgroundColor: t.bg, borderRadius: t.radiusS, padding: 12, borderWidth: 1, borderColor: t.border }}>
-                  <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent }} selectable>{pendingInviteToken}</Text>
+                {/* QR code centred */}
+                <View style={{ alignItems: 'center', paddingVertical: 12, backgroundColor: t.surface, borderRadius: t.radius, borderWidth: 1, borderColor: t.border }}>
+                  <QRCode
+                    value={`aegislink://work/join?token=${pendingInviteToken}`}
+                    size={200}
+                    color={t.text}
+                    backgroundColor={t.surface}
+                  />
                 </View>
-                <Pressable onPress={() => { setInviteModal(false); setPendingInviteToken(null); setInviteTeam('General'); }} style={{ backgroundColor: t.accent, borderRadius: t.radiusS, paddingVertical: 11, alignItems: 'center' }}>
+                {/* Token text (selectable for manual copy) */}
+                <View style={{ backgroundColor: t.bg, borderRadius: t.radiusS, padding: 12, borderWidth: 1, borderColor: t.border }}>
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent }} selectable>{pendingInviteToken}</Text>
+                </View>
+                {/* Action buttons */}
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable
+                    onPress={async () => {
+                      await Clipboard.setStringAsync(`aegislink://work/join?token=${pendingInviteToken}`);
+                      Alert.alert('Copiado', 'El link de invitación fue copiado al portapapeles.');
+                    }}
+                    style={{ flex: 1, borderWidth: 1, borderColor: t.borderStrong, borderRadius: t.radiusS, paddingVertical: 11, alignItems: 'center' }}
+                    accessibilityLabel="Copiar link de invitación"
+                  >
+                    <Text style={{ color: t.text, fontFamily: t.font, fontWeight: '500', fontSize: 13 }}>Copiar link</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => void Share.share({ message: `aegislink://work/join?token=${pendingInviteToken}` })}
+                    style={{ flex: 1, borderWidth: 1, borderColor: t.borderStrong, borderRadius: t.radiusS, paddingVertical: 11, alignItems: 'center' }}
+                    accessibilityLabel="Compartir link de invitación"
+                  >
+                    <Text style={{ color: t.text, fontFamily: t.font, fontWeight: '500', fontSize: 13 }}>Compartir</Text>
+                  </Pressable>
+                </View>
+                <Pressable onPress={() => { setInviteModal(false); setPendingInviteToken(null); setInviteTeam('General'); }} style={{ backgroundColor: t.accent, borderRadius: t.radiusS, paddingVertical: 11, alignItems: 'center' }} accessibilityLabel="Cerrar modal de invitación">
                   <Text style={{ color: t.bg, fontFamily: t.font, fontWeight: '700' }}>{i18nT('workDashboard.doneBtn')}</Text>
                 </Pressable>
               </>
@@ -520,11 +648,9 @@ function OverviewContent({
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint, padding: 14 }}>{i18nT('workDashboard.noAuditYet')}</Text>
           ) : (
             auditSlice.map((ev, i) => (
-              <AuditEventView
+              <AuditEventMini
                 key={ev.id}
-                time={fmtTime(ev.created_at)}
-                kind={ev.kind}
-                message={ev.message}
+                entry={ev}
                 t={t}
                 last={i === auditSlice.length - 1}
               />
@@ -594,16 +720,128 @@ function TeamRowView({ row, t, last }: { row: TeamRow; t: Theme; last: boolean }
   );
 }
 
-// ─── Audit event ──────────────────────────────────────────────────────────────
+// ─── Audit helpers ────────────────────────────────────────────────────────────
 
-function AuditEventView({ time, kind, message, t, last }: { time: string; kind: 'info' | 'warn' | 'ok'; message: string; t: Theme; last: boolean }) {
+type KindCategory = 'member' | 'channel' | 'message' | 'device' | 'org' | 'other';
+
+function kindCategory(kind: string): KindCategory {
+  if (kind.startsWith('member')) return 'member';
+  if (kind.startsWith('channel')) return 'channel';
+  if (kind.startsWith('message')) return 'message';
+  if (kind.startsWith('device')) return 'device';
+  if (kind.startsWith('org')) return 'org';
+  return 'other';
+}
+
+function KindIcon({ kind, size, color }: { kind: string; size: number; color: string }) {
+  const cat = kindCategory(kind);
+  if (cat === 'member') return <I.User size={size} color={color} />;
+  if (cat === 'channel') return <I.Hash size={size} color={color} />;
+  if (cat === 'message') return <I.MessageSquare size={size} color={color} />;
+  if (cat === 'device') return <I.Shield size={size} color={color} />;
+  if (cat === 'org') return <I.Building size={size} color={color} />;
+  return <I.Archive size={size} color={color} />;
+}
+
+function kindIconColor(kind: string, t: Theme): string {
+  const cat = kindCategory(kind);
+  if (cat === 'device') return t.warn;
+  if (cat === 'org') return t.accent;
+  return t.textDim;
+}
+
+function fmtRelativeTime(ts: number): string {
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 60) return `${diff}s`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
+}
+
+// Mini audit event — used in the overview card
+function AuditEventMini({ entry, t, last }: { entry: WorkAuditEntry; t: Theme; last: boolean }) {
   const s = makeStyles(t);
-  const dotColor = kind === 'ok' ? t.accent : kind === 'warn' ? t.warn : t.textDim;
+  const cat = kindCategory(entry.kind);
+  const dotColor = cat === 'org' || cat === 'channel' ? t.accent : cat === 'device' ? t.warn : t.textDim;
   return (
     <View style={[s.auditRow, !last && { borderBottomWidth: 1, borderBottomColor: t.divider }]}>
       <View style={[s.auditDot, { backgroundColor: dotColor }]} />
-      <Text style={s.auditTime}>{time}</Text>
-      <Text style={s.auditMsg} numberOfLines={2}>{message}</Text>
+      <Text style={s.auditTime}>{fmtTime(entry.createdAt)}</Text>
+      <Text style={s.auditMsg} numberOfLines={2}>{entry.message}</Text>
+    </View>
+  );
+}
+
+// Full audit event row — used in AuditContent
+function AuditEventRow({ entry, t, channels, last }: { entry: WorkAuditEntry; t: Theme; channels: import('../store/work').WorkChannel[]; last: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showAbsolute, setShowAbsolute] = useState(false);
+  const iconColor = kindIconColor(entry.kind, t);
+  const hasMetadata = entry.metadata !== null;
+  const channelName = entry.channelId
+    ? (channels.find((c) => c.channelId === entry.channelId)?.name ?? entry.channelId.slice(0, 8))
+    : null;
+
+  return (
+    <View style={[{ borderBottomWidth: last ? 0 : 1, borderBottomColor: t.divider }]}>
+      <Pressable
+        onPress={hasMetadata ? () => setExpanded((v) => !v) : undefined}
+        accessibilityLabel={`Evento de auditoría: ${entry.message}`}
+        style={{ flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 14, paddingVertical: 11, gap: 10 }}
+      >
+        {/* Kind icon */}
+        <View style={{ width: 28, height: 28, borderRadius: 6, backgroundColor: iconColor + '1a', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
+          <KindIcon kind={entry.kind} size={13} color={iconColor} />
+        </View>
+
+        {/* Body */}
+        <View style={{ flex: 1, gap: 3 }}>
+          {/* Actor */}
+          {entry.actorId && (
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5 }}>
+              @{entry.actorId.slice(0, 10)}
+            </Text>
+          )}
+          {/* Message */}
+          <Text style={{ fontFamily: t.font, fontSize: 13, color: t.text, lineHeight: 18 }} numberOfLines={expanded ? undefined : 2}>
+            {entry.message}
+          </Text>
+          {/* Target + Channel */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {entry.targetId && (
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim }}>
+                {'→ @'}{entry.targetId.slice(0, 10)}
+              </Text>
+            )}
+            {channelName && (
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim }}>
+                {'#'}{channelName}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* Timestamp + chevron */}
+        <View style={{ alignItems: 'flex-end', gap: 4, minWidth: 36 }}>
+          <Pressable onLongPress={() => setShowAbsolute((v) => !v)} hitSlop={8}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint }}>
+              {showAbsolute ? fmtTime(entry.createdAt) : fmtRelativeTime(entry.createdAt)}
+            </Text>
+          </Pressable>
+          {hasMetadata && (
+            <I.ChevronD size={13} color={t.textDim} />
+          )}
+        </View>
+      </Pressable>
+
+      {/* Metadata expand */}
+      {expanded && hasMetadata && (
+        <View style={{ marginHorizontal: 14, marginBottom: 10, backgroundColor: t.bg, borderRadius: t.radiusS, padding: 10, borderWidth: 1, borderColor: t.border }}>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, lineHeight: 16 }} selectable>
+            {JSON.stringify(entry.metadata, null, 2)}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -736,62 +974,851 @@ function DeviceRowView({
   );
 }
 
-function MembersContent({ t, members }: { t: Theme; members: WorkMember[] }) {
-  const s = makeStyles(t);
-  const { t: i18nT } = useTranslation();
+// ─── Member directory (upgraded) ─────────────────────────────────────────────
+
+type DisplayRole = 'owner' | 'admin' | 'member';
+
+interface MemberVM {
+  aegis_id: string;
+  team: string;
+  role: 'owner' | 'admin' | 'member';
+  displayRole: DisplayRole;
+  verified: boolean;
+  joined_at: number;
+  org_id: string;
+}
+
+interface TeamSection {
+  team: string;
+  data: MemberVM[];
+}
+
+function getDisplayRole(m: WorkMember, ownerId: string): DisplayRole {
+  if (m.aegis_id === ownerId) return 'owner';
+  return m.role;
+}
+
+const ROLE_ORDER: Record<DisplayRole, number> = { owner: 0, admin: 1, member: 2 };
+
+function buildSections(
+  members: WorkMember[],
+  devices: WorkDevice[],
+  ownerId: string,
+  query: string,
+): TeamSection[] {
+  const q = query.toLowerCase();
+
+  const vms: MemberVM[] = members.map((m) => ({
+    ...m,
+    displayRole: getDisplayRole(m, ownerId),
+    verified: devices.some((d) => d.aegis_id === m.aegis_id && d.status === 'verified'),
+  }));
+
+  const filtered = q
+    ? vms.filter((m) => m.aegis_id.toLowerCase().includes(q) || m.team.toLowerCase().includes(q))
+    : vms;
+
+  const teamMap = new Map<string, MemberVM[]>();
+  for (const m of filtered) {
+    const existing = teamMap.get(m.team) ?? [];
+    existing.push(m);
+    teamMap.set(m.team, existing);
+  }
+
+  const sections: TeamSection[] = Array.from(teamMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([team, data]) => ({
+      team,
+      data: [...data].sort((a, b) => {
+        const ro = ROLE_ORDER[a.displayRole] - ROLE_ORDER[b.displayRole];
+        if (ro !== 0) return ro;
+        return a.aegis_id.localeCompare(b.aegis_id);
+      }),
+    }));
+
+  return sections;
+}
+
+type FlatItem =
+  | { type: 'header'; team: string; count: number }
+  | { type: 'member'; vm: MemberVM; last: boolean };
+
+function flattenSections(sections: TeamSection[]): FlatItem[] {
+  const items: FlatItem[] = [];
+  for (const sec of sections) {
+    items.push({ type: 'header', team: sec.team, count: sec.data.length });
+    sec.data.forEach((vm, idx) => {
+      items.push({ type: 'member', vm, last: idx === sec.data.length - 1 });
+    });
+  }
+  return items;
+}
+
+const OWNER_BADGE_COLOR = '#f59e0b';
+
+function roleColor(role: DisplayRole, t: Theme): string {
+  if (role === 'owner') return OWNER_BADGE_COLOR;
+  if (role === 'admin') return t.accent;
+  return t.textDim;
+}
+
+function MemberCard({
+  vm,
+  last,
+  isCurrentUser,
+  isOnline,
+  t,
+  onLongPress,
+}: {
+  vm: MemberVM;
+  last: boolean;
+  isCurrentUser: boolean;
+  isOnline: boolean;
+  t: Theme;
+  onLongPress: () => void;
+}) {
+  const idDisplay = vm.aegis_id.length > 14 ? `${vm.aegis_id.slice(0, 14)}…` : vm.aegis_id;
+  const avatarChars = vm.aegis_id.slice(0, 2).toUpperCase();
+  const rColor = roleColor(vm.displayRole, t);
+  const roleLabel = vm.displayRole.toUpperCase();
+
   return (
-    <View style={s.card}>
-      <View style={s.cardHeader}>
-        <Text style={s.cardTitle}>{i18nT('workDashboard.navMembers')}</Text>
-        <View style={s.badge}>
-          <Text style={s.badgeText}>{i18nT('workDashboard.totalUpper', { count: members.length })}</Text>
+    <Pressable
+      onLongPress={onLongPress}
+      delayLongPress={400}
+      accessibilityLabel={`Miembro ${vm.aegis_id}, rol ${vm.displayRole}`}
+      style={[
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 14,
+          paddingVertical: 12,
+          gap: 12,
+        },
+        !last && { borderBottomWidth: 1, borderBottomColor: t.divider },
+      ]}
+    >
+      {/* Avatar circle with optional online dot */}
+      <View style={{ position: 'relative', width: 38, height: 38 }}>
+        <View
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: rColor + '22',
+            borderWidth: 1.5,
+            borderColor: rColor,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text style={{ fontFamily: t.fontMono, fontSize: 13, fontWeight: '700', color: rColor }}>
+            {avatarChars}
+          </Text>
         </View>
+        {isOnline && (
+          <View
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              right: 0,
+              width: 10,
+              height: 10,
+              borderRadius: 5,
+              backgroundColor: '#22c55e',
+              borderWidth: 1.5,
+              borderColor: t.surface,
+            }}
+            accessibilityLabel="En línea"
+          />
+        )}
       </View>
-      <View style={s.tableHeader}>
-        <Text style={[s.tableCol, s.colTeam, s.tableHeadText]}>{i18nT('workDashboard.tableAegisId')}</Text>
-        <Text style={[s.tableCol, s.colTeam, s.tableHeadText]}>{i18nT('workDashboard.tableTeam')}</Text>
-        <Text style={[s.tableCol, s.colNum, s.tableHeadText]}>{i18nT('workDashboard.tableRole')}</Text>
+
+      {/* Identity + team */}
+      <View style={{ flex: 1, gap: 2 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text
+            style={{ fontFamily: t.fontMono, fontSize: 13, color: t.text, fontWeight: '600' }}
+            numberOfLines={1}
+          >
+            {idDisplay}
+          </Text>
+          {vm.verified && <I.Check size={12} color={t.accent} />}
+          {isCurrentUser && (
+            <View
+              style={{
+                backgroundColor: t.accentDeep,
+                borderRadius: 4,
+                paddingHorizontal: 5,
+                paddingVertical: 1,
+              }}
+            >
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.8 }}>
+                TÚ
+              </Text>
+            </View>
+          )}
+        </View>
+        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint }}>
+          {vm.team}
+        </Text>
       </View>
-      {members.length === 0 ? (
-        <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint, padding: 14 }}>{i18nT('workDashboard.noMembersYet')}</Text>
-      ) : (
-        members.map((m, i) => (
-          <View key={`${m.org_id}-${m.aegis_id}`} style={[s.tableRow, i < members.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.divider }]}>
-            <Text style={[s.tableCol, s.colTeam, s.tableBodyText]}>{m.aegis_id.slice(0, 12)}…</Text>
-            <Text style={[s.tableCol, s.colTeam, s.tableBodyText]}>{m.team}</Text>
-            <Text style={[s.tableCol, s.colNum, s.tableBodyText, { color: m.role === 'admin' ? t.accent : t.text }]}>{m.role}</Text>
+
+      {/* Role badge */}
+      <View
+        style={{
+          backgroundColor: rColor + '1a',
+          borderRadius: 5,
+          paddingHorizontal: 7,
+          paddingVertical: 3,
+          borderWidth: 1,
+          borderColor: rColor + '44',
+        }}
+      >
+        <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: rColor, letterSpacing: 0.8 }}>
+          {roleLabel}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function MembersContent({
+  t,
+  members,
+  devices,
+  org,
+  currentAegisId,
+}: {
+  t: Theme;
+  members: WorkMember[];
+  devices: WorkDevice[];
+  org: import('../store/work').WorkOrg | null;
+  currentAegisId: string;
+}) {
+  const { t: i18nT } = useTranslation();
+  const [query, setQuery] = useState('');
+  const [actionTarget, setActionTarget] = useState<MemberVM | null>(null);
+  const [profileTarget, setProfileTarget] = useState<MemberVM | null>(null);
+  const onlineIds = useWorkPresence((s) => s.onlineIds);
+
+  const ownerId = org?.adminId ?? '';
+
+  const currentMember = members.find((m) => m.aegis_id === currentAegisId);
+  const currentDisplayRole: DisplayRole = currentAegisId === ownerId
+    ? 'owner'
+    : (currentMember?.role ?? 'member');
+
+  const sections = buildSections(members, devices, ownerId, query);
+  const flatItems = flattenSections(sections);
+
+  const totalMembers = members.length;
+  const adminCount = members.filter((m) => m.role === 'admin' || m.aegis_id === ownerId).length;
+  const verifiedCount = members.filter((m) =>
+    devices.some((d) => d.aegis_id === m.aegis_id && d.status === 'verified'),
+  ).length;
+
+  const handleLongPress = useCallback((vm: MemberVM) => {
+    setActionTarget(vm);
+  }, []);
+
+  async function handleRoleChange(vm: MemberVM, newRole: 'admin' | 'member') {
+    if (!org) return;
+    const adminSig = (() => {
+      const { useWork: w } = require('../store/work') as { useWork: typeof import('../store/work').useWork };
+      // Access signAdminAction indirectly through the store internals is not possible;
+      // we replicate the fetch pattern from the store using nacl directly.
+      return null; // placeholder — see fetch call below
+    })();
+    void adminSig; // not used directly — we call the PATCH endpoint manually
+
+    // Optimistic update
+    useWork.setState((s) => ({
+      members: s.members.map((m) =>
+        m.aegis_id === vm.aegis_id ? { ...m, role: newRole } : m,
+      ),
+    }));
+
+    try {
+      const nacl = (await import('tweetnacl')).default;
+      const { decodeBase64, encodeBase64 } = await import('tweetnacl-util');
+      const { useIdentity } = await import('../store/identity');
+      const skB64 = useIdentity.getState().identity?.signingSecretKeyB64;
+      if (!skB64) throw new Error('Identity not loaded');
+
+      const ts = Date.now();
+      const timeBucket = Math.floor(ts / 30_000);
+      const message = new TextEncoder().encode(`${org.orgId}:update_member_role:${timeBucket}`);
+      const sigBytes = nacl.sign.detached(message, decodeBase64(skB64));
+      const sig = encodeBase64(sigBytes);
+
+      const res = await fetch(
+        `${(await import('../config')).SERVER_URL}/work/org/${org.orgId}/members/${vm.aegis_id}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ aegisId: currentAegisId, sig, ts, role: newRole }),
+        },
+      );
+      if (!res.ok) throw new Error('Failed to update role');
+    } catch (e) {
+      // Roll back on failure
+      useWork.setState((s) => ({
+        members: s.members.map((m) =>
+          m.aegis_id === vm.aegis_id ? { ...m, role: vm.role } : m,
+        ),
+      }));
+      Alert.alert(i18nT('common.error'), (e as Error).message);
+    }
+
+    setActionTarget(null);
+  }
+
+  async function handleRemove(vm: MemberVM) {
+    if (!org) return;
+    Alert.alert(
+      'Eliminar miembro',
+      `¿Eliminar a ${vm.aegis_id.slice(0, 12)}… del workspace?`,
+      [
+        { text: i18nT('workDashboard.cancelBtn'), style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await useWork.getState().removeMember(org.orgId, vm.aegis_id, currentAegisId);
+            } catch (e) {
+              Alert.alert(i18nT('common.error'), (e as Error).message);
+            }
+            setActionTarget(null);
+          },
+        },
+      ],
+    );
+  }
+
+  const myPerms = getPermissions(currentDisplayRole);
+
+  const canActOn = (vm: MemberVM): boolean => {
+    if (vm.aegis_id === currentAegisId) return false;
+    return myPerms.canKickMembers || myPerms.canPromoteToAdmin || myPerms.canDemoteAdmin;
+  };
+
+  const renderItem = useCallback(
+    ({ item }: { item: FlatItem }) => {
+      if (item.type === 'header') {
+        return (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              backgroundColor: t.surface2,
+              gap: 8,
+            }}
+          >
+            <Text
+              style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.2, textTransform: 'uppercase', flex: 1 }}
+            >
+              {item.team}
+            </Text>
+            <View
+              style={{
+                backgroundColor: t.surface3,
+                borderRadius: 5,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+              }}
+            >
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint }}>
+                {item.count}
+              </Text>
+            </View>
           </View>
-        ))
-      )}
+        );
+      }
+      return (
+        <MemberCard
+          vm={item.vm}
+          last={item.last}
+          isCurrentUser={item.vm.aegis_id === currentAegisId}
+          isOnline={onlineIds.has(item.vm.aegis_id)}
+          t={t}
+          onLongPress={() => handleLongPress(item.vm)}
+        />
+      );
+    },
+    [t, currentAegisId, handleLongPress, onlineIds],
+  );
+
+  const keyExtractor = useCallback((item: FlatItem, index: number) => {
+    if (item.type === 'header') return `header-${item.team}`;
+    return `member-${item.vm.aegis_id}-${index}`;
+  }, []);
+
+  return (
+    <View style={{ gap: 12 }}>
+      {/* Stats bar */}
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {[
+          { label: 'MIEMBROS', value: totalMembers },
+          { label: 'ADMINS', value: adminCount },
+          { label: 'VERIFICADOS', value: verifiedCount },
+        ].map((chip) => (
+          <View
+            key={chip.label}
+            style={{
+              flex: 1,
+              backgroundColor: t.surface,
+              borderRadius: t.radiusS,
+              borderWidth: 1,
+              borderColor: t.border,
+              padding: 10,
+              alignItems: 'center',
+              gap: 3,
+            }}
+          >
+            <Text style={{ fontFamily: t.fontDisplay, fontSize: 20, fontWeight: '700', color: t.text }}>
+              {chip.value}
+            </Text>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 8, color: t.textFaint, letterSpacing: 1 }}>
+              {chip.label}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Search bar */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: t.surface,
+          borderRadius: t.radiusS,
+          borderWidth: 1,
+          borderColor: t.border,
+          paddingHorizontal: 12,
+          gap: 8,
+        }}
+      >
+        <I.Search size={14} color={t.textDim} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Buscar por ID o equipo…"
+          placeholderTextColor={t.textFaint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="Buscar miembros"
+          style={{
+            flex: 1,
+            fontFamily: t.fontMono,
+            fontSize: 13,
+            color: t.text,
+            paddingVertical: 10,
+          }}
+        />
+        {query.length > 0 && (
+          <Pressable onPress={() => setQuery('')} accessibilityLabel="Limpiar búsqueda" hitSlop={8}>
+            <I.X size={14} color={t.textDim} />
+          </Pressable>
+        )}
+      </View>
+
+      {/* Member list card */}
+      <View style={{ backgroundColor: t.surface, borderRadius: t.radius, borderWidth: 1, borderColor: t.border, overflow: 'hidden' }}>
+        {flatItems.length === 0 ? (
+          <View style={{ padding: 24, alignItems: 'center', gap: 8 }}>
+            <I.Users size={28} color={t.textFaint} />
+            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint, textAlign: 'center' }}>
+              {query ? 'Sin resultados para esa búsqueda' : i18nT('workDashboard.noMembersYet')}
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={flatItems}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            scrollEnabled={false}
+            removeClippedSubviews={false}
+          />
+        )}
+      </View>
+
+      {/* Action sheet modal */}
+      <Modal
+        visible={actionTarget !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setActionTarget(null)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+          onPress={() => setActionTarget(null)}
+        >
+          <Pressable
+            style={{
+              backgroundColor: t.surface,
+              borderTopLeftRadius: t.radius,
+              borderTopRightRadius: t.radius,
+              paddingBottom: 28,
+              paddingTop: 8,
+            }}
+            onPress={() => {/* absorb taps */}}
+          >
+            {/* Handle */}
+            <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.border }} />
+            </View>
+
+            {actionTarget && (
+              <>
+                {/* Member identity header */}
+                <View style={{ paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: t.divider, gap: 2 }}>
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 13, color: t.text, fontWeight: '600' }}>
+                    {actionTarget.aegis_id.slice(0, 18)}{actionTarget.aegis_id.length > 18 ? '…' : ''}
+                  </Text>
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint }}>
+                    {actionTarget.team} · {actionTarget.displayRole.toUpperCase()}
+                  </Text>
+                </View>
+
+                {/* "Ver perfil" — always */}
+                <Pressable
+                  onPress={() => { setProfileTarget(actionTarget); setActionTarget(null); }}
+                  accessibilityLabel="Ver perfil del miembro"
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: t.divider }}
+                >
+                  <I.QR size={18} color={t.text} />
+                  <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text }}>Ver perfil</Text>
+                </Pressable>
+
+                {/* Admin actions */}
+                {canActOn(actionTarget) && (
+                  <>
+                    {myPerms.canPromoteToAdmin && actionTarget.displayRole === 'member' && (
+                      <Pressable
+                        onPress={() => void handleRoleChange(actionTarget, 'admin')}
+                        accessibilityLabel="Promover a admin"
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: t.divider }}
+                      >
+                        <I.Shield size={18} color={t.accent} />
+                        <Text style={{ fontFamily: t.font, fontSize: 15, color: t.accent }}>Promover a admin</Text>
+                      </Pressable>
+                    )}
+                    {myPerms.canDemoteAdmin && actionTarget.displayRole === 'admin' && (
+                      <Pressable
+                        onPress={() => void handleRoleChange(actionTarget, 'member')}
+                        accessibilityLabel="Degradar a miembro"
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: t.divider }}
+                      >
+                        <I.Person size={18} color={t.warn} />
+                        <Text style={{ fontFamily: t.font, fontSize: 15, color: t.warn }}>Degradar a miembro</Text>
+                      </Pressable>
+                    )}
+                    {myPerms.canKickMembers && actionTarget.displayRole !== 'owner' && (
+                      <Pressable
+                        onPress={() => void handleRemove(actionTarget)}
+                        accessibilityLabel="Eliminar del workspace"
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: t.divider }}
+                      >
+                        <I.Trash size={18} color={t.danger} />
+                        <Text style={{ fontFamily: t.font, fontSize: 15, color: t.danger }}>Eliminar del workspace</Text>
+                      </Pressable>
+                    )}
+                  </>
+                )}
+
+                {/* Close */}
+                <Pressable
+                  onPress={() => setActionTarget(null)}
+                  accessibilityLabel="Cerrar menú de acciones"
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingVertical: 16 }}
+                >
+                  <I.X size={18} color={t.textDim} />
+                  <Text style={{ fontFamily: t.font, fontSize: 15, color: t.textDim }}>Cerrar</Text>
+                </Pressable>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Profile / QR modal */}
+      <Modal
+        visible={profileTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setProfileTarget(null)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', paddingHorizontal: 24 }}>
+          <View style={{ backgroundColor: t.surface, borderRadius: t.radius, padding: 20, gap: 16 }}>
+            {profileTarget && (
+              <>
+                <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
+                  Perfil del miembro
+                </Text>
+
+                {/* QR code */}
+                <View style={{ alignItems: 'center', paddingVertical: 12, backgroundColor: t.surface2, borderRadius: t.radius, borderWidth: 1, borderColor: t.border }}>
+                  <QRCode
+                    value={profileTarget.aegis_id}
+                    size={180}
+                    color={t.text}
+                    backgroundColor={t.surface2}
+                  />
+                </View>
+
+                {/* Full aegis_id selectable */}
+                <View style={{ backgroundColor: t.bg, borderRadius: t.radiusS, padding: 12, borderWidth: 1, borderColor: t.border }}>
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.8, marginBottom: 4 }}>
+                    AEGIS ID
+                  </Text>
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent }} selectable>
+                    {profileTarget.aegis_id}
+                  </Text>
+                </View>
+
+                {/* Copy + Close buttons */}
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable
+                    onPress={async () => {
+                      await (await import('expo-clipboard')).setStringAsync(profileTarget.aegis_id);
+                      Alert.alert('Copiado', 'Aegis ID copiado al portapapeles.');
+                    }}
+                    accessibilityLabel="Copiar Aegis ID"
+                    style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: t.borderStrong, borderRadius: t.radiusS, paddingVertical: 11 }}
+                  >
+                    <I.Copy size={14} color={t.text} />
+                    <Text style={{ fontFamily: t.font, fontSize: 13, color: t.text }}>Copiar</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setProfileTarget(null)}
+                    accessibilityLabel="Cerrar perfil"
+                    style={{ flex: 1, backgroundColor: t.accent, borderRadius: t.radiusS, paddingVertical: 11, alignItems: 'center' }}
+                  >
+                    <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '700', color: t.bg }}>Cerrar</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-function AuditContent({ t, auditLog }: { t: Theme; auditLog: WorkAuditEntry[] }) {
+// Kind filter chip definitions
+const KIND_CHIPS: { label: string; kinds: string[] }[] = [
+  { label: 'Miembros', kinds: ['member'] },
+  { label: 'Canales', kinds: ['channel'] },
+  { label: 'Mensajes', kinds: ['message'] },
+  { label: 'Dispositivos', kinds: ['device'] },
+];
+
+function AuditContent({ t }: { t: Theme }) {
   const s = makeStyles(t);
-  const { t: i18nT } = useTranslation();
+  const { org, auditLog, auditHasMore, auditLoading, auditFilters, channels, fetchAuditPage, setAuditFilters } = useWork();
+  const identity = useIdentity((st) => st.identity);
+  const aegisId = identity?.aegisId ?? '';
+  const isOwner = org?.adminId === aegisId;
+
+  const [actorQuery, setActorQuery] = useState('');
+  const [activeKindChip, setActiveKindChip] = useState<string | null>(null);
+
+  // Apply actor filter with debounce via useEffect
+  useEffect(() => {
+    const tid = setTimeout(() => {
+      void setAuditFilters({ kind: activeKindChip, actorId: actorQuery.trim() || null });
+    }, 400);
+    return () => clearTimeout(tid);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actorQuery, activeKindChip]);
+
+  function handleChip(kindPrefix: string | null) {
+    setActiveKindChip(kindPrefix);
+  }
+
+  async function handleLoadMore() {
+    if (!org || auditLoading || !auditHasMore) return;
+    const last = auditLog[auditLog.length - 1];
+    const opts: { before?: number; kind?: string; actorId?: string } = {};
+    if (last) opts.before = last.createdAt;
+    if (auditFilters.kind) opts.kind = auditFilters.kind;
+    if (auditFilters.actorId) opts.actorId = auditFilters.actorId;
+    await fetchAuditPage(org.orgId, opts);
+  }
+
+  async function handleExport() {
+    if (!org) return;
+    try {
+      const adminSig = signAdminAction(org.orgId, 'export_audit');
+      if (!adminSig) return;
+      const params = new URLSearchParams({
+        aegisId,
+        sig: adminSig.sig,
+        ts: String(adminSig.ts),
+      });
+      const res = await fetch(`${SERVER_URL}/work/org/${org.orgId}/audit/export?${params.toString()}`);
+      if (!res.ok) { Alert.alert('Error', 'No se pudo exportar el log.'); return; }
+      const csv = await res.text();
+      const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+      const path = `${FS.cacheDirectory ?? ''}audit_export_${Date.now()}.csv`;
+      await FS.writeAsStringAsync(path, csv, { encoding: FS.EncodingType.UTF8 });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Exportar log de auditoría' });
+      } else {
+        Alert.alert('Exportado', `Archivo guardado en: ${path}`);
+      }
+    } catch (e) {
+      Alert.alert('Error', (e as Error).message);
+    }
+  }
+
+  const renderItem = useCallback(({ item, index }: { item: WorkAuditEntry; index: number }) => (
+    <AuditEventRow
+      key={item.id}
+      entry={item}
+      t={t}
+      channels={channels}
+      last={index === auditLog.length - 1}
+    />
+  ), [t, channels, auditLog.length]);
+
+  const keyExtractor = useCallback((item: WorkAuditEntry) => item.id, []);
+
+  const ListFooter = (
+    <View style={{ padding: 14, alignItems: 'center' }}>
+      {auditLoading ? (
+        <ActivityIndicator size="small" color={t.accent} />
+      ) : auditHasMore ? (
+        <Pressable
+          onPress={() => void handleLoadMore()}
+          accessibilityLabel="Cargar más eventos de auditoría"
+          style={{ borderWidth: 1, borderColor: t.borderStrong, borderRadius: t.radiusS, paddingHorizontal: 18, paddingVertical: 9 }}
+        >
+          <Text style={{ fontFamily: t.font, fontSize: 13, color: t.text }}>Cargar más</Text>
+        </Pressable>
+      ) : auditLog.length > 0 ? (
+        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint }}>Fin del log</Text>
+      ) : null}
+    </View>
+  );
+
   return (
-    <View style={s.card}>
-      <View style={s.cardHeader}>
-        <Text style={s.cardTitle}>{i18nT('workDashboard.auditFullTitle')}</Text>
+    <View style={[s.card, { overflow: 'hidden' }]}>
+      {/* Header */}
+      <View style={[s.cardHeader, { gap: 8 }]}>
         <View style={[s.badge, { backgroundColor: t.accentDeep }]}>
           <View style={s.liveDot} />
-          <Text style={[s.badgeText, { color: t.accent }]}>{i18nT('workDashboard.auditLive')}</Text>
+          <Text style={[s.badgeText, { color: t.accent }]}>LIVE</Text>
         </View>
+        <Text style={[s.cardTitle, { flex: 1 }]}>Registro de auditoría</Text>
+        {isOwner && (
+          <Pressable
+            onPress={() => void handleExport()}
+            accessibilityLabel="Exportar log de auditoría como CSV"
+            hitSlop={8}
+          >
+            <I.Download size={18} color={t.textDim} />
+          </Pressable>
+        )}
       </View>
-      {auditLog.length === 0 ? (
-        <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint, padding: 14 }}>{i18nT('workDashboard.noAuditYet')}</Text>
-      ) : (
-        auditLog.map((ev, i) => (
-          <AuditEventView
-            key={ev.id}
-            time={fmtTime(ev.created_at)}
-            kind={ev.kind}
-            message={ev.message}
-            t={t}
-            last={i === auditLog.length - 1}
+
+      {/* Filter bar */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 10, gap: 8, flexDirection: 'row' }}
+        style={{ borderBottomWidth: 1, borderBottomColor: t.divider }}
+      >
+        {/* "Todos" chip */}
+        <Pressable
+          onPress={() => handleChip(null)}
+          accessibilityLabel="Filtro: Todos"
+          style={{
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            borderRadius: 20,
+            backgroundColor: activeKindChip === null ? t.accent : t.surface2,
+            borderWidth: 1,
+            borderColor: activeKindChip === null ? t.accent : t.border,
+          }}
+        >
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: activeKindChip === null ? t.bg : t.textDim, letterSpacing: 0.8 }}>
+            Todos
+          </Text>
+        </Pressable>
+
+        {KIND_CHIPS.map((chip) => {
+          const active = activeKindChip === chip.kinds[0];
+          return (
+            <Pressable
+              key={chip.label}
+              onPress={() => handleChip(chip.kinds[0])}
+              accessibilityLabel={`Filtro: ${chip.label}`}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 20,
+                backgroundColor: active ? t.accent : t.surface2,
+                borderWidth: 1,
+                borderColor: active ? t.accent : t.border,
+              }}
+            >
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: active ? t.bg : t.textDim, letterSpacing: 0.8 }}>
+                {chip.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+
+        {/* Actor search */}
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: t.surface2,
+          borderRadius: 20,
+          borderWidth: 1,
+          borderColor: t.border,
+          paddingHorizontal: 10,
+          minWidth: 120,
+          gap: 6,
+        }}>
+          <I.Search size={11} color={t.textDim} />
+          <TextInput
+            value={actorQuery}
+            onChangeText={setActorQuery}
+            placeholder="Actor ID…"
+            placeholderTextColor={t.textFaint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            accessibilityLabel="Filtrar por actor ID"
+            style={{ fontFamily: t.fontMono, fontSize: 10, color: t.text, paddingVertical: 0, flex: 1 }}
           />
-        ))
+        </View>
+      </ScrollView>
+
+      {/* Event list */}
+      {auditLog.length === 0 && !auditLoading ? (
+        <View style={{ padding: 24, alignItems: 'center', gap: 8 }}>
+          <I.Archive size={28} color={t.textFaint} />
+          <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint, textAlign: 'center' }}>
+            Sin eventos para mostrar
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={auditLog}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          scrollEnabled={false}
+          removeClippedSubviews={false}
+          ListFooterComponent={ListFooter}
+        />
       )}
     </View>
   );

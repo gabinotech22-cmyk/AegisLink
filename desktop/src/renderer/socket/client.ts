@@ -30,13 +30,16 @@ import {
 import {
   initRatchet,
   ratchetDecrypt,
+  ratchetEncrypt,
   trimOldSkippedKeys,
   MAX_SKIPPED_KEYS,
   type RatchetState,
 } from '../crypto/signal/ratchet';
+import { stripAndPad } from '../crypto/metadata';
 import { loadRatchetSession, saveRatchetSession } from '../db/local';
 import { showIncomingNotification } from '../notifications/push';
 import { useTyping } from '../store/typing';
+import { useWorkPresence } from '../store/workPresence';
 
 const DEV = import.meta.env.DEV;
 
@@ -69,7 +72,19 @@ interface WireSealedEnvelope {
   ciphertext: string;
   nonce: string;
   createdAt?: number;
+  /** Multi-device self-encrypted copy marker. See mobile counterpart. */
+  selfCopy?: boolean;
+  /**
+   * X25519 public key of the sender injected by the relay at delivery time.
+   * Lets the desktop decrypt messages from unknown senders (and auto-save them
+   * as contacts) without a separate HTTP round-trip to the identity directory.
+   * Only present on online-delivered envelopes.
+   */
+  senderPublicKeyB64?: string;
 }
+
+const SECURE_SELF_RATCHET_KEY = (myAegisId: string) =>
+  `aegis.${getSlotPrefix()}self.ratchet.${myAegisId}`;
 
 interface WireChallenge {
   ephemeralPubKey: string;
@@ -312,6 +327,13 @@ async function uploadPreKeys(identity: Identity) {
     if (DEV) console.error('[socket] Failed to persist prekey secrets:', err);
   }
 
+  let deviceId: string | null = null;
+  try {
+    deviceId = await window.aegis.secureStorage.get('aegis.deviceId');
+  } catch {
+    // Non-fatal: relay accepts prekeys:upload without deviceId
+  }
+
   return new Promise<void>((resolve, reject) => {
     socket!.emit(
       'prekeys:upload',
@@ -322,6 +344,7 @@ async function uploadPreKeys(identity: Identity) {
           signatureB64: preKeys.signedPreKey.signatureB64,
         },
         oneTimePreKeys: preKeys.oneTimePreKeys,
+        ...(deviceId !== null ? { deviceId } : {}),
       },
       (ack: { ok: boolean; error?: string }) => {
         if (ack?.ok) resolve();
@@ -342,9 +365,30 @@ export function connect(identity: Identity): Socket {
   if (socket) socket.disconnect();
 
   authenticated = false;
+
+  // Resolve (or generate) a stable deviceId before connecting.
+  // We use an IIFE that runs asynchronously in the background and patches
+  // socket.auth once the value is ready.  The socket is created immediately
+  // so callers can attach event listeners straight away.
+  void (async () => {
+    try {
+      const stored = await window.aegis.secureStorage.get('aegis.deviceId');
+      const deviceId: string = stored ?? await (async () => {
+        const id = crypto.randomUUID();
+        await window.aegis.secureStorage.set('aegis.deviceId', id);
+        return id;
+      })();
+      if (socket) {
+        (socket.auth as Record<string, string>)['deviceId'] = deviceId;
+      }
+    } catch {
+      // Non-fatal: relay accepts connections without deviceId
+    }
+  })();
+
   socket = io(RELAY_URL, {
     transports: ['websocket'],
-    auth: { aegisId: identity.aegisId },
+    auth: { aegisId: identity.aegisId, platform: 'desktop' },
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 8000,
@@ -470,10 +514,19 @@ export function connect(identity: Identity): Socket {
     void useMessages.getState().remoteDelete(from, msgId);
   });
 
-  socket.on('typing', ({ from, isTyping }: { from: string; isTyping: boolean }) => {
-    useTyping.getState().setTyping(from, isTyping);
-    if (isTyping) {
-      setTimeout(() => useTyping.getState().setTyping(from, false), 5000);
+  socket.on('typing', ({ from, isTyping, channelId }: { from: string; isTyping: boolean; channelId?: string }) => {
+    if (channelId) {
+      // Channel-scoped typing indicator (Work channels)
+      useWorkPresence.getState().setTyping(channelId, from, isTyping);
+      if (isTyping) {
+        setTimeout(() => useWorkPresence.getState().setTyping(channelId, from, false), 5000);
+      }
+    } else {
+      // 1:1 DM typing indicator
+      useTyping.getState().setTyping(from, isTyping);
+      if (isTyping) {
+        setTimeout(() => useTyping.getState().setTyping(from, false), 5000);
+      }
     }
   });
 
@@ -481,7 +534,59 @@ export function connect(identity: Identity): Socket {
     await handleIncoming(env, identity);
   });
 
+  socket.on('channel:msg', (msg: import('../store/workMessages').WorkMessage) => {
+    import('../store/workMessages').then(({ useWorkMessages }) => {
+      const store = useWorkMessages.getState();
+      if (msg.parent_id) {
+        store.appendThreadReply(msg);
+      } else {
+        store.append(msg);
+      }
+    }).catch(() => {});
+  });
+
+  socket.on('channel:thread_update', (ev: { parentId: string; replyCount: number }) => {
+    import('../store/workMessages').then(({ useWorkMessages }) => {
+      useWorkMessages.getState().updateReplyCount(ev.parentId, ev.replyCount);
+    }).catch(() => {});
+  });
+
+  socket.on('work:presence_sync', (data: { onlineIds: string[] }) => {
+    useWorkPresence.getState().setOnline(data.onlineIds);
+  });
+
+  socket.on('work:presence_join', (data: { aegisId: string }) => {
+    useWorkPresence.getState().addOnline(data.aegisId);
+  });
+
+  socket.on('work:presence_leave', (data: { aegisId: string }) => {
+    useWorkPresence.getState().removeOnline(data.aegisId);
+  });
+
   return socket;
+}
+
+export function joinChannel(channelId: string, orgId: string): void {
+  socket?.emit('channel:join', { channelId, orgId });
+}
+
+export function emitChannelMsg(payload: {
+  id: string;
+  channelId: string;
+  orgId: string;
+  body: string;
+  type: string;
+  parent_id?: string;
+}): void {
+  socket?.emit('channel:msg', payload);
+}
+
+export function emitDeleteChannelMsg(payload: {
+  channelId: string;
+  orgId: string;
+  messageId: string;
+}): void {
+  socket?.emit('channel:delete_msg', payload);
 }
 
 async function getOrCreateSession(
@@ -915,6 +1020,12 @@ async function decryptAndAppend(
 }
 
 async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
+  // Multi-device self-copy fast path (see mobile counterpart for rationale).
+  if (env.selfCopy === true && env.to === identity.aegisId) {
+    await handleSelfCopy(env, identity);
+    return;
+  }
+
   const contacts = useContacts.getState().contacts;
   let matchedContact = env.from ? contacts.find((c) => c.aegisId === env.from) : null;
 
@@ -923,8 +1034,24 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
   if (!matchedContact && env.from && AEGIS_ID_RE.test(env.from)) {
     try {
       matchedContact = await useContacts.getState().addByAegisId(env.from);
-    } catch (e) {
-      if (DEV) console.warn('[socket] failed to auto-add unknown sender', e);
+    } catch {
+      // API unreachable — fall back to the sender's public key embedded in the
+      // envelope by the relay.  This lets the desktop receive and decrypt the
+      // first message from an unknown peer even when the identity-directory
+      // HTTPS endpoint is temporarily unavailable (e.g. nginx not yet deployed).
+      if (env.senderPublicKeyB64) {
+        try {
+          matchedContact = await useContacts.getState().addFromEnvelope(
+            env.from,
+            env.senderPublicKeyB64,
+          );
+          if (DEV) console.log('[socket] auto-added unknown sender from envelope key:', env.from);
+        } catch (e2) {
+          if (DEV) console.warn('[socket] addFromEnvelope also failed:', e2);
+        }
+      } else {
+        if (DEV) console.warn('[socket] unknown sender and no senderPublicKeyB64 in envelope — dropping');
+      }
     }
   }
 
@@ -971,6 +1098,278 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
     console.warn(
       '[socket] envelope from unknown sender — add the peer as a contact first to decrypt their messages',
     );
+}
+
+// ─── Self-encrypted copy (multi-device sync) ─────────────────────────────────
+// Ported from mobile/src/socket/client.ts — see that file for full rationale.
+
+async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(SECURE_SELF_RATCHET_KEY(myAegisId));
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    s.RK = reviveBytes(s.RK);
+    s.CKs = reviveBytes(s.CKs);
+    s.CKr = reviveBytes(s.CKr);
+    s.DHr = reviveBytes(s.DHr);
+    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
+    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
+    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    return s as RatchetState;
+  } catch (e) {
+    if (DEV) console.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
+    return null;
+  }
+}
+
+async function saveSelfRatchet(myAegisId: string, state: RatchetState): Promise<void> {
+  trimOldSkippedKeys(state, MAX_SKIPPED_KEYS);
+  const serialized = {
+    RK: state.RK,
+    DHs: state.DHs,
+    DHr: state.DHr,
+    CKs: state.CKs,
+    CKr: state.CKr,
+    Ns: state.Ns,
+    Nr: state.Nr,
+    PN: state.PN,
+    MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
+    x3dhInit: state.x3dhInit,
+  };
+  await SecureStore.setItemAsync(
+    SECURE_SELF_RATCHET_KEY(myAegisId),
+    JSON.stringify(serialized),
+  );
+}
+
+async function initSelfSession(identity: Identity, sock: Socket): Promise<RatchetState> {
+  const bundle = await new Promise<PreKeyBundle>((resolve, reject) => {
+    sock.emit('prekeys:fetch', { aegisId: identity.aegisId }, (ack: { ok: boolean; bundle?: PreKeyBundle; error?: string }) => {
+      if (!ack?.ok || !ack.bundle) reject(new Error(ack?.error ?? 'self_prekeys_fetch_failed'));
+      else resolve(ack.bundle);
+    });
+  });
+
+  bundle.signingPublicKeyB64 = identity.signingPublicKeyB64;
+  bundle.identityKeyB64 = identity.publicKeyB64;
+
+  const x3dh = performX3DH(identity, bundle);
+  const ratchetState = initRatchet(
+    x3dh.rootKey,
+    decodeBase64(bundle.signedPreKey.publicKeyB64),
+    true,
+  );
+  ratchetState.x3dhInit = {
+    aliceEKB64: x3dh.myEphemeralPublicKeyB64,
+    spkId: bundle.signedPreKey.keyId,
+    opkId: bundle.oneTimePreKey ? bundle.oneTimePreKey.keyId : null,
+  };
+  return ratchetState;
+}
+
+interface SelfCopyMeta {
+  viewOnce?: boolean;
+  ephemeralSeconds?: number;
+}
+
+async function sendSelfCopy(
+  sock: Socket,
+  identity: Identity,
+  recipientAegisId: string,
+  msgId: string,
+  innerPayloadJson: string,
+  meta: SelfCopyMeta,
+): Promise<void> {
+  if (meta.viewOnce) return;
+  if (meta.ephemeralSeconds !== undefined && meta.ephemeralSeconds > 0 && meta.ephemeralSeconds < 5) return;
+
+  try {
+    let ratchet = await getSelfRatchet(identity.aegisId);
+    if (!ratchet) {
+      ratchet = await initSelfSession(identity, sock);
+    }
+
+    const selfPayloadObj = {
+      type: 'self_copy',
+      selfCopy: true,
+      msgId,
+      chatId: recipientAegisId,
+      inner: innerPayloadJson,
+      sentAt: Date.now(),
+    };
+    const selfPayload = JSON.stringify(selfPayloadObj);
+
+    const { ciphertext, nonce, header } = ratchetEncrypt(ratchet, new TextEncoder().encode(selfPayload));
+    await saveSelfRatchet(identity.aegisId, ratchet);
+
+    const innerPayload: Record<string, unknown> = {
+      v: 2,
+      from: identity.aegisId,
+      selfCopy: true,
+      ratchet: {
+        ratchetKeyB64: encodeBase64(header.ratchetKey),
+        n: header.n,
+        pn: header.pn,
+        ciphertextB64: encodeBase64(ciphertext),
+        nonceB64: encodeBase64(nonce),
+      },
+    };
+    if (ratchet.x3dhInit) {
+      innerPayload.x3dh = ratchet.x3dhInit;
+      delete ratchet.x3dhInit;
+      await saveSelfRatchet(identity.aegisId, ratchet);
+    }
+
+    const innerBytes = stripAndPad(innerPayload);
+    const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
+    const outerCiphertext = nacl.box(innerBytes, outerNonce, identity.publicKey, identity.secretKey);
+
+    sock.emit('envelope', {
+      id: crypto.randomUUID(),
+      to: identity.aegisId,
+      ciphertext: encodeBase64(outerCiphertext),
+      nonce: encodeBase64(outerNonce),
+      selfCopy: true,
+    });
+  } catch (e) {
+    if (DEV) console.warn('[socket] sendSelfCopy failed (non-fatal):', (e as Error).message);
+  }
+}
+
+async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Promise<void> {
+  const parsed = openEnvelope(
+    { ciphertextB64: env.ciphertext, nonceB64: env.nonce },
+    identity.publicKey,
+    identity.secretKey,
+  );
+  if (!parsed) {
+    if (DEV) console.warn('[socket] self-copy outer decrypt failed');
+    return;
+  }
+  if (parsed.from !== identity.aegisId) {
+    if (DEV) console.warn('[socket] self-copy from mismatch — dropping');
+    return;
+  }
+  if ((parsed as { selfCopy?: unknown }).selfCopy !== true) {
+    if (DEV) console.warn('[socket] self-copy inner flag missing — dropping');
+    return;
+  }
+
+  let ratchet = await getSelfRatchet(identity.aegisId);
+  if (!ratchet) {
+    if (!parsed.x3dh) {
+      if (DEV) console.warn('[socket] self-copy: no session and no X3DH headers — dropping');
+      return;
+    }
+    const spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    if (!spkSec) {
+      if (DEV) console.warn('[socket] self-copy: missing local SPK secret — dropping (multi-device SPK sync not implemented)');
+      return;
+    }
+    const mySpkSecret = decodeBase64(spkSec);
+
+    let myOpkSecret: Uint8Array | null = null;
+    const x3dhInit = parsed.x3dh as { aliceEKB64: string; spkId: number; opkId: number | null };
+    if (x3dhInit.opkId !== null) {
+      const opkB64 = await SecureStore.getItemAsync(opkSecretKey(x3dhInit.opkId));
+      if (opkB64) {
+        myOpkSecret = decodeBase64(opkB64);
+        void SecureStore.deleteItemAsync(opkSecretKey(x3dhInit.opkId));
+      }
+    }
+    const rootKey = performX3DHReceiver(
+      identity,
+      mySpkSecret,
+      myOpkSecret,
+      identity.publicKey,
+      decodeBase64(x3dhInit.aliceEKB64),
+    );
+    const spkPub = nacl.scalarMult.base(mySpkSecret);
+    const rHeader = parsed.ratchet as { ratchetKeyB64: string };
+    ratchet = initRatchet(rootKey, decodeBase64(rHeader.ratchetKeyB64), false, {
+      publicKey: spkPub,
+      secretKey: mySpkSecret,
+    });
+  }
+
+  const r = parsed.ratchet as { ratchetKeyB64: string; n: number; pn: number; ciphertextB64: string; nonceB64: string };
+  let plaintextBytes: Uint8Array | null;
+  try {
+    plaintextBytes = ratchetDecrypt(
+      ratchet,
+      { ratchetKey: decodeBase64(r.ratchetKeyB64), n: r.n, pn: r.pn },
+      decodeBase64(r.ciphertextB64),
+      decodeBase64(r.nonceB64),
+    );
+  } catch (e) {
+    if (DEV) console.warn('[socket] self-copy ratchet decrypt threw:', (e as Error).message);
+    return;
+  }
+  if (!plaintextBytes) {
+    if (DEV) console.warn('[socket] self-copy ratchet decrypt failed (null)');
+    return;
+  }
+  await saveSelfRatchet(identity.aegisId, ratchet);
+
+  let selfBody: string;
+  try {
+    selfBody = encodeUTF8(plaintextBytes);
+  } catch {
+    return;
+  }
+
+  let selfObj: {
+    type?: string;
+    msgId?: string;
+    chatId?: string;
+    inner?: string;
+    sentAt?: number;
+  };
+  try {
+    selfObj = JSON.parse(selfBody);
+  } catch {
+    if (DEV) console.warn('[socket] self-copy body is not JSON — dropping');
+    return;
+  }
+  if (selfObj.type !== 'self_copy' || !selfObj.msgId || !selfObj.chatId || !selfObj.inner) {
+    if (DEV) console.warn('[socket] self-copy malformed payload — dropping');
+    return;
+  }
+
+  const existing = useMessages.getState().byChat[selfObj.chatId];
+  if (existing && existing.some((m) => m.id === selfObj.msgId)) {
+    return;
+  }
+
+  let originalPayload: {
+    type?: string;
+    text?: string;
+    replyToId?: string;
+    expiresAt?: number | null;
+  } = {};
+  try {
+    originalPayload = JSON.parse(selfObj.inner);
+  } catch {
+    if (DEV) console.warn('[socket] self-copy inner payload not JSON — falling back to raw');
+  }
+
+  const displayBody = typeof originalPayload.text === 'string' ? originalPayload.text : selfObj.inner;
+
+  await useMessages.getState().append({
+    id: selfObj.msgId,
+    chatId: selfObj.chatId,
+    direction: 'out',
+    body: displayBody,
+    createdAt: selfObj.sentAt ?? Date.now(),
+    replyToId: originalPayload.replyToId ?? null,
+    type: (() => {
+      const raw = originalPayload.type as string | undefined;
+      if (raw === 'location') return 'location' as const;
+      if (raw === 'view_once') return 'view_once' as const;
+      return 'text' as const; // wire type 'direct_msg' maps to MessageType 'text'
+    })(),
+    expiresAt: originalPayload.expiresAt ?? null,
+  });
 }
 
 export function disconnect(): void {
@@ -1076,6 +1475,20 @@ export async function sendMessage(opts: {
       },
     );
   });
+
+  // Multi-device sync — best-effort self-encrypted copy.
+  const ephemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
+  void sendSelfCopy(
+    socket!,
+    opts.identity,
+    opts.recipientAegisId,
+    id,
+    payload,
+    {
+      viewOnce: msgType === 'view_once',
+      ephemeralSeconds,
+    },
+  );
 }
 
 /**

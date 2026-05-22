@@ -247,8 +247,22 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 export async function saveIdentity(v: StoredIdentity): Promise<void> {
-  await SecureStore.setItemAsync(getSecretKeySlot(), v.secretKeyB64);
-  await SecureStore.setItemAsync(getSignSecretKeySlot(), v.signingSecretKeyB64);
+  // expo-secure-store can fail with NullPointerException on Android if the
+  // Keystore has stale entries from a previous installation (classic "update
+  // over old APK" corruption).  Attempt once; on failure, clear the stale
+  // entries and retry exactly once so a fresh install recovers automatically.
+  const persistKeys = async () => {
+    await SecureStore.setItemAsync(getSecretKeySlot(), v.secretKeyB64);
+    await SecureStore.setItemAsync(getSignSecretKeySlot(), v.signingSecretKeyB64);
+  };
+  try {
+    await persistKeys();
+  } catch {
+    // Clear potentially corrupted entries and retry.
+    await SecureStore.deleteItemAsync(getSecretKeySlot()).catch(() => {});
+    await SecureStore.deleteItemAsync(getSignSecretKeySlot()).catch(() => {});
+    await persistKeys(); // if this throws again, surface the real error
+  }
   const d = await db();
   await d.runAsync(
     `INSERT OR REPLACE INTO identity (slot, aegis_id, public_key_b64, signing_public_key_b64, created_at)

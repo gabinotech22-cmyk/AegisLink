@@ -55,6 +55,13 @@ Los agentes disponen de las siguientes guías de diseño y habilidades avanzadas
 - [react-native-performance](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/react-native-performance.md): Optimización de FPS, TTI, bundle y memory leaks en React Native/Expo 54. (Callstack)
 - [expo-native-ui](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/expo-native-ui.md): Patrones de UI nativa con Expo Router, SF Symbols, animaciones y TabBar. (Expo oficial)
 - [security-pen-testing](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/security-pen-testing.md): STRIDE, OWASP Mobile Top 10, detección de fugas de metadatos y checklists de PR. (alirezarezvani)
+- [swm-animations-gestures](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/swm-animations-gestures.md): Reanimated 4 a 120fps, gestos compuestos, Skia canvas. (Software Mansion) → mobile-lead
+- [expo-eas-cicd](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/expo-eas-cicd.md): EAS Build completo, OTA updates, GitHub Actions pipeline de release. (Expo oficial) → infra-lead
+- [a11y-mobile](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/a11y-mobile.md): Accesibilidad WCAG 2.2 para React Native — VoiceOver/TalkBack, roles, contraste. (senaiverse) → mobile-lead + qa-lead
+
+## Plan de Mejoras Activo
+
+Ver `.claude/PLAN_DIRECTOR.md` — 6 épicas priorizadas con bloques de delegación listos para copiar.
 
 ## Protocolo de delegación
 

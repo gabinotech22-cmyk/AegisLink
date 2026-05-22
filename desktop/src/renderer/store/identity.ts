@@ -122,6 +122,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
   async hydrate() {
     set({ status: 'loading', error: null });
+    // Safety net: if IPC is unavailable or hangs, resolve after 8 s so the
+    // splash can dismiss and onboarding can render instead of a black screen.
+    const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
+      Promise.race([p, new Promise<null>((res) => setTimeout(() => res(null), ms))]);
     try {
       const { usePreferences } = await import('./preferences');
       if (usePreferences.getState().duressActive) {
@@ -152,8 +156,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         return;
       }
 
-      const activeSlotId = (await secureStorage().get('aegis.activeSlotId')) || 'self';
-      const slotsListRaw = await secureStorage().get('aegis.slotsList');
+      const activeSlotId = (await withTimeout(secureStorage().get('aegis.activeSlotId'), 8000)) || 'self';
+      const slotsListRaw = await withTimeout(secureStorage().get('aegis.slotsList'), 8000);
       const slotsList = slotsListRaw ? (JSON.parse(slotsListRaw) as string[]) : ['self'];
 
       setActiveDbSlot(activeSlotId);

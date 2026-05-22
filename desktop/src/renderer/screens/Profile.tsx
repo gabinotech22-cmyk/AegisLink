@@ -56,8 +56,14 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
   const updateProfile = useIdentity((s) => s.updateProfile);
   const updateStatus = useIdentity((s) => s.updateStatus);
 
+  const createWorkSlot = useIdentity((s) => s.createWorkSlot);
+  const switchSlot = useIdentity((s) => s.switchSlot);
+  const slotsList = useIdentity((s) => s.slotsList);
+
   // identityId drives which tab is shown in the profile card (local UI state)
   const [identityId, setIdentityId] = useState<ProfileType>(activeProfile);
+  const [generatingWork, setGeneratingWork] = useState(false);
+  const [workError, setWorkError] = useState<string | null>(null);
 
   const displayName = storeDisplayName;
   const workDisplayName = storeWorkDisplayName;
@@ -89,6 +95,28 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
   const curColor = identityId === 'personal' ? avatarColor : '#6366f1';
   const curImage = identityId === 'personal' ? avatarImage : null;
   const curStatus = identityId === 'personal' ? profileStatus : workProfileStatus;
+
+  async function handleWorkTabClick() {
+    if (slotsList.includes('work')) {
+      setIdentityId('work');
+      void setActiveProfile('work');
+      await switchSlot('work').catch(() => {});
+    } else if (onWorkGeneration) {
+      onWorkGeneration();
+    } else {
+      setWorkError(null);
+      setGeneratingWork(true);
+      try {
+        await createWorkSlot();
+        await switchSlot('work');
+        setIdentityId('work');
+      } catch (e) {
+        setWorkError((e as Error).message || 'Key generation failed');
+      } finally {
+        setGeneratingWork(false);
+      }
+    }
+  }
 
   function openEdit() {
     setEditName(curName);
@@ -165,27 +193,46 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
           <div style={{ display: 'flex', flexDirection: 'row', padding: 3, backgroundColor: t.surface2, borderRadius: t.radiusS }}>
             {ids.map((id) => {
               const active = identityId === id.id;
+              const isWork = id.id === 'work';
+              const workExists = slotsList.includes('work');
               return (
                 <button
                   key={id.id}
-                  onClick={(e) => { e.stopPropagation(); setIdentityId(id.id); void setActiveProfile(id.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isWork) {
+                      void handleWorkTabClick();
+                    } else {
+                      setIdentityId('personal');
+                      void setActiveProfile('personal');
+                    }
+                  }}
                   aria-label={`Switch to ${id.id} profile`}
-                  style={{ flex: 1, paddingTop: 8, paddingBottom: 8, backgroundColor: active ? t.surface : 'transparent', borderRadius: t.radiusS - 1, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  style={{ flex: 1, paddingTop: 8, paddingBottom: 8, backgroundColor: active ? t.surface : 'transparent', borderRadius: t.radiusS - 1, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
                 >
-                  <span style={{ fontFamily: t.font, fontSize: 12, fontWeight: active ? '600' : '400', color: active ? t.text : t.textDim }}>
-                    {id.id === 'personal' ? 'Personal' : 'Work'}
-                  </span>
+                  {generatingWork && isWork
+                    ? <span style={{ fontFamily: t.fontMono, fontSize: 10, color: '#8b5cf6' }}>Generating…</span>
+                    : <>
+                        <span style={{ fontFamily: t.font, fontSize: 12, fontWeight: active ? '600' : '400', color: active ? t.text : t.textDim }}>
+                          {id.id === 'personal' ? 'Personal' : 'Work'}
+                        </span>
+                        {isWork && !workExists && <span style={{ fontFamily: t.fontMono, fontSize: 9, color: '#8b5cf6' }}>NEW</span>}
+                      </>
+                  }
                 </button>
               );
             })}
             <button
-              onClick={(e) => { e.stopPropagation(); window.alert('Multiple identities — coming soon'); }}
+              onClick={(e) => { e.stopPropagation(); void handleWorkTabClick(); }}
               style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8, background: 'none', border: 'none', cursor: 'pointer' }}
-              aria-label="Add identity"
+              aria-label="Add work identity"
             >
               <span style={{ color: t.textFaint, fontSize: 14 }}>+</span>
             </button>
           </div>
+          {workError && (
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.danger, display: 'block', marginTop: 8 }}>{workError}</span>
+          )}
           <span style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 12, lineHeight: '16px', display: 'block' }}>
             Separate identities are cryptographically isolated — contacts and messages never cross profiles.
           </span>

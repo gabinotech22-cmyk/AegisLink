@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useLocale } from '../i18n/useLocale';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
@@ -20,8 +22,6 @@ interface Props {
   onTab: (tab: Tab) => void;
   onNav: (name: NavTarget) => void;
 }
-
-type LangOption = 'en' | 'it';
 
 export function PrivacyScreen({ onTab, onNav }: Props) {
   const { t, toggle } = useTheme();
@@ -50,7 +50,8 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   function setScreenshot(v: boolean) { void setPref('blockScreenshots', v); }
   function setTor(v: boolean) { void setPref('routeViaTor', v); }
 
-  const [locale, setLocale] = useState<LangOption>('en');
+  const { locale, setLocale } = useLocale();
+  const { t: i18nT } = useTranslation();
 
   const isWork = activeProfile === 'work';
   const WORK_ACCENT = '#6366f1';
@@ -117,7 +118,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
           </Section>
         )}
 
-        <Section t={t} label="LANGUAGE">
+        <Section t={t} label={i18nT('privacy.languageSection') || "LANGUAGE"}>
           <LanguagePicker t={t} locale={locale} onSelect={setLocale} />
         </Section>
 
@@ -168,10 +169,12 @@ function ModePicker({ t, dark, onToggle }: { t: Theme; dark: boolean; onToggle: 
   );
 }
 
-function LanguagePicker({ t, locale, onSelect }: { t: Theme; locale: LangOption; onSelect: (l: LangOption) => void }) {
-  const opts: { id: LangOption; label: string }[] = [
-    { id: 'en', label: 'English' },
-    { id: 'it', label: 'Italiano' },
+function LanguagePicker({ t, locale, onSelect }: { t: Theme; locale: string; onSelect: (l: 'en' | 'it' | 'es') => void }) {
+  const { t: i18nT } = useTranslation();
+  const opts: { id: 'en' | 'it' | 'es'; label: string }[] = [
+    { id: 'en', label: i18nT('privacy.languageEnglish') || 'English' },
+    { id: 'it', label: i18nT('privacy.languageItalian') || 'Italiano' },
+    { id: 'es', label: i18nT('privacy.languageSpanish') || 'Español' },
   ];
   return (
     <div style={{ padding: 14 }}>

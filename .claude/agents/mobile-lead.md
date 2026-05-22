@@ -111,6 +111,8 @@ const body = `[image:data:image/jpeg;base64,${b64}]`;
 ## Skills Avanzadas del Agente
 - [expo-native-security](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/expo-native-security.md): Guía de APIs nativas de Expo 54, protección contra captura de pantallas y trituración de archivos.
 - [secure-webrtc-signaling](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/secure-webrtc-signaling.md): Configuración de llamadas WebRTC nativas y protección de IP.
+- [swm-animations-gestures](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/swm-animations-gestures.md): Animaciones Reanimated 4 a 120fps, gestos compuestos, Skia canvas, reduce-motion. Usar para transiciones, swipe en chat, animaciones de llamada, modo pánico.
+- [a11y-mobile](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/a11y-mobile.md): Accesibilidad WCAG 2.2 para React Native — roles, focus management, contraste, VoiceOver/TalkBack. Aplicar a toda pantalla nueva antes de shipar.
 
 ## Reglas de fidelidad al diseño
 

@@ -18,6 +18,7 @@ const USE_PG = DATABASE_URL.startsWith('postgres://') || DATABASE_URL.startsWith
 
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 // Lazily-imported DatabaseSync class (ESM-safe: we import at module level but
 // only construct when needed, which is fine since node:sqlite is always available
@@ -52,7 +53,8 @@ function initSqliteSchema(db: DatabaseSync) {
       ciphertext_b64 TEXT NOT NULL,
       nonce_b64      TEXT NOT NULL,
       created_at     INTEGER NOT NULL,
-      expires_at     INTEGER NOT NULL DEFAULT 0
+      expires_at     INTEGER NOT NULL DEFAULT 0,
+      drained_by     TEXT NOT NULL DEFAULT '[]'
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_recipient
@@ -67,11 +69,13 @@ function initSqliteSchema(db: DatabaseSync) {
     );
 
     CREATE TABLE IF NOT EXISTS prekeys_signed (
-      aegis_id       TEXT PRIMARY KEY,
+      aegis_id       TEXT NOT NULL,
+      device_id      TEXT NOT NULL DEFAULT 'default',
       key_id         INTEGER NOT NULL,
       public_key_b64 TEXT NOT NULL,
       signature_b64  TEXT NOT NULL,
-      created_at     INTEGER NOT NULL
+      created_at     INTEGER NOT NULL,
+      PRIMARY KEY (aegis_id, device_id)
     );
 
     CREATE TABLE IF NOT EXISTS prekeys_onetime (
@@ -161,10 +165,15 @@ function initSqliteSchema(db: DatabaseSync) {
       org_id     TEXT NOT NULL,
       kind       TEXT NOT NULL,
       message    TEXT NOT NULL,
+      actor_id   TEXT,
+      target_id  TEXT,
+      channel_id TEXT,
+      metadata   TEXT,
       created_at INTEGER NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_work_audit_org ON work_audit_log(org_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_work_audit_actor ON work_audit_log(org_id, actor_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS work_invite_tokens (
       token      TEXT PRIMARY KEY,
@@ -194,12 +203,126 @@ function initSqliteSchema(db: DatabaseSync) {
 
     CREATE INDEX IF NOT EXISTS idx_workspace_members_ws
       ON workspace_members(workspace_id);
+
+    CREATE TABLE IF NOT EXISTS work_channels (
+      channel_id        TEXT PRIMARY KEY,
+      org_id            TEXT NOT NULL,
+      name              TEXT NOT NULL,
+      is_announcements  INTEGER NOT NULL DEFAULT 0,
+      created_at        INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_work_channels_org ON work_channels(org_id);
+
+    CREATE TABLE IF NOT EXISTS work_messages (
+      id          TEXT PRIMARY KEY,
+      channel_id  TEXT NOT NULL,
+      org_id      TEXT NOT NULL,
+      sender_id   TEXT NOT NULL,
+      body        TEXT NOT NULL,
+      type        TEXT NOT NULL DEFAULT 'text',
+      created_at  INTEGER NOT NULL,
+      is_pinned   INTEGER NOT NULL DEFAULT 0,
+      pinned_by   TEXT,
+      pinned_at   TEXT,
+      parent_id   TEXT,
+      reply_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_work_messages_channel
+      ON work_messages(channel_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_work_messages_parent
+      ON work_messages(parent_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS work_attachments (
+      id           TEXT PRIMARY KEY,
+      message_id   TEXT NOT NULL,
+      channel_id   TEXT NOT NULL,
+      org_id       TEXT NOT NULL,
+      blob_id      TEXT NOT NULL,
+      filename     TEXT NOT NULL,
+      mime_type    TEXT NOT NULL,
+      size_bytes   INTEGER NOT NULL,
+      uploaded_by  TEXT NOT NULL,
+      created_at   TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_work_attachments_channel
+      ON work_attachments(channel_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_work_attachments_message
+      ON work_attachments(message_id);
+
+    CREATE TABLE IF NOT EXISTS work_channel_permissions (
+      channel_id  TEXT NOT NULL,
+      org_id      TEXT NOT NULL,
+      role        TEXT NOT NULL,
+      can_send    INTEGER NOT NULL DEFAULT 1,
+      can_react   INTEGER NOT NULL DEFAULT 1,
+      can_upload  INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (channel_id, role)
+    );
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS work_messages_fts USING fts5(
+      id UNINDEXED,
+      body,
+      sender_id UNINDEXED,
+      channel_id UNINDEXED,
+      org_id UNINDEXED,
+      content='work_messages',
+      content_rowid='rowid'
+    );
+
+    CREATE TRIGGER IF NOT EXISTS work_messages_ai AFTER INSERT ON work_messages BEGIN
+      INSERT INTO work_messages_fts(rowid, id, body, sender_id, channel_id, org_id)
+      VALUES (new.rowid, new.id, new.body, new.sender_id, new.channel_id, new.org_id);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS work_messages_ad AFTER DELETE ON work_messages BEGIN
+      INSERT INTO work_messages_fts(work_messages_fts, rowid, id, body, sender_id, channel_id, org_id)
+      VALUES('delete', old.rowid, old.id, old.body, old.sender_id, old.channel_id, old.org_id);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS work_messages_au AFTER UPDATE ON work_messages BEGIN
+      INSERT INTO work_messages_fts(work_messages_fts, rowid, id, body, sender_id, channel_id, org_id)
+      VALUES('delete', old.rowid, old.id, old.body, old.sender_id, old.channel_id, old.org_id);
+      INSERT INTO work_messages_fts(rowid, id, body, sender_id, channel_id, org_id)
+      VALUES (new.rowid, new.id, new.body, new.sender_id, new.channel_id, new.org_id);
+    END;
   `);
 
   // Schema migrations for existing deployments
   try { db.exec(`ALTER TABLE identities ADD COLUMN signing_public_key_b64 TEXT NOT NULL DEFAULT '';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages DROP COLUMN sender;`); } catch { /* absent */ }
+  try { db.exec(`ALTER TABLE messages ADD COLUMN drained_by TEXT NOT NULL DEFAULT '[]';`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default';`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_messages ADD COLUMN pinned_by TEXT;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_messages ADD COLUMN pinned_at TEXT;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_messages ADD COLUMN parent_id TEXT;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_messages ADD COLUMN reply_count INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
+  // work_audit_log extended columns — migration guards for existing deployments
+  try { db.exec(`ALTER TABLE work_audit_log ADD COLUMN actor_id TEXT;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_audit_log ADD COLUMN target_id TEXT;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_audit_log ADD COLUMN channel_id TEXT;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_audit_log ADD COLUMN metadata TEXT;`); } catch { /* exists */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_work_audit_actor ON work_audit_log(org_id, actor_id, created_at DESC);`); } catch { /* exists */ }
+
+  // Channel-level permission table — migration guard for existing deployments
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS work_channel_permissions (
+      channel_id  TEXT NOT NULL,
+      org_id      TEXT NOT NULL,
+      role        TEXT NOT NULL,
+      can_send    INTEGER NOT NULL DEFAULT 1,
+      can_react   INTEGER NOT NULL DEFAULT 1,
+      can_upload  INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (channel_id, role)
+    );`);
+  } catch { /* exists */ }
 }
 
 // ── PostgreSQL backend ────────────────────────────────────────────────────────
@@ -231,7 +354,8 @@ async function initPgSchema(): Promise<void> {
       ciphertext_b64 TEXT NOT NULL,
       nonce_b64      TEXT NOT NULL,
       created_at     BIGINT NOT NULL,
-      expires_at     BIGINT NOT NULL DEFAULT 0
+      expires_at     BIGINT NOT NULL DEFAULT 0,
+      drained_by     TEXT NOT NULL DEFAULT '[]'
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_recipient
@@ -246,11 +370,13 @@ async function initPgSchema(): Promise<void> {
     );
 
     CREATE TABLE IF NOT EXISTS prekeys_signed (
-      aegis_id       TEXT PRIMARY KEY,
+      aegis_id       TEXT NOT NULL,
+      device_id      TEXT NOT NULL DEFAULT 'default',
       key_id         INTEGER NOT NULL,
       public_key_b64 TEXT NOT NULL,
       signature_b64  TEXT NOT NULL,
-      created_at     BIGINT NOT NULL
+      created_at     BIGINT NOT NULL,
+      PRIMARY KEY (aegis_id, device_id)
     );
 
     CREATE TABLE IF NOT EXISTS prekeys_onetime (
@@ -340,10 +466,15 @@ async function initPgSchema(): Promise<void> {
       org_id     TEXT NOT NULL,
       kind       TEXT NOT NULL,
       message    TEXT NOT NULL,
+      actor_id   TEXT,
+      target_id  TEXT,
+      channel_id TEXT,
+      metadata   TEXT,
       created_at BIGINT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_work_audit_org ON work_audit_log(org_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_work_audit_actor ON work_audit_log(org_id, actor_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS work_invite_tokens (
       token      TEXT PRIMARY KEY,
@@ -373,6 +504,66 @@ async function initPgSchema(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_workspace_members_ws
       ON workspace_members(workspace_id);
+
+    CREATE TABLE IF NOT EXISTS work_channels (
+      channel_id        TEXT PRIMARY KEY,
+      org_id            TEXT NOT NULL,
+      name              TEXT NOT NULL,
+      is_announcements  INTEGER NOT NULL DEFAULT 0,
+      created_at        BIGINT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_work_channels_org ON work_channels(org_id);
+
+    CREATE TABLE IF NOT EXISTS work_messages (
+      id          TEXT PRIMARY KEY,
+      channel_id  TEXT NOT NULL,
+      org_id      TEXT NOT NULL,
+      sender_id   TEXT NOT NULL,
+      body        TEXT NOT NULL,
+      type        TEXT NOT NULL DEFAULT 'text',
+      created_at  BIGINT NOT NULL,
+      is_pinned   INTEGER NOT NULL DEFAULT 0,
+      pinned_by   TEXT,
+      pinned_at   TEXT,
+      parent_id   TEXT,
+      reply_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_work_messages_channel
+      ON work_messages(channel_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_work_messages_parent
+      ON work_messages(parent_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS work_attachments (
+      id           TEXT PRIMARY KEY,
+      message_id   TEXT NOT NULL,
+      channel_id   TEXT NOT NULL,
+      org_id       TEXT NOT NULL,
+      blob_id      TEXT NOT NULL,
+      filename     TEXT NOT NULL,
+      mime_type    TEXT NOT NULL,
+      size_bytes   BIGINT NOT NULL,
+      uploaded_by  TEXT NOT NULL,
+      created_at   TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_work_attachments_channel
+      ON work_attachments(channel_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_work_attachments_message
+      ON work_attachments(message_id);
+
+    CREATE TABLE IF NOT EXISTS work_channel_permissions (
+      channel_id  TEXT NOT NULL,
+      org_id      TEXT NOT NULL,
+      role        TEXT NOT NULL,
+      can_send    INTEGER NOT NULL DEFAULT 1,
+      can_react   INTEGER NOT NULL DEFAULT 1,
+      can_upload  INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (channel_id, role)
+    );
   `);
 }
 
@@ -485,6 +676,8 @@ export interface MessageRow {
   nonce_b64: string;
   created_at: number;
   expires_at: number;
+  /** JSON-serialized string[]. Device IDs that have already drained this message. */
+  drained_by: string;
 }
 
 export interface PushTokenRow {
@@ -496,6 +689,8 @@ export interface PushTokenRow {
 
 export interface SignedPreKeyRow {
   aegis_id: string;
+  /** Device identifier for this prekey. Defaults to 'default' for legacy single-device clients. */
+  device_id: string;
   key_id: number;
   public_key_b64: string;
   signature_b64: string;
@@ -551,12 +746,55 @@ export interface WorkOrgRow {
   created_at: number;
 }
 
+// ── Role-based permissions ─────────────────────────────────────────────────────
+
+export type WorkRole = 'owner' | 'admin' | 'member';
+
+export interface WorkPermissions {
+  canManageMembers: boolean;
+  canCreateChannels: boolean;
+  canDeleteChannels: boolean;
+  canPinMessages: boolean;
+  canSendAnnouncements: boolean;
+  canInvite: boolean;
+  canKickMembers: boolean;
+  canPromoteToAdmin: boolean;
+  canDemoteAdmin: boolean;
+  canDeleteOrg: boolean;
+}
+
+export function getPermissions(role: WorkRole): WorkPermissions {
+  const isOwner = role === 'owner';
+  const isPrivileged = role === 'owner' || role === 'admin';
+  return {
+    canManageMembers:     isPrivileged,
+    canCreateChannels:    isPrivileged,
+    canDeleteChannels:    isOwner,
+    canPinMessages:       isPrivileged,
+    canSendAnnouncements: isPrivileged,
+    canInvite:            isPrivileged,
+    canKickMembers:       isPrivileged,
+    canPromoteToAdmin:    isOwner,
+    canDemoteAdmin:       isOwner,
+    canDeleteOrg:         isOwner,
+  };
+}
+
 export interface WorkMemberRow {
   org_id: string;
   aegis_id: string;
   team: string;
-  role: string;
+  role: WorkRole;
   joined_at: number;
+}
+
+export interface WorkChannelPermissionRow {
+  channel_id: string;
+  org_id: string;
+  role: WorkRole;
+  can_send: number;   // 0 | 1
+  can_react: number;  // 0 | 1
+  can_upload: number; // 0 | 1
 }
 
 export interface WorkDeviceRow {
@@ -573,8 +811,12 @@ export interface WorkDeviceRow {
 export interface WorkAuditRow {
   id: string;
   org_id: string;
-  kind: 'info' | 'warn' | 'ok';
+  kind: string;
   message: string;
+  actor_id: string | null;
+  target_id: string | null;
+  channel_id: string | null;
+  metadata: string | null;  // JSON string
   created_at: number;
 }
 
@@ -611,25 +853,69 @@ export const identityRepo = {
 
 // ── messageRepo ───────────────────────────────────────────────────────────────
 
+/**
+ * Maximum number of distinct device IDs that may drain a queued message before
+ * it is hard-deleted. Set to 2 as a conservative ceiling — most users have at
+ * most a primary phone + one linked desktop. Increase if you add more device
+ * slots in the product.
+ */
+const MAX_DRAIN_DEVICES = 2;
+
 export const messageRepo = {
-  async enqueue(row: MessageRow): Promise<void> {
+  async enqueue(row: Omit<MessageRow, 'drained_by'>): Promise<void> {
     const expiresAt = row.expires_at > 0 ? row.expires_at : row.created_at + MESSAGE_TTL_MS;
     await dbRun(
-      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by) VALUES (?, ?, ?, ?, ?, ?, '[]')`,
       [row.id, row.recipient, row.ciphertext_b64, row.nonce_b64, row.created_at, expiresAt]
     );
   },
-  async drainFor(recipient: string): Promise<MessageRow[]> {
-    return dbAll<MessageRow>(
-      `SELECT id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at
+
+  /**
+   * Fetch messages not yet drained by `deviceId` (or all messages when
+   * `deviceId` is undefined for backward compatibility).
+   */
+  async drainFor(recipient: string, deviceId?: string): Promise<MessageRow[]> {
+    const now = Date.now();
+    const rows = await dbAll<MessageRow>(
+      `SELECT id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by
        FROM messages WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)
        ORDER BY created_at ASC`,
-      [recipient, Date.now()]
+      [recipient, now]
     );
+    if (!deviceId) return rows;
+    return rows.filter((row) => {
+      const drained: string[] = (() => {
+        try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
+      })();
+      return !drained.includes(deviceId);
+    });
   },
-  async delete(id: string): Promise<void> {
-    await dbRun(`DELETE FROM messages WHERE id = ?`, [id]);
+
+  /**
+   * Mark a message as drained by `deviceId`. Deletes the row when all expected
+   * devices have drained it or the caller provides no deviceId (legacy path).
+   */
+  async delete(id: string, deviceId?: string): Promise<void> {
+    if (!deviceId) {
+      await dbRun(`DELETE FROM messages WHERE id = ?`, [id]);
+      return;
+    }
+    const row = await dbGet<Pick<MessageRow, 'drained_by'>>(
+      `SELECT drained_by FROM messages WHERE id = ?`,
+      [id]
+    );
+    if (!row) return;
+    const drained: string[] = (() => {
+      try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
+    })();
+    if (!drained.includes(deviceId)) drained.push(deviceId);
+    if (drained.length >= MAX_DRAIN_DEVICES) {
+      await dbRun(`DELETE FROM messages WHERE id = ?`, [id]);
+    } else {
+      await dbRun(`UPDATE messages SET drained_by = ? WHERE id = ?`, [JSON.stringify(drained), id]);
+    }
   },
+
   async purgeExpired(): Promise<number> {
     const result = await dbRun(`DELETE FROM messages WHERE expires_at > 0 AND expires_at <= ?`, [Date.now()]);
     return result.changes;
@@ -669,17 +955,18 @@ export const pushRepo = {
 
 export const prekeysRepo = {
   async upsertSigned(row: SignedPreKeyRow): Promise<void> {
+    const deviceId = row.device_id || 'default';
     if (USE_PG) {
       await dbRun(
-        `INSERT INTO prekeys_signed (aegis_id, key_id, public_key_b64, signature_b64, created_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(aegis_id) DO UPDATE SET key_id = EXCLUDED.key_id, public_key_b64 = EXCLUDED.public_key_b64, signature_b64 = EXCLUDED.signature_b64, created_at = EXCLUDED.created_at`,
-        [row.aegis_id, row.key_id, row.public_key_b64, row.signature_b64, row.created_at]
+        `INSERT INTO prekeys_signed (aegis_id, device_id, key_id, public_key_b64, signature_b64, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(aegis_id, device_id) DO UPDATE SET key_id = EXCLUDED.key_id, public_key_b64 = EXCLUDED.public_key_b64, signature_b64 = EXCLUDED.signature_b64, created_at = EXCLUDED.created_at`,
+        [row.aegis_id, deviceId, row.key_id, row.public_key_b64, row.signature_b64, row.created_at]
       );
     } else {
       await dbRun(
-        `INSERT INTO prekeys_signed (aegis_id, key_id, public_key_b64, signature_b64, created_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(aegis_id) DO UPDATE SET key_id = excluded.key_id, public_key_b64 = excluded.public_key_b64, signature_b64 = excluded.signature_b64, created_at = excluded.created_at`,
-        [row.aegis_id, row.key_id, row.public_key_b64, row.signature_b64, row.created_at]
+        `INSERT INTO prekeys_signed (aegis_id, device_id, key_id, public_key_b64, signature_b64, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(aegis_id, device_id) DO UPDATE SET key_id = excluded.key_id, public_key_b64 = excluded.public_key_b64, signature_b64 = excluded.signature_b64, created_at = excluded.created_at`,
+        [row.aegis_id, deviceId, row.key_id, row.public_key_b64, row.signature_b64, row.created_at]
       );
     }
   },
@@ -709,43 +996,72 @@ export const prekeysRepo = {
     signedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string };
     oneTimePreKey: { keyId: number; publicKeyB64: string } | null;
   } | null> {
-    const spk = await dbGet<{ key_id: number; public_key_b64: string; signature_b64: string }>(
-      `SELECT key_id, public_key_b64, signature_b64 FROM prekeys_signed WHERE aegis_id = ?`,
+    const bundles = await this.getBundles(aegisId);
+    return bundles.length > 0 ? bundles[0] : null;
+  },
+
+  /**
+   * Fetch an X3DH prekey bundle per device registered under `aegisId`.
+   * Each bundle includes a `device_id` field so the caller can address
+   * messages to specific devices (multi-device X3DH).
+   *
+   * One-time prekeys are consumed atomically — one OPK per device per call.
+   */
+  async getBundles(aegisId: string): Promise<Array<{
+    device_id: string;
+    signingPublicKeyB64: string;
+    signedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string };
+    oneTimePreKey: { keyId: number; publicKeyB64: string } | null;
+  }>> {
+    const spkRows = await dbAll<{ device_id: string; key_id: number; public_key_b64: string; signature_b64: string }>(
+      `SELECT device_id, key_id, public_key_b64, signature_b64 FROM prekeys_signed WHERE aegis_id = ?`,
       [aegisId]
     );
-    if (!spk) return null;
+    if (spkRows.length === 0) return [];
 
     const identity = await dbGet<{ signing_public_key_b64: string }>(
       `SELECT signing_public_key_b64 FROM identities WHERE aegis_id = ?`,
       [aegisId]
     );
     const signingPublicKeyB64 = identity?.signing_public_key_b64 ?? '';
-    if (signingPublicKeyB64 === '') return null;
+    if (signingPublicKeyB64 === '') return [];
 
-    // Pop OPK atomically
-    let opk: { key_id: number; public_key_b64: string } | undefined;
-    if (USE_PG) {
-      opk = await pgPopOpk(aegisId);
-    } else {
-      const db = getSqlite()!;
-      const found = db.prepare(
-        `SELECT key_id, public_key_b64 FROM prekeys_onetime WHERE aegis_id = ? ORDER BY key_id ASC LIMIT 1`
-      ).get(aegisId) as { key_id: number; public_key_b64: string } | undefined;
-      if (found) {
-        db.prepare(`DELETE FROM prekeys_onetime WHERE aegis_id = ? AND key_id = ?`).run(aegisId, found.key_id);
-        opk = found;
+    const result: Array<{
+      device_id: string;
+      signingPublicKeyB64: string;
+      signedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string };
+      oneTimePreKey: { keyId: number; publicKeyB64: string } | null;
+    }> = [];
+
+    for (const spk of spkRows) {
+      // Pop one OPK for this device atomically
+      let opk: { key_id: number; public_key_b64: string } | undefined;
+      if (USE_PG) {
+        opk = await pgPopOpk(aegisId);
+      } else {
+        const db = getSqlite()!;
+        const found = db.prepare(
+          `SELECT key_id, public_key_b64 FROM prekeys_onetime WHERE aegis_id = ? ORDER BY key_id ASC LIMIT 1`
+        ).get(aegisId) as { key_id: number; public_key_b64: string } | undefined;
+        if (found) {
+          db.prepare(`DELETE FROM prekeys_onetime WHERE aegis_id = ? AND key_id = ?`).run(aegisId, found.key_id);
+          opk = found;
+        }
       }
+
+      result.push({
+        device_id: spk.device_id,
+        signingPublicKeyB64,
+        signedPreKey: {
+          keyId: spk.key_id,
+          publicKeyB64: spk.public_key_b64,
+          signatureB64: spk.signature_b64,
+        },
+        oneTimePreKey: opk ? { keyId: opk.key_id, publicKeyB64: opk.public_key_b64 } : null,
+      });
     }
 
-    return {
-      signingPublicKeyB64,
-      signedPreKey: {
-        keyId: spk.key_id,
-        publicKeyB64: spk.public_key_b64,
-        signatureB64: spk.signature_b64,
-      },
-      oneTimePreKey: opk ? { keyId: opk.key_id, publicKeyB64: opk.public_key_b64 } : null,
-    };
+    return result;
   },
 };
 
@@ -954,17 +1270,39 @@ export const workRepo = {
   async touchDevice(deviceId: string): Promise<void> {
     await dbRun(`UPDATE work_devices SET last_seen = ? WHERE device_id = ?`, [Date.now(), deviceId]);
   },
-  async addAudit(row: WorkAuditRow): Promise<void> {
+  async addAudit(row: Omit<WorkAuditRow, 'id'> & { id?: string }): Promise<void> {
+    const id = row.id ?? randomUUID();
     await dbRun(
-      `INSERT INTO work_audit_log (id, org_id, kind, message, created_at) VALUES (?, ?, ?, ?, ?)`,
-      [row.id, row.org_id, row.kind, row.message, row.created_at]
+      `INSERT INTO work_audit_log (id, org_id, kind, message, actor_id, target_id, channel_id, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, row.org_id, row.kind, row.message, row.actor_id ?? null, row.target_id ?? null, row.channel_id ?? null, row.metadata ?? null, row.created_at]
     );
   },
-  async listAudit(orgId: string, limit = 50): Promise<WorkAuditRow[]> {
+  async listAudit(orgId: string, opts?: {
+    limit?: number;
+    before?: number;
+    kind?: string;
+    actorId?: string;
+    channelId?: string;
+  }): Promise<WorkAuditRow[]> {
+    const limit = Math.min(opts?.limit ?? 100, 500);
+    const conditions: string[] = ['org_id = ?'];
+    const params: unknown[] = [orgId];
+    if (opts?.before !== undefined) { conditions.push('created_at < ?'); params.push(opts.before); }
+    if (opts?.kind !== undefined) { conditions.push('kind = ?'); params.push(opts.kind); }
+    if (opts?.actorId !== undefined) { conditions.push('actor_id = ?'); params.push(opts.actorId); }
+    if (opts?.channelId !== undefined) { conditions.push('channel_id = ?'); params.push(opts.channelId); }
+    params.push(limit);
     return dbAll<WorkAuditRow>(
-      `SELECT * FROM work_audit_log WHERE org_id = ? ORDER BY created_at DESC LIMIT ?`,
-      [orgId, limit]
+      `SELECT id, org_id, kind, message, actor_id, target_id, channel_id, metadata, created_at FROM work_audit_log WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT ?`,
+      params
     );
+  },
+  async updateMemberRole(orgId: string, aegisId: string, role: WorkRole): Promise<boolean> {
+    const result = await dbRun(
+      `UPDATE work_members SET role = ? WHERE org_id = ? AND aegis_id = ?`,
+      [role, orgId, aegisId]
+    );
+    return result.changes > 0;
   },
   async createInvite(row: WorkInviteRow): Promise<void> {
     await dbRun(
@@ -977,6 +1315,307 @@ export const workRepo = {
   },
   async useInvite(token: string): Promise<void> {
     await dbRun(`UPDATE work_invite_tokens SET used = 1 WHERE token = ?`, [token]);
+  },
+};
+
+// ── workChannelRepo / workMessageRepo ─────────────────────────────────────────
+
+export interface WorkChannelRow {
+  channel_id: string;
+  org_id: string;
+  name: string;
+  is_announcements: number; // 0 | 1
+  created_at: number;
+}
+
+export interface WorkMessageRow {
+  id: string;
+  channel_id: string;
+  org_id: string;
+  sender_id: string;
+  body: string;
+  type: string;
+  created_at: number;
+  is_pinned: number; // 0 | 1
+  pinned_by: string | null;
+  pinned_at: string | null;
+  parent_id: string | null;
+  reply_count: number;
+  /** Soft-delete: 1 = deleted. Body and type are replaced with '' / 'deleted'. */
+  is_deleted: number; // 0 | 1
+}
+
+export const workChannelRepo = {
+  async create(row: WorkChannelRow): Promise<void> {
+    await dbRun(
+      `INSERT INTO work_channels (channel_id, org_id, name, is_announcements, created_at) VALUES (?, ?, ?, ?, ?)`,
+      [row.channel_id, row.org_id, row.name, row.is_announcements, row.created_at]
+    );
+  },
+  async listByOrg(orgId: string): Promise<WorkChannelRow[]> {
+    return dbAll<WorkChannelRow>(
+      `SELECT channel_id, org_id, name, is_announcements, created_at FROM work_channels WHERE org_id = ? ORDER BY created_at ASC`,
+      [orgId]
+    );
+  },
+  async get(channelId: string): Promise<WorkChannelRow | undefined> {
+    return dbGet<WorkChannelRow>(
+      `SELECT channel_id, org_id, name, is_announcements, created_at FROM work_channels WHERE channel_id = ?`,
+      [channelId]
+    );
+  },
+};
+
+export const workMessageRepo = {
+  async insert(row: Omit<WorkMessageRow, 'is_pinned' | 'pinned_by' | 'pinned_at' | 'reply_count' | 'is_deleted'>): Promise<void> {
+    const parentId = row.parent_id ?? null;
+    await dbRun(
+      `INSERT INTO work_messages (id, channel_id, org_id, sender_id, body, type, created_at, is_pinned, pinned_by, pinned_at, parent_id, reply_count) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, 0)`,
+      [row.id, row.channel_id, row.org_id, row.sender_id, row.body, row.type, row.created_at, parentId]
+    );
+    if (parentId !== null) {
+      await dbRun(
+        `UPDATE work_messages SET reply_count = reply_count + 1 WHERE id = ?`,
+        [parentId]
+      );
+    }
+  },
+  async getByChannel(
+    channelId: string,
+    limit = 50,
+    before?: number
+  ): Promise<WorkMessageRow[]> {
+    if (before !== undefined) {
+      return dbAll<WorkMessageRow>(
+        `SELECT id, channel_id, org_id, sender_id, body, type, created_at, is_pinned, pinned_by, pinned_at, parent_id, reply_count, COALESCE(is_deleted, 0) AS is_deleted
+         FROM work_messages WHERE channel_id = ? AND created_at < ?
+         ORDER BY created_at DESC LIMIT ?`,
+        [channelId, before, limit]
+      );
+    }
+    return dbAll<WorkMessageRow>(
+      `SELECT id, channel_id, org_id, sender_id, body, type, created_at, is_pinned, pinned_by, pinned_at, parent_id, reply_count, COALESCE(is_deleted, 0) AS is_deleted
+       FROM work_messages WHERE channel_id = ?
+       ORDER BY created_at DESC LIMIT ?`,
+      [channelId, limit]
+    );
+  },
+
+  async getThreadReplies(parentId: string, channelId: string): Promise<WorkMessageRow[]> {
+    return dbAll<WorkMessageRow>(
+      `SELECT id, channel_id, org_id, sender_id, body, type, created_at, is_pinned, pinned_by, pinned_at, parent_id, reply_count, COALESCE(is_deleted, 0) AS is_deleted
+       FROM work_messages WHERE parent_id = ? AND channel_id = ?
+       ORDER BY created_at ASC`,
+      [parentId, channelId]
+    );
+  },
+
+  async getById(messageId: string): Promise<WorkMessageRow | undefined> {
+    return dbGet<WorkMessageRow>(
+      `SELECT id, channel_id, org_id, sender_id, body, type, created_at, is_pinned, pinned_by, pinned_at, parent_id, reply_count, COALESCE(is_deleted, 0) AS is_deleted
+       FROM work_messages WHERE id = ?`,
+      [messageId]
+    );
+  },
+  
+  async search(orgId: string, channelId: string | null, query: string, limit = 50): Promise<WorkMessageRow[]> {
+    // Sanitize: escape double-quotes and wrap in phrase-search delimiters for FTS5
+    const ftsQuery = `"${query.replace(/"/g, '""')}"`;
+    try {
+      return await dbAll<WorkMessageRow>(
+        `SELECT m.id, m.channel_id, m.org_id, m.sender_id, m.body, m.type, m.created_at, m.is_pinned, m.pinned_by, m.pinned_at, m.parent_id, m.reply_count, COALESCE(m.is_deleted, 0) AS is_deleted
+         FROM work_messages_fts f
+         JOIN work_messages m ON m.id = f.id
+         WHERE f.org_id = ? AND (? IS NULL OR f.channel_id = ?) AND work_messages_fts MATCH ? AND COALESCE(m.is_deleted, 0) = 0
+         ORDER BY m.created_at DESC LIMIT ?`,
+        [orgId, channelId, channelId, ftsQuery, limit]
+      );
+    } catch {
+      // Fallback to LIKE for old DBs that may not have the FTS table yet
+      const likeQuery = `%${query}%`;
+      return dbAll<WorkMessageRow>(
+        `SELECT id, channel_id, org_id, sender_id, body, type, created_at, is_pinned, pinned_by, pinned_at, parent_id, reply_count, COALESCE(is_deleted, 0) AS is_deleted
+         FROM work_messages
+         WHERE org_id = ? AND (? IS NULL OR channel_id = ?) AND body LIKE ? AND COALESCE(is_deleted, 0) = 0
+         ORDER BY created_at DESC LIMIT ?`,
+        [orgId, channelId, channelId, likeQuery, limit]
+      );
+    }
+  },
+  async pinMessage(
+    messageId: string,
+    channelId: string,
+    orgId: string,
+    pinnedBy: string,
+    pin: boolean,
+  ): Promise<boolean> {
+    const existing = await dbGet<Pick<WorkMessageRow, 'id' | 'is_deleted'>>(
+      `SELECT id, COALESCE(is_deleted, 0) AS is_deleted FROM work_messages WHERE id = ? AND channel_id = ? AND org_id = ?`,
+      [messageId, channelId, orgId],
+    );
+    if (!existing) return false;
+    const isPinned = pin ? 1 : 0;
+    const pinnedByVal = pin ? pinnedBy : null;
+    const pinnedAtVal = pin ? new Date().toISOString() : null;
+    await dbRun(
+      `UPDATE work_messages SET is_pinned = ?, pinned_by = ?, pinned_at = ? WHERE id = ? AND channel_id = ?`,
+      [isPinned, pinnedByVal, pinnedAtVal, messageId, channelId],
+    );
+    return true;
+  },
+  async getPinnedMessages(channelId: string): Promise<WorkMessageRow[]> {
+    return dbAll<WorkMessageRow>(
+      `SELECT id, channel_id, org_id, sender_id, body, type, created_at, is_pinned, pinned_by, pinned_at, parent_id, reply_count, COALESCE(is_deleted, 0) AS is_deleted
+       FROM work_messages WHERE channel_id = ? AND is_pinned = 1
+       ORDER BY pinned_at ASC`,
+      [channelId],
+    );
+  },
+
+  /**
+   * Soft-delete a message: replaces body with '' and type with 'deleted'.
+   * Returns `true` if the message existed, `false` if not found.
+   */
+  async softDelete(messageId: string): Promise<boolean> {
+    const existing = await dbGet<Pick<WorkMessageRow, 'id'>>(
+      `SELECT id FROM work_messages WHERE id = ?`,
+      [messageId],
+    );
+    if (!existing) return false;
+    await dbRun(
+      `UPDATE work_messages SET body = '', type = 'deleted', is_deleted = 1 WHERE id = ?`,
+      [messageId],
+    );
+    return true;
+  },
+};
+
+// ── workAttachmentRepo ────────────────────────────────────────────────────────
+
+export interface WorkAttachmentRow {
+  id: string;
+  message_id: string;
+  channel_id: string;
+  org_id: string;
+  /** References a blob stored in the /uploads/ directory by the PoW upload endpoint. */
+  blob_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  uploaded_by: string;
+  /** ISO-8601 timestamp string */
+  created_at: string;
+}
+
+export const workAttachmentRepo = {
+  async insert(row: WorkAttachmentRow): Promise<void> {
+    await dbRun(
+      `INSERT INTO work_attachments (id, message_id, channel_id, org_id, blob_id, filename, mime_type, size_bytes, uploaded_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [row.id, row.message_id, row.channel_id, row.org_id, row.blob_id, row.filename, row.mime_type, row.size_bytes, row.uploaded_by, row.created_at]
+    );
+  },
+
+  /**
+   * Paginated list of all attachments for a channel.
+   * `before` is an ISO-8601 string cursor (exclusive upper bound on created_at).
+   */
+  async getByChannel(channelId: string, limit: number, before?: string): Promise<WorkAttachmentRow[]> {
+    if (before !== undefined) {
+      return dbAll<WorkAttachmentRow>(
+        `SELECT id, message_id, channel_id, org_id, blob_id, filename, mime_type, size_bytes, uploaded_by, created_at
+         FROM work_attachments WHERE channel_id = ? AND created_at < ?
+         ORDER BY created_at DESC LIMIT ?`,
+        [channelId, before, limit]
+      );
+    }
+    return dbAll<WorkAttachmentRow>(
+      `SELECT id, message_id, channel_id, org_id, blob_id, filename, mime_type, size_bytes, uploaded_by, created_at
+       FROM work_attachments WHERE channel_id = ?
+       ORDER BY created_at DESC LIMIT ?`,
+      [channelId, limit]
+    );
+  },
+
+  async getByMessage(messageId: string): Promise<WorkAttachmentRow[]> {
+    return dbAll<WorkAttachmentRow>(
+      `SELECT id, message_id, channel_id, org_id, blob_id, filename, mime_type, size_bytes, uploaded_by, created_at
+       FROM work_attachments WHERE message_id = ?
+       ORDER BY created_at ASC`,
+      [messageId]
+    );
+  },
+
+  async getById(attachmentId: string): Promise<WorkAttachmentRow | undefined> {
+    return dbGet<WorkAttachmentRow>(
+      `SELECT id, message_id, channel_id, org_id, blob_id, filename, mime_type, size_bytes, uploaded_by, created_at
+       FROM work_attachments WHERE id = ?`,
+      [attachmentId]
+    );
+  },
+};
+
+// ── workChannelPermissionRepo ─────────────────────────────────────────────────
+
+const ALL_ROLES: WorkRole[] = ['owner', 'admin', 'member'];
+
+export const workChannelPermissionRepo = {
+  /**
+   * Seed default permissions for a newly created channel.
+   * Announcements channels restrict members from sending.
+   */
+  async seedDefaults(channelId: string, orgId: string, isAnnouncements: boolean): Promise<void> {
+    for (const role of ALL_ROLES) {
+      const canSend = isAnnouncements && role === 'member' ? 0 : 1;
+      if (USE_PG) {
+        await dbRun(
+          `INSERT INTO work_channel_permissions (channel_id, org_id, role, can_send, can_react, can_upload)
+           VALUES (?, ?, ?, ?, 1, ?)
+           ON CONFLICT(channel_id, role) DO NOTHING`,
+          [channelId, orgId, role, canSend, canSend]
+        );
+      } else {
+        await dbRun(
+          `INSERT OR IGNORE INTO work_channel_permissions (channel_id, org_id, role, can_send, can_react, can_upload)
+           VALUES (?, ?, ?, ?, 1, ?)`,
+          [channelId, orgId, role, canSend, canSend]
+        );
+      }
+    }
+  },
+
+  async getAll(channelId: string): Promise<WorkChannelPermissionRow[]> {
+    return dbAll<WorkChannelPermissionRow>(
+      `SELECT channel_id, org_id, role, can_send, can_react, can_upload
+       FROM work_channel_permissions WHERE channel_id = ?`,
+      [channelId]
+    );
+  },
+
+  async getForRole(channelId: string, role: WorkRole): Promise<WorkChannelPermissionRow | undefined> {
+    return dbGet<WorkChannelPermissionRow>(
+      `SELECT channel_id, org_id, role, can_send, can_react, can_upload
+       FROM work_channel_permissions WHERE channel_id = ? AND role = ?`,
+      [channelId, role]
+    );
+  },
+
+  async set(channelId: string, orgId: string, role: WorkRole, perms: { canSend: boolean; canReact: boolean; canUpload: boolean }): Promise<void> {
+    if (USE_PG) {
+      await dbRun(
+        `INSERT INTO work_channel_permissions (channel_id, org_id, role, can_send, can_react, can_upload)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(channel_id, role) DO UPDATE SET can_send = EXCLUDED.can_send, can_react = EXCLUDED.can_react, can_upload = EXCLUDED.can_upload`,
+        [channelId, orgId, role, perms.canSend ? 1 : 0, perms.canReact ? 1 : 0, perms.canUpload ? 1 : 0]
+      );
+    } else {
+      await dbRun(
+        `INSERT INTO work_channel_permissions (channel_id, org_id, role, can_send, can_react, can_upload)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(channel_id, role) DO UPDATE SET can_send = excluded.can_send, can_react = excluded.can_react, can_upload = excluded.can_upload`,
+        [channelId, orgId, role, perms.canSend ? 1 : 0, perms.canReact ? 1 : 0, perms.canUpload ? 1 : 0]
+      );
+    }
   },
 };
 

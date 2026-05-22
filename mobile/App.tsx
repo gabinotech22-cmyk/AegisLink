@@ -1,6 +1,7 @@
 // Initialise i18n before anything else renders
 import './src/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Linking } from 'react-native';
 import { View, Text, ActivityIndicator, AppState, Pressable, type AppStateStatus, Dimensions } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -48,7 +49,13 @@ import { PollScreen } from './src/screens/Poll';
 import { FirstContactScreen } from './src/screens/FirstContact';
 import { AppIconScreen } from './src/screens/AppIcon';
 import { WorkDashboard } from './src/screens/WorkDashboard';
+import { WorkJoinSuccess } from './src/screens/WorkJoinSuccess';
+import { WorkChannels } from './src/screens/WorkChannels';
+import { WorkChannelChat } from './src/screens/WorkChannelChat';
+import { WorkChannelPermissions } from './src/screens/WorkChannelPermissions';
+import { WorkSearch } from './src/screens/WorkSearch';
 import { WorkGenerationScreen } from './src/screens/WorkGeneration';
+import { WorkDirectory } from './src/screens/WorkDirectory';
 import { SubscriptionScreen } from './src/screens/Subscription';
 import { CallScreen } from './src/screens/Call';
 import { IncomingCallScreen } from './src/screens/IncomingCall';
@@ -59,6 +66,7 @@ import { DistributionListsScreen } from './src/screens/DistributionLists';
 import { BroadcastComposeScreen } from './src/screens/BroadcastCompose';
 import { useIdentity } from './src/store/identity';
 import { usePreferences } from './src/store/preferences';
+import { useWork } from './src/store/work';
 
 import { useCall } from './src/store/call';
 import { connect as connectSocket, disconnect as disconnectSocket } from './src/socket/client';
@@ -151,13 +159,19 @@ type PushRoute =
   | { name: 'firstContact'; contact: StoredContact }
   | { name: 'contacts' }
   | { name: 'appIcon' }
-  | { name: 'workDashboard' }
+  | { name: 'workDashboard'; prefillJoinToken?: string }
+  | { name: 'workJoinSuccess' }
+  | { name: 'workChannels' }
   | { name: 'subscription' }
   | { name: 'lockSettings' }
   | { name: 'workGeneration' }
   | { name: 'keys' }
   | { name: 'distribution' }
-  | { name: 'broadcast'; list: import('./src/store/distribution').DistributionList };
+  | { name: 'broadcast'; list: import('./src/store/distribution').DistributionList }
+  | { name: 'workChannelChat'; channel: import('./src/store/work').WorkChannel }
+  | { name: 'workChannelPermissions'; channel: import('./src/store/work').WorkChannel }
+  | { name: 'workDirectory' }
+  | { name: 'workSearch' };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -441,6 +455,29 @@ function Shell() {
     setTab(tabId);
   }, []);
 
+  // ── Deep link handling ──────────────────────────────────────────────────────
+  const handleDeepLink = useCallback((url: string) => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'work' && parsed.pathname === '/join') {
+        const token = parsed.searchParams.get('token');
+        if (token && identity) {
+          push({ name: 'workDashboard', prefillJoinToken: token });
+        }
+      }
+    } catch {
+      /* invalid url — ignore */
+    }
+  }, [identity, push]);
+
+  useEffect(() => {
+    Linking.getInitialURL().then((url: string | null) => {
+      if (url) handleDeepLink(url);
+    }).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }: { url: string }) => handleDeepLink(url));
+    return () => sub.remove();
+  }, [handleDeepLink]);
+
   // Call overlay state (takes over the entire UI when active)
   const callStatus = useCall((s) => s.status);
   const callOverlay =
@@ -651,8 +688,103 @@ function Shell() {
             onBack={pop}
           />
         );
+      case 'workChannels':
+        return (
+          <WorkChannels
+            onBack={pop}
+            onOpenAdmin={() => push({ name: 'workDashboard' })}
+            onOpenChannel={(ch) => push({ name: 'workChannelChat', channel: ch })}
+            onOpenDirectory={() => push({ name: 'workDirectory' })}
+            onSearch={() => push({ name: 'workSearch' })}
+            onOpenChannelPermissions={(ch) => push({ name: 'workChannelPermissions', channel: ch })}
+          />
+        );
+      case 'workSearch':
+        return (
+          <WorkSearch
+            onBack={pop}
+            onOpenChannel={(ch) => {
+              pop();
+              push({ name: 'workChannelChat', channel: ch });
+            }}
+          />
+        );
+      case 'workDirectory':
+        return (
+          <WorkDirectory
+            onBack={pop}
+            onStartDM={(aegisId) => {
+              const { useContacts: _useContacts } = require('./src/store/contacts') as typeof import('./src/store/contacts');
+              const existing = _useContacts.getState().contacts.find((c: StoredContact) => c.aegisId === aegisId);
+              if (existing) {
+                pop();
+                push({ name: 'chat', contact: existing });
+                return;
+              }
+              // Fetch pubkey from relay and add as contact
+              (async () => {
+                try {
+                  const res = await fetch(`${require('./src/config').SERVER_URL}/identity/${aegisId}`);
+                  if (!res.ok) throw new Error('Not found');
+                  const data = await res.json() as { publicKey: string; signingPublicKey?: string };
+                  const contact = await _useContacts.getState().addByAegisId(aegisId);
+                  pop();
+                  push({ name: 'chat', contact });
+                } catch {
+                  const { Alert } = require('react-native');
+                  Alert.alert(
+                    'No se puede abrir DM',
+                    `No se encontró la clave pública de ${aegisId.slice(0, 12)}…\nPuedes añadirlo manualmente por AegisID.`,
+                    [{ text: 'OK' }]
+                  );
+                }
+              })();
+            }}
+          />
+        );
+      case 'workChannelChat': {
+        const { useWork } = require('./src/store/work') as typeof import('./src/store/work');
+        const { useIdentity: _useIdentity } = require('./src/store/identity') as typeof import('./src/store/identity');
+        const _isAdmin = useWork.getState().org?.adminId === _useIdentity.getState().identity?.aegisId;
+        return (
+          <WorkChannelChat
+            channel={top.channel}
+            onBack={pop}
+            isAdmin={_isAdmin ?? false}
+          />
+        );
+      }
+      case 'workChannelPermissions':
+        return (
+          <WorkChannelPermissions
+            channel={top.channel}
+            onBack={pop}
+          />
+        );
       case 'workDashboard':
-        return <WorkDashboard onBack={pop} />;
+        return (
+          <WorkDashboard
+            onBack={pop}
+            prefillJoinToken={top.prefillJoinToken}
+            onJoinSuccess={() => push({ name: 'workJoinSuccess' })}
+            onSearch={() => push({ name: 'workSearch' })}
+          />
+        );
+      case 'workJoinSuccess': {
+        const { useWork: _useWork } = require('./src/store/work') as typeof import('./src/store/work');
+        const { useIdentity: _useIdentity } = require('./src/store/identity') as typeof import('./src/store/identity');
+        const _workState = _useWork.getState();
+        const _identity = _useIdentity.getState().identity;
+        const _role = _workState.org?.adminId === _identity?.aegisId ? 'admin' as const : 'member' as const;
+        return (
+          <WorkJoinSuccess
+            orgName={_workState.org?.name ?? 'Workspace'}
+            role={_role}
+            channels={_workState.channels.slice(0, 5)}
+            onContinue={() => { setStack([]); setTab('dashboard'); }}
+          />
+        );
+      }
       case 'subscription':
         return <SubscriptionScreen onBack={pop} />;
       case 'notifs':
@@ -897,7 +1029,17 @@ function Shell() {
         />
       );
     case 'dashboard':
-      return <WorkDashboard onBack={() => setTab('groups')} />;
+      return (
+        <WorkChannels
+          onBack={() => setTab('groups')}
+          onOpenAdmin={() => push({ name: 'workDashboard' })}
+          onCreateOrg={() => push({ name: 'workGeneration' })}
+          onOpenChannel={(ch) => push({ name: 'workChannelChat', channel: ch })}
+          onOpenDirectory={() => push({ name: 'workDirectory' })}
+          onSearch={() => push({ name: 'workSearch' })}
+          onOpenChannelPermissions={(ch) => push({ name: 'workChannelPermissions', channel: ch })}
+        />
+      );
   }
 }
 

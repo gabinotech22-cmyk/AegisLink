@@ -7,8 +7,28 @@ import { Avatar } from './Avatar';
 import { I } from './icons';
 import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
+import { useWork } from '../store/work';
 import type { StoredContact, StoredMessage } from '../db/local';
 import type { Tab } from './TabBar';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const WORK_ACCENT = '#6366f1';
+
+const PERSONAL_NAV: { id: Tab; icon: keyof typeof I; label: string }[] = [
+  { id: 'home',     icon: 'Chat',     label: 'Chats'    },
+  { id: 'groups',   icon: 'Users',    label: 'Groups'   },
+  { id: 'verify',   icon: 'Shield',   label: 'Verify'   },
+  { id: 'settings', icon: 'Settings', label: 'Settings' },
+];
+
+const WORK_NAV: { id: Tab; icon: keyof typeof I; label: string }[] = [
+  { id: 'dashboard', icon: 'Building', label: 'Workspace' },
+  { id: 'verify',    icon: 'QR',       label: 'Verify'    },
+  { id: 'settings',  icon: 'Settings', label: 'Settings'  },
+];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,20 +40,17 @@ interface Props {
   onNavigate: (tab: Tab) => void;
   onSelectChat: (contact: StoredContact) => void;
   onNewChat: () => void;
+  isWork?: boolean;
+  onOpenChannel?: (channelId: string) => void;
+  onSwitchWorkspace?: (orgId: string) => void;
+  onOpenDirectory?: () => void;
 }
-
-const NAV_ITEMS: { id: Tab; icon: keyof typeof I; label: string }[] = [
-  { id: 'home',     icon: 'Chat',    label: 'Chats'   },
-  { id: 'groups',   icon: 'Users',   label: 'Groups'  },
-  { id: 'verify',   icon: 'Shield',  label: 'Verify'  },
-  { id: 'settings', icon: 'Settings', label: 'Settings' },
-];
 
 // ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
 
-export function Sidebar({ activeSection, activeChatId, onNavigate, onSelectChat, onNewChat }: Props) {
+export function Sidebar({ activeSection, activeChatId, onNavigate, onSelectChat, onNewChat, isWork = false, onOpenChannel, onSwitchWorkspace, onOpenDirectory }: Props) {
   const { t } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -57,6 +74,8 @@ export function Sidebar({ activeSection, activeChatId, onNavigate, onSelectChat,
     return sorted.filter((c) => c.name.toLowerCase().includes(q) || c.aegisId.toLowerCase().includes(q));
   }, [sorted, searchQuery]);
 
+  const accent = isWork ? WORK_ACCENT : t.accent;
+
   return (
     <div
       style={{
@@ -66,43 +85,396 @@ export function Sidebar({ activeSection, activeChatId, onNavigate, onSelectChat,
         display: 'flex',
         flexDirection: 'column',
         backgroundColor: t.surface,
-        borderRight: `1px solid ${t.border}`,
+        borderRight: `1px solid ${isWork ? `${WORK_ACCENT}44` : t.border}`,
         overflow: 'hidden',
       }}
     >
-      {/* Header */}
-      <SidebarHeader t={t} onNewChat={onNewChat} />
+      {isWork ? (
+        <WorkSidebarContent t={t} accent={accent} onNavigate={onNavigate} onOpenChannel={onOpenChannel} onSwitchWorkspace={onSwitchWorkspace} onOpenDirectory={onOpenDirectory} />
+      ) : (
+        <>
+          <SidebarHeader t={t} onNewChat={onNewChat} />
+          <SearchBar t={t} value={searchQuery} onChange={setSearchQuery} />
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {filtered.length === 0 ? (
+              <EmptyList t={t} hasQuery={searchQuery.trim().length > 0} />
+            ) : (
+              filtered.map((contact) => (
+                <ChatItem
+                  key={contact.aegisId}
+                  t={t}
+                  contact={contact}
+                  preview={previews[contact.aegisId]}
+                  unread={unreadCounts[contact.aegisId] ?? 0}
+                  active={activeChatId === contact.aegisId}
+                  onPress={() => onSelectChat(contact)}
+                />
+              ))
+            )}
+          </div>
+        </>
+      )}
 
-      {/* Search */}
-      <SearchBar t={t} value={searchQuery} onChange={setSearchQuery} />
-
-      {/* Chat list */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {filtered.length === 0 ? (
-          <EmptyList t={t} hasQuery={searchQuery.trim().length > 0} />
-        ) : (
-          filtered.map((contact) => (
-            <ChatItem
-              key={contact.aegisId}
-              t={t}
-              contact={contact}
-              preview={previews[contact.aegisId]}
-              unread={unreadCounts[contact.aegisId] ?? 0}
-              active={activeChatId === contact.aegisId}
-              onPress={() => onSelectChat(contact)}
-            />
-          ))
-        )}
-      </div>
-
-      {/* Bottom nav */}
-      <BottomNav t={t} active={activeSection} onNavigate={onNavigate} />
+      <BottomNav t={t} active={activeSection} onNavigate={onNavigate} isWork={isWork} accent={accent} />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Header
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Work sidebar content (channels list)
+// ---------------------------------------------------------------------------
+
+function WorkSidebarContent({ t, accent, onNavigate, onOpenChannel, onSwitchWorkspace, onOpenDirectory }: { t: Theme; accent: string; onNavigate: (tab: Tab) => void; onOpenChannel?: (channelId: string) => void; onSwitchWorkspace?: (orgId: string) => void; onOpenDirectory?: () => void }) {
+  const org = useWork((s) => s.org);
+  const channels = useWork((s) => s.channels);
+  const knownOrgIds = useWork((s) => s.knownOrgIds);
+  const activeOrgId = useWork((s) => s.activeOrgId);
+  const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const announcements = channels.filter((c) => c.isAnnouncements);
+  const regular = channels.filter((c) => !c.isAnnouncements);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      {/* Org identity bar */}
+      <div
+        style={{
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '14px 16px 12px',
+          borderBottom: `1px solid ${accent}33`,
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 9,
+            backgroundColor: `${accent}22`,
+            border: `1px solid ${accent}55`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <I.Shield size={17} color={accent} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: t.fontDisplay,
+              fontSize: 13,
+              fontWeight: 700,
+              color: t.text,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {org?.name ?? 'Workspace'}
+          </div>
+          <div style={{ fontFamily: t.fontMono, fontSize: 9, color: accent, letterSpacing: 1.2, marginTop: 1 }}>
+            AEGISLINK WORK
+          </div>
+        </div>
+        {/* Workspace picker trigger */}
+        <button
+          onClick={() => setPickerOpen((v) => !v)}
+          aria-label="Switch workspace"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: pickerOpen ? `${accent}22` : 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            borderRadius: 6,
+            padding: 4,
+            flexShrink: 0,
+            transition: 'background-color 0.1s',
+          }}
+        >
+          <ChevronDownIcon size={14} color={accent} flipped={pickerOpen} />
+        </button>
+        {/* Workspace picker dropdown */}
+        {pickerOpen && (
+          <div
+            style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              right: 0,
+              backgroundColor: '#1a1f1e',
+              border: `1px solid ${accent}44`,
+              borderRadius: 10,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+              zIndex: 100,
+              overflow: 'hidden',
+              marginTop: 2,
+            }}
+          >
+            {knownOrgIds.map((id) => (
+              <button
+                key={id}
+                onClick={() => {
+                  setPickerOpen(false);
+                  if (id !== activeOrgId) onSwitchWorkspace?.(id);
+                }}
+                aria-label={`Switch to workspace ${id.slice(0, 12)}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '9px 14px',
+                  background: id === activeOrgId ? `${accent}18` : 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    color: id === activeOrgId ? accent : '#a0a8a4',
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {id.slice(0, 12)}
+                </span>
+                {id === activeOrgId && (
+                  <CheckIcon size={13} color={accent} />
+                )}
+              </button>
+            ))}
+            <div style={{ height: 1, backgroundColor: `${accent}22`, margin: '2px 0' }} />
+            <button
+              onClick={() => { setPickerOpen(false); onNavigate('dashboard'); }}
+              aria-label="Create new workspace"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                padding: '9px 14px',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span style={{ fontFamily: 'monospace', fontSize: 11, color: accent }}>+ Crear nuevo workspace</span>
+            </button>
+            <button
+              onClick={() => { setPickerOpen(false); onNavigate('dashboard'); }}
+              aria-label="Join workspace with code"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                padding: '9px 14px',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#a0a8a4' }}>Unirse con código</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Channels list or empty state */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {!org ? (
+          <div style={{ padding: '32px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+            <I.Shield size={32} color={accent} style={{ opacity: 0.5 }} />
+            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, textAlign: 'center', lineHeight: '19px' }}>
+              Crea tu organización para tener canales de equipo.
+            </span>
+            <button
+              onClick={() => onNavigate('dashboard')}
+              style={{
+                marginTop: 4,
+                padding: '8px 18px',
+                backgroundColor: accent,
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontFamily: t.font,
+                fontSize: 13,
+                fontWeight: 700,
+                color: '#fff',
+              }}
+            >
+              Crear organización
+            </button>
+          </div>
+        ) : (
+          <>
+            {announcements.length > 0 && (
+              <ChannelSection
+                t={t}
+                accent={accent}
+                label="ANUNCIOS"
+                channels={announcements}
+                activeChannelId={activeChannelId}
+                onSelect={(id) => { setActiveChannelId(id); onOpenChannel?.(id); }}
+              />
+            )}
+            <ChannelSection
+              t={t}
+              accent={accent}
+              label="CANALES"
+              channels={regular}
+              activeChannelId={activeChannelId}
+              onSelect={(id) => { setActiveChannelId(id); onOpenChannel?.(id); }}
+            />
+            {channels.length === 0 && (
+              <div style={{ padding: '16px', opacity: 0.5 }}>
+                <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.8 }}>
+                  SIN CANALES
+                </span>
+              </div>
+            )}
+            {/* Directory link */}
+            <DirectoryLink t={t} accent={accent} onOpenDirectory={onOpenDirectory} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DirectoryLink({ t, accent, onOpenDirectory }: { t: Theme; accent: string; onOpenDirectory?: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  if (!onOpenDirectory) return null;
+  return (
+    <div style={{ padding: '8px 12px 12px' }}>
+      <button
+        onClick={onOpenDirectory}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        aria-label="Ver directorio de miembros"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 7,
+          width: '100%',
+          padding: '8px 10px',
+          backgroundColor: hovered ? `${accent}18` : `${accent}0c`,
+          border: `1px solid ${accent}33`,
+          borderRadius: 8,
+          cursor: 'pointer',
+          transition: 'background-color 0.1s',
+        }}
+      >
+        <I.Users size={13} color={accent} />
+        <span
+          style={{
+            fontFamily: t.fontMono,
+            fontSize: 10,
+            letterSpacing: 0.5,
+            color: accent,
+            flex: 1,
+            textAlign: 'left',
+          }}
+        >
+          Ver directorio →
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function ChannelSection({
+  t, accent, label, channels, activeChannelId, onSelect,
+}: {
+  t: Theme;
+  accent: string;
+  label: string;
+  channels: { channelId: string; name: string; isAnnouncements: boolean }[];
+  activeChannelId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div>
+      <div style={{ padding: '10px 16px 4px', fontFamily: t.fontMono, fontSize: 9, color: accent, letterSpacing: 1.2, opacity: 0.7 }}>
+        {label}
+      </div>
+      {channels.map((ch) => (
+        <ChannelItem key={ch.channelId} t={t} accent={accent} channel={ch} active={activeChannelId === ch.channelId} onPress={() => onSelect(ch.channelId)} />
+      ))}
+    </div>
+  );
+}
+
+function ChannelItem({
+  t, accent, channel, active, onPress,
+}: {
+  t: Theme;
+  accent: string;
+  channel: { channelId: string; name: string; isAnnouncements: boolean };
+  active: boolean;
+  onPress: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onPress}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        width: '100%',
+        padding: '7px 16px',
+        background: active ? `${accent}22` : hovered ? `${accent}11` : 'transparent',
+        border: 'none',
+        cursor: 'pointer',
+        textAlign: 'left',
+        transition: 'background-color 0.1s',
+      }}
+    >
+      <span style={{ fontFamily: t.fontMono, fontSize: 14, color: active ? accent : t.textFaint, fontWeight: 600, lineHeight: 1 }}>
+        {channel.isAnnouncements ? '📢' : '#'}
+      </span>
+      <span
+        style={{
+          fontFamily: t.font,
+          fontSize: 13,
+          color: active ? t.text : t.textDim,
+          fontWeight: active ? 600 : 400,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          flex: 1,
+        }}
+      >
+        {channel.name}
+      </span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Personal header
 // ---------------------------------------------------------------------------
 
 function SidebarHeader({ t, onNewChat }: { t: Theme; onNewChat: () => void }) {
@@ -367,13 +739,14 @@ interface NavItemProps {
   icon: keyof typeof I;
   label: string;
   active: boolean;
+  accent: string;
   onNavigate: (tab: Tab) => void;
 }
 
-function NavItem({ t, id, icon, label, active, onNavigate }: NavItemProps) {
+function NavItem({ t, id, icon, label, active, accent, onNavigate }: NavItemProps) {
   const [hovered, setHovered] = useState(false);
   const Icon = I[icon];
-  const color = active ? t.accent : hovered ? t.textDim : t.textFaint;
+  const color = active ? accent : hovered ? t.textDim : t.textFaint;
 
   return (
     <div style={{ position: 'relative', display: 'flex' }}>
@@ -390,7 +763,7 @@ function NavItem({ t, id, icon, label, active, onNavigate }: NavItemProps) {
           width: 40,
           height: 40,
           borderRadius: 10,
-          backgroundColor: active ? `${t.accent}18` : hovered ? t.surface2 : 'transparent',
+          backgroundColor: active ? `${accent}18` : hovered ? t.surface2 : 'transparent',
           border: 'none',
           cursor: 'pointer',
           transition: 'background-color 0.1s',
@@ -398,7 +771,6 @@ function NavItem({ t, id, icon, label, active, onNavigate }: NavItemProps) {
       >
         <Icon size={20} stroke={active ? 2.2 : 1.8} color={color} />
       </button>
-      {/* Tooltip */}
       {hovered && (
         <div
           style={{
@@ -427,7 +799,8 @@ function NavItem({ t, id, icon, label, active, onNavigate }: NavItemProps) {
   );
 }
 
-function BottomNav({ t, active, onNavigate }: { t: Theme; active: Tab; onNavigate: (tab: Tab) => void }) {
+function BottomNav({ t, active, onNavigate, isWork = false, accent }: { t: Theme; active: Tab; onNavigate: (tab: Tab) => void; isWork?: boolean; accent: string }) {
+  const items = isWork ? WORK_NAV : PERSONAL_NAV;
   return (
     <div
       style={{
@@ -439,11 +812,12 @@ function BottomNav({ t, active, onNavigate }: { t: Theme; active: Tab; onNavigat
         paddingRight: 12,
         paddingTop: 10,
         paddingBottom: 14,
-        borderTop: `1px solid ${t.border}`,
+        borderTop: isWork ? `2px solid ${accent}44` : `1px solid ${t.border}`,
         flexShrink: 0,
+        backgroundColor: isWork ? `${accent}08` : t.surface,
       }}
     >
-      {NAV_ITEMS.map((item) => (
+      {items.map((item) => (
         <NavItem
           key={item.id}
           t={t}
@@ -451,6 +825,7 @@ function BottomNav({ t, active, onNavigate }: { t: Theme; active: Tab; onNavigat
           icon={item.icon}
           label={item.label}
           active={active === item.id}
+          accent={accent}
           onNavigate={onNavigate}
         />
       ))}
@@ -461,6 +836,32 @@ function BottomNav({ t, active, onNavigate }: { t: Theme; active: Tab; onNavigat
 // ---------------------------------------------------------------------------
 // Inline edit icon (pencil) — not in I.*
 // ---------------------------------------------------------------------------
+
+function ChevronDownIcon({ size = 14, color, flipped = false }: { size?: number; color: string; flipped?: boolean }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ transform: flipped ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function CheckIcon({ size = 13, color }: { size?: number; color: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
 
 function EditIcon({ size = 18, color }: { size?: number; color: string }) {
   return (

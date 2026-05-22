@@ -4,7 +4,7 @@ import nacl from 'tweetnacl';
 import tweetnaclUtil from 'tweetnacl-util';
 const { decodeBase64 } = tweetnaclUtil;
 import { z } from 'zod';
-import { identityRepo, prekeysRepo } from '../db/client.js';
+import { identityRepo, prekeysRepo, type SignedPreKeyRow } from '../db/client.js';
 
 const router = Router();
 
@@ -25,6 +25,12 @@ const uploadLimiter = rateLimit({
 
 const UploadBody = z.object({
   aegisId: z.string().regex(AEGIS_ID_RE, 'invalid Aegis ID format'),
+  /**
+   * Optional device identifier. Callers should supply a stable UUID that
+   * uniquely identifies this installation. Defaults to 'default' for backward
+   * compatibility with single-device clients.
+   */
+  deviceId: z.string().min(1).max(128).optional(),
   sig: z.string().min(1),
   ts: z.number().int().positive(),
   signedPreKey: z.object({
@@ -61,7 +67,7 @@ router.post('/', uploadLimiter, async (req, res) => {
     return;
   }
 
-  const { aegisId, sig, ts, signedPreKey, oneTimePreKeys } = parsed.data;
+  const { aegisId, deviceId, sig, ts, signedPreKey, oneTimePreKeys } = parsed.data;
 
   // Validate timestamp within ±60 seconds.
   if (Math.abs(Date.now() - ts) > 60_000) {
@@ -103,13 +109,15 @@ router.post('/', uploadLimiter, async (req, res) => {
   const now = Date.now();
 
   try {
-    await prekeysRepo.upsertSigned({
+    const spkRow: SignedPreKeyRow = {
       aegis_id: aegisId,
+      device_id: deviceId ?? 'default',
       key_id: signedPreKey.keyId,
       public_key_b64: signedPreKey.publicKeyB64,
       signature_b64: signedPreKey.signatureB64,
       created_at: now,
-    });
+    };
+    await prekeysRepo.upsertSigned(spkRow);
 
     let uploaded = 0;
     for (const opk of oneTimePreKeys) {
@@ -130,18 +138,22 @@ router.post('/', uploadLimiter, async (req, res) => {
 
 // ── GET /bundle/:aegisId ──────────────────────────────────────────────────────
 /**
- * Fetch an X3DH prekey bundle for a contact.
+ * Fetch X3DH prekey bundles for a contact — one per registered device.
  *
- * The one-time prekey (OPK) is consumed atomically — it is deleted from the
- * database on read and will never be returned again. If no OPKs remain,
- * `oneTimePreKey` is null; X3DH continues to work (slightly weaker forward
- * secrecy but the session is still E2EE).
+ * One-time prekeys (OPKs) are consumed atomically per device. If no OPKs
+ * remain for a device, `oneTimePreKey` is null; X3DH continues to work with
+ * slightly weaker forward secrecy but the session is still E2EE.
  *
  * Response 200:
  *   {
- *     signingPublicKeyB64: string,
- *     signedPreKey: { keyId, publicKeyB64, signatureB64 },
- *     oneTimePreKey: { keyId, publicKeyB64 } | null
+ *     bundles: Array<{
+ *       device_id: string,
+ *       signingPublicKeyB64: string,
+ *       signedPreKey: { keyId, publicKeyB64, signatureB64 },
+ *       oneTimePreKey: { keyId, publicKeyB64 } | null
+ *     }>,
+ *     // backward compat: first bundle also exposed as top-level `bundle` field
+ *     bundle: { ... } | null
  *   }
  */
 router.get('/bundle/:aegisId', async (req, res) => {
@@ -153,13 +165,16 @@ router.get('/bundle/:aegisId', async (req, res) => {
   }
 
   try {
-    const bundle = await prekeysRepo.getBundle(aegisId);
-    if (!bundle) {
+    const bundles = await prekeysRepo.getBundles(aegisId);
+    if (bundles.length === 0) {
       res.status(404).json({ error: 'bundle_not_found' });
       return;
     }
 
-    res.json(bundle);
+    // `bundle` (singular) is kept for backward compatibility with older clients
+    // that expect the original flat object shape.
+    const bundle = bundles[0] ?? null;
+    res.json({ bundles, bundle });
   } catch (_err) {
     res.status(500).json({ error: 'db_error' });
   }

@@ -163,6 +163,31 @@ async function ensureSchema(): Promise<void> {
       for (const sql of statements) {
         await db().run(sql, []);
       }
+      // Migrations for existing DBs that predate schema changes.
+      // Each ALTER TABLE is wrapped individually — SQLite does not support
+      // ADD COLUMN IF NOT EXISTS, so we swallow duplicate-column errors only.
+      async function safeAddColumn(
+        table: string,
+        column: string,
+        definition: string,
+      ): Promise<void> {
+        try {
+          await db().run(
+            `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`,
+            [],
+          );
+        } catch (e) {
+          const msg = (e as Error)?.message ?? String(e);
+          if (
+            !msg.includes('duplicate column name') &&
+            !msg.includes('no such table')
+          ) {
+            throw e; // unexpected error — propagate so we don't silently corrupt state
+          }
+        }
+      }
+
+      await safeAddColumn('messages', 'pinned', 'INTEGER NOT NULL DEFAULT 0');
     })();
   }
   return schemaPromise;

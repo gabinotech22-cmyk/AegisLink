@@ -70,12 +70,6 @@
     },
     "plugins": [
       "./app.plugin.js",
-      [
-        "react-native-callkeep",
-        {
-          "appName": "AegisLink"
-        }
-      ],
       "expo-secure-store",
       "expo-sqlite",
       [

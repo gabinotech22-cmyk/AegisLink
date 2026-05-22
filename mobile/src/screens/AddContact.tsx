@@ -15,6 +15,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { PrimaryButton } from '../components/Button';
 import { useContacts } from '../store/contacts';
+import { useIdentity } from '../store/identity';
 import type { StoredContact } from '../db/local';
 
 interface Props {
@@ -32,6 +33,7 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const addByAegisId = useContacts((s) => s.addByAegisId);
+  const identity = useIdentity((s) => s.identity);
 
   const trimmedId = aegisId.trim().toUpperCase();
   const idValid = AEGIS_ID_RE.test(trimmedId);
@@ -46,6 +48,12 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
     setSubmitting(true);
     try {
       const contact = await addByAegisId(trimmedId, name);
+      // Send our profile to the new contact so their desktop/other devices
+      // can auto-add us and decrypt our first message without an API round-trip.
+      if (identity) {
+        const { sendProfileTo } = require('../socket/client') as typeof import('../socket/client');
+        void sendProfileTo(contact, identity);
+      }
       onAdded(contact);
     } catch (e) {
       const raw = (e as Error).message ?? '';
