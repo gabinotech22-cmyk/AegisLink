@@ -22,7 +22,14 @@
         "NSPhotoLibraryUsageDescription": "AegisLink accesses your photo library to send encrypted attachments.",
         "NSFaceIDUsageDescription": "AegisLink uses Face ID to protect your messages. Your biometric data never leaves the device.",
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["voip", "audio", "remote-notification"]
+        "UIBackgroundModes": [
+          "voip",
+          "audio",
+          "remote-notification",
+          "voip",
+          "audio",
+          "remote-notification"
+        ]
       },
       "bitcode": false,
       "buildNumber": "1"
@@ -33,7 +40,6 @@
     },
     "android": {
       "package": "com.aegislink.app",
-      "versionCode": 1,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "buildToolsVersion": "35.0.0",
@@ -50,6 +56,23 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH",
+        "android.permission.MANAGE_OWN_CALLS",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.READ_PHONE_NUMBERS",
+        "android.permission.CALL_PHONE",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.INTERNET",
@@ -113,6 +136,12 @@
         "projectId": "f658c210-cfa9-482e-85ae-610cc76152af"
       }
     },
-    "owner": "crowfn"
+    "owner": "crowfn",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f658c210-cfa9-482e-85ae-610cc76152af"
+    }
   }
 }
