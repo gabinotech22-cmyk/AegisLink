@@ -1,5 +1,7 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { z } from 'zod';
+import nacl from 'tweetnacl';
+import { decodeBase64 } from 'tweetnacl-util';
 import { messageRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { notifyRecipient, sendCallWakeUp, type CallMedia } from '../push/expo.js';
@@ -181,6 +183,8 @@ const GroupRekeyEvent = z.object({
 
 // Rate-limit buckets for channel:msg — keyed by aegisId, max 120/min
 const channelMsgRateLimit = new Map<string, { count: number; reset: number }>();
+// TODO: migrate to Redis for multi-instance deployments (current Map resets on restart)
+const RATE_LIMIT_MAP_MAX = 10_000;
 
 function checkChannelMsgRateLimit(aegisId: string): boolean {
   const now = Date.now();
@@ -188,6 +192,11 @@ function checkChannelMsgRateLimit(aegisId: string): boolean {
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
   entry.count++;
   channelMsgRateLimit.set(aegisId, entry);
+  // LRU eviction: prevent unbounded memory growth under sustained load
+  if (channelMsgRateLimit.size > RATE_LIMIT_MAP_MAX) {
+    const oldest = channelMsgRateLimit.keys().next().value;
+    if (oldest !== undefined) channelMsgRateLimit.delete(oldest);
+  }
   return entry.count <= 120;
 }
 
@@ -347,16 +356,19 @@ export function attachRelay(io: SocketServer) {
       }, DEVICE_LINK_TTL_MS);
       linkingSockets.set(desktopPubKey, { socket, timer });
 
+      // Neutral response regardless of whether target is online — prevents
+      // binary online/offline oracle for unauthenticated sockets (FND-06).
+      // If the target is online we forward immediately; if not, the pending
+      // entry stays in linkingSockets until the TTL expires or the target
+      // authenticates and picks up the link request via its own flow.
       const targetSockets = sockets.get(targetAegisId);
-      if (!targetSockets || targetSockets.size === 0) {
-        socket.emit('error_msg', { code: 'peer_offline' });
-        clearTimeout(timer);
-        linkingSockets.delete(desktopPubKey);
-        return;
+      if (targetSockets && targetSockets.size > 0) {
+        for (const s of targetSockets) {
+          s.emit('device:link', { desktopPubKey, tempSocketId: socket.id });
+        }
       }
-      for (const s of targetSockets) {
-        s.emit('device:link', { desktopPubKey, tempSocketId: socket.id });
-      }
+      // Always emit 'pending' — same response online or offline
+      socket.emit('device:link', { status: 'pending' });
     });
 
     socket.on('disconnect', () => {
@@ -477,21 +489,34 @@ export function attachRelay(io: SocketServer) {
         ack?.({ ok: false, error: 'invalid_payload' });
         return;
       }
-      const now = Date.now();
-      prekeysRepo.upsertSigned({
-        aegis_id: me,
-        device_id: parsed.data.deviceId ?? deviceId ?? 'default',
-        key_id: parsed.data.signedPreKey.keyId,
-        public_key_b64: parsed.data.signedPreKey.publicKeyB64,
-        signature_b64: parsed.data.signedPreKey.signatureB64,
-        created_at: now
-      }).then(async () => {
+
+      // Verify SPK signature server-side — defence in depth against DB tampering.
+      // identityRepo.get is async so the entire upload flow runs inside the promise chain.
+      void identityRepo.get(me).then(async (uploaderIdentity) => {
+        if (uploaderIdentity?.signing_public_key_b64) {
+          const spkBytes = decodeBase64(parsed.data.signedPreKey.publicKeyB64);
+          const sigBytes = decodeBase64(parsed.data.signedPreKey.signatureB64);
+          const signingKey = decodeBase64(uploaderIdentity.signing_public_key_b64);
+          if (!nacl.sign.detached.verify(spkBytes, sigBytes, signingKey)) {
+            ack?.({ ok: false, error: 'invalid_spk_signature' });
+            return;
+          }
+        }
+        const now = Date.now();
+        await prekeysRepo.upsertSigned({
+          aegis_id: me,
+          device_id: parsed.data.deviceId ?? deviceId ?? 'default',
+          key_id: parsed.data.signedPreKey.keyId,
+          public_key_b64: parsed.data.signedPreKey.publicKeyB64,
+          signature_b64: parsed.data.signedPreKey.signatureB64,
+          created_at: now,
+        });
         for (const opk of parsed.data.oneTimePreKeys) {
           await prekeysRepo.insertOneTime({
             aegis_id: me,
             key_id: opk.keyId,
             public_key_b64: opk.publicKeyB64,
-            created_at: now
+            created_at: now,
           });
         }
         ack?.({ ok: true });
@@ -697,8 +722,16 @@ export function attachRelay(io: SocketServer) {
         return;
       }
       const { channelId, orgId } = parsed.data;
-      workRepo.getMember(orgId, me).then((member) => {
+      Promise.all([
+        workRepo.getMember(orgId, me),
+        workChannelRepo.get(channelId),
+      ]).then(([member, channel]) => {
         if (!member) {
+          socket.emit('error_msg', { code: 'forbidden', for: 'channel:join' });
+          return;
+        }
+        // Verify channel actually belongs to the claimed org — prevents cross-org UUID guessing
+        if (!channel || channel.org_id !== orgId) {
           socket.emit('error_msg', { code: 'forbidden', for: 'channel:join' });
           return;
         }
@@ -1064,12 +1097,7 @@ const SealedSignal = z.object({
 const CallInvite = CallTo.extend({
   media: z.enum(['audio', 'video']),
 }).merge(SealedSignal);
-const CallOffer = CallTo.extend({
-  sdp: z.string().min(1).max(16384),
-  media: z.enum(['audio', 'video']).optional(),
-});
 const CallAnswer = CallTo.merge(SealedSignal);
-const CallAnswerSdp = CallTo.extend({ sdp: z.string().min(1).max(16384) });
 const CallIce = CallTo.merge(SealedSignal);
 const CallHangup = CallTo.extend({ reason: z.string().max(64).optional() });
 const CallEnd = CallTo.extend({ reason: z.string().max(64).optional() });
@@ -1084,6 +1112,11 @@ function checkCallOfferRateLimit(aegisId: string): boolean {
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
   entry.count++;
   callOfferRateLimit.set(aegisId, entry);
+  // LRU eviction to prevent unbounded memory growth
+  if (callOfferRateLimit.size > RATE_LIMIT_MAP_MAX) {
+    const oldest = callOfferRateLimit.keys().next().value;
+    if (oldest !== undefined) callOfferRateLimit.delete(oldest);
+  }
   return entry.count <= 5;
 }
 
@@ -1138,45 +1171,17 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
 
   // ── SDP-style signaling (offer/answer/ice/end/reject) ────────────────────
   // Relay is a dumb forwarder — SDPs and ICE candidates are never stored.
-  socket.on('call:offer', (raw) => {
-    const parsed = CallOffer.safeParse(raw);
-    if (!parsed.success) {
-      socket.emit('error_msg', { code: 'invalid_payload', for: 'call:offer' });
-      return;
-    }
-    if (!checkCallOfferRateLimit(me)) {
-      socket.emit('error_msg', { code: 'rate_limited', for: 'call:offer' });
-      return;
-    }
-    const target = sockets.get(parsed.data.to);
-    if (!target || target.size === 0) {
-      socket.emit('error_msg', { code: 'peer_offline', for: 'call:offer' });
-      // Fire push wake-up so the OS wakes the callee's app for the SDP-style flow.
-      void sendCallWakeUp(
-        parsed.data.to,
-        me,
-        (parsed.data.media ?? 'audio') as CallMedia,
-        parsed.data.callId,
-      ).catch(() => { /* push subsystem unavailable */ });
-      return;
-    }
-    const { to: _to, ...rest } = parsed.data;
-    for (const s of target) s.emit('call:offer', { ...rest, from: me, type: 'offer' });
+  // call:offer and call:sdp:answer with plaintext SDP are REJECTED.
+  // All call signaling must use the sealed NaCl box variants (call:invite / call:answer).
+  // These handlers exist only to return a clear error to legacy clients.
+  socket.on('call:offer', (_raw) => {
+    socket.emit('error_msg', { code: 'plaintext_sdp_rejected', for: 'call:offer',
+      message: 'Use call:invite with sealed NaCl box signaling' });
   });
 
-  socket.on('call:sdp:answer', (raw) => {
-    const parsed = CallAnswerSdp.safeParse(raw);
-    if (!parsed.success) {
-      socket.emit('error_msg', { code: 'invalid_payload', for: 'call:sdp:answer' });
-      return;
-    }
-    const target = sockets.get(parsed.data.to);
-    if (!target || target.size === 0) {
-      socket.emit('error_msg', { code: 'peer_offline', for: 'call:sdp:answer' });
-      return;
-    }
-    const { to: _to, ...rest } = parsed.data;
-    for (const s of target) s.emit('call:sdp:answer', { ...rest, from: me, type: 'answer' });
+  socket.on('call:sdp:answer', (_raw) => {
+    socket.emit('error_msg', { code: 'plaintext_sdp_rejected', for: 'call:sdp:answer',
+      message: 'Use call:answer with sealed NaCl box signaling' });
   });
 
   socket.on('call:end', (raw) => {

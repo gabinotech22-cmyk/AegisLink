@@ -25,7 +25,7 @@ import {
 
 function makePayload(overrides: Partial<BackupPayload> = {}): BackupPayload {
   return {
-    v: 1,
+    v: 2,
     createdAt: 1_700_000_000_000,
     identity: {
       aegisId: 'ABC-DEFG-HIJK',
