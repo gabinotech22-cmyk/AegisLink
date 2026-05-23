@@ -24,7 +24,8 @@
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": ["voip", "audio", "remote-notification"]
       },
-      "bitcode": false
+      "bitcode": false,
+      "buildNumber": "1"
     },
     "notification": {
       "icon": "./assets/notification-icon.png",
@@ -91,6 +92,8 @@
           "microphonePermission": "Allow AegisLink to access the microphone for end-to-end encrypted calls."
         }
       ],
+      "expo-background-fetch",
+      "expo-task-manager",
       "expo-localization",
       [
         "expo-notifications",

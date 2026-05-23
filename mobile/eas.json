@@ -23,6 +23,7 @@
       "android": { "buildType": "apk" },
       "ios": { "simulator": false },
       "env": {
+        "APP_ENV": "preview",
         "EXPO_PUBLIC_RELAY_URL": "https://aegislink.duckdns.org",
         "EXPO_PUBLIC_TURN_URL": "turn:aegislink.duckdns.org:3478",
         "AEGIS_EXPO_GO": "0"
@@ -31,8 +32,16 @@
     "production": {
       "autoIncrement": true,
       "channel": "production",
-      "android": { "buildType": "app-bundle" },
+      "ios": {
+        "buildConfiguration": "Release",
+        "credentialsSource": "remote"
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "credentialsSource": "remote"
+      },
       "env": {
+        "APP_ENV": "production",
         "EXPO_PUBLIC_RELAY_URL": "https://aegislink.duckdns.org",
         "EXPO_PUBLIC_TURN_URL": "turn:aegislink.duckdns.org:5349"
       }
