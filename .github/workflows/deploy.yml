@@ -1,0 +1,57 @@
+name: Deploy to Production
+
+# Triggers: every push to main (automatic) or manual dispatch.
+# Required GitHub secrets:
+#   DEPLOY_HOST       — public IP or hostname of the production server
+#   DEPLOY_USER       — SSH user (e.g. ubuntu, aegis)
+#   DEPLOY_SSH_KEY    — private SSH key (PEM, no passphrase) for that user
+#   TURN_SECRET       — HMAC-SHA1 seed for coturn ephemeral credentials (rotate every 24 h)
+#   CORS_ORIGIN       — e.g. https://aegislink.duckdns.org
+#
+# Optional secrets forwarded to the server env:
+#   FCM_SERVER_KEY, APNS_KEY_ID, APNS_TEAM_ID, EXTERNAL_IP, PORT, TRUST_PROXY
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy relay + coturn
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # All secrets are injected as env vars; deploy.sh reads them.
+          # TURN_SECRET is consumed by deploy.sh (envsubst into coturn conf)
+          # and by docker-compose (relay container env).
+          # No secret ever appears in the remote shell command string itself.
+          envs: TURN_SECRET,CORS_ORIGIN,FCM_SERVER_KEY,APNS_KEY_ID,APNS_TEAM_ID,EXTERNAL_IP,PORT,TRUST_PROXY
+          script: |
+            export TURN_SECRET="${TURN_SECRET}"
+            export CORS_ORIGIN="${CORS_ORIGIN}"
+            export FCM_SERVER_KEY="${FCM_SERVER_KEY:-}"
+            export APNS_KEY_ID="${APNS_KEY_ID:-}"
+            export APNS_TEAM_ID="${APNS_TEAM_ID:-}"
+            export EXTERNAL_IP="${EXTERNAL_IP:-}"
+            export PORT="${PORT:-3001}"
+            export TRUST_PROXY="${TRUST_PROXY:-1}"
+            cd /opt/aegislink
+            bash infra/deploy.sh
+        env:
+          TURN_SECRET: ${{ secrets.TURN_SECRET }}
+          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
+          FCM_SERVER_KEY: ${{ secrets.FCM_SERVER_KEY }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+          EXTERNAL_IP: ${{ secrets.EXTERNAL_IP }}
+          PORT: ${{ secrets.PORT }}
+          TRUST_PROXY: ${{ secrets.TRUST_PROXY }}
