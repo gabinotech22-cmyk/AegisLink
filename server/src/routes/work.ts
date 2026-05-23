@@ -988,6 +988,118 @@ router.post('/org/:orgId/channels/:channelId/messages/:messageId/pin', async (re
   }
 });
 
+// ── Org settings endpoints ────────────────────────────────────────────────────
+
+// GET /work/orgs/:orgId/settings — member can read
+router.get('/orgs/:orgId/settings', async (req, res) => {
+  const parsed = AdminQuerySchema.safeParse(req.query);
+  if (!parsed.success) { res.status(400).json({ error: 'INVALID_PAYLOAD' }); return; }
+  const { aegisId, sig, ts } = parsed.data;
+
+  const [member, sigOk] = await Promise.all([
+    workRepo.getMember(req.params.orgId, aegisId),
+    verifyAdminSig(req.params.orgId, aegisId, 'read_org_settings', sig, ts),
+  ]);
+  if (!member || !sigOk) { res.status(403).json({ error: 'FORBIDDEN' }); return; }
+
+  try {
+    const [org, members] = await Promise.all([
+      workRepo.getOrg(req.params.orgId),
+      workRepo.listMembers(req.params.orgId),
+    ]);
+    if (!org) { res.status(404).json({ error: 'NOT_FOUND' }); return; }
+    res.json({
+      orgId: org.org_id,
+      displayName: org.display_name ?? null,
+      invitePolicy: org.invite_policy ?? 'invite_only',
+      memberCount: members.length,
+    });
+  } catch {
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+const PatchOrgSettingsSchema = z.object({
+  aegisId: z.string().min(10),
+  sig: z.string().min(1),
+  ts: z.number().int().positive(),
+  displayName: z.string().min(1).max(48).nullable().optional(),
+  invitePolicy: z.enum(['invite_only', 'open']).optional(),
+});
+
+// PATCH /work/orgs/:orgId/settings — admin/owner only
+router.patch('/orgs/:orgId/settings', async (req, res) => {
+  const parsed = PatchOrgSettingsSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: 'INVALID_PAYLOAD' }); return; }
+  const { aegisId, sig, ts, displayName, invitePolicy } = parsed.data;
+
+  const [callerRole, sigOk] = await Promise.all([
+    getMemberRole(req.params.orgId, aegisId),
+    verifyAdminSig(req.params.orgId, aegisId, 'patch_org_settings', sig, ts),
+  ]);
+  if (!callerRole || !sigOk || !getPermissions(callerRole).canManageMembers) {
+    res.status(403).json({ error: 'FORBIDDEN' }); return;
+  }
+
+  try {
+    const org = await workRepo.getOrg(req.params.orgId);
+    if (!org) { res.status(404).json({ error: 'NOT_FOUND' }); return; }
+
+    const newDisplayName = displayName !== undefined ? displayName ?? null : (org.display_name ?? null);
+    const newInvitePolicy = invitePolicy ?? (org.invite_policy ?? 'invite_only');
+
+    await workRepo.updateOrgSettings(req.params.orgId, newDisplayName, newInvitePolicy);
+    audit(req.params.orgId, 'org.settings_updated', `Org settings updated`, {
+      actor_id: aegisId,
+      metadata: { displayName: newDisplayName, invitePolicy: newInvitePolicy },
+    });
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
+// ── Channel retention endpoint ────────────────────────────────────────────────
+
+const PatchRetentionSchema = z.object({
+  aegisId: z.string().min(10),
+  sig: z.string().min(1),
+  ts: z.number().int().positive(),
+  retentionDays: z.union([z.literal(7), z.literal(30), z.literal(90), z.null()]),
+});
+
+// PATCH /work/org/:orgId/channels/:channelId/retention — admin/owner only
+router.patch('/org/:orgId/channels/:channelId/retention', async (req, res) => {
+  const parsed = PatchRetentionSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: 'INVALID_PAYLOAD' }); return; }
+  const { aegisId, sig, ts, retentionDays } = parsed.data;
+
+  const [callerRole, sigOk] = await Promise.all([
+    getMemberRole(req.params.orgId, aegisId),
+    verifyAdminSig(req.params.orgId, aegisId, 'set_channel_retention', sig, ts),
+  ]);
+  if (!callerRole || !sigOk || !getPermissions(callerRole).canManageMembers) {
+    res.status(403).json({ error: 'FORBIDDEN' }); return;
+  }
+
+  const channel = await workChannelRepo.get(req.params.channelId);
+  if (!channel || channel.org_id !== req.params.orgId) {
+    res.status(404).json({ error: 'NOT_FOUND' }); return;
+  }
+
+  try {
+    await workRepo.updateChannelRetention(req.params.channelId, retentionDays);
+    audit(req.params.orgId, 'channel.retention_updated', `Channel retention set to ${retentionDays ?? 'forever'}`, {
+      actor_id: aegisId,
+      channel_id: req.params.channelId,
+      metadata: { retentionDays },
+    });
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
+});
+
 // ── Channel permission endpoints ──────────────────────────────────────────────
 
 const ChannelPermsQuerySchema = AdminQuerySchema;

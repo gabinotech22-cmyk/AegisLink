@@ -88,6 +88,7 @@ interface WorkMessagesState {
   loadThread: (orgId: string, channelId: string, parentId: string) => Promise<void>;
   handlePinEvent: (ev: PinEvent) => void;
   markDeleted: (channelId: string, messageId: string) => void;
+  deleteMessage: (orgId: string, channelId: string, messageId: string) => Promise<void>;
   append: (msg: WorkMessage) => void;
   appendThreadReply: (reply: WorkMessage) => void;
   updateReplyCount: (parentId: string, replyCount: number) => void;
@@ -239,6 +240,27 @@ export const useWorkMessages = create<WorkMessagesState>((set, get) => ({
         ),
       },
     }));
+  },
+
+  async deleteMessage(orgId, channelId, messageId) {
+    const aegisId = getAegisId();
+    if (!aegisId) return;
+
+    const adminSig = signAdminAction(orgId, 'delete_message');
+    if (!adminSig) return;
+
+    const query = `aegisId=${encodeURIComponent(aegisId)}&sig=${encodeURIComponent(adminSig.sig)}&ts=${adminSig.ts}`;
+    try {
+      const res = await fetch(
+        `${SERVER_URL}/work/org/${orgId}/channels/${channelId}/messages/${messageId}?${query}`,
+        { method: 'DELETE' },
+      );
+      if (!res.ok) return;
+      // Optimistic already done by caller; the socket event will confirm
+      get().markDeleted(channelId, messageId);
+    } catch {
+      // Offline — silent
+    }
   },
 
   append(msg) {

@@ -304,6 +304,9 @@ function initSqliteSchema(db: DatabaseSync) {
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN parent_id TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN reply_count INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_orgs ADD COLUMN display_name TEXT;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_orgs ADD COLUMN invite_policy TEXT NOT NULL DEFAULT 'invite_only';`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE work_channels ADD COLUMN retention_days INTEGER;`); } catch { /* exists */ }
   // work_audit_log extended columns — migration guards for existing deployments
   try { db.exec(`ALTER TABLE work_audit_log ADD COLUMN actor_id TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_audit_log ADD COLUMN target_id TEXT;`); } catch { /* exists */ }
@@ -744,6 +747,8 @@ export interface WorkOrgRow {
   admin_id: string;
   policy_key_rotation_days: number;
   created_at: number;
+  display_name: string | null;
+  invite_policy: 'invite_only' | 'open';
 }
 
 // ── Role-based permissions ─────────────────────────────────────────────────────
@@ -1215,7 +1220,7 @@ export const pollsRepo = {
 // ── workRepo ──────────────────────────────────────────────────────────────────
 
 export const workRepo = {
-  async createOrg(row: WorkOrgRow): Promise<void> {
+  async createOrg(row: Omit<WorkOrgRow, 'display_name' | 'invite_policy'> & { display_name?: string | null; invite_policy?: 'invite_only' | 'open' }): Promise<void> {
     await dbRun(
       `INSERT INTO work_orgs (org_id, name, admin_id, policy_key_rotation_days, created_at) VALUES (?, ?, ?, ?, ?)`,
       [row.org_id, row.name, row.admin_id, row.policy_key_rotation_days, row.created_at]
@@ -1316,6 +1321,18 @@ export const workRepo = {
   async useInvite(token: string): Promise<void> {
     await dbRun(`UPDATE work_invite_tokens SET used = 1 WHERE token = ?`, [token]);
   },
+  async updateOrgSettings(orgId: string, displayName: string | null, invitePolicy: 'invite_only' | 'open'): Promise<void> {
+    await dbRun(
+      `UPDATE work_orgs SET display_name = ?, invite_policy = ? WHERE org_id = ?`,
+      [displayName, invitePolicy, orgId],
+    );
+  },
+  async updateChannelRetention(channelId: string, retentionDays: number | null): Promise<void> {
+    await dbRun(
+      `UPDATE work_channels SET retention_days = ? WHERE channel_id = ?`,
+      [retentionDays, channelId],
+    );
+  },
 };
 
 // ── workChannelRepo / workMessageRepo ─────────────────────────────────────────
@@ -1326,6 +1343,7 @@ export interface WorkChannelRow {
   name: string;
   is_announcements: number; // 0 | 1
   created_at: number;
+  retention_days: number | null;
 }
 
 export interface WorkMessageRow {
@@ -1346,7 +1364,7 @@ export interface WorkMessageRow {
 }
 
 export const workChannelRepo = {
-  async create(row: WorkChannelRow): Promise<void> {
+  async create(row: Omit<WorkChannelRow, 'retention_days'>): Promise<void> {
     await dbRun(
       `INSERT INTO work_channels (channel_id, org_id, name, is_announcements, created_at) VALUES (?, ?, ?, ?, ?)`,
       [row.channel_id, row.org_id, row.name, row.is_announcements, row.created_at]
@@ -1354,13 +1372,13 @@ export const workChannelRepo = {
   },
   async listByOrg(orgId: string): Promise<WorkChannelRow[]> {
     return dbAll<WorkChannelRow>(
-      `SELECT channel_id, org_id, name, is_announcements, created_at FROM work_channels WHERE org_id = ? ORDER BY created_at ASC`,
+      `SELECT channel_id, org_id, name, is_announcements, created_at, retention_days FROM work_channels WHERE org_id = ? ORDER BY created_at ASC`,
       [orgId]
     );
   },
   async get(channelId: string): Promise<WorkChannelRow | undefined> {
     return dbGet<WorkChannelRow>(
-      `SELECT channel_id, org_id, name, is_announcements, created_at FROM work_channels WHERE channel_id = ?`,
+      `SELECT channel_id, org_id, name, is_announcements, created_at, retention_days FROM work_channels WHERE channel_id = ?`,
       [channelId]
     );
   },
@@ -1489,6 +1507,27 @@ export const workMessageRepo = {
     return true;
   },
 };
+
+// ── pruneExpiredWorkMessages ──────────────────────────────────────────────────
+
+/**
+ * Hard-delete work messages that are older than the channel's retention_days
+ * policy. Runs server-side only; clients never see deleted content after
+ * reconnect. Safe to call on any backend (SQLite or PG) via dbRun/dbAll.
+ */
+export async function pruneExpiredWorkMessages(): Promise<void> {
+  // Find channels with a retention policy set
+  const channels = await dbAll<{ channel_id: string; retention_days: number }>(
+    `SELECT channel_id, retention_days FROM work_channels WHERE retention_days IS NOT NULL`,
+  );
+  for (const ch of channels) {
+    const cutoffMs = Date.now() - ch.retention_days * 86400 * 1000;
+    await dbRun(
+      `DELETE FROM work_messages WHERE channel_id = ? AND created_at < ?`,
+      [ch.channel_id, cutoffMs],
+    );
+  }
+}
 
 // ── workAttachmentRepo ────────────────────────────────────────────────────────
 

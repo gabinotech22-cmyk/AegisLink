@@ -13,7 +13,7 @@ import { createWorkRouter } from './routes/work.js';
 import { createGroupCallsRouter } from './routes/groupCalls.js';
 import { createDeviceLinkRouter } from './routes/deviceLink.js';
 import { attachRelay } from './relay/handler.js';
-import { initDb, messageRepo } from './db/client.js';
+import { initDb, messageRepo, pruneExpiredWorkMessages } from './db/client.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 // Default '*' so React Native / Expo Go (which doesn't send a stable Origin)
@@ -102,6 +102,12 @@ initDb().then(() => {
   setInterval(() => {
     void messageRepo.purgeExpired();
   }, 10 * 60 * 1000).unref();
+
+  // Prune work messages that exceed channel retention policies.
+  void pruneExpiredWorkMessages();
+  setInterval(() => {
+    void pruneExpiredWorkMessages();
+  }, 60 * 60 * 1000).unref();
 }).catch((err: unknown) => {
   console.error('[aegislink-server] DB init failed:', err);
   process.exit(1);
