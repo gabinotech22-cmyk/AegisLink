@@ -8,6 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
   StyleSheet,
+  TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
@@ -38,6 +39,8 @@ function defaultPerms(channelId: string, role: WorkRole): ChannelPermission {
 }
 
 const ALL_ROLES: WorkRole[] = ['owner', 'admin', 'member'];
+
+type RetentionOption = 7 | 30 | 90 | null;
 
 const ROLE_LABELS: Record<WorkRole, string> = {
   owner: 'Owner',
@@ -86,6 +89,10 @@ export function WorkChannelPermissions({ channel, onBack }: Props) {
 
   const [saving, setSaving] = useState<WorkRole | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // ── Retention state ──────────────────────────────────────────────────────────
+  const [retentionDays, setRetentionDays] = useState<RetentionOption>(null);
+  const [savingRetention, setSavingRetention] = useState(false);
 
   // Load from store on mount
   useEffect(() => {
@@ -148,6 +155,39 @@ export function WorkChannelPermissions({ channel, onBack }: Props) {
       }
     },
     [localPerms, org, myAegisId, channel.channelId],
+  );
+
+  const canManageRetention = myPerms.canManageMembers;
+
+  const handleSaveRetention = useCallback(
+    async (days: RetentionOption) => {
+      if (!org || !canManageRetention) return;
+      setSavingRetention(true);
+      try {
+        const adminSig = signAdminAction(org.orgId, 'set_channel_retention');
+        if (!adminSig) throw new Error('Identidad no cargada');
+        const res = await fetch(
+          `${SERVER_URL}/work/org/${org.orgId}/channels/${channel.channelId}/retention`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              aegisId: myAegisId,
+              sig: adminSig.sig,
+              ts: adminSig.ts,
+              retentionDays: days,
+            }),
+          },
+        );
+        if (!res.ok) throw new Error('Error al guardar retención');
+        setRetentionDays(days);
+      } catch (e) {
+        Alert.alert('Error', (e as Error).message);
+      } finally {
+        setSavingRetention(false);
+      }
+    },
+    [org, myAegisId, channel.channelId, canManageRetention],
   );
 
   const s = makeStyles(t);
@@ -224,6 +264,74 @@ export function WorkChannelPermissions({ channel, onBack }: Props) {
             </View>
           );
         })}
+        {/* Retention section — admin/owner only */}
+        {canManageRetention && (
+          <View style={s.section}>
+            <View style={s.roleHeader}>
+              <Text style={[s.roleBadgeText, { color: t.accent, fontSize: 11, letterSpacing: 0.8 }]}>
+                RETENCIÓN DE MENSAJES
+              </Text>
+              {savingRetention && <ActivityIndicator size="small" color={t.accent} style={{ marginLeft: 'auto' }} />}
+            </View>
+            {([7, 30, 90, null] as RetentionOption[]).map((opt, idx, arr) => {
+              const label =
+                opt === 7 ? '7 días' :
+                opt === 30 ? '30 días' :
+                opt === 90 ? '90 días' :
+                'Para siempre';
+              const isSelected = retentionDays === opt;
+              const isLast = idx === arr.length - 1;
+              return (
+                <TouchableOpacity
+                  key={String(opt)}
+                  onPress={() => void handleSaveRetention(opt)}
+                  disabled={savingRetention}
+                  accessibilityLabel={`Retención: ${label}`}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: isSelected }}
+                  style={[
+                    {
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingHorizontal: 16,
+                      paddingVertical: 14,
+                    },
+                    !isLast && {
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: t.divider,
+                    },
+                  ]}
+                >
+                  <View
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: 10,
+                      borderWidth: 2,
+                      borderColor: isSelected ? t.accent : t.border,
+                      backgroundColor: isSelected ? t.accent : 'transparent',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginRight: 12,
+                    }}
+                  >
+                    {isSelected && (
+                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: t.bg }} />
+                    )}
+                  </View>
+                  <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text, flex: 1 }}>
+                    {label}
+                  </Text>
+                  {opt === null && (
+                    <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint }}>
+                      sin límite
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
