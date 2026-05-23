@@ -10,7 +10,6 @@ import Animated, {
   useReducedMotion,
   Easing,
 } from 'react-native-reanimated';
-import { usePanicGesture } from './src/hooks/usePanicGesture';
 import * as SecureStore from 'expo-secure-store';
 import { I } from './src/components/icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -64,9 +63,12 @@ import { LockSettingsScreen } from './src/screens/LockSettings';
 import { KeysScreen } from './src/screens/Keys';
 import { DistributionListsScreen } from './src/screens/DistributionLists';
 import { BroadcastComposeScreen } from './src/screens/BroadcastCompose';
+import { ProfileSwitcherScreen } from './src/screens/ProfileSwitcher';
+import { CreateProfileScreen } from './src/screens/CreateProfile';
 import { useIdentity } from './src/store/identity';
 import { usePreferences } from './src/store/preferences';
 import { useWork } from './src/store/work';
+import { useProfiles } from './src/store/profiles';
 
 import { useCall } from './src/store/call';
 import { connect as connectSocket, disconnect as disconnectSocket } from './src/socket/client';
@@ -171,7 +173,9 @@ type PushRoute =
   | { name: 'workChannelChat'; channel: import('./src/store/work').WorkChannel }
   | { name: 'workChannelPermissions'; channel: import('./src/store/work').WorkChannel }
   | { name: 'workDirectory' }
-  | { name: 'workSearch' };
+  | { name: 'workSearch' }
+  | { name: 'profileSwitcher' }
+  | { name: 'createProfile' };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -405,6 +409,8 @@ function Shell() {
   // Show NetworkErrorScreen after 5s of being offline (only when authenticated).
   useEffect(() => {
     if (!identity) return;
+    // Suppress network errors in decoy mode — no connection is intentional
+    if (usePreferences.getState().duressActive) return;
     if (!online) {
       netTimer.current = setTimeout(() => setNetError(true), 5000);
     } else {
@@ -416,6 +422,8 @@ function Shell() {
 
   useEffect(() => {
     if (identity && status === 'ready') {
+      // Never connect with the decoy identity — doing so leaks that panic mode is active
+      if (usePreferences.getState().duressActive) return;
       connectSocket(identity);
       if (WEBRTC_AVAILABLE) attachCallHandlers();
       setNotificationOpenChatHandler((aegisId) => {
@@ -450,8 +458,6 @@ function Shell() {
     }
     setShowWipeOverlay(false);
   }, []);
-
-  const { registerTap } = usePanicGesture(triggerPanic);
 
   async function handleFilePick(contact: StoredContact) {
     const DocumentPicker = require('expo-document-picker');
@@ -519,9 +525,9 @@ function Shell() {
 
   useEffect(() => {
     Linking.getInitialURL().then((url: string | null) => {
-      if (url) handleDeepLink(url);
+      if (url) void handleDeepLink(url);
     }).catch(() => {});
-    const sub = Linking.addEventListener('url', ({ url }: { url: string }) => handleDeepLink(url));
+    const sub = Linking.addEventListener('url', ({ url }: { url: string }) => void handleDeepLink(url));
     return () => sub.remove();
   }, [handleDeepLink]);
 
@@ -533,6 +539,17 @@ function Shell() {
     callStatus === 'in-call' ||
     callStatus === 'ended';
   const incomingCall = callStatus === 'incoming-ringing';
+
+  if (showWipeOverlay) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
+        <I.Shield size={44} color="#ff4444" stroke={1.5} />
+        <Text style={{ color: '#ff4444', fontFamily: 'monospace', fontSize: 12, letterSpacing: 3, marginTop: 28 }}>
+          WIPING DATA
+        </Text>
+      </View>
+    );
+  }
 
   if (status === 'loading' || showOnboarding === null) {
     return (
@@ -578,7 +595,7 @@ function Shell() {
     return (
       <LockScreen
         onUnlock={() => setAppLocked(false)}
-        onPanic={() => { setAppLocked(false); push({ name: 'panic' }); }}
+        onPanic={() => void triggerPanic()}
       />
     );
   }
@@ -705,6 +722,7 @@ function Shell() {
             onNotifications={() => push({ name: 'notifs' })}
             onLockConfig={() => push({ name: 'lockConfig' })}
             onExport={() => push({ name: 'export' })}
+            onProfileSwitcher={() => push({ name: 'profileSwitcher' })}
           />
         );
       case 'workGeneration':
@@ -845,7 +863,7 @@ function Shell() {
       case 'lockSettings':
         return <LockSettingsScreen onBack={pop} />;
       case 'lock':
-        return <LockScreen onUnlock={pop} onPanic={() => push({ name: 'panic' })} />;
+        return <LockScreen onUnlock={pop} onPanic={() => void triggerPanic()} />;
       case 'panic':
         return <PanicScreen onBack={pop} />;
       case 'ephemeral':
@@ -964,7 +982,7 @@ function Shell() {
       case 'viewoncesend':
         return <ViewOnceSendScreen contact={top.contact} onBack={pop} onSent={pop} />;
       case 'scheduled':
-        return <ScheduledScreen contact={top.contact} onBack={pop} />;
+        return <ScheduledScreen onBack={pop} />;
       case 'location':
         return <LocationScreen contact={top.contact} onBack={pop} onShare={pop} />;
       case 'search':
@@ -1013,6 +1031,20 @@ function Shell() {
             onChat={(contact) => push({ name: 'chat', contact })}
           />
         );
+      case 'profileSwitcher':
+        return (
+          <ProfileSwitcherScreen
+            onBack={pop}
+            onCreateProfile={() => push({ name: 'createProfile' })}
+          />
+        );
+      case 'createProfile':
+        return (
+          <CreateProfileScreen
+            onBack={pop}
+            onCreated={() => { setStack([]); setTab('home'); }}
+          />
+        );
     }
     }
     return (
@@ -1034,27 +1066,8 @@ function Shell() {
             onProfile={() => push({ name: 'profile' })}
             onContacts={() => push({ name: 'contacts' })}
             onDistribution={() => push({ name: 'distribution' })}
+            onProfileSwitcher={() => push({ name: 'profileSwitcher' })}
             onTab={setTab}
-          />
-          {/* Invisible tap target over the logo area for the 'tap' panic gesture.
-              Positioned top-left to cover the AegisLink wordmark (~120×52 px).
-              pointer-events passthrough is off intentionally — the logo's own
-              onPress (→ profile) fires via HomeScreen; this Pressable sits behind
-              it but Android/iOS let both fire because we use hitSlop only. */}
-          <Pressable
-            onPress={registerTap}
-            accessibilityLabel="Panic gesture tap zone"
-            accessibilityElementsHidden
-            importantForAccessibility="no"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: 130,
-              height: 66,
-              opacity: 0,
-            }}
-            hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }}
           />
         </View>
       );

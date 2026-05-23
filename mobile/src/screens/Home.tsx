@@ -26,9 +26,10 @@ interface Props {
   onContacts: () => void;
   onTab: (tab: Tab) => void;
   onDistribution?: () => void;
+  onProfileSwitcher?: () => void;
 }
 
-export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onContacts, onTab, onDistribution }: Props) {
+export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onContacts, onTab, onDistribution, onProfileSwitcher }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -155,7 +156,8 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
       >
         <Pressable
           onPress={() => { registerTap(); onProfile(); }}
-          accessibilityLabel="AegisLink home"
+          onLongPress={onProfileSwitcher}
+          accessibilityLabel="AegisLink home — mantén pulsado para cambiar de perfil"
           style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
         >
           <AegisMark t={t} size={26} />

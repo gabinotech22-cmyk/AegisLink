@@ -177,6 +177,18 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
           created_at INTEGER NOT NULL,
           group_id   TEXT NOT NULL
         );
+
+        -- Scheduled messages: ciphertext stored, plaintext never on disk
+        CREATE TABLE IF NOT EXISTS scheduled_messages (
+          id                TEXT PRIMARY KEY,
+          recipient_aegis_id TEXT NOT NULL,
+          encrypted_payload TEXT NOT NULL,
+          send_at           INTEGER NOT NULL,
+          created_at        INTEGER NOT NULL,
+          status            TEXT NOT NULL DEFAULT 'pending',
+          retry_count       INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_scheduled_send_at ON scheduled_messages(send_at, status);
       `);
 
       // ─── Schema versioning via PRAGMA user_version ──────────────────────────
@@ -1026,4 +1038,101 @@ export async function loadPolls(): Promise<StoredPoll[]> {
 export async function updatePollVotes(id: string, votes: number[]): Promise<void> {
   const d = await db();
   await d.runAsync('UPDATE polls SET votes = ? WHERE id = ?', JSON.stringify(votes), id);
+}
+
+// ─── Scheduled Messages ───────────────────────────────────────────────────────
+
+export interface StoredScheduledMessage {
+  id: string;
+  recipientAegisId: string;
+  /** SealedEnvelope JSON — already E2EE ciphertext, plaintext NEVER stored */
+  encryptedPayload: string;
+  sendAt: number;
+  createdAt: number;
+  status: 'pending' | 'sent' | 'failed';
+  retryCount: number;
+}
+
+type ScheduledRow = {
+  id: string;
+  recipient_aegis_id: string;
+  encrypted_payload: string;
+  send_at: number;
+  created_at: number;
+  status: string;
+  retry_count: number;
+};
+
+function rowToScheduled(r: ScheduledRow): StoredScheduledMessage {
+  return {
+    id: r.id,
+    recipientAegisId: r.recipient_aegis_id,
+    encryptedPayload: r.encrypted_payload,
+    sendAt: r.send_at,
+    createdAt: r.created_at,
+    status: r.status as 'pending' | 'sent' | 'failed',
+    retryCount: r.retry_count,
+  };
+}
+
+export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `INSERT OR REPLACE INTO scheduled_messages
+     (id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    msg.id,
+    msg.recipientAegisId,
+    msg.encryptedPayload,
+    msg.sendAt,
+    msg.createdAt,
+    msg.status,
+    msg.retryCount,
+  );
+}
+
+export async function loadPendingScheduled(): Promise<StoredScheduledMessage[]> {
+  const d = await db();
+  const rows = await d.getAllAsync<ScheduledRow>(
+    `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count
+     FROM scheduled_messages WHERE status = 'pending' ORDER BY send_at ASC`,
+  );
+  return rows.map(rowToScheduled);
+}
+
+export async function loadAllScheduled(): Promise<StoredScheduledMessage[]> {
+  const d = await db();
+  const rows = await d.getAllAsync<ScheduledRow>(
+    `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count
+     FROM scheduled_messages ORDER BY send_at ASC`,
+  );
+  return rows.map(rowToScheduled);
+}
+
+export async function markScheduledSent(id: string): Promise<void> {
+  const d = await db();
+  await d.runAsync(`UPDATE scheduled_messages SET status = 'sent' WHERE id = ?`, id);
+}
+
+export async function markScheduledFailed(id: string, retryCount: number): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `UPDATE scheduled_messages SET status = 'failed', retry_count = ? WHERE id = ?`,
+    retryCount,
+    id,
+  );
+}
+
+export async function incrementScheduledRetry(id: string, retryCount: number): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `UPDATE scheduled_messages SET retry_count = ? WHERE id = ?`,
+    retryCount,
+    id,
+  );
+}
+
+export async function deleteScheduled(id: string): Promise<void> {
+  const d = await db();
+  await d.runAsync(`DELETE FROM scheduled_messages WHERE id = ?`, id);
 }

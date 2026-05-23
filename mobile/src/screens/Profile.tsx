@@ -27,6 +27,7 @@ interface Props {
   onNotifications?: () => void;
   onLockConfig?: () => void;
   onExport?: () => void;
+  onProfileSwitcher?: () => void;
 }
 
 const PROFILE_COLORS = [
@@ -40,7 +41,7 @@ const PROFILE_COLORS = [
 ];
 
 
-export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDashboard, onSwitchToPersonal, onKeys, onSubscription, onWorkGeneration, onNotifications, onLockConfig, onExport }: Props) {
+export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDashboard, onSwitchToPersonal, onKeys, onSubscription, onWorkGeneration, onNotifications, onLockConfig, onExport, onProfileSwitcher }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -542,6 +543,15 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
               icon={<I.Forward size={18} color={t.textDim} />}
               label="Exportar datos"
               onPress={onExport}
+            />
+          )}
+          {onProfileSwitcher && (
+            <Row
+              t={t}
+              icon={<I.Person size={18} color={t.textDim} />}
+              label="Perfiles aislados"
+              sub="Gestionar identidades E2EE independientes"
+              onPress={onProfileSwitcher}
             />
           )}
           <Row
