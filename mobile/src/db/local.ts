@@ -834,6 +834,7 @@ export async function wipeDatabase(): Promise<void> {
   await d.runAsync('DELETE FROM chat_state');
   await d.runAsync('DELETE FROM call_history');
   await d.runAsync('DELETE FROM polls');
+  await d.runAsync('DELETE FROM scheduled_messages');
   // clearIdentity deletes SECRET_KEY_SLOT + SIGN_SECRET_KEY_SLOT and the identity table row.
   await clearIdentity();
   // SQLite DELETE only removes pages from free-list — VACUUM overwrites freed

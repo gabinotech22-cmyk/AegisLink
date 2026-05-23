@@ -1713,6 +1713,8 @@ export async function sendMessage(opts: {
 
   // If offline, queue for delivery on reconnect — message is already saved locally
   if (!socket || !connected || !authenticated) {
+    // Cap queue at 200 to prevent OOM during extended offline periods
+    if (offlineQueue.length >= 200) offlineQueue.shift(); // drop oldest
     offlineQueue.push({
       msgId: id,
       recipientAegisId: opts.recipientAegisId,

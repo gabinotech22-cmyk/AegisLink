@@ -175,6 +175,18 @@ function initSqliteSchema(db: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_work_audit_org ON work_audit_log(org_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_work_audit_actor ON work_audit_log(org_id, actor_id, created_at DESC);
 
+    CREATE TRIGGER IF NOT EXISTS audit_log_no_update
+      BEFORE UPDATE ON work_audit_log
+    BEGIN
+      SELECT RAISE(ABORT, 'audit_log_immutable');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
+      BEFORE DELETE ON work_audit_log
+    BEGIN
+      SELECT RAISE(ABORT, 'audit_log_immutable');
+    END;
+
     CREATE TABLE IF NOT EXISTS work_invite_tokens (
       token      TEXT PRIMARY KEY,
       org_id     TEXT NOT NULL,

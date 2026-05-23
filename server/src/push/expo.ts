@@ -11,6 +11,8 @@ export type CallMedia = 'audio' | 'video';
  * This mirrors Signal's design: FCM/APNs are reachability hints only; the
  * message body is fetched and decrypted on-device via our own relay.
  */
+// Parameters kept for call-site compatibility but fromAegisId/media/callId
+// are intentionally not forwarded to the push provider — blind wake-up only.
 
 const expo = new Expo();
 
@@ -46,19 +48,16 @@ export async function notifyRecipient(aegisId: string): Promise<void> {
 /**
  * High-priority wake-up push for an incoming call.
  *
- * The payload contains only routing metadata needed to reconstruct the
- * call UI on the client — no message content, no social graph information.
- * The caller's aegisId is included so the callee can display who is calling;
- * the callee's aegisId is only used locally to look up tokens and is never
- * forwarded to Expo or included in the push payload.
- *
- * TTL is 30 seconds — calls expire before the OS would retry a stale push.
+ * Blind wake-up only — no title, no body, no fromAegisId, no media type.
+ * The client wakes up, reconnects the socket, and drains the sealed
+ * call:invite which contains caller identity encrypted inside.
+ * TTL is 30 seconds — stale calls are never delivered by the OS.
  */
 export async function sendCallWakeUp(
   toAegisId: string,
-  fromAegisId: string,
-  media: CallMedia,
-  callId: string,
+  _fromAegisId: string,
+  _media: CallMedia,
+  _callId: string,
 ): Promise<void> {
   const tokens = await pushRepo.forRecipient(toAegisId);
   if (tokens.length === 0) return;
@@ -71,20 +70,13 @@ export async function sendCallWakeUp(
     }
     messages.push({
       to: row.expo_token,
-      title: `AegisLink · ${media === 'video' ? 'Video' : 'Voz'} entrante`,
-      body: 'Llamada E2EE cifrada',
-      sound: 'default',
+      sound: null,
       priority: 'high',
-      _contentAvailable: true, // iOS: wake background extension
-      channelId: 'aegislink-calls', // Android: bypass DND via MAX-importance channel
+      _contentAvailable: true,
       ttl: 30,
-      data: {
-        kind: 'call_wakeup',
-        type: 'call_invite',
-        callId,
-        fromAegisId,
-        media,
-      },
+      // Blind wake-up: no title, no body, no identity fields.
+      // Caller identity is sealed inside the call:invite socket event.
+      data: { kind: 'call_wakeup' },
     });
   }
 

@@ -15,15 +15,17 @@ import { sha256 } from '@noble/hashes/sha256';
 // The passphrase NEVER touches disk. Salt and ciphertext are stored; the user
 // must remember the passphrase to restore.
 
-export const BACKUP_VERSION = 1 as const;
+export const BACKUP_VERSION = 2 as const;
 export const BACKUP_FILE_EXTENSION = 'aegisbak' as const;
-export const BACKUP_PBKDF2_ITERATIONS = 100_000 as const;
+// OWASP 2023: minimum 600k iterations for PBKDF2-HMAC-SHA256 protecting identity keys
+export const BACKUP_PBKDF2_ITERATIONS = 600_000 as const;
+export const BACKUP_PBKDF2_ITERATIONS_V1 = 100_000 as const; // legacy — for decrypting v1 backups
 export const BACKUP_KEY_BYTES = 32 as const;
 export const BACKUP_SALT_BYTES = 32 as const;
 export const BACKUP_MIN_PASSPHRASE_LEN = 12 as const;
 
 export interface BackupEnvelope {
-  v: typeof BACKUP_VERSION;
+  v: 1 | 2;
   salt: string;
   nonce: string;
   ciphertext: string;
@@ -85,10 +87,10 @@ export function ratePassphrase(pw: string): PassphraseStrength {
   return 'weak';
 }
 
-function deriveKey(passphrase: string, salt: Uint8Array): Uint8Array {
+function deriveKey(passphrase: string, salt: Uint8Array, iterations: number = BACKUP_PBKDF2_ITERATIONS): Uint8Array {
   const pwBytes = decodeUTF8(passphrase);
   return pbkdf2(sha256, pwBytes, salt, {
-    c: BACKUP_PBKDF2_ITERATIONS,
+    c: iterations,
     dkLen: BACKUP_KEY_BYTES,
   });
 }
@@ -124,13 +126,15 @@ export function encryptBackup(payload: BackupPayload, passphrase: string): Backu
  * passphrase, MAC mismatch, or schema mismatch.
  */
 export function decryptBackup(envelope: BackupEnvelope, passphrase: string): BackupPayload {
-  if (envelope.v !== BACKUP_VERSION) {
+  if (envelope.v !== 1 && envelope.v !== BACKUP_VERSION) {
     throw new Error(`Unsupported backup version: ${envelope.v}`);
   }
+  // v1 used 100k iterations; v2+ uses 600k (OWASP 2023)
+  const iterations = envelope.v === 1 ? BACKUP_PBKDF2_ITERATIONS_V1 : BACKUP_PBKDF2_ITERATIONS;
   const salt = decodeBase64(envelope.salt);
   const nonce = decodeBase64(envelope.nonce);
   const ciphertext = decodeBase64(envelope.ciphertext);
-  const key = deriveKey(passphrase, salt);
+  const key = deriveKey(passphrase, salt, iterations);
   try {
     const opened = nacl.secretbox.open(ciphertext, nonce, key);
     if (!opened) {

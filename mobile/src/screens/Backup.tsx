@@ -122,7 +122,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       archived: c.archived,
     }));
     return {
-      v: 1,
+      v: 2,
       createdAt: Date.now(),
       identity: {
         aegisId: identity.aegisId,

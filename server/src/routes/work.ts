@@ -14,6 +14,8 @@ import fs from 'node:fs';
 const CreateOrgSchema = z.object({
   name: z.string().min(2).max(80),
   adminId: z.string().min(10),
+  sig: z.string().min(1),
+  ts: z.number().int().positive(),
   policyKeyRotationDays: z.number().int().min(7).max(365).default(90),
 });
 
@@ -28,6 +30,8 @@ const InviteSchema = z.object({
 const JoinSchema = z.object({
   token: z.string().min(10),
   aegisId: z.string().min(10),
+  sig: z.string().min(1),
+  ts: z.number().int().positive(),
   deviceName: z.string().min(1).max(80),
   platform: z.enum(['ios', 'android', 'desktop']).default('desktop'),
   deviceId: z.string().min(10),
@@ -111,22 +115,41 @@ function audit(orgId: string, kind: string, message: string, opts?: AuditOpts): 
 export function createWorkRouter(io: SocketServer): Router {
 const router = Router();
 
-// POST /work/org — create a new work org
+// POST /work/org — create a new work org (requires Ed25519 proof of adminId ownership)
 router.post('/org', async (req, res) => {
   const parsed = CreateOrgSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues }); return; }
-  const { name, adminId, policyKeyRotationDays } = parsed.data;
+  const { name, adminId, sig, ts, policyKeyRotationDays } = parsed.data;
+  // Verify caller owns the adminId signing key — prevents impersonation
   const orgId = randomUUID();
+  const sigOk = await verifyAdminSig(orgId, adminId, 'create_org', sig, ts);
+  if (!sigOk) { res.status(403).json({ error: 'invalid_identity_proof' }); return; }
   await workRepo.createOrg({ org_id: orgId, name, admin_id: adminId, policy_key_rotation_days: policyKeyRotationDays, created_at: Date.now() });
   await workRepo.addMember({ org_id: orgId, aegis_id: adminId, team: 'Admins', role: 'owner', joined_at: Date.now() });
   audit(orgId, 'org.created', `Organization created`, { actor_id: adminId });
   res.json({ orgId });
 });
 
-// GET /work/org/:orgId — get org + stats (public, no auth required)
+// GET /work/org/:orgId — get org + stats (requires membership proof)
 router.get('/org/:orgId', async (req, res) => {
   const org = await workRepo.getOrg(req.params.orgId);
   if (!org) { res.status(404).json({ error: 'not_found' }); return; }
+
+  const query = AdminQuerySchema.safeParse(req.query);
+  if (!query.success) {
+    // Unauthenticated: return minimal public info only (no adminId, no device stats)
+    const members = await workRepo.listMembers(org.org_id);
+    res.json({ orgId: org.org_id, name: org.name, stats: { memberCount: members.length } });
+    return;
+  }
+  const { aegisId, sig, ts } = query.data;
+  const [member, sigOk] = await Promise.all([
+    workRepo.getMember(org.org_id, aegisId),
+    verifyAdminSig(org.org_id, aegisId, 'read_org', sig, ts),
+  ]);
+  if (!member || !sigOk) {
+    res.status(403).json({ error: 'forbidden' }); return;
+  }
   const [members, devices] = await Promise.all([
     workRepo.listMembers(org.org_id),
     workRepo.listDevices(org.org_id),
@@ -136,7 +159,6 @@ router.get('/org/:orgId', async (req, res) => {
   res.json({
     orgId: org.org_id,
     name: org.name,
-    adminId: org.admin_id,
     policyKeyRotationDays: org.policy_key_rotation_days,
     createdAt: org.created_at,
     stats: {
@@ -282,16 +304,36 @@ router.post('/org/:orgId/invite', async (req, res) => {
   res.json({ token });
 });
 
-// POST /work/join — member accepts invite (no admin sig required — uses invite token)
+// POST /work/join — member accepts invite (requires Ed25519 proof of aegisId ownership)
 router.post('/join', async (req, res) => {
   const parsed = JoinSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues }); return; }
-  const { token, aegisId, deviceName, platform, deviceId } = parsed.data;
+  const { token, aegisId, sig, ts, deviceName, platform, deviceId } = parsed.data;
+
+  // Validate token first (cheap check) before doing crypto
   const invite = await workRepo.getInvite(token);
   if (!invite || invite.used || invite.expires_at < Date.now()) {
     res.status(400).json({ error: 'invalid_or_expired_token' });
     return;
   }
+
+  // Verify caller owns the aegisId they claim — prevents token interception + identity theft
+  if (Math.abs(Date.now() - ts) > 60_000) {
+    res.status(403).json({ error: 'invalid_identity_proof' }); return;
+  }
+  const identity = await identityRepo.get(aegisId);
+  if (!identity?.signing_public_key_b64) {
+    res.status(403).json({ error: 'identity_not_found' }); return;
+  }
+  const timeBucket = Math.floor(ts / 30_000);
+  const msgBytes = (bucket: number) => new TextEncoder().encode(`${token}:${aegisId}:${bucket}`);
+  let sigBytes: Uint8Array;
+  try { sigBytes = decodeBase64(sig); } catch { res.status(403).json({ error: 'invalid_identity_proof' }); return; }
+  const pubKey = decodeBase64(identity.signing_public_key_b64);
+  const sigValid = nacl.sign.detached.verify(msgBytes(timeBucket), sigBytes, pubKey)
+                || nacl.sign.detached.verify(msgBytes(timeBucket - 1), sigBytes, pubKey);
+  if (!sigValid) { res.status(403).json({ error: 'invalid_identity_proof' }); return; }
+
   const now = Date.now();
   await workRepo.useInvite(token);
   await workRepo.addMember({ org_id: invite.org_id, aegis_id: aegisId, team: invite.team, role: (invite.role as WorkRole) || 'member', joined_at: now });
@@ -657,7 +699,7 @@ router.get('/workspace/:id', async (req, res) => {
   }
 });
 
-// POST /work/workspace/:id/invite — add a member (admin only)
+// POST /work/workspace/:id/invite — add a member (admin only, requires Ed25519 sig)
 router.post('/workspace/:id/invite', async (req, res) => {
   const body = InviteWorkspaceMemberSchema.safeParse(req.body);
   if (!body.success) { res.status(400).json({ error: 'INVALID_PAYLOAD' }); return; }
@@ -665,20 +707,23 @@ router.post('/workspace/:id/invite', async (req, res) => {
   const workspaceId = req.params.id;
   const { aegisId, role } = body.data;
 
-  // Caller identity comes from a signed header in production; for now we require
-  // adminAegisId in body to verify admin status without storing session state.
-  const adminQuery = z.object({ adminAegisId: z.string().regex(AEGIS_ID_WS_RE) }).safeParse(req.body);
+  const adminQuery = z.object({
+    adminAegisId: z.string().regex(AEGIS_ID_WS_RE),
+    sig: z.string().min(1),
+    ts: z.number().int().positive(),
+  }).safeParse(req.body);
   if (!adminQuery.success) { res.status(400).json({ error: 'INVALID_PAYLOAD' }); return; }
-  const adminAegisId = adminQuery.data.adminAegisId;
+  const { adminAegisId, sig, ts } = adminQuery.data;
 
   try {
-    const [ws, adminMember] = await Promise.all([
+    const [ws, adminMember, sigOk] = await Promise.all([
       workspaceRepo.get(workspaceId),
       workspaceRepo.isMember(workspaceId, adminAegisId),
+      verifyAdminSig(workspaceId, adminAegisId, 'workspace_admin', sig, ts),
     ]);
 
     if (!ws) { res.status(404).json({ error: 'NOT_FOUND' }); return; }
-    if (!adminMember || ws.admin_id !== adminAegisId) {
+    if (!adminMember || ws.admin_id !== adminAegisId || !sigOk) {
       res.status(403).json({ error: 'FORBIDDEN' }); return;
     }
 
@@ -689,27 +734,32 @@ router.post('/workspace/:id/invite', async (req, res) => {
   }
 });
 
-// DELETE /work/workspace/:id/member/:memberId?adminAegisId= — remove member
+// DELETE /work/workspace/:id/member/:memberId?adminAegisId=&sig=&ts= — remove member
 router.delete('/workspace/:id/member/:memberId', async (req, res) => {
-  const query = z.object({ adminAegisId: z.string().regex(AEGIS_ID_WS_RE) }).safeParse(req.query);
+  const query = z.object({
+    adminAegisId: z.string().regex(AEGIS_ID_WS_RE),
+    sig: z.string().min(1),
+    ts: z.coerce.number().int().positive(),
+  }).safeParse(req.query);
   if (!query.success) { res.status(400).json({ error: 'INVALID_PAYLOAD' }); return; }
 
   const workspaceId = req.params.id;
   const memberId = req.params.memberId;
-  const adminAegisId = query.data.adminAegisId;
+  const { adminAegisId, sig, ts } = query.data;
 
   if (!AEGIS_ID_WS_RE.test(memberId)) {
     res.status(400).json({ error: 'INVALID_PAYLOAD' }); return;
   }
 
   try {
-    const [ws, adminMember] = await Promise.all([
+    const [ws, adminMember, sigOk] = await Promise.all([
       workspaceRepo.get(workspaceId),
       workspaceRepo.isMember(workspaceId, adminAegisId),
+      verifyAdminSig(workspaceId, adminAegisId, 'workspace_admin', sig, ts),
     ]);
 
     if (!ws) { res.status(404).json({ error: 'NOT_FOUND' }); return; }
-    if (!adminMember || ws.admin_id !== adminAegisId) {
+    if (!adminMember || ws.admin_id !== adminAegisId || !sigOk) {
       res.status(403).json({ error: 'FORBIDDEN' }); return;
     }
     // Admin cannot remove themselves
