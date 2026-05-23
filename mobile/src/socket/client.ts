@@ -863,9 +863,14 @@ async function decryptAndAppend(
       const opkSecBase64 = await SecureStore.getItemAsync(opkSecretKey(parsed.x3dh.opkId));
       if (opkSecBase64) {
         myOpkSecret = decodeBase64(opkSecBase64);
-        // One-time pre-key — consume it after use so the same OPK is never
-        // accepted again. (The server already pops it on the sender side.)
-        void SecureStore.deleteItemAsync(opkSecretKey(parsed.x3dh.opkId));
+        // One-time pre-key — consume it BEFORE proceeding so the same OPK
+        // is never reused, even if decryption or session setup fails later.
+        // await ensures the deletion is committed before we derive the root
+        // key; a fire-and-forget void could leave the OPK live during a
+        // crash/retry window and break forward secrecy.
+        try {
+          await SecureStore.deleteItemAsync(opkSecretKey(parsed.x3dh.opkId));
+        } catch { /* best-effort — OPK may already be absent on retry */ }
       } else {
         if (__DEV__) console.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— continuing without DH4');
       }
@@ -1564,7 +1569,11 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
       const opkB64 = await SecureStore.getItemAsync(opkSecretKey(x3dhInit.opkId));
       if (opkB64) {
         myOpkSecret = decodeBase64(opkB64);
-        void SecureStore.deleteItemAsync(opkSecretKey(x3dhInit.opkId));
+        // Same forward-secrecy guarantee as the primary decrypt path: consume
+        // the OPK atomically before deriving the root key (see comment above).
+        try {
+          await SecureStore.deleteItemAsync(opkSecretKey(x3dhInit.opkId));
+        } catch { /* best-effort */ }
       }
     }
     const rootKey = performX3DHReceiver(
