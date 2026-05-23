@@ -32,6 +32,8 @@ import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { MessageActionsSheet } from '../components/MessageActionsSheet';
 import { ForwardModal } from '../components/ForwardModal';
+import { SchedulePicker } from '../components/SchedulePicker';
+import { useScheduledMessages } from '../store/scheduledMessages';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
 import { usePanicGesture } from '../hooks/usePanicGesture';
@@ -129,6 +131,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const readReceipts = usePreferences((s) => s.readReceipts);
   const typingIndicator = usePreferences((s) => s.typingIndicator);
   const [mismatchKey, setMismatchKey] = useState<string | null>(null);
+  const [showScheduler, setShowScheduler] = useState(false);
+  const { scheduleMessage, scheduled } = useScheduledMessages();
+  const pendingScheduledCount = scheduled.filter(
+    (m) => m.status === 'pending' && m.recipientAegisId === contact.aegisId,
+  ).length;
 
   // Lazy directory key audit for MITM and Zero-Trust enforcement
   useEffect(() => {
@@ -895,6 +902,29 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           }
         />
 
+        {/* Scheduled messages banner */}
+        {pendingScheduledCount > 0 ? (
+          <Pressable
+            onPress={() => setShowScheduler(false)}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              paddingHorizontal: 16,
+              paddingVertical: 7,
+              backgroundColor: `${t.accent}14`,
+              borderTopWidth: 1,
+              borderTopColor: `${t.accent}30`,
+            }}
+            accessibilityLabel={`${pendingScheduledCount} mensaje${pendingScheduledCount > 1 ? 's' : ''} programado${pendingScheduledCount > 1 ? 's' : ''}`}
+          >
+            <I.Timer size={13} color={t.accent} />
+            <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5, fontWeight: '700' }}>
+              {pendingScheduledCount} MENSAJE{pendingScheduledCount > 1 ? 'S' : ''} PROGRAMADO{pendingScheduledCount > 1 ? 'S' : ''}
+            </Text>
+          </Pressable>
+        ) : null}
+
         {/* Composer */}
         <View
           style={[
@@ -1035,8 +1065,19 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                   maxHeight: 120,
                 }}
               />
-              <Pressable onPress={onEphemeral} hitSlop={6} style={{ padding: 6 }}>
+              <Pressable onPress={onEphemeral} hitSlop={6} style={{ padding: 6 }} accessibilityLabel="Mensajes efimeros">
                 <I.Timer size={22} color={t.textDim} />
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (!draft.trim()) return;
+                  setShowScheduler(true);
+                }}
+                hitSlop={6}
+                style={{ padding: 6, opacity: draft.trim() ? 1 : 0.35 }}
+                accessibilityLabel="Programar mensaje"
+              >
+                <I.Timer size={22} color={pendingScheduledCount > 0 ? t.accent : t.textDim} />
               </Pressable>
               <Pressable
                 testID="send-button"
@@ -1095,6 +1136,29 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         onSelectSticker={handleStickerSelect}
       />
       <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
+
+      <SchedulePicker
+        visible={showScheduler}
+        onClose={() => setShowScheduler(false)}
+        onConfirm={async (sendAt) => {
+          if (!identity) return;
+          const text = draft.trim();
+          if (!text) return;
+          try {
+            await scheduleMessage({
+              identity,
+              recipientAegisId: contact.aegisId,
+              recipientPublicKeyB64: contact.publicKeyB64,
+              plaintext: text,
+              sendAt,
+            });
+            setDraft('');
+            void saveDraft(contact.aegisId, '');
+          } catch (e) {
+            Alert.alert('Error al programar', (e as Error).message);
+          }
+        }}
+      />
     </KeyboardAvoidingView>
     </GestureHandlerRootView>
   );

@@ -10,6 +10,7 @@ import { verifyPIN, hasStoredPIN, hashPinWithSalt, DURESS_PIN_SALT } from '../lo
 import { usePreferences } from '../store/preferences';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
+import { usePanicGesture } from '../hooks/usePanicGesture';
 
 const MAX_ATTEMPTS = 5;
 
@@ -90,6 +91,9 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const [pulse1] = useState(new Animated.Value(0));
   const [pulse2] = useState(new Animated.Value(0));
+
+  // Panic gestures — only active while lock screen is visible
+  const { registerTap } = usePanicGesture(onPanic);
 
   // ── Initialise: detect what's available, pick starting mode ────────────────
   useEffect(() => {
@@ -253,7 +257,12 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
     const ok = hasPIN ? await verifyPIN(pin) : false;
     if (ok) {
+      const wasDecoy = usePreferences.getState().duressActive;
       usePreferences.setState({ duressActive: false });
+      if (wasDecoy) {
+        // Reload real identity and data now that decoy mode is off
+        await useIdentity.getState().hydrate();
+      }
       setPinCode('');
       onUnlock();
       return;
@@ -282,8 +291,8 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           } catch { /* wipe failure is non-recoverable; app will reset on restart */ }
         }, 800);
       } else {
+        // Stay on lock screen — do NOT navigate away or unlock the app
         setPinError(i18nT('lock.maxAttemptsReached', { max: MAX_ATTEMPTS }));
-        setTimeout(onPanic, 1800);
       }
     } else {
       const left = MAX_ATTEMPTS - newAttempts;
@@ -299,13 +308,23 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   // ── Biometric view ─────────────────────────────────────────────────────────
   if (mode === 'biometric') {
     return (
-      <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 40, paddingBottom: insets.bottom + 20 }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <I.Lock size={12} color={t.textDim} />
-          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>
-            {i18nT('lock.locked')}
-          </Text>
-        </View>
+      <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}>
+        {/* Logo — triple tap triggers panic gesture */}
+        <Pressable onPress={registerTap} accessibilityElementsHidden importantForAccessibility="no">
+          <View style={{ alignItems: 'center', gap: 6 }}>
+            <View style={{
+              width: 52, height: 52, borderRadius: 26,
+              backgroundColor: t.dark ? 'rgba(91,242,185,0.08)' : 'rgba(13,143,95,0.08)',
+              borderWidth: 1, borderColor: `${t.accent}33`,
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <I.Shield size={28} stroke={1.6} color={t.accent} />
+            </View>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.4 }}>
+              AEGISLINK
+            </Text>
+          </View>
+        </Pressable>
 
         <View style={{ alignItems: 'center', gap: 28 }}>
           {/* Fingerprint / FaceID ring — tap to retry */}
@@ -353,24 +372,30 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           )}
         </View>
 
-        <Pressable onPress={onPanic} hitSlop={8} style={{ padding: 8 }}>
-          <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger, letterSpacing: 0.8 }}>
-            {i18nT('lock.emergency')}
-          </Text>
-        </Pressable>
+        <View style={{ height: 32 }} />
       </View>
     );
   }
 
   // ── PIN view ───────────────────────────────────────────────────────────────
   return (
-    <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 20 }]}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <I.Lock size={12} color={t.textDim} />
-        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>
-          {i18nT('lock.locked')}
-        </Text>
-      </View>
+    <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}>
+      {/* Logo — triple tap triggers panic gesture */}
+      <Pressable onPress={registerTap} accessibilityElementsHidden importantForAccessibility="no">
+        <View style={{ alignItems: 'center', gap: 6 }}>
+          <View style={{
+            width: 52, height: 52, borderRadius: 26,
+            backgroundColor: t.dark ? 'rgba(91,242,185,0.08)' : 'rgba(13,143,95,0.08)',
+            borderWidth: 1, borderColor: `${t.accent}33`,
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <I.Shield size={28} stroke={1.6} color={t.accent} />
+          </View>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.4 }}>
+            AEGISLINK
+          </Text>
+        </View>
+      </Pressable>
 
       <View style={{ alignItems: 'center', width: '100%' }}>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.3, color: t.text }}>
@@ -396,7 +421,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
             onPress={() => {
               setPinCode('');
               setPinError('');
-              didAutoTrigger.current = false; // allow re-trigger
+              didAutoTrigger.current = false;
               setMode('biometric');
             }}
             style={({ pressed }) => ({ marginTop: 24, opacity: pressed ? 0.6 : 1 })}
@@ -408,11 +433,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         )}
       </View>
 
-      <Pressable onPress={onPanic} hitSlop={8} style={{ padding: 8 }}>
-        <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger, letterSpacing: 0.8 }}>
-          {i18nT('lock.emergency')}
-        </Text>
-      </Pressable>
+      <View style={{ height: 32 }} />
     </View>
   );
 }

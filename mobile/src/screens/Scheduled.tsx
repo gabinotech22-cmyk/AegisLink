@@ -1,353 +1,270 @@
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, StyleSheet } from 'react-native';
+/**
+ * ScheduledMessages screen — Section 12
+ *
+ * Lists all pending scheduled messages grouped by recipient.
+ * Each row shows: recipient AegisID snippet, scheduled time, and a Cancel button.
+ * Accessed from the Chat header clock icon or from Settings.
+ */
+
+import { useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  FlatList,
+  Alert,
+  StyleSheet,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
-import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
-import { GhostButton, PrimaryButton } from '../components/Button';
+import { useScheduledMessages } from '../store/scheduledMessages';
 import { useContacts } from '../store/contacts';
-import { useIdentity } from '../store/identity';
-import { sendMessage } from '../socket/client';
-import { decodeBase64 } from 'tweetnacl-util';
+import type { ScheduledMessage } from '../store/scheduledMessages';
 import type { StoredContact } from '../db/local';
 
-const SCHEDULED_KEY = 'aegis.scheduled.v1';
-
 interface Props {
-  contact?: StoredContact;
   onBack: () => void;
 }
 
-interface ScheduledItem {
-  id: string;
-  toContact: StoredContact;
-  text: string;
-  sendAt: number; // timestamp when it should be sent
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
 }
 
-const DELAY_KEYS = [
-  { lKey: 'scheduled.delay5sTest', sec: 5 },
-  { lKey: 'scheduled.delay15s', sec: 15 },
-  { lKey: 'scheduled.delay1m', sec: 60 },
-  { lKey: 'scheduled.delay5m', sec: 300 },
-  { lKey: 'scheduled.delay1h', sec: 3600 },
-  { lKey: 'scheduled.delay1d', sec: 86400 },
-];
+function formatSendAt(ts: number): string {
+  const d = new Date(ts);
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
-export function ScheduledScreen({ contact, onBack }: Props) {
+function statusLabel(status: ScheduledMessage['status']): string {
+  if (status === 'sent') return 'ENVIADO';
+  if (status === 'failed') return 'FALLIDO';
+  return 'PENDIENTE';
+}
+
+function statusColor(status: ScheduledMessage['status'], accent: string, warn: string, textFaint: string): string {
+  if (status === 'sent') return accent;
+  if (status === 'failed') return warn;
+  return textFaint;
+}
+
+export function ScheduledScreen({ onBack }: Props) {
   const { t } = useTheme();
-  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { contacts } = useContacts();
-  const { identity } = useIdentity();
+  const { scheduled, loadPending, cancelScheduled } = useScheduledMessages();
+  const contacts = useContacts((s) => s.contacts);
 
-  const [items, setItems] = useState<ScheduledItem[]>([]);
-  const [isScheduling, setIsScheduling] = useState(false);
-  const [targetContactId, setTargetContactId] = useState(contact?.aegisId ?? contacts[0]?.aegisId ?? '');
-  const [bodyText, setBodyText] = useState('');
-  const [delay, setDelay] = useState(5);
-  const [now, setNow] = useState(Date.now());
-
-  // Persist helpers
-  const persist = useCallback(async (next: ScheduledItem[]) => {
-    try {
-      await SecureStore.setItemAsync(SCHEDULED_KEY, JSON.stringify(next));
-    } catch { /* storage full or unavailable — degrade gracefully */ }
-  }, []);
-
-  // Load and sync items on periodic interval to match background runner (Gap 4)
   useEffect(() => {
-    const sync = async () => {
-      try {
-        const raw = await SecureStore.getItemAsync(SCHEDULED_KEY);
-        if (raw) {
-          const loaded = JSON.parse(raw) as ScheduledItem[];
-          setItems(loaded);
-        } else {
-          setItems([]);
-        }
-      } catch {}
-    };
-    sync();
-    const timer = setInterval(() => {
-      setNow(Date.now());
-      sync();
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+    void loadPending();
+  }, [loadPending]);
 
-  function handleAddScheduled() {
-    if (!bodyText.trim()) {
-      Alert.alert(i18nT('common.error'), i18nT('scheduled.errorEmptyMessage'));
-      return;
-    }
-    const dest = contacts.find((c) => c.aegisId === targetContactId);
-    if (!dest) {
-      Alert.alert(i18nT('common.error'), i18nT('scheduled.errorNoRecipient'));
-      return;
-    }
+  const contactFor = useCallback(
+    (aegisId: string): StoredContact | undefined =>
+      contacts.find((c) => c.aegisId === aegisId),
+    [contacts],
+  );
 
-    const newItem: ScheduledItem = {
-      id: Math.random().toString(36).substr(2, 9),
-      toContact: dest,
-      text: bodyText.trim(),
-      sendAt: Date.now() + delay * 1000,
-    };
-
-    const next = [...items, newItem];
-    setItems(next);
-    void persist(next);
-    setBodyText('');
-    setIsScheduling(false);
-    Alert.alert(i18nT('scheduled.scheduledAlert'), i18nT('scheduled.scheduledAlertDesc', { name: dest.name, delay }));
+  function handleCancel(msg: ScheduledMessage) {
+    Alert.alert(
+      'Cancelar mensaje',
+      '¿Cancelar este mensaje programado? No se podrá deshacer.',
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Cancelar mensaje',
+          style: 'destructive',
+          onPress: () => void cancelScheduled(msg.id),
+        },
+      ],
+    );
   }
+
+  const pending = scheduled.filter((m) => m.status === 'pending');
+  const others = scheduled.filter((m) => m.status !== 'pending');
+  const sorted = [...pending, ...others];
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <TopBar
         t={t}
-        title={i18nT('scheduled.title')}
+        title="Mensajes Programados"
         big
         left={
-          <Pressable onPress={onBack} hitSlop={8} style={{ padding: 4 }}>
+          <Pressable
+            onPress={onBack}
+            hitSlop={8}
+            style={{ padding: 4 }}
+            accessibilityLabel="Volver"
+          >
             <I.ChevronL size={22} color={t.textDim} />
           </Pressable>
         }
-        right={
-          <Pressable onPress={() => setIsScheduling(true)} hitSlop={8} style={{ padding: 4 }}>
-            <I.Plus size={22} color={t.accent} />
-          </Pressable>
-        }
       />
-      <ScrollView contentContainerStyle={{ paddingBottom: 22 + insets.bottom }}>
-        <View
-          style={{
-            marginHorizontal: 18,
-            marginBottom: 14,
-            padding: 14,
-            backgroundColor: t.surface,
-            borderWidth: 1,
-            borderColor: t.border,
-            borderRadius: t.radius,
-          }}
-        >
-          <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19 }}>
-            {i18nT('scheduled.infoDesc')}
-          </Text>
-        </View>
 
-        {items.length === 0 ? (
-          <View style={{ padding: 36, alignItems: 'center' }}>
-            <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textFaint, textAlign: 'center' }}>
-              {i18nT('scheduled.empty')}
+      <FlatList
+        data={sorted}
+        keyExtractor={(m) => m.id}
+        contentContainerStyle={{ paddingBottom: 22 + insets.bottom, flexGrow: 1 }}
+        ListHeaderComponent={
+          <View
+            style={{
+              marginHorizontal: 18,
+              marginTop: 8,
+              marginBottom: 14,
+              padding: 14,
+              backgroundColor: t.surface,
+              borderWidth: 1,
+              borderColor: t.border,
+              borderRadius: t.radius,
+            }}
+          >
+            <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19 }}>
+              Los mensajes se cifran ahora y se envían automáticamente en el momento programado.
+              El texto nunca se guarda en disco — solo el texto cifrado.
             </Text>
           </View>
-        ) : (
-          items.map((it) => {
-            const secsLeft = Math.max(0, Math.ceil((it.sendAt - now) / 1000));
-            return (
+        }
+        ListEmptyComponent={
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60, paddingHorizontal: 24 }}>
+            <I.Timer size={40} color={t.textFaint} />
+            <Text
+              style={{
+                fontFamily: t.font,
+                fontSize: 14,
+                color: t.textFaint,
+                textAlign: 'center',
+                marginTop: 14,
+                lineHeight: 20,
+              }}
+            >
+              No hay mensajes programados.{'\n'}
+              Mantén pulsado el botón de enviar en un chat para programar un mensaje.
+            </Text>
+          </View>
+        }
+        renderItem={({ item }) => {
+          const contact = contactFor(item.recipientAegisId);
+          const displayName = contact?.name ?? item.recipientAegisId.slice(0, 12) + '…';
+          const isPending = item.status === 'pending';
+
+          return (
+            <View
+              style={[
+                styles.row,
+                { borderBottomColor: t.divider },
+              ]}
+              accessibilityLabel={`Mensaje programado para ${displayName} el ${formatSendAt(item.sendAt)}, estado: ${statusLabel(item.status)}`}
+            >
               <View
-                key={it.id}
-                style={{
-                  flexDirection: 'row',
-                  gap: 12,
-                  paddingHorizontal: 18,
-                  paddingVertical: 14,
-                  borderBottomWidth: 1,
-                  borderBottomColor: t.divider,
-                }}
+                style={[styles.iconBox, { backgroundColor: t.surface2 }]}
               >
-                <View
-                  style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: t.radius,
-                    backgroundColor: t.surface2,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <I.Timer size={18} color={t.accent} />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-                    <Text
-                      numberOfLines={1}
-                      style={{
-                        flex: 1,
-                        fontFamily: t.font,
-                        fontWeight: '600',
-                        fontSize: 13,
-                        color: t.text,
-                      }}
-                    >
-                      {it.toContact.name}
-                    </Text>
-                    <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.4 }}>
-                      {i18nT('scheduled.inSeconds', { secs: secsLeft })}
-                    </Text>
-                  </View>
-                  <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 18 }}>{it.text}</Text>
-                  <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, marginTop: 4, letterSpacing: 0.5 }}>
-                    {i18nT('scheduled.e2eeQueue')}
+                <I.Timer size={18} color={isPending ? t.accent : t.textFaint} />
+              </View>
+
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={styles.rowTop}>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.name, { color: t.text, fontFamily: t.font }]}
+                  >
+                    {displayName}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.statusBadge,
+                      {
+                        color: statusColor(item.status, t.accent, t.warn, t.textFaint),
+                        fontFamily: t.fontMono,
+                      },
+                    ]}
+                  >
+                    {statusLabel(item.status)}
                   </Text>
                 </View>
-              </View>
-            );
-          })
-        )}
 
-        <View style={{ paddingHorizontal: 18, paddingTop: 14 }}>
-          <GhostButton t={t} label={`+ ${i18nT('scheduled.schedule')}`} onPress={() => setIsScheduling(true)} />
-        </View>
-      </ScrollView>
+                <Text style={[styles.sendAt, { color: t.textDim, fontFamily: t.fontMono }]}>
+                  {formatSendAt(item.sendAt)}
+                </Text>
 
-      {/* Scheduler Modal */}
-      <Modal visible={isScheduling} transparent animationType="slide">
-        <View style={styles.modalBg}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
-            <View style={[styles.modalContent, { backgroundColor: t.surface, borderColor: t.border }]}>
-              <Text style={[styles.modalTitle, { color: t.text, fontFamily: t.fontDisplay }]}>
-                {i18nT('scheduled.schedule')}
-              </Text>
-              
-              <Text style={{ color: t.textDim, fontFamily: t.font, fontSize: 12, marginBottom: 6 }}>
-                {i18nT('scheduled.recipientLabel')}
-              </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
-                {contacts.map((c) => {
-                  const isSel = targetContactId === c.aegisId;
-                  return (
-                    <Pressable
-                      key={c.aegisId}
-                      onPress={() => setTargetContactId(c.aegisId)}
-                      style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: t.radiusS,
-                        backgroundColor: isSel ? t.accent : t.bg,
-                        borderWidth: 1,
-                        borderColor: isSel ? t.accent : t.borderStrong,
-                      }}
-                    >
-                      <Text style={{ color: isSel ? t.accentInk : t.text, fontSize: 12, fontFamily: t.font }}>
-                        {c.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+                {item.retryCount > 0 && (
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.warn, marginTop: 2 }}>
+                    Intentos: {item.retryCount}/3
+                  </Text>
+                )}
+
+                <Text style={[styles.e2eeTag, { color: t.textFaint, fontFamily: t.fontMono }]}>
+                  E2EE · CIFRADO EN ORIGEN
+                </Text>
               </View>
 
-              <Text style={{ color: t.textDim, fontFamily: t.font, fontSize: 12, marginBottom: 6 }}>
-                {i18nT('scheduled.messageLabel')}
-              </Text>
-              <TextInput
-                placeholder={i18nT('scheduled.messagePlaceholder')}
-                placeholderTextColor={t.textDim}
-                value={bodyText}
-                onChangeText={setBodyText}
-                multiline
-                style={{
-                  color: t.text,
-                  backgroundColor: t.bg,
-                  borderColor: t.borderStrong,
-                  borderWidth: 1,
-                  borderRadius: t.radiusS,
-                  padding: 12,
-                  fontSize: 14,
-                  minHeight: 80,
-                  marginBottom: 16,
-                  fontFamily: t.font,
-                }}
-              />
-
-              <Text style={{ color: t.textDim, fontFamily: t.font, fontSize: 12, marginBottom: 6 }}>
-                {i18nT('scheduled.delayLabel')}
-              </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 22 }}>
-                {DELAY_KEYS.map((d) => {
-                  const isSel = delay === d.sec;
-                  return (
-                    <Pressable
-                      key={d.sec}
-                      onPress={() => setDelay(d.sec)}
-                      style={{
-                        paddingHorizontal: 10,
-                        paddingVertical: 6,
-                        borderRadius: t.radiusS,
-                        backgroundColor: isSel ? t.accent : t.bg,
-                        borderWidth: 1,
-                        borderColor: isSel ? t.accent : t.borderStrong,
-                      }}
-                    >
-                      <Text style={{ color: isSel ? t.accentInk : t.text, fontSize: 11, fontFamily: t.font }}>
-                        {i18nT(d.lKey)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 10 }}>
+              {isPending && (
                 <Pressable
-                  onPress={handleAddScheduled}
-                  style={{
-                    flex: 1,
-                    backgroundColor: t.accent,
-                    paddingVertical: 12,
-                    borderRadius: t.radiusS,
-                    alignItems: 'center',
-                  }}
+                  onPress={() => handleCancel(item)}
+                  hitSlop={8}
+                  style={[styles.cancelBtn, { borderColor: t.danger }]}
+                  accessibilityLabel={`Cancelar mensaje programado para ${displayName}`}
                 >
-                  <Text style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600' }}>
-                    {i18nT('scheduled.schedule')}
+                  <Text style={{ fontFamily: t.font, fontSize: 12, color: t.danger, fontWeight: '600' }}>
+                    Cancelar
                   </Text>
                 </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setIsScheduling(false);
-                    setBodyText('');
-                  }}
-                  style={{
-                    flex: 1,
-                    borderWidth: 1,
-                    borderColor: t.borderStrong,
-                    paddingVertical: 12,
-                    borderRadius: t.radiusS,
-                    alignItems: 'center',
-                  }}
-                >
-                  <Text style={{ color: t.text, fontFamily: t.font, fontWeight: '500' }}>
-                    {i18nT('common.cancel')}
-                  </Text>
-                </Pressable>
-              </View>
+              )}
             </View>
-          </ScrollView>
-        </View>
-      </Modal>
+          );
+        }}
+        ItemSeparatorComponent={() => null}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  modalBg: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  iconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
   },
-  modalContent: {
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 20,
+  rowTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 3,
   },
-  modalTitle: {
-    fontSize: 18,
+  name: {
+    flex: 1,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  statusBadge: {
+    fontSize: 9,
+    letterSpacing: 0.5,
     fontWeight: '700',
-    marginBottom: 16,
+  },
+  sendAt: {
+    fontSize: 12,
+    letterSpacing: 0.3,
+  },
+  e2eeTag: {
+    fontSize: 9,
+    letterSpacing: 0.5,
+    marginTop: 4,
+  },
+  cancelBtn: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
 });
-
