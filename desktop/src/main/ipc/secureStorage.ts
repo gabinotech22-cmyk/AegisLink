@@ -19,6 +19,13 @@ function assertValidKey(key: unknown): asserts key is string {
     throw new Error('invalid key')
 }
 
+function assertKeyAllowed(key: string): void {
+  const pattern = /^aegis\.(?:[a-zA-Z0-9_\-]+\.)?(secretKey\.b64|signSecretKey\.b64|activeProfile|displayName|avatarColor|avatarImage|profileStatus|workDisplayName|workAvatarColor|workAvatarImage|workProfileStatus|panic\.v1|preferences\.v1|polls\.v1)$/
+  if (!pattern.test(key)) {
+    throw new Error('Access denied: key is not whitelisted for renderer access')
+  }
+}
+
 function assertValidValue(value: unknown): asserts value is string {
   if (typeof value !== 'string' || value.length > 65536) throw new Error('invalid value')
 }
@@ -27,7 +34,7 @@ function getKeystorePath(): string {
   return path.join(app.getPath('userData'), 'keystore.json')
 }
 
-function readKeystore(): Keystore {
+export function readKeystore(): Keystore {
   const keystorePath = getKeystorePath()
   if (!fs.existsSync(keystorePath)) {
     return {}
@@ -40,7 +47,7 @@ function readKeystore(): Keystore {
   }
 }
 
-function writeKeystore(keystore: Keystore): void {
+export function writeKeystore(keystore: Keystore): void {
   const keystorePath = getKeystorePath()
   fs.writeFileSync(keystorePath, JSON.stringify(keystore), { mode: 0o600 })
 }
@@ -49,6 +56,7 @@ export function registerSecureStorageHandlers(): void {
   ipcMain.handle('secureStorage:set', (event, key: string, value: string): void => {
     assertTrustedSender(event)
     assertValidKey(key)
+    assertKeyAllowed(key)
     assertValidValue(value)
     const keystore = readKeystore()
     if (safeStorage.isEncryptionAvailable()) {
@@ -71,6 +79,7 @@ export function registerSecureStorageHandlers(): void {
   ipcMain.handle('secureStorage:get', (event, key: string): string | null => {
     assertTrustedSender(event)
     assertValidKey(key)
+    assertKeyAllowed(key)
     const keystore = readKeystore()
     const encoded = keystore[key]
     if (!encoded) return null
@@ -96,6 +105,7 @@ export function registerSecureStorageHandlers(): void {
   ipcMain.handle('secureStorage:delete', (event, key: string): void => {
     assertTrustedSender(event)
     assertValidKey(key)
+    assertKeyAllowed(key)
     const keystore = readKeystore()
     delete keystore[key]
     writeKeystore(keystore)

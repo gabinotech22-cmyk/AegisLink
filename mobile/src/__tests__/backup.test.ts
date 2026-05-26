@@ -36,15 +36,10 @@ function makePayload(overrides: Partial<BackupPayload> = {}): BackupPayload {
       createdAt: 1_700_000_000_000,
     },
     profile: {
-      activeProfile: 'personal',
       displayName: 'alice',
       avatarColor: '#05b875',
       avatarImage: null,
       profileStatus: '',
-      workDisplayName: 'alice.work',
-      workAvatarColor: '#8b5cf6',
-      workAvatarImage: null,
-      workProfileStatus: '',
     },
     contacts: [
       {

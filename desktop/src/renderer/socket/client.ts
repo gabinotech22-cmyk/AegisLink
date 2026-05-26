@@ -39,7 +39,6 @@ import { stripAndPad } from '../crypto/metadata';
 import { loadRatchetSession, saveRatchetSession } from '../db/local';
 import { showIncomingNotification } from '../notifications/push';
 import { useTyping } from '../store/typing';
-import { useWorkPresence } from '../store/workPresence';
 
 const DEV = import.meta.env.DEV;
 
@@ -514,19 +513,10 @@ export function connect(identity: Identity): Socket {
     void useMessages.getState().remoteDelete(from, msgId);
   });
 
-  socket.on('typing', ({ from, isTyping, channelId }: { from: string; isTyping: boolean; channelId?: string }) => {
-    if (channelId) {
-      // Channel-scoped typing indicator (Work channels)
-      useWorkPresence.getState().setTyping(channelId, from, isTyping);
-      if (isTyping) {
-        setTimeout(() => useWorkPresence.getState().setTyping(channelId, from, false), 5000);
-      }
-    } else {
-      // 1:1 DM typing indicator
-      useTyping.getState().setTyping(from, isTyping);
-      if (isTyping) {
-        setTimeout(() => useTyping.getState().setTyping(from, false), 5000);
-      }
+  socket.on('typing', ({ from, isTyping }: { from: string; isTyping: boolean; channelId?: string }) => {
+    useTyping.getState().setTyping(from, isTyping);
+    if (isTyping) {
+      setTimeout(() => useTyping.getState().setTyping(from, false), 5000);
     }
   });
 
@@ -534,60 +524,9 @@ export function connect(identity: Identity): Socket {
     await handleIncoming(env, identity);
   });
 
-  socket.on('channel:msg', (msg: import('../store/workMessages').WorkMessage) => {
-    import('../store/workMessages').then(({ useWorkMessages }) => {
-      const store = useWorkMessages.getState();
-      if (msg.parent_id) {
-        store.appendThreadReply(msg);
-      } else {
-        store.append(msg);
-      }
-    }).catch(() => {});
-  });
-
-  socket.on('channel:thread_update', (ev: { parentId: string; replyCount: number }) => {
-    import('../store/workMessages').then(({ useWorkMessages }) => {
-      useWorkMessages.getState().updateReplyCount(ev.parentId, ev.replyCount);
-    }).catch(() => {});
-  });
-
-  socket.on('work:presence_sync', (data: { onlineIds: string[] }) => {
-    useWorkPresence.getState().setOnline(data.onlineIds);
-  });
-
-  socket.on('work:presence_join', (data: { aegisId: string }) => {
-    useWorkPresence.getState().addOnline(data.aegisId);
-  });
-
-  socket.on('work:presence_leave', (data: { aegisId: string }) => {
-    useWorkPresence.getState().removeOnline(data.aegisId);
-  });
-
   return socket;
 }
 
-export function joinChannel(channelId: string, orgId: string): void {
-  socket?.emit('channel:join', { channelId, orgId });
-}
-
-export function emitChannelMsg(payload: {
-  id: string;
-  channelId: string;
-  orgId: string;
-  body: string;
-  type: string;
-  parent_id?: string;
-}): void {
-  socket?.emit('channel:msg', payload);
-}
-
-export function emitDeleteChannelMsg(payload: {
-  channelId: string;
-  orgId: string;
-  messageId: string;
-}): void {
-  socket?.emit('channel:delete_msg', payload);
-}
 
 async function getOrCreateSession(
   contactAegisId: string,
@@ -1393,10 +1332,9 @@ export async function sendMessage(opts: {
 }): Promise<void> {
   const { useIdentity } = await import('../store/identity');
   const idState = useIdentity.getState();
-  const isWork = idState.activeProfile === 'work';
-  const senderName = isWork ? idState.workDisplayName : idState.displayName;
-  const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
-  const senderStatus = isWork ? idState.workProfileStatus : idState.profileStatus;
+  const senderName = idState.displayName;
+  const senderColor = idState.avatarColor;
+  const senderStatus = idState.profileStatus;
 
   // Web Crypto API UUID — available in Chromium renderer
   const id = crypto.randomUUID();
@@ -1507,12 +1445,10 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
 
   const { useIdentity } = await import('../store/identity');
   const idState = useIdentity.getState();
-  const isWork = idState.activeProfile === 'work';
-  const senderName = isWork ? idState.workDisplayName : idState.displayName;
-  const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
-  const senderStatus = isWork ? idState.workProfileStatus : idState.profileStatus;
-  const rawImage = isWork ? idState.workAvatarImage : idState.avatarImage;
-  const senderImage = await toDataUri(rawImage);
+  const senderName = idState.displayName;
+  const senderColor = idState.avatarColor;
+  const senderStatus = idState.profileStatus;
+  const senderImage = await toDataUri(idState.avatarImage);
 
   const contacts = useContacts.getState().contacts;
   for (const contact of contacts) {
@@ -1556,12 +1492,10 @@ export async function sendProfileTo(
   try {
     const { useIdentity } = await import('../store/identity');
     const idState = useIdentity.getState();
-    const isWork = idState.activeProfile === 'work';
-    const senderName = isWork ? idState.workDisplayName : idState.displayName;
-    const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
-    const senderStatus = isWork ? idState.workProfileStatus : idState.profileStatus;
-    const rawImage = isWork ? idState.workAvatarImage : idState.avatarImage;
-    const senderImage = await toDataUri(rawImage);
+    const senderName = idState.displayName;
+    const senderColor = idState.avatarColor;
+    const senderStatus = idState.profileStatus;
+    const senderImage = await toDataUri(idState.avatarImage);
 
     const payload = JSON.stringify({
       type: 'profile_update',
@@ -1645,11 +1579,9 @@ export async function sendGroupMessage(opts: {
 
     const { useIdentity } = await import('../store/identity');
     const idState = useIdentity.getState();
-    const isWork = idState.activeProfile === 'work';
-    const senderName = isWork ? idState.workDisplayName : idState.displayName;
-    const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
-    const rawImage = isWork ? idState.workAvatarImage : idState.avatarImage;
-    const senderImage = await toDataUri(rawImage);
+    const senderName = idState.displayName;
+    const senderColor = idState.avatarColor;
+    const senderImage = await toDataUri(idState.avatarImage);
 
     const payload = JSON.stringify({
       type: 'group_msg',
@@ -1707,9 +1639,8 @@ export async function sendGroupMessage(opts: {
 
   const { useIdentity } = await import('../store/identity');
   const idState = useIdentity.getState();
-  const isWorkCtx = idState.activeProfile === 'work';
   const myDisplayName =
-    (isWorkCtx ? idState.workDisplayName : idState.displayName) ||
+    idState.displayName ||
     opts.identity.aegisId.substring(0, 8);
 
   const id = crypto.randomUUID();
@@ -1743,9 +1674,8 @@ export async function sendGroupVote(opts: {
 
   const { useIdentity } = await import('../store/identity');
   const idState = useIdentity.getState();
-  const isWork = idState.activeProfile === 'work';
-  const senderName = isWork ? idState.workDisplayName : idState.displayName;
-  const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
+  const senderName = idState.displayName;
+  const senderColor = idState.avatarColor;
 
   const sendPromises = group.members.map(async (memberId: string) => {
     if (memberId === opts.identity.aegisId) return;

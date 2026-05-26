@@ -44,15 +44,10 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   const insets = useSafeAreaInsets();
   const {
     identity,
-    activeProfile,
     displayName,
     avatarColor,
     avatarImage,
     profileStatus,
-    workDisplayName,
-    workAvatarColor,
-    workAvatarImage,
-    workProfileStatus,
     hydrate: hydrateIdentity,
   } = useIdentity();
   const { contacts, hydrate: hydrateContacts } = useContacts();
@@ -133,15 +128,10 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         createdAt: identity.createdAt,
       },
       profile: {
-        activeProfile,
         displayName,
         avatarColor,
         avatarImage,
         profileStatus,
-        workDisplayName,
-        workAvatarColor,
-        workAvatarImage,
-        workProfileStatus,
       },
       contacts: backupContacts,
     };
@@ -249,17 +239,11 @@ export function BackupScreen({ onBack, onRestored }: Props) {
 
       // 2) Restore profile preferences.
       const p = payload.profile;
-      await SecureStore.setItemAsync('aegis.activeProfile', p.activeProfile);
       await SecureStore.setItemAsync('aegis.displayName', p.displayName);
       await SecureStore.setItemAsync('aegis.avatarColor', p.avatarColor);
       if (p.avatarImage) await SecureStore.setItemAsync('aegis.avatarImage', p.avatarImage);
       else await SecureStore.deleteItemAsync('aegis.avatarImage');
       await SecureStore.setItemAsync('aegis.profileStatus', p.profileStatus);
-      await SecureStore.setItemAsync('aegis.workDisplayName', p.workDisplayName);
-      await SecureStore.setItemAsync('aegis.workAvatarColor', p.workAvatarColor);
-      if (p.workAvatarImage) await SecureStore.setItemAsync('aegis.workAvatarImage', p.workAvatarImage);
-      else await SecureStore.deleteItemAsync('aegis.workAvatarImage');
-      await SecureStore.setItemAsync('aegis.workProfileStatus', p.workProfileStatus);
 
       // 3) Restore contacts.
       for (const c of payload.contacts) {

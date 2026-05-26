@@ -18,13 +18,11 @@ import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { OnboardingScreen } from './src/screens/Onboarding';
 import { HomeScreen } from './src/screens/Home';
 import { GroupsScreen } from './src/screens/Groups';
-import { VerifyScreen } from './src/screens/Verify';
 import { PrivacyScreen } from './src/screens/Privacy';
 import { ChatScreen } from './src/screens/Chat';
 import { GroupChatScreen } from './src/screens/GroupChat';
 import { AddContactScreen } from './src/screens/AddContact';
 import { ScanQRScreen } from './src/screens/ScanQR';
-import { InviteAddScreen } from './src/screens/InviteAdd';
 import { ProfileScreen } from './src/screens/Profile';
 import { NotificationsScreen } from './src/screens/Notifications';
 import { BackupScreen } from './src/screens/Backup';
@@ -47,14 +45,6 @@ import { ContactsScreen } from './src/screens/Contacts';
 import { PollScreen } from './src/screens/Poll';
 import { FirstContactScreen } from './src/screens/FirstContact';
 import { AppIconScreen } from './src/screens/AppIcon';
-import { WorkDashboard } from './src/screens/WorkDashboard';
-import { WorkJoinSuccess } from './src/screens/WorkJoinSuccess';
-import { WorkChannels } from './src/screens/WorkChannels';
-import { WorkChannelChat } from './src/screens/WorkChannelChat';
-import { WorkChannelPermissions } from './src/screens/WorkChannelPermissions';
-import { WorkSearch } from './src/screens/WorkSearch';
-import { WorkGenerationScreen } from './src/screens/WorkGeneration';
-import { WorkDirectory } from './src/screens/WorkDirectory';
 import { SubscriptionScreen } from './src/screens/Subscription';
 import { CallScreen } from './src/screens/Call';
 import { IncomingCallScreen } from './src/screens/IncomingCall';
@@ -67,7 +57,6 @@ import { ProfileSwitcherScreen } from './src/screens/ProfileSwitcher';
 import { CreateProfileScreen } from './src/screens/CreateProfile';
 import { useIdentity } from './src/store/identity';
 import { usePreferences } from './src/store/preferences';
-import { useWork } from './src/store/work';
 import { useProfiles } from './src/store/profiles';
 
 import { useCall } from './src/store/call';
@@ -138,7 +127,6 @@ type PushRoute =
   | { name: 'contact'; contact: StoredContact; keyChanged?: boolean }
   | { name: 'add' }
   | { name: 'scan' }
-  | { name: 'invite' }
   | { name: 'profile' }
   | { name: 'notifs' }
   | { name: 'backup' }
@@ -161,19 +149,11 @@ type PushRoute =
   | { name: 'firstContact'; contact: StoredContact }
   | { name: 'contacts' }
   | { name: 'appIcon' }
-  | { name: 'workDashboard'; prefillJoinToken?: string }
-  | { name: 'workJoinSuccess' }
-  | { name: 'workChannels' }
   | { name: 'subscription' }
   | { name: 'lockSettings' }
-  | { name: 'workGeneration' }
   | { name: 'keys' }
   | { name: 'distribution' }
   | { name: 'broadcast'; list: import('./src/store/distribution').DistributionList }
-  | { name: 'workChannelChat'; channel: import('./src/store/work').WorkChannel }
-  | { name: 'workChannelPermissions'; channel: import('./src/store/work').WorkChannel }
-  | { name: 'workDirectory' }
-  | { name: 'workSearch' }
   | { name: 'profileSwitcher' }
   | { name: 'createProfile' };
 
@@ -499,12 +479,7 @@ function Shell() {
   const handleDeepLink = useCallback(async (url: string) => {
     try {
       const parsed = new URL(url);
-      if (parsed.hostname === 'work' && parsed.pathname === '/join') {
-        const token = parsed.searchParams.get('token');
-        if (token && identity) {
-          push({ name: 'workDashboard', prefillJoinToken: token });
-        }
-      } else if (parsed.hostname === 'panic') {
+      if (parsed.hostname === 'panic') {
         const incoming = parsed.searchParams.get('token');
         if (incoming) {
           try {
@@ -674,7 +649,6 @@ function Shell() {
                 void startCall(top.contact.aegisId, media).catch(() => {});
               }, 400);
             }}
-            onVerify={() => popAllTo('verify')}
             onEphemeral={() => push({ name: 'ephemeral', chatId: top.contact.aegisId })}
           />
         );
@@ -698,15 +672,6 @@ function Shell() {
             }}
           />
         );
-      case 'invite':
-        return (
-          <InviteAddScreen
-            onBack={pop}
-            onShowMyQR={() => popAllTo('verify')}
-            onScanQR={() => setStack((s) => [...s.slice(0, -1), { name: 'scan' }])}
-            onPasteId={() => setStack((s) => [...s.slice(0, -1), { name: 'add' }])}
-          />
-        );
       case 'profile':
         return (
           <ProfileScreen
@@ -715,24 +680,11 @@ function Shell() {
             onDevices={() => push({ name: 'devices' })}
             onPanic={() => push({ name: 'panic' })}
             onAppIcon={() => push({ name: 'appIcon' })}
-            onWorkDashboard={() => { pop(); setTab('dashboard'); }}
-            onSwitchToPersonal={() => { pop(); setTab('home'); }}
             onSubscription={() => push({ name: 'subscription' })}
-            onWorkGeneration={() => push({ name: 'workGeneration' })}
             onNotifications={() => push({ name: 'notifs' })}
             onLockConfig={() => push({ name: 'lockConfig' })}
             onExport={() => push({ name: 'export' })}
             onProfileSwitcher={() => push({ name: 'profileSwitcher' })}
-          />
-        );
-      case 'workGeneration':
-        return (
-          <WorkGenerationScreen
-            onDone={() => {
-              pop();
-              setTab('dashboard');
-            }}
-            onBack={pop}
           />
         );
       case 'appIcon':
@@ -753,103 +705,6 @@ function Shell() {
             onBack={pop}
           />
         );
-      case 'workChannels':
-        return (
-          <WorkChannels
-            onBack={pop}
-            onOpenAdmin={() => push({ name: 'workDashboard' })}
-            onOpenChannel={(ch) => push({ name: 'workChannelChat', channel: ch })}
-            onOpenDirectory={() => push({ name: 'workDirectory' })}
-            onSearch={() => push({ name: 'workSearch' })}
-            onOpenChannelPermissions={(ch) => push({ name: 'workChannelPermissions', channel: ch })}
-          />
-        );
-      case 'workSearch':
-        return (
-          <WorkSearch
-            onBack={pop}
-            onOpenChannel={(ch) => {
-              pop();
-              push({ name: 'workChannelChat', channel: ch });
-            }}
-          />
-        );
-      case 'workDirectory':
-        return (
-          <WorkDirectory
-            onBack={pop}
-            onStartDM={(aegisId) => {
-              const { useContacts: _useContacts } = require('./src/store/contacts') as typeof import('./src/store/contacts');
-              const existing = _useContacts.getState().contacts.find((c: StoredContact) => c.aegisId === aegisId);
-              if (existing) {
-                pop();
-                push({ name: 'chat', contact: existing });
-                return;
-              }
-              // Fetch pubkey from relay and add as contact
-              (async () => {
-                try {
-                  const res = await fetch(`${require('./src/config').SERVER_URL}/identity/${aegisId}`);
-                  if (!res.ok) throw new Error('Not found');
-                  const data = await res.json() as { publicKey: string; signingPublicKey?: string };
-                  const contact = await _useContacts.getState().addByAegisId(aegisId);
-                  pop();
-                  push({ name: 'chat', contact });
-                } catch {
-                  const { Alert } = require('react-native');
-                  Alert.alert(
-                    'No se puede abrir DM',
-                    `No se encontró la clave pública de ${aegisId.slice(0, 12)}…\nPuedes añadirlo manualmente por AegisID.`,
-                    [{ text: 'OK' }]
-                  );
-                }
-              })();
-            }}
-          />
-        );
-      case 'workChannelChat': {
-        const { useWork } = require('./src/store/work') as typeof import('./src/store/work');
-        const { useIdentity: _useIdentity } = require('./src/store/identity') as typeof import('./src/store/identity');
-        const _isAdmin = useWork.getState().org?.adminId === _useIdentity.getState().identity?.aegisId;
-        return (
-          <WorkChannelChat
-            channel={top.channel}
-            onBack={pop}
-            isAdmin={_isAdmin ?? false}
-          />
-        );
-      }
-      case 'workChannelPermissions':
-        return (
-          <WorkChannelPermissions
-            channel={top.channel}
-            onBack={pop}
-          />
-        );
-      case 'workDashboard':
-        return (
-          <WorkDashboard
-            onBack={pop}
-            prefillJoinToken={top.prefillJoinToken}
-            onJoinSuccess={() => push({ name: 'workJoinSuccess' })}
-            onSearch={() => push({ name: 'workSearch' })}
-          />
-        );
-      case 'workJoinSuccess': {
-        const { useWork: _useWork } = require('./src/store/work') as typeof import('./src/store/work');
-        const { useIdentity: _useIdentity } = require('./src/store/identity') as typeof import('./src/store/identity');
-        const _workState = _useWork.getState();
-        const _identity = _useIdentity.getState().identity;
-        const _role = _workState.org?.adminId === _identity?.aegisId ? 'admin' as const : 'member' as const;
-        return (
-          <WorkJoinSuccess
-            orgName={_workState.org?.name ?? 'Workspace'}
-            role={_role}
-            channels={_workState.channels.slice(0, 5)}
-            onContinue={() => { setStack([]); setTab('dashboard'); }}
-          />
-        );
-      }
       case 'subscription':
         return <SubscriptionScreen onBack={pop} />;
       case 'notifs':
@@ -1019,14 +874,14 @@ function Shell() {
           <FirstContactScreen
             contact={top.contact}
             onOpenChat={() => { setStack([]); push({ name: 'chat', contact: top.contact }); }}
-            onAddAnother={() => { setStack([]); push({ name: 'invite' }); }}
+            onAddAnother={() => { setStack([]); push({ name: 'add' }); }}
           />
         );
       case 'contacts':
         return (
           <ContactsScreen
             onBack={pop}
-            onAddContact={() => push({ name: 'invite' })}
+            onAddContact={() => push({ name: 'add' })}
             onOpenContact={(contact) => push({ name: 'contact', contact })}
             onChat={(contact) => push({ name: 'chat', contact })}
           />
@@ -1061,7 +916,7 @@ function Shell() {
         <View style={{ flex: 1 }}>
           <HomeScreen
             onOpenChat={(contact) => push({ name: 'chat', contact })}
-            onAddContact={() => push({ name: 'invite' })}
+            onAddContact={() => push({ name: 'add' })}
             onSearch={() => push({ name: 'search' })}
             onProfile={() => push({ name: 'profile' })}
             onContacts={() => push({ name: 'contacts' })}
@@ -1073,31 +928,11 @@ function Shell() {
       );
     case 'groups':
       return <GroupsScreen onTab={setTab} onOpenGroupChat={(group) => push({ name: 'groupChat', group })} />;
-    case 'verify':
-      return (
-        <VerifyScreen
-          onBack={() => setTab('home')}
-          onScan={() => push({ name: 'scan' })}
-          onTab={setTab}
-        />
-      );
     case 'settings':
       return (
         <PrivacyScreen
           onTab={setTab}
           onNav={(name) => push({ name } as PushRoute)}
-        />
-      );
-    case 'dashboard':
-      return (
-        <WorkChannels
-          onBack={() => setTab('groups')}
-          onOpenAdmin={() => push({ name: 'workDashboard' })}
-          onCreateOrg={() => push({ name: 'workGeneration' })}
-          onOpenChannel={(ch) => push({ name: 'workChannelChat', channel: ch })}
-          onOpenDirectory={() => push({ name: 'workDirectory' })}
-          onSearch={() => push({ name: 'workSearch' })}
-          onOpenChannelPermissions={(ch) => push({ name: 'workChannelPermissions', channel: ch })}
         />
       );
   }

@@ -34,15 +34,10 @@ function samplePayload(): BackupPayload {
       createdAt: 1_700_000_000_000,
     },
     profile: {
-      activeProfile: 'personal',
       displayName: 'Anon',
       avatarColor: '#abc',
       avatarImage: null,
       profileStatus: '',
-      workDisplayName: '',
-      workAvatarColor: '#def',
-      workAvatarImage: null,
-      workProfileStatus: '',
     },
     contacts: [
       {

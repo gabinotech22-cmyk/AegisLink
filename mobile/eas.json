@@ -53,6 +53,12 @@
         "EXPO_PUBLIC_RELAY_URL": "https://aegislink.duckdns.org",
         "EXPO_PUBLIC_TURN_URL": "turn:aegislink.duckdns.org:5349"
       }
+    },
+    "production-apk": {
+      "extends": "production",
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
   "submit": {

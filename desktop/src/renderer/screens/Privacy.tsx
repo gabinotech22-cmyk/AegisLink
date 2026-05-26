@@ -16,7 +16,7 @@ import { usePreferences } from '../store/preferences';
 // Types
 // ---------------------------------------------------------------------------
 
-type NavTarget = 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'workDashboard';
+type NavTarget = 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices';
 
 interface Props {
   onTab: (tab: Tab) => void;
@@ -28,10 +28,9 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
 
   // Real identity
   const identity = useIdentity((s) => s.identity);
-  const activeProfile = useIdentity((s) => s.activeProfile);
-  const storeDisplayName = useIdentity((s) => s.activeProfile === 'work' ? s.workDisplayName : s.displayName);
-  const storeAvatarColor = useIdentity((s) => s.activeProfile === 'work' ? s.workAvatarColor : s.avatarColor);
-  const storeAvatarImage = useIdentity((s) => s.activeProfile === 'work' ? s.workAvatarImage : s.avatarImage);
+  const storeDisplayName = useIdentity((s) => s.displayName);
+  const storeAvatarColor = useIdentity((s) => s.avatarColor);
+  const storeAvatarImage = useIdentity((s) => s.avatarImage);
 
   const aegisId = identity?.aegisId ?? '— — —';
   const displayName = storeDisplayName;
@@ -53,9 +52,6 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const { locale, setLocale } = useLocale();
   const { t: i18nT } = useTranslation();
 
-  const isWork = activeProfile === 'work';
-  const WORK_ACCENT = '#6366f1';
-
   function showAlert(title: string, msg: string) {
     window.alert(`${title}\n\n${msg}`);
   }
@@ -75,7 +71,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             <Avatar t={t} name={avatarImage ?? displayName} color={avatarColor} size={52} photoUri={avatarImage ?? undefined} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, display: 'block' }}>
-                {displayName}{isWork ? ' · work' : ''}
+                {displayName}
               </span>
               <span style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent, letterSpacing: 0.5, marginTop: 2, display: 'block' }}>
                 {aegisId}
@@ -111,12 +107,6 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
           <Row t={t} icon={<I.Phone size={20} color={t.textDim} />} label="Linked devices" sub="Manage devices connected to your account" onPress={() => onNav('devices')} />
           <Row t={t} icon={<I.Shield size={20} color={t.accent} />} label="Panic mode" sub="Instantly wipe all data in an emergency" onPress={() => onNav('panic')} noBorder />
         </Section>
-
-        {isWork && (
-          <Section t={t} label="ENTERPRISE">
-            <Row t={t} icon={<I.Building size={20} color={t.accent} />} label="AegisLink Work" sub="Enterprise dashboard and team settings" onPress={() => onNav('workDashboard')} noBorder />
-          </Section>
-        )}
 
         <Section t={t} label={i18nT('privacy.languageSection') || "LANGUAGE"}>
           <LanguagePicker t={t} locale={locale} onSelect={setLocale} />

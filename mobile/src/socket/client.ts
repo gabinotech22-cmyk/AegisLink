@@ -328,7 +328,19 @@ export function connect(identity: Identity): Socket {
 
   // Read Tor preference synchronously from Zustand store (no hook needed outside React)
   const { routeViaTor } = usePreferences.getState();
-  const relayUrl = routeViaTor && ONION_URL ? ONION_URL : SERVER_URL;
+  let relayUrl = routeViaTor && ONION_URL ? ONION_URL : SERVER_URL;
+
+  // Hardened Transport: Enforce HTTPS/WSS in production
+  if (!__DEV__) {
+    if (relayUrl.startsWith('http://')) {
+      relayUrl = relayUrl.replace('http://', 'https://');
+    } else if (relayUrl.startsWith('ws://')) {
+      relayUrl = relayUrl.replace('ws://', 'wss://');
+    }
+    if (!relayUrl.startsWith('https://') && !relayUrl.startsWith('wss://')) {
+      throw new Error('AegisLink: Insecure connection protocol refused in production');
+    }
+  }
 
   // ── Stable per-slot deviceId ────────────────────────────────────────────────
   // Resolved asynchronously; socket creation and event wiring happen immediately
@@ -532,11 +544,6 @@ export function connect(identity: Identity): Socket {
 
   socket.on('envelope', async (env: WireSealedEnvelope) => {
     await handleIncoming(env, identity);
-  });
-
-  socket.on('channel:msg', (msg: import('../store/workMessages').WorkMessage) => {
-    const { useWorkMessages } = require('../store/workMessages') as typeof import('../store/workMessages');
-    useWorkMessages.getState().append(msg);
   });
 
   // ── Group re-key fan-out (forward secrecy on member removal) ─────────────────
@@ -1689,10 +1696,9 @@ export async function sendMessage(opts: {
 }): Promise<void> {
   const { useIdentity } = require('../store/identity');
   const idState = useIdentity.getState();
-  const isWork = idState.activeProfile === 'work';
-  const senderName = isWork ? idState.workDisplayName : idState.displayName;
-  const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
-  const senderStatus = isWork ? idState.workProfileStatus : idState.profileStatus;
+  const senderName = idState.displayName;
+  const senderColor = idState.avatarColor;
+  const senderStatus = idState.profileStatus;
 
   const id = Crypto.randomUUID();
   const createdAt = Date.now();
@@ -1813,11 +1819,10 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
 
   const { useIdentity } = require('../store/identity');
   const idState = useIdentity.getState();
-  const isWork = idState.activeProfile === 'work';
-  const senderName = isWork ? idState.workDisplayName : idState.displayName;
-  const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
-  const senderStatus = isWork ? idState.workProfileStatus : idState.profileStatus;
-  const rawImage = isWork ? idState.workAvatarImage : idState.avatarImage;
+  const senderName = idState.displayName;
+  const senderColor = idState.avatarColor;
+  const senderStatus = idState.profileStatus;
+  const rawImage = idState.avatarImage;
   // Encode local file URIs to base64 data URIs so other devices can render them
   const senderImage = await toDataUri(rawImage);
 
@@ -1861,11 +1866,10 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
   try {
     const { useIdentity } = require('../store/identity');
     const idState = useIdentity.getState();
-    const isWork = idState.activeProfile === 'work';
-    const senderName = isWork ? idState.workDisplayName : idState.displayName;
-    const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
-    const senderStatus = isWork ? idState.workProfileStatus : idState.profileStatus;
-    const rawImage = isWork ? idState.workAvatarImage : idState.avatarImage;
+    const senderName = idState.displayName;
+    const senderColor = idState.avatarColor;
+    const senderStatus = idState.profileStatus;
+    const rawImage = idState.avatarImage;
     const senderImage = await toDataUri(rawImage);
 
     const payload = JSON.stringify({ type: 'profile_update', senderName, senderColor, senderImage, senderStatus });
@@ -1932,10 +1936,9 @@ export async function sendGroupMessage(opts: {
 
     const { useIdentity } = require('../store/identity');
     const idState = useIdentity.getState();
-    const isWork = idState.activeProfile === 'work';
-    const senderName = isWork ? idState.workDisplayName : idState.displayName;
-    const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
-    const rawImage = isWork ? idState.workAvatarImage : idState.avatarImage;
+    const senderName = idState.displayName;
+    const senderColor = idState.avatarColor;
+    const rawImage = idState.avatarImage;
     const senderImage = await toDataUri(rawImage);
 
     const payload = JSON.stringify({
@@ -1990,8 +1993,7 @@ export async function sendGroupMessage(opts: {
 
   const { useIdentity } = require('../store/identity');
   const idState = useIdentity.getState();
-  const isWorkCtx = idState.activeProfile === 'work';
-  const myDisplayName = (isWorkCtx ? idState.workDisplayName : idState.displayName)
+  const myDisplayName = idState.displayName
     || opts.identity.aegisId.substring(0, 8);
 
   const id = Crypto.randomUUID();
@@ -2048,9 +2050,8 @@ export async function sendGroupVote(opts: {
 
   const { useIdentity } = require('../store/identity');
   const idState = useIdentity.getState();
-  const isWork = idState.activeProfile === 'work';
-  const senderName = isWork ? idState.workDisplayName : idState.displayName;
-  const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
+  const senderName = idState.displayName;
+  const senderColor = idState.avatarColor;
 
   const sendPromises = group.members.map(async (memberId: string) => {
     if (memberId === opts.identity.aegisId) return;

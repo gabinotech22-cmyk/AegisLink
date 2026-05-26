@@ -8,19 +8,17 @@ import { I } from '../components/icons';
 import { useIdentity } from '../store/identity';
 import { fingerprintWords, fingerprintHex } from '../crypto/fingerprint';
 import { encodeIdentityQR } from '../crypto/qr';
-import { TabBar, type Tab } from '../components/TabBar';
 
 interface Props {
   onBack: () => void;
   onScan: () => void;
-  onTab?: (tab: Tab) => void;
 }
 
 /**
  * "Show my identity" screen. Peers scan this QR or compare 8 words side-by-side
  * to verify they got the right pubkey out-of-band (defeats directory MITM).
  */
-export function VerifyScreen({ onBack, onScan, onTab }: Props) {
+export function VerifyScreen({ onBack, onScan }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -47,19 +45,14 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
   }
 
   const qrPayload = encodeIdentityQR(identity.aegisId, identity.publicKeyB64);
-  const asTab = !!onTab;
 
   return (
     <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
       <View style={styles.top}>
-        {asTab ? (
-          <View style={{ width: 22 }} />
-        ) : (
-          <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
-            <I.ChevronL size={22} color={t.text} />
-          </Pressable>
-        )}
-        <Text style={{ fontFamily: t.fontDisplay, fontSize: asTab ? 24 : 17, fontWeight: '600', color: t.text, letterSpacing: -0.4 }}>
+        <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
+          <I.ChevronL size={22} color={t.text} />
+        </Pressable>
+        <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, letterSpacing: -0.4 }}>
           {i18nT('verify.title', 'Verify')}
         </Text>
         <View style={{ width: 22 }} />
@@ -232,7 +225,6 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
         </Pressable>
       </ScrollView>
 
-      {onTab ? <TabBar t={t} current="verify" onChange={onTab} /> : null}
     </View>
   );
 }

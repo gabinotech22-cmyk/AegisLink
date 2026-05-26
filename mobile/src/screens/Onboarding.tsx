@@ -33,7 +33,7 @@ interface Props {
 type Step = 'welcome' | 'generating' | 'show';
 
 export function OnboardingScreen({ onDone, onRestore }: Props) {
-  const { t } = useTheme();
+  const { t, dark, toggle } = useTheme();
   const { t: i18nT } = useTranslation();
   const { locale, setLocale } = useLocale();
   const insets = useSafeAreaInsets();
@@ -150,8 +150,29 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
   if (step === 'welcome') {
     return (
       <View style={[styles.frame, { backgroundColor: t.bg }, containerPad]}>
-        {/* Language toggle — top-right */}
-        <View style={{ position: 'absolute', top: insets.top + 16, right: 24, zIndex: 10 }}>
+        {/* Top-right controls: theme toggle + language toggle */}
+        <View style={{ position: 'absolute', top: insets.top + 16, right: 24, zIndex: 10, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          {/* Dark / light toggle */}
+          <Pressable
+            onPress={toggle}
+            accessibilityLabel={dark ? i18nT('onboarding.switchLight', 'Switch to light mode') : i18nT('onboarding.switchDark', 'Switch to dark mode')}
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 99,
+              borderWidth: 1,
+              borderColor: t.border,
+              backgroundColor: t.surface2,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {dark
+              ? <I.Sun size={15} color={t.textDim} />
+              : <I.Moon size={15} color={t.textDim} />}
+          </Pressable>
+
+          {/* Language toggle */}
           <Pressable
             onPress={() => {
               if (locale === 'en') {

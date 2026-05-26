@@ -18,7 +18,6 @@ import { ProfileScreen } from './screens/Profile';
 import { NotificationsScreen } from './screens/Notifications';
 import { SearchScreen } from './screens/Search';
 import { ScanQRScreen } from './screens/ScanQR';
-import { InviteAddScreen } from './screens/InviteAdd';
 import { BackupScreen } from './screens/Backup';
 import { DevicesScreen } from './screens/Devices';
 import { LockConfigScreen } from './screens/LockConfig';
@@ -37,19 +36,11 @@ import { GroupAdminScreen } from './screens/GroupAdmin';
 import { PollScreen } from './screens/Poll';
 import { FirstContactScreen } from './screens/FirstContact';
 import { AppIconScreen } from './screens/AppIcon';
-import { WorkDashboard } from './screens/WorkDashboard';
-import { WorkJoinSuccess } from './screens/WorkJoinSuccess';
-import { WorkChannels } from './screens/WorkChannels';
-import { WorkChannelChat } from './screens/WorkChannelChat';
-import { WorkSearch } from './screens/WorkSearch';
-import { WorkDirectory } from './screens/WorkDirectory';
 import { SubscriptionScreen } from './screens/Subscription';
-import { WorkGenerationScreen } from './screens/WorkGeneration';
 import { CallScreen } from './screens/Call';
 import { IncomingCallScreen } from './screens/IncomingCall';
 import { NetworkErrorScreen } from './screens/NetworkError';
 import { useIdentity } from './store/identity';
-import { useWork } from './store/work';
 import { usePreferences } from './store/preferences';
 import { useCall } from './store/call';
 import { useConnection } from './store/connection';
@@ -61,7 +52,7 @@ import { AegisMark } from './components/AegisMark';
 import type { Tab } from './components/TabBar';
 import type { StoredContact, StoredGroup } from './db/local';
 
-// ─── PushRoute — mirrors mobile/App.tsx exactly ──────────────────────────────
+// ─── PushRoute ────────────────────────────────────────────────────────────────
 type PushRoute =
   | { name: 'chat'; contact: StoredContact }
   | { name: 'contact'; contact: StoredContact; keyChanged?: boolean }
@@ -90,43 +81,8 @@ type PushRoute =
   | { name: 'firstContact'; contact: StoredContact }
   | { name: 'contacts' }
   | { name: 'appIcon' }
-  | { name: 'workDashboard' }
-  | { name: 'workChannels' }
-  | { name: 'workJoinSuccess' }
   | { name: 'subscription' }
-  | { name: 'lockSettings' }
-  | { name: 'workGeneration' };
-
-// ─── WorkJoinSuccessWrapper ───────────────────────────────────────────────────
-function WorkJoinSuccessWrapper({ onContinue }: { onContinue: () => void }) {
-  const org = useWork((s) => s.org);
-  const channels = useWork((s) => s.channels);
-  const identity = useIdentity((s) => s.identity);
-  const role = org?.adminId === identity?.aegisId ? 'admin' : 'member';
-  return (
-    <WorkJoinSuccess
-      orgName={org?.name ?? 'Workspace'}
-      role={role}
-      channels={channels.slice(0, 5)}
-      onContinue={onContinue}
-    />
-  );
-}
-
-// ─── Placeholder — used for screens not yet ported to desktop ────────────────
-function PlaceholderScreen({ name, onBack }: { name: string; onBack: () => void }) {
-  return (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, color: '#e8ede9', background: '#0a0e0d', height: '100%' }}>
-      <span style={{ fontSize: 18, opacity: 0.6 }}>{name}</span>
-      <button
-        onClick={onBack}
-        style={{ padding: '8px 24px', background: '#1e4a3a', color: '#e8ede9', border: 'none', borderRadius: 8, cursor: 'pointer' }}
-      >
-        Back
-      </button>
-    </div>
-  );
-}
+  | { name: 'lockSettings' };
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
 function Shell() {
@@ -135,9 +91,7 @@ function Shell() {
   const hydratePrefs = usePreferences((s) => s.hydrate);
   const appLockEnabled = usePreferences((s) => s.appLockEnabled);
   const lockTimeoutMin = usePreferences((s) => s.lockTimeoutMin);
-  const hideRecents = usePreferences((s) => s.hideRecents);
 
-  const activeProfile = useIdentity((s) => s.activeProfile);
   const [tab, setTab] = useState<Tab>('home');
   const [stack, setStack] = useState<PushRoute[]>([]);
   const [showSplash, setShowSplash] = useState(true);
@@ -148,23 +102,16 @@ function Shell() {
   const [pendingLinkAfterOnboarding, setPendingLinkAfterOnboarding] = useState(false);
   const [netError, setNetError] = useState(false);
   const [appLocked, setAppLocked] = useState(false);
-  const [isBackgroundShieldActive, setIsBackgroundShieldActive] = useState(false);
+  const [isBackgroundShieldActive] = useState(false);
 
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [activeWorkChannelId, setActiveWorkChannelId] = useState<string | null>(null);
-  const [showWorkDirectory, setShowWorkDirectory] = useState(false);
-  const [showWorkSearch, setShowWorkSearch] = useState(false);
 
-  // Refs so callbacks never go stale.
   const identityRef = useRef(identity);
   useEffect(() => { identityRef.current = identity; }, [identity]);
   const hydratedRef = useRef(hydrated);
   useEffect(() => { hydratedRef.current = hydrated; }, [hydrated]);
   const splashTimerFiredRef = useRef(false);
 
-  // Stable callback — never recreated, so Splash's timer never resets on re-render.
-  // If hydration is already done when the timer fires → transition immediately.
-  // Otherwise, just flag and let the effect below handle it when hydration completes.
   const handleSplashDone = useCallback(() => {
     splashTimerFiredRef.current = true;
     if (hydratedRef.current) {
@@ -173,7 +120,6 @@ function Shell() {
     }
   }, []);
 
-  // When hydration completes AFTER the splash timer already fired → proceed now.
   useEffect(() => {
     if (splashTimerFiredRef.current && hydrated && showSplash) {
       setShowSplash(false);
@@ -186,44 +132,24 @@ function Shell() {
   const didColdLockRef = useRef(false);
   const online = useConnection((s) => s.online);
 
-  // ── Hydrate stores on mount ─────────────────────────────────────────────────
   useEffect(() => {
     void hydrate();
     void hydratePrefs();
   }, [hydrate, hydratePrefs]);
 
-  // ── Sync tab to active profile ──────────────────────────────────────────────
-  useEffect(() => {
-    if (activeProfile === 'work' && tab === 'home') setTab('dashboard');
-    if (activeProfile === 'personal' && tab === 'dashboard') setTab('home');
-    if (activeProfile === 'work' && identity) {
-      useWork.getState().loadKnownOrgs();
-      const { activeOrgId } = useWork.getState();
-      if (activeOrgId) {
-        void useWork.getState().switchWorkspace(activeOrgId, identity.aegisId);
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeProfile]);
-
-  // ── Determine onboarding state ──────────────────────────────────────────────
   useEffect(() => {
     if (!hydrated) return;
     if (showOnboarding === null) {
       if (!identity) {
-        // Will show Entry after Splash, so mark as "not yet decided"
-        // showOnboarding stays null until user picks an option from Entry
         setShowOnboarding(false);
       } else {
         setShowOnboarding(false);
       }
     } else if (showOnboarding === false && !identity && !showSplash && !showEntry) {
-      // Identity was wiped mid-session — send back to Entry
       setShowEntry(true);
     }
   }, [hydrated, identity, showOnboarding, showSplash, showEntry]);
 
-  // ── Cold-start app lock ─────────────────────────────────────────────────────
   useEffect(() => {
     if (identity && status === 'ready' && appLockEnabled && !didColdLockRef.current) {
       didColdLockRef.current = true;
@@ -235,7 +161,6 @@ function Shell() {
     }
   }, [identity, status, appLockEnabled]);
 
-  // ── Visibility-based lock enforcement (desktop equiv. of AppState) ──────────
   useEffect(() => {
     if (!appLockEnabled || !identity) return;
     const handler = () => {
@@ -256,10 +181,6 @@ function Shell() {
     return () => document.removeEventListener('visibilitychange', handler);
   }, [appLockEnabled, lockTimeoutMin, identity]);
 
-  // Background privacy shield disabled on desktop — visibilitychange fires on
-  // every window switch, which would black out the app constantly.
-
-  // ── Scheduled message runner (foreground) ───────────────────────────────────
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     void import('./store/messages').then(({ useMessages }) => {
@@ -270,7 +191,6 @@ function Shell() {
     return () => clearInterval(interval);
   }, []);
 
-  // ── Network error screen after 5s offline ───────────────────────────────────
   useEffect(() => {
     if (!identity) return;
     if (!online) {
@@ -282,7 +202,6 @@ function Shell() {
     return () => { if (netTimer.current) clearTimeout(netTimer.current); };
   }, [online, identity]);
 
-  // ── Socket connect / disconnect ─────────────────────────────────────────────
   useEffect(() => {
     if (identity && status === 'ready') {
       connectSocket(identity);
@@ -300,7 +219,6 @@ function Shell() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, status]);
 
-  // ── Panic keyboard shortcut: Ctrl+Shift+P / Cmd+Shift+P ────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const isMeta = e.metaKey || e.ctrlKey;
@@ -314,22 +232,6 @@ function Shell() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Cmd+K / Ctrl+K — workspace search ──────────────────────────────────────
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const isMeta = e.metaKey || e.ctrlKey;
-      if (isMeta && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        if (activeProfile === 'work') {
-          setShowWorkSearch((v) => !v);
-        }
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [activeProfile]);
-
-  // ── Dynamic document.title ──────────────────────────────────────────────────
   const callStatus = useCall((s) => s.status);
   useEffect(() => {
     const top = stack[stack.length - 1];
@@ -344,7 +246,6 @@ function Shell() {
   const pop = useCallback(() => setStack((s) => s.slice(0, -1)), []);
   const popAllTo = useCallback((tabId: Tab) => { setStack([]); setTab(tabId); }, []);
 
-  // ── Panic wipe ──────────────────────────────────────────────────────────────
   const triggerPanic = useCallback(async () => {
     try {
       const { wipeDatabase } = await import('./db/local');
@@ -356,7 +257,6 @@ function Shell() {
     }
   }, []);
 
-  // ── ALL useCallbacks MUST be here — before ANY early return (Rules of Hooks) ─
   const openChat = useCallback((contact: StoredContact) => {
     setActiveChatId(contact.aegisId);
     setStack([{ name: 'chat', contact }]);
@@ -369,7 +269,6 @@ function Shell() {
     setTab(newTab);
   }, []);
 
-  // ── Call overlays ────────────────────────────────────────────────────────────
   const callOverlay =
     callStatus === 'outgoing-ringing' ||
     callStatus === 'connecting' ||
@@ -377,14 +276,8 @@ function Shell() {
     callStatus === 'ended';
   const incomingCall = callStatus === 'incoming-ringing';
 
-  // ── Loading (hydration) — only blocks if splash already gone ────────────────
-  // Do NOT include `showOnboarding === null` here: that flag resolves in a
-  // useEffect tick after hydration completes, so gating on it causes a brief
-  // black-screen frame where isLoading=true blocks showEntry from rendering.
-  // status === 'loading' already covers the hydration-in-progress case.
   const isLoading = !showSplash && status === 'loading';
 
-  // ── Derive the main content to render (behind splash overlay if needed) ──────
   const mainContent = (() => {
     if (isLoading) {
       return (
@@ -394,10 +287,8 @@ function Shell() {
         </div>
       );
     }
-    // The blocks below are the original early-return logic, now returning JSX instead.
-    return null; // sentinel — replaced by the ifs below
+    return null;
   })();
-  // If loading, render immediately (with splash overlay on top if still showing).
   if (mainContent !== null) {
     return (
       <>
@@ -407,7 +298,6 @@ function Shell() {
     );
   }
 
-  // ── Entry ────────────────────────────────────────────────────────────────────
   if (showEntry && !identity) {
     return (
       <EntryScreen
@@ -432,7 +322,6 @@ function Shell() {
     );
   }
 
-  // ── Onboarding ───────────────────────────────────────────────────────────────
   if (showOnboarding) {
     if (onboardingRestore || onboardingMode === 'restore') {
       return <PanicScreen onBack={() => { setOnboardingRestore(false); setOnboardingMode('generate'); setShowEntry(true); setShowOnboarding(false); }} />;
@@ -452,9 +341,6 @@ function Shell() {
     );
   }
 
-  // ── Helper: render the right-panel content ────────────────────────────────────
-  // This is a plain function (not a hook) so it can safely appear here before
-  // early returns — it is only *called* from the final return block.
   function renderContent(): ReactNode {
     const top = stack[stack.length - 1];
     if (top) {
@@ -486,7 +372,7 @@ function Shell() {
         case 'scan':
           return <ScanQRScreen onCancel={pop} onAdded={(contact) => { pop(); push({ name: 'firstContact', contact }); }} />;
         case 'invite':
-          return <InviteAddScreen onBack={pop} onShowMyQR={() => { setStack([]); setTab('verify'); }} onPasteId={() => push({ name: 'add' })} onScanQR={() => push({ name: 'scan' })} />;
+          return <AddContactScreen onCancel={pop} onAdded={(contact) => { pop(); push({ name: 'firstContact', contact }); }} />;
         case 'profile':
           return (
             <ProfileScreen
@@ -494,9 +380,7 @@ function Shell() {
               onDevices={() => push({ name: 'devices' })}
               onPanic={() => push({ name: 'panic' })}
               onAppIcon={() => push({ name: 'appIcon' })}
-              onWorkDashboard={() => push({ name: 'workChannels' })}
-              onSwitchToPersonal={pop}
-              onWorkGeneration={() => push({ name: 'workGeneration' })}
+              onSubscription={() => push({ name: 'subscription' })}
             />
           );
         case 'notifs':
@@ -516,12 +400,8 @@ function Shell() {
             <PanicScreen
               onBack={pop}
               onWipe={async () => {
-                // Clear the stack FIRST so no screen tries to render stale state
-                // while identity is being wiped (prevents green-screen race).
                 setStack([]);
                 await triggerPanic();
-                // identity is now null — the showEntry effect will fire on next
-                // render. Explicitly set it here to be safe.
                 setShowEntry(true);
               }}
             />
@@ -572,27 +452,11 @@ function Shell() {
           );
         case 'appIcon':
           return <AppIconScreen onBack={pop} />;
-        case 'workChannels':
-          return (
-            <WorkChannels
-              onBack={pop}
-              onOpenAdmin={() => push({ name: 'workDashboard' })}
-              onCreateOrg={() => push({ name: 'workGeneration' })}
-              onOpenChannel={(ch) => { setActiveWorkChannelId(ch.channelId); pop(); }}
-            />
-          );
-        case 'workDashboard':
-          return <WorkDashboard onBack={pop} onJoinSuccess={() => push({ name: 'workJoinSuccess' })} />;
-        case 'workJoinSuccess':
-          return <WorkJoinSuccessWrapper onContinue={() => { setStack([]); setTab('dashboard'); }} />;
         case 'subscription':
           return <SubscriptionScreen onBack={pop} />;
-        case 'workGeneration':
-          return <WorkGenerationScreen onBack={pop} onDone={pop} />;
       }
     }
 
-    // Tab destinations
     switch (tab) {
       case 'home':
         return (
@@ -614,7 +478,6 @@ function Shell() {
             onScan={() => push({ name: 'scan' })}
             onTab={setTab}
             onContactAdded={(contact) => {
-              // Peer scanned our QR and was auto-added — navigate to their chat.
               openChat(contact);
             }}
           />
@@ -626,45 +489,23 @@ function Shell() {
             onNav={(name) => push({ name } as PushRoute)}
           />
         );
-      case 'dashboard': {
-        if (activeWorkChannelId) {
-          const { useWork: _useWork } = require('./store/work') as typeof import('./store/work');
-          const { useIdentity: _useIdentity } = require('./store/identity') as typeof import('./store/identity');
-          const _channel = _useWork.getState().channels.find((c) => c.channelId === activeWorkChannelId);
-          const _isAdmin = _useWork.getState().org?.adminId === _useIdentity.getState().identity?.aegisId;
-          if (_channel) {
-            return (
-              <WorkChannelChat
-                channel={_channel}
-                onBack={() => setActiveWorkChannelId(null)}
-                isAdmin={_isAdmin ?? false}
-              />
-            );
-          }
-        }
-        return <WorkDashboard onBack={() => setTab('home')} onJoinSuccess={() => push({ name: 'workJoinSuccess' })} />;
-      }
       default:
         return null;
     }
   }
 
-  // ── App lock overlay ─────────────────────────────────────────────────────────
   if (appLocked) {
     return <LockScreen onUnlock={() => setAppLocked(false)} onPanic={() => push({ name: 'panic' })} />;
   }
 
-  // ── Background privacy shield ─────────────────────────────────────────────
   if (isBackgroundShieldActive) {
     return <div style={{ position: 'fixed', inset: 0, background: '#0a0e0d', zIndex: 9999 }} />;
   }
 
-  // ── Incoming call overlay ─────────────────────────────────────────────────
   if (incomingCall) {
     return <IncomingCallScreen onAccept={acceptCall} onReject={() => endCall('declined')} />;
   }
 
-  // ── Active call overlay ───────────────────────────────────────────────────
   if (callOverlay) {
     return (
       <div style={{ display: 'flex', height: '100vh', width: '100vw', backgroundColor: t.bg, overflow: 'hidden' }}>
@@ -673,65 +514,25 @@ function Shell() {
     );
   }
 
+  // suppress unused warning
+  void netError;
+  void popAllTo;
+
   return (
     <>
       <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', backgroundColor: t.bg }}>
-        {/* Left: sidebar */}
         <Sidebar
           activeSection={tab}
           activeChatId={activeChatId}
           onNavigate={handleNavigate}
           onSelectChat={openChat}
           onNewChat={() => push({ name: 'invite' })}
-          isWork={activeProfile === 'work'}
-          onOpenChannel={(id) => setActiveWorkChannelId(id)}
-          onSwitchWorkspace={(orgId) => {
-            const id = useIdentity.getState().identity;
-            if (id) void useWork.getState().switchWorkspace(orgId, id.aegisId);
-          }}
-          onOpenDirectory={activeProfile === 'work' ? () => setShowWorkDirectory(true) : undefined}
         />
-        {/* Right: content area */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {renderContent() ?? <NoChatPlaceholder t={t} />}
         </div>
       </div>
-      {/* Splash overlaid on top — already mounted content shows instantly when it lifts */}
       {showSplash && <SplashScreen onDone={handleSplashDone} />}
-      {/* Work search overlay — Cmd+K */}
-      {showWorkSearch && activeProfile === 'work' && (
-        <WorkSearch
-          onClose={() => setShowWorkSearch(false)}
-          onOpenChannel={(channelId) => {
-            setShowWorkSearch(false);
-            setActiveWorkChannelId(channelId);
-            setTab('dashboard');
-          }}
-        />
-      )}
-      {/* Work directory overlay */}
-      {showWorkDirectory && (
-        <WorkDirectory
-          onClose={() => setShowWorkDirectory(false)}
-          onStartDM={async (aegisId) => {
-            setShowWorkDirectory(false);
-            // Find or fetch the contact, then open DM
-            const { useContacts: _uc } = await import('./store/contacts');
-            const existing = _uc.getState().contacts.find((c: StoredContact) => c.aegisId === aegisId);
-            if (existing) {
-              openChat(existing);
-              return;
-            }
-            try {
-              const contact = await _uc.getState().addByAegisId(aegisId);
-              openChat(contact);
-            } catch {
-              // eslint-disable-next-line no-alert
-              alert(`No se pudo abrir DM con ${aegisId.slice(0, 12)}…\nPuedes añadirlo manualmente por AegisID.`);
-            }
-          }}
-        />
-      )}
     </>
   );
 }
@@ -770,7 +571,6 @@ function NoChatPlaceholder({ t }: { t: Theme }) {
     >
       <style>{PULSE_CSS}</style>
 
-      {/* Logo + pulse rings */}
       <div style={{ position: 'relative', width: 80, height: 80, marginBottom: 32 }}>
         {(['ncp-ring', 'ncp-ring-2', 'ncp-ring-3'] as const).map(cls => (
           <div
@@ -789,7 +589,6 @@ function NoChatPlaceholder({ t }: { t: Theme }) {
         </div>
       </div>
 
-      {/* Headline */}
       <span
         className="ncp-text"
         style={{
@@ -804,7 +603,6 @@ function NoChatPlaceholder({ t }: { t: Theme }) {
         AegisLink Desktop
       </span>
 
-      {/* Subtext */}
       <span
         className="ncp-hint"
         style={{
@@ -820,7 +618,6 @@ function NoChatPlaceholder({ t }: { t: Theme }) {
         Selecciona una conversación o inicia un nuevo chat cifrado.
       </span>
 
-      {/* Pills */}
       <div className="ncp-pills" style={{ display: 'flex', gap: 8 }}>
         {['Zero metadata', 'E2EE', 'On-device keys'].map(label => (
           <span

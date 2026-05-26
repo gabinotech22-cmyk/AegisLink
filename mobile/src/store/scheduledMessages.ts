@@ -101,9 +101,8 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
 
     const { useIdentity } = await import('./identity');
     const idState = useIdentity.getState();
-    const isWork = idState.activeProfile === 'work';
-    const senderName = isWork ? idState.workDisplayName : idState.displayName;
-    const senderColor = isWork ? idState.workAvatarColor : idState.avatarColor;
+    const senderName = idState.displayName;
+    const senderColor = idState.avatarColor;
 
     const payloadObj = {
       type: 'direct_msg',

@@ -19,7 +19,6 @@ import { useMessages } from '../store/messages';
 import { sendGroupMessage } from '../socket/client';
 import type { StoredGroup } from '../db/local';
 
-const WORK_ACCENT = '#6366f1';
 
 interface Props {
   onTab: (tab: Tab) => void;
@@ -53,8 +52,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { identity, activeProfile } = useIdentity();
-  const isWork = activeProfile === 'work';
+  const { identity } = useIdentity();
   const { contacts } = useContacts();
   const { groups, hydrate, createGroup, leaveGroup } = useGroups();
   const previews = useMessages((s) => s.previews);
@@ -310,7 +308,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
             {i18nT('groups.iconLabel')}
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 6, marginBottom: 20 }}>
-            {GROUP_EMOJIS.map((e, idx) => {
+            {GROUP_EMOJIS.map((e) => {
               const isSel = groupImage === e.val;
               return (
                 <Pressable
@@ -430,7 +428,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <TopBar
         t={t}
-        title={isWork ? i18nT('tabBar.channels') : i18nT('groups.title')}
+        title={i18nT('groups.title')}
         big
         right={
           <Pressable onPress={() => setIsCreating(true)} hitSlop={8} style={{ padding: 4 }}>
@@ -439,37 +437,6 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
         }
       />
 
-      {isWork ? (
-        <View
-          style={{
-            marginHorizontal: 18,
-            marginTop: 4,
-            marginBottom: 8,
-            paddingVertical: 9,
-            paddingHorizontal: 14,
-            backgroundColor: `${WORK_ACCENT}11`,
-            borderWidth: 1,
-            borderColor: `${WORK_ACCENT}44`,
-            borderRadius: 10,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <I.Users size={13} color={WORK_ACCENT} />
-          <Text
-            style={{
-              flex: 1,
-              fontFamily: t.fontMono,
-              fontSize: 10,
-              color: WORK_ACCENT,
-              letterSpacing: 0.6,
-            }}
-          >
-            {i18nT('groups.workBanner')}
-          </Text>
-        </View>
-      ) : null}
 
       {groups.length === 0 ? (
         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
@@ -494,7 +461,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
                 marginBottom: 10,
               }}
             >
-              {isWork ? i18nT('home.emptyWorkTitle') : i18nT('groups.emptyTitle')}
+              {i18nT('groups.emptyTitle')}
             </Text>
             <Text
               style={{
@@ -507,14 +474,12 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
                 marginBottom: 26,
               }}
             >
-              {isWork
-                ? i18nT('groups.emptyWorkDesc')
-                : i18nT('groups.emptyPersonalDesc')}
+              {i18nT('groups.emptyPersonalDesc')}
             </Text>
             <Pressable
               onPress={() => setIsCreating(true)}
               style={({ pressed }) => ({
-                backgroundColor: isWork ? WORK_ACCENT : t.accent,
+                backgroundColor: t.accent,
                 paddingHorizontal: 24,
                 paddingVertical: 13,
                 borderRadius: t.radius,
@@ -525,9 +490,9 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
                 opacity: pressed ? 0.85 : 1,
               })}
             >
-              <I.Plus size={18} color={isWork ? '#fff' : t.accentInk} />
-              <Text style={{ color: isWork ? '#fff' : t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
-                {isWork ? i18nT('groups.newGroup') : i18nT('groups.createGroup')}
+              <I.Plus size={18} color={t.accentInk} />
+              <Text style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
+                {i18nT('groups.createGroup')}
               </Text>
             </Pressable>
             <Pressable

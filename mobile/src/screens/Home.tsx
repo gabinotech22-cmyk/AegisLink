@@ -16,8 +16,6 @@ import { useMessages } from '../store/messages';
 import { useTyping } from '../store/typing';
 import type { StoredContact, StoredMessage } from '../db/local';
 
-const WORK_ACCENT = '#6366f1';
-
 interface Props {
   onOpenChat: (contact: StoredContact) => void;
   onAddContact: () => void;
@@ -35,18 +33,10 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   const insets = useSafeAreaInsets();
   const {
     identity,
-    activeProfile,
     displayName,
     avatarColor,
     avatarImage,
-    workDisplayName,
-    workAvatarColor,
-    workAvatarImage,
   } = useIdentity();
-  const isWork = activeProfile === 'work';
-  const activeDisplayName = isWork ? workDisplayName : displayName;
-  const activeAvatarColor = isWork ? workAvatarColor : avatarColor;
-  const activeAvatarImage = isWork ? workAvatarImage : avatarImage;
   const contacts = useContacts((s) => s.contacts);
   const hydrate = useContacts((s) => s.hydrate);
   const archiveContact = useContacts((s) => s.archiveContact);
@@ -162,44 +152,6 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         >
           <AegisMark t={t} size={26} />
           <AegisWord t={t} size={24} />
-          {isWork ? (
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                backgroundColor: `${WORK_ACCENT}22`,
-                borderWidth: 1,
-                borderColor: `${WORK_ACCENT}55`,
-                borderRadius: 99,
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-              }}
-            >
-              <Avatar
-                t={t}
-                name={activeAvatarImage ?? activeDisplayName}
-                color={activeAvatarColor}
-                size={18}
-                photoUri={activeAvatarImage ?? undefined}
-              />
-              <Text
-                numberOfLines={1}
-                style={{
-                  fontFamily: t.fontMono,
-                  fontSize: 10,
-                  color: WORK_ACCENT,
-                  letterSpacing: 0.5,
-                  maxWidth: 100,
-                }}
-              >
-                {activeDisplayName}
-              </Text>
-              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: WORK_ACCENT, fontWeight: '700' }}>
-                W
-              </Text>
-            </View>
-          ) : null}
         </Pressable>
         <View style={{ flexDirection: 'row', gap: 4 }}>
           <Pressable onPress={onSearch} hitSlop={8} style={{ padding: 8 }} accessibilityLabel="Search">
@@ -229,10 +181,8 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
             marginBottom: 14,
             padding: 14,
             borderWidth: 1,
-            borderColor: isWork ? `${WORK_ACCENT}44` : `${t.accent}33`,
-            backgroundColor: isWork
-              ? 'rgba(99,102,241,0.07)'
-              : t.dark ? 'rgba(91,242,185,0.06)' : 'rgba(13,143,95,0.06)',
+            borderColor: `${t.accent}33`,
+            backgroundColor: t.dark ? 'rgba(91,242,185,0.06)' : 'rgba(13,143,95,0.06)',
             borderRadius: t.radius,
             flexDirection: 'row',
             gap: 12,
@@ -245,34 +195,34 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
               width: 30,
               height: 30,
               borderRadius: t.radiusS,
-              backgroundColor: isWork ? `${WORK_ACCENT}22` : `${t.accent}22`,
+              backgroundColor: `${t.accent}22`,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <I.Check size={16} color={isWork ? WORK_ACCENT : t.accent} />
+            <I.Check size={16} color={t.accent} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ fontFamily: t.font, fontWeight: '600', fontSize: 13, color: t.text }}>
-              {isWork ? i18nT('home.workProfileActive') : i18nT('home.identityCreated')}
+              {i18nT('home.identityCreated')}
             </Text>
             <Text
               style={{
                 fontFamily: t.fontMono,
                 fontSize: 11,
-                color: isWork ? WORK_ACCENT : t.accent,
+                color: t.accent,
                 letterSpacing: 0.5,
                 marginTop: 2,
               }}
             >
-              {isWork ? activeDisplayName : (identity?.aegisId ?? '— — —')}
+              {identity?.aegisId ?? '— — —'}
             </Text>
           </View>
           <Text
             style={{
               fontFamily: t.fontMono,
               fontSize: 10,
-              color: isWork ? WORK_ACCENT : t.accent,
+              color: t.accent,
               letterSpacing: 0.5,
             }}
           >
@@ -289,14 +239,14 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
             paddingHorizontal: 14,
             backgroundColor: t.surface,
             borderWidth: 1,
-            borderColor: isWork ? `${WORK_ACCENT}44` : t.border,
+            borderColor: t.border,
             borderRadius: t.radius,
             flexDirection: 'row',
             alignItems: 'center',
             gap: 8,
           }}
         >
-          <I.Lock size={12} color={isWork ? WORK_ACCENT : t.accent} />
+          <I.Lock size={12} color={t.accent} />
           <Text
             numberOfLines={1}
             style={{
@@ -307,24 +257,8 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
               letterSpacing: 0.5,
             }}
           >
-            {isWork
-              ? `${activeDisplayName} · ${i18nT('home.workStatus')}`
-              : `${identity?.aegisId ?? '— — —'} · ${i18nT('home.e2eeStatus')}`}
+            {`${identity?.aegisId ?? '— — —'} · ${i18nT('home.e2eeStatus')}`}
           </Text>
-          {isWork ? (
-            <View
-              style={{
-                paddingHorizontal: 6,
-                paddingVertical: 2,
-                borderRadius: 99,
-                backgroundColor: `${WORK_ACCENT}22`,
-              }}
-            >
-              <Text style={{ fontFamily: t.fontMono, fontSize: 8, color: WORK_ACCENT, fontWeight: '700' }}>
-                WORK
-              </Text>
-            </View>
-          ) : null}
         </View>
       )}
 
@@ -342,7 +276,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
       )}
 
       {empty && !showArchived ? (
-        <EmptyHero t={t} onAdd={onAddContact} isWork={isWork} />
+        <EmptyHero t={t} onAdd={onAddContact} />
       ) : (
         <FlatList
           data={displayed}
@@ -396,7 +330,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   );
 }
 
-function EmptyHero({ t, onAdd, isWork }: { t: Theme; onAdd: () => void; isWork: boolean }) {
+function EmptyHero({ t, onAdd }: { t: Theme; onAdd: () => void }) {
   const { t: i18nT } = useTranslation();
   const [scale1] = useState(new Animated.Value(0));
   const [scale2] = useState(new Animated.Value(0));
@@ -437,7 +371,7 @@ function EmptyHero({ t, onAdd, isWork }: { t: Theme; onAdd: () => void; isWork: 
             key={i}
             style={[
               StyleSheet.absoluteFillObject,
-              { borderRadius: 70, borderWidth: 1, borderColor: isWork ? WORK_ACCENT : t.accent },
+              { borderRadius: 70, borderWidth: 1, borderColor: t.accent },
               ring(s),
             ]}
           />
@@ -471,15 +405,15 @@ function EmptyHero({ t, onAdd, isWork }: { t: Theme; onAdd: () => void; isWork: 
           maxWidth: 280,
         }}
       >
-        {isWork ? i18nT('home.emptyWorkTitle') : i18nT('home.emptyPersonalTitle')}
+        {i18nT('home.emptyPersonalTitle')}
       </Text>
       <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: 21, textAlign: 'center', maxWidth: 300, marginBottom: 24 }}>
-        {isWork ? i18nT('home.emptyWorkDesc') : i18nT('home.emptyPersonalDesc')}
+        {i18nT('home.emptyPersonalDesc')}
       </Text>
       <Pressable
         onPress={onAdd}
         style={({ pressed }) => ({
-          backgroundColor: isWork ? WORK_ACCENT : t.accent,
+          backgroundColor: t.accent,
           paddingHorizontal: 24,
           paddingVertical: 13,
           borderRadius: t.radius,
@@ -489,9 +423,9 @@ function EmptyHero({ t, onAdd, isWork }: { t: Theme; onAdd: () => void; isWork: 
           opacity: pressed ? 0.85 : 1,
         })}
       >
-        <I.Plus size={18} color={isWork ? '#fff' : t.accentInk} />
-        <Text style={{ color: isWork ? '#fff' : t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
-          {isWork ? i18nT('home.addCoworker') : i18nT('home.addFirstContact')}
+        <I.Plus size={18} color={t.accentInk} />
+        <Text style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
+          {i18nT('home.addFirstContact')}
         </Text>
       </Pressable>
       <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.8, marginTop: 22 }}>
