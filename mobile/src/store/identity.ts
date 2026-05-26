@@ -375,6 +375,12 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       // Publish to server
       await publishToServer(identity);
 
+      // Reset (don't close) the temp slot's DB reference before switching back.
+      // closeAsync() here races against any in-flight DB call and causes
+      // "Access to closed resource". resetDbConnection just nulls the pointer.
+      const { resetDbConnection } = require('../db/local') as typeof import('../db/local');
+      resetDbConnection();
+
       // Restore active slot
       setActiveDbSlot(prevSlot);
 
@@ -424,6 +430,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       // Publish to server
       await publishToServer(identity);
 
+      // Reset (don't close) — same reasoning as createSlot above.
+      const { resetDbConnection } = require('../db/local') as typeof import('../db/local');
+      resetDbConnection();
+
       // Restore active slot
       setActiveDbSlot(prevSlot);
 
@@ -449,11 +459,11 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         sock.disconnect();
       }
 
-      // 2. Safely close database
-      const { closeActiveDatabase, setActiveDbSlot } = require('../db/local');
-      await closeActiveDatabase();
+      // 2. Switch slot FIRST so store resets open the new DB, not the old one.
+      const { setActiveDbSlot } = require('../db/local');
+      setActiveDbSlot(slotId);
 
-      // 3. Reset Zustand stores in memory
+      // 3. Reset Zustand stores in memory (may trigger DB reads on new slot — OK).
       const { useContacts } = require('./contacts');
       const { useGroups } = require('./groups');
       const { useMessages } = require('./messages');
@@ -461,8 +471,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       useGroups.setState({ groups: [] });
       useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {}, pendingMediaUri: null });
 
-      // 4. Update slot settings and activeDbSlot
-      setActiveDbSlot(slotId);
+      // 4. Persist active slot.
       await SecureStore.setItemAsync('aegis.activeSlotId', slotId);
 
       // 5. Hydrate from the new DB

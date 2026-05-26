@@ -37,12 +37,29 @@ export function setActiveDbSlot(slot: string): void {
 }
 
 export async function closeActiveDatabase(): Promise<void> {
-  if (dbPromise) {
+  if (!dbPromise) return;
+  _closing = true;
+  try {
     const d = await dbPromise;
-    await d.closeAsync();
     dbPromise = null;
     cachedDbKey = null;
+    // closeAsync flushes WAL to the main file — needed before backup/copy.
+    // Wrap in try/catch: if already closed (e.g. double-close), this is a no-op.
+    try { await d.closeAsync(); } catch { /* already closed — safe to ignore */ }
+  } finally {
+    _closing = false;
   }
+}
+
+/**
+ * Reset the DB reference without closing the native connection.
+ * Use this for profile switches where you want the next db() call to open
+ * the new slot's file without risking "Access to closed resource" on
+ * in-flight operations that hold a reference to the old connection.
+ */
+export function resetDbConnection(): void {
+  dbPromise = null;
+  cachedDbKey = null;
 }
 
 export async function deleteIdentitySlot(slot: string): Promise<void> {
@@ -88,10 +105,25 @@ export interface StoredIdentity {
 }
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+// Tracks whether a close is in progress to prevent concurrent operations from
+// reopening the DB mid-close then immediately seeing "Access to closed resource".
+let _closing = false;
 
 async function db(): Promise<SQLite.SQLiteDatabase> {
+  // Wait until any in-progress close finishes before opening a new connection.
+  if (_closing) {
+    await new Promise<void>((resolve) => {
+      const interval = setInterval(() => {
+        if (!_closing) { clearInterval(interval); resolve(); }
+      }, 10);
+    });
+  }
   if (!dbPromise) {
     const dbName = activeSlot === 'self' ? 'aegislink.db' : `aegislink_${activeSlot}.db`;
+    // Do NOT pass useNewConnection: true — expo-sqlite manages the shared
+    // WAL-mode connection and handles lifecycle correctly. useNewConnection
+    // creates an independent handle that becomes invalid after closeAsync()
+    // causing "Access to closed resource" on concurrent operations.
     dbPromise = SQLite.openDatabaseAsync(dbName).then(async (d) => {
       await d.execAsync(`
         PRAGMA journal_mode = WAL;
