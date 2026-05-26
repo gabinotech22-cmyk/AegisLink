@@ -58,15 +58,18 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
     } catch (e) {
       const raw = (e as Error).message ?? '';
       // Translate low-level network errors into something actionable.
-      const message =
+      const isNetwork =
         raw.toLowerCase().includes('network') ||
         raw.toLowerCase().includes('failed to fetch') ||
-        raw.toLowerCase().includes('network request failed')
-          ? i18nT(
-              'addContact.networkError',
-              'Could not connect to the server. Check your internet connection and try again.',
-            )
-          : raw;
+        raw.toLowerCase().includes('network request failed') ||
+        raw.toLowerCase().includes('timeout') ||
+        raw.toLowerCase().includes('econnrefused');
+      const message = isNetwork
+        ? i18nT(
+            'addContact.networkError',
+            'Cannot reach the AegisLink server.\n\nIf testing on a real device, set EXPO_PUBLIC_SERVER_URL in your .env to your server\'s IP address (e.g. http://192.168.x.x:3001).',
+          )
+        : raw;
       Alert.alert(i18nT('addContact.errorTitle', 'Could not add contact'), message);
     } finally {
       setSubmitting(false);

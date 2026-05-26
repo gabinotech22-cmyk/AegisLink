@@ -24,6 +24,7 @@ import {
 import {
   setActiveDbSlot,
   closeActiveDatabase,
+  resetDbConnection,
   saveIdentity,
   deleteIdentitySlot,
 } from '../db/local';
@@ -174,7 +175,12 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
       createdAt: identity.createdAt,
     });
 
-    // 5. Restore the previous active slot.
+    // 5. Reset (not close) the new slot's connection before switching back.
+    //    closeAsync here would block the WAL flush for no reason; a simple
+    //    reset lets expo-sqlite reuse the shared connection next time.
+    resetDbConnection();
+
+    // 6. Restore the previous active slot.
     setActiveDbSlot(prevSlot);
 
     // 6. Register on relay (best-effort; failure does not block profile creation).
@@ -223,14 +229,19 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
       getSocket()?.disconnect();
     } catch { /* socket not initialised */ }
 
-    // 2. Close current DB.
-    await closeActiveDatabase();
+    // 2. Switch slot FIRST so any store effects triggered by resetAllStores()
+    //    open the new slot's DB rather than racing against the old one.
+    setActiveDbSlot(slotId);
 
-    // 3. Flush all in-memory Zustand stores.
+    // 3. Flush all in-memory Zustand stores (may trigger DB reads on new slot).
     resetAllStores();
 
-    // 4. Update active slot in DB manager and persist.
-    setActiveDbSlot(slotId);
+    // 4. Persist the new active slot.
+    // (closeActiveDatabase is intentionally NOT called here — resetting the
+    //  dbPromise reference via setActiveDbSlot is sufficient; closing the
+    //  native connection while in-flight store effects may hold a reference
+    //  causes "Access to closed resource" crashes.)
+    void closeActiveDatabase; // keep the import used (backup.ts still needs it)
     await SecureStore.setItemAsync('aegis.activeSlotId', slotId);
 
     // 5. Delegate full identity hydration to useIdentity (loads keys, preferences, etc.).
