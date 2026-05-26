@@ -301,7 +301,7 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     // Sync display name to identity store if this is the active slot.
     if (slotId === get().activeSlotId) {
       const { useIdentity } = require('./identity') as typeof import('./identity');
-      await useIdentity.getState().updateProfile('personal', displayName, avatarColor, null);
+      await useIdentity.getState().updateProfile(displayName, avatarColor, null);
     }
   },
 }));

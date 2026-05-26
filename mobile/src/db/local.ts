@@ -70,15 +70,10 @@ export async function deleteIdentitySlot(slot: string): Promise<void> {
 
   // 2. Delete preferences for this slot
   const prefKeys = [
-    'activeProfile',
     'displayName',
     'avatarColor',
     'avatarImage',
     'profileStatus',
-    'workDisplayName',
-    'workAvatarColor',
-    'workAvatarImage',
-    'workProfileStatus',
   ];
   for (const pk of prefKeys) {
     await SecureStore.deleteItemAsync(`aegis.${slot}.${pk}`).catch(() => {});

@@ -15,8 +15,10 @@ const ThemeContext = createContext<ThemeCtx | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const scheme = useColorScheme();
-  const [autoMode, setAutoModeState] = useState(true);
-  const [dark, setDarkState] = useState(scheme !== 'light');
+  // Default: dark mode always — dark is the primary design language of AegisLink.
+  // autoMode follows the system only after the user explicitly enables it.
+  const [autoMode, setAutoModeState] = useState(false);
+  const [dark, setDarkState] = useState(true);
 
   // When auto mode is on, follow the system
   useEffect(() => {

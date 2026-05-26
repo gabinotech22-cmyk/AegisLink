@@ -24,6 +24,7 @@ import { ForwardModal } from '../components/ForwardModal';
 import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
 import { useContacts } from '../store/contacts';
+import { useGroups } from '../store/groups';
 import { sendGroupMessage, sendGroupVote } from '../socket/client';
 import { useConnection } from '../store/connection';
 import { usePollsStore, type PollResult } from '../store/polls';
@@ -48,13 +49,15 @@ interface Props {
   onAttach?: () => void;
 }
 
-export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach }: Props) {
+export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, onPoll, onAttach }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
   const contacts = useContacts((s) => s.contacts);
   const hydrate = useContacts((s) => s.hydrate);
+  // Read group reactively from the store so member add/remove is reflected live
+  const group = useGroups((s) => s.groups.find((g) => g.id === initialGroup.id) ?? initialGroup);
   const list = useMessages((s) => s.byChat[group.id] ?? EMPTY_MSGS);
   const loadChat = useMessages((s) => s.loadChat);
   const toggleStar = useMessages((s) => s.toggleStar);
@@ -81,11 +84,14 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
   const isNearBottomRef = useRef(true);
   const online = useConnection((s) => s.online);
 
-  // Build member name lookup
-  const memberNames: Record<string, string> = {};
-  for (const c of contacts) {
-    if (group.members.includes(c.aegisId)) memberNames[c.aegisId] = c.name;
-  }
+  // Build member name lookup — memoised so GroupBubble receives a stable reference
+  const memberNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of contacts) {
+      if (group.members.includes(c.aegisId)) map[c.aegisId] = c.name;
+    }
+    return map;
+  }, [contacts, group.members]);
 
   useEffect(() => {
     void hydrate();
@@ -263,7 +269,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onAttach
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={{ flex: 1, backgroundColor: t.bg }}
     >
       <View style={{ flex: 1, paddingTop: insets.top }}>

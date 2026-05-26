@@ -16,7 +16,7 @@ import type { Theme } from '../theme/vault';
 
 interface Props {
   onTab: (tab: Tab) => void;
-  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'workDashboard') => void;
+  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices') => void;
 }
 
 export function PrivacyScreen({ onTab, onNav }: Props) {
@@ -25,16 +25,9 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const { locale, setLocale } = useLocale();
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
-  const activeProfile = useIdentity((s) => s.activeProfile);
-  const displayName = useIdentity((s) =>
-    s.activeProfile === 'work' ? s.workDisplayName : s.displayName
-  );
-  const avatarColor = useIdentity((s) =>
-    s.activeProfile === 'work' ? s.workAvatarColor : s.avatarColor
-  );
-  const avatarImage = useIdentity((s) =>
-    s.activeProfile === 'work' ? s.workAvatarImage : s.avatarImage
-  );
+  const displayName = useIdentity((s) => s.displayName);
+  const avatarColor = useIdentity((s) => s.avatarColor);
+  const avatarImage = useIdentity((s) => s.avatarImage);
   const hydrated = usePreferences((s) => s.hydrated);
   const hydrate = usePreferences((s) => s.hydrate);
   const readReceipts = usePreferences((s) => s.readReceipts);
@@ -76,7 +69,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             <Avatar t={t} name={avatarImage || displayName} color={avatarColor} size={52} photoUri={avatarImage} />
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
-                {displayName}{activeProfile === 'work' ? ' · work' : ''}
+                {displayName}
               </Text>
               <Text
                 style={{
@@ -234,19 +227,6 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             noBorder
           />
         </Section>
-
-        {activeProfile === 'work' && (
-          <Section t={t} label={i18nT('privacy.enterpriseSection')}>
-            <Row
-              t={t}
-              icon={<I.Building size={20} color={t.accent} />}
-              label="AegisLink Work"
-              sub={i18nT('privacy.workDashboardSub')}
-              onPress={() => onNav('workDashboard')}
-              noBorder
-            />
-          </Section>
-        )}
 
         <Section t={t} label={i18nT('settings.language')}>
           <LanguagePicker t={t} locale={locale} onSelect={setLocale} />

@@ -20,7 +20,7 @@ interface Props {
   onBack: () => void;
   onChat: () => void;
   onCall: (media: 'audio' | 'video') => void;
-  onVerify: () => void;
+  onVerify?: () => void;
   onEphemeral: () => void;
 }
 

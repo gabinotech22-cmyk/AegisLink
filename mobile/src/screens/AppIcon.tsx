@@ -4,7 +4,6 @@ import Svg, { Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
-import { useIdentity } from '../store/identity';
 import { I } from '../components/icons';
 import * as SecureStore from 'expo-secure-store';
 
@@ -27,11 +26,10 @@ export function AppIconScreen({ onBack }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const activeProfile = useIdentity((s) => s.activeProfile);
   const [current, setCurrent] = useState<IconId>('default');
   const [loading, setLoading] = useState(false);
 
-  const VARIANTS = ALL_VARIANTS.filter((v) => !v.workOnly || activeProfile === 'work');
+  const VARIANTS = ALL_VARIANTS.filter((v) => !v.workOnly);
 
   const { width } = Dimensions.get('window');
   const COLS = 2;

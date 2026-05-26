@@ -60,15 +60,10 @@ export interface BackupPayload {
     createdAt: number;
   };
   profile: {
-    activeProfile: 'personal' | 'work';
     displayName: string;
     avatarColor: string;
     avatarImage: string | null;
     profileStatus: string;
-    workDisplayName: string;
-    workAvatarColor: string;
-    workAvatarImage: string | null;
-    workProfileStatus: string;
   };
   contacts: BackupContact[];
 }

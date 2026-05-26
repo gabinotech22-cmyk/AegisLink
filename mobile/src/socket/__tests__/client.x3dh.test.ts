@@ -78,15 +78,10 @@ jest.mock('../../store/identity', () => ({
   __esModule: true,
   useIdentity: {
     getState: () => ({
-      activeProfile: 'personal',
       displayName: 'Tester',
       avatarColor: '#000',
       profileStatus: '',
       avatarImage: null,
-      workDisplayName: '',
-      workAvatarColor: '#000',
-      workProfileStatus: '',
-      workAvatarImage: null,
     }),
   },
 }));

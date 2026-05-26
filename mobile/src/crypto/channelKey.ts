@@ -3,7 +3,7 @@ import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-ut
 import { hmacSHA256, hkdfSHA256 } from './signal/kdf';
 
 // ---------------------------------------------------------------------------
-// Sender Key scheme for Work channel E2EE (Signal-style group messaging).
+// Sender Key scheme for E2EE group/channel messaging (Signal-style).
 //
 // Each member owns a SenderKey: a 32-byte symmetric chain key plus a
 // monotonic iteration counter. Messages are encrypted with a per-message key

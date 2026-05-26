@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "test": "jest",
-    "gen-icons": "node scripts/gen-icons.mjs"
+    "gen-icons": "node scripts/gen-icons.mjs",
+    "build:apk": "eas build --platform android --profile production-apk --local",
+    "build:native": "npx expo prebuild --platform android && cd android && gradlew assembleRelease"
   },
   "dependencies": {
     "@noble/hashes": "^1.6.1",

@@ -119,6 +119,17 @@ export const I = {
       <Path d="M4 18v-2a4 4 0 014-4h12" />
     </IconBase>
   ),
+  Sun: (p: IconProps) => (
+    <IconBase {...p}>
+      <Circle cx={12} cy={12} r={4} />
+      <Path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </IconBase>
+  ),
+  Moon: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </IconBase>
+  ),
   Star: (p: IconProps) => (
     <IconBase {...p}>
       <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />

@@ -242,11 +242,12 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     for (const id of unsentIds) sentReceiptIdsRef.current.add(id);
   }, [contact.aegisId, list.length, online, readReceipts]);
 
-  // Stop typing indicator on unmount; save draft
+  // Stop typing indicator on unmount; save draft; clear search debounce
   useEffect(() => {
     return () => {
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
       if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
       emitTyping(contact.aegisId, false);
     };
   }, [contact.aegisId]);
