@@ -120,9 +120,11 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
     // creates an independent handle that becomes invalid after closeAsync()
     // causing "Access to closed resource" on concurrent operations.
     dbPromise = SQLite.openDatabaseAsync(dbName).then(async (d) => {
+      // Run PRAGMAs in isolation — mixing PRAGMA + DDL in one execAsync call
+      // crashes on Android 14 with New Architecture (expo-sqlite v16 JSI).
+      await d.execAsync('PRAGMA journal_mode = WAL;');
+      await d.execAsync('PRAGMA foreign_keys = ON;');
       await d.execAsync(`
-        PRAGMA journal_mode = WAL;
-
         CREATE TABLE IF NOT EXISTS identity (
           slot                    TEXT PRIMARY KEY,
           aegis_id                TEXT NOT NULL,
@@ -311,9 +313,15 @@ export async function saveIdentity(v: StoredIdentity): Promise<void> {
   // Keystore has stale entries from a previous installation (classic "update
   // over old APK" corruption).  Attempt once; on failure, clear the stale
   // entries and retry exactly once so a fresh install recovers automatically.
+  // AFTER_FIRST_UNLOCK: compatible with Android 14 hardware-backed Keystore
+  // (StrongBox). Without this, setItemAsync can throw a native NPE on first
+  // write on real devices even when the JS catch would normally handle it.
+  const secureOpts: SecureStore.SecureStoreOptions = {
+    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+  };
   const persistKeys = async () => {
-    await SecureStore.setItemAsync(getSecretKeySlot(), v.secretKeyB64);
-    await SecureStore.setItemAsync(getSignSecretKeySlot(), v.signingSecretKeyB64);
+    await SecureStore.setItemAsync(getSecretKeySlot(), v.secretKeyB64, secureOpts);
+    await SecureStore.setItemAsync(getSignSecretKeySlot(), v.signingSecretKeyB64, secureOpts);
   };
   try {
     await persistKeys();
