@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useLocale } from '../i18n/useLocale';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
-import { TabBar, type Tab } from '../components/TabBar';
+import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
 
@@ -14,24 +16,21 @@ import { usePreferences } from '../store/preferences';
 // Types
 // ---------------------------------------------------------------------------
 
-type NavTarget = 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'workDashboard';
+type NavTarget = 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices';
 
 interface Props {
   onTab: (tab: Tab) => void;
   onNav: (name: NavTarget) => void;
 }
 
-type LangOption = 'en' | 'it';
-
 export function PrivacyScreen({ onTab, onNav }: Props) {
   const { t, toggle } = useTheme();
 
   // Real identity
   const identity = useIdentity((s) => s.identity);
-  const activeProfile = useIdentity((s) => s.activeProfile);
-  const storeDisplayName = useIdentity((s) => s.activeProfile === 'work' ? s.workDisplayName : s.displayName);
-  const storeAvatarColor = useIdentity((s) => s.activeProfile === 'work' ? s.workAvatarColor : s.avatarColor);
-  const storeAvatarImage = useIdentity((s) => s.activeProfile === 'work' ? s.workAvatarImage : s.avatarImage);
+  const storeDisplayName = useIdentity((s) => s.displayName);
+  const storeAvatarColor = useIdentity((s) => s.avatarColor);
+  const storeAvatarImage = useIdentity((s) => s.avatarImage);
 
   const aegisId = identity?.aegisId ?? '— — —';
   const displayName = storeDisplayName;
@@ -50,10 +49,8 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   function setScreenshot(v: boolean) { void setPref('blockScreenshots', v); }
   function setTor(v: boolean) { void setPref('routeViaTor', v); }
 
-  const [locale, setLocale] = useState<LangOption>('en');
-
-  const isWork = activeProfile === 'work';
-  const WORK_ACCENT = '#6366f1';
+  const { locale, setLocale } = useLocale();
+  const { t: i18nT } = useTranslation();
 
   function showAlert(title: string, msg: string) {
     window.alert(`${title}\n\n${msg}`);
@@ -74,7 +71,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             <Avatar t={t} name={avatarImage ?? displayName} color={avatarColor} size={52} photoUri={avatarImage ?? undefined} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, display: 'block' }}>
-                {displayName}{isWork ? ' · work' : ''}
+                {displayName}
               </span>
               <span style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent, letterSpacing: 0.5, marginTop: 2, display: 'block' }}>
                 {aegisId}
@@ -111,13 +108,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
           <Row t={t} icon={<I.Shield size={20} color={t.accent} />} label="Panic mode" sub="Instantly wipe all data in an emergency" onPress={() => onNav('panic')} noBorder />
         </Section>
 
-        {isWork && (
-          <Section t={t} label="ENTERPRISE">
-            <Row t={t} icon={<I.Building size={20} color={t.accent} />} label="AegisLink Work" sub="Enterprise dashboard and team settings" onPress={() => onNav('workDashboard')} noBorder />
-          </Section>
-        )}
-
-        <Section t={t} label="LANGUAGE">
+        <Section t={t} label={i18nT('privacy.languageSection') || "LANGUAGE"}>
           <LanguagePicker t={t} locale={locale} onSelect={setLocale} />
         </Section>
 
@@ -140,7 +131,6 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
         </Section>
       </div>
 
-      <TabBar t={t} current="settings" onChange={onTab} isWork={isWork} />
     </div>
   );
 }
@@ -169,10 +159,12 @@ function ModePicker({ t, dark, onToggle }: { t: Theme; dark: boolean; onToggle: 
   );
 }
 
-function LanguagePicker({ t, locale, onSelect }: { t: Theme; locale: LangOption; onSelect: (l: LangOption) => void }) {
-  const opts: { id: LangOption; label: string }[] = [
-    { id: 'en', label: 'English' },
-    { id: 'it', label: 'Italiano' },
+function LanguagePicker({ t, locale, onSelect }: { t: Theme; locale: string; onSelect: (l: 'en' | 'it' | 'es') => void }) {
+  const { t: i18nT } = useTranslation();
+  const opts: { id: 'en' | 'it' | 'es'; label: string }[] = [
+    { id: 'en', label: i18nT('privacy.languageEnglish') || 'English' },
+    { id: 'it', label: i18nT('privacy.languageItalian') || 'Italiano' },
+    { id: 'es', label: i18nT('privacy.languageSpanish') || 'Español' },
   ];
   return (
     <div style={{ padding: 14 }}>

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, type StoredContact } from '../db/local';
+import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, pinContact as dbPinContact, type StoredContact } from '../db/local';
 import { lookupIdentity, ApiError } from '../api';
 
 export type AddResult =
@@ -32,6 +32,7 @@ interface ContactsState {
   setZeroTrust: (aegisId: string, enabled: boolean) => Promise<void>;
   setBlocked: (aegisId: string, blocked: boolean) => Promise<void>;
   archiveContact: (aegisId: string, archived: boolean) => Promise<void>;
+  pinContact: (aegisId: string, pinned: boolean) => Promise<void>;
   removeContact: (aegisId: string) => Promise<void>;
 }
 
@@ -47,9 +48,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
         set({ contacts: [], loading: false });
         return;
       }
-      const { useIdentity } = require('./identity');
-      const activeProfile = useIdentity.getState().activeProfile as 'personal' | 'work';
-      const contacts = await loadContacts(activeProfile);
+      const contacts = await loadContacts();
       set({ contacts, loading: false });
     } catch (e) {
       set({ loading: false, error: (e as Error).message });
@@ -68,11 +67,17 @@ export const useContacts = create<ContactsState>((set, get) => ({
       if (e instanceof ApiError && e.status === 404) {
         throw new Error(`No identity found for ${aegisId}. Has your peer opened the app yet?`);
       }
+      const raw = (e as Error).message ?? '';
+      if (
+        raw.toLowerCase().includes('network') ||
+        raw.toLowerCase().includes('failed to fetch') ||
+        raw.toLowerCase().includes('network request failed')
+      ) {
+        throw new Error('Could not connect to the server. Check your internet connection and try again.');
+      }
       throw e;
     }
 
-    const { useIdentity } = require('./identity');
-    const profile = useIdentity.getState().activeProfile as 'personal' | 'work';
     const contact: StoredContact = {
       aegisId: record.aegisId,
       publicKeyB64: record.publicKey,
@@ -80,7 +85,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
       name: displayName?.trim() || aegisId,
       verified: false,
       addedAt: Date.now(),
-      profile,
+      profile: 'personal',
     };
     await saveContact(contact);
     set({ contacts: [contact, ...get().contacts.filter((c) => c.aegisId !== aegisId)] });
@@ -110,15 +115,13 @@ export const useContacts = create<ContactsState>((set, get) => ({
     }
 
     // Brand-new contact from QR — verified by virtue of in-person scan.
-    const { useIdentity } = require('./identity');
-    const profile = useIdentity.getState().activeProfile as 'personal' | 'work';
     const contact: StoredContact = {
       aegisId,
       publicKeyB64,
       name: displayName?.trim() || aegisId,
       verified: true,
       addedAt: Date.now(),
-      profile,
+      profile: 'personal',
     };
     await saveContact(contact);
     set({ contacts: [contact, ...get().contacts] });
@@ -206,6 +209,11 @@ export const useContacts = create<ContactsState>((set, get) => ({
     const updated = { ...existing, archived };
     await saveContact(updated);
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
+  },
+
+  async pinContact(aegisId, pinned) {
+    await dbPinContact(aegisId, pinned);
+    set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, pinned } : c)) });
   },
 
   async removeContact(aegisId) {

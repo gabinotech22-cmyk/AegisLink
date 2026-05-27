@@ -47,7 +47,13 @@ jest.mock('react-native-gesture-handler', () => {
 });
 
 import { Alert } from 'react-native';
+import { ThemeProvider } from '../../theme/ThemeContext';
+
 jest.spyOn(Alert, 'alert');
+
+const Wrapper = ({ children }: { children: React.ReactNode }) => (
+  <ThemeProvider>{children}</ThemeProvider>
+);
 
 describe('SwipeableMessage', () => {
   beforeEach(() => {
@@ -58,7 +64,8 @@ describe('SwipeableMessage', () => {
     const { getByText } = render(
       <SwipeableMessage onDelete={jest.fn()}>
         <Text>Hello world</Text>
-      </SwipeableMessage>
+      </SwipeableMessage>,
+      { wrapper: Wrapper }
     );
     expect(getByText('Hello world')).toBeTruthy();
   });
@@ -68,7 +75,8 @@ describe('SwipeableMessage', () => {
     const { getByText } = render(
       <SwipeableMessage onDelete={onDelete} disabled>
         <Text>Disabled bubble</Text>
-      </SwipeableMessage>
+      </SwipeableMessage>,
+      { wrapper: Wrapper }
     );
     expect(getByText('Disabled bubble')).toBeTruthy();
     expect(onDelete).not.toHaveBeenCalled();
@@ -79,7 +87,8 @@ describe('SwipeableMessage', () => {
     render(
       <SwipeableMessage onDelete={onDelete}>
         <Text>Swipeable</Text>
-      </SwipeableMessage>
+      </SwipeableMessage>,
+      { wrapper: Wrapper }
     );
 
     act(() => {

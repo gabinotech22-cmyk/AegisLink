@@ -1,5 +1,11 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
+
+// AFTER_FIRST_UNLOCK: required for Android 14 hardware-backed Keystore (StrongBox).
+// Without this flag, setItemAsync throws a native NPE on first write on real devices.
+const SS_OPTS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+};
 import { createIdentity, identityFromStored, type Identity } from '../crypto/identity';
 import { loadIdentity, saveIdentity, clearIdentity } from '../db/local';
 import { ApiError } from '../api';
@@ -12,15 +18,10 @@ interface IdentityState {
   status: 'idle' | 'loading' | 'generating' | 'ready';
   hydrated: boolean;
   error: string | null;
-  activeProfile: 'personal' | 'work';
   displayName: string;
   avatarColor: string;
   avatarImage: string | null;
   profileStatus: string;
-  workDisplayName: string;
-  workAvatarColor: string;
-  workAvatarImage: string | null;
-  workProfileStatus: string;
 
   // Multi-E2EE Slots State
   activeSlotId: string;
@@ -29,13 +30,11 @@ interface IdentityState {
   hydrate: () => Promise<void>;
   generate: () => Promise<Identity>;
   reset: () => Promise<void>;
-  updateProfile: (type: 'personal' | 'work', displayName: string, avatarColor: string, avatarImage: string | null) => Promise<void>;
-  setActiveProfile: (type: 'personal' | 'work') => Promise<void>;
-  updateStatus: (type: 'personal' | 'work', text: string) => Promise<void>;
+  updateProfile: (displayName: string, avatarColor: string, avatarImage: string | null) => Promise<void>;
+  updateStatus: (text: string) => Promise<void>;
 
   // Multi-E2EE Slots Actions
   createSlot: () => Promise<string>;
-  createWorkSlot: () => Promise<Identity>;
   switchSlot: (slotId: string) => Promise<void>;
   deleteSlot: (slotId: string) => Promise<void>;
 }
@@ -91,15 +90,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
   status: 'idle',
   hydrated: false,
   error: null,
-  activeProfile: 'personal',
   displayName: 'you',
   avatarColor: '#05b875',
   avatarImage: null,
   profileStatus: '',
-  workDisplayName: 'cirrus.work',
-  workAvatarColor: '#8b5cf6',
-  workAvatarImage: null,
-  workProfileStatus: '',
 
   activeSlotId: 'self',
   slotsList: ['self'],
@@ -109,27 +103,20 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     try {
       const { usePreferences } = require('./preferences');
       if (usePreferences.getState().duressActive) {
-        const decoyIdentity = {
-          aegisId: 'AEGIS-MOCK',
-          publicKey: new Uint8Array(32),
-          secretKey: new Uint8Array(32),
-          publicKeyB64: 'mockPublicKeyB64String',
-          secretKeyB64: 'mockSecretKeyB64String',
-          signingPublicKey: new Uint8Array(32),
-          signingSecretKey: new Uint8Array(64),
-          signingPublicKeyB64: 'mockSigningPublicKeyB64String',
-          signingSecretKeyB64: 'mockSigningSecretKeyB64String',
-          createdAt: Date.now(),
-        };
+        // Generate a cryptographically random throwaway identity so the decoy
+        // looks indistinguishable from a real account: real AegisID, real key
+        // material, real createdAt. All-zero keys are trivially detectable under
+        // forensic analysis and must never be used here.
+        const decoyIdentity = createIdentity();
+        const decoyName = decoyIdentity.aegisId.toLowerCase().replace(/-/g, '');
         set({
           identity: decoyIdentity,
           activeSlotId: 'self',
           slotsList: ['self'],
-          activeProfile: 'personal',
-          displayName: 'anon.aegis',
+          displayName: decoyName,
           avatarColor: '#5bf2b9',
           avatarImage: null,
-          profileStatus: 'Safe & Protected',
+          profileStatus: '',
           status: 'ready',
           hydrated: true,
         });
@@ -151,18 +138,11 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         return;
       }
       const identity = identityFromStored(stored);
-      
-      const activeProfile = (await SecureStore.getItemAsync(getPrefKey('aegis.activeProfile', activeSlotId)) as 'personal' | 'work') || 'personal';
+
       const displayName = await SecureStore.getItemAsync(getPrefKey('aegis.displayName', activeSlotId)) || identity.aegisId.toLowerCase().replace(/-/g, '');
       const avatarColor = await SecureStore.getItemAsync(getPrefKey('aegis.avatarColor', activeSlotId)) || '#05b875';
       const avatarImage = await SecureStore.getItemAsync(getPrefKey('aegis.avatarImage', activeSlotId)) || null;
-
       const profileStatus = await SecureStore.getItemAsync(getPrefKey('aegis.profileStatus', activeSlotId)) || '';
-
-      const workDisplayName = await SecureStore.getItemAsync(getPrefKey('aegis.workDisplayName', activeSlotId)) || 'cirrus.work';
-      const workAvatarColor = await SecureStore.getItemAsync(getPrefKey('aegis.workAvatarColor', activeSlotId)) || '#8b5cf6';
-      const workAvatarImage = await SecureStore.getItemAsync(getPrefKey('aegis.workAvatarImage', activeSlotId)) || null;
-      const workProfileStatus = await SecureStore.getItemAsync(getPrefKey('aegis.workProfileStatus', activeSlotId)) || '';
 
       // Register identity on server BEFORE marking ready — prevents the race
       // condition where the socket authenticates before the identity is in the
@@ -172,15 +152,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         identity,
         activeSlotId,
         slotsList,
-        activeProfile,
         displayName,
         avatarColor,
         avatarImage,
         profileStatus,
-        workDisplayName,
-        workAvatarColor,
-        workAvatarImage,
-        workProfileStatus,
         status: 'ready',
         hydrated: true
       });
@@ -204,29 +179,22 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     const activeSlotId = get().activeSlotId || 'self';
     const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
     const defaultColor = '#05b875';
-    await SecureStore.setItemAsync(getPrefKey('aegis.activeProfile', activeSlotId), 'personal');
-    await SecureStore.setItemAsync(getPrefKey('aegis.displayName', activeSlotId), defaultName);
-    await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor);
+    await SecureStore.setItemAsync(getPrefKey('aegis.displayName', activeSlotId), defaultName, SS_OPTS);
+    await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor, SS_OPTS);
     await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', activeSlotId));
 
-    await SecureStore.setItemAsync(getPrefKey('aegis.workDisplayName', activeSlotId), 'cirrus.work');
-    await SecureStore.setItemAsync(getPrefKey('aegis.workAvatarColor', activeSlotId), '#8b5cf6');
-    await SecureStore.deleteItemAsync(getPrefKey('aegis.workAvatarImage', activeSlotId));
-
-    await publishToServer(identity);
+    // Mark ready immediately — identity is already saved locally.
+    // Server registration is best-effort and must never block onboarding.
     set({
       identity,
-      activeProfile: 'personal',
       displayName: defaultName,
       avatarColor: defaultColor,
       avatarImage: null,
       profileStatus: '',
-      workDisplayName: 'cirrus.work',
-      workAvatarColor: '#8b5cf6',
-      workAvatarImage: null,
-      workProfileStatus: '',
       status: 'ready'
     });
+    // Fire-and-forget: register with server in background after UI has moved on.
+    void publishToServer(identity);
     return identity;
   },
 
@@ -240,6 +208,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     await SecureStore.deleteItemAsync('aegis.activeSlotId').catch(() => {});
     await SecureStore.deleteItemAsync('aegis.slotsList').catch(() => {});
 
+    // Purge any plaintext-decrypted media from the filesystem cache
+    const { purgeCachedDecryptedMedia } = require('../crypto/media');
+    await (purgeCachedDecryptedMedia as () => Promise<void>)().catch(() => {});
+
     // Reset all other Zustand stores — DB is already empty, bring memory in sync
     const { useContacts } = require('./contacts');
     const { useGroups } = require('./groups');
@@ -251,86 +223,45 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       identity: null,
       activeSlotId: 'self',
       slotsList: ['self'],
-      activeProfile: 'personal',
       displayName: 'you',
       avatarColor: '#05b875',
       avatarImage: null,
       profileStatus: '',
-      workDisplayName: 'cirrus.work',
-      workAvatarColor: '#8b5cf6',
-      workAvatarImage: null,
-      workProfileStatus: '',
       status: 'idle'
     });
   },
 
-  async updateProfile(type, displayName, avatarColor, avatarImage) {
+  async updateProfile(displayName, avatarColor, avatarImage) {
     const slotId = get().activeSlotId || 'self';
-    if (type === 'personal') {
-      await SecureStore.setItemAsync(getPrefKey('aegis.displayName', slotId), displayName);
-      await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', slotId), avatarColor);
-      if (avatarImage) {
-        await SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', slotId), avatarImage);
-      } else {
-        await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', slotId));
-      }
-      set({ displayName, avatarColor, avatarImage });
+    await SecureStore.setItemAsync(getPrefKey('aegis.displayName', slotId), displayName, SS_OPTS);
+    await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', slotId), avatarColor, SS_OPTS);
+    if (avatarImage) {
+      await SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', slotId), avatarImage, SS_OPTS);
     } else {
-      await SecureStore.setItemAsync(getPrefKey('aegis.workDisplayName', slotId), displayName);
-      await SecureStore.setItemAsync(getPrefKey('aegis.workAvatarColor', slotId), avatarColor);
-      if (avatarImage) {
-        await SecureStore.setItemAsync(getPrefKey('aegis.workAvatarImage', slotId), avatarImage);
-      } else {
-        await SecureStore.deleteItemAsync(getPrefKey('aegis.workAvatarImage', slotId));
-      }
-      set({ workDisplayName: displayName, workAvatarColor: avatarColor, workAvatarImage: avatarImage });
+      await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', slotId));
     }
+    set({ displayName, avatarColor, avatarImage });
 
-    // Propagate the new profile to all contacts so they don't keep seeing our
-    // raw Aegis ID. Only fires if the edited profile is currently active.
-    if (type === get().activeProfile) {
-      const identity = get().identity;
-      if (identity) {
-        const { broadcastProfileUpdate } = require('../socket/client');
-        broadcastProfileUpdate(identity).catch((e: Error) => { if (__DEV__) console.warn('[identity] profile broadcast failed:', e); });
-      }
+    // Propagate the new profile to all contacts
+    const identity = get().identity;
+    if (identity) {
+      const { broadcastProfileUpdate } = require('../socket/client');
+      broadcastProfileUpdate(identity).catch((e: Error) => { if (__DEV__) console.warn('[identity] profile broadcast failed:', e); });
     }
   },
 
-  async setActiveProfile(type) {
+  async updateStatus(text) {
     const slotId = get().activeSlotId || 'self';
-    await SecureStore.setItemAsync(getPrefKey('aegis.activeProfile', slotId), type);
-    set({ activeProfile: type });
+    await SecureStore.setItemAsync(getPrefKey('aegis.profileStatus', slotId), text, SS_OPTS);
+    set({ profileStatus: text });
 
-    // GAP 4 FIX: Propagate the newly active profile to all contacts so they
-    // immediately see Personal↔Work switch instead of stale data
     const identity = get().identity;
     if (identity) {
       try {
         const { broadcastProfileUpdate } = require('../socket/client');
         await broadcastProfileUpdate(identity);
       } catch (e) {
-        if (__DEV__) console.warn('[identity] profile switch broadcast failed:', e);
-      }
-    }
-  },
-
-  async updateStatus(type, text) {
-    const slotId = get().activeSlotId || 'self';
-    const key = type === 'personal' ? 'aegis.profileStatus' : 'aegis.workProfileStatus';
-    await SecureStore.setItemAsync(getPrefKey(key, slotId), text);
-    if (type === 'personal') set({ profileStatus: text });
-    else set({ workProfileStatus: text });
-
-    if (type === get().activeProfile) {
-      const identity = get().identity;
-      if (identity) {
-        try {
-          const { broadcastProfileUpdate } = require('../socket/client');
-          await broadcastProfileUpdate(identity);
-        } catch (e) {
-          if (__DEV__) console.warn('[identity] status broadcast failed:', e);
-        }
+        if (__DEV__) console.warn('[identity] status broadcast failed:', e);
       }
     }
   },
@@ -368,73 +299,27 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       // Save default preferences for the new slot
       const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
       const defaultColor = '#05b875';
-      await SecureStore.setItemAsync(getPrefKey('aegis.activeProfile', newSlotId), 'personal');
-      await SecureStore.setItemAsync(getPrefKey('aegis.displayName', newSlotId), defaultName);
-      await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', newSlotId), defaultColor);
-      await SecureStore.setItemAsync(getPrefKey('aegis.workDisplayName', newSlotId), 'cirrus.work');
-      await SecureStore.setItemAsync(getPrefKey('aegis.workAvatarColor', newSlotId), '#8b5cf6');
+      await SecureStore.setItemAsync(getPrefKey('aegis.displayName', newSlotId), defaultName, SS_OPTS);
+      await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', newSlotId), defaultColor, SS_OPTS);
 
       // Publish to server
       await publishToServer(identity);
+
+      // Reset (don't close) the temp slot's DB reference before switching back.
+      // closeAsync() here races against any in-flight DB call and causes
+      // "Access to closed resource". resetDbConnection just nulls the pointer.
+      const { resetDbConnection } = require('../db/local') as typeof import('../db/local');
+      resetDbConnection();
 
       // Restore active slot
       setActiveDbSlot(prevSlot);
 
       // Update slotsList
       const newSlotsList = [...slotsList, newSlotId];
-      await SecureStore.setItemAsync('aegis.slotsList', JSON.stringify(newSlotsList));
+      await SecureStore.setItemAsync('aegis.slotsList', JSON.stringify(newSlotsList), SS_OPTS);
 
       set({ slotsList: newSlotsList, status: 'ready' });
       return newSlotId;
-    } catch (e) {
-      set({ status: 'ready', error: (e as Error).message });
-      throw e;
-    }
-  },
-
-  async createWorkSlot() {
-    set({ status: 'generating', error: null });
-    try {
-      const slotsList = get().slotsList || ['self'];
-      const newSlotId = 'work';
-
-      // Create identity for the new slot
-      const identity = createIdentity();
-
-      // Temporarily set active slot in db to the new slot to save the identity in the new DB file!
-      const { setActiveDbSlot } = require('../db/local');
-      const prevSlot = get().activeSlotId;
-      setActiveDbSlot(newSlotId);
-
-      await saveIdentity({
-        aegisId: identity.aegisId,
-        publicKeyB64: identity.publicKeyB64,
-        secretKeyB64: identity.secretKeyB64,
-        signingPublicKeyB64: identity.signingPublicKeyB64,
-        signingSecretKeyB64: identity.signingSecretKeyB64,
-        createdAt: identity.createdAt,
-      });
-
-      // Save default preferences for the new slot
-      await SecureStore.setItemAsync(getPrefKey('aegis.activeProfile', newSlotId), 'work');
-      await SecureStore.setItemAsync(getPrefKey('aegis.displayName', newSlotId), 'cirrus.work');
-      await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', newSlotId), '#8b5cf6');
-
-      await SecureStore.setItemAsync(getPrefKey('aegis.workDisplayName', newSlotId), 'cirrus.work');
-      await SecureStore.setItemAsync(getPrefKey('aegis.workAvatarColor', newSlotId), '#8b5cf6');
-
-      // Publish to server
-      await publishToServer(identity);
-
-      // Restore active slot
-      setActiveDbSlot(prevSlot);
-
-      // Update slotsList
-      const newSlotsList = slotsList.includes(newSlotId) ? slotsList : [...slotsList, newSlotId];
-      await SecureStore.setItemAsync('aegis.slotsList', JSON.stringify(newSlotsList));
-
-      set({ slotsList: newSlotsList, status: 'ready' });
-      return identity;
     } catch (e) {
       set({ status: 'ready', error: (e as Error).message });
       throw e;
@@ -451,11 +336,11 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         sock.disconnect();
       }
 
-      // 2. Safely close database
-      const { closeActiveDatabase, setActiveDbSlot } = require('../db/local');
-      await closeActiveDatabase();
+      // 2. Switch slot FIRST so store resets open the new DB, not the old one.
+      const { setActiveDbSlot } = require('../db/local');
+      setActiveDbSlot(slotId);
 
-      // 3. Reset Zustand stores in memory
+      // 3. Reset Zustand stores in memory (may trigger DB reads on new slot — OK).
       const { useContacts } = require('./contacts');
       const { useGroups } = require('./groups');
       const { useMessages } = require('./messages');
@@ -463,9 +348,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       useGroups.setState({ groups: [] });
       useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {}, pendingMediaUri: null });
 
-      // 4. Update slot settings and activeDbSlot
-      setActiveDbSlot(slotId);
-      await SecureStore.setItemAsync('aegis.activeSlotId', slotId);
+      // 4. Persist active slot.
+      await SecureStore.setItemAsync('aegis.activeSlotId', slotId, SS_OPTS);
 
       // 5. Hydrate from the new DB
       set({ activeSlotId: slotId });
@@ -507,7 +391,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
       // Remove from list
       const newSlotsList = slotsList.filter((s) => s !== slotId);
-      await SecureStore.setItemAsync('aegis.slotsList', JSON.stringify(newSlotsList));
+      await SecureStore.setItemAsync('aegis.slotsList', JSON.stringify(newSlotsList), SS_OPTS);
       
       set({ slotsList: newSlotsList });
     } catch (e) {

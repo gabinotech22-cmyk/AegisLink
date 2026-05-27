@@ -195,6 +195,9 @@ export function generateTurnCredentials(aegisId: string, ttlSeconds = 86400) {
 - Loguear conexiones de clientes al servidor TURN
 - Usar IPs públicas de usuarios como identificadores en métricas
 
+## Skills Avanzadas del Agente
+- [expo-eas-cicd](file:///c:/Users/starl/Desktop/AegisLink/.claude/skills/expo-eas-cicd.md): EAS Build profiles completos, GitHub Actions pipeline, EAS Update OTA, code signing y checklist de release. Usar siempre que se modifique eas.json, workflows o se prepare un release.
+
 ## Escalada
 
 - Si el relay necesita un nuevo puerto o endpoint → coordinar con backend-lead

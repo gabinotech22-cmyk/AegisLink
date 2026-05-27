@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
-import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, Alert, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -16,31 +16,24 @@ import type { Theme } from '../theme/vault';
 
 interface Props {
   onTab: (tab: Tab) => void;
-  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'workDashboard') => void;
+  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices') => void;
 }
 
 export function PrivacyScreen({ onTab, onNav }: Props) {
-  const { t, toggle, setDark } = useTheme();
+  const { t, setDark, autoMode, setAutoMode } = useTheme();
   const { t: i18nT } = useTranslation();
   const { locale, setLocale } = useLocale();
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
-  const activeProfile = useIdentity((s) => s.activeProfile);
-  const displayName = useIdentity((s) =>
-    s.activeProfile === 'work' ? s.workDisplayName : s.displayName
-  );
-  const avatarColor = useIdentity((s) =>
-    s.activeProfile === 'work' ? s.workAvatarColor : s.avatarColor
-  );
-  const avatarImage = useIdentity((s) =>
-    s.activeProfile === 'work' ? s.workAvatarImage : s.avatarImage
-  );
+  const displayName = useIdentity((s) => s.displayName);
+  const avatarColor = useIdentity((s) => s.avatarColor);
+  const avatarImage = useIdentity((s) => s.avatarImage);
   const hydrated = usePreferences((s) => s.hydrated);
   const hydrate = usePreferences((s) => s.hydrate);
   const readReceipts = usePreferences((s) => s.readReceipts);
   const typing = usePreferences((s) => s.typingIndicator);
   const screenshot = usePreferences((s) => s.blockScreenshots);
-  const tor = usePreferences((s) => s.routeViaTor);
+  const routeViaTor = usePreferences((s) => s.routeViaTor);
   const setPref = usePreferences((s) => s.set);
 
   // Shell already hydrates on mount; this is a belt-and-suspenders guard
@@ -52,7 +45,6 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const setRR = (v: boolean) => void setPref('readReceipts', v);
   const setTyping = (v: boolean) => void setPref('typingIndicator', v);
   const setSS = (v: boolean) => void setPref('blockScreenshots', v);
-  const setTor = (v: boolean) => void setPref('routeViaTor', v);
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
@@ -77,7 +69,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             <Avatar t={t} name={avatarImage || displayName} color={avatarColor} size={52} photoUri={avatarImage} />
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
-                {displayName}{activeProfile === 'work' ? ' · work' : ''}
+                {displayName}
               </Text>
               <Text
                 style={{
@@ -96,7 +88,13 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
         </Pressable>
 
         <Section t={t} label={i18nT('privacy.appearanceSection')}>
-          <ModePicker t={t} value={t.dark ? 'dark' : 'light'} onChange={setDark} onToggle={toggle} />
+          <ModePicker
+            t={t}
+            value={t.dark ? 'dark' : 'light'}
+            autoMode={autoMode}
+            onChange={setDark}
+            onSetAuto={() => setAutoMode(true)}
+          />
         </Section>
 
         <Section t={t} label={i18nT('privacy.dataSharingSection')}>
@@ -127,11 +125,49 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
         <Section t={t} label={i18nT('privacy.networkSection')}>
           <Toggle
             t={t}
-            label={i18nT('privacy.routeViaTor')}
-            sub={i18nT('privacy.routeViaTorSub')}
-            value={tor}
-            onChange={setTor}
+            label={i18nT('privacy.torLabel')}
+            sub={i18nT('privacy.torSub')}
+            value={routeViaTor}
+            onChange={(v) => {
+              void setPref('routeViaTor', v);
+              // Reconnect socket with new URL preference
+              if (identity) {
+                const { disconnect: sockDisconnect, connect: sockConnect } = require('../socket/client') as typeof import('../socket/client');
+                sockDisconnect();
+                sockConnect(identity);
+              }
+            }}
           />
+          {routeViaTor && (
+            <View style={{ paddingHorizontal: 16, paddingBottom: 12, gap: 10 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, lineHeight: 16 }}>
+                {i18nT('privacy.torOrbot')}
+              </Text>
+              <Pressable
+                accessibilityLabel={i18nT('privacy.openOrbot')}
+                onPress={() => {
+                  void Linking.openURL('orbot://request/vpn').catch(() =>
+                    Linking.openURL('https://orbot.app')
+                  );
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  backgroundColor: t.surface2,
+                  borderRadius: t.radiusS,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  alignSelf: 'flex-start',
+                }}
+              >
+                <I.Shield size={14} color={t.accent} />
+                <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent, letterSpacing: 0.4 }}>
+                  {i18nT('privacy.openOrbot')}
+                </Text>
+              </Pressable>
+            </View>
+          )}
           <Row
             t={t}
             icon={<I.Cloud size={20} color={t.textDim} />}
@@ -191,19 +227,6 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             noBorder
           />
         </Section>
-
-        {activeProfile === 'work' && (
-          <Section t={t} label={i18nT('privacy.enterpriseSection')}>
-            <Row
-              t={t}
-              icon={<I.Building size={20} color={t.accent} />}
-              label="AegisLink Work"
-              sub={i18nT('privacy.workDashboardSub')}
-              onPress={() => onNav('workDashboard')}
-              noBorder
-            />
-          </Section>
-        )}
 
         <Section t={t} label={i18nT('settings.language')}>
           <LanguagePicker t={t} locale={locale} onSelect={setLocale} />
@@ -273,18 +296,32 @@ function LanguagePicker({ t, locale, onSelect }: { t: Theme; locale: SupportedLo
 function ModePicker({
   t,
   value,
+  autoMode,
   onChange,
+  onSetAuto,
 }: {
   t: Theme;
   value: 'dark' | 'light';
+  autoMode: boolean;
   onChange: (dark: boolean) => void;
-  onToggle: () => void;
+  onSetAuto: () => void;
 }) {
   const { t: i18nT } = useTranslation();
-  const opts = [
-    { id: 'light' as const, label: i18nT('privacy.modeLight') },
-    { id: 'dark' as const, label: i18nT('privacy.modeDark') },
+  const opts: { id: 'light' | 'auto' | 'dark'; label: string }[] = [
+    { id: 'light', label: i18nT('privacy.modeLight') },
+    { id: 'auto', label: i18nT('privacy.modeAuto') },
+    { id: 'dark', label: i18nT('privacy.modeDark') },
   ];
+  const activeId: 'light' | 'auto' | 'dark' = autoMode ? 'auto' : value;
+
+  const handlePress = (id: 'light' | 'auto' | 'dark') => {
+    if (id === 'auto') {
+      onSetAuto();
+    } else {
+      onChange(id === 'dark');
+    }
+  };
+
   return (
     <View style={{ padding: 14 }}>
       <View
@@ -297,11 +334,12 @@ function ModePicker({
         }}
       >
         {opts.map((o) => {
-          const active = o.id === value;
+          const active = o.id === activeId;
           return (
             <Pressable
               key={o.id}
-              onPress={() => onChange(o.id === 'dark')}
+              onPress={() => handlePress(o.id)}
+              accessibilityLabel={o.label}
               style={{
                 flex: 1,
                 paddingVertical: 10,

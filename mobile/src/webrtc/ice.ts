@@ -28,9 +28,21 @@ const TURN_URL =
 const TURN_USERNAME = (process.env.EXPO_PUBLIC_TURN_USERNAME as string | undefined) ?? '';
 const TURN_PASSWORD = (process.env.EXPO_PUBLIC_TURN_PASSWORD as string | undefined) ?? '';
 
-export function rtcConfig(): RTCConfigShape {
+/**
+ * When `forceRelay` is true the peer connection ONLY emits relay (TURN) ICE
+ * candidates — host and server-reflexive candidates are suppressed so neither
+ * peer's real IP address ever appears in the signaling exchange. This is the
+ * privacy-preserving default; it requires a reachable TURN server. Callers may
+ * pass `false` to permit direct (lower-latency) connectivity when IP exposure
+ * to the peer is acceptable.
+ */
+export function rtcConfig(forceRelay: boolean = true): RTCConfigShape {
   const iceServers: RTCConfigShape['iceServers'] = [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    { urls: [
+      'stun:stun.l.google.com:19302',
+      'stun:stun1.l.google.com:19302',
+      'stun:stun.cloudflare.com:3478',
+    ] },
   ];
   if (TURN_URL) {
     iceServers.push({
@@ -39,7 +51,13 @@ export function rtcConfig(): RTCConfigShape {
       credential: TURN_PASSWORD,
     });
   }
-  return { iceServers };
+  const config: RTCConfigShape = { iceServers };
+  // Only force relay when a TURN server is actually configured; otherwise a
+  // relay-only policy would yield zero candidates and the call could never
+  // connect. Privacy is preserved when TURN exists; we degrade gracefully when
+  // it does not.
+  if (forceRelay && TURN_URL) config.iceTransportPolicy = 'relay';
+  return config;
 }
 
 /**
@@ -61,34 +79,42 @@ const _cache = new Map<string, { config: RTCConfigShape; expiresAt: number }>();
 /** Cache TTL in ms: 50 minutes (tokens are valid for 1 hour). */
 const CACHE_TTL_MS = 50 * 60 * 1000;
 
-export async function fetchTurnConfig(aegisId: string): Promise<RTCConfigShape> {
+export async function fetchTurnConfig(aegisId: string, forceRelay: boolean = true): Promise<RTCConfigShape> {
   // Return cached result if still fresh
-  const cached = _cache.get(aegisId);
+  const cacheKey = `${aegisId}|${forceRelay ? 'relay' : 'all'}`;
+  const cached = _cache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) return cached.config;
 
   try {
     const res = await fetch(
       `${SERVER_URL}/turn/credentials?aegisId=${encodeURIComponent(aegisId)}`,
-      { signal: AbortSignal.timeout(3000) },
+      { signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 3000); return c.signal; })() },
     );
-    if (!res.ok) return rtcConfig();
+    if (!res.ok) return rtcConfig(forceRelay);
     const { username, password } = (await res.json()) as {
       username: string;
       password: string;
       ttl: number;
     };
     const iceServers: RTCConfigShape['iceServers'] = [
-      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+      { urls: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun.cloudflare.com:3478',
+      ] },
     ];
     if (TURN_URL) {
       iceServers.push({ urls: TURN_URL, username, credential: password });
     }
     const config: RTCConfigShape = { iceServers };
-    _cache.set(aegisId, { config, expiresAt: Date.now() + CACHE_TTL_MS });
+    // Relay-only ICE keeps both peers' real IPs out of the signaling exchange.
+    // Only enforce it when ephemeral TURN creds were actually obtained.
+    if (forceRelay && TURN_URL) config.iceTransportPolicy = 'relay';
+    _cache.set(cacheKey, { config, expiresAt: Date.now() + CACHE_TTL_MS });
     return config;
   } catch {
     // Network error, timeout, or parse failure — degrade gracefully to STUN / static creds
-    return rtcConfig();
+    return rtcConfig(forceRelay);
   }
 }
 

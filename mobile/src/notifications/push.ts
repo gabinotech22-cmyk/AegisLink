@@ -3,6 +3,12 @@ import { Platform } from 'react-native';
 import { SERVER_URL } from '../config';
 import type { Identity } from '../crypto/identity';
 
+function makeSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
 /**
  * Push wake-ups: register the Expo push token for our Aegis ID so the server
  * can ping us when an envelope arrives while we're offline.
@@ -31,10 +37,37 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export async function registerForPush(identity: Identity): Promise<void> {
-  if (registered) return;
+export async function registerForPush(identity: Identity): Promise<{ token: string | null }> {
+  if (registered) return { token: null };
 
   try {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('aegislink-messages', {
+        name: 'Mensajes',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#5bf2b9',
+        sound: 'default',
+        showBadge: true,
+      });
+      await Notifications.setNotificationChannelAsync('aegislink-calls', {
+        name: 'Llamadas',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 500, 200, 500],
+        lightColor: '#5bf2b9',
+        sound: 'default',
+        bypassDnd: true,
+      });
+      await Notifications.setNotificationChannelAsync('aegislink-security', {
+        name: 'Seguridad',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 100, 100, 100, 100, 100],
+        lightColor: '#ff6b6b',
+        sound: 'default',
+        bypassDnd: true,
+      });
+    }
+
     const perm = await Notifications.getPermissionsAsync();
     let granted = perm.granted || perm.status === 'granted';
     if (!granted && perm.canAskAgain) {
@@ -43,7 +76,7 @@ export async function registerForPush(identity: Identity): Promise<void> {
     }
     if (!granted) {
       if (__DEV__) console.log('[push] notification permission denied — wake-ups disabled');
-      return;
+      return { token: null };
     }
 
     const tokenResponse = await Notifications.getExpoPushTokenAsync();
@@ -55,18 +88,55 @@ export async function registerForPush(identity: Identity): Promise<void> {
     const res = await fetch(`${SERVER_URL}/push/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      signal: makeSignal(10_000),
       body: JSON.stringify({ aegisId: identity.aegisId, expoToken, platform }),
     });
     if (!res.ok) {
       if (__DEV__) console.warn('[push] server rejected token registration', res.status);
-      return;
+      return { token: null };
     }
 
-    // Handle tapping a notification to open the right chat
+    // Handle notification action taps (Reply, Mark read) and default tap to open chat
     Notifications.addNotificationResponseReceivedListener((response) => {
       const data = response.notification.request.content.data as Record<string, unknown>;
       const fromAegisId = data?.fromAegisId as string | undefined;
-      if (fromAegisId && _onOpenChat) {
+      const actionId = response.actionIdentifier;
+
+      if (actionId === 'REPLY') {
+        // User replied from notification — send the text via socket without opening app
+        const replyText = (response as { userText?: string }).userText;
+        if (replyText && fromAegisId) {
+          try {
+            const { sendMessage } = require('../socket/client') as { sendMessage: (to: string, text: string) => void };
+            sendMessage(fromAegisId, replyText);
+            void Notifications.dismissNotificationAsync(response.notification.request.identifier);
+          } catch (e) {
+            if (__DEV__) console.warn('[push] inline reply failed:', e);
+          }
+        }
+      } else if (actionId === 'MARK_READ') {
+        if (fromAegisId) {
+          try {
+            const { useMessages } = require('../store/messages') as { useMessages: { getState: () => { markRead: (id: string) => Promise<void> } } };
+            void useMessages.getState().markRead(fromAegisId);
+            void Notifications.dismissNotificationAsync(response.notification.request.identifier);
+          } catch (e) {
+            if (__DEV__) console.warn('[push] mark-read action failed:', e);
+          }
+        }
+      } else if ((data?.type as string) === 'call_invite') {
+        // App was woken by a call push — reconnect socket so the relay can
+        // re-deliver call:invite once the authenticated socket is established.
+        try {
+          const { reconnect } = require('../socket/client') as { reconnect: () => void };
+          reconnect();
+        } catch { /* socket module not yet loaded — no-op */ }
+        // Also surface the incoming call screen if caller info is available
+        if (fromAegisId && _onOpenChat) {
+          _onOpenChat(fromAegisId);
+        }
+      } else if (fromAegisId && _onOpenChat) {
+        // Default tap — open chat
         _onOpenChat(fromAegisId);
       }
     });
@@ -76,15 +146,58 @@ export async function registerForPush(identity: Identity): Promise<void> {
     if (lastResponse) {
       const data = lastResponse.notification.request.content.data as Record<string, unknown>;
       const fromAegisId = data?.fromAegisId as string | undefined;
-      if (fromAegisId && _onOpenChat) {
+      if ((data?.type as string) === 'call_invite') {
+        // Cold-start from a call push — reconnect socket first, then navigate
+        try {
+          const { reconnect } = require('../socket/client') as { reconnect: () => void };
+          reconnect();
+        } catch { /* socket module not yet loaded — no-op */ }
+        if (fromAegisId && _onOpenChat) {
+          setTimeout(() => _onOpenChat?.(fromAegisId), 500);
+        }
+      } else if (fromAegisId && _onOpenChat) {
         setTimeout(() => _onOpenChat?.(fromAegisId), 500);
       }
     }
 
     registered = true;
-    if (__DEV__) console.log('[push] registered for wake-ups');
+    if (__DEV__) console.log('[push] registered for wake-ups, token:', expoToken);
+
+    // Register notification action categories (Reply + Mark as read)
+    await Notifications.setNotificationCategoryAsync('aegislink-message', [
+      {
+        identifier: 'REPLY',
+        buttonTitle: 'Responder',
+        textInput: {
+          submitButtonTitle: 'Enviar',
+          placeholder: 'Mensaje cifrado…',
+        },
+        options: { opensAppToForeground: false },
+      },
+      {
+        identifier: 'MARK_READ',
+        buttonTitle: 'Marcar leído',
+        options: { opensAppToForeground: false, isDestructive: false },
+      },
+    ]);
+
+    await Notifications.setNotificationCategoryAsync('aegislink-call', [
+      {
+        identifier: 'ACCEPT_CALL',
+        buttonTitle: 'Contestar',
+        options: { opensAppToForeground: true },
+      },
+      {
+        identifier: 'DECLINE_CALL',
+        buttonTitle: 'Rechazar',
+        options: { opensAppToForeground: false, isDestructive: true },
+      },
+    ]);
+
+    return { token: expoToken };
   } catch (e) {
     if (__DEV__) console.warn('[push] registration failed:', (e as Error).message);
+    return { token: null };
   }
 }
 
@@ -94,6 +207,7 @@ export async function unregisterPush(aegisId: string): Promise<void> {
     await fetch(`${SERVER_URL}/push/unregister`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      signal: makeSignal(8_000),
       body: JSON.stringify({ aegisId }),
     });
   } catch { /* best effort */ }
@@ -180,7 +294,10 @@ export async function showIncomingNotification(
         title,
         body: notificationBody,
         sound: prefs.notifSound ? 'default' : undefined,
+        categoryIdentifier: 'aegislink-message',
         data: { fromAegisId: senderAegisId, isGroup, groupName },
+        // Android notification channel
+        ...(Platform.OS === 'android' ? { channelId: 'aegislink-messages' } : {}),
       },
       trigger: null,
     });
@@ -224,10 +341,34 @@ export async function showCriticalSecurityNotification(
         body,
         sound: 'default',
         priority: Notifications.AndroidNotificationPriority.MAX,
+        ...(Platform.OS === 'android' ? { channelId: 'aegislink-security' } : {}),
       },
       trigger: null,
     });
   } catch (err) {
     if (__DEV__) console.warn('[push] showCriticalSecurityNotification failed:', err);
+  }
+}
+
+export async function showIncomingCallNotification(
+  callerAegisId: string,
+  callerName: string,
+  isVideo: boolean
+): Promise<void> {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `AegisLink · ${isVideo ? '📹' : '📞'} ${callerName}`,
+        body: isVideo ? 'Videollamada E2EE entrante' : 'Llamada de voz E2EE entrante',
+        sound: 'default',
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        categoryIdentifier: 'aegislink-call',
+        data: { fromAegisId: callerAegisId, type: 'call', isVideo },
+        ...(Platform.OS === 'android' ? { channelId: 'aegislink-calls' } : {}),
+      },
+      trigger: null,
+    });
+  } catch (err) {
+    if (__DEV__) console.warn('[push] showIncomingCallNotification failed:', err);
   }
 }

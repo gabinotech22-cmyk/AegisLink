@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createHmac } from 'node:crypto';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
 
@@ -25,7 +26,17 @@ const CredentialsQuery = z.object({
  * to RTCPeerConnection as an iceServer entry. The server never logs the
  * aegisId — it is used only for username uniqueness within the TTL window.
  */
-router.get('/credentials', (req, res) => {
+const turnLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20, // 20 credential refreshes per minute is generous for real usage
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
+  },
+});
+
+router.get('/credentials', turnLimiter, (req, res) => {
   const secret = process.env.TURN_SECRET;
   if (!secret) {
     res.status(503).json({ error: 'TURN_NOT_CONFIGURED' });

@@ -12,6 +12,8 @@ import {
   deleteContactMessages,
   deleteChatState,
   deleteContactRatchetSession,
+  setChatEphemeralTimer,
+  getAllChatEphemeralTimers,
   type StoredMessage,
 } from '../db/local';
 
@@ -19,7 +21,10 @@ interface MessagesState {
   byChat: Record<string, StoredMessage[]>;
   previews: Record<string, StoredMessage>;
   pinnedMsg: Record<string, StoredMessage | null>;
+  /** @deprecated Use ephemeralTimers[chatId] instead. Kept for backward compatibility. */
   ephemeralTimer: number;
+  /** Per-chat ephemeral timer in seconds (0 = off). Persisted in SQLite. */
+  ephemeralTimers: Record<string, number>;
   pendingMediaUri: string | null;
   /** Unread incoming message count per chatId */
   unreadCounts: Record<string, number>;
@@ -29,7 +34,14 @@ interface MessagesState {
   loadChat: (chatId: string) => Promise<StoredMessage[]>;
   append: (m: StoredMessage) => Promise<void>;
   refreshPreview: (chatId: string) => Promise<void>;
+  /** @deprecated Use setEphemeralTimer(chatId, seconds) instead. */
   setEphemeralTimer: (seconds: number) => void;
+  /** Set per-chat ephemeral timer. Persisted in SQLite. */
+  setChatEphemeralTimer: (chatId: string, seconds: number) => Promise<void>;
+  /** Read per-chat ephemeral timer. Returns 0 if not set. */
+  getEphemeralTimer: (chatId: string) => number;
+  /** Load all per-chat timers from SQLite (call at app startup). */
+  loadAllEphemeralTimers: () => Promise<void>;
   pruneExpired: () => void;
   setPendingMedia: (uri: string | null) => void;
   markRead: (chatId: string) => Promise<void>;
@@ -50,6 +62,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
   previews: {},
   pinnedMsg: {},
   ephemeralTimer: 0,
+  ephemeralTimers: {},
   pendingMediaUri: null,
   unreadCounts: {},
   drafts: {},
@@ -132,20 +145,36 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   setEphemeralTimer(seconds) {
+    // Deprecated global setter — kept for backward compat. Does not persist.
     set({ ephemeralTimer: seconds });
-    get().pruneExpired();
+  },
+
+  async setChatEphemeralTimer(chatId, seconds) {
+    await setChatEphemeralTimer(chatId, seconds);
+    set((s) => ({
+      ephemeralTimers: { ...s.ephemeralTimers, [chatId]: seconds },
+    }));
+  },
+
+  getEphemeralTimer(chatId) {
+    return get().ephemeralTimers[chatId] ?? 0;
+  },
+
+  async loadAllEphemeralTimers() {
+    const timers = await getAllChatEphemeralTimers();
+    set((s) => ({ ephemeralTimers: { ...s.ephemeralTimers, ...timers } }));
   },
 
   pruneExpired() {
-    const timer = get().ephemeralTimer;
     const now = Date.now();
     const updatedByChat = { ...get().byChat };
     let changed = false;
 
     for (const [chatId, list] of Object.entries(updatedByChat)) {
+      // Only prune messages that have an explicit expiresAt — never retroactively
+      // delete messages without one based on the global timer.
       const filtered = list.filter((m) => {
-        if (m.expiresAt && now >= m.expiresAt) return false;
-        if (timer > 0 && now - m.createdAt >= timer * 1000) return false;
+        if (m.expiresAt != null && now >= m.expiresAt) return false;
         return true;
       });
       if (filtered.length !== list.length) {
@@ -155,8 +184,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
     }
 
     if (changed) set({ byChat: updatedByChat });
-    // Also delete from DB
-    deleteExpiredMessages(timer).catch(() => {});
+    deleteExpiredMessages().catch(() => {});
   },
 
   async toggleStar(chatId, id) {

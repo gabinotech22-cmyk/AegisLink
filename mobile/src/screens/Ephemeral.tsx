@@ -9,6 +9,8 @@ import { useMessages } from '../store/messages';
 
 interface Props {
   onBack: () => void;
+  /** The chatId (aegisId) this timer applies to. Required for per-chat persistence. */
+  chatId: string;
 }
 
 const OPT_IDS = ['off', '30s', '5m', '1h', '1d', '7d', '30d'] as const;
@@ -31,20 +33,21 @@ const OPTS: Opt[] = [
   { id: '30d',  labelKey: 'ephemeral.30dLabel',  subKey: 'ephemeral.30dDesc',  sec: 2592000 },
 ];
 
-export function EphemeralScreen({ onBack }: Props) {
+export function EphemeralScreen({ onBack, chatId }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const ephemeralTimer = useMessages((s) => s.ephemeralTimer);
-  const setEphemeralTimer = useMessages((s) => s.setEphemeralTimer);
+  const getEphemeralTimer = useMessages((s) => s.getEphemeralTimer);
+  const setChatEphemeralTimerAction = useMessages((s) => s.setChatEphemeralTimer);
 
+  const currentSec = getEphemeralTimer(chatId);
   // Determine active picked ID from current store seconds
-  const initialPick = OPTS.find((o) => o.sec === ephemeralTimer)?.id ?? 'off';
+  const initialPick = OPTS.find((o) => o.sec === currentSec)?.id ?? 'off';
   const [pick, setPick] = useState<string>(initialPick);
 
   function handleSelect(id: OptId, sec: number, labelKey: string) {
     setPick(id);
-    setEphemeralTimer(sec);
+    void setChatEphemeralTimerAction(chatId, sec);
     if (sec > 0) {
       Alert.alert(
         i18nT('ephemeral.alertTitle'),

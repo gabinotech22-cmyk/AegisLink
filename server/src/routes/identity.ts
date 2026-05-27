@@ -94,9 +94,19 @@ router.post('/', registrationLimiter, async (req, res) => {
   res.status(201).json({ aegisId, publicKey, signingPublicKey, createdAt });
 });
 
+const lookupLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
+  },
+});
+
 // ── GET /identity/:id ─────────────────────────────────────────────────────────
 /** Look up a public key by Aegis ID (for adding contacts). */
-router.get('/:id', async (req, res) => {
+router.get('/:id', lookupLimiter, async (req, res) => {
   const id = req.params.id;
   if (!AEGIS_ID_RE.test(id)) {
     res.status(400).json({ error: 'invalid_id_format' });

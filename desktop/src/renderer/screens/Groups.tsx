@@ -5,14 +5,12 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
-import { TabBar, type Tab } from '../components/TabBar';
+import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { useGroups } from '../store/groups';
 import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
 import type { StoredGroup, StoredContact } from '../db/local';
-
-const WORK_ACCENT = '#6366f1';
 
 const GROUP_COLORS = ['#05b875', '#8b5cf6', '#3b82f6', '#ec4899', '#f97316', '#eab308', '#06b6d4'];
 const GROUP_EMOJIS = [
@@ -35,12 +33,7 @@ interface Props {
 
 export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
   const { t } = useTheme();
-  const activeProfile = useIdentity((s) => s.activeProfile);
-  const isWork = activeProfile === 'work';
-  const allGroups = useGroups((s) => s.groups);
-  const groups = isWork
-    ? allGroups.filter((g) => (g as StoredGroup & { isWork?: boolean }).isWork === true)
-    : allGroups.filter((g) => !(g as StoredGroup & { isWork?: boolean }).isWork);
+  const groups = useGroups((s) => s.groups);
   const contacts = useContacts((s) => s.contacts) as StoredContact[];
   const previews = useMessages((s) => s.previews);
 
@@ -191,7 +184,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       <TopBar
         t={t}
-        title={isWork ? 'Channels' : 'Groups'}
+        title="Groups"
         big
         right={
           <button onClick={() => setIsCreating(true)} aria-label="Create group" style={iconBtn}>
@@ -200,26 +193,19 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
         }
       />
 
-      {isWork && (
-        <div style={{ margin: '4px 18px 8px', paddingTop: 9, paddingBottom: 9, paddingLeft: 14, paddingRight: 14, backgroundColor: `${WORK_ACCENT}11`, border: `1px solid ${WORK_ACCENT}44`, borderRadius: 10, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <I.Users size={13} color={WORK_ACCENT} />
-          <span style={{ flex: 1, fontFamily: t.fontMono, fontSize: 10, color: WORK_ACCENT, letterSpacing: 0.6 }}>Work channels are encrypted team workspaces</span>
-        </div>
-      )}
-
       {groups.length === 0 ? (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingLeft: 32, paddingRight: 32 }}>
           <ConstellationVisual t={t} />
           <h2 style={{ fontFamily: t.fontDisplay, fontSize: 24, fontWeight: '600', letterSpacing: -0.4, color: t.text, marginTop: 28, marginBottom: 10, textAlign: 'center' }}>
-            {isWork ? 'Your work space is ready' : 'No groups yet'}
+            No groups yet
           </h2>
           <p style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: '21px', textAlign: 'center', maxWidth: 280, marginBottom: 26, marginTop: 0 }}>
-            {isWork ? 'Create encrypted channels for your team.' : 'Create a group to chat with multiple people at once.'}
+            Create a group to chat with multiple people at once.
           </p>
-          <button onClick={() => setIsCreating(true)} aria-label={isWork ? 'New channel' : 'Create group'} style={{ backgroundColor: isWork ? WORK_ACCENT : t.accent, paddingLeft: 24, paddingRight: 24, paddingTop: 13, paddingBottom: 13, borderRadius: t.radius, border: 'none', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 10 }}>
-            <I.Plus size={18} color={isWork ? '#fff' : t.accentInk} />
-            <span style={{ color: isWork ? '#fff' : t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
-              {isWork ? 'New Channel' : 'Create Group'}
+          <button onClick={() => setIsCreating(true)} aria-label="Create group" style={{ backgroundColor: t.accent, paddingLeft: 24, paddingRight: 24, paddingTop: 13, paddingBottom: 13, borderRadius: t.radius, border: 'none', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 10 }}>
+            <I.Plus size={18} color={t.accentInk} />
+            <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
+              Create Group
             </span>
           </button>
           <button aria-label="Join by link" style={{ backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, paddingLeft: 24, paddingRight: 24, paddingTop: 12, paddingBottom: 12, borderRadius: t.radius, cursor: 'pointer' }}>
@@ -266,7 +252,6 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
         </div>
       )}
 
-      <TabBar t={t} current="groups" onChange={onTab} isWork={isWork} />
     </div>
   );
 }

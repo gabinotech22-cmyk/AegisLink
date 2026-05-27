@@ -4,9 +4,8 @@ import Svg, { Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
-import { useIdentity } from '../store/identity';
 import { I } from '../components/icons';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 
 const ICON_KEY = 'active_app_icon';
 
@@ -27,11 +26,10 @@ export function AppIconScreen({ onBack }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const activeProfile = useIdentity((s) => s.activeProfile);
   const [current, setCurrent] = useState<IconId>('default');
   const [loading, setLoading] = useState(false);
 
-  const VARIANTS = ALL_VARIANTS.filter((v) => !v.workOnly || activeProfile === 'work');
+  const VARIANTS = ALL_VARIANTS.filter((v) => !v.workOnly);
 
   const { width } = Dimensions.get('window');
   const COLS = 2;
@@ -70,7 +68,7 @@ export function AppIconScreen({ onBack }: Props) {
         }
       }
       // Fallback: read from SecureStore
-      const stored = await SecureStore.getItemAsync(ICON_KEY);
+      const stored = await ss.get(ICON_KEY);
       if (stored && ALL_VARIANTS.some((x) => x.id === stored)) {
         setCurrent(stored as IconId);
       }
@@ -87,7 +85,7 @@ export function AppIconScreen({ onBack }: Props) {
         await NativeModules.AppIconModule.setAppIcon(iconArg);
       }
       // Save to SecureStore as backup
-      await SecureStore.setItemAsync(ICON_KEY, id);
+      await ss.set(ICON_KEY, id);
       setCurrent(id);
     } catch {
       Alert.alert(i18nT('common.error'), i18nT('appIcon.changeError'));

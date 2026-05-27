@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTranslation } from 'react-i18next';
@@ -98,7 +98,7 @@ export function DevicesScreen({ onBack }: Props) {
 
     // First restore the local cache so the list appears instantly.
     try {
-      const cached = await SecureStore.getItemAsync(DEVICES_CACHE_KEY);
+      const cached = await ss.get(DEVICES_CACHE_KEY);
       if (cached) {
         setLinkedDevices(JSON.parse(cached) as LinkedDevice[]);
       }
@@ -119,7 +119,7 @@ export function DevicesScreen({ onBack }: Props) {
         if (res.ok && res.devices) {
           setLinkedDevices(res.devices);
           // Persist fresh list as offline cache.
-          void SecureStore.setItemAsync(DEVICES_CACHE_KEY, JSON.stringify(res.devices));
+          void ss.set(DEVICES_CACHE_KEY, JSON.stringify(res.devices));
         }
       },
     );
@@ -294,7 +294,7 @@ export function DevicesScreen({ onBack }: Props) {
       // Update local state and cache immediately.
       const updated = linkedDevices.filter((d) => d.id !== device.id);
       setLinkedDevices(updated);
-      await SecureStore.setItemAsync(DEVICES_CACHE_KEY, JSON.stringify(updated));
+      await ss.set(DEVICES_CACHE_KEY, JSON.stringify(updated));
     } catch (e) {
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
     } finally {
@@ -421,6 +421,19 @@ export function DevicesScreen({ onBack }: Props) {
         {/* Loading indicator */}
         {loadingList && linkedDevices.length === 0 && (
           <ActivityIndicator color={t.accent} style={{ marginTop: 24 }} />
+        )}
+
+        {/* Empty state */}
+        {!loadingList && linkedDevices.length === 0 && (
+          <View style={{ paddingVertical: 40, alignItems: 'center', paddingHorizontal: 32 }}>
+            <I.Monitor size={40} color={t.textFaint} style={{ marginBottom: 16 }} />
+            <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text, marginBottom: 6 }}>
+              {i18nT('devices.emptyTitle', 'No linked devices')}
+            </Text>
+            <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, textAlign: 'center', lineHeight: 20 }}>
+              {i18nT('devices.emptyDesc', 'Link your desktop to sync conversations securely without sharing keys')}
+            </Text>
+          </View>
         )}
 
         {/* Linked devices */}

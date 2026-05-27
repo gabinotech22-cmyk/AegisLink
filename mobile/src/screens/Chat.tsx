@@ -14,6 +14,12 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
+import { FormattedText } from '../components/FormattedText';
+import { AudioWaveform } from '../components/AudioWaveform';
+import { LinkPreview } from '../components/LinkPreview';
+import { GifPicker } from '../components/GifPicker';
+import { ImageViewerModal } from '../components/ImageViewerModal';
+import { loadWallpaper, wallpaperBg, type WallpaperOption } from '../components/WallpaperPicker';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import Svg, { Path } from 'react-native-svg';
@@ -26,7 +32,11 @@ import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { MessageActionsSheet } from '../components/MessageActionsSheet';
 import { ForwardModal } from '../components/ForwardModal';
+import { SchedulePicker } from '../components/SchedulePicker';
+import { useScheduledMessages } from '../store/scheduledMessages';
 import { useIdentity } from '../store/identity';
+import { wipeDatabase } from '../db/local';
+import { usePanicGesture } from '../hooks/usePanicGesture';
 import { useMessages } from '../store/messages';
 import { useTyping } from '../store/typing';
 import { useConnection } from '../store/connection';
@@ -35,9 +45,27 @@ import { useContacts } from '../store/contacts';
 import { sendMessage, emitTyping, sendReadReceipts, sendDeleteForEveryone } from '../socket/client';
 import { startCall } from '../socket/calls';
 import { WEBRTC_AVAILABLE } from '../runtime';
+import { SoundFX } from '../hooks/useSoundFX';
 import type { StoredContact, StoredMessage } from '../db/local';
+import { parseLocationMessage } from '../utils/parseLocationMessage';
 
 const EMPTY_MSGS: StoredMessage[] = [];
+
+function formatLastSeen(ts: number): string {
+  const now = Date.now();
+  const diffMs = now - ts;
+  const diffMin = Math.floor(diffMs / 60_000);
+  const diffHours = Math.floor(diffMs / 3_600_000);
+  const diffDays = Math.floor(diffMs / 86_400_000);
+  if (diffMin < 1) return 'Visto hace un momento';
+  if (diffMin < 60) return `Visto hace ${diffMin}m`;
+  if (diffHours < 24) return `Visto hace ${diffHours}h`;
+  if (diffDays === 1) return 'Visto ayer';
+  const d = new Date(ts);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `Visto el ${dd}/${mm}`;
+}
 
 interface Props {
   contact: StoredContact;
@@ -53,6 +81,15 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
+
+  // ── Panic gesture (shake) ─────────────────────────────────────────────────
+  const handlePanicTrigger = useCallback(async () => {
+    try {
+      await wipeDatabase();
+      await useIdentity.getState().reset();
+    } catch { /* non-recoverable */ }
+  }, []);
+  usePanicGesture(handlePanicTrigger);
   // GAP 1 FIX: Read contact reactively from store so profile updates from peers
   // (name, photo, color, status) are reflected live without leaving the chat
   const contact = useContacts((s) => s.contacts.find(c => c.aegisId === initialContact.aegisId)) ?? initialContact;
@@ -72,9 +109,17 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
   const [draft, setDraft] = useState(savedDraft);
   const [sending, setSending] = useState(false);
+  const [chatWallpaper, setChatWallpaper] = useState<WallpaperOption>(0);
   // Image staged for sending — shown as preview in composer until user taps Send
   const [stagedImageUri, setStagedImageUri] = useState<string | null>(null);
   const [imageProcessing, setImageProcessing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchActive, setSearchActive] = useState(false);
+  const [searchHits, setSearchHits] = useState<string[]>([]);
+  const [searchIdx, setSearchIdx] = useState(0);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [gifPickerVisible, setGifPickerVisible] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [replyTo, setReplyTo] = useState<StoredMessage | null>(null);
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
@@ -86,6 +131,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const readReceipts = usePreferences((s) => s.readReceipts);
   const typingIndicator = usePreferences((s) => s.typingIndicator);
   const [mismatchKey, setMismatchKey] = useState<string | null>(null);
+  const [showScheduler, setShowScheduler] = useState(false);
+  const { scheduleMessage, scheduled } = useScheduledMessages();
+  const pendingScheduledCount = scheduled.filter(
+    (m) => m.status === 'pending' && m.recipientAegisId === contact.aegisId,
+  ).length;
 
   // Lazy directory key audit for MITM and Zero-Trust enforcement
   useEffect(() => {
@@ -105,6 +155,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     })();
     return () => { active = false; };
   }, [contact.aegisId, contact.publicKeyB64]);
+
+  // Load wallpaper for this contact
+  useEffect(() => {
+    void loadWallpaper(contact.aegisId).then(setChatWallpaper);
+  }, [contact.aegisId]);
 
   useEffect(() => {
     void loadChat(contact.aegisId);
@@ -126,6 +181,54 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     }
   }, [list.length]);
 
+  // Play received-message tone only for incoming messages we did not send,
+  // and only when the chat is not currently the active (focused) screen.
+  // The active chat ID is already set via setActiveChatNotificationId above,
+  // which suppresses push banners; we mirror the same guard here for sound.
+  const prevListLengthRef = useRef(list.length);
+  useEffect(() => {
+    const prev = prevListLengthRef.current;
+    prevListLengthRef.current = list.length;
+    if (list.length <= prev) return;
+    // Check if any of the new items are incoming messages
+    const newItems = list.slice(prev);
+    const hasIncoming = newItems.some((m) => m.direction === 'in');
+    if (hasIncoming) {
+      void SoundFX.msgReceived();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.length]);
+
+  // Search hits — debounced filter + scroll to active hit
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!searchQuery.trim()) {
+      setSearchHits([]);
+      setSearchIdx(0);
+      return;
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      const q = searchQuery.toLowerCase();
+      const hits = list
+        .filter((m) => !m.deleted && m.body.toLowerCase().includes(q))
+        .map((m) => m.id);
+      setSearchHits(hits);
+      setSearchIdx(0);
+    }, 200);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, list]);
+
+  useEffect(() => {
+    if (searchHits.length === 0) return;
+    const targetId = searchHits[searchIdx];
+    const idx = list.findIndex((m) => m.id === targetId);
+    if (idx >= 0) {
+      try {
+        flatlistRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+      } catch { /* list may not be ready */ }
+    }
+  }, [searchIdx, searchHits, list]);
+
   const sentReceiptIdsRef = useRef<Set<string>>(new Set());
 
   // Send read receipts only for new (not-yet-receipted) incoming messages
@@ -139,11 +242,12 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     for (const id of unsentIds) sentReceiptIdsRef.current.add(id);
   }, [contact.aegisId, list.length, online, readReceipts]);
 
-  // Stop typing indicator on unmount; save draft
+  // Stop typing indicator on unmount; save draft; clear search debounce
   useEffect(() => {
     return () => {
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
       if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
       emitTyping(contact.aegisId, false);
     };
   }, [contact.aegisId]);
@@ -267,7 +371,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           mediaUri: imageUri,
         });
         const { encryptAndUploadMedia } = require('../crypto/media');
-        const blobUri = await encryptAndUploadMedia(imageUri);
+        const blobUri = await encryptAndUploadMedia(imageUri, 'image/jpeg');
         await sendMessage({
           identity,
           recipientAegisId: contact.aegisId,
@@ -286,7 +390,9 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           replyToId: replying?.id,
         });
       }
+      void SoundFX.msgSent();
     } catch (e) {
+      setDraft(text);
       Alert.alert(i18nT('chat.sendError'), (e as Error).message);
     } finally {
       setSending(false);
@@ -350,10 +456,70 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     [list],
   );
 
+  const filteredList = useMemo(() => {
+    if (!searchQuery) return list;
+    const q = searchQuery.toLowerCase();
+    return list.filter((m) => !m.deleted && m.body.toLowerCase().includes(q));
+  }, [list, searchQuery]);
+
+  async function handleGifSelect(url: string) {
+    setGifPickerVisible(false);
+    if (!identity) return;
+
+    // Privacy fix: never send the raw Giphy URL.
+    // Download the GIF locally, encrypt it like any other image attachment,
+    // and send [image:...] so the receiver never contacts Giphy servers.
+    const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+    const cacheDir = FS.cacheDirectory ?? '';
+    const gifId = url.split('/').pop()?.split('?')[0] ?? Crypto.randomUUID();
+    const tmpPath = `${cacheDir}gif_tmp_${gifId}.gif`;
+
+    let blobUri: string;
+    try {
+      // Enforce a 10 MB size guard by checking after download
+      const downloadResult = await FS.downloadAsync(url, tmpPath);
+      if (!downloadResult.uri) throw new Error('GIF download failed');
+
+      const info = await FS.getInfoAsync(downloadResult.uri);
+      const fileSize = (info as { size?: number }).size ?? 0;
+      if (fileSize > 10 * 1024 * 1024) {
+        await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
+        Alert.alert(i18nT('chat.sendError'), 'GIF demasiado grande (máx. 10 MB)');
+        return;
+      }
+
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      blobUri = await encryptAndUploadMedia(tmpPath, 'image/gif');
+    } catch (e) {
+      await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      return;
+    }
+
+    // Clean up the temporary file regardless of send outcome
+    await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
+
+    try {
+      await sendMessage({
+        identity,
+        recipientAegisId: contact.aegisId,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext: `[image:${blobUri}]`,
+      });
+    } catch (e) {
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+    }
+  }
+
+  function handleStickerSelect(emoji: string) {
+    setGifPickerVisible(false);
+    setDraft((prev) => prev + emoji);
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={{ flex: 1, backgroundColor: t.bg }}
     >
       <View style={{ flex: 1, paddingTop: insets.top }}>
@@ -362,71 +528,163 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
             <I.ChevronL size={22} color={t.text} />
           </Pressable>
-          <Pressable
-            onPress={onContactDetail}
-            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
-          >
-            <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={36} />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text
-                numberOfLines={1}
+          {searchActive ? (
+            <>
+              <TextInput
+                autoFocus
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder={i18nT('chat.searchPlaceholder', 'Search messages…')}
+                placeholderTextColor={t.textFaint}
                 style={{
-                  fontFamily: /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(contact.name) ? t.fontMono : t.font,
-                  fontWeight: '600',
+                  flex: 1,
+                  fontFamily: t.font,
                   fontSize: 15,
                   color: t.text,
+                  backgroundColor: t.surface2,
+                  borderRadius: 20,
+                  paddingHorizontal: 14,
+                  paddingVertical: Platform.OS === 'ios' ? 8 : 4,
                 }}
+                accessibilityLabel={i18nT('chat.searchPlaceholder', 'Search messages')}
+              />
+              <Pressable
+                onPress={() => { setSearchActive(false); setSearchQuery(''); setSearchHits([]); setSearchIdx(0); }}
+                hitSlop={8}
+                style={{ padding: 6 }}
+                accessibilityLabel="Close search"
               >
-                {contact.name}
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                {isContactTyping ? (
-                  <Text style={{ fontFamily: t.font, fontSize: 11, color: t.accent, fontStyle: 'italic' }}>
-                    {i18nT('home.typing')}
+                <I.X size={20} color={t.textDim} />
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable
+                onPress={onContactDetail}
+                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
+              >
+                <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={36} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontFamily: /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(contact.name) ? t.fontMono : t.font,
+                      fontWeight: '600',
+                      fontSize: 15,
+                      color: t.text,
+                    }}
+                  >
+                    {contact.name}
                   </Text>
-                ) : contact.status ? (
-                  <>
-                    <Text
-                      numberOfLines={1}
-                      style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, flex: 1 }}
-                    >
-                      {contact.status}
-                    </Text>
-                    <I.Lock size={8} color={contact.verified ? t.accent : t.warn} />
-                  </>
-                ) : (
-                  <>
-                    <I.Lock size={10} color={contact.verified ? t.accent : t.warn} />
-                    <Text
-                      style={{
-                        fontFamily: t.fontMono,
-                        fontSize: 10,
-                        color: contact.verified ? t.accent : t.warn,
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      {contact.verified ? i18nT('chat.e2eVerified') : i18nT('chat.e2eNotVerified')}
-                    </Text>
-                  </>
-                )}
-              </View>
-            </View>
-          </Pressable>
-          <Pressable
-            onPress={() => void handleCall('audio')}
-            hitSlop={8}
-            style={{ padding: 6, opacity: WEBRTC_AVAILABLE ? 1 : 0.4 }}
-          >
-            <I.Phone size={20} color={t.text} />
-          </Pressable>
-          <Pressable
-            onPress={() => void handleCall('video')}
-            hitSlop={8}
-            style={{ padding: 6, opacity: WEBRTC_AVAILABLE ? 1 : 0.4 }}
-          >
-            <I.Video size={20} color={t.text} />
-          </Pressable>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    {isContactTyping ? (
+                      <Text style={{ fontFamily: t.font, fontSize: 11, color: t.accent, fontStyle: 'italic' }}>
+                        {i18nT('home.typing')}
+                      </Text>
+                    ) : contact.online ? (
+                      <Text style={{ fontFamily: t.font, fontSize: 11, color: t.accent }}>
+                        {i18nT('chat.online', 'En línea')}
+                      </Text>
+                    ) : contact.lastSeenAt ? (
+                      <Text
+                        numberOfLines={1}
+                        style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, flex: 1 }}
+                      >
+                        {formatLastSeen(contact.lastSeenAt)}
+                      </Text>
+                    ) : contact.status ? (
+                      <>
+                        <Text
+                          numberOfLines={1}
+                          style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, flex: 1 }}
+                        >
+                          {contact.status}
+                        </Text>
+                        <I.Lock size={8} color={contact.verified ? t.accent : t.warn} />
+                      </>
+                    ) : (
+                      <>
+                        <I.Lock size={10} color={contact.verified ? t.accent : t.warn} />
+                        <Text
+                          style={{
+                            fontFamily: t.fontMono,
+                            fontSize: 10,
+                            color: contact.verified ? t.accent : t.warn,
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          {contact.verified ? i18nT('chat.e2eVerified') : i18nT('chat.e2eNotVerified')}
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={() => setSearchActive(true)}
+                hitSlop={8}
+                style={{ padding: 6 }}
+                accessibilityLabel={i18nT('chat.searchMessages', 'Search messages')}
+              >
+                <I.Search size={20} color={t.textDim} />
+              </Pressable>
+              <Pressable
+                onPress={() => void handleCall('audio')}
+                hitSlop={8}
+                style={{ padding: 6, opacity: WEBRTC_AVAILABLE ? 1 : 0.4 }}
+              >
+                <I.Phone size={20} color={t.text} />
+              </Pressable>
+              <Pressable
+                onPress={() => void handleCall('video')}
+                hitSlop={8}
+                style={{ padding: 6, opacity: WEBRTC_AVAILABLE ? 1 : 0.4 }}
+              >
+                <I.Video size={20} color={t.text} />
+              </Pressable>
+            </>
+          )}
         </View>
+
+        {/* Search navigation row */}
+        {searchActive && searchQuery.trim().length > 0 ? (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 14,
+              paddingVertical: 6,
+              gap: 8,
+              backgroundColor: t.surface,
+              borderBottomWidth: StyleSheet.hairlineWidth,
+              borderBottomColor: t.divider,
+            }}
+          >
+            <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, flex: 1 }}>
+              {searchHits.length > 0
+                ? `${searchIdx + 1} of ${searchHits.length}`
+                : i18nT('chat.noResults', 'No results')}
+            </Text>
+            <Pressable
+              onPress={() => setSearchIdx((prev) => Math.max(0, prev - 1))}
+              disabled={searchHits.length === 0 || searchIdx === 0}
+              hitSlop={8}
+              style={{ padding: 4, opacity: searchIdx === 0 ? 0.35 : 1 }}
+              accessibilityLabel={i18nT('chat.searchPrev', 'Previous result')}
+            >
+              <I.ChevronL size={18} color={t.textDim} />
+            </Pressable>
+            <Pressable
+              onPress={() => setSearchIdx((prev) => Math.min(searchHits.length - 1, prev + 1))}
+              disabled={searchHits.length === 0 || searchIdx >= searchHits.length - 1}
+              hitSlop={8}
+              style={{ padding: 4, opacity: searchIdx >= searchHits.length - 1 ? 0.35 : 1 }}
+              accessibilityLabel={i18nT('chat.searchNext', 'Next result')}
+            >
+              <I.Chevron size={18} color={t.textDim} />
+            </Pressable>
+          </View>
+        ) : null}
 
         {/* Offline banner */}
         {!online ? (
@@ -435,13 +693,13 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             style={{
               paddingHorizontal: 16,
               paddingVertical: 8,
-              backgroundColor: '#f59e0b',
+              backgroundColor: t.warn,
               flexDirection: 'row',
               alignItems: 'center',
               gap: 10,
             }}
           >
-            <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: '#000', fontWeight: '700', letterSpacing: 0.5 }}>
+            <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: t.bg, fontWeight: '700', letterSpacing: 0.5 }}>
               {i18nT('common.offline')}
             </Text>
             <Pressable
@@ -592,12 +850,20 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
         <FlatList
           ref={flatlistRef}
-          data={list}
+          data={filteredList}
           keyExtractor={(m) => m.id}
+          style={{ backgroundColor: wallpaperBg(chatWallpaper, t) ?? t.bg }}
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10 }}
           renderItem={({ item }) => (
+            <View
+              style={
+                searchHits.length > 0 && searchHits[searchIdx] === item.id
+                  ? { backgroundColor: t.accentDeep, borderRadius: t.radiusS, marginHorizontal: -4, paddingHorizontal: 4 }
+                  : undefined
+              }
+            >
             <SwipeableMessage
-              disabled={item.deleted || item.direction !== 'out'}
+              disabled={item.deleted}
               onDelete={() => {
                 Alert.alert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
                   { text: i18nT('common.cancel'), style: 'cancel' },
@@ -608,6 +874,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                   },
                 ]);
               }}
+              onReply={() => setReplyTo(item)}
             >
               <Bubble
                 t={t}
@@ -616,8 +883,10 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 quotedMsg={item.replyToId ? msgById[item.replyToId] : undefined}
                 onLongPress={() => handleLongPress(item)}
                 onViewOnce={onViewOnce}
+                onImagePress={setViewerUri}
               />
             </SwipeableMessage>
+            </View>
           )}
           ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
           onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
@@ -625,7 +894,37 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
           }}
           scrollEventThrottle={100}
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 40 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim }}>
+                Sin mensajes aún. Todo cifrado de extremo a extremo.
+              </Text>
+            </View>
+          }
         />
+
+        {/* Scheduled messages banner */}
+        {pendingScheduledCount > 0 ? (
+          <Pressable
+            onPress={() => setShowScheduler(false)}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              paddingHorizontal: 16,
+              paddingVertical: 7,
+              backgroundColor: `${t.accent}14`,
+              borderTopWidth: 1,
+              borderTopColor: `${t.accent}30`,
+            }}
+            accessibilityLabel={`${pendingScheduledCount} mensaje${pendingScheduledCount > 1 ? 's' : ''} programado${pendingScheduledCount > 1 ? 's' : ''}`}
+          >
+            <I.Timer size={13} color={t.accent} />
+            <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5, fontWeight: '700' }}>
+              {pendingScheduledCount} MENSAJE{pendingScheduledCount > 1 ? 'S' : ''} PROGRAMADO{pendingScheduledCount > 1 ? 'S' : ''}
+            </Text>
+          </Pressable>
+        ) : null}
 
         {/* Composer */}
         <View
@@ -656,26 +955,29 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 {i18nT('chat.blockedContact')}
               </Text>
             </View>
-          ) : (contact.zeroTrust && mismatchKey) ? (
-            <View
-              style={{
-                flex: 1,
-                alignItems: 'center',
-                justifyContent: 'center',
-                paddingVertical: 14,
-                paddingHorizontal: 16,
-                backgroundColor: t.surface2,
-                borderRadius: t.radius,
-                marginHorizontal: 12,
-                marginVertical: 4,
-              }}
-            >
-              <Text style={{ fontFamily: t.font, fontSize: 13, color: t.danger, fontWeight: '500', textAlign: 'center' }}>
-                {i18nT('chat.zeroTrustBlock')}
-              </Text>
-            </View>
           ) : (
             <>
+              {/* Unverified contact warning banner — non-blocking, send always allowed */}
+              {!contact.verified && (
+                <View
+                  style={{
+                    width: '100%',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    backgroundColor: `${t.warn}18`,
+                    borderTopWidth: 1,
+                    borderTopColor: `${t.warn}44`,
+                  }}
+                >
+                  <I.Lock size={13} color={t.warn} />
+                  <Text style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.warn, lineHeight: 17 }}>
+                    {i18nT('chat.unverifiedContact', 'Contacto no verificado. Verifica su identidad para maxima seguridad.')}
+                  </Text>
+                </View>
+              )}
               {/* Reply banner */}
               {replyTo ? (
                 <View
@@ -735,11 +1037,22 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               <Pressable onPress={onAttach} hitSlop={6} style={{ padding: 6 }}>
                 <I.Attach size={22} color={t.textDim} />
               </Pressable>
+              <Pressable
+                onPress={() => setGifPickerVisible(true)}
+                hitSlop={6}
+                style={{ padding: 6 }}
+                accessibilityLabel="Open GIF picker"
+              >
+                <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
+                  GIF
+                </Text>
+              </Pressable>
               <TextInput
                 value={draft}
                 onChangeText={handleDraftChange}
                 placeholder={online ? i18nT('chat.messagePlaceholder') : i18nT('chat.messageOfflinePlaceholder')}
                 placeholderTextColor={t.textFaint}
+                accessibilityLabel="Campo de mensaje"
                 multiline
                 style={{
                   flex: 1,
@@ -753,8 +1066,19 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                   maxHeight: 120,
                 }}
               />
-              <Pressable onPress={onEphemeral} hitSlop={6} style={{ padding: 6 }}>
+              <Pressable onPress={onEphemeral} hitSlop={6} style={{ padding: 6 }} accessibilityLabel="Mensajes efimeros">
                 <I.Timer size={22} color={t.textDim} />
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (!draft.trim()) return;
+                  setShowScheduler(true);
+                }}
+                hitSlop={6}
+                style={{ padding: 6, opacity: draft.trim() ? 1 : 0.35 }}
+                accessibilityLabel="Programar mensaje"
+              >
+                <I.Timer size={22} color={pendingScheduledCount > 0 ? t.accent : t.textDim} />
               </Pressable>
               <Pressable
                 testID="send-button"
@@ -805,26 +1129,44 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         body={forwardBody ?? ''}
         onClose={() => setForwardBody(null)}
       />
+
+      <GifPicker
+        visible={gifPickerVisible}
+        onClose={() => setGifPickerVisible(false)}
+        onSelectGif={handleGifSelect}
+        onSelectSticker={handleStickerSelect}
+      />
+      <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
+
+      <SchedulePicker
+        visible={showScheduler}
+        onClose={() => setShowScheduler(false)}
+        onConfirm={async (sendAt) => {
+          if (!identity) return;
+          const text = draft.trim();
+          if (!text) return;
+          try {
+            await scheduleMessage({
+              identity,
+              recipientAegisId: contact.aegisId,
+              recipientPublicKeyB64: contact.publicKeyB64,
+              plaintext: text,
+              sendAt,
+            });
+            setDraft('');
+            void saveDraft(contact.aegisId, '');
+          } catch (e) {
+            Alert.alert('Error al programar', (e as Error).message);
+          }
+        }}
+      />
     </KeyboardAvoidingView>
     </GestureHandlerRootView>
   );
 }
 
 // ─── Location message parser ─────────────────────────────────────────────────
-
-function parseLocationMessage(body: string) {
-  if (!body.startsWith('📍')) return null;
-  const regex = /📍 Ubicación compartida \(([^,]+), durante ([^)]+)\):\s*([^(]+?)(?:\s*\(Lat:\s*([-\d.]+),\s*Lon:\s*([-\d.]+)\))?$/i;
-  const match = body.match(regex);
-  if (!match) return null;
-  return {
-    precision: match[1],
-    duration: match[2],
-    address: match[3].trim(),
-    latitude: match[4] ? parseFloat(match[4]) : null,
-    longitude: match[5] ? parseFloat(match[5]) : null,
-  };
-}
+// Defined in mobile/src/utils/parseLocationMessage.ts — imported above
 
 // ─── Bubble ──────────────────────────────────────────────────────────────────
 
@@ -835,9 +1177,10 @@ interface BubbleProps {
   quotedMsg?: StoredMessage;
   onLongPress: () => void;
   onViewOnce?: (mediaUri: string, messageId: string) => void;
+  onImagePress?: (uri: string) => void;
 }
 
-function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProps) {
+function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress }: BubbleProps) {
   const { t: i18nT } = useTranslation();
   const me = m.direction === 'out';
   const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -904,7 +1247,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProp
           <View
             style={{
               height: 100,
-              backgroundColor: t.dark ? '#1e282d' : '#e6e3d8',
+              backgroundColor: t.surface2,
               alignItems: 'center',
               justifyContent: 'center',
               position: 'relative',
@@ -1034,6 +1377,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProp
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         <Pressable
+          onPress={() => onImagePress?.(m.mediaUri!)}
           onLongPress={onLongPress}
           style={({ pressed }) => ({
             borderRadius: t.radius,
@@ -1140,9 +1484,16 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProp
           {/* Divider + action */}
           <View style={{ borderTopWidth: 1, borderTopColor: me ? 'rgba(255,255,255,0.12)' : t.divider }}>
             <Pressable
-              onPress={() => {
-                const Clipboard = require('@react-native-clipboard/clipboard').default as { setString(s: string): void };
-                Clipboard.setString(cardAegisId);
+              onPress={async () => {
+                try {
+                  await useContacts.getState().addByAegisId(cardAegisId);
+                  Alert.alert(i18nT('chat.contactAdded', 'Contacto añadido'), cardName);
+                } catch {
+                  // Fallback: copy ID to clipboard
+                  const Clipboard = require('expo-clipboard');
+                  await Clipboard.setStringAsync(cardAegisId).catch(() => {});
+                  Alert.alert(i18nT('chat.contactAddFailed', 'No se pudo añadir'), i18nT('chat.idCopied', 'ID copiado al portapapeles'));
+                }
               }}
               style={({ pressed }) => ({
                 paddingVertical: 9,
@@ -1162,13 +1513,51 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProp
     );
   }
 
-  // Text bubble
+  // GIF bubble — legacy format [gif:url] kept for historical messages only.
+  // New GIFs are sent as [image:...] after being downloaded and encrypted.
+  // DO NOT load from the remote URL here — that would reveal IP to Giphy.
+  const gifMatch = m.body?.match(/^\[gif:(.+)\]$/);
+  if (gifMatch) {
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+        <Pressable
+          onLongPress={onLongPress}
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+            backgroundColor: me ? t.bubbleOut : t.bubbleIn,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            borderRadius: t.radius,
+            borderTopRightRadius: me ? t.radiusS : t.radius,
+            borderTopLeftRadius: me ? t.radius : t.radiusS,
+            borderWidth: 1,
+            borderColor: `${t.border}`,
+            opacity: queued ? 0.55 : pressed ? 0.9 : 1,
+            maxWidth: 260,
+          })}
+        >
+          <I.Globe size={18} color={t.textDim} />
+          <Text style={{ flex: 1, fontFamily: t.font, fontSize: 13, color: me ? t.bubbleOutText : t.textDim, fontStyle: 'italic' }}>
+            GIF (formato legacy)
+          </Text>
+        </Pressable>
+        <ReactionPills t={t} reactions={reactions} me={me} />
+        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+      </View>
+    );
+  }
+
+  // Text bubble — extract first URL to show link preview card
+  const urlMatch = /\bhttps?:\/\/[^\s<>"')\]]+/.exec(m.body ?? '');
+  const previewUrl = urlMatch?.[0] ?? null;
+
   return (
-    <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+    <View style={{ alignItems: me ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
       <Pressable
         onLongPress={onLongPress}
         style={({ pressed }) => ({
-          maxWidth: '80%',
           backgroundColor: me ? t.bubbleOut : t.bubbleIn,
           paddingHorizontal: 13,
           paddingTop: quotedMsg ? 8 : 10,
@@ -1199,9 +1588,13 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce }: BubbleProp
             </Text>
           </View>
         ) : null}
-        <Text style={{ color: me ? t.bubbleOutText : t.bubbleInText, fontFamily: t.font, fontSize: 15, lineHeight: 20 }}>
-          {m.body}
-        </Text>
+        <FormattedText
+          body={m.body}
+          t={t}
+          style={{ color: me ? t.bubbleOutText : t.bubbleInText, fontFamily: t.font, fontSize: 15, lineHeight: 20 }}
+        />
+        {/* Open Graph link preview card */}
+        {previewUrl ? <LinkPreview url={previewUrl} t={t} /> : null}
       </Pressable>
       <ReactionPills t={t} reactions={reactions} me={me} />
       <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
@@ -1274,6 +1667,8 @@ function TimestampRow({
   );
 }
 
+const PLAYBACK_RATES: number[] = [1.0, 1.5, 2.0, 0.5];
+
 function AudioBubble({
   t, m, me, queued, time, reactions, onLongPress,
 }: {
@@ -1287,10 +1682,20 @@ function AudioBubble({
 }) {
   const [playing, setPlaying] = useState(false);
   const [posMs, setPosMs] = useState(0);
-  const soundRef = useRef<any>(null);
+  const [playbackRate, setPlaybackRate] = useState(1.0);
+  type AudioSound = import('expo-av').Audio.Sound;
+  type AVPlaybackStatus = import('expo-av').AVPlaybackStatus;
+  const soundRef = useRef<AudioSound | null>(null);
+
+  useEffect(() => {
+    return () => {
+      void soundRef.current?.unloadAsync().catch(() => {});
+    };
+  }, []);
 
   // Parse duration from body "[audio:30s]"
   const durSec = parseInt(m.body.match(/\[audio:(\d+)s/)?.[1] ?? '0', 10);
+  const durMs = durSec * 1000;
 
   async function togglePlay() {
     if (!m.mediaUri) return;
@@ -1307,8 +1712,8 @@ function AudioBubble({
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
       const { sound } = await Audio.Sound.createAsync(
         { uri: m.mediaUri },
-        { shouldPlay: true },
-        (status: any) => {
+        { shouldPlay: true, rate: playbackRate, shouldCorrectPitch: true },
+        (status: AVPlaybackStatus) => {
           if (!status.isLoaded) return;
           setPosMs(status.positionMillis ?? 0);
           if (status.didJustFinish) {
@@ -1323,11 +1728,31 @@ function AudioBubble({
     } catch { setPlaying(false); }
   }
 
-  const progress = durSec > 0 ? Math.min(1, posMs / (durSec * 1000)) : 0;
+  async function cycleRate() {
+    const currentIndex = PLAYBACK_RATES.indexOf(playbackRate);
+    const nextRate = PLAYBACK_RATES[(currentIndex + 1) % PLAYBACK_RATES.length];
+    setPlaybackRate(nextRate);
+    if (soundRef.current) {
+      try {
+        await soundRef.current.setRateAsync(nextRate, true);
+      } catch { /* ignore */ }
+    }
+  }
+
+  async function handleSeek(seekMs: number) {
+    if (!soundRef.current) return;
+    try {
+      await soundRef.current.setPositionAsync(seekMs);
+      setPosMs(seekMs);
+    } catch { /* ignore */ }
+  }
+
   const elapsed = Math.floor(posMs / 1000);
   const display = playing
     ? `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
     : `${String(Math.floor(durSec / 60)).padStart(2, '0')}:${String(durSec % 60).padStart(2, '0')}`;
+
+  const rateLabel = playbackRate === 1.0 ? '1×' : `${playbackRate}×`;
 
   return (
     <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
@@ -1337,7 +1762,7 @@ function AudioBubble({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 10,
-          width: 220,
+          width: 240,
           backgroundColor: me ? t.bubbleOut : t.bubbleIn,
           paddingHorizontal: 12,
           paddingVertical: 10,
@@ -1358,13 +1783,37 @@ function AudioBubble({
           }
         </Pressable>
         <View style={{ flex: 1, gap: 5 }}>
-          <View style={{ height: 3, borderRadius: 2, backgroundColor: me ? 'rgba(255,255,255,0.25)' : t.surface3, overflow: 'hidden' }}>
-            <View style={{ height: 3, borderRadius: 2, width: `${progress * 100}%`, backgroundColor: me ? 'rgba(255,255,255,0.8)' : t.accent }} />
-          </View>
+          <AudioWaveform
+            durMs={durMs}
+            posMs={posMs}
+            width={148}
+            maxBarHeight={24}
+            onSeek={handleSeek}
+            t={t}
+            isMe={me}
+          />
           <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? t.bubbleOutText : t.textDim }}>
             {display}
           </Text>
         </View>
+        <Pressable
+          onPress={cycleRate}
+          accessibilityLabel={`Playback speed ${rateLabel}`}
+          hitSlop={8}
+          style={{
+            paddingHorizontal: 5,
+            paddingVertical: 3,
+            borderRadius: 4,
+            backgroundColor: me ? 'rgba(255,255,255,0.15)' : t.surface3,
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: 28,
+          }}
+        >
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? t.bubbleOutText : t.textDim, fontWeight: '700' }}>
+            {rateLabel}
+          </Text>
+        </Pressable>
         <I.Mic size={14} color={me ? t.bubbleOutText : t.textDim} />
       </Pressable>
       <ReactionPills t={t} reactions={reactions} me={me} />

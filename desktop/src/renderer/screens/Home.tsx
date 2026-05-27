@@ -5,13 +5,11 @@ import type { Theme } from '../theme/vault';
 import { AegisMark, AegisWord } from '../components/AegisMark';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
-import { TabBar, type Tab } from '../components/TabBar';
+import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
 import type { StoredContact, StoredMessage } from '../db/local';
-
-const WORK_ACCENT = '#6366f1';
 
 interface Props {
   onOpenChat: (contact: StoredContact) => void;
@@ -26,13 +24,11 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   const { t } = useTheme();
 
   const identity = useIdentity((s) => s.identity);
-  const activeProfile = useIdentity((s) => s.activeProfile);
-  const storeDisplayName = useIdentity((s) => (s.activeProfile === 'work' ? s.workDisplayName : s.displayName));
+  const storeDisplayName = useIdentity((s) => s.displayName);
   const contacts = useContacts((s) => s.contacts);
   const previews = useMessages((s) => s.previews);
   const unreadCounts = useMessages((s) => s.unreadCounts);
 
-  const isWork = activeProfile === 'work';
   const displayName = identity?.aegisId ?? storeDisplayName ?? '— — —';
   const identityDisplay = { aegisId: identity?.aegisId ?? '— — —' };
 
@@ -84,29 +80,6 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         >
           <AegisMark t={t} size={26} />
           <AegisWord t={t} size={24} />
-          {isWork && (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                backgroundColor: `${WORK_ACCENT}22`,
-                border: `1px solid ${WORK_ACCENT}55`,
-                borderRadius: 99,
-                paddingLeft: 8,
-                paddingRight: 8,
-                paddingTop: 3,
-                paddingBottom: 3,
-              }}
-            >
-              <Avatar t={t} name={displayName} size={18} />
-              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: WORK_ACCENT, letterSpacing: 0.5, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {displayName}
-              </span>
-              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: WORK_ACCENT, fontWeight: '700' }}>W</span>
-            </div>
-          )}
         </button>
 
         <div style={{ display: 'flex', flexDirection: 'row', gap: 4 }}>
@@ -124,9 +97,9 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
 
       {/* Identity / status banner */}
       {empty ? (
-        <IdentityBanner t={t} identity={identityDisplay} isWork={isWork} displayName={displayName} onPress={onProfile} />
+        <IdentityBanner t={t} identity={identityDisplay} displayName={displayName} onPress={onProfile} />
       ) : (
-        <StatusBar t={t} identity={identityDisplay} isWork={isWork} displayName={displayName} />
+        <StatusBar t={t} identity={identityDisplay} displayName={displayName} />
       )}
 
       {/* Archived back button */}
@@ -145,7 +118,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
 
       {/* Main content */}
       {empty && !showArchived ? (
-        <EmptyHero t={t} onAdd={onAddContact} isWork={isWork} />
+        <EmptyHero t={t} onAdd={onAddContact} />
       ) : (
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {displayed.map((contact, idx) => (
@@ -203,7 +176,6 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         </div>
       )}
 
-      <TabBar t={t} current="home" onChange={onTab} isWork={isWork} />
     </div>
   );
 }
@@ -222,7 +194,7 @@ const iconBtnStyle: CSSProperties = {
   justifyContent: 'center',
 };
 
-function IdentityBanner({ t, identity, isWork, displayName, onPress }: { t: Theme; identity: { aegisId: string }; isWork: boolean; displayName: string; onPress: () => void }) {
+function IdentityBanner({ t, identity, displayName: _displayName, onPress }: { t: Theme; identity: { aegisId: string }; displayName: string; onPress: () => void }) {
   const [hovered, setHovered] = useState(false);
 
   return (
@@ -234,10 +206,10 @@ function IdentityBanner({ t, identity, isWork, displayName, onPress }: { t: Them
       style={{
         margin: '4px 18px 14px',
         padding: 14,
-        border: `1px solid ${isWork ? `${WORK_ACCENT}44` : `${t.accent}33`}`,
+        border: `1px solid ${t.accent}33`,
         backgroundColor: hovered
-          ? isWork ? `rgba(99,102,241,0.12)` : t.dark ? 'rgba(91,242,185,0.10)' : 'rgba(13,143,95,0.10)'
-          : isWork ? `rgba(99,102,241,0.07)` : t.dark ? 'rgba(91,242,185,0.06)' : 'rgba(13,143,95,0.06)',
+          ? t.dark ? 'rgba(91,242,185,0.10)' : 'rgba(13,143,95,0.10)'
+          : t.dark ? 'rgba(91,242,185,0.06)' : 'rgba(13,143,95,0.06)',
         borderRadius: t.radius,
         display: 'flex',
         flexDirection: 'row',
@@ -255,40 +227,40 @@ function IdentityBanner({ t, identity, isWork, displayName, onPress }: { t: Them
           width: 30,
           height: 30,
           borderRadius: t.radiusS,
-          backgroundColor: isWork ? `${WORK_ACCENT}22` : `${t.accent}22`,
+          backgroundColor: `${t.accent}22`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
         }}
       >
-        <I.Check size={16} color={isWork ? WORK_ACCENT : t.accent} />
+        <I.Check size={16} color={t.accent} />
       </div>
       <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
         <span style={{ fontFamily: t.font, fontWeight: '600', fontSize: 13, color: t.text, display: 'block' }}>
-          {isWork ? 'Work profile active' : 'Identity created'}
+          Identity created
         </span>
         <span
           style={{
             fontFamily: t.fontMono,
             fontSize: 11,
-            color: isWork ? WORK_ACCENT : t.accent,
+            color: t.accent,
             letterSpacing: 0.5,
             marginTop: 2,
             display: 'block',
           }}
         >
-          {isWork ? displayName : identity.aegisId}
+          {identity.aegisId}
         </span>
       </div>
-      <span style={{ fontFamily: t.fontMono, fontSize: 10, color: isWork ? WORK_ACCENT : t.accent, letterSpacing: 0.5, flexShrink: 0 }}>
+      <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5, flexShrink: 0 }}>
         VIEW
       </span>
     </button>
   );
 }
 
-function StatusBar({ t, identity, isWork, displayName }: { t: Theme; identity: { aegisId: string }; isWork: boolean; displayName: string }) {
+function StatusBar({ t, identity, displayName: _displayName }: { t: Theme; identity: { aegisId: string }; displayName: string }) {
   return (
     <div
       style={{
@@ -298,7 +270,7 @@ function StatusBar({ t, identity, isWork, displayName }: { t: Theme; identity: {
         paddingLeft: 14,
         paddingRight: 14,
         backgroundColor: t.surface,
-        border: `1px solid ${isWork ? `${WORK_ACCENT}44` : t.border}`,
+        border: `1px solid ${t.border}`,
         borderRadius: t.radius,
         display: 'flex',
         flexDirection: 'row',
@@ -306,7 +278,7 @@ function StatusBar({ t, identity, isWork, displayName }: { t: Theme; identity: {
         gap: 8,
       }}
     >
-      <I.Lock size={12} color={isWork ? WORK_ACCENT : t.accent} />
+      <I.Lock size={12} color={t.accent} />
       <span
         style={{
           flex: 1,
@@ -319,18 +291,13 @@ function StatusBar({ t, identity, isWork, displayName }: { t: Theme; identity: {
           whiteSpace: 'nowrap',
         }}
       >
-        {isWork ? `${displayName} · Work profile` : `${identity.aegisId} · End-to-end encrypted`}
+        {`${identity.aegisId} · End-to-end encrypted`}
       </span>
-      {isWork && (
-        <div style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 99, backgroundColor: `${WORK_ACCENT}22` }}>
-          <span style={{ fontFamily: t.fontMono, fontSize: 8, color: WORK_ACCENT, fontWeight: '700' }}>WORK</span>
-        </div>
-      )}
     </div>
   );
 }
 
-function EmptyHero({ t, onAdd, isWork }: { t: Theme; onAdd: () => void; isWork: boolean }) {
+function EmptyHero({ t, onAdd }: { t: Theme; onAdd: () => void }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingLeft: 32, paddingRight: 32 }}>
       {/* Pulse rings */}
@@ -349,7 +316,7 @@ function EmptyHero({ t, onAdd, isWork }: { t: Theme; onAdd: () => void; isWork: 
               width: 140,
               height: 140,
               borderRadius: '50%',
-              border: `1px solid ${isWork ? WORK_ACCENT : t.accent}`,
+              border: `1px solid ${t.accent}`,
               animation: `aegis-ring-pulse 2.4s ease-out ${delay}ms infinite`,
             }}
           />
@@ -385,20 +352,18 @@ function EmptyHero({ t, onAdd, isWork }: { t: Theme; onAdd: () => void; isWork: 
           maxWidth: 280,
         }}
       >
-        {isWork ? 'Your work space is ready' : 'No conversations yet'}
+        No conversations yet
       </h2>
 
       <p style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: '21px', textAlign: 'center', maxWidth: 300, marginBottom: 24, marginTop: 0 }}>
-        {isWork
-          ? 'Add coworkers via their AegisLink ID to start encrypted team communication.'
-          : 'Add your first contact via QR code, link, or AegisLink ID to start chatting privately.'}
+        Add your first contact via QR code, link, or AegisLink ID to start chatting privately.
       </p>
 
       <button
         onClick={onAdd}
-        aria-label={isWork ? 'Add coworker' : 'Add first contact'}
+        aria-label="Add first contact"
         style={{
-          backgroundColor: isWork ? WORK_ACCENT : t.accent,
+          backgroundColor: t.accent,
           paddingLeft: 24,
           paddingRight: 24,
           paddingTop: 13,
@@ -412,9 +377,9 @@ function EmptyHero({ t, onAdd, isWork }: { t: Theme; onAdd: () => void; isWork: 
           border: 'none',
         }}
       >
-        <I.Plus size={18} color={isWork ? '#fff' : t.accentInk} />
-        <span style={{ color: isWork ? '#fff' : t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
-          {isWork ? 'Add coworker' : 'Add first contact'}
+        <I.Plus size={18} color={t.accentInk} />
+        <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
+          Add first contact
         </span>
       </button>
 

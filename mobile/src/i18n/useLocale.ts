@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import * as Localization from 'expo-localization';
 import i18n, { type SupportedLocale, SUPPORTED_LOCALES } from './index';
 import { usePreferences } from '../store/preferences';
@@ -37,7 +37,7 @@ export function useLocale() {
     let active = true;
     void (async () => {
       try {
-        const stored = await SecureStore.getItemAsync(LANGUAGE_KEY);
+        const stored = await ss.get(LANGUAGE_KEY);
         const lang: SupportedLocale =
           stored && SUPPORTED_LOCALES.includes(stored as SupportedLocale)
             ? (stored as SupportedLocale)
@@ -60,7 +60,7 @@ export function useLocale() {
       setLocaleState(lang);
       await i18n.changeLanguage(lang);
       try {
-        await SecureStore.setItemAsync(LANGUAGE_KEY, lang);
+        await ss.set(LANGUAGE_KEY, lang);
       } catch { /* storage unavailable */ }
       void setPref('language', lang);
     },

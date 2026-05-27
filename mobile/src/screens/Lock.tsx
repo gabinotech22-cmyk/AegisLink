@@ -5,11 +5,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import { verifyPIN, hasStoredPIN, hashPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
 import { usePreferences } from '../store/preferences';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
+import { usePanicGesture } from '../hooks/usePanicGesture';
 
 const MAX_ATTEMPTS = 5;
 
@@ -91,27 +92,35 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   const [pulse1] = useState(new Animated.Value(0));
   const [pulse2] = useState(new Animated.Value(0));
 
+  // Panic gestures — only active while lock screen is visible
+  const { registerTap } = usePanicGesture(onPanic);
+
   // ── Initialise: detect what's available, pick starting mode ────────────────
   useEffect(() => {
     async function init() {
       const stored = await hasStoredPIN();
       setHasPIN(stored);
 
+      // Always detect hardware availability regardless of user preference.
+      // `biometricsEnabled` controls auto-launch behaviour, not whether the
+      // button is shown.
       let bio = false;
-      if (biometricsEnabled) {
-        try {
-          // expo-local-authentication works perfectly in modern Expo Go builds
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
-          const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
-          const hasHw = await LA.hasHardwareAsync();
-          const enrolled = await LA.isEnrolledAsync();
-          bio = hasHw && enrolled;
-        } catch { /* module not available in this build */ }
-      }
+      try {
+        // expo-local-authentication works perfectly in modern Expo Go builds
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
+        const hasHw = await LA.hasHardwareAsync();
+        const enrolled = await LA.isEnrolledAsync();
+        bio = hasHw && enrolled;
+      } catch { /* module not available in this build */ }
+
       setBioAvailable(bio);
       setBioStatus(i18nT('lock.tapToUnlock'));
 
-      if (bio) {
+      // Auto-launch biometric UI only when the user has enabled it AND hardware
+      // is present. If the preference is off but hardware exists, we show PIN
+      // by default and surface a "Use Face ID / Fingerprint" button instead.
+      if (bio && biometricsEnabled) {
         setMode('biometric');
         // auto-trigger after mode is set via the effect below
       } else {
@@ -220,7 +229,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
   async function validatePin(pin: string) {
     try {
-      const panicRaw = await SecureStore.getItemAsync('aegis.panic.v1');
+      const panicRaw = await ss.get('aegis.panic.v1');
       if (panicRaw) {
         const config = JSON.parse(panicRaw) as {
           duressPin?: boolean;
@@ -229,6 +238,12 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         if (config.duressPin && typeof config.pinHash === 'string' && config.pinHash.length > 0) {
           const candidate = await hashPinWithSalt(pin, DURESS_PIN_SALT);
           if (candidate === config.pinHash) {
+            // Wipe first — if interrupted mid-wipe, real data is already gone.
+            // Only after a successful wipe do we surface the decoy UI.
+            try {
+              await wipeDatabase();
+              await useIdentity.getState().reset();
+            } catch { /* wipe failure is non-recoverable; decoy still shown */ }
             usePreferences.setState({ duressActive: true });
             setPinCode('');
             onUnlock();
@@ -242,7 +257,12 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
     const ok = hasPIN ? await verifyPIN(pin) : false;
     if (ok) {
+      const wasDecoy = usePreferences.getState().duressActive;
       usePreferences.setState({ duressActive: false });
+      if (wasDecoy) {
+        // Reload real identity and data now that decoy mode is off
+        await useIdentity.getState().hydrate();
+      }
       setPinCode('');
       onUnlock();
       return;
@@ -255,7 +275,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       // Read autoWipe setting from SecureStore
       let autoWipe = false;
       try {
-        const panicRaw = await SecureStore.getItemAsync('aegis.panic.v1');
+        const panicRaw = await ss.get('aegis.panic.v1');
         if (panicRaw) {
           const config = JSON.parse(panicRaw) as { autoWipe?: boolean };
           autoWipe = config.autoWipe === true;
@@ -271,8 +291,8 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           } catch { /* wipe failure is non-recoverable; app will reset on restart */ }
         }, 800);
       } else {
+        // Stay on lock screen — do NOT navigate away or unlock the app
         setPinError(i18nT('lock.maxAttemptsReached', { max: MAX_ATTEMPTS }));
-        setTimeout(onPanic, 1800);
       }
     } else {
       const left = MAX_ATTEMPTS - newAttempts;
@@ -288,13 +308,23 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   // ── Biometric view ─────────────────────────────────────────────────────────
   if (mode === 'biometric') {
     return (
-      <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 40, paddingBottom: insets.bottom + 20 }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <I.Lock size={12} color={t.textDim} />
-          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>
-            {i18nT('lock.locked')}
-          </Text>
-        </View>
+      <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}>
+        {/* Logo — triple tap triggers panic gesture */}
+        <Pressable onPress={registerTap} accessibilityElementsHidden importantForAccessibility="no">
+          <View style={{ alignItems: 'center', gap: 6 }}>
+            <View style={{
+              width: 52, height: 52, borderRadius: 26,
+              backgroundColor: t.dark ? 'rgba(91,242,185,0.08)' : 'rgba(13,143,95,0.08)',
+              borderWidth: 1, borderColor: `${t.accent}33`,
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <I.Shield size={28} stroke={1.6} color={t.accent} />
+            </View>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.4 }}>
+              AEGISLINK
+            </Text>
+          </View>
+        </Pressable>
 
         <View style={{ alignItems: 'center', gap: 28 }}>
           {/* Fingerprint / FaceID ring — tap to retry */}
@@ -342,24 +372,30 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           )}
         </View>
 
-        <Pressable onPress={onPanic} hitSlop={8} style={{ padding: 8 }}>
-          <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger, letterSpacing: 0.8 }}>
-            {i18nT('lock.emergency')}
-          </Text>
-        </Pressable>
+        <View style={{ height: 32 }} />
       </View>
     );
   }
 
   // ── PIN view ───────────────────────────────────────────────────────────────
   return (
-    <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 24, paddingBottom: insets.bottom + 20 }]}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <I.Lock size={12} color={t.textDim} />
-        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>
-          {i18nT('lock.locked')}
-        </Text>
-      </View>
+    <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}>
+      {/* Logo — triple tap triggers panic gesture */}
+      <Pressable onPress={registerTap} accessibilityElementsHidden importantForAccessibility="no">
+        <View style={{ alignItems: 'center', gap: 6 }}>
+          <View style={{
+            width: 52, height: 52, borderRadius: 26,
+            backgroundColor: t.dark ? 'rgba(91,242,185,0.08)' : 'rgba(13,143,95,0.08)',
+            borderWidth: 1, borderColor: `${t.accent}33`,
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <I.Shield size={28} stroke={1.6} color={t.accent} />
+          </View>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.4 }}>
+            AEGISLINK
+          </Text>
+        </View>
+      </Pressable>
 
       <View style={{ alignItems: 'center', width: '100%' }}>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.3, color: t.text }}>
@@ -385,7 +421,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
             onPress={() => {
               setPinCode('');
               setPinError('');
-              didAutoTrigger.current = false; // allow re-trigger
+              didAutoTrigger.current = false;
               setMode('biometric');
             }}
             style={({ pressed }) => ({ marginTop: 24, opacity: pressed ? 0.6 : 1 })}
@@ -397,11 +433,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         )}
       </View>
 
-      <Pressable onPress={onPanic} hitSlop={8} style={{ padding: 8 }}>
-        <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger, letterSpacing: 0.8 }}>
-          {i18nT('lock.emergency')}
-        </Text>
-      </Pressable>
+      <View style={{ height: 32 }} />
     </View>
   );
 }

@@ -13,17 +13,12 @@ import { usePreferences } from '../store/preferences';
 // Types
 // ---------------------------------------------------------------------------
 
-type ProfileType = 'personal' | 'work';
-
 interface Props {
   onBack: () => void;
   onDevices: () => void;
   onPanic: () => void;
   onAppIcon: () => void;
-  onWorkDashboard: () => void;
-  onSwitchToPersonal: () => void;
   onSubscription?: () => void;
-  onWorkGeneration?: () => void;
 }
 
 const PROFILE_COLORS = ['#05b875', '#8b5cf6', '#3b82f6', '#ec4899', '#f97316', '#eab308', '#6366f1'];
@@ -40,34 +35,23 @@ const PROFILE_EMOJIS = [
   { label: 'Robot', val: '🤖' },
 ];
 
-export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDashboard, onSwitchToPersonal, onSubscription, onWorkGeneration }: Props) {
+export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscription }: Props) {
   const { t } = useTheme();
 
-  // Real identity state
   const identity = useIdentity((s) => s.identity);
-  const activeProfile = useIdentity((s) => s.activeProfile);
-  const setActiveProfile = useIdentity((s) => s.setActiveProfile);
   const storeDisplayName = useIdentity((s) => s.displayName);
-  const storeWorkDisplayName = useIdentity((s) => s.workDisplayName);
   const storeAvatarColor = useIdentity((s) => s.avatarColor);
   const storeAvatarImage = useIdentity((s) => s.avatarImage);
   const storeProfileStatus = useIdentity((s) => s.profileStatus);
-  const storeWorkProfileStatus = useIdentity((s) => s.workProfileStatus);
   const updateProfile = useIdentity((s) => s.updateProfile);
   const updateStatus = useIdentity((s) => s.updateStatus);
 
-  // identityId drives which tab is shown in the profile card (local UI state)
-  const [identityId, setIdentityId] = useState<ProfileType>(activeProfile);
-
   const displayName = storeDisplayName;
-  const workDisplayName = storeWorkDisplayName;
   const aegisId = identity?.aegisId ?? '— — —';
   const avatarColor = storeAvatarColor;
   const avatarImage = storeAvatarImage;
   const profileStatus = storeProfileStatus;
-  const workProfileStatus = storeWorkProfileStatus;
 
-  // Real preferences
   const photoVis = usePreferences((s) => s.photoVis);
   const lastSeen = usePreferences((s) => s.lastSeenVisible);
   const typing = usePreferences((s) => s.typingVisible);
@@ -76,7 +60,6 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
   function setLastSeen(v: boolean) { void setPref('lastSeenVisible', v); }
   function setTyping(v: boolean) { void setPref('typingVisible', v); }
 
-  // Edit state
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(displayName);
   const [editColor, setEditColor] = useState(avatarColor);
@@ -85,15 +68,10 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
   const [statusDraft, setStatusDraft] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const curName = identityId === 'personal' ? displayName : workDisplayName;
-  const curColor = identityId === 'personal' ? avatarColor : '#6366f1';
-  const curImage = identityId === 'personal' ? avatarImage : null;
-  const curStatus = identityId === 'personal' ? profileStatus : workProfileStatus;
-
   function openEdit() {
-    setEditName(curName);
-    setEditColor(curColor);
-    setEditImage(curImage);
+    setEditName(displayName);
+    setEditColor(avatarColor);
+    setEditImage(avatarImage);
     setIsEditing(true);
   }
 
@@ -110,7 +88,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
 
   function handleSaveProfile() {
     if (!editName.trim()) { setErrorMsg('Name cannot be empty.'); return; }
-    void updateProfile(identityId, editName.trim(), editColor, editImage);
+    void updateProfile(editName.trim(), editColor, editImage);
     setIsEditing(false);
     setErrorMsg(null);
   }
@@ -119,11 +97,6 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
     if (!window.confirm('Delete this identity? All messages and contacts will be permanently erased.')) return;
     void import('../store/identity').then(({ useIdentity: id }) => id.getState().reset());
   }
-
-  const ids: { id: ProfileType; name: string; color: string }[] = [
-    { id: 'personal', name: displayName, color: avatarColor },
-    { id: 'work', name: workDisplayName, color: '#6366f1' },
-  ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
@@ -145,62 +118,37 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
           aria-label="Edit profile"
           style={{ margin: '4px 18px 18px', padding: 18, backgroundColor: t.surface, border: `1px solid ${t.borderStrong}`, borderRadius: t.radius, cursor: 'pointer', width: 'calc(100% - 36px)', boxSizing: 'border-box', textAlign: 'left', display: 'block' }}
         >
-          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-            <Avatar t={t} name={curName} color={curColor} size={56} photoUri={curImage ?? undefined} />
+          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <Avatar t={t} name={displayName} color={avatarColor} size={56} photoUri={avatarImage ?? undefined} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontFamily: t.fontDisplay, fontWeight: '600', fontSize: 17, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {curName}
+                  {displayName}
                 </span>
                 <div style={{ padding: 3, borderRadius: 99, backgroundColor: t.surface2 }}>
                   <I.Settings size={10} color={t.accent} />
                 </div>
               </div>
-              <span style={{ fontFamily: t.fontMono, fontSize: 11, color: curColor, letterSpacing: 0.5, marginTop: 2, display: 'block' }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 11, color: avatarColor, letterSpacing: 0.5, marginTop: 2, display: 'block' }}>
                 {aegisId}
               </span>
             </div>
           </div>
-          {/* Profile tabs */}
-          <div style={{ display: 'flex', flexDirection: 'row', padding: 3, backgroundColor: t.surface2, borderRadius: t.radiusS }}>
-            {ids.map((id) => {
-              const active = identityId === id.id;
-              return (
-                <button
-                  key={id.id}
-                  onClick={(e) => { e.stopPropagation(); setIdentityId(id.id); void setActiveProfile(id.id); }}
-                  aria-label={`Switch to ${id.id} profile`}
-                  style={{ flex: 1, paddingTop: 8, paddingBottom: 8, backgroundColor: active ? t.surface : 'transparent', borderRadius: t.radiusS - 1, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <span style={{ fontFamily: t.font, fontSize: 12, fontWeight: active ? '600' : '400', color: active ? t.text : t.textDim }}>
-                    {id.id === 'personal' ? 'Personal' : 'Work'}
-                  </span>
-                </button>
-              );
-            })}
-            <button
-              onClick={(e) => { e.stopPropagation(); window.alert('Multiple identities — coming soon'); }}
-              style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8, background: 'none', border: 'none', cursor: 'pointer' }}
-              aria-label="Add identity"
-            >
-              <span style={{ color: t.textFaint, fontSize: 14 }}>+</span>
-            </button>
-          </div>
           <span style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 12, lineHeight: '16px', display: 'block' }}>
-            Separate identities are cryptographically isolated — contacts and messages never cross profiles.
+            Your identity is cryptographically isolated — tap to edit your display name and avatar.
           </span>
         </button>
 
         {/* Status */}
         <Section t={t} label="STATUS">
           <button
-            onClick={() => { setStatusDraft(curStatus); setIsEditingStatus(true); }}
+            onClick={() => { setStatusDraft(profileStatus); setIsEditingStatus(true); }}
             aria-label="Edit status"
             style={{ padding: 14, background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', boxSizing: 'border-box' }}
           >
             <div style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 10, paddingBottom: 10, backgroundColor: t.surface2, borderRadius: t.radiusS, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <span style={{ flex: 1, fontFamily: t.font, fontSize: 14, color: curStatus ? t.text : t.textFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {curStatus || 'Add a status…'}
+              <span style={{ flex: 1, fontFamily: t.font, fontSize: 14, color: profileStatus ? t.text : t.textFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {profileStatus || 'Add a status…'}
               </span>
               <I.Settings size={14} color={t.textFaint} />
             </div>
@@ -316,7 +264,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onWorkDas
               <button onClick={() => setIsEditingStatus(false)} aria-label="Cancel" style={{ flex: 1, paddingTop: 10, paddingBottom: 10, border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <span style={{ fontFamily: t.font, fontSize: 14, color: t.textDim }}>Cancel</span>
               </button>
-              <button onClick={() => { void updateStatus(identityId, statusDraft.trim()); setIsEditingStatus(false); }} aria-label="Save status" style={{ flex: 1, paddingTop: 10, paddingBottom: 10, backgroundColor: t.accent, borderRadius: t.radiusS, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <button onClick={() => { void updateStatus(statusDraft.trim()); setIsEditingStatus(false); }} aria-label="Save status" style={{ flex: 1, paddingTop: 10, paddingBottom: 10, backgroundColor: t.accent, borderRadius: t.radiusS, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.accentInk }}>Save</span>
               </button>
             </div>

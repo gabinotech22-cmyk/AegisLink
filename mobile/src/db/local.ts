@@ -1,8 +1,10 @@
 import * as SQLite from 'expo-sqlite';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
+import { ss } from '../utils/secureStore';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
+import { secretKeySlot, signSecretKeySlot, dbEncKeySlot } from '../crypto/types';
 
 // ─── Identity (Keychain / Keystore) ──────────────────────────────────────────
 //
@@ -18,15 +20,15 @@ export function getActiveDbSlot(): string {
 }
 
 export function getSecretKeySlot(slot = activeSlot): string {
-  return slot === 'self' ? 'aegis.secretKey.b64' : `aegis.${slot}.secretKey.b64`;
+  return secretKeySlot(slot);
 }
 
 export function getSignSecretKeySlot(slot = activeSlot): string {
-  return slot === 'self' ? 'aegis.signSecretKey.b64' : `aegis.${slot}.signSecretKey.b64`;
+  return signSecretKeySlot(slot);
 }
 
 export function getDbEncKeySlot(slot = activeSlot): string {
-  return slot === 'self' ? 'aegis.dbEncKey.b64' : `aegis.${slot}.dbEncKey.b64`;
+  return dbEncKeySlot(slot);
 }
 
 export function setActiveDbSlot(slot: string): void {
@@ -36,12 +38,29 @@ export function setActiveDbSlot(slot: string): void {
 }
 
 export async function closeActiveDatabase(): Promise<void> {
-  if (dbPromise) {
+  if (!dbPromise) return;
+  _closing = true;
+  try {
     const d = await dbPromise;
-    await d.closeAsync();
     dbPromise = null;
     cachedDbKey = null;
+    // closeAsync flushes WAL to the main file — needed before backup/copy.
+    // Wrap in try/catch: if already closed (e.g. double-close), this is a no-op.
+    try { await d.closeAsync(); } catch { /* already closed — safe to ignore */ }
+  } finally {
+    _closing = false;
   }
+}
+
+/**
+ * Reset the DB reference without closing the native connection.
+ * Use this for profile switches where you want the next db() call to open
+ * the new slot's file without risking "Access to closed resource" on
+ * in-flight operations that hold a reference to the old connection.
+ */
+export function resetDbConnection(): void {
+  dbPromise = null;
+  cachedDbKey = null;
 }
 
 export async function deleteIdentitySlot(slot: string): Promise<void> {
@@ -52,15 +71,10 @@ export async function deleteIdentitySlot(slot: string): Promise<void> {
 
   // 2. Delete preferences for this slot
   const prefKeys = [
-    'activeProfile',
     'displayName',
     'avatarColor',
     'avatarImage',
     'profileStatus',
-    'workDisplayName',
-    'workAvatarColor',
-    'workAvatarImage',
-    'workProfileStatus',
   ];
   for (const pk of prefKeys) {
     await SecureStore.deleteItemAsync(`aegis.${slot}.${pk}`).catch(() => {});
@@ -87,14 +101,31 @@ export interface StoredIdentity {
 }
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+// Tracks whether a close is in progress to prevent concurrent operations from
+// reopening the DB mid-close then immediately seeing "Access to closed resource".
+let _closing = false;
 
 async function db(): Promise<SQLite.SQLiteDatabase> {
+  // Wait until any in-progress close finishes before opening a new connection.
+  if (_closing) {
+    await new Promise<void>((resolve) => {
+      const interval = setInterval(() => {
+        if (!_closing) { clearInterval(interval); resolve(); }
+      }, 10);
+    });
+  }
   if (!dbPromise) {
     const dbName = activeSlot === 'self' ? 'aegislink.db' : `aegislink_${activeSlot}.db`;
+    // Do NOT pass useNewConnection: true — expo-sqlite manages the shared
+    // WAL-mode connection and handles lifecycle correctly. useNewConnection
+    // creates an independent handle that becomes invalid after closeAsync()
+    // causing "Access to closed resource" on concurrent operations.
     dbPromise = SQLite.openDatabaseAsync(dbName).then(async (d) => {
+      // Run PRAGMAs in isolation — mixing PRAGMA + DDL in one execAsync call
+      // crashes on Android 14 with New Architecture (expo-sqlite v16 JSI).
+      await d.execAsync('PRAGMA journal_mode = WAL;');
+      await d.execAsync('PRAGMA foreign_keys = ON;');
       await d.execAsync(`
-        PRAGMA journal_mode = WAL;
-
         CREATE TABLE IF NOT EXISTS identity (
           slot                    TEXT PRIMARY KEY,
           aegis_id                TEXT NOT NULL,
@@ -166,6 +197,28 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
           duration_s  INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_calls_contact ON call_history(contact_id, started_at);
+
+        -- Poll vote counts (aggregate only — no voter identity)
+        CREATE TABLE IF NOT EXISTS polls (
+          id         TEXT PRIMARY KEY,
+          question   TEXT NOT NULL,
+          options    TEXT NOT NULL,   -- JSON array of option strings
+          votes      TEXT NOT NULL,   -- JSON array of vote counts (number[])
+          created_at INTEGER NOT NULL,
+          group_id   TEXT NOT NULL
+        );
+
+        -- Scheduled messages: ciphertext stored, plaintext never on disk
+        CREATE TABLE IF NOT EXISTS scheduled_messages (
+          id                TEXT PRIMARY KEY,
+          recipient_aegis_id TEXT NOT NULL,
+          encrypted_payload TEXT NOT NULL,
+          send_at           INTEGER NOT NULL,
+          created_at        INTEGER NOT NULL,
+          status            TEXT NOT NULL DEFAULT 'pending',
+          retry_count       INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_scheduled_send_at ON scheduled_messages(send_at, status);
       `);
 
       // ─── Schema versioning via PRAGMA user_version ──────────────────────────
@@ -225,6 +278,9 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
       try { await d.execAsync('ALTER TABLE contacts ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
       try { await d.execAsync('ALTER TABLE contacts ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
       try { await d.execAsync("ALTER TABLE contacts ADD COLUMN profile TEXT NOT NULL DEFAULT 'personal';"); } catch (e) {}
+      try { await d.execAsync('ALTER TABLE contacts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
+      try { await d.execAsync('ALTER TABLE contacts ADD COLUMN last_seen_at INTEGER;'); } catch (e) {}
+      try { await d.execAsync('ALTER TABLE contacts ADD COLUMN online INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
 
       // Message capabilities (replies, reactions, star, delete, media)
       try { await d.execAsync('ALTER TABLE messages ADD COLUMN type TEXT;'); } catch (e) {}
@@ -235,7 +291,22 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
       try { await d.execAsync('ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
       try { await d.execAsync('ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
       try { await d.execAsync('ALTER TABLE messages ADD COLUMN expires_at INTEGER;'); } catch (e) {}
+      try { await d.execAsync('ALTER TABLE chat_state ADD COLUMN ephemeral_timer INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
+
+      // Purge messages that expired while the app was closed.
+      // This ensures ephemeral messages are removed on every cold start,
+      // not only when foreground pruning runs.
+      await d.runAsync(
+        'DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?',
+        Date.now()
+      );
+
       return d;
+    }).catch((err) => {
+      // Reset so the next call retries cleanly instead of re-returning
+      // this permanently-rejected promise (which causes infinite NPE crashes).
+      dbPromise = null;
+      throw err;
     });
   }
   return dbPromise;
@@ -244,8 +315,28 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 export async function saveIdentity(v: StoredIdentity): Promise<void> {
-  await SecureStore.setItemAsync(getSecretKeySlot(), v.secretKeyB64);
-  await SecureStore.setItemAsync(getSignSecretKeySlot(), v.signingSecretKeyB64);
+  // expo-secure-store can fail with NullPointerException on Android if the
+  // Keystore has stale entries from a previous installation (classic "update
+  // over old APK" corruption).  Attempt once; on failure, clear the stale
+  // entries and retry exactly once so a fresh install recovers automatically.
+  // AFTER_FIRST_UNLOCK: compatible with Android 14 hardware-backed Keystore
+  // (StrongBox). Without this, setItemAsync can throw a native NPE on first
+  // write on real devices even when the JS catch would normally handle it.
+  const secureOpts: SecureStore.SecureStoreOptions = {
+    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+  };
+  const persistKeys = async () => {
+    await SecureStore.setItemAsync(getSecretKeySlot(), v.secretKeyB64, secureOpts);
+    await SecureStore.setItemAsync(getSignSecretKeySlot(), v.signingSecretKeyB64, secureOpts);
+  };
+  try {
+    await persistKeys();
+  } catch {
+    // Clear potentially corrupted entries and retry.
+    await SecureStore.deleteItemAsync(getSecretKeySlot()).catch(() => {});
+    await SecureStore.deleteItemAsync(getSignSecretKeySlot()).catch(() => {});
+    await persistKeys(); // if this throws again, surface the real error
+  }
   const d = await db();
   await d.runAsync(
     `INSERT OR REPLACE INTO identity (slot, aegis_id, public_key_b64, signing_public_key_b64, created_at)
@@ -313,14 +404,17 @@ export interface StoredContact {
   blocked?: boolean;
   archived?: boolean;
   profile?: 'personal' | 'work';
+  lastSeenAt?: number;
+  online?: boolean;
+  pinned?: boolean;
 }
 
 export async function saveContact(c: StoredContact): Promise<void> {
   const d = await db();
   await d.runAsync(
     `INSERT OR REPLACE INTO contacts
-     (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     c.aegisId,
     c.publicKeyB64,
     c.signingPublicKeyB64 || "",
@@ -335,8 +429,16 @@ export async function saveContact(c: StoredContact): Promise<void> {
     c.mutedUntil ?? null,
     c.blocked ? 1 : 0,
     c.archived ? 1 : 0,
-    c.profile ?? 'personal'
+    c.profile ?? 'personal',
+    c.pinned ? 1 : 0,
+    c.lastSeenAt ?? null,
+    c.online ? 1 : 0
   );
+}
+
+export async function pinContact(aegisId: string, pinned: boolean): Promise<void> {
+  const d = await db();
+  await d.runAsync('UPDATE contacts SET pinned = ? WHERE aegis_id = ?', pinned ? 1 : 0, aegisId);
 }
 
 type ContactRow = {
@@ -355,6 +457,9 @@ type ContactRow = {
   blocked: number;
   archived: number;
   profile: string;
+  pinned: number;
+  last_seen_at: number | null;
+  online: number;
 };
 
 function rowToContact(r: ContactRow): StoredContact {
@@ -374,6 +479,9 @@ function rowToContact(r: ContactRow): StoredContact {
     blocked: r.blocked === 1,
     archived: r.archived === 1,
     profile: (r.profile === 'work' ? 'work' : 'personal') as 'personal' | 'work',
+    pinned: r.pinned === 1,
+    lastSeenAt: r.last_seen_at ?? undefined,
+    online: r.online === 1,
   };
 }
 
@@ -381,11 +489,11 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
   const d = await db();
   const rows = profile
     ? await d.getAllAsync<ContactRow>(
-        `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
+        `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
         profile
       )
     : await d.getAllAsync<ContactRow>(
-        `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile FROM contacts ORDER BY added_at DESC`
+        `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online FROM contacts ORDER BY added_at DESC`
       );
   return rows.map(rowToContact);
 }
@@ -393,7 +501,7 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
 export async function getContact(aegisId: string): Promise<StoredContact | null> {
   const d = await db();
   const row = await d.getFirstAsync<ContactRow>(
-    `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile FROM contacts WHERE aegis_id = ?`,
+    `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online FROM contacts WHERE aegis_id = ?`,
     aegisId
   );
   if (!row) return null;
@@ -422,11 +530,11 @@ let cachedDbKey: Uint8Array | null = null;
 async function getDbKey(): Promise<Uint8Array> {
   if (cachedDbKey) return cachedDbKey;
   const slotKey = getDbEncKeySlot();
-  let keyB64 = await SecureStore.getItemAsync(slotKey);
+  let keyB64 = await ss.get(slotKey);
   if (!keyB64) {
     const keyBytes = nacl.randomBytes(32);
     keyB64 = encodeBase64(keyBytes);
-    await SecureStore.setItemAsync(slotKey, keyB64);
+    await ss.set(slotKey, keyB64);
   }
   cachedDbKey = decodeBase64(keyB64);
   return cachedDbKey;
@@ -444,7 +552,7 @@ export async function encryptBody(body: string): Promise<string> {
     };
     return 'encv1:' + JSON.stringify(result);
   } catch (e) {
-    return body;
+    throw new Error(`encryptBody: SecureStore unavailable — ${(e as Error).message}`);
   }
 }
 
@@ -563,7 +671,7 @@ export async function updateMessageDelivery(id: string, status: 'sent' | 'delive
 export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[]> {
   const d = await db();
   const rows = await d.getAllAsync<MessageRow>(
-    `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status
+    `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
      FROM messages WHERE chat_id = ? ORDER BY created_at ASC`,
     chatId
   );
@@ -573,7 +681,7 @@ export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[
 export async function getMessage(id: string): Promise<StoredMessage | null> {
   const d = await db();
   const row = await d.getFirstAsync<MessageRow>(
-    `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status
+    `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
      FROM messages WHERE id = ?`,
     id
   );
@@ -766,11 +874,34 @@ export async function wipeDatabase(): Promise<void> {
   await d.runAsync('DELETE FROM ratchet_sessions');
   await d.runAsync('DELETE FROM chat_state');
   await d.runAsync('DELETE FROM call_history');
+  await d.runAsync('DELETE FROM polls');
+  await d.runAsync('DELETE FROM scheduled_messages');
   // clearIdentity deletes SECRET_KEY_SLOT + SIGN_SECRET_KEY_SLOT and the identity table row.
   await clearIdentity();
+  // SQLite DELETE only removes pages from free-list — VACUUM overwrites freed
+  // pages with zeros so a forensic read of the raw database file finds nothing.
+  await d.execAsync('VACUUM');
   // Also purge the at-rest DB encryption key so recovered storage cannot be decrypted.
   cachedDbKey = null;
   await SecureStore.deleteItemAsync(getDbEncKeySlot());
+  // Purge X3DH prekey secrets (SPK + OPKs) from SecureStore.
+  // These live outside the SQLite file; without this a forensic attacker who
+  // recovers the device storage after panic could still derive past session keys.
+  const slot = activeSlot;
+  const prefix = slot === 'self' ? '' : `${slot}.`;
+  const opkIdsRaw = await SecureStore.getItemAsync(`aegis.${prefix}opkIds.json`).catch(() => null);
+  if (opkIdsRaw) {
+    try {
+      const ids: number[] = JSON.parse(opkIdsRaw) as number[];
+      for (const id of ids) {
+        await SecureStore.deleteItemAsync(`aegis.${prefix}opkSecret.${id}`).catch(() => {});
+        await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.${id}`).catch(() => {});
+      }
+    } catch { /* non-fatal */ }
+  }
+  await SecureStore.deleteItemAsync(`aegis.${prefix}opkIds.json`).catch(() => {});
+  await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.b64`).catch(() => {});
+  await SecureStore.deleteItemAsync(`aegis.${prefix}spk.keyId`).catch(() => {});
   // Purge forensic remnants: panic config + user preferences.
   // Without this, a post-wipe forensic analysis could detect that a panic-enabled account existed.
   await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
@@ -830,25 +961,47 @@ export async function getAllUnreadCounts(): Promise<Record<string, number>> {
   return result;
 }
 
+// ─── Per-chat ephemeral timer ─────────────────────────────────────────────────
+
+export async function setChatEphemeralTimer(chatId: string, seconds: number): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `INSERT INTO chat_state (chat_id, ephemeral_timer, unread_count)
+     VALUES (?, ?, COALESCE((SELECT unread_count FROM chat_state WHERE chat_id = ?), 0))
+     ON CONFLICT(chat_id) DO UPDATE SET ephemeral_timer = excluded.ephemeral_timer`,
+    chatId, seconds, chatId
+  );
+}
+
+export async function getChatEphemeralTimer(chatId: string): Promise<number> {
+  const d = await db();
+  const row = await d.getFirstAsync<{ ephemeral_timer: number }>(
+    'SELECT ephemeral_timer FROM chat_state WHERE chat_id = ?', chatId
+  );
+  return row?.ephemeral_timer ?? 0;
+}
+
+export async function getAllChatEphemeralTimers(): Promise<Record<string, number>> {
+  const d = await db();
+  const rows = await d.getAllAsync<{ chat_id: string; ephemeral_timer: number }>(
+    'SELECT chat_id, ephemeral_timer FROM chat_state WHERE ephemeral_timer > 0'
+  );
+  const result: Record<string, number> = {};
+  for (const r of rows) result[r.chat_id] = r.ephemeral_timer;
+  return result;
+}
+
 // ─── Ephemeral cleanup ────────────────────────────────────────────────────────
 
-export async function deleteExpiredMessages(timerSeconds: number): Promise<void> {
+export async function deleteExpiredMessages(_timerSeconds?: number): Promise<void> {
   const d = await db();
   const now = Date.now();
-  // 1. Delete explicitly expired messages (location/ephemeral)
+  // Only delete messages that have an explicit expiresAt set and have passed it.
+  // The global timer is no longer used — expiresAt is authoritative.
   await d.runAsync(
-    'DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < ?',
+    'DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?',
     now
   );
-
-  // 2. Delete traditional global ephemeral messages if applicable
-  if (timerSeconds > 0) {
-    const cutoff = now - timerSeconds * 1000;
-    await d.runAsync(
-      'DELETE FROM messages WHERE created_at < ? AND expires_at IS NULL AND deleted = 0',
-      cutoff
-    );
-  }
 }
 
 // ─── Call history ─────────────────────────────────────────────────────────────
@@ -887,4 +1040,159 @@ export async function getCallHistory(contactId: string, limit = 50): Promise<Sto
     status: r.status as 'missed' | 'answered' | 'declined',
     startedAt: r.started_at, durationS: r.duration_s,
   }));
+}
+
+// ─── Polls ────────────────────────────────────────────────────────────────────
+
+export interface StoredPoll {
+  id: string;
+  question: string;
+  options: string[];
+  votes: number[];
+  createdAt: number;
+  groupId: string;
+}
+
+type PollRow = {
+  id: string;
+  question: string;
+  options: string;
+  votes: string;
+  created_at: number;
+  group_id: string;
+};
+
+function rowToPoll(r: PollRow): StoredPoll {
+  return {
+    id: r.id,
+    question: r.question,
+    options: JSON.parse(r.options) as string[],
+    votes: JSON.parse(r.votes) as number[],
+    createdAt: r.created_at,
+    groupId: r.group_id,
+  };
+}
+
+export async function savePoll(p: StoredPoll): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `INSERT OR REPLACE INTO polls (id, question, options, votes, created_at, group_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    p.id,
+    p.question,
+    JSON.stringify(p.options),
+    JSON.stringify(p.votes),
+    p.createdAt,
+    p.groupId
+  );
+}
+
+export async function loadPolls(): Promise<StoredPoll[]> {
+  const d = await db();
+  const rows = await d.getAllAsync<PollRow>(
+    'SELECT id, question, options, votes, created_at, group_id FROM polls ORDER BY created_at DESC'
+  );
+  return rows.map(rowToPoll);
+}
+
+export async function updatePollVotes(id: string, votes: number[]): Promise<void> {
+  const d = await db();
+  await d.runAsync('UPDATE polls SET votes = ? WHERE id = ?', JSON.stringify(votes), id);
+}
+
+// ─── Scheduled Messages ───────────────────────────────────────────────────────
+
+export interface StoredScheduledMessage {
+  id: string;
+  recipientAegisId: string;
+  /** SealedEnvelope JSON — already E2EE ciphertext, plaintext NEVER stored */
+  encryptedPayload: string;
+  sendAt: number;
+  createdAt: number;
+  status: 'pending' | 'sent' | 'failed';
+  retryCount: number;
+}
+
+type ScheduledRow = {
+  id: string;
+  recipient_aegis_id: string;
+  encrypted_payload: string;
+  send_at: number;
+  created_at: number;
+  status: string;
+  retry_count: number;
+};
+
+function rowToScheduled(r: ScheduledRow): StoredScheduledMessage {
+  return {
+    id: r.id,
+    recipientAegisId: r.recipient_aegis_id,
+    encryptedPayload: r.encrypted_payload,
+    sendAt: r.send_at,
+    createdAt: r.created_at,
+    status: r.status as 'pending' | 'sent' | 'failed',
+    retryCount: r.retry_count,
+  };
+}
+
+export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `INSERT OR REPLACE INTO scheduled_messages
+     (id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    msg.id,
+    msg.recipientAegisId,
+    msg.encryptedPayload,
+    msg.sendAt,
+    msg.createdAt,
+    msg.status,
+    msg.retryCount,
+  );
+}
+
+export async function loadPendingScheduled(): Promise<StoredScheduledMessage[]> {
+  const d = await db();
+  const rows = await d.getAllAsync<ScheduledRow>(
+    `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count
+     FROM scheduled_messages WHERE status = 'pending' ORDER BY send_at ASC`,
+  );
+  return rows.map(rowToScheduled);
+}
+
+export async function loadAllScheduled(): Promise<StoredScheduledMessage[]> {
+  const d = await db();
+  const rows = await d.getAllAsync<ScheduledRow>(
+    `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count
+     FROM scheduled_messages ORDER BY send_at ASC`,
+  );
+  return rows.map(rowToScheduled);
+}
+
+export async function markScheduledSent(id: string): Promise<void> {
+  const d = await db();
+  await d.runAsync(`UPDATE scheduled_messages SET status = 'sent' WHERE id = ?`, id);
+}
+
+export async function markScheduledFailed(id: string, retryCount: number): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `UPDATE scheduled_messages SET status = 'failed', retry_count = ? WHERE id = ?`,
+    retryCount,
+    id,
+  );
+}
+
+export async function incrementScheduledRetry(id: string, retryCount: number): Promise<void> {
+  const d = await db();
+  await d.runAsync(
+    `UPDATE scheduled_messages SET retry_count = ? WHERE id = ?`,
+    retryCount,
+    id,
+  );
+}
+
+export async function deleteScheduled(id: string): Promise<void> {
+  const d = await db();
+  await d.runAsync(`DELETE FROM scheduled_messages WHERE id = ?`, id);
 }

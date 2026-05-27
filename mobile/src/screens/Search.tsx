@@ -288,11 +288,25 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
         ListEmptyComponent={
           q.length > 0 ? (
             <View style={{ paddingHorizontal: 22, paddingVertical: 32, alignItems: 'center' }}>
+              <I.Search size={32} color={t.textFaint} style={{ marginBottom: 12 }} />
+              <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text, marginBottom: 6 }}>
+                {i18nT('search.noResultsTitle', 'No results')}
+              </Text>
               <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, textAlign: 'center' }}>
                 {i18nT('search.noResults')}
               </Text>
             </View>
-          ) : null
+          ) : (
+            <View style={{ paddingHorizontal: 22, paddingVertical: 48, alignItems: 'center' }}>
+              <I.Search size={40} color={t.textFaint} style={{ marginBottom: 16 }} />
+              <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text, marginBottom: 6 }}>
+                {i18nT('search.emptyTitle', 'Search AegisLink')}
+              </Text>
+              <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, textAlign: 'center', maxWidth: 280 }}>
+                {i18nT('search.emptyDesc', 'Find messages, contacts, files and groups')}
+              </Text>
+            </View>
+          )
         }
       />
     </View>

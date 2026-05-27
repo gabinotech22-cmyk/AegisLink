@@ -341,4 +341,63 @@ export const I = {
       <path d="M6 2v14a2 2 0 002 2h14M18 22V8a2 2 0 00-2-2H2" />
     </IconBase>
   ),
+  UserMinus: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M16 11c1.7 0 3-1.3 3-3s-1.3-3-3-3-3 1.3-3 3 1.3 3 3 3zM22 20c0-3.3-2.7-6-6-6s-6 2.7-6 6M1 15h8" />
+    </IconBase>
+  ),
+  ShieldCheck: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z" />
+      <path d="M9 12l2 2 4-4" />
+    </IconBase>
+  ),
+  ShieldOff: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M19.7 14a8.5 8.5 0 00.3-2V6l-9-4-3.7 1.6M4.7 4.7L3 6v6c0 4 2.5 7.4 7 9 1.7-.6 3.2-1.6 4.3-2.8M2 2l20 20" />
+    </IconBase>
+  ),
+  CheckCircle: (p: IconProps) => (
+    <IconBase {...p}>
+      <circle cx={12} cy={12} r={10} />
+      <path d="M9 12l2 2 4-4" />
+    </IconBase>
+  ),
+  MessageSquare: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </IconBase>
+  ),
+  Paperclip: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+    </IconBase>
+  ),
+  Download: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+    </IconBase>
+  ),
+  File: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+      <path d="M14 2v6h6" />
+    </IconBase>
+  ),
+  Hash: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M4 9h16M4 15h16M10 3l-2 18M16 3l-2 18" />
+    </IconBase>
+  ),
+  UserIcon: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+      <circle cx={12} cy={7} r={4} />
+    </IconBase>
+  ),
+  Loader: (p: IconProps) => (
+    <IconBase {...p}>
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </IconBase>
+  ),
 };

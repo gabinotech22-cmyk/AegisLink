@@ -33,7 +33,7 @@ interface Props {
 type Step = 'welcome' | 'generating' | 'show';
 
 export function OnboardingScreen({ onDone, onRestore }: Props) {
-  const { t } = useTheme();
+  const { t, dark, toggle } = useTheme();
   const { t: i18nT } = useTranslation();
   const { locale, setLocale } = useLocale();
   const insets = useSafeAreaInsets();
@@ -41,6 +41,9 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
   const { identity, generate } = useIdentity();
   const [fingerprint, setFingerprint] = useState<string[]>([]);
   const [did, setDid] = useState<string | null>(null);
+  // Tracks when the 'generating' step started so we can enforce a minimum
+  // animation duration of 2 s even on fast devices.
+  const generatingStartRef = useRef<number>(0);
 
   type RegistrationState = 'idle' | 'registering' | 'error';
   const [regState, setRegState] = useState<RegistrationState>('idle');
@@ -50,6 +53,7 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
 
   async function handleGenerate() {
     if (step !== 'welcome') return;
+    generatingStartRef.current = Date.now();
     setStep('generating');
     try {
       await generate();
@@ -59,11 +63,23 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
     }
   }
 
-  // Auto-transition from generating → show after 10s (matches prototype)
+  // Advance to 'show' as soon as identity is ready AND at least 2 s of
+  // animation have elapsed (so the spinner never flashes by on fast devices).
+  useEffect(() => {
+    if (step === 'generating' && identity) {
+      const elapsed = Date.now() - generatingStartRef.current;
+      const minDelay = Math.max(0, 2000 - elapsed);
+      const t = setTimeout(() => setStep('show'), minDelay);
+      return () => clearTimeout(t);
+    }
+  }, [step, identity]);
+
+  // Hard fallback: if generate() takes longer than 10 s (very slow device),
+  // advance anyway so the user is not stuck on the spinner indefinitely.
   useEffect(() => {
     if (step === 'generating') {
-      const timer = setTimeout(() => setStep('show'), 10000);
-      return () => clearTimeout(timer);
+      const fallback = setTimeout(() => setStep('show'), 10000);
+      return () => clearTimeout(fallback);
     }
   }, [step]);
 
@@ -81,15 +97,22 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
 
   async function handleEnter() {
     if (!identity) return;
-    // If we already confirmed registration in this session, skip straight through
     if (registeredRef.current) {
       onDone();
       return;
     }
     setRegState('registering');
     setRegError(null);
+
+    // Registration is best-effort. If the relay is unreachable, we proceed
+    // to Home anyway — the app works offline and will retry on next launch.
+    const TIMEOUT_MS = 12_000;
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS),
+    );
+
     try {
-      const { challenge, difficulty } = await fetchPowChallenge(RELAY_URL);
+      const { challenge, difficulty } = await Promise.race([fetchPowChallenge(RELAY_URL), timeout]);
       const nonce = await solvePoW(challenge, difficulty);
       const preKeys = generatePreKeys(identity);
       const result = await uploadIdentityAndPrekeys(
@@ -108,17 +131,16 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
           signatureB64: preKeys.signedPreKey.signatureB64,
         },
       );
-      if (!result.ok) {
-        setRegState('error');
-        setRegError(result.error ?? i18nT('onboarding.registrationFailed'));
-        return;
+      if (result.ok) {
+        registeredRef.current = true;
       }
-      registeredRef.current = true;
+      // Proceed to Home regardless of server response — identity is local
       setRegState('idle');
       onDone();
-    } catch (e) {
-      setRegState('error');
-      setRegError((e as Error).message ?? i18nT('onboarding.networkError'));
+    } catch {
+      // Network unavailable or timed out — go Home and retry on next session
+      setRegState('idle');
+      onDone();
     }
   }
 
@@ -128,8 +150,29 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
   if (step === 'welcome') {
     return (
       <View style={[styles.frame, { backgroundColor: t.bg }, containerPad]}>
-        {/* Language toggle — top-right */}
-        <View style={{ position: 'absolute', top: insets.top + 16, right: 24, zIndex: 10 }}>
+        {/* Top-right controls: theme toggle + language toggle */}
+        <View style={{ position: 'absolute', top: insets.top + 16, right: 24, zIndex: 10, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          {/* Dark / light toggle */}
+          <Pressable
+            onPress={toggle}
+            accessibilityLabel={dark ? i18nT('onboarding.switchLight', 'Switch to light mode') : i18nT('onboarding.switchDark', 'Switch to dark mode')}
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 99,
+              borderWidth: 1,
+              borderColor: t.border,
+              backgroundColor: t.surface2,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {dark
+              ? <I.Sun size={15} color={t.textDim} />
+              : <I.Moon size={15} color={t.textDim} />}
+          </Pressable>
+
+          {/* Language toggle */}
           <Pressable
             onPress={() => {
               if (locale === 'en') {

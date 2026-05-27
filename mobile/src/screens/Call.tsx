@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from 'react';
-import { View, Text, Pressable, StyleSheet, StatusBar as RNStatusBar, Alert } from 'react-native';
+import { useEffect, useState, useCallback } from 'react';
+import { View, Text, Pressable, StyleSheet, StatusBar as RNStatusBar, Alert, Modal } from 'react-native';
 import { sha256 } from '@noble/hashes/sha256';
+import { bytesToHex } from '@noble/hashes/utils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { WEBRTC_AVAILABLE } from '../runtime';
@@ -11,9 +12,8 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
-import { useIdentity } from '../store/identity';
 import { acceptCall, endCall, toggleMute, toggleCamera } from '../socket/calls';
-import { WORDLIST_256 } from '../crypto/wordlist';
+import { useProximitySensor } from '../hooks/useProximitySensor';
 
 interface Props {
   onClose: () => void;
@@ -31,39 +31,104 @@ export function CallScreen({ onClose }: Props) {
   const muted = useCall((s) => s.muted);
   const cameraOff = useCall((s) => s.cameraOff);
   const startedAt = useCall((s) => s.startedAt);
+  const activePeer = useCall((s) => s.activePeer);
 
   const peer = useContacts((s) => (peerId ? s.get(peerId) : undefined));
-  const { identity } = useIdentity();
   const peerName = peer?.name ?? peerId ?? 'unknown';
   const peerInitial = peerName.trim()[0]?.toUpperCase() ?? '?';
 
-  // Derive 8 safety words from sha256(myId + peerId)
-  const fingerprintWords = useMemo<string[]>(() => {
-    if (!identity?.aegisId || !peerId) return [];
-    try {
-      const hash = sha256(new TextEncoder().encode(identity.aegisId + peerId));
-      return Array.from({ length: 8 }, (_, i) => {
-        const idx = (hash[i * 4] + hash[i * 4 + 1] * 256) % 256;
-        return WORDLIST_256[idx] ?? '???';
-      });
-    } catch {
-      return [];
+  // Session fingerprint derived from DTLS certificate fingerprints in the SDP.
+  // This is session-specific: a new fingerprint is computed per call.
+  // null = not yet available (loading state); string = ready.
+  const [sessionFingerprint, setSessionFingerprint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (status !== 'in-call' || !activePeer) {
+      setSessionFingerprint(null);
+      return;
     }
-  }, [identity?.aegisId, peerId]);
+    const pc = activePeer.pc as unknown as {
+      localDescription?: { sdp?: string } | null;
+      remoteDescription?: { sdp?: string } | null;
+    };
+    const extractDTLS = (sdp: string): string | null => {
+      const match = /a=fingerprint:(\S+)\s+(\S+)/i.exec(sdp);
+      return match ? match[2] : null;
+    };
+    const localSdp = pc.localDescription?.sdp ?? '';
+    const remoteSdp = pc.remoteDescription?.sdp ?? '';
+    const local = extractDTLS(localSdp);
+    const remote = extractDTLS(remoteSdp);
+    if (!local || !remote) {
+      setSessionFingerprint(null);
+      return;
+    }
+    // Sort so both peers derive the same value regardless of caller/callee role.
+    const sorted = [local, remote].sort();
+    const hash = sha256(new TextEncoder().encode(sorted.join('|')));
+    const hex = bytesToHex(hash);
+    // Format as 8 groups of 4 chars: "A1B2 C3D4 …"
+    const groups = Array.from({ length: 8 }, (_, i) => hex.slice(i * 4, i * 4 + 4).toUpperCase());
+    setSessionFingerprint(groups.join(' '));
+  }, [status, activePeer]);
 
   // Auto-close after a brief "ended" state.
   useEffect(() => {
     if (status === 'idle') onClose();
   }, [status, onClose]);
 
-  const isVideo = media === 'video';
+  const [speakerOn, setSpeakerOn] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
 
-  // Background: remote video for video calls, solid surface for audio.
-  const showRemoteVideo = isVideo && remoteStream && status === 'in-call';
+  const toggleSpeaker = useCallback(async () => {
+    const next = !speakerOn;
+    setSpeakerOn(next);
+    try {
+      const { Audio } = require('expo-av') as typeof import('expo-av');
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: false,
+        playThroughEarpieceAndroid: !next, // false = speaker, true = earpiece
+      });
+    } catch { /* no-op */ }
+  }, [speakerOn]);
+
+  const isVideo = media === 'video';
+  const peerColor = peer?.color ?? t.surface2;
+
+  const callActive = status === 'in-call' || status === 'connecting';
+  useProximitySensor(!isVideo && callActive);
+
+  // Remote video ready (in-call + stream)
+  const showRemoteVideo = isVideo && !!remoteStream && status === 'in-call';
+  // Local video fills background while waiting for remote (pre-connect)
+  const showLocalFullscreen = isVideo && !!localStream && !cameraOff && !showRemoteVideo;
 
   return (
-    <View style={[styles.screen, { backgroundColor: isVideo ? '#000' : t.bg }]}>
+    <View style={[styles.screen, { backgroundColor: '#000' }]}>
       <RNStatusBar barStyle="light-content" />
+
+      {/* ── AUDIO call: radial gradient background ── */}
+      {!isVideo && (
+        <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+          <View style={{ position: 'absolute', top: -120, left: -100, width: 500, height: 500, borderRadius: 9999, backgroundColor: peerColor, opacity: 0.33 }} />
+          <View style={{ position: 'absolute', bottom: -80, right: -80, width: 400, height: 400, borderRadius: 9999, backgroundColor: t.accent, opacity: 0.13 }} />
+        </View>
+      )}
+
+      {/* ── VIDEO: local camera fills screen while connecting ── */}
+      {showLocalFullscreen && RTCView && (
+        <RTCView
+          style={StyleSheet.absoluteFillObject}
+          streamURL={(localStream as unknown as { toURL: () => string }).toURL()}
+          objectFit="cover"
+          mirror
+        />
+      )}
+
+      {/* ── VIDEO: remote camera fills screen when in-call ── */}
       {showRemoteVideo && RTCView && (
         <RTCView
           style={StyleSheet.absoluteFillObject}
@@ -72,132 +137,123 @@ export function CallScreen({ onClose }: Props) {
         />
       )}
 
-      {/* Local self-view (small, top-right) for video */}
-      {isVideo && localStream && !cameraOff && (
-        <View
-          style={{
-            position: 'absolute',
-            top: insets.top + 12,
-            right: 12,
-            width: 110,
-            height: 150,
-            borderRadius: 12,
-            overflow: 'hidden',
-            backgroundColor: t.surface,
-            borderWidth: 1,
-            borderColor: t.borderStrong,
-            zIndex: 3,
-          }}
-        >
-          {RTCView && (
-            <RTCView
-              style={StyleSheet.absoluteFillObject}
-              streamURL={(localStream as unknown as { toURL: () => string }).toURL()}
-              objectFit="cover"
-              mirror
-            />
-          )}
-        </View>
-      )}
 
-      {/* Top: peer name + status */}
-      <View style={{ paddingTop: insets.top + 32, alignItems: 'center', zIndex: 2 }}>
-        {!showRemoteVideo && (
-          <View
+      {/* Top: peer info (left) + self-preview (right) — matches JSX design */}
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          paddingTop: insets.top + 22,
+          paddingHorizontal: 22,
+          zIndex: 2,
+        }}
+      >
+        {/* Left: badge + name + timer + avatar (audio only) */}
+        <View style={{ flex: 1, paddingRight: 16 }}>
+          {/* Avatar: only for AUDIO calls */}
+          {!isVideo && (
+            <View
+              style={{
+                width: 80,
+                height: 80,
+                borderRadius: 40,
+                backgroundColor: peerColor,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 16,
+              }}
+            >
+              <Text style={{ fontFamily: t.fontDisplay, fontSize: 34, color: '#fff', fontWeight: '600' }}>
+                {peerInitial}
+              </Text>
+            </View>
+          )}
+
+          {/* E2EE badge */}
+          <Pressable
+            onPress={() => Alert.alert(i18nT('call.alertTitle', 'End-to-End Encrypted Call'), i18nT('call.alertDesc', 'This call uses DTLS-SRTP with ephemeral CURVE25519 key exchange. No server can decrypt or intercept the audio/video stream.'))}
+            accessibilityLabel="E2EE call info"
             style={{
-              width: 100,
-              height: 100,
-              borderRadius: 50,
-              backgroundColor: t.surface2,
+              flexDirection: 'row',
               alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 22,
+              gap: 6,
+              alignSelf: 'flex-start',
+              paddingHorizontal: 10,
+              paddingVertical: 4,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              borderRadius: 99,
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.1)',
             }}
           >
-            <Text style={{ fontFamily: t.fontDisplay, fontSize: 42, color: t.accent, fontWeight: '600' }}>
-              {peerInitial}
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.accent }} />
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.8 }}>
+              {i18nT('call.badgeShort', 'E2EE · ENCRYPTED')}
             </Text>
+          </Pressable>
+
+          <Text
+            style={{
+              fontFamily: /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(peerName) ? t.fontMono : t.fontDisplay,
+              fontSize: 26,
+              color: '#fff',
+              fontWeight: '600',
+              letterSpacing: -0.5,
+              marginTop: 12,
+            }}
+          >
+            {peerName}
+          </Text>
+
+          <Text
+            style={{
+              fontFamily: t.fontMono,
+              fontSize: 13,
+              color: 'rgba(255,255,255,0.7)',
+              marginTop: 4,
+              letterSpacing: 0.5,
+            }}
+          >
+            {labelFor(status, startedAt, i18nT)}
+          </Text>
+        </View>
+
+        {/* Right: self-preview (90×130) — video only */}
+        {isVideo && (
+          <View
+            style={{
+              width: 90,
+              height: 130,
+              borderRadius: 10,
+              overflow: 'hidden',
+              backgroundColor: `${t.accent}22`,
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.15)',
+            }}
+          >
+            {localStream && !cameraOff && RTCView ? (
+              <RTCView
+                style={{ flex: 1 }}
+                streamURL={(localStream as unknown as { toURL: () => string }).toURL()}
+                objectFit="cover"
+                mirror
+              />
+            ) : (
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: 'rgba(255,255,255,0.5)' }}>OFF</Text>
+              </View>
+            )}
+            {/* "YOU" label — bottom-right */}
+            <View style={{ position: 'absolute', bottom: 6, right: 7 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5 }}>YOU</Text>
+            </View>
           </View>
         )}
-        <Text
-          style={{
-            fontFamily: t.fontDisplay,
-            fontSize: 24,
-            color: isVideo ? '#fff' : t.text,
-            fontWeight: '600',
-            letterSpacing: -0.4,
-          }}
-        >
-          {peerName}
-        </Text>
-
-        {/* E2EE badge */}
-        <Pressable
-          onPress={() => Alert.alert(i18nT('call.alertTitle', 'End-to-End Encrypted Call'), i18nT('call.alertDesc', 'This call uses DTLS-SRTP with ephemeral CURVE25519 key exchange. No server can decrypt or intercept the audio/video stream.'))}
-          accessibilityLabel="E2EE call info"
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 4,
-            marginTop: 8,
-            paddingHorizontal: 10,
-            paddingVertical: 4,
-            backgroundColor: `${t.accent}22`,
-            borderRadius: 99,
-            borderWidth: 1,
-            borderColor: `${t.accent}44`,
-          }}
-        >
-          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 1 }}>
-            {i18nT('call.badgeText', '🔒 E2EE · CURVE25519 · SRTP')}
-          </Text>
-        </Pressable>
-
-        <Text
-          style={{
-            fontFamily: t.fontMono,
-            fontSize: 12,
-            color: isVideo ? 'rgba(255,255,255,0.7)' : t.textDim,
-            marginTop: 8,
-            letterSpacing: 0.5,
-          }}
-        >
-          {labelFor(status, startedAt, i18nT)}
-        </Text>
-
-        {/* Fingerprint card (show when in-call) */}
-        {status === 'in-call' && fingerprintWords.length === 8 ? (
-          <View
-            style={{
-              marginTop: 16,
-              marginHorizontal: 24,
-              padding: 12,
-              backgroundColor: t.surface,
-              borderWidth: 1,
-              borderColor: t.border,
-              borderRadius: t.radius,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1, marginBottom: 8 }}>
-              {i18nT('call.fingerprintTitle', 'CALL FINGERPRINT')}
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
-              {fingerprintWords.map((w, i) => (
-                <Text key={i} style={{ fontFamily: t.fontMono, fontSize: 12, color: t.text }}>
-                  {w}
-                </Text>
-              ))}
-            </View>
-            <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, marginTop: 8, textAlign: 'center' }}>
-              {i18nT('call.fingerprintDesc', 'Compare with your contact to verify')}
-            </Text>
-          </View>
-        ) : null}
       </View>
 
-      {/* Flip camera button for video */}
-      {isVideo && localStream && !cameraOff ? (
+      {/* Flip camera button for video — bottom-left overlay */}
+      {(isVideo && !!localStream) ? (
         <Pressable
           onPress={() => {
             try {
@@ -223,6 +279,138 @@ export function CallScreen({ onClose }: Props) {
         </Pressable>
       ) : null}
 
+      {/* Session fingerprint card — just above bottom controls */}
+      {status === 'in-call' ? (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: insets.bottom + 120,
+            left: 24,
+            right: 24,
+            padding: 12,
+            backgroundColor: isVideo ? 'rgba(0,0,0,0.55)' : t.surface,
+            borderWidth: 1,
+            borderColor: isVideo ? 'rgba(255,255,255,0.1)' : t.border,
+            borderRadius: t.radius,
+            alignItems: 'center',
+            zIndex: 3,
+          }}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1 }}>
+              {i18nT('call.sessionFingerprintTitle', 'SESSION FINGERPRINT')}
+            </Text>
+            {sessionFingerprint ? <I.Check size={14} color={t.accent} /> : null}
+          </View>
+          {sessionFingerprint ? (
+            <>
+              <Text
+                style={{ fontFamily: t.fontMono, fontSize: 13, color: '#fff', marginTop: 8, letterSpacing: 1.2, textAlign: 'center' }}
+                accessibilityLabel={`Session fingerprint: ${sessionFingerprint}`}
+              >
+                {sessionFingerprint}
+              </Text>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginTop: 6, textAlign: 'center' }}>
+                {i18nT('call.fingerprintDesc', 'Compare with your contact to verify')}
+              </Text>
+            </>
+          ) : (
+            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, marginTop: 8, textAlign: 'center' }}>
+              {i18nT('call.fingerprintPending', 'Deriving session fingerprint…')}
+            </Text>
+          )}
+        </View>
+      ) : null}
+
+      {/* More options bottom sheet */}
+      <Modal
+        transparent
+        visible={moreOpen}
+        animationType="slide"
+        onRequestClose={() => setMoreOpen(false)}
+      >
+        <Pressable
+          onPress={() => setMoreOpen(false)}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation?.()}
+            style={{
+              backgroundColor: t.surface,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              borderTopWidth: 1,
+              borderColor: t.border,
+              paddingTop: 12,
+              paddingBottom: insets.bottom + 20,
+            }}
+          >
+            {/* Handle */}
+            <View style={{ alignItems: 'center', paddingBottom: 14 }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.border }} />
+            </View>
+
+            {/* Option: Teclado */}
+            <Pressable
+              onPress={() => { setMoreOpen(false); /* keypad TODO */ }}
+              accessibilityRole="button"
+              accessibilityLabel={i18nT('call.keypad', 'Teclado')}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 16,
+                paddingHorizontal: 24, paddingVertical: 16,
+                backgroundColor: pressed ? t.surface2 : 'transparent',
+              })}
+            >
+              <Text style={{ fontSize: 18, color: t.text, letterSpacing: 3 }}>···</Text>
+              <Text style={{ fontFamily: t.font, fontSize: 16, color: t.text }}>
+                {i18nT('call.keypad', 'Teclado')}
+              </Text>
+            </Pressable>
+
+            {/* Option: Añadir al grupo */}
+            <Pressable
+              onPress={() => { setMoreOpen(false); /* group add TODO */ }}
+              accessibilityRole="button"
+              accessibilityLabel={i18nT('call.addToGroup', 'Añadir al grupo')}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 16,
+                paddingHorizontal: 24, paddingVertical: 16,
+                backgroundColor: pressed ? t.surface2 : 'transparent',
+              })}
+            >
+              <I.Users size={22} color={t.text} />
+              <Text style={{ fontFamily: t.font, fontSize: 16, color: t.text }}>
+                {i18nT('call.addToGroup', 'Añadir al grupo')}
+              </Text>
+            </Pressable>
+
+            {/* Option: Verificar huella */}
+            <Pressable
+              onPress={() => { setMoreOpen(false); /* show fingerprint */ }}
+              accessibilityRole="button"
+              accessibilityLabel={i18nT('call.verifyFingerprint', 'Verificar huella')}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 16,
+                paddingHorizontal: 24, paddingVertical: 16,
+                backgroundColor: pressed ? t.surface2 : 'transparent',
+              })}
+            >
+              <I.Shield size={22} color={t.accent} />
+              <View>
+                <Text style={{ fontFamily: t.font, fontSize: 16, color: t.text }}>
+                  {i18nT('call.verifyFingerprint', 'Verificar huella')}
+                </Text>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, marginTop: 2 }}>
+                  {sessionFingerprint
+                    ? sessionFingerprint.slice(0, 19)
+                    : i18nT('call.fingerprintPending', 'Deriving session fingerprint…')}
+                </Text>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Bottom controls */}
       <View
         style={{
@@ -240,30 +428,52 @@ export function CallScreen({ onClose }: Props) {
             <CircleBtn t={t} color={t.accent} onPress={() => void acceptCall()} icon="Check" label={i18nT('incomingCall.accept', 'Accept')} />
           </View>
         ) : (
-          <View style={{ flexDirection: 'row', gap: 28, justifyContent: 'center' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 4, width: '100%', paddingLeft: 24, paddingRight: 24 }}>
+            {/* Mic — filled+warn+MicOff icon when muted, outlined+Mic when active */}
             <CircleBtn
               t={t}
               color={muted ? t.warn : t.surface2}
               onPress={toggleMute}
               icon="Mic"
               label={muted ? i18nT('call.unmute', 'Unmute') : i18nT('call.mute', 'Mute')}
-              accessibilityLabel={muted ? i18nT('call.muteA11y', 'Mute: active') : i18nT('call.muteA11yOff', 'Mute: inactive')}
+              accessibilityLabel={muted ? i18nT('call.muteA11y', 'Muted') : i18nT('call.muteA11yOff', 'Mic on')}
               accessibilityState={{ selected: muted }}
-              outlined
+              outlined={!muted}
+              active={muted}
             />
+            {/* Camera — filled+warn when off, outlined when on */}
             {isVideo && (
               <CircleBtn
                 t={t}
                 color={cameraOff ? t.warn : t.surface2}
                 onPress={toggleCamera}
                 icon="Video"
-                label={cameraOff ? i18nT('call.cameraOn', 'Camera on') : i18nT('call.cameraOff', 'Camera off')}
-                accessibilityLabel={cameraOff ? i18nT('call.cameraA11yOff', 'Camera: off') : i18nT('call.cameraA11yOn', 'Camera: on')}
+                label={cameraOff ? i18nT('call.cameraOn', 'Cam on') : i18nT('call.cameraOff', 'Cam off')}
+                accessibilityLabel={cameraOff ? i18nT('call.cameraA11yOff', 'Camera off') : i18nT('call.cameraA11yOn', 'Camera on')}
                 accessibilityState={{ selected: cameraOff }}
-                outlined
+                outlined={!cameraOff}
               />
             )}
-            <CircleBtn t={t} color={t.danger} onPress={() => endCall('hangup')} icon="Hangup" label={i18nT('call.end', 'End')} />
+            {/* Speaker — filled+accent when on, outlined when off */}
+            <CircleBtn
+              t={t}
+              color={speakerOn ? t.accent : t.surface2}
+              onPress={() => void toggleSpeaker()}
+              icon="Speaker"
+              label={speakerOn ? i18nT('call.speakerOn', 'Speaker') : i18nT('call.speakerOff', 'Earpiece')}
+              accessibilityLabel={speakerOn ? 'Speaker: on' : 'Speaker: off'}
+              accessibilityState={{ selected: speakerOn }}
+              outlined={!speakerOn}
+            />
+            <CircleBtn
+              t={t}
+              color={t.surface2}
+              onPress={() => setMoreOpen(true)}
+              icon="More"
+              label={i18nT('call.more', 'Más')}
+              outlined
+            />
+            <CircleBtn t={t} color={t.danger} onPress={() => endCall('hangup')} icon="Hangup" label={i18nT('call.end', 'End')} large />
           </View>
         )}
       </View>
@@ -302,18 +512,24 @@ function CircleBtn({
   icon,
   label,
   outlined = false,
+  large = false,
+  active = false,
   accessibilityLabel: a11yLabel,
   accessibilityState,
 }: {
   t: Theme;
   color: string;
   onPress: () => void;
-  icon: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup';
+  icon: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker' | 'More';
   label: string;
   outlined?: boolean;
+  large?: boolean;
+  active?: boolean;
   accessibilityLabel?: string;
   accessibilityState?: { selected?: boolean; disabled?: boolean };
 }) {
+  const size = large ? 64 : 54;
+  const r = size / 2;
   return (
     <Pressable
       onPress={onPress}
@@ -327,17 +543,17 @@ function CircleBtn({
     >
       <View
         style={{
-          width: 64,
-          height: 64,
-          borderRadius: 32,
-          backgroundColor: outlined ? 'transparent' : color,
-          borderWidth: outlined ? 1 : 0,
-          borderColor: color,
+          width: size,
+          height: size,
+          borderRadius: r,
+          backgroundColor: outlined ? 'rgba(255,255,255,0.06)' : color,
+          borderWidth: 1,
+          borderColor: outlined ? 'rgba(255,255,255,0.15)' : 'transparent',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        <IconGlyph name={icon} color={outlined ? color : t.bg} />
+        <IconGlyph name={icon} color={outlined ? '#fff' : t.bg} active={active} />
       </View>
       <Text
         style={{
@@ -354,12 +570,15 @@ function CircleBtn({
   );
 }
 
-function IconGlyph({ name, color }: { name: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup'; color: string }) {
-  // Inline tiny glyphs avoiding wider Icon imports.
+function IconGlyph({ name, color, active }: { name: 'X' | 'Check' | 'Mic' | 'Video' | 'Hangup' | 'Speaker' | 'More'; color: string; active?: boolean }) {
+  if (name === 'More') return <I.More size={22} color={color} />;
   if (name === 'X') return <I.X size={26} color={color} />;
   if (name === 'Check') return <I.Check size={26} color={color} />;
-  // Use simple text glyphs for mic/video/hangup to avoid expanding the icon set further.
-  const ch = name === 'Mic' ? '🎙' : name === 'Video' ? '📷' : '☎';
+  if (name === 'Speaker') return <I.Volume size={22} color={color} />;
+  // Mic: show MicOff when active (muted state)
+  if (name === 'Mic') return active ? <I.MicOff size={22} color={color} /> : <I.Mic size={22} color={color} />;
+  // Video/Hangup: emoji fallback
+  const ch = name === 'Video' ? '📷' : '☎';
   return (
     <Text style={{ fontSize: 22, color, transform: name === 'Hangup' ? [{ rotate: '135deg' }] : undefined }}>
       {ch}

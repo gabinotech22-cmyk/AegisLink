@@ -21,8 +21,9 @@ let _openHandler: NotificationOpenHandler | null = null;
  * Never includes message content in the title/body beyond the sender name —
  * consistent with the mobile wake-up-only policy.
  */
-export async function showNotification(title: string, body: string): Promise<void> {
-  await window.aegis.notifications.show(title, body);
+// M-3: body is intentionally ignored — main process always shows a generic body.
+export async function showNotification(_title: string, _body: string): Promise<void> {
+  await window.aegis.notifications.show('AegisLink', '');
 }
 
 /**
@@ -39,16 +40,13 @@ export async function showNotification(title: string, body: string): Promise<voi
  */
 export async function showIncomingNotification(
   _contactId: string,
-  senderName: string,
+  _senderName: string,
   _body: string,
-  isGroup: boolean,
-  groupName?: string,
+  _isGroup: boolean,
+  _groupName?: string,
 ): Promise<void> {
-  const title = isGroup && groupName ? groupName : 'AegisLink';
-  const notifBody = isGroup && groupName
-    ? `New message from ${senderName}`
-    : `New message from ${senderName}`;
-  await window.aegis.notifications.show(title, notifBody);
+  // M-3: title and body are generic — no plaintext message content on the wire.
+  await window.aegis.notifications.show('AegisLink', '');
 }
 
 /**
