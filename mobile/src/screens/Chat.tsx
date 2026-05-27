@@ -176,9 +176,30 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   }, [contact.aegisId, loadChat, markRead]);
 
   const isNearBottomRef = useRef(true);
+  const hasInitialScrolledRef = useRef(false);
+
+  // Reset the initial-scroll guard whenever we switch to a different chat so
+  // each conversation always scrolls to its latest message on open.
+  useEffect(() => {
+    hasInitialScrolledRef.current = false;
+  }, [contact.aegisId]);
 
   useEffect(() => {
-    if (list.length > 0 && isNearBottomRef.current) {
+    if (list.length === 0) return;
+    if (!hasInitialScrolledRef.current) {
+      // First load: give the FlatList 120 ms to finish measuring all items
+      // before calling scrollToEnd. requestAnimationFrame fires before layout
+      // is complete when the list transitions from 0 → N items in one cycle,
+      // resulting in a no-op or partial scroll.
+      hasInitialScrolledRef.current = true;
+      const timer = setTimeout(() => {
+        flatlistRef.current?.scrollToEnd({ animated: false });
+        isNearBottomRef.current = true;
+      }, 120);
+      return () => clearTimeout(timer);
+    }
+    if (isNearBottomRef.current) {
+      // New message arrived while the user is already near the bottom — follow.
       requestAnimationFrame(() => flatlistRef.current?.scrollToEnd({ animated: true }));
     }
   }, [list.length]);
@@ -891,6 +912,15 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             </View>
           )}
           ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
+          onContentSizeChange={() => {
+            // Backup: if the timer-based scroll hasn't fired yet when the list
+            // finishes laying out (e.g. fast device), trigger it immediately.
+            if (!hasInitialScrolledRef.current && list.length > 0) {
+              hasInitialScrolledRef.current = true;
+              flatlistRef.current?.scrollToEnd({ animated: false });
+              isNearBottomRef.current = true;
+            }
+          }}
           onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
             isNearBottomRef.current =
               contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
