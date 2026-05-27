@@ -125,7 +125,9 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
   useEffect(() => {
     return () => {
       clearInterval(intervalRef.current ?? undefined);
-      void recordingRef.current?.stopAndUnloadAsync().catch(() => {});
+      const rec = recordingRef.current;
+      recordingRef.current = null;
+      void rec?.stopAndUnloadAsync().catch(() => {});
       void soundRef.current?.unloadAsync().catch(() => {});
     };
   }, []);
@@ -325,6 +327,11 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
   // ── Audio recording ─────────────────────────────────────────────────────────
 
   async function startAudioRecording() {
+    // Stop and unload any previous recording that wasn't cleaned up
+    if (recordingRef.current) {
+      try { await recordingRef.current.stopAndUnloadAsync(); } catch { /* ignore */ }
+      recordingRef.current = null;
+    }
     try {
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) { Alert.alert(i18nT('voiceRecorder.permissionTitle'), i18nT('voiceRecorder.permissionMessage')); return; }

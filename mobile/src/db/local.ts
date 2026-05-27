@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
+import { ss } from '../utils/secureStore';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { secretKeySlot, signSecretKeySlot, dbEncKeySlot } from '../crypto/types';
@@ -301,6 +302,11 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
       );
 
       return d;
+    }).catch((err) => {
+      // Reset so the next call retries cleanly instead of re-returning
+      // this permanently-rejected promise (which causes infinite NPE crashes).
+      dbPromise = null;
+      throw err;
     });
   }
   return dbPromise;
@@ -524,11 +530,11 @@ let cachedDbKey: Uint8Array | null = null;
 async function getDbKey(): Promise<Uint8Array> {
   if (cachedDbKey) return cachedDbKey;
   const slotKey = getDbEncKeySlot();
-  let keyB64 = await SecureStore.getItemAsync(slotKey);
+  let keyB64 = await ss.get(slotKey);
   if (!keyB64) {
     const keyBytes = nacl.randomBytes(32);
     keyB64 = encodeBase64(keyBytes);
-    await SecureStore.setItemAsync(slotKey, keyB64);
+    await ss.set(slotKey, keyB64);
   }
   cachedDbKey = decodeBase64(keyB64);
   return cachedDbKey;
