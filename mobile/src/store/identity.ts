@@ -177,7 +177,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor);
     await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', activeSlotId));
 
-    await publishToServer(identity);
+    // Mark ready immediately — identity is already saved locally.
+    // Server registration is best-effort and must never block onboarding.
     set({
       identity,
       displayName: defaultName,
@@ -186,6 +187,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       profileStatus: '',
       status: 'ready'
     });
+    // Fire-and-forget: register with server in background after UI has moved on.
+    void publishToServer(identity);
     return identity;
   },
 
