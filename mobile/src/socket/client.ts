@@ -61,6 +61,13 @@ let authenticated = false;
 let opkSecretsCache: Map<number, Uint8Array> = new Map();
 let mySpkSecretCache: Uint8Array | null = null;
 
+// ── Per-session profile image tracking ───────────────────────────────────────
+// We send senderImage only on the FIRST message to each contact per session to
+// avoid embedding a 50–100 KB base64 blob in every single envelope. The Set is
+// cleared when the socket disconnects so each new session re-sends the image to
+// every contact once, ensuring fresh data after an identity update.
+const profiledContacts = new Set<string>();
+
 // ── Offline message queue ─────────────────────────────────────────────────────
 interface QueuedSend {
   msgId: string;
@@ -1130,14 +1137,16 @@ async function decryptAndAppend(
       ) {
         finalBody = parsedPayload.text;
 
-        // Dynamically update contact name/color/status on every message
-        // (image updates only come via dedicated profile_update broadcasts)
+        // Dynamically update contact name/color/image/status on every message.
+        // senderImage is populated only on the first message per session from
+        // the sender (see profiledContacts in sendMessage). Passing undefined
+        // when absent preserves the previously stored avatar.
         if (parsedPayload.senderName) {
           void useContacts.getState().updateContactProfile(
             contact.aegisId,
             parsedPayload.senderName,
             parsedPayload.senderColor,
-            undefined,
+            parsedPayload.senderImage ?? undefined,
             parsedPayload.senderStatus ?? undefined
           );
         }
@@ -1714,6 +1723,9 @@ export function disconnect(): void {
     connected = false;
     authenticated = false;
   }
+  // Reset per-session profile image tracking so each new session re-sends the
+  // image on the first message to each contact (ensures freshness after updates).
+  profiledContacts.clear();
 }
 
 export async function sendMessage(opts: {
@@ -1772,12 +1784,23 @@ export async function sendMessage(opts: {
     return; // resolve silently — UI shows "EN COLA" via !online indicator
   }
 
+  // Include senderImage only on the first message to each contact per session.
+  // This avoids embedding a large base64 blob in every envelope while still
+  // ensuring the recipient always has an up-to-date avatar.
+  const rawImage = idState.avatarImage;
+  let senderImage: string | null = null;
+  if (!profiledContacts.has(opts.recipientAegisId)) {
+    senderImage = await toDataUri(rawImage);
+    if (senderImage) profiledContacts.add(opts.recipientAegisId);
+  }
+
   const payloadObj = {
     type: msgType,
     text: opts.plaintext,
     senderName,
     senderColor,
     senderStatus,
+    senderImage,
     replyToId: opts.replyToId,
     expiresAt,
   };
