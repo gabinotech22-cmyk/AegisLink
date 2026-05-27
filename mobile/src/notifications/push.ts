@@ -163,6 +163,17 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
     registered = true;
     if (__DEV__) console.log('[push] registered for wake-ups, token:', expoToken);
 
+    // When the app moves to the background or becomes inactive, clear activeChatId
+    // so that notifications are shown for the previously-focused chat. Without this,
+    // a user who backgrounds the app while in a chat would never receive banners for
+    // new messages in that chat until the app is foregrounded and navigated away.
+    const { AppState } = require('react-native') as typeof import('react-native');
+    AppState.addEventListener('change', (nextState: string) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        activeChatId = null;
+      }
+    });
+
     // Register notification action categories (Reply + Mark as read)
     await Notifications.setNotificationCategoryAsync('aegislink-message', [
       {
