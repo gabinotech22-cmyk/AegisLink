@@ -3,6 +3,12 @@ import { Platform } from 'react-native';
 import { SERVER_URL } from '../config';
 import type { Identity } from '../crypto/identity';
 
+function makeSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
 /**
  * Push wake-ups: register the Expo push token for our Aegis ID so the server
  * can ping us when an envelope arrives while we're offline.
@@ -82,6 +88,7 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
     const res = await fetch(`${SERVER_URL}/push/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      signal: makeSignal(10_000),
       body: JSON.stringify({ aegisId: identity.aegisId, expoToken, platform }),
     });
     if (!res.ok) {
@@ -200,6 +207,7 @@ export async function unregisterPush(aegisId: string): Promise<void> {
     await fetch(`${SERVER_URL}/push/unregister`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      signal: makeSignal(8_000),
       body: JSON.stringify({ aegisId }),
     });
   } catch { /* best effort */ }

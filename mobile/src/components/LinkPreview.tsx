@@ -60,7 +60,7 @@ export function LinkPreview({ url, t }: Props) {
     void (async () => {
       try {
         const res = await fetch(url, {
-          signal: AbortSignal.timeout(5000),
+          signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 5000); return c.signal; })(),
           // Only need the first ~8 KB to find OG meta tags in <head>
           headers: { Range: 'bytes=0-8191' },
         });

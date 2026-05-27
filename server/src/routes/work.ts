@@ -5,6 +5,17 @@ import nacl from 'tweetnacl';
 import tweetnaclUtil from 'tweetnacl-util';
 const { decodeBase64 } = tweetnaclUtil;
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
+
+const workLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
+  },
+});
 import { identityRepo, workRepo, workspaceRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -114,6 +125,7 @@ function audit(orgId: string, kind: string, message: string, opts?: AuditOpts): 
 
 export function createWorkRouter(io: SocketServer): Router {
 const router = Router();
+router.use(workLimiter);
 
 // POST /work/org — create a new work org (requires Ed25519 proof of adminId ownership)
 router.post('/org', async (req, res) => {

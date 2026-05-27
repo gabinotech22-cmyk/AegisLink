@@ -84,7 +84,7 @@ export async function fetchTurnConfig(aegisId: string, forceRelay: boolean = tru
   try {
     const res = await fetch(
       `${SERVER_URL}/turn/credentials?aegisId=${encodeURIComponent(aegisId)}`,
-      { signal: AbortSignal.timeout(3000) },
+      { signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 3000); return c.signal; })() },
     );
     if (!res.ok) return rtcConfig(forceRelay);
     const { username, password } = (await res.json()) as {
