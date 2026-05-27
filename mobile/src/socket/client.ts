@@ -3,6 +3,7 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
+import { Alert } from 'react-native';
 import { SERVER_URL, ONION_URL } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope } from '../crypto/messaging';
@@ -384,8 +385,14 @@ export function connect(identity: Identity): Socket {
     if (__DEV__) console.log('[socket] disconnected:', reason);
   });
 
-  socket.on('error_msg', async (e: { code?: string }) => {
+  socket.on('error_msg', async (e: { code?: string; for?: string }) => {
     if (__DEV__) console.warn('[socket] server error:', e);
+    if (e?.code === 'peer_offline') {
+      // The relay couldn't deliver our call:invite — callee is not connected.
+      const { endCall } = require('./calls') as typeof import('./calls');
+      endCall('peer_offline');
+      Alert.alert('Contact offline', 'The contact is not currently connected to the server. Try again later.');
+    }
     if (e?.code === 'unknown_identity') {
       // Server doesn't know us — re-register with PoW then reconnect.
       if (__DEV__) console.log('[socket] unknown_identity — re-registering and reconnecting');

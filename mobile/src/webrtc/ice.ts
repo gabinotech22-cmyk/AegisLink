@@ -38,7 +38,11 @@ const TURN_PASSWORD = (process.env.EXPO_PUBLIC_TURN_PASSWORD as string | undefin
  */
 export function rtcConfig(forceRelay: boolean = true): RTCConfigShape {
   const iceServers: RTCConfigShape['iceServers'] = [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    { urls: [
+      'stun:stun.l.google.com:19302',
+      'stun:stun1.l.google.com:19302',
+      'stun:stun.cloudflare.com:3478',
+    ] },
   ];
   if (TURN_URL) {
     iceServers.push({
@@ -93,7 +97,11 @@ export async function fetchTurnConfig(aegisId: string, forceRelay: boolean = tru
       ttl: number;
     };
     const iceServers: RTCConfigShape['iceServers'] = [
-      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+      { urls: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+        'stun:stun.cloudflare.com:3478',
+      ] },
     ];
     if (TURN_URL) {
       iceServers.push({ urls: TURN_URL, username, credential: password });
