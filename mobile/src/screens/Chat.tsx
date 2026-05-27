@@ -105,6 +105,8 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const setPendingMedia = useMessages((s) => s.setPendingMedia);
   const markRead = useMessages((s) => s.markRead);
   const saveDraft = useMessages((s) => s.saveDraft);
+  // Ephemeral timer state — read live so the indicator updates immediately
+  const ephemeralSecs = useMessages((s) => s.ephemeralTimers[contact.aegisId] ?? 0);
   const savedDraft = useMessages((s) => s.drafts[contact.aegisId] ?? '');
 
   const [draft, setDraft] = useState(savedDraft);
@@ -1034,19 +1036,26 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 </View>
               )}
 
-              <Pressable onPress={onAttach} hitSlop={6} style={{ padding: 6 }}>
+              {/* ── Attach / expand button ────────────────────────────── */}
+              <Pressable onPress={onAttach} hitSlop={8} style={{ padding: 6 }} accessibilityLabel="Adjuntar archivo">
                 <I.Attach size={22} color={t.textDim} />
               </Pressable>
-              <Pressable
-                onPress={() => setGifPickerVisible(true)}
-                hitSlop={6}
-                style={{ padding: 6 }}
-                accessibilityLabel="Open GIF picker"
-              >
-                <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
-                  GIF
-                </Text>
-              </Pressable>
+
+              {/* ── GIF — only visible when input is empty (disappears while typing) ── */}
+              {!draft.trim() && !stagedImageUri && (
+                <Pressable
+                  onPress={() => setGifPickerVisible(true)}
+                  hitSlop={8}
+                  style={{ padding: 6 }}
+                  accessibilityLabel="Abrir selector de GIF"
+                >
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
+                    GIF
+                  </Text>
+                </Pressable>
+              )}
+
+              {/* ── Input field ────────────────────────────────────────── */}
               <TextInput
                 value={draft}
                 onChangeText={handleDraftChange}
@@ -1064,28 +1073,33 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                   paddingHorizontal: 16,
                   paddingVertical: Platform.OS === 'ios' ? 10 : 6,
                   maxHeight: 120,
+                  // Subtle accent border when ephemeral timer is active
+                  borderWidth: ephemeralSecs > 0 ? 1.5 : 0,
+                  borderColor: ephemeralSecs > 0 ? t.accent : 'transparent',
                 }}
               />
-              <Pressable onPress={onEphemeral} hitSlop={6} style={{ padding: 6 }} accessibilityLabel="Mensajes efimeros">
-                <I.Timer size={22} color={t.textDim} />
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  if (!draft.trim()) return;
-                  setShowScheduler(true);
-                }}
-                hitSlop={6}
-                style={{ padding: 6, opacity: draft.trim() ? 1 : 0.35 }}
-                accessibilityLabel="Programar mensaje"
-              >
-                <I.Timer size={22} color={pendingScheduledCount > 0 ? t.accent : t.textDim} />
-              </Pressable>
+
+              {/* ── Ephemeral indicator — only when timer is active ────── */}
+              {ephemeralSecs > 0 && (
+                <Pressable
+                  onPress={onEphemeral}
+                  hitSlop={8}
+                  style={{ padding: 6 }}
+                  accessibilityLabel="Temporizador de autodestrucción activo"
+                >
+                  <I.Timer size={20} color={t.accent} />
+                </Pressable>
+              )}
+
+              {/* ── Send button — long-press to schedule ────────────────── */}
               <Pressable
                 testID="send-button"
                 accessibilityRole="button"
                 accessibilityLabel={i18nT('chat.sendAccessibilityLabel', 'Send message')}
                 disabled={(!draft.trim() && !stagedImageUri) || sending || imageProcessing}
                 onPress={handleSend}
+                onLongPress={() => { if (draft.trim()) setShowScheduler(true); }}
+                delayLongPress={450}
                 style={({ pressed }) => ({
                   width: 40,
                   height: 40,
