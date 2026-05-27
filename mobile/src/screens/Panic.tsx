@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import * as Clipboard from 'expo-clipboard';
+import nacl from 'tweetnacl';
+import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -36,9 +38,11 @@ export function PanicScreen({ onBack }: Props) {
   const [isEditingPin, setIsEditingPin] = useState(false);
   const [tempPin, setTempPin] = useState('');
   const [remoteToken, setRemoteToken] = useState('');
+  const [remoteTokenSig, setRemoteTokenSig] = useState('');
   const [copied, setCopied] = useState(false);
 
   const resetIdentity = useIdentity((s) => s.reset);
+  const identity = useIdentity((s) => s.identity);
 
   const getGestureLabel = (id: string) => {
     switch (id) {
@@ -60,41 +64,53 @@ export function PanicScreen({ onBack }: Props) {
 
   const persist = useCallback(async (patch: Record<string, unknown>) => {
     try {
-      const raw = await SecureStore.getItemAsync(PANIC_KEY);
+      const raw = await ss.get(PANIC_KEY);
       const current = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-      await SecureStore.setItemAsync(PANIC_KEY, JSON.stringify({ ...current, ...patch }));
+      await ss.set(PANIC_KEY, JSON.stringify({ ...current, ...patch }));
     } catch { /* storage unavailable */ }
   }, []);
 
   const generateAndSaveToken = useCallback(async () => {
+    // H-5: bind the remote panic token to this device's identity by Ed25519-signing
+    // it. Deep-link handlers MUST verify (token, sig) against the local signing
+    // public key before wiping, so a leaked token alone is useless to an attacker.
+    if (!identity?.signingSecretKey) return; // identity not yet hydrated — defer
     const { randomUUID } = require('expo-crypto') as typeof import('expo-crypto');
     const token = randomUUID();
+    const sigBytes = nacl.sign.detached(decodeUTF8(token), identity.signingSecretKey);
+    const sig = encodeBase64(sigBytes);
     setRemoteToken(token);
-    await persist({ remoteToken: token });
-  }, [persist]);
+    setRemoteTokenSig(sig);
+    await persist({ remoteToken: token, remoteTokenSig: sig });
+  }, [persist, identity?.signingSecretKey]);
 
   const copyLink = useCallback(async () => {
-    if (!remoteToken) return;
-    await Clipboard.setStringAsync(`aegislink://panic?token=${remoteToken}`);
+    if (!remoteToken || !remoteTokenSig) return;
+    // Both halves are required — the deep-link handler rejects unsigned tokens.
+    await Clipboard.setStringAsync(
+      `aegislink://panic?token=${remoteToken}&sig=${encodeURIComponent(remoteTokenSig)}`,
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [remoteToken]);
+  }, [remoteToken, remoteTokenSig]);
 
   useEffect(() => {
-    SecureStore.getItemAsync(PANIC_KEY).then((raw) => {
+    ss.get(PANIC_KEY).then((raw) => {
       if (!raw) {
         void generateAndSaveToken();
         return;
       }
       try {
-        const s = JSON.parse(raw) as { gesture?: string; duressPin?: boolean; hidePin?: boolean; autoWipe?: boolean; pinLength?: number; remoteToken?: string };
+        const s = JSON.parse(raw) as { gesture?: string; duressPin?: boolean; hidePin?: boolean; autoWipe?: boolean; pinLength?: number; remoteToken?: string; remoteTokenSig?: string };
         if (s.gesture !== undefined) setGesture(s.gesture);
         if (s.duressPin !== undefined) setDuressPin(s.duressPin);
         if (s.hidePin !== undefined) setHidePin(s.hidePin);
         if (s.autoWipe !== undefined) setAutoWipe(s.autoWipe);
         if (typeof s.pinLength === 'number') setPinLength(s.pinLength);
-        if (typeof s.remoteToken === 'string' && s.remoteToken) {
+        // Migrate legacy unsigned tokens (pre-H-5): regenerate to attach signature.
+        if (typeof s.remoteToken === 'string' && s.remoteToken && typeof s.remoteTokenSig === 'string' && s.remoteTokenSig) {
           setRemoteToken(s.remoteToken);
+          setRemoteTokenSig(s.remoteTokenSig);
         } else {
           void generateAndSaveToken();
         }

@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import type { SenderKey } from './channelKey';
 
@@ -26,7 +26,7 @@ interface StoredSenderKey {
 }
 
 async function loadIndex(channelId: string): Promise<string[]> {
-  const raw = await SecureStore.getItemAsync(indexKeyFor(channelId));
+  const raw = await ss.get(indexKeyFor(channelId));
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -37,7 +37,7 @@ async function loadIndex(channelId: string): Promise<string[]> {
 }
 
 async function saveIndex(channelId: string, senders: string[]): Promise<void> {
-  await SecureStore.setItemAsync(indexKeyFor(channelId), JSON.stringify(senders));
+  await ss.set(indexKeyFor(channelId), JSON.stringify(senders));
 }
 
 export async function saveSenderKey(
@@ -49,7 +49,7 @@ export async function saveSenderKey(
     chainKeyB64: encodeBase64(sk.chainKey),
     iteration: sk.iteration,
   };
-  await SecureStore.setItemAsync(keyFor(channelId, senderAegisId), JSON.stringify(stored));
+  await ss.set(keyFor(channelId, senderAegisId), JSON.stringify(stored));
 
   const index = await loadIndex(channelId);
   if (!index.includes(senderAegisId)) {
@@ -61,7 +61,7 @@ export async function loadSenderKey(
   channelId: string,
   senderAegisId: string
 ): Promise<SenderKey | null> {
-  const raw = await SecureStore.getItemAsync(keyFor(channelId, senderAegisId));
+  const raw = await ss.get(keyFor(channelId, senderAegisId));
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as StoredSenderKey;
@@ -74,7 +74,7 @@ export async function loadSenderKey(
 }
 
 export async function deleteSenderKey(channelId: string, senderAegisId: string): Promise<void> {
-  await SecureStore.deleteItemAsync(keyFor(channelId, senderAegisId));
+  await ss.delete(keyFor(channelId, senderAegisId));
   const index = await loadIndex(channelId);
   const next = index.filter((s) => s !== senderAegisId);
   if (next.length !== index.length) {

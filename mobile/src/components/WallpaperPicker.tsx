@@ -7,7 +7,7 @@ import {
   FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from './icons';
 
@@ -42,7 +42,7 @@ const WALLPAPER_KEY = (aegisId: string) => `aegis.wallpaper.${aegisId}`;
 
 export async function loadWallpaper(aegisId: string): Promise<WallpaperOption> {
   try {
-    const raw = await SecureStore.getItemAsync(WALLPAPER_KEY(aegisId));
+    const raw = await ss.get(WALLPAPER_KEY(aegisId));
     if (raw === null) return 0;
     const n = parseInt(raw, 10);
     if (n >= 0 && n <= 8) return n as WallpaperOption;
@@ -53,7 +53,7 @@ export async function loadWallpaper(aegisId: string): Promise<WallpaperOption> {
 }
 
 export async function saveWallpaper(aegisId: string, option: WallpaperOption): Promise<void> {
-  await SecureStore.setItemAsync(WALLPAPER_KEY(aegisId), String(option));
+  await ss.set(WALLPAPER_KEY(aegisId), String(option));
 }
 
 // ─── Preview cells ────────────────────────────────────────────────────────────

@@ -11,6 +11,11 @@
  */
 
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
+
+// Argon2id (v3 backup format) is intentionally slow — bump the timeout so
+// per-test 5 s default doesn't flake on slower CI workers.
+jest.setTimeout(60_000);
+
 import {
   encryptBackup,
   decryptBackup,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import { Switch } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -37,7 +37,7 @@ export function LockSettingsScreen({ onBack }: Props) {
   const [lockOnBackground, setLockOnBackground] = useState(true);
 
   useEffect(() => {
-    SecureStore.getItemAsync(LOCK_SETTINGS_KEY)
+    ss.get(LOCK_SETTINGS_KEY)
       .then((raw) => {
         if (!raw) return;
         try {
@@ -52,11 +52,11 @@ export function LockSettingsScreen({ onBack }: Props) {
 
   async function save(patch: Partial<LockSettingsData>) {
     try {
-      const raw = await SecureStore.getItemAsync(LOCK_SETTINGS_KEY);
+      const raw = await ss.get(LOCK_SETTINGS_KEY);
       const current: LockSettingsData = raw
         ? (JSON.parse(raw) as LockSettingsData)
         : { biometrics, autoLockMinutes, lockOnBackground };
-      await SecureStore.setItemAsync(LOCK_SETTINGS_KEY, JSON.stringify({ ...current, ...patch }));
+      await ss.set(LOCK_SETTINGS_KEY, JSON.stringify({ ...current, ...patch }));
     } catch { /* storage unavailable */ }
   }
 

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import type { SupportedLocale } from '../i18n';
 
 /**
@@ -99,7 +99,7 @@ function snapshot(get: () => PrefsState): Preferences {
 
 async function persist(prefs: Preferences): Promise<void> {
   try {
-    await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(prefs));
+    await ss.set(STORAGE_KEY, JSON.stringify(prefs));
   } catch (e) {
     if (__DEV__) console.warn('[preferences] persist failed:', (e as Error).message);
   }
@@ -112,7 +112,7 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
 
   async hydrate() {
     try {
-      const raw = await SecureStore.getItemAsync(STORAGE_KEY);
+      const raw = await ss.get(STORAGE_KEY);
       if (raw) {
         const loaded = JSON.parse(raw) as Partial<Preferences>;
         setState({ ...DEFAULTS, ...loaded, hydrated: true });
@@ -131,6 +131,6 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
 
   async reset() {
     setState({ ...DEFAULTS });
-    await SecureStore.deleteItemAsync(STORAGE_KEY);
+    await ss.delete(STORAGE_KEY);
   },
 }));

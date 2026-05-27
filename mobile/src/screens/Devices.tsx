@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTranslation } from 'react-i18next';
@@ -98,7 +98,7 @@ export function DevicesScreen({ onBack }: Props) {
 
     // First restore the local cache so the list appears instantly.
     try {
-      const cached = await SecureStore.getItemAsync(DEVICES_CACHE_KEY);
+      const cached = await ss.get(DEVICES_CACHE_KEY);
       if (cached) {
         setLinkedDevices(JSON.parse(cached) as LinkedDevice[]);
       }
@@ -119,7 +119,7 @@ export function DevicesScreen({ onBack }: Props) {
         if (res.ok && res.devices) {
           setLinkedDevices(res.devices);
           // Persist fresh list as offline cache.
-          void SecureStore.setItemAsync(DEVICES_CACHE_KEY, JSON.stringify(res.devices));
+          void ss.set(DEVICES_CACHE_KEY, JSON.stringify(res.devices));
         }
       },
     );
@@ -294,7 +294,7 @@ export function DevicesScreen({ onBack }: Props) {
       // Update local state and cache immediately.
       const updated = linkedDevices.filter((d) => d.id !== device.id);
       setLinkedDevices(updated);
-      await SecureStore.setItemAsync(DEVICES_CACHE_KEY, JSON.stringify(updated));
+      await ss.set(DEVICES_CACHE_KEY, JSON.stringify(updated));
     } catch (e) {
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
     } finally {

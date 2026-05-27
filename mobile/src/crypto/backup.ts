@@ -2,30 +2,61 @@ import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
 import { pbkdf2 } from '@noble/hashes/pbkdf2';
 import { sha256 } from '@noble/hashes/sha256';
+import { argon2id } from '@noble/hashes/argon2';
 
 // ─── AegisLink encrypted backup format ────────────────────────────────────────
 //
 // File extension: .aegisbak
 // JSON shape:
-//   { v: 1, salt: base64(32 bytes), nonce: base64(24 bytes), ciphertext: base64 }
+//   { v: 1 | 2 | 3, salt: base64(32 bytes), nonce: base64(24 bytes), ciphertext: base64 }
 //
-// Key derivation: PBKDF2-HMAC-SHA256, 100_000 iterations, dkLen=32.
-// Symmetric cipher: nacl.secretbox (XSalsa20-Poly1305) — authenticated.
+// Three on-disk envelope formats are supported for backward compatibility.
+// AegisLink ALWAYS WRITES v=3 envelopes today, but can still DECRYPT older
+// backups produced by earlier app versions (v1 and v2).
 //
-// The passphrase NEVER touches disk. Salt and ciphertext are stored; the user
-// must remember the passphrase to restore.
+//   v=1 (legacy)     PBKDF2-HMAC-SHA256, c=100_000, dkLen=32
+//   v=2 (legacy)     PBKDF2-HMAC-SHA256, c=600_000, dkLen=32  (OWASP 2023 baseline)
+//   v=3 (current)    Argon2id, m=65_536 KiB (64 MiB), t=3, p=1, dkLen=32
+//
+// Why Argon2id (H-3 finding mitigation):
+//   PBKDF2 is NOT memory-hard. A modern attacker can rent an RTX 4090
+//   (~500M SHA-256/s) and crack mid-entropy passphrases far faster than
+//   intended. The backup envelope contains the user's PRIVATE identity key,
+//   so the cost asymmetry must be maximised. Argon2id (winner of the
+//   2015 Password Hashing Competition, OWASP top recommendation) requires
+//   ~64 MiB of RAM per attempt, which collapses GPU/ASIC parallelism by
+//   orders of magnitude. Parameters are chosen so that a single derivation
+//   completes in well under 2 s on commodity mobile hardware.
+//
+// Symmetric cipher in all versions: nacl.secretbox (XSalsa20-Poly1305) —
+// authenticated, so MAC failure on wrong passphrase is detected explicitly.
+//
+// The passphrase NEVER touches disk. Salt, nonce and ciphertext are stored;
+// the user must remember the passphrase to restore.
 
-export const BACKUP_VERSION = 2 as const;
+/** Envelope version emitted by encryptBackup today. */
+export const BACKUP_VERSION = 3 as const;
 export const BACKUP_FILE_EXTENSION = 'aegisbak' as const;
-// OWASP 2023: minimum 600k iterations for PBKDF2-HMAC-SHA256 protecting identity keys
-export const BACKUP_PBKDF2_ITERATIONS = 600_000 as const;
-export const BACKUP_PBKDF2_ITERATIONS_V1 = 100_000 as const; // legacy — for decrypting v1 backups
+
+// PBKDF2 iterations — kept ONLY for decrypting legacy v1 / v2 envelopes.
+export const BACKUP_PBKDF2_ITERATIONS_V1 = 100_000 as const;
+export const BACKUP_PBKDF2_ITERATIONS_V2 = 600_000 as const;
+
+// Argon2id parameters for v3. Tuned for mobile: ~64 MiB RAM, 3 passes, 1 lane.
+// RFC 9106 §4 "SECOND RECOMMENDED option" (memory-constrained / interactive).
+export const BACKUP_ARGON2_MEMORY = 65536 as const; // KiB → 64 MiB
+export const BACKUP_ARGON2_TIME = 3 as const; // iterations (passes)
+export const BACKUP_ARGON2_PARALLELISM = 1 as const; // lanes (mobile-safe)
+
 export const BACKUP_KEY_BYTES = 32 as const;
 export const BACKUP_SALT_BYTES = 32 as const;
 export const BACKUP_MIN_PASSPHRASE_LEN = 12 as const;
 
+/** Supported on-disk envelope versions. */
+export type BackupEnvelopeVersion = 1 | 2 | 3;
+
 export interface BackupEnvelope {
-  v: 1 | 2;
+  v: BackupEnvelopeVersion;
   salt: string;
   nonce: string;
   ciphertext: string;
@@ -49,7 +80,8 @@ export interface BackupContact {
 }
 
 export interface BackupPayload {
-  v: typeof BACKUP_VERSION;
+  /** Schema version of the inner JSON. Same set as the envelope version. */
+  v: BackupEnvelopeVersion;
   createdAt: number;
   identity: {
     aegisId: string;
@@ -82,7 +114,9 @@ export function ratePassphrase(pw: string): PassphraseStrength {
   return 'weak';
 }
 
-function deriveKey(passphrase: string, salt: Uint8Array, iterations: number = BACKUP_PBKDF2_ITERATIONS): Uint8Array {
+// ─── KDF dispatch ─────────────────────────────────────────────────────────────
+
+function derivePbkdf2(passphrase: string, salt: Uint8Array, iterations: number): Uint8Array {
   const pwBytes = decodeUTF8(passphrase);
   return pbkdf2(sha256, pwBytes, salt, {
     c: iterations,
@@ -90,9 +124,35 @@ function deriveKey(passphrase: string, salt: Uint8Array, iterations: number = BA
   });
 }
 
+function deriveArgon2id(passphrase: string, salt: Uint8Array): Uint8Array {
+  const pwBytes = decodeUTF8(passphrase);
+  return argon2id(pwBytes, salt, {
+    m: BACKUP_ARGON2_MEMORY,
+    t: BACKUP_ARGON2_TIME,
+    p: BACKUP_ARGON2_PARALLELISM,
+    dkLen: BACKUP_KEY_BYTES,
+  });
+}
+
+/**
+ * Derive a 32-byte symmetric key for the given envelope version.
+ * Throws on unsupported versions.
+ */
+function deriveKeyForVersion(
+  passphrase: string,
+  salt: Uint8Array,
+  version: BackupEnvelopeVersion,
+): Uint8Array {
+  if (version === 1) return derivePbkdf2(passphrase, salt, BACKUP_PBKDF2_ITERATIONS_V1);
+  if (version === 2) return derivePbkdf2(passphrase, salt, BACKUP_PBKDF2_ITERATIONS_V2);
+  if (version === 3) return deriveArgon2id(passphrase, salt);
+  throw new Error(`Unsupported backup version: ${version as number}`);
+}
+
 /**
  * Encrypts the payload with a passphrase. Returns a JSON-serialisable envelope.
- * The passphrase is wiped from local scope as soon as the key is derived.
+ * The derived key is wiped from local scope as soon as ciphertext is produced.
+ * Always emits BACKUP_VERSION (v3 / Argon2id).
  */
 export function encryptBackup(payload: BackupPayload, passphrase: string): BackupEnvelope {
   if (passphrase.length < BACKUP_MIN_PASSPHRASE_LEN) {
@@ -100,7 +160,7 @@ export function encryptBackup(payload: BackupPayload, passphrase: string): Backu
   }
   const salt = nacl.randomBytes(BACKUP_SALT_BYTES);
   const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const key = deriveKey(passphrase, salt);
+  const key = deriveKeyForVersion(passphrase, salt, BACKUP_VERSION);
   try {
     const plaintext = decodeUTF8(JSON.stringify(payload));
     const ciphertext = nacl.secretbox(plaintext, nonce, key);
@@ -118,18 +178,18 @@ export function encryptBackup(payload: BackupPayload, passphrase: string): Backu
 
 /**
  * Decrypts a backup envelope with the user's passphrase. Throws on bad
- * passphrase, MAC mismatch, or schema mismatch.
+ * passphrase, MAC mismatch, schema mismatch, or unsupported version.
+ *
+ * Supports envelope versions 1, 2 and 3 (see header for KDF per version).
  */
 export function decryptBackup(envelope: BackupEnvelope, passphrase: string): BackupPayload {
-  if (envelope.v !== 1 && envelope.v !== BACKUP_VERSION) {
-    throw new Error(`Unsupported backup version: ${envelope.v}`);
+  if (envelope.v !== 1 && envelope.v !== 2 && envelope.v !== 3) {
+    throw new Error(`Unsupported backup version: ${(envelope as { v: number }).v}`);
   }
-  // v1 used 100k iterations; v2+ uses 600k (OWASP 2023)
-  const iterations = envelope.v === 1 ? BACKUP_PBKDF2_ITERATIONS_V1 : BACKUP_PBKDF2_ITERATIONS;
   const salt = decodeBase64(envelope.salt);
   const nonce = decodeBase64(envelope.nonce);
   const ciphertext = decodeBase64(envelope.ciphertext);
-  const key = deriveKey(passphrase, salt, iterations);
+  const key = deriveKeyForVersion(passphrase, salt, envelope.v);
   try {
     const opened = nacl.secretbox.open(ciphertext, nonce, key);
     if (!opened) {
@@ -137,7 +197,11 @@ export function decryptBackup(envelope: BackupEnvelope, passphrase: string): Bac
     }
     const json = encodeUTF8(opened);
     const parsed = JSON.parse(json) as BackupPayload;
-    if (parsed.v !== BACKUP_VERSION || !parsed.identity || !Array.isArray(parsed.contacts)) {
+    if (
+      (parsed.v !== 1 && parsed.v !== 2 && parsed.v !== 3) ||
+      !parsed.identity ||
+      !Array.isArray(parsed.contacts)
+    ) {
       throw new Error('Backup payload schema mismatch');
     }
     return parsed;
@@ -150,7 +214,7 @@ export function isBackupEnvelope(value: unknown): value is BackupEnvelope {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
-    v.v === BACKUP_VERSION &&
+    (v.v === 1 || v.v === 2 || v.v === BACKUP_VERSION) &&
     typeof v.salt === 'string' &&
     typeof v.nonce === 'string' &&
     typeof v.ciphertext === 'string'

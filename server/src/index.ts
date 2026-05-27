@@ -9,6 +9,8 @@ import prekeysRoutes from './routes/prekeys.js';
 import blobRoutes from './routes/blob.js';
 import pollsRoutes from './routes/polls.js';
 import turnRoutes from './routes/turn.js';
+import proxyGifRoutes from './routes/proxyGif.js';
+import proxyLinkPreviewRoutes from './routes/proxyLinkPreview.js';
 import { createWorkRouter } from './routes/work.js';
 import { createGroupCallsRouter } from './routes/groupCalls.js';
 import { createDeviceLinkRouter } from './routes/deviceLink.js';
@@ -77,6 +79,8 @@ app.use('/prekeys', prekeysRoutes);
 app.use('/blob', blobRoutes);
 app.use('/polls', pollsRoutes);
 app.use('/turn', turnRoutes);
+app.use('/proxy/gif', proxyGifRoutes);
+app.use('/proxy/linkpreview', proxyLinkPreviewRoutes);
 
 const httpServer = createServer(app);
 
