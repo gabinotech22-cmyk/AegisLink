@@ -258,13 +258,14 @@ export async function showIncomingNotification(
   senderName: string,
   body: string,
   isGroup: boolean,
-  groupName?: string
+  groupName?: string,
+  groupId?: string
 ) {
   try {
     const { usePreferences } = require('../store/preferences');
     const prefs = usePreferences.getState();
 
-    const targetChatId = isGroup && groupName ? groupName : senderAegisId;
+    const targetChatId = isGroup ? (groupId ?? groupName ?? senderAegisId) : senderAegisId;
     let isMuted = prefs.mutedChats.includes(targetChatId);
 
     if (!isMuted) {
