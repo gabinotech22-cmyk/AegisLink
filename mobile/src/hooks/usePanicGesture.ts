@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Alert } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 
 const PANIC_KEY = 'aegis.panic.v1';
 const SHAKE_THRESHOLD = 2.8; // g-force magnitude
@@ -62,7 +62,7 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
 
     async function setup(): Promise<void> {
       try {
-        const raw = await SecureStore.getItemAsync(PANIC_KEY);
+        const raw = await ss.get(PANIC_KEY);
         if (!raw) return;
         const config = JSON.parse(raw) as PanicConfig;
         gestureRef.current = config.gesture ?? 'off';

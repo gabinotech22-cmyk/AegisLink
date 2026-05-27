@@ -2,13 +2,25 @@
  * Unit tests — Section 10: Encrypted Backup
  *
  * Tests cover:
- *   1. encryptBackup / decryptBackup round-trip
+ *   1. encryptBackup / decryptBackup round-trip (v3 / Argon2id)
  *   2. Wrong passphrase → throws
  *   3. Corrupted ciphertext → throws
  *   4. ratePassphrase strength ladder
- *   5. isBackupEnvelope type-guard
+ *   5. isBackupEnvelope type-guard (accepts v1, v2, v3; rejects others)
  *   6. backupFileName format
+ *   7. Backward compatibility: decryptBackup reads v1 (PBKDF2 100k) and v2
+ *      (PBKDF2 600k) envelopes synthesised in-test.
  */
+
+import nacl from 'tweetnacl';
+import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
+import { pbkdf2 } from '@noble/hashes/pbkdf2';
+import { sha256 } from '@noble/hashes/sha256';
+
+// Argon2id m=64 MiB, t=3 is intentionally slow (H-3 mitigation). A single
+// derivation takes ~1–2 s in pure JS, and several tests perform multiple
+// round-trips. Raise the per-test timeout to keep CI green.
+jest.setTimeout(60_000);
 
 import {
   encryptBackup,
@@ -17,7 +29,12 @@ import {
   isBackupEnvelope,
   BACKUP_FILE_EXTENSION,
   BACKUP_MIN_PASSPHRASE_LEN,
+  BACKUP_PBKDF2_ITERATIONS_V1,
+  BACKUP_PBKDF2_ITERATIONS_V2,
+  BACKUP_KEY_BYTES,
+  BACKUP_SALT_BYTES,
   type BackupPayload,
+  type BackupEnvelope,
   type PassphraseStrength,
 } from '../crypto/backup';
 
@@ -25,7 +42,7 @@ import {
 
 function makePayload(overrides: Partial<BackupPayload> = {}): BackupPayload {
   return {
-    v: 2,
+    v: 3,
     createdAt: 1_700_000_000_000,
     identity: {
       aegisId: 'ABC-DEFG-HIJK',
@@ -57,6 +74,34 @@ function makePayload(overrides: Partial<BackupPayload> = {}): BackupPayload {
 const STRONG_PASSPHRASE = 'Tr0ub4dor&3-correct-horse-battery-staple';
 const SHORT_PASSPHRASE = 'short';
 
+/**
+ * Synthesise a legacy v1/v2 envelope using PBKDF2 directly so we can verify
+ * that decryptBackup still accepts older formats produced by previous app
+ * versions. We bypass encryptBackup intentionally (it always writes v3 today).
+ */
+function makeLegacyPbkdf2Envelope(
+  payload: BackupPayload,
+  passphrase: string,
+  version: 1 | 2,
+): BackupEnvelope {
+  const iterations = version === 1 ? BACKUP_PBKDF2_ITERATIONS_V1 : BACKUP_PBKDF2_ITERATIONS_V2;
+  const salt = nacl.randomBytes(BACKUP_SALT_BYTES);
+  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+  const key = pbkdf2(sha256, decodeUTF8(passphrase), salt, {
+    c: iterations,
+    dkLen: BACKUP_KEY_BYTES,
+  });
+  const plaintext = decodeUTF8(JSON.stringify(payload));
+  const ciphertext = nacl.secretbox(plaintext, nonce, key);
+  key.fill(0);
+  return {
+    v: version,
+    salt: encodeBase64(salt),
+    nonce: encodeBase64(nonce),
+    ciphertext: encodeBase64(ciphertext),
+  };
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('encryptBackup / decryptBackup', () => {
@@ -64,7 +109,7 @@ describe('encryptBackup / decryptBackup', () => {
     const payload = makePayload();
     const envelope = encryptBackup(payload, STRONG_PASSPHRASE);
 
-    expect(envelope.v).toBe(2);
+    expect(envelope.v).toBe(3);
     expect(typeof envelope.salt).toBe('string');
     expect(typeof envelope.nonce).toBe('string');
     expect(typeof envelope.ciphertext).toBe('string');
@@ -116,7 +161,7 @@ describe('encryptBackup / decryptBackup', () => {
 
   it('throws on unsupported backup version', () => {
     const envelope = encryptBackup(makePayload(), STRONG_PASSPHRASE);
-    const badVersion = { ...envelope, v: 99 as 1 };
+    const badVersion = { ...envelope, v: 99 as unknown as 1 };
     expect(() => decryptBackup(badVersion, STRONG_PASSPHRASE)).toThrow(
       /unsupported backup version/i,
     );
@@ -129,6 +174,39 @@ describe('encryptBackup / decryptBackup', () => {
     expect(e1.salt).not.toBe(e2.salt);
     expect(e1.nonce).not.toBe(e2.nonce);
     expect(e1.ciphertext).not.toBe(e2.ciphertext);
+  });
+});
+
+// ─── Backward compatibility (H-3 / Argon2id migration) ────────────────────────
+
+describe('decryptBackup — legacy compatibility', () => {
+  it('decrypts a legacy v1 envelope (PBKDF2 100k)', () => {
+    const payload = makePayload({ v: 1 });
+    const envelope = makeLegacyPbkdf2Envelope(payload, STRONG_PASSPHRASE, 1);
+    expect(envelope.v).toBe(1);
+
+    const restored = decryptBackup(envelope, STRONG_PASSPHRASE);
+    expect(restored.v).toBe(1);
+    expect(restored.identity.aegisId).toBe(payload.identity.aegisId);
+    expect(restored.contacts[0].name).toBe('Bob');
+  });
+
+  it('decrypts a legacy v2 envelope (PBKDF2 600k)', () => {
+    const payload = makePayload({ v: 2 });
+    const envelope = makeLegacyPbkdf2Envelope(payload, STRONG_PASSPHRASE, 2);
+    expect(envelope.v).toBe(2);
+
+    const restored = decryptBackup(envelope, STRONG_PASSPHRASE);
+    expect(restored.v).toBe(2);
+    expect(restored.identity.aegisId).toBe(payload.identity.aegisId);
+    expect(restored.contacts[0].name).toBe('Bob');
+  });
+
+  it('rejects a legacy v2 envelope with the wrong passphrase', () => {
+    const envelope = makeLegacyPbkdf2Envelope(makePayload({ v: 2 }), STRONG_PASSPHRASE, 2);
+    expect(() => decryptBackup(envelope, 'WrongPassphrase123!')).toThrow(
+      /passphrase|corrupted/i,
+    );
   });
 });
 
@@ -152,26 +230,36 @@ describe('ratePassphrase', () => {
 // ─── isBackupEnvelope ─────────────────────────────────────────────────────────
 
 describe('isBackupEnvelope', () => {
-  it('accepts a valid envelope', () => {
+  it('accepts a valid v3 envelope (current format)', () => {
     const envelope = encryptBackup(makePayload(), STRONG_PASSPHRASE);
     expect(isBackupEnvelope(envelope)).toBe(true);
+  });
+
+  it('accepts a legacy v1 envelope', () => {
+    expect(isBackupEnvelope({ v: 1, salt: 'a', nonce: 'b', ciphertext: 'c' })).toBe(true);
+  });
+
+  it('accepts a legacy v2 envelope', () => {
+    expect(isBackupEnvelope({ v: 2, salt: 'a', nonce: 'b', ciphertext: 'c' })).toBe(true);
   });
 
   it('rejects null', () => {
     expect(isBackupEnvelope(null)).toBe(false);
   });
 
-  it('rejects wrong version', () => {
+  it('rejects unsupported versions', () => {
     expect(isBackupEnvelope({ v: 99, salt: 'a', nonce: 'b', ciphertext: 'c' })).toBe(false);
+    expect(isBackupEnvelope({ v: 0, salt: 'a', nonce: 'b', ciphertext: 'c' })).toBe(false);
+    expect(isBackupEnvelope({ v: 4, salt: 'a', nonce: 'b', ciphertext: 'c' })).toBe(false);
   });
 
   it('rejects missing fields', () => {
-    expect(isBackupEnvelope({ v: 2, salt: 'a', nonce: 'b' })).toBe(false);
-    expect(isBackupEnvelope({ v: 2, salt: 'a', ciphertext: 'c' })).toBe(false);
+    expect(isBackupEnvelope({ v: 3, salt: 'a', nonce: 'b' })).toBe(false);
+    expect(isBackupEnvelope({ v: 3, salt: 'a', ciphertext: 'c' })).toBe(false);
   });
 
   it('rejects non-string fields', () => {
-    expect(isBackupEnvelope({ v: 2, salt: 42, nonce: 'b', ciphertext: 'c' })).toBe(false);
+    expect(isBackupEnvelope({ v: 3, salt: 42, nonce: 'b', ciphertext: 'c' })).toBe(false);
   });
 });
 

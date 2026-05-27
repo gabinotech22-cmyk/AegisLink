@@ -29,7 +29,18 @@
           "voip",
           "audio",
           "remote-notification"
-        ]
+        ],
+        "NSAppTransportSecurity": {
+          "NSPinnedDomains": {
+            "aegislink.duckdns.org": {
+              "NSIncludesSubdomains": true,
+              "NSPinnedCAIdentities": [
+                { "SPKI-SHA256-BASE64": "REPLACE_WITH_PRIMARY_SPKI_SHA256_BASE64=" },
+                { "SPKI-SHA256-BASE64": "REPLACE_WITH_BACKUP_SPKI_SHA256_BASE64=" }
+              ]
+            }
+          }
+        }
       },
       "bitcode": false,
       "buildNumber": "1"

@@ -1,10 +1,8 @@
 /**
  * LinkPreview — Open Graph card shown beneath a message that contains a URL.
  *
- * PRIVACY NOTE: The fetch is performed directly from the user's device, which
- * reveals their IP address to the destination server. This is equivalent to
- * what Signal does on iOS. A future improvement would proxy the request through
- * the AegisLink relay so the user's IP is never disclosed to external sites.
+ * PRIVACY: All fetches are proxied through the AegisLink relay via
+ * /proxy/linkpreview — the user's IP is never disclosed to external sites.
  *
  * Usage: <LinkPreview url="https://example.com" t={t} />
  */
@@ -12,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Image, Pressable, Linking } from 'react-native';
 import type { Theme } from '../theme/vault';
+import { SERVER_URL } from '../config';
 
 interface Props {
   url: string;
@@ -24,61 +23,56 @@ interface OGData {
   image?: string;
 }
 
-// Matches <meta property="og:X" content="Y"> in either attribute order
-const OG_TITLE_RE =
-  /(?:<meta[^>]+property="og:title"[^>]+content="([^"]+)"|<meta[^>]+content="([^"]+)"[^>]+property="og:title")/i;
-const OG_DESC_RE =
-  /(?:<meta[^>]+property="og:description"[^>]+content="([^"]+)"|<meta[^>]+content="([^"]+)"[^>]+property="og:description")/i;
-const OG_IMAGE_RE =
-  /(?:<meta[^>]+property="og:image"[^>]+content="([^"]+)"|<meta[^>]+content="([^"]+)"[^>]+property="og:image")/i;
-
-function extractOG(html: string): OGData {
-  const titleM = OG_TITLE_RE.exec(html);
-  const descM = OG_DESC_RE.exec(html);
-  const imageM = OG_IMAGE_RE.exec(html);
-  return {
-    title: titleM?.[1] ?? titleM?.[2],
-    description: descM?.[1] ?? descM?.[2],
-    image: imageM?.[1] ?? imageM?.[2],
-  };
-}
+// In-memory cache shared across all LinkPreview instances in the component tree
+const cache = new Map<string, OGData | 'error'>();
 
 export function LinkPreview({ url, t }: Props) {
   const [data, setData] = useState<OGData | null>(null);
-  // Cache result to avoid re-fetching on every render
-  const cacheRef = useRef<Record<string, OGData | 'error'>>({});
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    cancelledRef.current = false;
 
-    const cached = cacheRef.current[url];
+    const cached = cache.get(url);
     if (cached) {
       if (cached !== 'error') setData(cached);
       return;
     }
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+
     void (async () => {
       try {
-        const res = await fetch(url, {
-          signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 5000); return c.signal; })(),
-          // Only need the first ~8 KB to find OG meta tags in <head>
-          headers: { Range: 'bytes=0-8191' },
-        });
-        const html = await res.text();
-        const og = extractOG(html);
-        if (!og.title && !og.description) {
-          cacheRef.current[url] = 'error';
+        const proxyUrl = `${SERVER_URL}/proxy/linkpreview?url=${encodeURIComponent(url)}`;
+        const res = await fetch(proxyUrl, { signal: controller.signal });
+        if (!res.ok) {
+          cache.set(url, 'error');
           return;
         }
-        cacheRef.current[url] = og;
-        if (!cancelled) setData(og);
+        const og = await res.json() as { title: string | null; description: string | null; image: string | null };
+        if (!og.title && !og.description) {
+          cache.set(url, 'error');
+          return;
+        }
+        const ogData: OGData = {
+          title: og.title ?? undefined,
+          description: og.description ?? undefined,
+          image: og.image ?? undefined,
+        };
+        cache.set(url, ogData);
+        if (!cancelledRef.current) setData(ogData);
       } catch {
-        cacheRef.current[url] = 'error';
+        cache.set(url, 'error');
+      } finally {
+        clearTimeout(timer);
       }
     })();
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
+      controller.abort();
+      clearTimeout(timer);
     };
   }, [url]);
 

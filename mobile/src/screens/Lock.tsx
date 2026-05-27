@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import { verifyPIN, hasStoredPIN, hashPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
 import { usePreferences } from '../store/preferences';
 import { useIdentity } from '../store/identity';
@@ -229,7 +229,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
   async function validatePin(pin: string) {
     try {
-      const panicRaw = await SecureStore.getItemAsync('aegis.panic.v1');
+      const panicRaw = await ss.get('aegis.panic.v1');
       if (panicRaw) {
         const config = JSON.parse(panicRaw) as {
           duressPin?: boolean;
@@ -275,7 +275,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       // Read autoWipe setting from SecureStore
       let autoWipe = false;
       try {
-        const panicRaw = await SecureStore.getItemAsync('aegis.panic.v1');
+        const panicRaw = await ss.get('aegis.panic.v1');
         if (panicRaw) {
           const config = JSON.parse(panicRaw) as { autoWipe?: boolean };
           autoWipe = config.autoWipe === true;

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import * as Crypto from 'expo-crypto';
 
 const STORE_KEY = 'aegis.distribution.v1';
@@ -21,7 +21,7 @@ interface DistributionState {
 }
 
 async function persist(lists: DistributionList[]): Promise<void> {
-  await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(lists));
+  await ss.set(STORE_KEY, JSON.stringify(lists));
 }
 
 export const useDistribution = create<DistributionState>((set, get) => ({
@@ -31,7 +31,7 @@ export const useDistribution = create<DistributionState>((set, get) => ({
   hydrate: async () => {
     if (get().hydrated) return;
     try {
-      const raw = await SecureStore.getItemAsync(STORE_KEY);
+      const raw = await ss.get(STORE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as DistributionList[];
         set({ lists: parsed, hydrated: true });

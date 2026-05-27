@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from './icons';
+import { SERVER_URL } from '../config';
 
 // Tab type
 type GifTab = 'gifs' | 'stickers';
@@ -60,7 +61,6 @@ interface Props {
   onSelectSticker: (text: string) => void;
 }
 
-const TENOR_KEY = 'AIzaSyAyimkuYQYF_FXVALexPzfiTPEHC2H18mk';
 const SCREEN_W = Dimensions.get('window').width;
 const TILE_SIZE = (SCREEN_W - 18 * 2 - 10) / 2; // 2 columns, 10px gap
 
@@ -72,18 +72,33 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
   const [results, setResults] = useState<TenorResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('Could not connect to the GIF service. Check your internet connection.');
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchGifs = useCallback(async (q: string) => {
     setLoading(true);
     setError(false);
+    setErrorMessage('Could not connect to the GIF service. Check your internet connection.');
     try {
       const endpoint = q.trim()
-        ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}&key=${TENOR_KEY}&limit=20&media_filter=gif`
-        : `https://tenor.googleapis.com/v2/featured?key=${TENOR_KEY}&limit=20&media_filter=gif`;
+        ? `${SERVER_URL}/proxy/gif?q=${encodeURIComponent(q)}`
+        : `${SERVER_URL}/proxy/gif`;
 
-      const res = await fetch(endpoint);
-      if (!res.ok) throw new Error('tenor_error');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      let res: Response;
+      try {
+        res = await fetch(endpoint, { signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (res.status === 503) {
+        setError(true);
+        setErrorMessage('GIFs no disponibles');
+        setResults([]);
+        return;
+      }
+      if (!res.ok) throw new Error('gif_proxy_error');
       const json = await res.json() as {
         results: Array<{
           id: string;
@@ -108,6 +123,7 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
       setResults(mapped);
     } catch {
       setError(true);
+      setErrorMessage('Could not connect to the GIF service. Check your internet connection.');
       setResults([]);
     } finally {
       setLoading(false);
@@ -315,7 +331,7 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
                 }}
               >
                 {error
-                  ? 'Could not connect to the GIF service. Check your internet connection.'
+                  ? errorMessage
                   : 'No results found. Try a different search term.'}
               </Text>
               {error && (

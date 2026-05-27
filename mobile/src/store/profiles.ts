@@ -14,7 +14,7 @@
  */
 
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import { createIdentity } from '../crypto/identity';
 import {
   secretKeySlot,
@@ -82,7 +82,7 @@ interface ProfilesState {
 async function persistProfiles(profiles: Profile[]): Promise<void> {
   // Strip isActive before persisting — it's derived at runtime.
   const toStore = profiles.map(({ isActive: _ia, ...rest }) => rest);
-  await SecureStore.setItemAsync(PROFILES_STORE_KEY, JSON.stringify(toStore));
+  await ss.set(PROFILES_STORE_KEY, JSON.stringify(toStore));
 }
 
 function attachActive(profiles: Profile[], activeSlotId: string): Profile[] {
@@ -114,7 +114,7 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
 
   async hydrate() {
     try {
-      const raw = await SecureStore.getItemAsync(PROFILES_STORE_KEY);
+      const raw = await ss.get(PROFILES_STORE_KEY);
       if (!raw) {
         // First boot: derive profile metadata from the primary identity if it
         // exists in the identity store, or initialise an empty placeholder.
@@ -159,11 +159,11 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     setActiveDbSlot(slotId);
 
     // 3. Persist keys to SecureStore under per-slot names.
-    await SecureStore.setItemAsync(secretKeySlot(slotId), identity.secretKeyB64);
-    await SecureStore.setItemAsync(signSecretKeySlot(slotId), identity.signingSecretKeyB64);
+    await ss.set(secretKeySlot(slotId), identity.secretKeyB64);
+    await ss.set(signSecretKeySlot(slotId), identity.signingSecretKeyB64);
     // Generate and store the per-profile DB encryption key.
     const dbKey = nacl.randomBytes(32);
-    await SecureStore.setItemAsync(dbEncKeySlot(slotId), encodeBase64(dbKey));
+    await ss.set(dbEncKeySlot(slotId), encodeBase64(dbKey));
 
     // 4. Persist the identity row in the new DB.
     await saveIdentity({
@@ -242,7 +242,7 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     //  native connection while in-flight store effects may hold a reference
     //  causes "Access to closed resource" crashes.)
     void closeActiveDatabase; // keep the import used (backup.ts still needs it)
-    await SecureStore.setItemAsync('aegis.activeSlotId', slotId);
+    await ss.set('aegis.activeSlotId', slotId);
 
     // 5. Delegate full identity hydration to useIdentity (loads keys, preferences, etc.).
     set({ activeSlotId: slotId, profiles: attachActive(get().profiles, slotId) });

@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 
 const ICON_KEY = 'active_app_icon';
 
@@ -68,7 +68,7 @@ export function AppIconScreen({ onBack }: Props) {
         }
       }
       // Fallback: read from SecureStore
-      const stored = await SecureStore.getItemAsync(ICON_KEY);
+      const stored = await ss.get(ICON_KEY);
       if (stored && ALL_VARIANTS.some((x) => x.id === stored)) {
         setCurrent(stored as IconId);
       }
@@ -85,7 +85,7 @@ export function AppIconScreen({ onBack }: Props) {
         await NativeModules.AppIconModule.setAppIcon(iconArg);
       }
       // Save to SecureStore as backup
-      await SecureStore.setItemAsync(ICON_KEY, id);
+      await ss.set(ICON_KEY, id);
       setCurrent(id);
     } catch {
       Alert.alert(i18nT('common.error'), i18nT('appIcon.changeError'));

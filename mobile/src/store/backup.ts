@@ -7,7 +7,7 @@
  */
 
 import { create } from 'zustand';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import * as Sharing from 'expo-sharing';
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
@@ -91,7 +91,7 @@ export const useBackup = create<BackupState>((set) => ({
 
   async loadMeta() {
     try {
-      const raw = await SecureStore.getItemAsync(LAST_AT_KEY);
+      const raw = await ss.get(LAST_AT_KEY);
       if (raw) {
         const ts = parseInt(raw, 10);
         if (!Number.isNaN(ts)) set({ lastBackupAt: ts });
@@ -107,7 +107,7 @@ export const useBackup = create<BackupState>((set) => ({
       const envelope = encryptBackup(payload, passphrase);
       const uri = await writeEnvelopeToCacheDir(envelope);
       const now = Date.now();
-      await SecureStore.setItemAsync(LAST_AT_KEY, String(now));
+      await ss.set(LAST_AT_KEY, String(now));
       set({ lastBackupAt: now, isBackingUp: false });
       return uri;
     } catch (e) {
