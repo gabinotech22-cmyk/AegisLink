@@ -1069,8 +1069,8 @@ async function decryptAndAppend(
             });
             const { useGroups } = require('../store/groups');
             void useGroups.getState().hydrate();
-          } else if ((nameChanged || membersChanged) && __DEV__) {
-            console.warn('[socket] group metadata change ignored — sender not admin or sig invalid');
+          } else if (nameChanged || membersChanged) {
+            if (__DEV__) console.warn('[socket] group metadata change ignored — sender not admin or sig invalid');
           }
         }
 
@@ -1127,7 +1127,7 @@ async function decryptAndAppend(
 
         // Trigger local notification in alignment with AegisLink notifications spec
         const { showIncomingNotification } = require('../notifications/push');
-        void showIncomingNotification(senderId, parsedPayload.senderName || senderId.substring(0, 8), msgBody, true, trustedGroupName);
+        void showIncomingNotification(senderId, parsedPayload.senderName || senderId.substring(0, 8), msgBody, true, trustedGroupName, groupId);
 
         return true;
       } else if (
@@ -1983,18 +1983,30 @@ export async function sendGroupMessage(opts: {
 
   const contacts = useContacts.getState().contacts;
 
+  // Read identity fields once, outside the per-member loop
+  const { useIdentity: _useIdentity } = require('../store/identity') as typeof import('../store/identity');
+  const _idState = _useIdentity.getState();
+  const senderName = _idState.displayName;
+  const senderColor = _idState.avatarColor;
+  const rawImage = _idState.avatarImage;
+
+  // Pre-compute the data URI once if at least one member hasn't received it yet.
+  // Same profiledContacts optimization as 1:1 messages — image is sent only on
+  // the first message per contact per session to avoid embedding a 50–100 KB blob
+  // in every group envelope.
+  const anyNeedsImage = group.members.some(
+    (m: string) => m !== opts.identity.aegisId && !profiledContacts.has(m),
+  );
+  const imageDataUri = anyNeedsImage ? await toDataUri(rawImage) : null;
+
   // Multicast to all members
   const sendPromises = group.members.map(async (memberId: string) => {
     if (memberId === opts.identity.aegisId) return;
     const contact = contacts.find((c) => c.aegisId === memberId);
     if (!contact) return;
 
-    const { useIdentity } = require('../store/identity');
-    const idState = useIdentity.getState();
-    const senderName = idState.displayName;
-    const senderColor = idState.avatarColor;
-    const rawImage = idState.avatarImage;
-    const senderImage = await toDataUri(rawImage);
+    const senderImage = profiledContacts.has(contact.aegisId) ? null : imageDataUri;
+    if (senderImage) profiledContacts.add(contact.aegisId);
 
     const payload = JSON.stringify({
       type: 'group_msg',
@@ -2046,10 +2058,7 @@ export async function sendGroupMessage(opts: {
 
   await Promise.all(sendPromises);
 
-  const { useIdentity } = require('../store/identity');
-  const idState = useIdentity.getState();
-  const myDisplayName = idState.displayName
-    || opts.identity.aegisId.substring(0, 8);
+  const myDisplayName = senderName || opts.identity.aegisId.substring(0, 8);
 
   const id = Crypto.randomUUID();
   await useMessages.getState().append({

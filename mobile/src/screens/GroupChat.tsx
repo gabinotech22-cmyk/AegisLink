@@ -82,6 +82,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const flatlistRef = useRef<FlatList>(null);
   const isNearBottomRef = useRef(true);
+  const hasInitialScrolledRef = useRef(false);
   const online = useConnection((s) => s.online);
 
   // Build member name lookup — memoised so GroupBubble receives a stable reference
@@ -104,9 +105,19 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const castVote = usePollsStore((s) => s.castVote);
   const hydratePollsStore = usePollsStore((s) => s.hydrate);
 
+  // Reset initial-scroll guard when switching groups
+  useEffect(() => {
+    hasInitialScrolledRef.current = false;
+  }, [group.id]);
+
   useEffect(() => {
     void loadChat(group.id);
     void markRead(group.id);
+    const { setActiveChatNotificationId } = require('../notifications/push') as typeof import('../notifications/push');
+    setActiveChatNotificationId(group.id);
+    return () => {
+      setActiveChatNotificationId(null);
+    };
   }, [group.id, loadChat, markRead]);
 
   useEffect(() => {
@@ -154,9 +165,32 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   }
 
   useEffect(() => {
-    if (list.length > 0 && isNearBottomRef.current) {
+    if (list.length === 0) return;
+    if (!hasInitialScrolledRef.current) {
+      hasInitialScrolledRef.current = true;
+      const timer = setTimeout(() => {
+        flatlistRef.current?.scrollToEnd({ animated: false });
+        isNearBottomRef.current = true;
+      }, 120);
+      return () => clearTimeout(timer);
+    }
+    if (isNearBottomRef.current) {
       requestAnimationFrame(() => flatlistRef.current?.scrollToEnd({ animated: true }));
     }
+  }, [list.length]);
+
+  // Play received-message tone for incoming group messages
+  const prevListLengthRef = useRef(list.length);
+  useEffect(() => {
+    const prev = prevListLengthRef.current;
+    prevListLengthRef.current = list.length;
+    if (list.length <= prev) return;
+    const newItems = list.slice(prev);
+    if (newItems.some((m) => m.direction === 'in')) {
+      const { SoundFX } = require('../hooks/useSoundFX') as typeof import('../hooks/useSoundFX');
+      void SoundFX.msgReceived();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list.length]);
 
   // @ mention autocomplete
@@ -471,16 +505,18 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
               <I.Attach size={22} color={t.textDim} />
             </Pressable>
           )}
-          <Pressable
-            onPress={() => setGifPickerVisible(true)}
-            hitSlop={6}
-            style={{ padding: 6 }}
-            accessibilityLabel="Open GIF picker"
-          >
-            <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
-              GIF
-            </Text>
-          </Pressable>
+          {!draft.trim() && !stagedImageUri && (
+            <Pressable
+              onPress={() => setGifPickerVisible(true)}
+              hitSlop={6}
+              style={{ padding: 6 }}
+              accessibilityLabel="Open GIF picker"
+            >
+              <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
+                GIF
+              </Text>
+            </Pressable>
+          )}
           <TextInput
             placeholder={i18nT('groupChat.messagePlaceholder', 'Group message…')}
             placeholderTextColor={t.textDim}
