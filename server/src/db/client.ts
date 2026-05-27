@@ -878,13 +878,25 @@ export const identityRepo = {
  */
 const MAX_DRAIN_DEVICES = 2;
 
+/** Maximum queued messages per recipient — prevents disk exhaustion attacks. */
+export const MAX_QUEUED_PER_RECIPIENT = 500;
+
 export const messageRepo = {
-  async enqueue(row: Omit<MessageRow, 'drained_by'>): Promise<void> {
+  async enqueue(row: Omit<MessageRow, 'drained_by'>): Promise<{ ok: boolean; reason?: string }> {
     const expiresAt = row.expires_at > 0 ? row.expires_at : row.created_at + MESSAGE_TTL_MS;
+    // Enforce per-recipient queue limit before inserting.
+    const countRow = await dbGet<{ n: number }>(
+      `SELECT COUNT(*) as n FROM messages WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)`,
+      [row.recipient, Date.now()]
+    );
+    if (countRow && countRow.n >= MAX_QUEUED_PER_RECIPIENT) {
+      return { ok: false, reason: 'queue_full' };
+    }
     await dbRun(
       `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by) VALUES (?, ?, ?, ?, ?, ?, '[]')`,
       [row.id, row.recipient, row.ciphertext_b64, row.nonce_b64, row.created_at, expiresAt]
     );
+    return { ok: true };
   },
 
   /**

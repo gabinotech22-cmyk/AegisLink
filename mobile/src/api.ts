@@ -13,9 +13,16 @@ export class ApiError extends Error {
   }
 }
 
+function makeSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${SERVER_URL}${path}`, {
     headers: { 'content-type': 'application/json' },
+    signal: makeSignal(10_000),
     ...init,
   });
   if (!res.ok) {

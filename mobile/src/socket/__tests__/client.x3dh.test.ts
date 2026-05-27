@@ -68,6 +68,7 @@ jest.mock('../../store/messages', () => ({
     getState: () => ({
       ephemeralTimer: 0,
       byChat: {},
+      getEphemeralTimer: jest.fn(() => 0),
       append: jest.fn(async () => undefined),
       updateDelivery: jest.fn(async () => undefined),
       remoteDelete: jest.fn(async () => undefined),

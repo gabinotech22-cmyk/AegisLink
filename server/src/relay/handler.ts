@@ -376,7 +376,24 @@ export function attachRelay(io: SocketServer) {
     });
   });
 
+  // Per-socket token bucket for the 'envelope' event (prevents flooding).
+  // 60 messages/minute with a burst allowance of 20.
+  function makeEnvelopeLimiter() {
+    let tokens = 20;
+    const MAX = 20;
+    const REFILL_INTERVAL = 60_000 / 60; // 1 token per second
+    const timer = setInterval(() => { if (tokens < MAX) tokens++; }, REFILL_INTERVAL);
+    timer.unref?.();
+    return {
+      consume(): boolean { if (tokens <= 0) return false; tokens--; return true; },
+      destroy() { clearInterval(timer); },
+    };
+  }
+
   async function onAuthenticated(socket: Socket, me: string, deviceId: string | undefined, _challenge: Challenge) {
+    const envelopeLimiter = makeEnvelopeLimiter();
+    socket.on('disconnect', () => envelopeLimiter.destroy());
+
     const set = sockets.get(me) ?? new Set<Socket>();
     set.add(socket);
     sockets.set(me, set);
@@ -415,6 +432,10 @@ export function attachRelay(io: SocketServer) {
     socket.on(
       'envelope',
       (raw, ack?: (response: { ok: boolean; queued?: boolean; error?: string }) => void) => {
+        if (!envelopeLimiter.consume()) {
+          ack?.({ ok: false, error: 'rate_limited' });
+          return;
+        }
         const parsed = EnvelopeIn.safeParse(raw);
         if (!parsed.success) {
           ack?.({ ok: false, error: 'invalid_envelope' });
@@ -455,10 +476,16 @@ export function attachRelay(io: SocketServer) {
               created_at: env.createdAt,
               // 0 signals "use default TTL" — messageRepo.enqueue applies MESSAGE_TTL_MS
               expires_at: 0,
+            }).then((result) => {
+              if (!result.ok) {
+                ack?.({ ok: false, error: result.reason ?? 'queue_full' });
+                return;
+              }
+              // Fire silent push wake-up so the recipient's app reconnects and drains.
+              void notifyRecipient(env.to);
+              ack?.({ ok: true, queued: true });
             });
-            // Fire silent push wake-up so the recipient's app reconnects and drains.
-            void notifyRecipient(env.to);
-            ack?.({ ok: true, queued: true });
+            return; // ack will be called in the .then()
           } else {
             ack?.({ ok: true, queued: false });
           }

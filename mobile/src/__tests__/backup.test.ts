@@ -64,7 +64,7 @@ describe('encryptBackup / decryptBackup', () => {
     const payload = makePayload();
     const envelope = encryptBackup(payload, STRONG_PASSPHRASE);
 
-    expect(envelope.v).toBe(1);
+    expect(envelope.v).toBe(2);
     expect(typeof envelope.salt).toBe('string');
     expect(typeof envelope.nonce).toBe('string');
     expect(typeof envelope.ciphertext).toBe('string');
@@ -162,16 +162,16 @@ describe('isBackupEnvelope', () => {
   });
 
   it('rejects wrong version', () => {
-    expect(isBackupEnvelope({ v: 2, salt: 'a', nonce: 'b', ciphertext: 'c' })).toBe(false);
+    expect(isBackupEnvelope({ v: 99, salt: 'a', nonce: 'b', ciphertext: 'c' })).toBe(false);
   });
 
   it('rejects missing fields', () => {
-    expect(isBackupEnvelope({ v: 1, salt: 'a', nonce: 'b' })).toBe(false);
-    expect(isBackupEnvelope({ v: 1, salt: 'a', ciphertext: 'c' })).toBe(false);
+    expect(isBackupEnvelope({ v: 2, salt: 'a', nonce: 'b' })).toBe(false);
+    expect(isBackupEnvelope({ v: 2, salt: 'a', ciphertext: 'c' })).toBe(false);
   });
 
   it('rejects non-string fields', () => {
-    expect(isBackupEnvelope({ v: 1, salt: 42, nonce: 'b', ciphertext: 'c' })).toBe(false);
+    expect(isBackupEnvelope({ v: 2, salt: 42, nonce: 'b', ciphertext: 'c' })).toBe(false);
   });
 });
 

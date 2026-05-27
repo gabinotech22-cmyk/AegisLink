@@ -878,6 +878,24 @@ export async function wipeDatabase(): Promise<void> {
   // Also purge the at-rest DB encryption key so recovered storage cannot be decrypted.
   cachedDbKey = null;
   await SecureStore.deleteItemAsync(getDbEncKeySlot());
+  // Purge X3DH prekey secrets (SPK + OPKs) from SecureStore.
+  // These live outside the SQLite file; without this a forensic attacker who
+  // recovers the device storage after panic could still derive past session keys.
+  const slot = activeSlot;
+  const prefix = slot === 'self' ? '' : `${slot}.`;
+  const opkIdsRaw = await SecureStore.getItemAsync(`aegis.${prefix}opkIds.json`).catch(() => null);
+  if (opkIdsRaw) {
+    try {
+      const ids: number[] = JSON.parse(opkIdsRaw) as number[];
+      for (const id of ids) {
+        await SecureStore.deleteItemAsync(`aegis.${prefix}opkSecret.${id}`).catch(() => {});
+        await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.${id}`).catch(() => {});
+      }
+    } catch { /* non-fatal */ }
+  }
+  await SecureStore.deleteItemAsync(`aegis.${prefix}opkIds.json`).catch(() => {});
+  await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.b64`).catch(() => {});
+  await SecureStore.deleteItemAsync(`aegis.${prefix}spk.keyId`).catch(() => {});
   // Purge forensic remnants: panic config + user preferences.
   // Without this, a post-wipe forensic analysis could detect that a panic-enabled account existed.
   await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
