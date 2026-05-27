@@ -244,6 +244,18 @@ export function attachCallHandlers(): void {
       } catch { return msg.from; }
     })();
     displayIncomingCall(msg.callId, msg.from, callerName, msg.media === 'video');
+
+    // Show a local push notification when the app is in the background so the
+    // user sees a heads-up banner. CallKit / ConnectionService handles the
+    // full-screen UI on iOS / Android 10+; the push is a fallback for cases
+    // where native call UI is not available or not rendered (e.g. kill state).
+    const { AppState } = require('react-native') as typeof import('react-native');
+    if (AppState.currentState !== 'active') {
+      const { showIncomingCallNotification } = require('../notifications/push') as {
+        showIncomingCallNotification: (callerAegisId: string, callerName: string, isVideo: boolean) => Promise<void>;
+      };
+      void showIncomingCallNotification(msg.from, callerName, msg.media === 'video').catch(() => {});
+    }
   });
 
   socket.on('call:answer', async (msg: CallAnswerPayload) => {
