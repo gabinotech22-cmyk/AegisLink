@@ -735,12 +735,37 @@ async function getOrCreateSession(contactAegisId: string, contactPublicKeyB64: s
   // No session exists, fetch PreKey bundle and perform X3DH as Alice (Sender)
   if (!socket) throw new Error('Cannot fetch prekeys offline');
   type PreKeyFetchAck = { ok: true; bundle: PreKeyBundle } | { ok: false; error?: string };
-  const bundle = await new Promise<PreKeyBundle>((resolve, reject) => {
-    socket!.emit('prekeys:fetch', { aegisId: contactAegisId }, (ack: PreKeyFetchAck) => {
-      if (!ack?.ok) reject(new Error(ack?.error ?? 'prekeys_fetch_failed'));
-      else resolve(ack.bundle);
+
+  // Retry up to 3 times with 2 s delay to handle the race where the recipient
+  // is connecting simultaneously and uploads prekeys just after our first attempt.
+  const MAX_PREKEY_RETRIES = 3;
+  const PREKEY_RETRY_DELAY_MS = 2000;
+  let bundle!: PreKeyBundle;
+  for (let attempt = 1; attempt <= MAX_PREKEY_RETRIES; attempt++) {
+    const result = await new Promise<{ ok: true; bundle: PreKeyBundle } | { ok: false; msg: string }>((res) => {
+      socket!.emit('prekeys:fetch', { aegisId: contactAegisId }, (ack: PreKeyFetchAck) => {
+        if (ack?.ok) {
+          res({ ok: true, bundle: ack.bundle });
+        } else {
+          const raw = ack?.error ?? 'prekeys_fetch_failed';
+          const msg = raw === 'not_found'
+            ? 'Contact is not yet available on this server. Ask them to open AegisLink and try again.'
+            : raw;
+          res({ ok: false, msg });
+        }
+      });
     });
-  });
+    if (result.ok) {
+      bundle = result.bundle;
+      break;
+    }
+    // Only retry on not_found; surface other errors immediately
+    const isNotFound = result.msg.startsWith('Contact is not yet available');
+    if (!isNotFound || attempt === MAX_PREKEY_RETRIES) {
+      throw new Error(result.msg);
+    }
+    await new Promise<void>((res) => setTimeout(res, PREKEY_RETRY_DELAY_MS));
+  }
 
   const contact = useContacts.getState().contacts.find(c => c.aegisId === contactAegisId);
   if (!contact) throw new Error('Contact not found');
