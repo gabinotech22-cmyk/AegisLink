@@ -20,7 +20,11 @@ import { I } from '../components/icons';
 import { PrimaryButton, GhostButton } from '../components/Button';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
+import { encodeIdentityQR, parseIdentityQR } from '../crypto/qr';
 import type { StoredContact } from '../db/local';
+import type { Theme } from '../theme/vault';
+import type { Identity } from '../crypto/identity';
+import type { AddResult } from '../store/contacts';
 
 type Method = 'menu' | 'qr' | 'link' | 'id';
 
@@ -38,6 +42,7 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
   const [method, setMethod] = useState<Method>('menu');
   const identity = useIdentity((s) => s.identity);
   const addByAegisId = useContacts((s) => s.addByAegisId);
+  const addFromQR = useContacts((s) => s.addFromQR);
 
   const goBack = () => setMethod('menu');
 
@@ -48,19 +53,9 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
         identity={identity}
         insets={insets}
         onBack={goBack}
-        onScanned={async (scannedId: string) => {
-          try {
-            const contact = await addByAegisId(scannedId, '');
-            if (identity) {
-              const { sendProfileTo } = require('../socket/client') as typeof import('../socket/client');
-              void sendProfileTo(contact, identity);
-            }
-            onAdded(contact);
-          } catch (e) {
-            Alert.alert('Error', (e as Error).message);
-            goBack();
-          }
-        }}
+        addFromQR={addFromQR}
+        addByAegisId={addByAegisId}
+        onAdded={onAdded}
       />
     );
   }
@@ -97,7 +92,12 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
   return (
     <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
       <View style={styles.topBar}>
-        <Pressable onPress={onCancel} hitSlop={8} style={{ padding: 6 }}>
+        <Pressable
+          onPress={onCancel}
+          hitSlop={8}
+          style={{ padding: 6 }}
+          accessibilityLabel="Volver"
+        >
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '600', color: t.text }}>
@@ -134,7 +134,7 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
             t={t}
             icon={<I.Key size={24} color={t.text} />}
             label="Por Aegis ID"
-            sub="Pega el ID de 12 caracteres del contacto. Después verifica la huella."
+            sub="Introduce el ID del contacto. Verifica opcionalmente con 8 palabras de seguridad."
             cta="INTRODUCIR ID →"
             onPress={() => setMethod('id')}
           />
@@ -161,12 +161,24 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
 }
 
 // ── QR Screen — muestra mi QR y escanea el del otro ─────────────────────────
-function QRScreen({ t, identity, insets, onBack, onScanned }: any) {
-  const [mode, setMode] = useState<'show' | 'scan'>('show');
+function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdded }: {
+  t: Theme;
+  identity: Identity | null;
+  insets: { top: number; bottom: number; left: number; right: number };
+  onBack: () => void;
+  addFromQR: (aegisId: string, publicKeyB64: string, displayName?: string) => Promise<AddResult>;
+  addByAegisId: (aegisId: string, displayName?: string) => Promise<StoredContact>;
+  onAdded: (contact: StoredContact) => void;
+}) {
+  const [mode, setMode] = useState<'show' | 'scan' | 'success'>('show');
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [addedContact, setAddedContact] = useState<StoredContact | null>(null);
 
-  const myQRData = identity ? `aegislink:${identity.aegisId}` : '';
+  const myQRData = identity
+    ? encodeIdentityQR(identity.aegisId, identity.publicKeyB64)
+    : '';
 
   const handleScan = async () => {
     if (!permission?.granted) {
@@ -176,23 +188,146 @@ function QRScreen({ t, identity, insets, onBack, onScanned }: any) {
     setMode('scan');
   };
 
-  const handleBarCode = ({ data }: { data: string }) => {
-    if (scanned) return;
+  function finishAdd(contact: StoredContact) {
+    if (identity) {
+      const { sendProfileTo } = require('../socket/client') as typeof import('../socket/client');
+      void sendProfileTo(contact, identity);
+    }
+    setAddedContact(contact);
+    setMode('success');
+    setScanning(false);
+  }
+
+  const handleBarCode = async ({ data }: { data: string }) => {
+    if (scanned || scanning) return;
     setScanned(true);
-    const id = data.replace('aegislink:', '').trim().toUpperCase();
-    if (AEGIS_ID_RE.test(id)) {
-      onScanned(id);
-    } else {
+    setScanning(true);
+
+    try {
+      // Try full identity QR first (aegislink://v1/{id}/{pubkey})
+      const parsed = parseIdentityQR(data);
+      if (parsed) {
+        const result = await addFromQR(parsed.aegisId, parsed.publicKeyB64, '');
+
+        if (result.kind === 'mitm_detected') {
+          Alert.alert(
+            'Alerta de seguridad',
+            `La clave pública en el QR no coincide con la registrada en el servidor.\n\nID: ${parsed.aegisId}\n\nNo añadas este contacto a menos que confirmes que es tu interlocutor real.`,
+            [
+              {
+                text: 'Cancelar',
+                style: 'cancel',
+                onPress: () => { setScanned(false); setScanning(false); setMode('show'); },
+              },
+              {
+                text: 'Confiar en el QR',
+                style: 'destructive',
+                onPress: async () => {
+                  const updated = await useContacts.getState().confirmKeyChange(parsed.aegisId, parsed.publicKeyB64);
+                  if (updated) finishAdd(updated);
+                },
+              },
+            ]
+          );
+          return;
+        }
+
+        finishAdd(result.contact);
+        return;
+      }
+
+      // Fallback: old simple QR format (aegislink:{id})
+      const simpleId = data.replace(/^aegislink:/i, '').trim().toUpperCase();
+      if (AEGIS_ID_RE.test(simpleId)) {
+        const contact = await addByAegisId(simpleId, '');
+        finishAdd(contact);
+        return;
+      }
+
       Alert.alert('QR inválido', 'Este código QR no pertenece a AegisLink.', [
-        { text: 'OK', onPress: () => { setScanned(false); setMode('show'); } },
+        { text: 'OK', onPress: () => { setScanned(false); setScanning(false); setMode('show'); } },
+      ]);
+    } catch (e) {
+      Alert.alert('Error', (e as Error).message, [
+        { text: 'OK', onPress: () => { setScanned(false); setScanning(false); setMode('show'); } },
       ]);
     }
   };
 
+  // ── Success screen ────────────────────────────────────────────────────────
+  if (mode === 'success' && addedContact) {
+    return (
+      <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+        <View style={{
+          width: 80, height: 80, borderRadius: 40,
+          backgroundColor: addedContact.verified ? t.accent + '22' : t.warn + '22',
+          alignItems: 'center', justifyContent: 'center', marginBottom: 20,
+        }}>
+          <I.Shield size={36} color={addedContact.verified ? t.accent : t.warn} />
+        </View>
+
+        <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, color: t.text, fontWeight: '700', marginBottom: 8 }}>
+          Contacto añadido
+        </Text>
+
+        <Text style={{ fontFamily: t.fontMono, fontSize: 16, color: t.accent, letterSpacing: 2, marginBottom: 16 }}>
+          {addedContact.aegisId}
+        </Text>
+
+        {/* Verified badge */}
+        <View style={{
+          flexDirection: 'row', alignItems: 'center', gap: 6,
+          paddingHorizontal: 12, paddingVertical: 6, borderRadius: 99,
+          backgroundColor: addedContact.verified ? t.accent + '18' : t.warn + '18',
+          borderWidth: 1, borderColor: addedContact.verified ? t.accent : t.warn,
+          marginBottom: 28,
+        }}>
+          <I.Shield size={12} color={addedContact.verified ? t.accent : t.warn} />
+          <Text style={{
+            fontFamily: t.fontMono, fontSize: 10,
+            color: addedContact.verified ? t.accent : t.warn,
+            letterSpacing: 0.8, fontWeight: '600',
+          }}>
+            {addedContact.verified ? 'IDENTIDAD VERIFICADA' : 'SIN VERIFICAR'}
+          </Text>
+        </View>
+
+        {!addedContact.verified && (
+          <Text style={{
+            fontFamily: t.font, fontSize: 12, color: t.textDim,
+            textAlign: 'center', lineHeight: 18, maxWidth: 280, marginBottom: 20,
+          }}>
+            Para verificar, compara las 8 palabras de seguridad en Privacidad → Verificar
+          </Text>
+        )}
+
+        <Pressable
+          onPress={() => onAdded(addedContact)}
+          accessibilityLabel="Abrir chat con el contacto añadido"
+          style={{
+            backgroundColor: t.accent, borderRadius: t.radius,
+            paddingHorizontal: 24, paddingVertical: 14,
+            flexDirection: 'row', alignItems: 'center', gap: 8,
+          }}
+        >
+          <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accentInk, letterSpacing: 0.5, fontWeight: '600' }}>
+            ABRIR CHAT →
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // ── Show / Scan modes ─────────────────────────────────────────────────────
   return (
     <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
       <View style={styles.topBar}>
-        <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
+        <Pressable
+          onPress={onBack}
+          hitSlop={8}
+          style={{ padding: 6 }}
+          accessibilityLabel="Volver"
+        >
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
@@ -241,6 +376,7 @@ function QRScreen({ t, identity, insets, onBack, onScanned }: any) {
 
           <Pressable
             onPress={handleScan}
+            accessibilityLabel="Escanear código QR del contacto"
             style={{
               flexDirection: 'row', alignItems: 'center', gap: 8,
               backgroundColor: t.surface, borderWidth: 1, borderColor: t.border,
@@ -267,6 +403,7 @@ function QRScreen({ t, identity, insets, onBack, onScanned }: any) {
           }}>
             <Pressable
               onPress={() => setMode('show')}
+              accessibilityLabel="Cancelar escaneo"
               style={{
                 backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 99,
                 paddingHorizontal: 20, paddingVertical: 10,
@@ -314,7 +451,12 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
   return (
     <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
       <View style={styles.topBar}>
-        <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
+        <Pressable
+          onPress={onBack}
+          hitSlop={8}
+          style={{ padding: 6 }}
+          accessibilityLabel="Volver"
+        >
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
@@ -344,6 +486,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
         <View style={{ gap: 10 }}>
           <Pressable
             onPress={handleCopy}
+            accessibilityLabel={copied ? 'Enlace copiado' : 'Copiar enlace'}
             style={{
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
               backgroundColor: copied ? t.accent + '22' : t.surface,
@@ -359,6 +502,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
 
           <Pressable
             onPress={handleShare}
+            accessibilityLabel="Compartir enlace de invitación"
             style={{
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
               backgroundColor: t.accent, borderRadius: t.radius, paddingVertical: 14,
@@ -430,7 +574,12 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
   return (
     <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
       <View style={styles.topBar}>
-        <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
+        <Pressable
+          onPress={onBack}
+          hitSlop={8}
+          style={{ padding: 6 }}
+          accessibilityLabel="Volver"
+        >
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
@@ -441,7 +590,7 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
 
       <ScrollView contentContainerStyle={{ padding: 22, gap: 18 }}>
         <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 20, textAlign: 'center' }}>
-          Introduce el ID de 12 caracteres de tu contacto. Después verifica la huella para confirmar la identidad.
+          Introduce el ID de 12 caracteres de tu contacto. Recomendamos verificar las 8 palabras de seguridad después en Privacidad → Verificar.
         </Text>
 
         {/* ID input */}
@@ -468,7 +617,12 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
                 color: t.text, paddingVertical: 14, letterSpacing: 1,
               }}
             />
-            <Pressable onPress={handlePaste} hitSlop={8} style={{ padding: 6 }}>
+            <Pressable
+              onPress={handlePaste}
+              hitSlop={8}
+              style={{ padding: 6 }}
+              accessibilityLabel="Pegar ID desde portapapeles"
+            >
               <I.Copy size={18} color={t.textDim} />
             </Pressable>
           </View>
@@ -515,6 +669,7 @@ function MethodCard({ t, icon, label, sub, cta, badge, primary, onPress }: any) 
   return (
     <Pressable
       onPress={onPress}
+      accessibilityLabel={label}
       style={({ pressed }) => [{
         padding: 16, backgroundColor: t.surface,
         borderWidth: 1, borderColor: primary ? t.accent + '66' : t.border,
