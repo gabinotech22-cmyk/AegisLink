@@ -14,6 +14,9 @@ import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
 import { withPickingGuard } from '../utils/pickingGuard';
 
+// expo-file-system v19 removed EncodingType from the main index — use legacy subpath
+const FileSystem = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+
 interface Props {
   onBack: () => void;
   onDevices: () => void;
@@ -98,20 +101,27 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys, o
   }
 
   /**
-   * Resize + compress to 256×256 JPEG using expo-image-manipulator v14 API.
-   * Falls back to the raw URI if manipulation fails so the user always gets
-   * their photo rather than a frozen screen.
+   * Resize + compress to 256px JPEG using expo-image-manipulator v14 API,
+   * then copy the result to documentDirectory so it survives OS cache clears.
+   * Falls back to the raw URI if any step fails so the user always gets their photo.
    */
   async function shrinkToAvatar(uri: string): Promise<string> {
     try {
       const result = await manipulateAsync(
         uri,
-        [{ resize: { width: 256, height: 256 } }],
+        [{ resize: { width: 256 } }],
         { compress: 0.7, format: SaveFormat.JPEG }
       );
-      return result.uri;
+      // Copy to a persistent location — the manipulator writes to a temp/cache dir
+      // that the OS can delete at any time, which would cause other devices to see
+      // an empty avatar once toDataUri() can no longer read the file.
+      const dir = FileSystem.documentDirectory + 'avatars/';
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      const dest = dir + 'self.jpg';
+      await FileSystem.copyAsync({ from: result.uri, to: dest });
+      return dest; // permanent URI that survives app restarts and cache clears
     } catch (e) {
-      if (__DEV__) console.warn('[avatar] manipulateAsync failed, using raw URI:', e);
+      if (__DEV__) console.warn('[avatar] shrinkToAvatar failed, using raw URI:', e);
       return uri; // graceful fallback — user still gets their photo
     }
   }
