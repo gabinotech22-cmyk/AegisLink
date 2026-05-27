@@ -27,14 +27,31 @@ export function setNotificationOpenChatHandler(fn: (aegisId: string) => void) {
   _onOpenChat = fn;
 }
 
-// Show banners for messages that arrive while the app is in background/foreground
+// Notification handler: suppress the server's generic wake-up push when the
+// app is in the foreground — the socket handler will call showIncomingNotification()
+// with the full decrypted sender name and body. When the app is in the background
+// or killed, the OS shows the server push directly (visible push with generic text).
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
+  handleNotification: async (notification) => {
+    const kind = (notification.request.content.data as Record<string, unknown>)?.kind as string | undefined;
+    // Suppress the generic server wake-up banners — we'll show richer local ones
+    if (kind === 'wakeup' || kind === 'call_wakeup') {
+      return {
+        shouldShowBanner: false,
+        shouldShowList: false,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      };
+    }
+    // Local notifications (from showIncomingNotification / showIncomingCallNotification)
+    // have no 'kind' field — always show them
+    return {
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    };
+  },
 });
 
 export async function registerForPush(identity: Identity): Promise<{ token: string | null }> {
