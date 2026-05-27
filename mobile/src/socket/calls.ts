@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
+import { Alert } from 'react-native';
 import { getSocket, isConnected } from './client';
 import { useCall } from '../store/call';
 import { displayIncomingCall, endNativeCall, reportCallConnected, setNativeMuted } from '../calls/callkeep';
@@ -326,12 +327,19 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
       socket.emit('call:ice', { callId, to: toAegisId, ...sealed });
     },
     onConnectionStateChange: (state) => {
+      if (__DEV__) console.log('[calls] connectionState:', state);
       if (state === 'connected') {
         useCall.getState().setStatus('in-call');
         const { callId: cid } = useCall.getState();
         if (cid) reportCallConnected(cid);
       }
-      if (state === 'failed' || state === 'closed') endCall('rtc_failure');
+      if (state === 'failed' || state === 'closed') {
+        endCall('rtc_failure');
+        Alert.alert(
+          'Call failed',
+          'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
+        );
+      }
     },
   }, turnConfig);
   // setActivePeer BEFORE createOffer so toggleMute/toggleCamera always see a
@@ -343,7 +351,11 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   if (!sealedOffer) {
     // Cannot encrypt the offer — abort rather than leak plaintext SDP to the relay.
     endCall('encrypt_failure');
-    throw new Error('cannot_seal_offer');
+    Alert.alert(
+      'Call failed',
+      'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
+    );
+    return; // don't throw — call is already ended cleanly
   }
   socket.emit('call:invite', { callId, to: toAegisId, media, ...sealedOffer });
 
@@ -400,12 +412,19 @@ export async function acceptCall(): Promise<void> {
       socket.emit('call:ice', { callId, to: peerId, ...sealed });
     },
     onConnectionStateChange: (state) => {
+      if (__DEV__) console.log('[calls] connectionState:', state);
       if (state === 'connected') {
         useCall.getState().setStatus('in-call');
         const { callId: cid } = useCall.getState();
         if (cid) reportCallConnected(cid);
       }
-      if (state === 'failed' || state === 'closed') endCall('rtc_failure');
+      if (state === 'failed' || state === 'closed') {
+        endCall('rtc_failure');
+        Alert.alert(
+          'Call failed',
+          'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
+        );
+      }
     },
   }, turnConfig);
   // setActivePeer BEFORE setRemoteOffer so toggleMute/toggleCamera never see null
@@ -419,7 +438,11 @@ export async function acceptCall(): Promise<void> {
   if (!sealedAnswer) {
     // Cannot encrypt the answer — abort rather than leak plaintext SDP.
     endCall('encrypt_failure');
-    throw new Error('cannot_seal_answer');
+    Alert.alert(
+      'Call failed',
+      'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
+    );
+    return; // don't throw — call is already ended cleanly
   }
   socket.emit('call:answer', { callId, to: peerId, ...sealedAnswer });
   // Clear pendingOffer — direction is already stored in the call store.
