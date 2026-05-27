@@ -1420,10 +1420,27 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
     const callMedia = parts[2] ?? 'audio';
     const callDuration = parts[3] ?? '0s';
     const isMissed = callStatus === 'missed' || callStatus === 'declined';
-    const statusLabel =
-      callStatus === 'missed' ? i18nT('chat.missedCall') :
-      callStatus === 'declined' ? i18nT('chat.declinedCall') :
-      callMedia === 'video' ? i18nT('chat.videoCall') : i18nT('chat.voiceCall');
+    const wasOutgoing = m.direction === 'out';
+
+    // Direction-aware label: differentiate "you called" vs "they called"
+    // so outgoing unanswered calls show "Sin respuesta" instead of "Llamada perdida".
+    const statusLabel = (() => {
+      if (wasOutgoing) {
+        if (callStatus === 'missed') return i18nT('chat.callNoAnswer', 'Sin respuesta');
+        if (callStatus === 'declined') return i18nT('chat.callDeclinedByThem', 'Llamada rechazada');
+        return callMedia === 'video' ? i18nT('chat.videoCallMade', 'Videollamada') : i18nT('chat.voiceCallMade', 'Llamada de voz');
+      } else {
+        if (callStatus === 'missed') return i18nT('chat.missedCall', 'Llamada perdida');
+        if (callStatus === 'declined') return i18nT('chat.declinedCall', 'Llamada rechazada');
+        return callMedia === 'video' ? i18nT('chat.videoCall', 'Videollamada') : i18nT('chat.voiceCall', 'Llamada de voz');
+      }
+    })();
+
+    // Only highlight in warn color for incoming missed calls — those are the
+    // most actionable (you missed something). Outgoing unanswered calls use
+    // a dimmer treatment since you were the initiator.
+    const showAsAlert = isMissed && !wasOutgoing;
+
     const CallIcon = callMedia === 'video' ? I.Video : I.Phone;
     return (
       <View style={{ alignItems: 'center', marginVertical: 4 }}>
@@ -1437,11 +1454,11 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
             paddingVertical: 9,
             borderRadius: 99,
             borderWidth: 1,
-            borderColor: isMissed ? `${t.warn}55` : t.border,
+            borderColor: showAsAlert ? `${t.warn}55` : t.border,
           }}
         >
-          <CallIcon size={14} color={isMissed ? t.warn : t.accent} />
-          <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: isMissed ? t.warn : t.text }}>
+          <CallIcon size={14} color={showAsAlert ? t.warn : (wasOutgoing ? t.textDim : t.accent)} />
+          <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: showAsAlert ? t.warn : t.text }}>
             {statusLabel}
           </Text>
           {!isMissed && callDuration !== '0s' && (
