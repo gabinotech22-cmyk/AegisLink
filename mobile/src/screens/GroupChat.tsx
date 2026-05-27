@@ -355,7 +355,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
                     <I.Lock size={10} color={t.accent} />
                     <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5 }}>
-                      {i18nT('groupChat.membersCount', 'E2EE · {{count}} MEMBERS', { count: group.members.length })}
+                      {`E2EE · ${group.members.length} MIEMBROS`}
                     </Text>
                   </View>
                 </View>
