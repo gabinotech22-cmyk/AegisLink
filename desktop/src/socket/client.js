@@ -103,9 +103,21 @@ export function connectToRelay(identity) {
     socket = null;
   }
 
-  const RELAY = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_URL)
+  let RELAY = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_RELAY_URL)
     ? import.meta.env.VITE_RELAY_URL
     : 'http://localhost:3001';
+
+  const isProd = typeof import.meta !== 'undefined' && import.meta.env?.PROD;
+  if (isProd) {
+    if (RELAY.startsWith('http://')) {
+      RELAY = RELAY.replace('http://', 'https://');
+    } else if (RELAY.startsWith('ws://')) {
+      RELAY = RELAY.replace('ws://', 'wss://');
+    }
+    if (!RELAY.startsWith('https://') && !RELAY.startsWith('wss://')) {
+      throw new Error('AegisLink: Insecure connection protocol refused in production');
+    }
+  }
 
   socket = io(RELAY, {
     transports: ['websocket'],

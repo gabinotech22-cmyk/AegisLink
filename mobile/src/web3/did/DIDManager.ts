@@ -16,7 +16,7 @@
  *   - No correlation between DID and aegisId is made on the server.
  */
 
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../../utils/secureStore';
 import { deriveDIDFromPublicKey } from './deriveDID';
 
 const DID_STORE_KEY_PREFIX = 'aegis.did.v1.';
@@ -38,7 +38,7 @@ export async function getOrCreateDID(
   publicKey: Uint8Array
 ): Promise<DIDRecord> {
   const storeKey = `${DID_STORE_KEY_PREFIX}${profileId}`;
-  const cached = await SecureStore.getItemAsync(storeKey);
+  const cached = await ss.get(storeKey);
   if (cached) {
     try {
       const parsed = JSON.parse(cached) as DIDRecord;
@@ -56,7 +56,7 @@ export async function getOrCreateDID(
     profileId,
     derivedAt: Date.now(),
   };
-  await SecureStore.setItemAsync(storeKey, JSON.stringify(record));
+  await ss.set(storeKey, JSON.stringify(record));
   return record;
 }
 
@@ -66,7 +66,7 @@ export async function getOrCreateDID(
  */
 export async function getDID(profileId: string): Promise<DIDRecord | null> {
   const storeKey = `${DID_STORE_KEY_PREFIX}${profileId}`;
-  const cached = await SecureStore.getItemAsync(storeKey);
+  const cached = await ss.get(storeKey);
   if (!cached) return null;
   try {
     const parsed = JSON.parse(cached) as DIDRecord;
@@ -83,5 +83,5 @@ export async function getDID(profileId: string): Promise<DIDRecord | null> {
  */
 export async function clearDID(profileId: string): Promise<void> {
   const storeKey = `${DID_STORE_KEY_PREFIX}${profileId}`;
-  await SecureStore.deleteItemAsync(storeKey);
+  await ss.delete(storeKey);
 }

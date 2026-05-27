@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="30%" cy="20%" r="140%">
+      <stop offset="0%" stop-color="#1a2326"/>
+      <stop offset="70%" stop-color="#06090a"/>
+    </radialGradient>
+    <radialGradient id="glare" cx="100%" cy="100%" r="80%">
+      <stop offset="0%" stop-color="rgba(91,242,185,0.18)"/>
+      <stop offset="60%" stop-color="transparent"/>
+    </radialGradient>
+    <radialGradient id="glare2" cx="0%" cy="0%" r="40%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.06)"/>
+      <stop offset="70%" stop-color="transparent"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect width="1024" height="1024" fill="url(#glare)"/>
+  <rect width="1024" height="1024" fill="url(#glare2)"/>
+  <g transform="translate(225.28, 225.28) scale(14.336)">
+    <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke="#5bf2b9" stroke-width="2.4" fill="none" stroke-linejoin="round"/>
+    <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+    <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+  </g>
+</svg>

@@ -50,3 +50,12 @@ export const TURN_SERVER_URL: string =
   (process.env.EXPO_PUBLIC_TURN_URL as string | undefined) ??
   // eslint-disable-next-line no-undef
   (__DEV__ ? '' : ORACLE_IP ? `turn:${ORACLE_IP}:3478` : '');
+
+/**
+ * ONION_URL — relay Tor hidden service address.
+ * Set EXPO_PUBLIC_ONION_URL in .env.production or EAS secrets.
+ * Only used when routeViaTor=true in user preferences.
+ * null means onion URL not configured (still benefits from Orbot VPN mode).
+ */
+export const ONION_URL: string | null =
+  (process.env.EXPO_PUBLIC_ONION_URL as string | undefined) ?? null;

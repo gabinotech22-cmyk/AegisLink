@@ -1,56 +1,206 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, Share, ActivityIndicator, Alert } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { decodeBase64 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
+import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
+import { useContacts } from '../store/contacts';
 import { fingerprintWords, fingerprintHex } from '../crypto/fingerprint';
 import { encodeIdentityQR } from '../crypto/qr';
-import { TabBar, type Tab } from '../components/TabBar';
+import type { Theme } from '../theme/vault';
 
 interface Props {
   onBack: () => void;
   onScan: () => void;
-  onTab?: (tab: Tab) => void;
+  /** If provided, show a side-by-side comparison with this contact's key words. */
+  contactId?: string;
 }
 
 /**
- * "Show my identity" screen. Peers scan this QR or compare 8 words side-by-side
- * to verify they got the right pubkey out-of-band (defeats directory MITM).
+ * "Show my identity" screen.
+ *
+ * Without contactId — shows own QR + 8 words to share with a peer.
+ * With contactId — shows own words vs contact words side-by-side so either
+ * party can confirm both match out-of-band (defeats directory MITM).
  */
-export function VerifyScreen({ onBack, onScan, onTab }: Props) {
+export function VerifyScreen({ onBack, onScan, contactId }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
-  const [words, setWords] = useState<string[]>([]);
+  const contact = useContacts((s) => (contactId ? s.get(contactId) : undefined));
+  const markVerified = useContacts((s) => s.markVerified);
+
+  const [myWords, setMyWords] = useState<string[]>([]);
   const [hex, setHex] = useState<string[]>([]);
+  const [theirWords, setTheirWords] = useState<string[]>([]);
 
   useEffect(() => {
     if (identity) {
-      setWords(fingerprintWords(identity.publicKey));
+      setMyWords(fingerprintWords(identity.publicKey));
       setHex(fingerprintHex(identity.publicKey));
     }
   }, [identity]);
 
-  if (!identity) return null;
+  useEffect(() => {
+    if (contact?.publicKeyB64) {
+      try {
+        setTheirWords(fingerprintWords(decodeBase64(contact.publicKeyB64)));
+      } catch {
+        setTheirWords([]);
+      }
+    } else {
+      setTheirWords([]);
+    }
+  }, [contact?.publicKeyB64]);
+
+  if (!identity) {
+    return (
+      <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={t.accent} />
+        <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 12 }}>
+          {i18nT('verify.loading', 'Loading identity…')}
+        </Text>
+      </View>
+    );
+  }
 
   const qrPayload = encodeIdentityQR(identity.aegisId, identity.publicKeyB64);
-  const asTab = !!onTab;
+  const screenTitle = contactId && contact
+    ? `Verificar — ${contact.name}`
+    : i18nT('verify.title', 'Verify');
 
+  // ── Comparison mode (contactId provided) ─────────────────────────────────
+  if (contactId) {
+    if (!contact) {
+      return (
+        <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
+          <View style={styles.top}>
+            <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }} accessibilityLabel="Volver">
+              <I.ChevronL size={22} color={t.text} />
+            </Pressable>
+            <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, letterSpacing: -0.4 }}>
+              Verificar
+            </Text>
+            <View style={{ width: 22 }} />
+          </View>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+            <I.Shield size={32} color={t.textDim} />
+            <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, marginTop: 12, textAlign: 'center' }}>
+              Contacto no encontrado.
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
+        <View style={styles.top}>
+          <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }} accessibilityLabel="Volver">
+            <I.ChevronL size={22} color={t.text} />
+          </Pressable>
+          <Text
+            style={{ fontFamily: t.fontDisplay, fontSize: 16, fontWeight: '600', color: t.text, letterSpacing: -0.4, flex: 1, textAlign: 'center' }}
+            numberOfLines={1}
+          >
+            {screenTitle}
+          </Text>
+          <View style={{ width: 22 }} />
+        </View>
+
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 40 }}>
+          {/* Instruction banner */}
+          <View style={{
+            backgroundColor: t.surface, borderWidth: 1, borderColor: t.border,
+            borderRadius: t.radius, padding: 14, flexDirection: 'row', gap: 10,
+            alignItems: 'flex-start', marginVertical: 14,
+          }}>
+            <I.Shield size={16} color={t.accent} style={{ marginTop: 2 }} />
+            <Text style={{ flex: 1, fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19 }}>
+              Lean las palabras en voz alta. Si coinciden, pulsen Verificar.
+            </Text>
+          </View>
+
+          {/* Side-by-side word comparison */}
+          <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
+            {/* My words */}
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginBottom: 8, letterSpacing: 0.8 }}>
+                YO
+              </Text>
+              {myWords.map((w, i) => (
+                <WordChip key={i} word={w} n={i + 1} t={t} />
+              ))}
+            </View>
+
+            {/* Divider */}
+            <View style={{ width: 1, backgroundColor: t.border, marginVertical: 4 }} />
+
+            {/* Their words */}
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginBottom: 8, letterSpacing: 0.8 }}
+                numberOfLines={1}
+              >
+                {contact.name.toUpperCase()}
+              </Text>
+              {theirWords.length > 0 ? (
+                theirWords.map((w, i) => (
+                  <WordChip key={i} word={w} n={i + 1} t={t} />
+                ))
+              ) : (
+                <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 4 }}>
+                  Clave no disponible
+                </Text>
+              )}
+            </View>
+          </View>
+
+          {/* Verify action */}
+          {theirWords.length > 0 && (
+            <PrimaryButton
+              t={t}
+              label="Confirmar — palabras coinciden"
+              onPress={async () => {
+                await markVerified(contactId, true);
+                Alert.alert(
+                  'Verificado',
+                  `${contact.name} está verificado. Tus mensajes están protegidos contra ataques de intermediario.`,
+                  [{ text: 'OK', onPress: onBack }]
+                );
+              }}
+            />
+          )}
+
+          {contact.verified && (
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+              gap: 6, marginTop: 14,
+            }}>
+              <I.Shield size={14} color={t.accent} />
+              <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 0.8 }}>
+                IDENTIDAD YA VERIFICADA
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ── Own identity view (no contactId) ─────────────────────────────────────
   return (
     <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
       <View style={styles.top}>
-        {asTab ? (
-          <View style={{ width: 22 }} />
-        ) : (
-          <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }}>
-            <I.ChevronL size={22} color={t.text} />
-          </Pressable>
-        )}
-        <Text style={{ fontFamily: t.fontDisplay, fontSize: asTab ? 24 : 17, fontWeight: '600', color: t.text, letterSpacing: -0.4 }}>
+        <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }} accessibilityLabel="Volver">
+          <I.ChevronL size={22} color={t.text} />
+        </Pressable>
+        <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, letterSpacing: -0.4 }}>
           {i18nT('verify.title', 'Verify')}
         </Text>
         <View style={{ width: 22 }} />
@@ -117,7 +267,7 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
           }}
         >
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {words.map((w, i) => (
+            {myWords.map((w, i) => (
               <View
                 key={i}
                 style={{
@@ -187,15 +337,60 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
             alignItems: 'center',
             gap: 10,
           })}
+          accessibilityLabel={i18nT('verify.scanPeer', "Scan a peer's QR")}
         >
           <I.QR size={18} color={t.text} />
           <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text, fontWeight: '500' }}>
             {i18nT('verify.scanPeer', "Scan a peer's QR")}
           </Text>
         </Pressable>
-      </ScrollView>
 
-      {onTab ? <TabBar t={t} current="verify" onChange={onTab} /> : null}
+        <Pressable
+          onPress={async () => {
+            await Share.share({
+              title: i18nT('verify.shareTitle', 'Mi contacto AegisLink'),
+              message: `${i18nT('verify.shareMessage', 'Add me on AegisLink:')}\naegislink://v1/${identity.aegisId}/${encodeURIComponent(identity.publicKeyB64)}\n\n${i18nT('verify.shareId', 'Or use my ID:')} ${identity.aegisId}`,
+            });
+          }}
+          style={({ pressed }) => ({
+            marginTop: 12,
+            backgroundColor: pressed ? t.surface2 : 'transparent',
+            borderWidth: 1,
+            borderColor: t.borderStrong,
+            borderRadius: t.radius,
+            paddingVertical: 14,
+            paddingHorizontal: 22,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+          })}
+          accessibilityLabel={i18nT('verify.shareContactLabel', 'Compartir mi contacto')}
+        >
+          <I.Forward size={18} color={t.text} />
+          <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text, fontWeight: '500' }}>
+            {i18nT('verify.shareContact', 'Compartir mi contacto')}
+          </Text>
+        </Pressable>
+      </ScrollView>
+    </View>
+  );
+}
+
+// ── WordChip ─────────────────────────────────────────────────────────────────
+function WordChip({ word, n, t }: { word: string; n: number; t: Theme }) {
+  return (
+    <View style={{
+      flexDirection: 'row', alignItems: 'center', gap: 6,
+      paddingHorizontal: 8, paddingVertical: 5,
+      backgroundColor: t.surface2, borderRadius: t.radiusS,
+      marginBottom: 4,
+    }}>
+      <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, width: 14 }}>
+        {n.toString().padStart(2, '0')}
+      </Text>
+      <Text style={{ fontFamily: t.fontMono, fontSize: 13, color: t.text, fontWeight: '500' }}>
+        {word}
+      </Text>
     </View>
   );
 }

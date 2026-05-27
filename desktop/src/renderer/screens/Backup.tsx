@@ -28,15 +28,10 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   const { t } = useTheme();
   const {
     identity,
-    activeProfile,
     displayName,
     avatarColor,
     avatarImage,
     profileStatus,
-    workDisplayName,
-    workAvatarColor,
-    workAvatarImage,
-    workProfileStatus,
     hydrate: hydrateIdentity,
   } = useIdentity();
   const { contacts, hydrate: hydrateContacts } = useContacts();
@@ -104,15 +99,10 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         createdAt: identity.createdAt,
       },
       profile: {
-        activeProfile,
         displayName,
         avatarColor,
         avatarImage,
         profileStatus,
-        workDisplayName,
-        workAvatarColor,
-        workAvatarImage,
-        workProfileStatus,
       },
       contacts: contacts.map((c) => ({
         aegisId: c.aegisId,

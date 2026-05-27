@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import QRCode from 'qrcode';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
-import { TabBar, type Tab } from '../components/TabBar';
-
-// ---------------------------------------------------------------------------
-// Stub types
-// ---------------------------------------------------------------------------
+import type { Tab } from '../components/TabBar';
+import { useIdentity } from '../store/identity';
+import { useContacts } from '../store/contacts';
+import type { StoredContact } from '../db/local';
 
 interface Identity {
   aegisId: string;
@@ -18,6 +18,8 @@ interface Props {
   onBack: () => void;
   onScan: () => void;
   onTab?: (tab: Tab) => void;
+  /** Called when a peer scans this QR and is auto-added as a new contact. */
+  onContactAdded?: (contact: StoredContact) => void;
 }
 
 // Stub fingerprint functions
@@ -32,32 +34,55 @@ function fingerprintHex(key: Uint8Array): string[] {
           padded.slice(16, 20), padded.slice(20, 24), padded.slice(24, 28), padded.slice(28, 32)].map((s) => s.toUpperCase());
 }
 function encodeIdentityQR(aegisId: string, pubKeyB64: string): string {
-  return `aegislink:v1:${aegisId}:${pubKeyB64}`;
+  return `aegislink://v1/${aegisId}/${encodeURIComponent(pubKeyB64)}`;
 }
 
-export function VerifyScreen({ onBack, onScan, onTab }: Props) {
+export function VerifyScreen({ onBack, onScan, onTab, onContactAdded }: Props) {
   const { t } = useTheme();
   const asTab = !!onTab;
 
-  // Stub identity
-  const [identity] = useState<Identity>({
-    aegisId: 'ABC-1234-5678',
-    publicKey: new Uint8Array(32).fill(0x42),
-    publicKeyB64: btoa('stub-public-key-data-for-display'),
-  });
+  const storedIdentity = useIdentity((s) => s.identity);
+  const contacts = useContacts((s) => s.contacts);
 
-  const [words, setWords] = useState<string[]>([]);
-  const [hex, setHex] = useState<string[]>([]);
-  const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  const identity = useMemo<Identity | null>(() => {
+    if (!storedIdentity) return null;
+    const raw = storedIdentity as { aegisId: string; publicKeyB64: string };
+    const publicKey = Uint8Array.from(atob(raw.publicKeyB64), c => c.charCodeAt(0));
+    return { aegisId: raw.aegisId, publicKey, publicKeyB64: raw.publicKeyB64 };
+  }, [storedIdentity]);
 
+  // When a peer scans our QR → they get auto-added as a contact by the socket
+  // handler. Detect that here and navigate to chat with them.
+  const prevCountRef = useRef(contacts.length);
   useEffect(() => {
-    setWords(fingerprintWords(identity.publicKey));
-    setHex(fingerprintHex(identity.publicKey));
-  }, [identity.publicKey]);
+    const prev = prevCountRef.current;
+    prevCountRef.current = contacts.length;
+    if (contacts.length > prev) {
+      // The newest contact is always prepended at index 0.
+      const newest = contacts[0];
+      if (newest) {
+        if (onContactAdded) {
+          onContactAdded(newest);
+        } else if (onTab) {
+          onTab('home');
+        } else {
+          onBack();
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts.length]);
 
-  const qrPayload = encodeIdentityQR(identity.aegisId, identity.publicKeyB64);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  const [shareMsg, setShareMsg] = useState<string | null>(null);
+
+  const words = useMemo(() => identity ? fingerprintWords(identity.publicKey) : [], [identity]);
+  const hex   = useMemo(() => identity ? fingerprintHex(identity.publicKey)   : [], [identity]);
+
+  const qrPayload = identity ? encodeIdentityQR(identity.aegisId, identity.publicKeyB64) : '';
 
   async function handleCopyId() {
+    if (!identity) return;
     try {
       await navigator.clipboard.writeText(identity.aegisId);
       setCopyMsg('AegisLink ID copied!');
@@ -65,6 +90,19 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
     } catch {
       setCopyMsg('Copy failed — use Ctrl+C');
       setTimeout(() => setCopyMsg(null), 2000);
+    }
+  }
+
+  async function handleShareContact() {
+    if (!identity) return;
+    const shareText = `Agregame en AegisLink:\naegislink://v1/${identity.aegisId}/${encodeURIComponent(identity.publicKeyB64)}\n\nO usa mi ID: ${identity.aegisId}`;
+    try {
+      await navigator.clipboard.writeText(shareText);
+      setShareMsg('¡Copiado!');
+      setTimeout(() => setShareMsg(null), 2000);
+    } catch {
+      setShareMsg('Copy failed');
+      setTimeout(() => setShareMsg(null), 2000);
     }
   }
 
@@ -103,8 +141,8 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
 
         {/* QR display — desktop shows payload text in a styled box */}
         <div style={{ padding: 20, backgroundColor: t.surface, borderRadius: t.radius, border: `1px solid ${t.borderStrong}`, marginTop: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, width: '100%', maxWidth: 280, boxSizing: 'border-box' }}>
-          {/* QR placeholder grid */}
-          <QRPlaceholder payload={qrPayload} t={t} />
+          {/* Real QR code */}
+          <QRCanvas payload={qrPayload} t={t} />
           <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.5, textAlign: 'center', wordBreak: 'break-all' }}>
             {qrPayload.slice(0, 40)}…
           </span>
@@ -114,10 +152,22 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
           </button>
         </div>
 
+        {/* Share contact link button */}
+        <button
+          onClick={() => void handleShareContact()}
+          aria-label="Copiar link de contacto"
+          style={{ marginTop: 14, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, paddingLeft: 16, paddingRight: 16, paddingTop: 9, paddingBottom: 9, backgroundColor: 'transparent', cursor: 'pointer' }}
+        >
+          <I.Copy size={15} color={t.textDim} />
+          <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5 }}>
+            {shareMsg ?? 'COPIAR LINK DE CONTACTO'}
+          </span>
+        </button>
+
         {/* AegisLink ID */}
         <div style={{ marginTop: 18, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <span style={{ fontFamily: t.fontMono, fontSize: 14, color: t.text, letterSpacing: 0.6 }}>
-            {identity.aegisId}
+            {identity?.aegisId ?? '—'}
           </span>
           <button onClick={() => void handleCopyId()} aria-label="Copy AegisLink ID" style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4 }}>
             <I.Copy size={16} color={t.accent} />
@@ -173,39 +223,26 @@ export function VerifyScreen({ onBack, onScan, onTab }: Props) {
         </div>
       </div>
 
-      {onTab && <TabBar t={t} current="verify" onChange={onTab} />}
     </div>
   );
 }
 
-// Simple QR-like grid placeholder for desktop
-function QRPlaceholder({ payload, t }: { payload: string; t: { text: string; surface: string; surface2: string; accent: string } }) {
-  // Generate a deterministic 11x11 bit matrix from payload hash
-  const bits: boolean[] = [];
-  for (let i = 0; i < 121; i++) {
-    const charCode = payload.charCodeAt(i % payload.length) ^ (i * 31);
-    bits.push((charCode & (1 << (i % 8))) !== 0);
-  }
-  // Force corner finder patterns
-  const forced = new Set([0,1,2,3,4,5,6,11,12,13,14,15,16,17,22,77,88,99,110,114,115,116,117,118,119,120]);
-  const blank = new Set([7,8,9,10,18,19,20,21,23,24,25,26]);
+// Real scannable QR code using the `qrcode` library
+function QRCanvas({ payload, t }: { payload: string; t: { radius: number } }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!canvasRef.current || !payload) return;
+    void QRCode.toCanvas(canvasRef.current, payload, {
+      width: 176,
+      margin: 1,
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+  }, [payload]);
 
   return (
-    <div style={{ width: 176, height: 176, display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {Array.from({ length: 11 }).map((_, row) => (
-        <div key={row} style={{ display: 'flex', flexDirection: 'row', gap: 2, flex: 1 }}>
-          {Array.from({ length: 11 }).map((_, col) => {
-            const idx = row * 11 + col;
-            const on = forced.has(idx) ? true : blank.has(idx) ? false : bits[idx];
-            return (
-              <div
-                key={col}
-                style={{ flex: 1, backgroundColor: on ? t.text : t.surface, borderRadius: 1 }}
-              />
-            );
-          })}
-        </div>
-      ))}
+    <div style={{ width: 176, height: 176, borderRadius: t.radius, overflow: 'hidden', flexShrink: 0 }}>
+      <canvas ref={canvasRef} style={{ display: 'block' }} />
     </div>
   );
 }

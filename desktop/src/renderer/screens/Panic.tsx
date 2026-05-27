@@ -7,9 +7,11 @@ import { Section, Toggle } from '../components/Section';
 
 interface Props {
   onBack: () => void;
+  /** Called after a real wipe is triggered — App.tsx wires this to reset identity + stack */
+  onWipe?: () => Promise<void>;
 }
 
-export function PanicScreen({ onBack }: Props) {
+export function PanicScreen({ onBack, onWipe }: Props) {
   const { t } = useTheme();
   const [duressPin, setDuressPin] = useState(true);
   const [autoWipe, setAutoWipe] = useState(false);
@@ -37,7 +39,14 @@ export function PanicScreen({ onBack }: Props) {
     if (!first) return;
     const second = window.confirm('Are you absolutely sure? THIS CANNOT BE UNDONE.');
     if (!second) return;
-    window.alert('Panic activated. All data has been wiped.');
+    // If App.tsx supplied a real wipe callback, use it (clears stack before
+    // setting identity = null to avoid the green-screen race).
+    if (onWipe) {
+      void onWipe();
+    } else {
+      window.alert('Panic activated. All data has been wiped.');
+      onBack();
+    }
   }
 
   const overlayStyle: CSSProperties = {

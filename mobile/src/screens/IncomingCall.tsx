@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, Modal, ScrollView } from 'react-native';
+import { View, Text, Pressable, Modal, ScrollView, StyleSheet } from 'react-native';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -19,6 +19,7 @@ import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { sendMessage } from '../socket/client';
+import { SoundFX } from '../hooks/useSoundFX';
 
 interface Props {
   onAccept: () => void;
@@ -72,6 +73,14 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reduceMotion]);
 
+  // Start ringing when the screen mounts; stop on unmount regardless of outcome
+  useEffect(() => {
+    void SoundFX.callIncoming();
+    return () => {
+      void SoundFX.stopAll();
+    };
+  }, []);
+
   const pulseStyle = useAnimatedStyle(() => ({
     opacity: pulseOpacity.value,
   }));
@@ -88,6 +97,16 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
     i18nT('incomingCall.quickReply5', 'Write to me instead'),
   ];
 
+  function handleAccept() {
+    void SoundFX.callConnected();
+    onAccept();
+  }
+
+  function handleReject() {
+    void SoundFX.callEnded();
+    onReject();
+  }
+
   async function handleQuickReply(text: string) {
     setShowReplies(false);
     if (identity && peer) {
@@ -100,11 +119,40 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
         });
       } catch { /* socket offline — queued */ }
     }
-    onReject();
+    handleReject();
   }
+
+  const peerColor = peer?.color ?? t.accent;
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000', paddingTop: insets.top }}>
+      {/* Radial gradient background approximation */}
+      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+        <View
+          style={{
+            position: 'absolute',
+            top: -150,
+            left: -150,
+            right: -150,
+            height: 500,
+            borderRadius: 9999,
+            backgroundColor: peerColor,
+            opacity: 0.25,
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            bottom: -100,
+            left: -100,
+            right: -100,
+            height: 400,
+            borderRadius: 9999,
+            backgroundColor: t.accent,
+            opacity: 0.08,
+          }}
+        />
+      </View>
       <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 28, paddingTop: 40 }}>
         <View
           style={{
@@ -146,7 +194,7 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
               width: 132,
               height: 132,
               borderRadius: 66,
-              backgroundColor: '#8b5cf6',
+              backgroundColor: peerColor,
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -205,9 +253,9 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
           width: '100%',
         }}
       >
-        <ActionBtn t={t} color="#e63946" label={i18nT('incomingCall.decline', 'DECLINE').toUpperCase()} onPress={onReject} icon={<I.Phone size={28} color="#fff" />} rotate />
+        <ActionBtn t={t} color={t.danger} label={i18nT('incomingCall.decline', 'DECLINE').toUpperCase()} onPress={handleReject} icon={<I.Phone size={28} color="#fff" />} rotate />
         <ActionBtn t={t} color="rgba(255,255,255,0.08)" label={i18nT('incomingCall.reply', 'REPLY').toUpperCase()} small icon={<I.Chat size={20} color="#fff" />} onPress={() => setShowReplies(true)} />
-        <ActionBtn t={t} color={t.accent} label={i18nT('incomingCall.accept', 'ACCEPT').toUpperCase()} onPress={onAccept} icon={<I.Phone size={28} color={t.accentInk} />} />
+        <ActionBtn t={t} color={t.accent} label={i18nT('incomingCall.accept', 'ACCEPT').toUpperCase()} onPress={handleAccept} icon={<I.Phone size={28} color={t.accentInk} />} />
       </View>
       <Modal transparent visible={showReplies} animationType="slide" onRequestClose={() => setShowReplies(false)}>
         <Pressable
@@ -217,7 +265,7 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
           <Pressable
             onPress={(e) => e.stopPropagation?.()}
             style={{
-              backgroundColor: '#1a1a1a',
+              backgroundColor: t.surface,
               borderTopLeftRadius: 18,
               borderTopRightRadius: 18,
               borderTopWidth: 1,

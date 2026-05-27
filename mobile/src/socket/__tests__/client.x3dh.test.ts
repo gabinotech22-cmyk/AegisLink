@@ -68,6 +68,7 @@ jest.mock('../../store/messages', () => ({
     getState: () => ({
       ephemeralTimer: 0,
       byChat: {},
+      getEphemeralTimer: jest.fn(() => 0),
       append: jest.fn(async () => undefined),
       updateDelivery: jest.fn(async () => undefined),
       remoteDelete: jest.fn(async () => undefined),
@@ -78,15 +79,10 @@ jest.mock('../../store/identity', () => ({
   __esModule: true,
   useIdentity: {
     getState: () => ({
-      activeProfile: 'personal',
       displayName: 'Tester',
       avatarColor: '#000',
       profileStatus: '',
       avatarImage: null,
-      workDisplayName: '',
-      workAvatarColor: '#000',
-      workProfileStatus: '',
-      workAvatarImage: null,
     }),
   },
 }));

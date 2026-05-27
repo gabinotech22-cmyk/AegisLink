@@ -73,6 +73,17 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
   const scrollRef = useRef<HTMLDivElement>(null);
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stagedObjectUrlRef = useRef<string | null>(null);
+
+  // Revoke object URLs when component unmounts or image is cleared
+  useEffect(() => {
+    return () => {
+      if (stagedObjectUrlRef.current) {
+        URL.revokeObjectURL(stagedObjectUrlRef.current);
+        stagedObjectUrlRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     void loadChat(contact.aegisId);
@@ -117,25 +128,37 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
     const hasText = draft.trim().length > 0;
     const hasImage = !!stagedImageUri;
     if (!hasText && !hasImage) return;
+    if (!identity) return;
     setSending(true);
     setErrorMsg(null);
+
+    const plaintext = hasImage
+      ? `[image:${stagedImageUri}]`
+      : draft.trim();
+    const capturedReplyTo = replyTo?.id ?? undefined;
+
+    // Optimistic clear so UI feels fast
+    setDraft('');
+    void saveDraft(contact.aegisId, '');
+    if (stagedObjectUrlRef.current) {
+      URL.revokeObjectURL(stagedObjectUrlRef.current);
+      stagedObjectUrlRef.current = null;
+    }
+    setStagedImageUri(null);
+    setReplyTo(null);
+
     try {
-      const id = crypto.randomUUID();
-      const msg: StoredMessage = {
-        id,
-        chatId: contact.aegisId,
-        direction: 'out',
-        body: draft.trim(),
-        createdAt: Date.now(),
-        type: hasImage ? 'image' : 'text',
-        mediaUri: stagedImageUri,
-        replyToId: replyTo?.id ?? null,
-      };
-      await append(msg);
-      setDraft('');
-      void saveDraft(contact.aegisId, '');
-      setStagedImageUri(null);
-      setReplyTo(null);
+      const { decodeBase64 } = await import('tweetnacl-util');
+      const { sendMessage } = await import('../socket/client');
+      await sendMessage({
+        identity,
+        recipientAegisId: contact.aegisId,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext,
+        replyToId: capturedReplyTo,
+        // sendMessage already handles local append via skipLocalAppend=false (default)
+        // so we must NOT call append() separately here.
+      });
     } catch (e) {
       setErrorMsg((e as Error).message);
     } finally {
@@ -146,7 +169,12 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Revoke any previous object URL before creating a new one
+    if (stagedObjectUrlRef.current) {
+      URL.revokeObjectURL(stagedObjectUrlRef.current);
+    }
     const url = URL.createObjectURL(file);
+    stagedObjectUrlRef.current = url;
     setStagedImageUri(url);
     e.target.value = '';
   }
@@ -317,7 +345,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8, backgroundColor: t.surface2, borderTop: `1px solid ${t.divider}`, flexShrink: 0 }}>
           <img src={stagedImageUri} alt="staged" style={{ width: 48, height: 48, borderRadius: t.radiusS, objectFit: 'cover', backgroundColor: t.surface3 }} />
           <span style={{ flex: 1, fontFamily: t.font, fontSize: 13, color: t.textDim }}>Image ready to send</span>
-          <button onClick={() => setStagedImageUri(null)} aria-label="Remove image" style={iconBtn}>
+          <button onClick={() => { if (stagedObjectUrlRef.current) { URL.revokeObjectURL(stagedObjectUrlRef.current); stagedObjectUrlRef.current = null; } setStagedImageUri(null); }} aria-label="Remove image" style={iconBtn}>
             <I.X size={18} color={t.textDim} />
           </button>
         </div>
@@ -327,6 +355,13 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
       {errorMsg && (
         <div style={{ padding: '6px 14px', backgroundColor: `${t.danger}22`, flexShrink: 0 }}>
           <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger }}>{errorMsg}</span>
+        </div>
+      )}
+
+      {/* Unverified contact banner */}
+      {!contact.verified && (
+        <div style={{ padding: '8px 16px', backgroundColor: '#1a1200', borderTop: `1px solid #ff9500`, color: '#ff9500', fontSize: 12, fontFamily: t.fontMono, flexShrink: 0 }}>
+          Unverified contact. Sending is enabled — verify their identity for maximum security.
         </div>
       )}
 

@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
-import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 import { useTheme } from '../theme/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import { I } from '../components/icons';
@@ -27,6 +27,7 @@ import {
   isBackupEnvelope,
   BACKUP_FILE_EXTENSION,
   BACKUP_MIN_PASSPHRASE_LEN,
+  BACKUP_VERSION,
   type BackupPayload,
   type PassphraseStrength,
 } from '../crypto/backup';
@@ -44,15 +45,10 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   const insets = useSafeAreaInsets();
   const {
     identity,
-    activeProfile,
     displayName,
     avatarColor,
     avatarImage,
     profileStatus,
-    workDisplayName,
-    workAvatarColor,
-    workAvatarImage,
-    workProfileStatus,
     hydrate: hydrateIdentity,
   } = useIdentity();
   const { contacts, hydrate: hydrateContacts } = useContacts();
@@ -78,7 +74,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
 
   const [lastBackupAt, setLastBackupAt] = useState<number | null>(null);
   useEffect(() => {
-    SecureStore.getItemAsync('aegis.backup.lastAt')
+    ss.get('aegis.backup.lastAt')
       .then((raw) => raw ? setLastBackupAt(parseInt(raw, 10)) : null)
       .catch(() => {});
   }, []);
@@ -122,7 +118,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       archived: c.archived,
     }));
     return {
-      v: 1,
+      v: BACKUP_VERSION,
       createdAt: Date.now(),
       identity: {
         aegisId: identity.aegisId,
@@ -133,15 +129,10 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         createdAt: identity.createdAt,
       },
       profile: {
-        activeProfile,
         displayName,
         avatarColor,
         avatarImage,
         profileStatus,
-        workDisplayName,
-        workAvatarColor,
-        workAvatarImage,
-        workProfileStatus,
       },
       contacts: backupContacts,
     };
@@ -176,7 +167,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       // Wipe local passphrase memory before opening the share sheet.
       resetPassphrase();
       const now = Date.now();
-      await SecureStore.setItemAsync('aegis.backup.lastAt', String(now));
+      await ss.set('aegis.backup.lastAt', String(now));
       setLastBackupAt(now);
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
@@ -249,17 +240,11 @@ export function BackupScreen({ onBack, onRestored }: Props) {
 
       // 2) Restore profile preferences.
       const p = payload.profile;
-      await SecureStore.setItemAsync('aegis.activeProfile', p.activeProfile);
-      await SecureStore.setItemAsync('aegis.displayName', p.displayName);
-      await SecureStore.setItemAsync('aegis.avatarColor', p.avatarColor);
-      if (p.avatarImage) await SecureStore.setItemAsync('aegis.avatarImage', p.avatarImage);
-      else await SecureStore.deleteItemAsync('aegis.avatarImage');
-      await SecureStore.setItemAsync('aegis.profileStatus', p.profileStatus);
-      await SecureStore.setItemAsync('aegis.workDisplayName', p.workDisplayName);
-      await SecureStore.setItemAsync('aegis.workAvatarColor', p.workAvatarColor);
-      if (p.workAvatarImage) await SecureStore.setItemAsync('aegis.workAvatarImage', p.workAvatarImage);
-      else await SecureStore.deleteItemAsync('aegis.workAvatarImage');
-      await SecureStore.setItemAsync('aegis.workProfileStatus', p.workProfileStatus);
+      await ss.set('aegis.displayName', p.displayName);
+      await ss.set('aegis.avatarColor', p.avatarColor);
+      if (p.avatarImage) await ss.set('aegis.avatarImage', p.avatarImage);
+      else await ss.delete('aegis.avatarImage');
+      await ss.set('aegis.profileStatus', p.profileStatus);
 
       // 3) Restore contacts.
       for (const c of payload.contacts) {
@@ -377,7 +362,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         {/* Live Database Stats Card */}
         <View
           style={{
-            padding: 22,
+            padding: 16,
             borderWidth: 1,
             borderColor: t.borderStrong,
             borderRadius: t.radius,
@@ -385,17 +370,17 @@ export function BackupScreen({ onBack, onRestored }: Props) {
             marginBottom: 16,
           }}
         >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, alignItems: 'center', marginBottom: 16 }}>
             <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: lastBackupAt ? t.accent : t.warn, letterSpacing: 1.1 }}>{lastBackupLabel}</Text>
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim }}>{i18nT('backup.realtimeStats')}</Text>
           </View>
-          <Text style={{ fontFamily: t.fontDisplay, fontSize: 32, fontWeight: '600', letterSpacing: -0.6, color: t.text }}>
+          <Text style={{ fontFamily: t.fontDisplay, fontSize: 28, fontWeight: '600', letterSpacing: -0.6, color: t.text, flexShrink: 1 }}>
             {totalMessages.toLocaleString()} messages
           </Text>
           <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.textDim, marginTop: 2 }}>
             {i18nT('backup.dbEncrypted')}
           </Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 18, gap: 10 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 18, columnGap: 8, rowGap: 10 }}>
             <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.conversations')} val={totalConversations.toString()} /></View>
             <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.groups')} val={totalGroups.toString()} /></View>
             <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.media')} val={totalMedia.toString()} /></View>

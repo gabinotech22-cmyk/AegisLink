@@ -1,10 +1,7 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import * as SecureStore from 'expo-secure-store';
-
-// SecureStore key names — must match db/local.ts
-const SECRET_KEY_SLOT = 'aegis.secretKey.b64';
-const SIGN_SECRET_KEY_SLOT = 'aegis.signSecretKey.b64';
+import { signSecretKeySlot } from './types';
 
 export interface KeyPair {
   publicKey: Uint8Array;
@@ -76,37 +73,54 @@ export function createIdentity(): Identity {
 
 // ── Web3 integration helpers ─────────────────────────────────────────────────
 // These functions access SecureStore directly so the private key never leaves
-// the device's secure enclave. profileId is the aegisId of the profile.
+// the device's secure enclave. `profileId` is the slot id of the profile
+// ('self' for the primary profile, or e.g. 'work' / 'slot_1' for others).
 
 /**
- * Returns the 32-byte Ed25519 signing public key for the given profile.
- * The public key is read from the SQLite identity table (public, non-secret).
- * We derive it from the signing secret key to avoid a separate DB call.
+ * Loads the 64-byte Ed25519 signing secret key for the given profile/slot.
+ *
+ * Per-profile isolation: the slot name is derived from `profileId` via the
+ * single source of truth in crypto/types. The primary profile ('self') maps to
+ * the legacy un-suffixed slot (SLOT_KEY_PREFIX.SIGN_SECRET), so existing
+ * identities created before multi-profile support keep working with zero
+ * migration. Non-'self' profiles use their own suffixed slot and NEVER read the
+ * primary's legacy key — doing so would break isolation and let one profile
+ * sign with another's identity.
+ *
+ * The secret never leaves SecureStore except as the in-memory Uint8Array the
+ * caller needs to sign with.
  */
-export async function getProfilePublicKey(profileId: string): Promise<Uint8Array> {
-  // The signing secret key is a 64-byte nacl signing key (seed || publicKey).
-  const signSecretB64 = await SecureStore.getItemAsync(SIGN_SECRET_KEY_SLOT);
+async function loadSignSecret(profileId: string): Promise<Uint8Array> {
+  const slot = signSecretKeySlot(profileId);
+  // For 'self', slot === SLOT_KEY_PREFIX.SIGN_SECRET (the legacy name), so the
+  // primary profile is read in place with no migration step required.
+  const signSecretB64 = await SecureStore.getItemAsync(slot);
+
   if (!signSecretB64) {
     throw new Error(`no signing key in SecureStore for profile ${profileId}`);
   }
-  const signSecret = decodeBase64(signSecretB64);
+  return decodeBase64(signSecretB64);
+}
+
+/**
+ * Returns the 32-byte Ed25519 signing public key for the given profile.
+ * Derived from that profile's signing secret key (64 bytes = seed || pubkey).
+ */
+export async function getProfilePublicKey(profileId: string): Promise<Uint8Array> {
+  const signSecret = await loadSignSecret(profileId);
   // nacl sign secret key is 64 bytes: first 32 are the seed, last 32 the public key.
   return signSecret.slice(32, 64);
 }
 
 /**
- * Signs an arbitrary payload with the Ed25519 signing key from SecureStore.
+ * Signs an arbitrary payload with the given profile's Ed25519 signing key.
  * Returns a 64-byte detached signature. The private key never leaves SecureStore.
  */
 export async function signWithProfileKey(
   profileId: string,
   payload: Uint8Array
 ): Promise<Uint8Array> {
-  const signSecretB64 = await SecureStore.getItemAsync(SIGN_SECRET_KEY_SLOT);
-  if (!signSecretB64) {
-    throw new Error(`no signing key in SecureStore for profile ${profileId}`);
-  }
-  const signSecret = decodeBase64(signSecretB64);
+  const signSecret = await loadSignSecret(profileId);
   return nacl.sign.detached(payload, signSecret);
 }
 

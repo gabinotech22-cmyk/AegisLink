@@ -1,6 +1,7 @@
 // Initialise i18n before anything else renders
 import './src/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Linking } from 'react-native';
 import { View, Text, ActivityIndicator, AppState, Pressable, type AppStateStatus, Dimensions } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -9,7 +10,6 @@ import Animated, {
   useReducedMotion,
   Easing,
 } from 'react-native-reanimated';
-import { usePanicGesture } from './src/hooks/usePanicGesture';
 import * as SecureStore from 'expo-secure-store';
 import { I } from './src/components/icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -18,13 +18,11 @@ import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { OnboardingScreen } from './src/screens/Onboarding';
 import { HomeScreen } from './src/screens/Home';
 import { GroupsScreen } from './src/screens/Groups';
-import { VerifyScreen } from './src/screens/Verify';
 import { PrivacyScreen } from './src/screens/Privacy';
 import { ChatScreen } from './src/screens/Chat';
 import { GroupChatScreen } from './src/screens/GroupChat';
 import { AddContactScreen } from './src/screens/AddContact';
 import { ScanQRScreen } from './src/screens/ScanQR';
-import { InviteAddScreen } from './src/screens/InviteAdd';
 import { ProfileScreen } from './src/screens/Profile';
 import { NotificationsScreen } from './src/screens/Notifications';
 import { BackupScreen } from './src/screens/Backup';
@@ -47,16 +45,19 @@ import { ContactsScreen } from './src/screens/Contacts';
 import { PollScreen } from './src/screens/Poll';
 import { FirstContactScreen } from './src/screens/FirstContact';
 import { AppIconScreen } from './src/screens/AppIcon';
-import { WorkDashboard } from './src/screens/WorkDashboard';
-import { WorkGenerationScreen } from './src/screens/WorkGeneration';
 import { SubscriptionScreen } from './src/screens/Subscription';
 import { CallScreen } from './src/screens/Call';
 import { IncomingCallScreen } from './src/screens/IncomingCall';
 import { NetworkErrorScreen } from './src/screens/NetworkError';
 import { LockSettingsScreen } from './src/screens/LockSettings';
 import { KeysScreen } from './src/screens/Keys';
+import { DistributionListsScreen } from './src/screens/DistributionLists';
+import { BroadcastComposeScreen } from './src/screens/BroadcastCompose';
+import { ProfileSwitcherScreen } from './src/screens/ProfileSwitcher';
+import { CreateProfileScreen } from './src/screens/CreateProfile';
 import { useIdentity } from './src/store/identity';
 import { usePreferences } from './src/store/preferences';
+import { useProfiles } from './src/store/profiles';
 
 import { useCall } from './src/store/call';
 import { connect as connectSocket, disconnect as disconnectSocket } from './src/socket/client';
@@ -64,8 +65,10 @@ import { useConnection } from './src/store/connection';
 import { isPicking } from './src/utils/pickingGuard';
 import { attachCallHandlers, acceptCall, endCall } from './src/socket/calls';
 import { registerForPush, setNotificationOpenChatHandler } from './src/notifications/push';
+import { initCallKeep } from './src/calls/callkeep';
 import { WEBRTC_AVAILABLE } from './src/runtime';
 import { clearTurnCache } from './src/webrtc/ice';
+import { handlePanicDeepLink } from './src/utils/panicLink';
 
 // ─── Background Scheduled-Message Task ───────────────────────────────────────
 const SCHEDULED_TASK_NAME = 'aegis.scheduled-sender';
@@ -125,7 +128,6 @@ type PushRoute =
   | { name: 'contact'; contact: StoredContact; keyChanged?: boolean }
   | { name: 'add' }
   | { name: 'scan' }
-  | { name: 'invite' }
   | { name: 'profile' }
   | { name: 'notifs' }
   | { name: 'backup' }
@@ -133,7 +135,7 @@ type PushRoute =
   | { name: 'lockConfig' }
   | { name: 'lock' }
   | { name: 'panic' }
-  | { name: 'ephemeral' }
+  | { name: 'ephemeral'; chatId: string }
   | { name: 'export' }
   | { name: 'attach'; contact: StoredContact }
   | { name: 'voice'; contact: StoredContact }
@@ -148,11 +150,13 @@ type PushRoute =
   | { name: 'firstContact'; contact: StoredContact }
   | { name: 'contacts' }
   | { name: 'appIcon' }
-  | { name: 'workDashboard' }
   | { name: 'subscription' }
   | { name: 'lockSettings' }
-  | { name: 'workGeneration' }
-  | { name: 'keys' };
+  | { name: 'keys' }
+  | { name: 'distribution' }
+  | { name: 'broadcast'; list: import('./src/store/distribution').DistributionList }
+  | { name: 'profileSwitcher' }
+  | { name: 'createProfile' };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -216,6 +220,7 @@ function Shell() {
 
   // ── App lock state ──────────────────────────────────────────────────────────
   const [appLocked, setAppLocked] = useState(false);
+  const [showWipeOverlay, setShowWipeOverlay] = useState(false);
   const lastBgTimeRef = useRef<number | null>(null);
   const didColdLockRef = useRef(false);
 
@@ -270,9 +275,38 @@ function Shell() {
     return () => sub.remove();
   }, [hideRecents]);
 
+  // Purge plaintext media cache 30 s after going to background to reduce forensic window
+  useEffect(() => {
+    let purgeTimer: ReturnType<typeof setTimeout> | null = null;
+    const handler = (nextState: AppStateStatus) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        purgeTimer = setTimeout(() => {
+          const { purgeCachedDecryptedMedia } = require('./src/crypto/media');
+          void (purgeCachedDecryptedMedia as () => Promise<void>)().catch(() => {});
+        }, 30_000);
+      } else if (nextState === 'active') {
+        if (purgeTimer !== null) {
+          clearTimeout(purgeTimer);
+          purgeTimer = null;
+        }
+      }
+    };
+    const sub = AppState.addEventListener('change', handler);
+    return () => {
+      sub.remove();
+      if (purgeTimer !== null) clearTimeout(purgeTimer);
+    };
+  }, []);
+
   useEffect(() => {
     void hydrate();
     void hydratePrefs();
+    // Startup: prune messages that expired while the app was closed,
+    // and restore per-chat ephemeral timers from SQLite.
+    const { deleteExpiredMessages: pruneDb } = require('./src/db/local');
+    void (pruneDb as () => Promise<void>)();
+    const { useMessages: msgStore } = require('./src/store/messages');
+    void (msgStore.getState().loadAllEphemeralTimers as () => Promise<void>)();
   }, [hydrate, hydratePrefs]);
 
   // Enforce screenshot / screen-recording block
@@ -356,6 +390,8 @@ function Shell() {
   // Show NetworkErrorScreen after 5s of being offline (only when authenticated).
   useEffect(() => {
     if (!identity) return;
+    // Suppress network errors in decoy mode — no connection is intentional
+    if (usePreferences.getState().duressActive) return;
     if (!online) {
       netTimer.current = setTimeout(() => setNetError(true), 5000);
     } else {
@@ -367,6 +403,8 @@ function Shell() {
 
   useEffect(() => {
     if (identity && status === 'ready') {
+      // Never connect with the decoy identity — doing so leaks that panic mode is active
+      if (usePreferences.getState().duressActive) return;
       connectSocket(identity);
       if (WEBRTC_AVAILABLE) attachCallHandlers();
       setNotificationOpenChatHandler((aegisId) => {
@@ -375,6 +413,7 @@ function Shell() {
         if (contact) { setStack([]); push({ name: 'chat', contact }); }
       });
       void registerForPush(identity);
+      initCallKeep();
     } else if (!identity && status === 'idle') {
       disconnectSocket();
       clearTurnCache();
@@ -387,6 +426,9 @@ function Shell() {
 
   // ── Panic gesture ───────────────────────────────────────────────────────────
   const triggerPanic = useCallback(async () => {
+    setShowWipeOverlay(true);
+    // Allow the overlay to render before blocking with async I/O
+    await new Promise<void>((resolve) => setTimeout(resolve, 600));
     try {
       const { wipeDatabase } = require('./src/db/local') as typeof import('./src/db/local');
       await wipeDatabase();
@@ -395,9 +437,8 @@ function Shell() {
     } catch {
       /* wipe failure: app state is now invalid — identity reset forces re-onboarding */
     }
+    setShowWipeOverlay(false);
   }, []);
-
-  const { registerTap } = usePanicGesture(triggerPanic);
 
   async function handleFilePick(contact: StoredContact) {
     const DocumentPicker = require('expo-document-picker');
@@ -435,6 +476,39 @@ function Shell() {
     setTab(tabId);
   }, []);
 
+  // ── Deep link handling ──────────────────────────────────────────────────────
+  const handleDeepLink = useCallback(async (url: string) => {
+    if (!url.startsWith('aegislink://')) return;
+
+    // Remote panic wipe — handlePanicDeepLink does full Ed25519 + token
+    // verification before touching any data. We show the WIPING overlay
+    // immediately (prevents flash of app content) and clear it on failure.
+    if (url.startsWith('aegislink://panic')) {
+      setShowWipeOverlay(true);
+      const wiped = await handlePanicDeepLink(url);
+      if (wiped) {
+        // Wipe + identity reset completed inside handlePanicDeepLink.
+        // Brief pause so the overlay is visible before shell unmounts.
+        await new Promise<void>((r) => setTimeout(r, 600));
+      }
+      // Always clear the overlay — on failure this restores the app UI,
+      // on success the identity reset already triggered a shell re-render
+      // to the onboarding screen.
+      setShowWipeOverlay(false);
+      return;
+    }
+
+    // Future scheme handlers go here (e.g. aegislink://chat/{id})
+  }, []);
+
+  useEffect(() => {
+    Linking.getInitialURL().then((url: string | null) => {
+      if (url) void handleDeepLink(url);
+    }).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }: { url: string }) => void handleDeepLink(url));
+    return () => sub.remove();
+  }, [handleDeepLink]);
+
   // Call overlay state (takes over the entire UI when active)
   const callStatus = useCall((s) => s.status);
   const callOverlay =
@@ -443,6 +517,17 @@ function Shell() {
     callStatus === 'in-call' ||
     callStatus === 'ended';
   const incomingCall = callStatus === 'incoming-ringing';
+
+  if (showWipeOverlay) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
+        <I.Shield size={44} color="#ff4444" stroke={1.5} />
+        <Text style={{ color: '#ff4444', fontFamily: 'monospace', fontSize: 12, letterSpacing: 3, marginTop: 28 }}>
+          WIPING DATA
+        </Text>
+      </View>
+    );
+  }
 
   if (status === 'loading' || showOnboarding === null) {
     return (
@@ -488,7 +573,7 @@ function Shell() {
     return (
       <LockScreen
         onUnlock={() => setAppLocked(false)}
-        onPanic={() => { setAppLocked(false); push({ name: 'panic' }); }}
+        onPanic={() => void triggerPanic()}
       />
     );
   }
@@ -524,7 +609,7 @@ function Shell() {
             onBack={pop}
             onContactDetail={() => push({ name: 'contact', contact: top.contact })}
             onAttach={() => push({ name: 'attach', contact: top.contact })}
-            onEphemeral={() => push({ name: 'ephemeral' })}
+            onEphemeral={() => push({ name: 'ephemeral', chatId: top.contact.aegisId })}
             onViewOnce={(mediaUri, messageId) => push({ name: 'viewonce', contact: top.contact, mediaUri, messageId })}
           />
         );
@@ -535,6 +620,17 @@ function Shell() {
             onBack={pop}
             onGroupDetail={() => push({ name: 'groupadmin', group: top.group })}
             onPoll={() => push({ name: 'poll', group: top.group })}
+            onAttach={async () => {
+              const ImagePicker = require('expo-image-picker');
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                quality: 1,
+              });
+              if (!result.canceled && result.assets?.[0]?.uri) {
+                const { useMessages } = require('./src/store/messages');
+                useMessages.getState().setPendingMedia(result.assets[0].uri);
+              }
+            }}
           />
         );
       case 'contact':
@@ -556,8 +652,7 @@ function Shell() {
                 void startCall(top.contact.aegisId, media).catch(() => {});
               }, 400);
             }}
-            onVerify={() => popAllTo('verify')}
-            onEphemeral={() => push({ name: 'ephemeral' })}
+            onEphemeral={() => push({ name: 'ephemeral', chatId: top.contact.aegisId })}
           />
         );
       case 'add':
@@ -580,15 +675,6 @@ function Shell() {
             }}
           />
         );
-      case 'invite':
-        return (
-          <InviteAddScreen
-            onBack={pop}
-            onShowMyQR={() => popAllTo('verify')}
-            onScanQR={() => setStack((s) => [...s.slice(0, -1), { name: 'scan' }])}
-            onPasteId={() => setStack((s) => [...s.slice(0, -1), { name: 'add' }])}
-          />
-        );
       case 'profile':
         return (
           <ProfileScreen
@@ -597,28 +683,31 @@ function Shell() {
             onDevices={() => push({ name: 'devices' })}
             onPanic={() => push({ name: 'panic' })}
             onAppIcon={() => push({ name: 'appIcon' })}
-            onWorkDashboard={() => { pop(); setTab('dashboard'); }}
-            onSwitchToPersonal={() => { pop(); setTab('home'); }}
             onSubscription={() => push({ name: 'subscription' })}
-            onWorkGeneration={() => push({ name: 'workGeneration' })}
-          />
-        );
-      case 'workGeneration':
-        return (
-          <WorkGenerationScreen
-            onDone={() => {
-              pop();
-              setTab('dashboard');
-            }}
-            onBack={pop}
+            onNotifications={() => push({ name: 'notifs' })}
+            onLockConfig={() => push({ name: 'lockConfig' })}
+            onExport={() => push({ name: 'export' })}
+            onProfileSwitcher={() => push({ name: 'profileSwitcher' })}
           />
         );
       case 'appIcon':
         return <AppIconScreen onBack={pop} />;
       case 'keys':
         return <KeysScreen onBack={pop} />;
-      case 'workDashboard':
-        return <WorkDashboard onBack={pop} />;
+      case 'distribution':
+        return (
+          <DistributionListsScreen
+            onBack={pop}
+            onOpenList={(list) => push({ name: 'broadcast', list })}
+          />
+        );
+      case 'broadcast':
+        return (
+          <BroadcastComposeScreen
+            list={top.list}
+            onBack={pop}
+          />
+        );
       case 'subscription':
         return <SubscriptionScreen onBack={pop} />;
       case 'notifs':
@@ -632,11 +721,11 @@ function Shell() {
       case 'lockSettings':
         return <LockSettingsScreen onBack={pop} />;
       case 'lock':
-        return <LockScreen onUnlock={pop} onPanic={() => push({ name: 'panic' })} />;
+        return <LockScreen onUnlock={pop} onPanic={() => void triggerPanic()} />;
       case 'panic':
         return <PanicScreen onBack={pop} />;
       case 'ephemeral':
-        return <EphemeralScreen onBack={pop} />;
+        return <EphemeralScreen onBack={pop} chatId={top.chatId} />;
       case 'export':
         return <DataExportScreen onBack={pop} />;
       case 'attach':
@@ -751,7 +840,7 @@ function Shell() {
       case 'viewoncesend':
         return <ViewOnceSendScreen contact={top.contact} onBack={pop} onSent={pop} />;
       case 'scheduled':
-        return <ScheduledScreen contact={top.contact} onBack={pop} />;
+        return <ScheduledScreen onBack={pop} />;
       case 'location':
         return <LocationScreen contact={top.contact} onBack={pop} onShare={pop} />;
       case 'search':
@@ -788,16 +877,30 @@ function Shell() {
           <FirstContactScreen
             contact={top.contact}
             onOpenChat={() => { setStack([]); push({ name: 'chat', contact: top.contact }); }}
-            onAddAnother={() => { setStack([]); push({ name: 'invite' }); }}
+            onAddAnother={() => { setStack([]); push({ name: 'add' }); }}
           />
         );
       case 'contacts':
         return (
           <ContactsScreen
             onBack={pop}
-            onAddContact={() => push({ name: 'invite' })}
+            onAddContact={() => push({ name: 'add' })}
             onOpenContact={(contact) => push({ name: 'contact', contact })}
             onChat={(contact) => push({ name: 'chat', contact })}
+          />
+        );
+      case 'profileSwitcher':
+        return (
+          <ProfileSwitcherScreen
+            onBack={pop}
+            onCreateProfile={() => push({ name: 'createProfile' })}
+          />
+        );
+      case 'createProfile':
+        return (
+          <CreateProfileScreen
+            onBack={pop}
+            onCreated={() => { setStack([]); setTab('home'); }}
           />
         );
     }
@@ -816,44 +919,18 @@ function Shell() {
         <View style={{ flex: 1 }}>
           <HomeScreen
             onOpenChat={(contact) => push({ name: 'chat', contact })}
-            onAddContact={() => push({ name: 'invite' })}
+            onAddContact={() => push({ name: 'add' })}
             onSearch={() => push({ name: 'search' })}
             onProfile={() => push({ name: 'profile' })}
             onContacts={() => push({ name: 'contacts' })}
+            onDistribution={() => push({ name: 'distribution' })}
+            onProfileSwitcher={() => push({ name: 'profileSwitcher' })}
             onTab={setTab}
-          />
-          {/* Invisible tap target over the logo area for the 'tap' panic gesture.
-              Positioned top-left to cover the AegisLink wordmark (~120×52 px).
-              pointer-events passthrough is off intentionally — the logo's own
-              onPress (→ profile) fires via HomeScreen; this Pressable sits behind
-              it but Android/iOS let both fire because we use hitSlop only. */}
-          <Pressable
-            onPress={registerTap}
-            accessibilityLabel="Panic gesture tap zone"
-            accessibilityElementsHidden
-            importantForAccessibility="no"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: 130,
-              height: 66,
-              opacity: 0,
-            }}
-            hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }}
           />
         </View>
       );
     case 'groups':
       return <GroupsScreen onTab={setTab} onOpenGroupChat={(group) => push({ name: 'groupChat', group })} />;
-    case 'verify':
-      return (
-        <VerifyScreen
-          onBack={() => setTab('home')}
-          onScan={() => push({ name: 'scan' })}
-          onTab={setTab}
-        />
-      );
     case 'settings':
       return (
         <PrivacyScreen
@@ -861,8 +938,6 @@ function Shell() {
           onNav={(name) => push({ name } as PushRoute)}
         />
       );
-    case 'dashboard':
-      return <WorkDashboard onBack={() => setTab('groups')} />;
   }
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { Alert } from 'react-native';
+import { ss } from '../utils/secureStore';
 
 const PANIC_KEY = 'aegis.panic.v1';
 const SHAKE_THRESHOLD = 2.8; // g-force magnitude
@@ -61,7 +62,7 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
 
     async function setup(): Promise<void> {
       try {
-        const raw = await SecureStore.getItemAsync(PANIC_KEY);
+        const raw = await ss.get(PANIC_KEY);
         if (!raw) return;
         const config = JSON.parse(raw) as PanicConfig;
         gestureRef.current = config.gesture ?? 'off';
@@ -86,7 +87,19 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
                 now - lastShakeRef.current > SHAKE_DEBOUNCE_MS
               ) {
                 lastShakeRef.current = now;
-                onTriggerRef.current();
+                Alert.alert(
+                  '¿Borrar todo?',
+                  'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.',
+                  [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                      text: 'Borrar',
+                      style: 'destructive',
+                      onPress: () => onTriggerRef.current(),
+                    },
+                  ],
+                  { cancelable: true }
+                );
               }
             }
           );
@@ -130,7 +143,19 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
         clearTimeout(tapTimerRef.current);
         tapTimerRef.current = null;
       }
-      onTriggerRef.current();
+      Alert.alert(
+        '¿Borrar todo?',
+        'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Borrar',
+            style: 'destructive',
+            onPress: () => onTriggerRef.current(),
+          },
+        ],
+        { cancelable: true }
+      );
     }
   }
 

@@ -35,7 +35,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     try {
       const result = await manipulateAsync(
         uri,
-        [{ resize: { width: 1280, height: 1280 } }],
+        [{ resize: { width: 1280 } }],
         { compress: 0.85, format: SaveFormat.JPEG }
       );
       return result.uri;

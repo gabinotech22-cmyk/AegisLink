@@ -5,7 +5,7 @@ import type { Theme } from '../theme/vault';
 import { I } from './icons';
 import { useIdentity } from '../store/identity';
 
-export type Tab = 'home' | 'groups' | 'verify' | 'settings' | 'dashboard';
+export type Tab = 'home' | 'groups' | 'settings';
 
 interface Props {
   t: Theme;
@@ -13,36 +13,22 @@ interface Props {
   onChange: (tab: Tab) => void;
 }
 
-const WORK_ACCENT = '#6366f1';
-
 const PERSONAL_ITEMS: { id: Tab; icon: keyof typeof I }[] = [
   { id: 'home',     icon: 'Chat'    },
   { id: 'groups',   icon: 'Users'   },
-  { id: 'verify',   icon: 'QR'      },
   { id: 'settings', icon: 'Shield'  },
-];
-
-const WORK_ITEMS: { id: Tab; icon: keyof typeof I }[] = [
-  { id: 'dashboard', icon: 'Building' },
-  { id: 'groups',    icon: 'Users'    },
-  { id: 'verify',    icon: 'QR'       },
-  { id: 'settings',  icon: 'Shield'   },
 ];
 
 export function TabBar({ t, current, onChange }: Props) {
   const insets = useSafeAreaInsets();
   const { t: i18nT } = useTranslation();
-  const activeProfile = useIdentity((s) => s.activeProfile);
-  const isWork = activeProfile === 'work';
-  const activeColor = isWork ? WORK_ACCENT : t.accent;
-  const items = isWork ? WORK_ITEMS : PERSONAL_ITEMS;
+  const activeColor = t.accent;
+  const items = PERSONAL_ITEMS;
 
-  const getTranslationKey = (id: Tab, isWorkProfile: boolean) => {
+  const getTranslationKey = (id: Tab) => {
     if (id === 'home') return 'chats';
-    if (id === 'groups') return isWorkProfile ? 'channels' : 'groups';
-    if (id === 'verify') return 'verify';
+    if (id === 'groups') return 'groups';
     if (id === 'settings') return 'privacy';
-    if (id === 'dashboard') return 'dashboard';
     return 'chats';
   };
 
@@ -54,15 +40,15 @@ export function TabBar({ t, current, onChange }: Props) {
         paddingHorizontal: 8,
         paddingTop: 10,
         paddingBottom: 10 + insets.bottom,
-        borderTopWidth: isWork ? 2 : 1,
-        borderTopColor: isWork ? `${WORK_ACCENT}55` : t.divider,
+        borderTopWidth: 1,
+        borderTopColor: t.divider,
         backgroundColor: t.surface,
       }}
     >
       {items.map((it) => {
         const Icon = I[it.icon];
         const active = current === it.id;
-        const translationKey = getTranslationKey(it.id, isWork);
+        const translationKey = getTranslationKey(it.id);
         const label = i18nT(`tabBar.${translationKey}`);
         
         return (

@@ -44,6 +44,12 @@ export const I = {
       <Path d="M8 11V8a4 4 0 018 0v3" />
     </IconBase>
   ),
+  Link: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+      <Path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+    </IconBase>
+  ),
   Key: (p: IconProps) => (
     <IconBase {...p}>
       <Circle cx={8} cy={14} r={4} />
@@ -117,6 +123,17 @@ export const I = {
     <IconBase {...p}>
       <Path d="M15 17l5-5-5-5" />
       <Path d="M4 18v-2a4 4 0 014-4h12" />
+    </IconBase>
+  ),
+  Sun: (p: IconProps) => (
+    <IconBase {...p}>
+      <Circle cx={12} cy={12} r={4} />
+      <Path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </IconBase>
+  ),
+  Moon: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </IconBase>
   ),
   Star: (p: IconProps) => (
@@ -340,6 +357,36 @@ export const I = {
   Crop: (p: IconProps) => (
     <IconBase {...p}>
       <Path d="M6 2v14a2 2 0 002 2h14M18 22V8a2 2 0 00-2-2H2" />
+    </IconBase>
+  ),
+  Broadcast: (p: IconProps) => (
+    <IconBase {...p}>
+      <Circle cx={12} cy={12} r={3} />
+      <Path d="M6.3 6.3a8 8 0 000 11.4M17.7 6.3a8 8 0 010 11.4" />
+      <Path d="M3.5 3.5a12 12 0 000 17M20.5 3.5a12 12 0 010 17" />
+    </IconBase>
+  ),
+  Download: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+      <Path d="M7 10l5 5 5-5" />
+      <Path d="M12 15V3" />
+    </IconBase>
+  ),
+  Hash: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18" />
+    </IconBase>
+  ),
+  MessageSquare: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </IconBase>
+  ),
+  User: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+      <Circle cx={12} cy={7} r={4} />
     </IconBase>
   ),
 };

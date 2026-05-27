@@ -80,9 +80,19 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
         onAdded(outcome.contact);
       }
     } catch (e) {
+      const raw = (e as Error).message ?? '';
+      const message =
+        raw.toLowerCase().includes('network') ||
+        raw.toLowerCase().includes('failed to fetch') ||
+        raw.toLowerCase().includes('network request failed')
+          ? i18nT(
+              'scanQR.networkError',
+              'Could not connect to the server. Check your internet connection and try again.',
+            )
+          : raw;
       Alert.alert(
         i18nT('scanQR.addError', 'Could not add contact'),
-        (e as Error).message,
+        message,
         [
           { text: i18nT('common.ok', 'OK'), onPress: () => (handledRef.current = null) },
         ]
