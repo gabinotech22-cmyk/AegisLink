@@ -61,6 +61,7 @@ export async function fetchPowChallenge(
   const res = await fetch(`${trimSlash(relayUrl)}/identity/challenge`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) {
     throw new Error(`PoW challenge fetch failed: HTTP ${res.status}`);
@@ -160,6 +161,7 @@ export async function uploadIdentityAndPrekeys(
         Accept: 'application/json',
       },
       body: JSON.stringify(identityBody),
+      signal: AbortSignal.timeout(10000),
     });
   } catch (e) {
     return { ok: false, error: `identity: network error: ${errMsg(e)}` };
@@ -197,6 +199,7 @@ export async function uploadIdentityAndPrekeys(
         Accept: 'application/json',
       },
       body: JSON.stringify(prekeysBody),
+      signal: AbortSignal.timeout(10000),
     });
   } catch (e) {
     return { ok: false, error: `prekeys: network error: ${errMsg(e)}` };
