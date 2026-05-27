@@ -1,5 +1,11 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
+
+// AFTER_FIRST_UNLOCK: required for Android 14 hardware-backed Keystore (StrongBox).
+// Without this flag, setItemAsync throws a native NPE on first write on real devices.
+const SS_OPTS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+};
 import { createIdentity, identityFromStored, type Identity } from '../crypto/identity';
 import { loadIdentity, saveIdentity, clearIdentity } from '../db/local';
 import { ApiError } from '../api';
@@ -173,8 +179,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     const activeSlotId = get().activeSlotId || 'self';
     const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
     const defaultColor = '#05b875';
-    await SecureStore.setItemAsync(getPrefKey('aegis.displayName', activeSlotId), defaultName);
-    await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor);
+    await SecureStore.setItemAsync(getPrefKey('aegis.displayName', activeSlotId), defaultName, SS_OPTS);
+    await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor, SS_OPTS);
     await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', activeSlotId));
 
     // Mark ready immediately — identity is already saved locally.
@@ -227,10 +233,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
   async updateProfile(displayName, avatarColor, avatarImage) {
     const slotId = get().activeSlotId || 'self';
-    await SecureStore.setItemAsync(getPrefKey('aegis.displayName', slotId), displayName);
-    await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', slotId), avatarColor);
+    await SecureStore.setItemAsync(getPrefKey('aegis.displayName', slotId), displayName, SS_OPTS);
+    await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', slotId), avatarColor, SS_OPTS);
     if (avatarImage) {
-      await SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', slotId), avatarImage);
+      await SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', slotId), avatarImage, SS_OPTS);
     } else {
       await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', slotId));
     }
@@ -246,7 +252,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
   async updateStatus(text) {
     const slotId = get().activeSlotId || 'self';
-    await SecureStore.setItemAsync(getPrefKey('aegis.profileStatus', slotId), text);
+    await SecureStore.setItemAsync(getPrefKey('aegis.profileStatus', slotId), text, SS_OPTS);
     set({ profileStatus: text });
 
     const identity = get().identity;
@@ -293,8 +299,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       // Save default preferences for the new slot
       const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
       const defaultColor = '#05b875';
-      await SecureStore.setItemAsync(getPrefKey('aegis.displayName', newSlotId), defaultName);
-      await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', newSlotId), defaultColor);
+      await SecureStore.setItemAsync(getPrefKey('aegis.displayName', newSlotId), defaultName, SS_OPTS);
+      await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', newSlotId), defaultColor, SS_OPTS);
 
       // Publish to server
       await publishToServer(identity);
@@ -310,7 +316,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
       // Update slotsList
       const newSlotsList = [...slotsList, newSlotId];
-      await SecureStore.setItemAsync('aegis.slotsList', JSON.stringify(newSlotsList));
+      await SecureStore.setItemAsync('aegis.slotsList', JSON.stringify(newSlotsList), SS_OPTS);
 
       set({ slotsList: newSlotsList, status: 'ready' });
       return newSlotId;
@@ -343,7 +349,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {}, pendingMediaUri: null });
 
       // 4. Persist active slot.
-      await SecureStore.setItemAsync('aegis.activeSlotId', slotId);
+      await SecureStore.setItemAsync('aegis.activeSlotId', slotId, SS_OPTS);
 
       // 5. Hydrate from the new DB
       set({ activeSlotId: slotId });
@@ -385,7 +391,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
       // Remove from list
       const newSlotsList = slotsList.filter((s) => s !== slotId);
-      await SecureStore.setItemAsync('aegis.slotsList', JSON.stringify(newSlotsList));
+      await SecureStore.setItemAsync('aegis.slotsList', JSON.stringify(newSlotsList), SS_OPTS);
       
       set({ slotsList: newSlotsList });
     } catch (e) {
