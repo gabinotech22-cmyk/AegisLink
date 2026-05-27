@@ -30,15 +30,18 @@ export async function notifyRecipient(aegisId: string): Promise<void> {
     }
     messages.push({
       to: row.expo_token,
-      sound: null,
+      // Visible push: generic title + body so the OS shows a banner even when
+      // the app cannot be woken for background execution (Doze mode, battery
+      // optimization, iOS rate-limiting of silent pushes). Zero-metadata —
+      // no sender, no count, no content. The app, when it wakes, replaces this
+      // with a richer local notification via showIncomingNotification().
+      sound: 'default',
       priority: 'high',
-      // Silent / data-only: no body/title means the OS won't show a banner
-      // by default. The app's notification handler decides whether to surface
-      // anything based on whether a chat is open.
-      // Zero-metadata: no aegisId, no message count, no sender — just a wake-up
-      // signal. The app reconnects and drains the queue itself.
+      title: 'AegisLink',
+      body: 'Nuevo mensaje cifrado · E2EE',
       data: { kind: 'wakeup' },
-      _contentAvailable: true, // iOS background fetch flag
+      _contentAvailable: true,   // iOS background fetch flag
+      channelId: 'aegislink-messages', // Android notification channel
     });
   }
 
