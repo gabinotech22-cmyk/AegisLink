@@ -68,6 +68,7 @@ import { registerForPush, setNotificationOpenChatHandler } from './src/notificat
 import { initCallKeep } from './src/calls/callkeep';
 import { WEBRTC_AVAILABLE } from './src/runtime';
 import { clearTurnCache } from './src/webrtc/ice';
+import { handlePanicDeepLink } from './src/utils/panicLink';
 
 // ─── Background Scheduled-Message Task ───────────────────────────────────────
 const SCHEDULED_TASK_NAME = 'aegis.scheduled-sender';
@@ -477,26 +478,28 @@ function Shell() {
 
   // ── Deep link handling ──────────────────────────────────────────────────────
   const handleDeepLink = useCallback(async (url: string) => {
-    try {
-      const parsed = new URL(url);
-      if (parsed.hostname === 'panic') {
-        const incoming = parsed.searchParams.get('token');
-        if (incoming) {
-          try {
-            const raw = await SecureStore.getItemAsync('aegis.panic.v1');
-            if (raw) {
-              const config = JSON.parse(raw) as { remoteToken?: string };
-              if (config.remoteToken && config.remoteToken === incoming) {
-                void triggerPanic();
-              }
-            }
-          } catch { /* SecureStore unavailable — ignore */ }
-        }
+    if (!url.startsWith('aegislink://')) return;
+
+    // Remote panic wipe — handlePanicDeepLink does full Ed25519 + token
+    // verification before touching any data. We show the WIPING overlay
+    // immediately (prevents flash of app content) and clear it on failure.
+    if (url.startsWith('aegislink://panic')) {
+      setShowWipeOverlay(true);
+      const wiped = await handlePanicDeepLink(url);
+      if (wiped) {
+        // Wipe + identity reset completed inside handlePanicDeepLink.
+        // Brief pause so the overlay is visible before shell unmounts.
+        await new Promise<void>((r) => setTimeout(r, 600));
       }
-    } catch {
-      /* invalid url — ignore */
+      // Always clear the overlay — on failure this restores the app UI,
+      // on success the identity reset already triggered a shell re-render
+      // to the onboarding screen.
+      setShowWipeOverlay(false);
+      return;
     }
-  }, [identity, push, triggerPanic]);
+
+    // Future scheme handlers go here (e.g. aegislink://chat/{id})
+  }, []);
 
   useEffect(() => {
     Linking.getInitialURL().then((url: string | null) => {
