@@ -180,7 +180,8 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
           admin_only_invite     INTEGER NOT NULL DEFAULT 1,
           moderate_new_members  INTEGER NOT NULL DEFAULT 0,
           admin_id              TEXT,
-          admin_sig             TEXT
+          admin_sig             TEXT,
+          moderators            TEXT
         );
 
         -- Per-chat state: draft text + unread count
@@ -227,7 +228,7 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
 
       // ─── Schema versioning via PRAGMA user_version ──────────────────────────
       // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-      const USER_DB_VERSION = 3;
+      const USER_DB_VERSION = 4;
       const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
       const currentVersion = versionRow?.user_version ?? 0;
 
@@ -256,6 +257,13 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
         try { await d.execAsync('ALTER TABLE groups ADD COLUMN admin_id TEXT;'); } catch {}
         try { await d.execAsync('ALTER TABLE groups ADD COLUMN admin_sig TEXT;'); } catch {}
         await d.execAsync('PRAGMA user_version = 3');
+      }
+
+      if (currentVersion < 4) {
+        // v3 → v4: add moderators column (JSON array of aegisIds).
+        // Fresh installs already have this column via CREATE TABLE above.
+        try { await d.execAsync('ALTER TABLE groups ADD COLUMN moderators TEXT;'); } catch {}
+        await d.execAsync('PRAGMA user_version = 4');
       }
 
       // Database migrations: Alter tables safely to append optional columns on existing installs
@@ -805,7 +813,7 @@ export interface StoredGroup {
 export async function saveGroup(g: StoredGroup): Promise<void> {
   const d = await db();
   await d.runAsync(
-    `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     g.id,
     g.name,
     JSON.stringify(g.members),
@@ -815,7 +823,8 @@ export async function saveGroup(g: StoredGroup): Promise<void> {
     g.adminOnlyInvite !== false ? 1 : 0,
     g.moderateNewMembers ? 1 : 0,
     g.adminId ?? null,
-    g.adminSig ?? null
+    g.adminSig ?? null,
+    g.moderators && g.moderators.length > 0 ? JSON.stringify(g.moderators) : null
   );
 }
 
@@ -830,6 +839,7 @@ type GroupRow = {
   moderate_new_members: number;
   admin_id: string | null;
   admin_sig: string | null;
+  moderators: string | null;
 };
 
 function rowToGroup(r: GroupRow): StoredGroup {
@@ -844,13 +854,14 @@ function rowToGroup(r: GroupRow): StoredGroup {
     moderateNewMembers: r.moderate_new_members === 1,
     adminId: r.admin_id ?? undefined,
     adminSig: r.admin_sig ?? undefined,
+    moderators: r.moderators ? (JSON.parse(r.moderators) as string[]) : undefined,
   };
 }
 
 export async function loadGroups(): Promise<StoredGroup[]> {
   const d = await db();
   const rows = await d.getAllAsync<GroupRow>(
-    `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig FROM groups ORDER BY created_at DESC`
+    `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators FROM groups ORDER BY created_at DESC`
   );
   return rows.map(rowToGroup);
 }
@@ -863,7 +874,7 @@ export async function deleteGroup(id: string): Promise<void> {
 export async function getGroup(id: string): Promise<StoredGroup | null> {
   const d = await db();
   const row = await d.getFirstAsync<GroupRow>(
-    `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig FROM groups WHERE id = ?`,
+    `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators FROM groups WHERE id = ?`,
     id
   );
   if (!row) return null;
