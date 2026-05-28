@@ -171,12 +171,16 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
 
         -- MLS Group Chats (Fase 4)
         CREATE TABLE IF NOT EXISTS groups (
-          id           TEXT PRIMARY KEY,
-          name         TEXT NOT NULL,
-          members      TEXT NOT NULL, -- JSON array of contact aegisIds
-          created_at   INTEGER NOT NULL,
-          avatar_color TEXT,
-          avatar_image TEXT
+          id                    TEXT PRIMARY KEY,
+          name                  TEXT NOT NULL,
+          members               TEXT NOT NULL,
+          created_at            INTEGER NOT NULL,
+          avatar_color          TEXT,
+          avatar_image          TEXT,
+          admin_only_invite     INTEGER NOT NULL DEFAULT 1,
+          moderate_new_members  INTEGER NOT NULL DEFAULT 0,
+          admin_id              TEXT,
+          admin_sig             TEXT
         );
 
         -- Per-chat state: draft text + unread count
@@ -223,7 +227,7 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
 
       // ─── Schema versioning via PRAGMA user_version ──────────────────────────
       // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-      const USER_DB_VERSION = 2;
+      const USER_DB_VERSION = 3;
       const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
       const currentVersion = versionRow?.user_version ?? 0;
 
@@ -238,6 +242,20 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
         // v1 → v2: add delivery_status for read receipts and delivery indicators
         try { await d.execAsync("ALTER TABLE messages ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'sent';"); } catch (e) {}
         await d.execAsync('PRAGMA user_version = 2');
+      }
+
+      if (currentVersion < 3) {
+        // v2 → v3: add admin/permission columns to groups table.
+        // The CREATE TABLE above includes these for fresh installs; here we patch
+        // existing databases that were created with the old 6-column schema.
+        // Each ALTER is wrapped individually — "duplicate column name" means the
+        // column already exists (e.g. from an earlier unconditional migration run),
+        // which is harmless and should be silently ignored.
+        try { await d.execAsync('ALTER TABLE groups ADD COLUMN admin_only_invite INTEGER NOT NULL DEFAULT 1;'); } catch {}
+        try { await d.execAsync('ALTER TABLE groups ADD COLUMN moderate_new_members INTEGER NOT NULL DEFAULT 0;'); } catch {}
+        try { await d.execAsync('ALTER TABLE groups ADD COLUMN admin_id TEXT;'); } catch {}
+        try { await d.execAsync('ALTER TABLE groups ADD COLUMN admin_sig TEXT;'); } catch {}
+        await d.execAsync('PRAGMA user_version = 3');
       }
 
       // Database migrations: Alter tables safely to append optional columns on existing installs
@@ -257,19 +275,6 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
       try {
         await d.execAsync('ALTER TABLE groups ADD COLUMN avatar_image TEXT;');
       } catch (e) {}
-      try {
-        await d.execAsync('ALTER TABLE groups ADD COLUMN admin_only_invite INTEGER NOT NULL DEFAULT 1;');
-      } catch (e) {}
-      try {
-        await d.execAsync('ALTER TABLE groups ADD COLUMN moderate_new_members INTEGER NOT NULL DEFAULT 0;');
-      } catch (e) {}
-      try {
-        await d.execAsync('ALTER TABLE groups ADD COLUMN admin_id TEXT;');
-      } catch (e) {}
-      try {
-        await d.execAsync('ALTER TABLE groups ADD COLUMN admin_sig TEXT;');
-      } catch (e) {}
-
       // Contact capabilities (mute, zero-trust mode, status, block)
       try { await d.execAsync('ALTER TABLE contacts ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
       try { await d.execAsync('ALTER TABLE contacts ADD COLUMN zero_trust INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
