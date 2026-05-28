@@ -1141,8 +1141,74 @@ async function decryptAndAppend(
           return true;
         }
 
+        // ── Media detection for group messages ─────────────────────────────────
+        // Mirrors the same format-detection logic used for direct_msg below, but
+        // runs here so we save the correct type/mediaUri before early-returning.
+        // saveMediaToCache is a function declaration (hoisted) defined later in
+        // this same async scope — accessible here without forward-reference issues.
+        let groupMsgType: string = 'text';
+        let groupMsgMediaUri: string | null = null;
+        let cleanMsgBody = msgBody;
+
+        if (msgBody.startsWith('[audio:') && msgBody.endsWith(']')) {
+          const durEnd = msgBody.indexOf('s:', 7);
+          if (durEnd > 7) {
+            const durStr = msgBody.slice(7, durEnd);
+            const dataUri = msgBody.slice(durEnd + 2, -1);
+            groupMsgType = 'audio';
+            cleanMsgBody = `[audio:${durStr}s]`;
+            if (dataUri.startsWith('blob:')) {
+              try {
+                const { downloadAndDecryptMedia } = require('../crypto/media');
+                groupMsgMediaUri = await downloadAndDecryptMedia(dataUri, 'm4a');
+              } catch { groupMsgMediaUri = dataUri; }
+            } else if (dataUri.startsWith('data:')) {
+              try { groupMsgMediaUri = await saveMediaToCache(dataUri, `audio_${env.id}.m4a`); }
+              catch { groupMsgMediaUri = dataUri; }
+            }
+          }
+        } else if (msgBody.startsWith('[image:blob:') && msgBody.endsWith(']')) {
+          const dataUri = msgBody.slice(7, -1);
+          groupMsgType = 'image';
+          cleanMsgBody = '';
+          try {
+            const { downloadAndDecryptMedia } = require('../crypto/media');
+            groupMsgMediaUri = await downloadAndDecryptMedia(dataUri);
+          } catch { groupMsgMediaUri = dataUri; }
+        } else if (msgBody.startsWith('[image:data:') && msgBody.endsWith(']')) {
+          const dataUri = msgBody.slice(7, -1);
+          groupMsgType = 'image';
+          cleanMsgBody = '';
+          try { groupMsgMediaUri = await saveMediaToCache(dataUri, `img_${env.id}.jpg`); }
+          catch { groupMsgMediaUri = dataUri; }
+        } else if (msgBody.startsWith('[file:') && msgBody.endsWith(']')) {
+          const inner = msgBody.slice(6, -1);
+          const blobColonIdx = inner.indexOf(':blob:');
+          if (blobColonIdx !== -1) {
+            const fileName = inner.slice(0, blobColonIdx);
+            const blobUri = inner.slice(blobColonIdx + 1);
+            groupMsgType = 'file';
+            cleanMsgBody = fileName;
+            try {
+              const { downloadAndDecryptMedia } = require('../crypto/media');
+              const rawExt = fileName.includes('.') ? fileName.split('.').pop() ?? '' : '';
+              const safeExt = /^[a-zA-Z0-9]{1,8}$/.test(rawExt) ? rawExt.toLowerCase() : 'bin';
+              groupMsgMediaUri = await downloadAndDecryptMedia(blobUri, safeExt);
+            } catch { groupMsgMediaUri = blobUri; }
+          } else {
+            const plainColonIdx = inner.indexOf(':');
+            if (plainColonIdx !== -1) {
+              cleanMsgBody = inner.slice(0, plainColonIdx);
+              groupMsgType = 'file';
+            }
+          }
+        }
+
         const senderDisp = parsedPayload.senderName || senderId.substring(0, 8);
-        const formattedBody = `${senderDisp}: ${msgBody}`;
+        // Embed sender prefix in body so GroupBubble can extract and display it
+        // as a sender header chip above the bubble. For media messages cleanMsgBody
+        // is the filename / "[audio:Ns]" / "" (image) — never the raw blob URI.
+        const formattedBody = `${senderDisp}: ${cleanMsgBody}`;
 
         await saveSessionState(contact.aegisId, ratchetState);
 
@@ -1152,11 +1218,13 @@ async function decryptAndAppend(
           direction: 'in',
           body: formattedBody,
           createdAt: env.createdAt ?? Date.now(),
+          type: groupMsgType as 'text' | 'image' | 'audio' | 'file' | 'poll' | 'location' | 'view_once',
+          mediaUri: groupMsgMediaUri,
         });
 
         // Trigger local notification in alignment with AegisLink notifications spec
         const { showIncomingNotification } = require('../notifications/push');
-        void showIncomingNotification(senderId, parsedPayload.senderName || senderId.substring(0, 8), msgBody, true, trustedGroupName, groupId);
+        void showIncomingNotification(senderId, parsedPayload.senderName || senderId.substring(0, 8), cleanMsgBody, true, trustedGroupName, groupId);
 
         return true;
       } else if (

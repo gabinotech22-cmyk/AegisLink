@@ -146,6 +146,8 @@ type PushRoute =
   | { name: 'search' }
   | { name: 'groupadmin'; group: StoredGroup }
   | { name: 'groupChat'; group: StoredGroup }
+  | { name: 'groupAttach'; group: StoredGroup }
+  | { name: 'groupVoice'; group: StoredGroup }
   | { name: 'poll'; group?: StoredGroup }
   | { name: 'firstContact'; contact: StoredContact }
   | { name: 'contacts' }
@@ -471,6 +473,36 @@ function Shell() {
       } catch { /* queued */ }
     }
   }
+  async function handleGroupFilePick(group: StoredGroup) {
+    const DocumentPicker = require('expo-document-picker');
+    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const { useMessages } = require('./src/store/messages');
+    const id = (await import('expo-crypto')).randomUUID();
+    await useMessages.getState().append({
+      id,
+      chatId: group.id,
+      direction: 'out',
+      body: asset.name ?? 'archivo',
+      createdAt: Date.now(),
+      type: 'file',
+      mediaUri: asset.uri,
+    });
+    if (identity) {
+      const { sendGroupMessage: sendGrpMsg } = require('./src/socket/client');
+      const { encryptAndUploadMedia } = require('./src/crypto/media');
+      try {
+        const blobUri: string = await encryptAndUploadMedia(asset.uri);
+        await sendGrpMsg({
+          identity,
+          groupId: group.id,
+          plaintext: `[file:${asset.name}:${blobUri}]`,
+        });
+      } catch { /* queued when offline */ }
+    }
+  }
+
   const popAllTo = useCallback((tabId: Tab) => {
     setStack([]);
     setTab(tabId);
@@ -620,17 +652,7 @@ function Shell() {
             onBack={pop}
             onGroupDetail={() => push({ name: 'groupadmin', group: top.group })}
             onPoll={() => push({ name: 'poll', group: top.group })}
-            onAttach={async () => {
-              const ImagePicker = require('expo-image-picker');
-              const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                quality: 1,
-              });
-              if (!result.canceled && result.assets?.[0]?.uri) {
-                const { useMessages } = require('./src/store/messages');
-                useMessages.getState().setPendingMedia(result.assets[0].uri);
-              }
-            }}
+            onAttach={() => push({ name: 'groupAttach', group: top.group })}
           />
         );
       case 'contact':
@@ -850,6 +872,96 @@ function Shell() {
             onOpenChat={(contact) => push({ name: 'chat', contact })}
             onOpenContact={(contact) => push({ name: 'contact', contact })}
             onOpenGroupChat={(group) => push({ name: 'groupChat', group })}
+          />
+        );
+      case 'groupAttach':
+        return (
+          <AttachSheetScreen
+            onBack={pop}
+            onPick={(kind) => {
+              // photo / camera are handled internally by AttachSheetScreen via
+              // setPendingMedia — they never reach onPick. The cases below cover
+              // all the explicit-tap options.
+              if (kind === 'voice') {
+                pop();
+                push({ name: 'groupVoice', group: top.group });
+              } else if (kind === 'file') {
+                handleGroupFilePick(top.group).then(pop).catch(() => {});
+              } else if (kind === 'contact') {
+                const { useContacts: _uc } = require('./src/store/contacts');
+                const allContacts: StoredContact[] = _uc.getState().contacts.filter(
+                  (c: StoredContact) => !top.group.members.includes(c.aegisId),
+                );
+                if (allContacts.length === 0) {
+                  const { Alert: A } = require('react-native');
+                  A.alert('Sin contactos', 'No tienes contactos fuera del grupo para compartir.');
+                  return;
+                }
+                const { Alert: A } = require('react-native');
+                A.alert(
+                  'Compartir contacto',
+                  'Selecciona un contacto para compartir su ID',
+                  [
+                    ...allContacts.slice(0, 5).map((c: StoredContact) => ({
+                      text: c.name,
+                      onPress: async () => {
+                        const { useMessages: _um } = require('./src/store/messages');
+                        const { randomUUID: _uuid } = await import('expo-crypto');
+                        const msgId = _uuid();
+                        await _um.getState().append({
+                          id: msgId,
+                          chatId: top.group.id,
+                          direction: 'out',
+                          body: `[contact:${c.name}:${c.aegisId}]`,
+                          createdAt: Date.now(),
+                          type: 'text',
+                        });
+                        if (identity) {
+                          const { sendGroupMessage: _sg } = require('./src/socket/client');
+                          try {
+                            await _sg({ identity, groupId: top.group.id, plaintext: `[contact:${c.name}:${c.aegisId}]` });
+                          } catch { /* queued */ }
+                        }
+                        pop();
+                      },
+                    })),
+                    { text: 'Cancelar', style: 'cancel' },
+                  ],
+                );
+              } else {
+                // scheduled, location, viewoncesend — not yet implemented for groups
+                pop();
+              }
+            }}
+          />
+        );
+      case 'groupVoice':
+        return (
+          <VoiceRecorderScreen
+            onBack={pop}
+            onSend={async (uri, durationMs) => {
+              if (!identity) { pop(); return; }
+              const { randomUUID: _uuid } = await import('expo-crypto');
+              const id = _uuid();
+              const { useMessages: _um } = require('./src/store/messages');
+              const durationSec = Math.round(durationMs / 1000);
+              await _um.getState().append({
+                id,
+                chatId: top.group.id,
+                direction: 'out',
+                body: `[audio:${durationSec}s]`,
+                createdAt: Date.now(),
+                type: 'audio',
+                mediaUri: uri,
+              });
+              const { sendGroupMessage: _sg } = require('./src/socket/client');
+              const { encryptAndUploadMedia: _eu } = require('./src/crypto/media');
+              try {
+                const blobUri: string = await _eu(uri);
+                await _sg({ identity, groupId: top.group.id, plaintext: `[audio:${durationSec}s:${blobUri}]` });
+              } catch { /* queued */ }
+              pop();
+            }}
           />
         );
       case 'groupadmin':
