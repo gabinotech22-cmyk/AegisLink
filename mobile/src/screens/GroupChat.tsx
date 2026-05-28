@@ -850,7 +850,9 @@ function GroupBubble({
 
   // File bubble
   if (m.type === 'file') {
-    const fileName = m.body || 'file';
+    // `body` is the local variable with the sender prefix already stripped
+    // (e.g. "document.pdf", not "Alice: document.pdf")
+    const fileName = body || m.body || 'file';
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         {sender ? (
