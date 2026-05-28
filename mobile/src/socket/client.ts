@@ -68,6 +68,13 @@ let mySpkSecretCache: Uint8Array | null = null;
 // every contact once, ensuring fresh data after an identity update.
 const profiledContacts = new Set<string>();
 
+// ── Per-session group avatar tracking ────────────────────────────────────────
+// groupAvatarImage (data URI) is included only on the FIRST group message per
+// session so receivers always get an up-to-date copy without embedding the
+// blob in every multicast envelope. groupAvatarColor (hex string) is always
+// included — it is only 7 bytes and requires no read from disk.
+const profiledGroupImages = new Set<string>();
+
 // ── Offline message queue ─────────────────────────────────────────────────────
 interface QueuedSend {
   msgId: string;
@@ -1021,6 +1028,12 @@ async function decryptAndAppend(
           );
         }
 
+        // Avatar fields sent by the admin — not part of the Ed25519-signed
+        // canonical bytes (those cover name/members/createdAt only), but we
+        // gate updates on isAdmin below to prevent spoofing by non-admins.
+        const claimedAvatarColor: string | undefined = parsedPayload.groupAvatarColor ?? undefined;
+        const claimedAvatarImage: string | null = parsedPayload.groupAvatarImage ?? null;
+
         const { getGroup, saveGroup } = require('../db/local');
         const existingGroup = await getGroup(groupId);
 
@@ -1038,6 +1051,10 @@ async function decryptAndAppend(
             if (__DEV__) console.warn('[socket] group_msg create rejected — local id not in members');
             return false;
           }
+          // Persist avatar image to documentDirectory so it survives restarts.
+          const localAvatarImage = claimedAvatarImage
+            ? await saveGroupAvatarToFile(groupId, claimedAvatarImage)
+            : undefined;
           await saveGroup({
             id: groupId,
             name: claimedName,
@@ -1045,11 +1062,13 @@ async function decryptAndAppend(
             createdAt: claimedCreatedAt as number,
             adminId: claimedAdminId,
             adminSig: claimedAdminSig,
+            avatarColor: claimedAvatarColor,
+            avatarImage: localAvatarImage,
           });
           const { useGroups } = require('../store/groups');
           void useGroups.getState().hydrate();
         } else {
-          // Existing group: only the original admin may rotate name/members.
+          // Existing group: only the original admin may rotate name/members/avatar.
           // Anyone else may post messages but their metadata fields are ignored.
           const isAdmin =
             !!existingGroup.adminId &&
@@ -1059,13 +1078,23 @@ async function decryptAndAppend(
           const nameChanged = claimedName !== existingGroup.name;
           const membersChanged =
             JSON.stringify([...claimedMembers].sort()) !== JSON.stringify([...existingGroup.members].sort());
+          const avatarColorChanged = claimedAvatarColor !== undefined && claimedAvatarColor !== existingGroup.avatarColor;
+          const avatarImageChanged = claimedAvatarImage !== null;
 
-          if ((nameChanged || membersChanged) && isAdmin && (await metadataIsAuthentic())) {
+          const metadataChanged = nameChanged || membersChanged || avatarColorChanged || avatarImageChanged;
+
+          if (metadataChanged && isAdmin && (await metadataIsAuthentic())) {
+            let localAvatarImage = existingGroup.avatarImage;
+            if (avatarImageChanged && claimedAvatarImage) {
+              localAvatarImage = await saveGroupAvatarToFile(groupId, claimedAvatarImage);
+            }
             await saveGroup({
               ...existingGroup,
               name: claimedName,
               members: claimedMembers,
               adminSig: claimedAdminSig,
+              avatarColor: claimedAvatarColor ?? existingGroup.avatarColor,
+              avatarImage: localAvatarImage,
             });
             const { useGroups } = require('../store/groups');
             void useGroups.getState().hydrate();
@@ -1723,9 +1752,10 @@ export function disconnect(): void {
     connected = false;
     authenticated = false;
   }
-  // Reset per-session profile image tracking so each new session re-sends the
-  // image on the first message to each contact (ensures freshness after updates).
+  // Reset per-session tracking so each new session re-sends images once,
+  // ensuring freshness after identity or group avatar updates.
   profiledContacts.clear();
+  profiledGroupImages.clear();
 }
 
 export async function sendMessage(opts: {
@@ -1850,6 +1880,29 @@ export async function sendMessage(opts: {
  * to their chat history. Failures are swallowed per-contact so one offline
  * peer doesn't block the rest.
  */
+/**
+ * Persist a received group avatar (data URI) to documentDirectory so the file
+ * survives app restarts. Returns the local file:// path on success, or
+ * undefined on failure (caller falls back to no avatar).
+ * Groups that never send an avatar leave this function un-called.
+ */
+async function saveGroupAvatarToFile(groupId: string, dataUri: string): Promise<string | undefined> {
+  try {
+    const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+    const dir = `${FS.documentDirectory}avatars/`;
+    await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+    // Sanitise groupId for use as a filename — replace anything that isn't
+    // alphanumeric or underscore with '_'.
+    const safe = groupId.replace(/[^a-zA-Z0-9_]/g, '_');
+    const path = `${dir}group_${safe}.jpg`;
+    const base64 = dataUri.includes(',') ? dataUri.split(',')[1] : dataUri;
+    await FS.writeAsStringAsync(path, base64, { encoding: FS.EncodingType.Base64 });
+    return path;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Convert a local file:// or content:// URI to a data: URI by reading the file as base64.
  *  Returns the original string unchanged if it is already a data: URI, emoji, or null. */
 async function toDataUri(imageField: string | null): Promise<string | null> {
@@ -1990,7 +2043,7 @@ export async function sendGroupMessage(opts: {
   const senderColor = _idState.avatarColor;
   const rawImage = _idState.avatarImage;
 
-  // Pre-compute the data URI once if at least one member hasn't received it yet.
+  // Pre-compute the sender data URI once if at least one member hasn't received it yet.
   // Same profiledContacts optimization as 1:1 messages — image is sent only on
   // the first message per contact per session to avoid embedding a 50–100 KB blob
   // in every group envelope.
@@ -1998,6 +2051,14 @@ export async function sendGroupMessage(opts: {
     (m: string) => m !== opts.identity.aegisId && !profiledContacts.has(m),
   );
   const imageDataUri = anyNeedsImage ? await toDataUri(rawImage) : null;
+
+  // Group avatar: color always included (7 bytes). Image included only on the
+  // first message per group per session — same optimization as senderImage.
+  const groupAvatarColor = group.avatarColor ?? null;
+  const groupAvatarImage = profiledGroupImages.has(group.id)
+    ? null
+    : await toDataUri(group.avatarImage ?? null);
+  if (groupAvatarImage) profiledGroupImages.add(group.id);
 
   // Multicast to all members
   const sendPromises = group.members.map(async (memberId: string) => {
@@ -2016,6 +2077,8 @@ export async function sendGroupMessage(opts: {
       groupCreatedAt: group.createdAt,
       adminId: group.adminId,
       adminSig: group.adminSig,
+      groupAvatarColor,
+      groupAvatarImage,
       senderId: opts.identity.aegisId,
       senderName,
       senderColor,
