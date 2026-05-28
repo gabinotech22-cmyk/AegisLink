@@ -40,6 +40,7 @@ import { ScheduledScreen } from './src/screens/Scheduled';
 import { LocationScreen } from './src/screens/Location';
 import { SearchScreen } from './src/screens/Search';
 import { GroupAdminScreen } from './src/screens/GroupAdmin';
+import { GroupJoinScreen } from './src/screens/GroupJoin';
 import { VoiceRecorderScreen } from './src/screens/VoiceRecorder';
 import { ContactsScreen } from './src/screens/Contacts';
 import { PollScreen } from './src/screens/Poll';
@@ -158,7 +159,8 @@ type PushRoute =
   | { name: 'distribution' }
   | { name: 'broadcast'; list: import('./src/store/distribution').DistributionList }
   | { name: 'profileSwitcher' }
-  | { name: 'createProfile' };
+  | { name: 'createProfile' }
+  | { name: 'groupJoin'; groupId: string; groupName: string; adminId: string };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -530,8 +532,16 @@ function Shell() {
       return;
     }
 
-    // Future scheme handlers go here (e.g. aegislink://chat/{id})
-  }, []);
+    // Group invite: aegislink://group/v1/<groupId>/<groupName>/<adminId>
+    if (url.startsWith('aegislink://group/v1/')) {
+      const { parseGroupInviteLink } = require('./src/crypto/qr') as typeof import('./src/crypto/qr');
+      const parsed = parseGroupInviteLink(url);
+      if (parsed) {
+        push({ name: 'groupJoin', groupId: parsed.groupId, groupName: parsed.groupName, adminId: parsed.adminId });
+      }
+      return;
+    }
+  }, [push]);
 
   useEffect(() => {
     Linking.getInitialURL().then((url: string | null) => {
@@ -964,6 +974,17 @@ function Shell() {
             }}
           />
         );
+      case 'groupJoin':
+        return (
+          <GroupJoinScreen
+            groupId={top.groupId}
+            groupName={top.groupName}
+            adminId={top.adminId}
+            onBack={pop}
+            onOpenGroup={(group) => { setStack([]); push({ name: 'groupChat', group }); }}
+            onAddContact={() => { pop(); push({ name: 'add' }); }}
+          />
+        );
       case 'groupadmin':
         return <GroupAdminScreen group={top.group} onBack={pop} />;
       case 'poll':
@@ -1042,7 +1063,15 @@ function Shell() {
         </View>
       );
     case 'groups':
-      return <GroupsScreen onTab={setTab} onOpenGroupChat={(group) => push({ name: 'groupChat', group })} />;
+      return (
+        <GroupsScreen
+          onTab={setTab}
+          onOpenGroupChat={(group) => push({ name: 'groupChat', group })}
+          onJoinByLink={(groupId, groupName, adminId) =>
+            push({ name: 'groupJoin', groupId, groupName, adminId })
+          }
+        />
+      );
     case 'settings':
       return (
         <PrivacyScreen

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, TextInput, FlatList } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, TextInput, FlatList, Modal } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
@@ -17,12 +17,14 @@ import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
 import { sendGroupMessage } from '../socket/client';
+import { parseGroupInviteLink } from '../crypto/qr';
 import type { StoredGroup } from '../db/local';
 
 
 interface Props {
   onTab: (tab: Tab) => void;
   onOpenGroupChat: (group: StoredGroup) => void;
+  onJoinByLink?: (groupId: string, groupName: string, adminId: string) => void;
 }
 
 const GROUP_COLORS = [
@@ -48,7 +50,7 @@ const GROUP_EMOJIS = [
   { label: 'Cubo', val: '🧊' },
 ];
 
-export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
+export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -62,6 +64,8 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [groupColor, setGroupColor] = useState('#05b875');
   const [groupImage, setGroupImage] = useState<string | undefined>(undefined);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinLinkInput, setJoinLinkInput] = useState('');
 
   useEffect(() => {
     void hydrate();
@@ -496,7 +500,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
               </Text>
             </Pressable>
             <Pressable
-              onPress={() => Alert.alert(i18nT('groups.joinByLinkTitle'), i18nT('groups.joinByLinkDesc'))}
+              onPress={() => { setJoinLinkInput(''); setShowJoinModal(true); }}
               style={({ pressed }) => ({
                 backgroundColor: 'transparent',
                 borderWidth: 1,
@@ -589,6 +593,88 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
           }}
         />
       )}
+
+      {/* Join by link modal */}
+      <Modal
+        visible={showJoinModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowJoinModal(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+          onPress={() => setShowJoinModal(false)}
+        >
+          <Pressable
+            style={{
+              backgroundColor: t.surface,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              padding: 24,
+              paddingBottom: insets.bottom + 24,
+              gap: 16,
+            }}
+            onPress={() => {/* prevent dismiss */}}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '600', color: t.text }}>
+                {i18nT('groups.joinByLinkTitle')}
+              </Text>
+              <Pressable onPress={() => setShowJoinModal(false)} hitSlop={8}>
+                <I.X size={20} color={t.textDim} />
+              </Pressable>
+            </View>
+            <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19 }}>
+              {i18nT('groups.joinByLinkModalDesc')}
+            </Text>
+            <TextInput
+              value={joinLinkInput}
+              onChangeText={setJoinLinkInput}
+              placeholder={i18nT('groups.joinByLinkPlaceholder')}
+              placeholderTextColor={t.textDim}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={{
+                backgroundColor: t.surface2,
+                borderRadius: t.radius,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                fontFamily: t.fontMono,
+                fontSize: 12,
+                color: t.text,
+                borderWidth: 1,
+                borderColor: t.divider,
+                letterSpacing: 0.2,
+              }}
+            />
+            <Pressable
+              onPress={() => {
+                const parsed = parseGroupInviteLink(joinLinkInput.trim());
+                if (!parsed) {
+                  Alert.alert(
+                    i18nT('groups.joinByLinkInvalidTitle'),
+                    i18nT('groups.joinByLinkInvalidDesc'),
+                  );
+                  return;
+                }
+                setShowJoinModal(false);
+                onJoinByLink?.(parsed.groupId, parsed.groupName, parsed.adminId);
+              }}
+              style={({ pressed }) => ({
+                backgroundColor: t.accent,
+                borderRadius: t.radius,
+                paddingVertical: 14,
+                alignItems: 'center',
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.accentInk }}>
+                {i18nT('groups.joinByLinkBtn')}
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <TabBar t={t} current="groups" onChange={onTab} />
     </View>

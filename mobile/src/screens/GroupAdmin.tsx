@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, TextInput, Image } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, TextInput, Image, Share } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -11,6 +11,7 @@ import { Section, Toggle } from '../components/Section';
 import { useGroups } from '../store/groups';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
+import { encodeGroupInviteLink } from '../crypto/qr';
 import type { StoredGroup } from '../db/local';
 
 interface Props {
@@ -291,6 +292,51 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
             noBorder
           />
         </Section>
+        )}
+
+        {/* Invite link — admin only */}
+        {amIAdmin && (
+          <Section t={t} label={i18nT('groupAdmin.inviteLinkSection').toUpperCase()}>
+            <Pressable
+              onPress={async () => {
+                if (!group.adminId) return;
+                const link = encodeGroupInviteLink(group.id, group.name, group.adminId);
+                await Share.share({ message: link });
+              }}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 14,
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <I.Link size={18} color={t.accent} />
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontFamily: t.font,
+                    fontSize: 15,
+                    color: t.accent,
+                    fontWeight: '500',
+                  }}
+                >
+                  {i18nT('groupAdmin.shareInviteLink')}
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: t.font,
+                    fontSize: 12,
+                    color: t.textDim,
+                    marginTop: 2,
+                  }}
+                >
+                  {i18nT('groupAdmin.shareInviteLinkSub')}
+                </Text>
+              </View>
+            </Pressable>
+          </Section>
         )}
 
         {/* Danger */}
