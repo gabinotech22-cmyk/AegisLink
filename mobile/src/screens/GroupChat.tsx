@@ -943,6 +943,39 @@ function GroupBubble({
     );
   }
 
+  // Vault sticker bubble — [sticker:vault_<key>]
+  const stickerMatch = body.match(/^\[sticker:(vault_\w+)\]$/);
+  if (stickerMatch) {
+    const { VaultSticker } = require('../components/stickers/VaultPack') as typeof import('../components/stickers/VaultPack');
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+        {sender ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: senderColor }}>{sender}</Text>
+          </View>
+        ) : null}
+        <Pressable
+          onLongPress={onLongPress}
+          style={({ pressed }) => ({
+            width: 130,
+            height: 130,
+            borderRadius: t.radius,
+            overflow: 'hidden',
+            backgroundColor: '#0d1311',
+            borderWidth: 1,
+            borderColor: pressed ? 'rgba(91,242,185,0.35)' : t.border,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <VaultSticker stickerKey={stickerMatch[1]} size={120} />
+        </Pressable>
+        <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginTop: 3 }}>{time}</Text>
+      </View>
+    );
+  }
+
   // GIF bubble
   const gifMatch = body.match(/^\[gif:(.+)\]$/);
   if (gifMatch) {

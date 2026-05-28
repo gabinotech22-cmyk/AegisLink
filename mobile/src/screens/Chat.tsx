@@ -1574,6 +1574,34 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
     );
   }
 
+  // Vault sticker bubble — [sticker:vault_<key>]
+  const stickerMatch = m.body?.match(/^\[sticker:(vault_\w+)\]$/);
+  if (stickerMatch) {
+    const { VaultSticker } = require('../components/stickers/VaultPack') as typeof import('../components/stickers/VaultPack');
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+        <Pressable
+          onLongPress={onLongPress}
+          style={({ pressed }) => ({
+            width: 130,
+            height: 130,
+            borderRadius: t.radius,
+            overflow: 'hidden',
+            backgroundColor: '#0d1311',
+            borderWidth: 1,
+            borderColor: pressed ? 'rgba(91,242,185,0.35)' : t.border,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: queued ? 0.55 : 1,
+          })}
+        >
+          <VaultSticker stickerKey={stickerMatch[1]} size={120} />
+        </Pressable>
+        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+      </View>
+    );
+  }
+
   // GIF bubble — legacy format [gif:url] kept for historical messages only.
   // New GIFs are sent as [image:...] after being downloaded and encrypted.
   // DO NOT load from the remote URL here — that would reveal IP to Giphy.
