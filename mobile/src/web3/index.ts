@@ -28,13 +28,5 @@ export {
   type RevocationPayload,
 } from './deviceRevocation/RevokeDevice';
 
-// Lightning payments
-export {
-  verifyPreimage,
-  requestInvoice,
-  activateSubscription,
-  type InvoiceRequest,
-  type InvoiceResponse,
-  type ActivationRequest,
-  type ActivationResult,
-} from './payments/LightningPayment';
+// Lightning payments — removed until wallet monetization is re-added
+// See src/_unused/web3/payments/LightningPayment.ts
