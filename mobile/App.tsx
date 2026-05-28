@@ -46,9 +46,9 @@ import { ContactsScreen } from './src/screens/Contacts';
 import { PollScreen } from './src/screens/Poll';
 import { FirstContactScreen } from './src/screens/FirstContact';
 import { AppIconScreen } from './src/screens/AppIcon';
-import { SubscriptionScreen } from './src/screens/Subscription';
 import { CallScreen } from './src/screens/Call';
 import { IncomingCallScreen } from './src/screens/IncomingCall';
+import { FloatingCallBar } from './src/components/FloatingCallBar';
 import { NetworkErrorScreen } from './src/screens/NetworkError';
 import { LockSettingsScreen } from './src/screens/LockSettings';
 import { KeysScreen } from './src/screens/Keys';
@@ -153,7 +153,6 @@ type PushRoute =
   | { name: 'firstContact'; contact: StoredContact }
   | { name: 'contacts' }
   | { name: 'appIcon' }
-  | { name: 'subscription' }
   | { name: 'lockSettings' }
   | { name: 'keys' }
   | { name: 'distribution' }
@@ -551,8 +550,9 @@ function Shell() {
     return () => sub.remove();
   }, [handleDeepLink]);
 
-  // Call overlay state (takes over the entire UI when active)
+  // Call overlay state
   const callStatus = useCall((s) => s.status);
+  const callMinimized = useCall((s) => s.minimized);
   const callOverlay =
     callStatus === 'outgoing-ringing' ||
     callStatus === 'connecting' ||
@@ -634,8 +634,15 @@ function Shell() {
   if (incomingCall) {
     return <IncomingCallScreen onAccept={() => void acceptCall()} onReject={() => endCall('declined')} />;
   }
-  if (callOverlay) {
-    return <CallScreen onClose={() => { /* state resets itself */ }} />;
+  // Full-screen call UI — skipped when the user has minimized the call,
+  // in which case FloatingCallBarRoot (sibling of Shell in App) handles the overlay.
+  if (callOverlay && !callMinimized) {
+    return (
+      <CallScreen
+        onClose={() => { /* call store resets itself via useEffect in CallScreen */ }}
+        onMinimize={() => useCall.getState().setMinimized(true)}
+      />
+    );
   }
 
   // Top of stack wins; otherwise show the current tab.
@@ -713,11 +720,8 @@ function Shell() {
             onBack={pop}
             onKeys={() => push({ name: 'keys' })}
             onDevices={() => push({ name: 'devices' })}
-            onPanic={() => push({ name: 'panic' })}
             onAppIcon={() => push({ name: 'appIcon' })}
-            onSubscription={() => push({ name: 'subscription' })}
             onNotifications={() => push({ name: 'notifs' })}
-            onLockConfig={() => push({ name: 'lockConfig' })}
             onExport={() => push({ name: 'export' })}
             onProfileSwitcher={() => push({ name: 'profileSwitcher' })}
           />
@@ -740,8 +744,6 @@ function Shell() {
             onBack={pop}
           />
         );
-      case 'subscription':
-        return <SubscriptionScreen onBack={pop} />;
       case 'notifs':
         return <NotificationsScreen onBack={pop} />;
       case 'backup':
@@ -1082,12 +1084,43 @@ function Shell() {
   }
 }
 
+/**
+ * Renders the FloatingCallBar when the user has minimized the call UI.
+ * Lives OUTSIDE Shell so it can overlay any screen in the navigation stack
+ * without Shell needing to track call state in its render logic.
+ *
+ * Situation matrix:
+ *   in-call + minimized=true  → renders the bar
+ *   in-call + minimized=false → Shell shows full CallScreen (bar is null)
+ *   ended / connecting        → setStatus auto-resets minimized=false → bar is null
+ *   outgoing-ringing          → minimized is always false → bar is null
+ *   incoming-ringing          → IncomingCallScreen (full-screen), bar is null
+ *   app lock triggers         → LockScreen (higher priority in Shell), bar is null
+ *     (WebRTC audio continues; bar reappears after unlock since Zustand persists)
+ *   other person hangs up     → setStatus('ended') resets minimized → full CallScreen briefly
+ *   app backgrounded          → bar state persists in memory; visible on return
+ */
+function FloatingCallBarRoot() {
+  const status = useCall((s) => s.status);
+  const minimized = useCall((s) => s.minimized);
+
+  if (status !== 'in-call' || !minimized) return null;
+
+  return (
+    <FloatingCallBar
+      onExpand={() => useCall.getState().setMinimized(false)}
+    />
+  );
+}
+
 export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
         <StatusBar style="auto" />
         <Shell />
+        {/* FloatingCallBar is a sibling to Shell so it overlays any screen */}
+        <FloatingCallBarRoot />
       </ThemeProvider>
     </SafeAreaProvider>
   );

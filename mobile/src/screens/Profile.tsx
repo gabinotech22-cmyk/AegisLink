@@ -20,12 +20,9 @@ const FileSystem = require('expo-file-system/legacy') as typeof import('expo-fil
 interface Props {
   onBack: () => void;
   onDevices: () => void;
-  onPanic: () => void;
   onAppIcon: () => void;
   onKeys: () => void;
-  onSubscription?: () => void;
   onNotifications?: () => void;
-  onLockConfig?: () => void;
   onExport?: () => void;
   onProfileSwitcher?: () => void;
 }
@@ -41,7 +38,7 @@ const PROFILE_COLORS = [
 ];
 
 
-export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys, onSubscription, onNotifications, onLockConfig, onExport, onProfileSwitcher }: Props) {
+export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onNotifications, onExport, onProfileSwitcher }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -387,43 +384,19 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys, o
             label={i18nT('profile.linkedDevices')}
             onPress={onDevices}
           />
-          <Row
-            t={t}
-            icon={<I.Shield size={18} color={t.accent} />}
-            label={i18nT('profile.panicMode')}
-            sub={i18nT('profile.panicModeSub')}
-            onPress={onPanic}
-          />
-          {onSubscription && (
-            <Row
-              t={t}
-              icon={<I.Zap size={18} color={t.textDim} />}
-              label={i18nT('profile.anonSubscription')}
-              sub={i18nT('profile.anonSubscriptionSub')}
-              onPress={onSubscription}
-            />
-          )}
           {onNotifications && (
             <Row
               t={t}
               icon={<I.Bell size={18} color={t.textDim} />}
-              label="Notificaciones"
+              label={i18nT('privacy.notifications')}
               onPress={onNotifications}
-            />
-          )}
-          {onLockConfig && (
-            <Row
-              t={t}
-              icon={<I.Lock size={18} color={t.textDim} />}
-              label="Pantalla de bloqueo"
-              onPress={onLockConfig}
             />
           )}
           {onExport && (
             <Row
               t={t}
               icon={<I.Forward size={18} color={t.textDim} />}
-              label="Exportar datos"
+              label={i18nT('dataExport.export')}
               onPress={onExport}
             />
           )}
@@ -431,8 +404,8 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys, o
             <Row
               t={t}
               icon={<I.Person size={18} color={t.textDim} />}
-              label="Perfiles aislados"
-              sub="Gestionar identidades E2EE independientes"
+              label={i18nT('profile.isolatedProfiles')}
+              sub={i18nT('profile.isolatedProfilesSub')}
               onPress={onProfileSwitcher}
             />
           )}
