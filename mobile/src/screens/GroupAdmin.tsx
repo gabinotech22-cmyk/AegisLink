@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, TextInput, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -95,6 +95,9 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
   }
 
   const isMe = (aegisId: string) => aegisId === identity?.aegisId;
+  // Only the group creator (adminId) has admin privileges — not every member
+  // who views the screen. amIAdmin drives all permission gates below.
+  const amIAdmin = !!identity && identity.aegisId === group.adminId;
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
@@ -111,20 +114,28 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         {/* Header */}
         <View style={{ alignItems: 'center', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 18 }}>
-          <View
-            style={{
-              width: 76,
-              height: 76,
-              borderRadius: t.radiusL,
-              backgroundColor: `${group.avatarColor ?? t.accent}22`,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <I.Users size={34} color={group.avatarColor ?? t.accent} />
-          </View>
+          {group.avatarImage ? (
+            <Image
+              source={{ uri: group.avatarImage }}
+              style={{ width: 76, height: 76, borderRadius: t.radiusL }}
+              resizeMode="cover"
+            />
+          ) : (
+            <View
+              style={{
+                width: 76,
+                height: 76,
+                borderRadius: t.radiusL,
+                backgroundColor: `${group.avatarColor ?? t.accent}22`,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <I.Users size={34} color={group.avatarColor ?? t.accent} />
+            </View>
+          )}
 
-          {editingName ? (
+          {editingName && amIAdmin ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}>
               <TextInput
                 value={nameInput}
@@ -147,11 +158,14 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
               </Pressable>
             </View>
           ) : (
-            <Pressable onPress={() => { setNameInput(group.name); setEditingName(true); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 }}>
+            <Pressable
+              onPress={amIAdmin ? () => { setNameInput(group.name); setEditingName(true); } : undefined}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 }}
+            >
               <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.4, color: t.text }}>
                 {group.name}
               </Text>
-              <I.Key size={14} color={t.textDim} />
+              {amIAdmin && <I.Settings size={14} color={t.textDim} />}
             </Pressable>
           )}
 
@@ -161,7 +175,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
         </View>
 
         {/* Members */}
-        <Section t={t} label={`${i18nT('groupAdmin.membersSection').toUpperCase()} · ${group.members.length}`}>
+        <Section t={t} label={i18nT('groupAdmin.membersSection', { count: group.members.length }).toUpperCase()}>
           {group.members.map((aegisId, i) => {
             const name = getMemberName(aegisId);
             const color = getMemberColor(aegisId);
@@ -187,7 +201,8 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
                       {name}
                     </Text>
                     {(() => {
-                      const isAdmin = me || group.adminId === aegisId;
+                      // isAdmin is true only for the actual admin — NOT for "me" viewing the screen
+                      const isAdmin = group.adminId === aegisId;
                       const isMod = !isAdmin && group.moderators?.includes(aegisId);
                       if (isAdmin) return (
                         <View style={{ backgroundColor: t.surface2, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 }}>
@@ -210,7 +225,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
                     {me ? i18nT('groupAdmin.youTag') : aegisId.slice(0, 16) + '…'}
                   </Text>
                 </View>
-                {!me && (
+                {!me && amIAdmin && (
                   <Pressable onPress={() => handleRemoveMember(aegisId)} hitSlop={8} style={{ padding: 6 }}>
                     <I.X size={16} color={t.textDim} />
                   </Pressable>
@@ -219,7 +234,8 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
             );
           })}
 
-          {/* Add member */}
+          {/* Add member — only admin can invite when adminOnlyInvite is on */}
+          {(amIAdmin || !group.adminOnlyInvite) && (
           <Pressable
             onPress={handleAddMember}
             style={({ pressed }) => ({
@@ -253,9 +269,11 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
               {i18nT('groupAdmin.fromContacts').toUpperCase()}
             </Text>
           </Pressable>
+          )}
         </Section>
 
-        {/* Permissions */}
+        {/* Permissions — only admin can change these */}
+        {amIAdmin && (
         <Section t={t} label={i18nT('groupAdmin.permissionsSection').toUpperCase()}>
           <Toggle
             t={t}
@@ -273,6 +291,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
             noBorder
           />
         </Section>
+        )}
 
         {/* Danger */}
         <Section t={t} label={i18nT('groupAdmin.dangerZone').toUpperCase()}>
