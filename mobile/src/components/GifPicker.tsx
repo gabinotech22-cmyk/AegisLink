@@ -16,33 +16,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from './icons';
 import { SERVER_URL } from '../config';
+import { VAULT_PACK } from './stickers/VaultPack';
 
 // Tab type
 type GifTab = 'gifs' | 'stickers';
-
-// Sticker definitions — static unicode/emoji, bundled with app, no CDN
-const STICKERS = [
-  { id: 's1', emoji: '😂', label: 'Laughing' },
-  { id: 's2', emoji: '🔥', label: 'Fire' },
-  { id: 's3', emoji: '❤️', label: 'Heart' },
-  { id: 's4', emoji: '👍', label: 'Thumbs up' },
-  { id: 's5', emoji: '😭', label: 'Sobbing' },
-  { id: 's6', emoji: '🙏', label: 'Hands' },
-  { id: 's7', emoji: '💀', label: 'Skull' },
-  { id: 's8', emoji: '😍', label: 'Heart eyes' },
-  { id: 's9', emoji: '🤣', label: 'ROFL' },
-  { id: 's10', emoji: '😢', label: 'Cry' },
-  { id: 's11', emoji: '🥺', label: 'Pleading' },
-  { id: 's12', emoji: '😎', label: 'Cool' },
-  { id: 's13', emoji: '🤔', label: 'Thinking' },
-  { id: 's14', emoji: '👀', label: 'Eyes' },
-  { id: 's15', emoji: '💯', label: '100' },
-  { id: 's16', emoji: '🎉', label: 'Party' },
-  { id: 's17', emoji: '😅', label: 'Sweat smile' },
-  { id: 's18', emoji: '🤦', label: 'Facepalm' },
-  { id: 's19', emoji: '💪', label: 'Muscle' },
-  { id: 's20', emoji: '✨', label: 'Sparkles' },
-];
 
 interface TenorResult {
   id: string;
@@ -388,36 +365,40 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
             />
           )
         ) : (
-          /* Stickers grid */
+          /* Vault Pack sticker grid — 16 animated stickers */
           <FlatList
-            data={STICKERS}
-            keyExtractor={(item) => item.id}
+            data={VAULT_PACK as unknown as typeof VAULT_PACK[number][]}
+            keyExtractor={(item) => item.key}
             numColumns={4}
             contentContainerStyle={{
-              paddingHorizontal: 18,
+              paddingHorizontal: 12,
               paddingBottom: insets.bottom + 12,
-              gap: 10,
+              gap: 8,
             }}
-            columnWrapperStyle={{ gap: 10 }}
-            renderItem={({ item }) => (
-              <Pressable
-                onPress={() => onSelectSticker(item.emoji)}
-                accessibilityLabel={`Sticker: ${item.label}`}
-                style={({ pressed }) => ({
-                  flex: 1,
-                  aspectRatio: 1,
-                  backgroundColor: t.surface,
-                  borderWidth: 1,
-                  borderColor: t.border,
-                  borderRadius: t.radius,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: pressed ? 0.75 : 1,
-                })}
-              >
-                <Text style={{ fontSize: 36 }}>{item.emoji}</Text>
-              </Pressable>
-            )}
+            columnWrapperStyle={{ gap: 8 }}
+            renderItem={({ item }) => {
+              const { Component } = item;
+              return (
+                <Pressable
+                  onPress={() => onSelectSticker(`[sticker:${item.key}]`)}
+                  accessibilityLabel={`Sticker: ${item.label}`}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    aspectRatio: 1,
+                    backgroundColor: '#0d1311',
+                    borderWidth: 1,
+                    borderColor: pressed ? 'rgba(91,242,185,0.35)' : t.border,
+                    borderRadius: t.radius,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Component size={72} />
+                </Pressable>
+              );
+            }}
           />
         )}
       </KeyboardAvoidingView>
