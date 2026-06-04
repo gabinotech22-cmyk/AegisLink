@@ -36,14 +36,20 @@ let currentTotalBytes = 0;
   } catch { /* uploads dir may not exist yet */ }
 })();
 
-// ── Rate limiter (10 uploads per 15 minutes per IP) ───────────────────────────
+// ── Rate limiter (per IP) ─────────────────────────────────────────────────────
+// A real messenger shares many photos/audios in a single sitting, so 10/15 min
+// (the old value) blocked normal use almost immediately. Abuse is already
+// constrained by the per-upload Proof-of-Work and the global byte quota, so the
+// rate limit only needs to bound bulk-bot floods. 200/15 min (~13/min sustained)
+// comfortably covers sharing a photo album while still capping automated abuse.
+const UPLOAD_WINDOW_MS = 15 * 60 * 1000;
 const uploadLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
+  windowMs: UPLOAD_WINDOW_MS,
+  max: 200,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
+    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: UPLOAD_WINDOW_MS });
   },
 });
 
