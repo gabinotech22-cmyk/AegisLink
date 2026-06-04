@@ -2305,13 +2305,17 @@ export async function sendGroupMessage(opts: {
 
   // Optimistic local append — skip when caller already pre-appended (e.g. media messages)
   if (!opts.skipLocalAppend) {
-    const myDisplayName = senderName || opts.identity.aegisId.substring(0, 8);
     const localId = Crypto.randomUUID();
     await useMessages.getState().append({
       id: localId,
       chatId: opts.groupId,
       direction: 'out',
-      body: `${myDisplayName}: ${opts.plaintext}`,
+      // Store the RAW body (no "name: " prefix). The sender's own bubble never
+      // strips/show a sender prefix (only incoming messages do, see
+      // GroupMessageBubble), so prefixing here broke special bodies on the
+      // sender's screen — e.g. `[poll:…]`/`[gif:…]` failed their startsWith()
+      // parse and rendered as literal text.
+      body: opts.plaintext,
       createdAt: nowMs,
       type: (opts.msgType as 'text' | 'image' | 'audio' | 'file' | 'poll' | 'location' | 'view_once' | undefined) ?? 'text',
       mediaUri: opts.mediaUri ?? undefined,

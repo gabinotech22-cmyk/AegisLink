@@ -1126,6 +1126,7 @@ function Shell() {
                   identity,
                   groupId: top.group!.id,
                   plaintext: `[poll:${question}|${options.join('|')}]`,
+                  msgType: 'poll',
                 });
               } catch { /* queued */ }
               pop();
