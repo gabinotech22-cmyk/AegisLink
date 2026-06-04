@@ -1,18 +1,20 @@
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import { readFileSync } from 'node:fs';
 import { Server as SocketServer } from 'socket.io';
 import identityRoutes from './routes/identity.js';
 import pushRoutes from './routes/push.js';
 import web3Routes from './routes/web3.js';
 import prekeysRoutes from './routes/prekeys.js';
 import blobRoutes from './routes/blob.js';
+import backupRoutes from './routes/backup.js';
 import pollsRoutes from './routes/polls.js';
 import turnRoutes from './routes/turn.js';
 import proxyGifRoutes from './routes/proxyGif.js';
 import proxyLinkPreviewRoutes from './routes/proxyLinkPreview.js';
 import { createWorkRouter } from './routes/work.js';
-import { createGroupCallsRouter } from './routes/groupCalls.js';
 import { createDeviceLinkRouter } from './routes/deviceLink.js';
 import { attachRelay } from './relay/handler.js';
 import { initDb, messageRepo, pruneExpiredWorkMessages } from './db/client.js';
@@ -77,12 +79,29 @@ app.use('/push', pushRoutes);
 app.use('/web3', web3Routes);
 app.use('/prekeys', prekeysRoutes);
 app.use('/blob', blobRoutes);
+app.use('/backup', backupRoutes);
 app.use('/polls', pollsRoutes);
 app.use('/turn', turnRoutes);
 app.use('/proxy/gif', proxyGifRoutes);
 app.use('/proxy/linkpreview', proxyLinkPreviewRoutes);
 
-const httpServer = createServer(app);
+// ── Direct TLS (optional) ────────────────────────────────────────────────────
+// When TLS_CERT_PATH + TLS_KEY_PATH are set, the relay terminates HTTPS/WSS
+// ITSELF — no reverse proxy needed. Clients then connect straight to
+// wss://<domain>:<PORT> with zero extra hops (reuse the same Let's Encrypt cert
+// coturn already uses, e.g. /etc/letsencrypt/live/aegislink.duckdns.org/).
+// When unset, the relay listens on plain HTTP — the correct choice when an
+// nginx/Caddy proxy upstream is terminating TLS for you.
+const TLS_CERT_PATH = process.env.TLS_CERT_PATH;
+const TLS_KEY_PATH = process.env.TLS_KEY_PATH;
+const tlsDirect = Boolean(TLS_CERT_PATH && TLS_KEY_PATH);
+const serverScheme = tlsDirect ? 'https' : 'http';
+const httpServer = tlsDirect
+  ? createHttpsServer(
+      { cert: readFileSync(TLS_CERT_PATH as string), key: readFileSync(TLS_KEY_PATH as string) },
+      app,
+    )
+  : createServer(app);
 
 const io = new SocketServer(httpServer, {
   // Mirror the same permissive-in-dev / strict-in-prod logic used for HTTP CORS.
@@ -96,13 +115,12 @@ attachRelay(io);
 
 // Routes that require access to the Socket.IO server for real-time events.
 app.use('/work', createWorkRouter(io));
-app.use('/calls/group', createGroupCallsRouter(io));
 app.use('/devices', createDeviceLinkRouter(io));
 
 // Bootstrap DB then start server.
 initDb().then(() => {
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`[aegislink-server] listening on http://0.0.0.0:${PORT}`);
+    console.log(`[aegislink-server] listening on ${serverScheme}://0.0.0.0:${PORT}${tlsDirect ? ' (direct TLS)' : ''}`);
     console.log(`[aegislink-server] CORS origin: ${ORIGIN}`);
   });
 

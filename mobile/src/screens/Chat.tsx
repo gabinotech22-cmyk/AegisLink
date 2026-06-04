@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { FormattedText } from '../components/FormattedText';
+import { VideoBubble } from '../components/VideoBubble';
 import { AudioWaveform } from '../components/AudioWaveform';
 import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
@@ -177,6 +178,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
   const isNearBottomRef = useRef(true);
   const hasInitialScrolledRef = useRef(false);
+  const sendingRef = useRef(false);
 
   // Reset the initial-scroll guard whenever we switch to a different chat so
   // each conversation always scrolls to its latest message on open.
@@ -186,20 +188,12 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
   useEffect(() => {
     if (list.length === 0) return;
-    if (!hasInitialScrolledRef.current) {
-      // First load: give the FlatList 120 ms to finish measuring all items
-      // before calling scrollToEnd. requestAnimationFrame fires before layout
-      // is complete when the list transitions from 0 → N items in one cycle,
-      // resulting in a no-op or partial scroll.
-      hasInitialScrolledRef.current = true;
-      const timer = setTimeout(() => {
-        flatlistRef.current?.scrollToEnd({ animated: false });
-        isNearBottomRef.current = true;
-      }, 120);
-      return () => clearTimeout(timer);
-    }
+    // The FIRST landing at the bottom is owned exclusively by onContentSizeChange
+    // (it snaps instantly, no animation). Bail until that has happened so we never
+    // fire a competing animated scroll that produces the visible "jump" on open.
+    if (!hasInitialScrolledRef.current) return;
+    // New message arrived while the user is already near the bottom — follow it.
     if (isNearBottomRef.current) {
-      // New message arrived while the user is already near the bottom — follow.
       requestAnimationFrame(() => flatlistRef.current?.scrollToEnd({ animated: true }));
     }
   }, [list.length]);
@@ -364,11 +358,12 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   }
 
   async function handleSend() {
-    if (!identity || sending) return;
+    if (!identity || sendingRef.current) return;
     const hasText = draft.trim().length > 0;
     const hasImage = !!stagedImageUri;
     if (!hasText && !hasImage) return;
 
+    sendingRef.current = true;
     setSending(true);
     const text = draft.trim();
     const imageUri = stagedImageUri;
@@ -418,6 +413,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       setDraft(text);
       Alert.alert(i18nT('chat.sendError'), (e as Error).message);
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }
@@ -877,6 +873,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           keyExtractor={(m) => m.id}
           style={{ backgroundColor: wallpaperBg(chatWallpaper, t) ?? t.bg }}
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10 }}
+          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <View
               style={
@@ -913,12 +910,19 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           )}
           ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
           onContentSizeChange={() => {
-            // Backup: if the timer-based scroll hasn't fired yet when the list
-            // finishes laying out (e.g. fast device), trigger it immediately.
-            if (!hasInitialScrolledRef.current && list.length > 0) {
-              hasInitialScrolledRef.current = true;
+            if (list.length === 0) return;
+            // Authoritative scroll-to-bottom. Fires when the content has finished
+            // measuring and refires as images/media load and as new messages append.
+            if (!hasInitialScrolledRef.current) {
+              // First layout pass for this chat: snap straight to the latest message
+              // WITHOUT animation, so opening a conversation always lands at the bottom
+              // cleanly — no visible scroll travelling from top to bottom.
               flatlistRef.current?.scrollToEnd({ animated: false });
-              isNearBottomRef.current = true;
+              hasInitialScrolledRef.current = true;
+            } else if (isNearBottomRef.current) {
+              // Already anchored once; keep pinned while the user is at the bottom.
+              // Once they scroll up, isNearBottomRef flips false and we leave them be.
+              flatlistRef.current?.scrollToEnd({ animated: false });
             }
           }}
           onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
@@ -1030,7 +1034,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 >
                   <I.Reply size={14} color={t.accent} />
                   <Text numberOfLines={1} style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.textDim }}>
-                    {replyTo.deleted ? i18nT('chat.deletedMessage') : replyTo.body || (replyTo.type === 'image' ? '📷 ' + i18nT('attachSheet.image') : '…')}
+                    {replyTo.deleted ? i18nT('chat.deletedMessage') : replyTo.body || (replyTo.type === 'image' ? '📷 ' + i18nT('attachSheet.image') : replyTo.type === 'video' ? '📹 Video' : '…')}
                   </Text>
                   <Pressable onPress={() => setReplyTo(null)} hitSlop={8}>
                     <I.X size={16} color={t.textDim} />
@@ -1093,6 +1097,15 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 placeholderTextColor={t.textFaint}
                 accessibilityLabel="Campo de mensaje"
                 multiline
+                returnKeyType="send"
+                submitBehavior="submit"
+                onSubmitEditing={() => {
+                  // Soft-keyboard "send" key. submitBehavior="submit" (RN 0.81)
+                  // makes the return key fire onSubmitEditing on a multiline input
+                  // WITHOUT inserting a newline and WITHOUT dismissing the keyboard,
+                  // so the user can keep typing the next message immediately.
+                  if (draft.trim() || stagedImageUri) void handleSend();
+                }}
                 style={{
                   flex: 1,
                   backgroundColor: t.surface2,
@@ -1327,6 +1340,11 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
         <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
       </View>
     );
+  }
+
+  // Video bubble
+  if (m.type === 'video') {
+    return <VideoBubble t={t} m={m} me={me} queued={queued} time={time} onLongPress={onLongPress} />;
   }
 
   // Audio bubble

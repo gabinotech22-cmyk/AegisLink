@@ -13,7 +13,15 @@ import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
 import { performX3DH, performX3DHReceiver, generatePreKeys, type PreKeyBundle } from '../crypto/signal/x3dh';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
-import { loadRatchetSession, saveRatchetSession } from '../db/local';
+import {
+  loadRatchetSession,
+  saveRatchetSession,
+  enqueueOutboxJob,
+  loadOutboxJobs,
+  deleteOutboxJob,
+  incrementOutboxAttempts,
+  type OutboxJob,
+} from '../db/local';
 
 const getSlotPrefix = () => {
   const { getActiveDbSlot } = require('../db/local');
@@ -75,19 +83,10 @@ const profiledContacts = new Set<string>();
 // included — it is only 7 bytes and requires no read from disk.
 const profiledGroupImages = new Set<string>();
 
-// ── Offline message queue ─────────────────────────────────────────────────────
-interface QueuedSend {
-  msgId: string;
-  recipientAegisId: string;
-  recipientPublicKeyB64: string;
-  plaintext: string;
-  replyToId?: string;
-}
-const offlineQueue: QueuedSend[] = [];
-
-// ── Group offline queue ───────────────────────────────────────────────────────
-interface QueuedGroupSend { groupId: string; plaintext: string }
-const groupOfflineQueue: QueuedGroupSend[] = [];
+// ── Persistent outbox (replaces in-memory offlineQueue + groupOfflineQueue) ───
+// Jobs are persisted in SQLite via enqueueOutboxJob / loadOutboxJobs so they
+// survive app close and crashes. Drained in FIFO order by flushOutbox() on
+// auth:ok and reconnect. See db/local.ts for the outbox table schema.
 
 /**
  * Canonical byte representation of group metadata for signing/verification.
@@ -138,40 +137,54 @@ function verifyGroupMetadata(
   }
 }
 
-async function flushGroupOfflineQueue(identity: Identity) {
-  if (groupOfflineQueue.length === 0) return;
-  const items = groupOfflineQueue.splice(0);
-  for (const item of items) {
-    try {
-      await sendGroupMessage({ identity, groupId: item.groupId, plaintext: item.plaintext });
-    } catch (e) {
-      if (__DEV__) console.warn('[socket] group offline queue flush error', e);
-      groupOfflineQueue.push(item);
-    }
+/**
+ * Drain all pending outbox jobs in FIFO order.
+ *
+ * Each job is re-encrypted with the CURRENT ratchet state at drain time —
+ * the outbox only stores plaintext (at-rest encrypted via encryptBody).
+ * Jobs that deliver successfully are deleted; failures increment attempts
+ * and leave the job in place for the next reconnect / drain cycle.
+ *
+ * CRITICAL: drain in SERIES (await each before the next) to preserve FIFO
+ * order and avoid concurrent ratchet state mutations.
+ */
+async function flushOutbox(identity: Identity): Promise<void> {
+  let jobs: OutboxJob[];
+  try {
+    jobs = await loadOutboxJobs();
+  } catch (e) {
+    if (__DEV__) console.warn('[socket] flushOutbox: could not load jobs', e);
+    return;
   }
-}
+  if (jobs.length === 0) return;
 
-async function flushOfflineQueue(identity: Identity) {
-  if (offlineQueue.length === 0) return;
-  const items = offlineQueue.splice(0); // drain
-  for (const item of items) {
+  for (const job of jobs) {
+    if (!socket || !connected || !authenticated) break; // gone offline mid-drain
     try {
-      const recipientPublicKey = decodeBase64(item.recipientPublicKeyB64);
-      const session = await getOrCreateSession(item.recipientAegisId, item.recipientPublicKeyB64, identity);
-      const { envelope, newState } = encryptMessage(item.plaintext, identity.aegisId, recipientPublicKey, identity.secretKey, session);
-      await saveSessionState(item.recipientAegisId, newState);
+      const recipientPublicKey = decodeBase64(job.recipientPubkeyB64);
+      const session = await getOrCreateSession(job.recipientAegisId, job.recipientPubkeyB64, identity);
+      const { envelope, newState } = encryptMessage(
+        job.payload,
+        identity.aegisId,
+        recipientPublicKey,
+        identity.secretKey,
+        session,
+      );
+      await saveSessionState(job.recipientAegisId, newState);
       await new Promise<void>((resolve, reject) => {
-        socket!.emit('envelope', { id: item.msgId, to: item.recipientAegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 },
+        socket!.emit(
+          'envelope',
+          { id: job.msgId, to: job.recipientAegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 },
           (ack: { ok: boolean; error?: string } | undefined) => {
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
             else resolve();
-          }
+          },
         );
       });
+      await deleteOutboxJob(job.jobId);
     } catch (e) {
-      if (__DEV__) console.warn('[socket] offline queue flush error', e);
-      // Re-queue on failure so we retry next time
-      offlineQueue.push(item);
+      if (__DEV__) console.warn('[socket] flushOutbox: job failed, will retry on next reconnect', job.jobId, e);
+      try { await incrementOutboxAttempts(job.jobId); } catch { /* non-fatal */ }
     }
   }
 }
@@ -378,11 +391,21 @@ export function connect(identity: Identity): Socket {
   })();
 
   socket = io(relayUrl, {
-    transports: ['websocket'],
+    // WebSocket first (lowest latency), but fall back to HTTP long-polling within
+    // the SAME connection attempt when the WS upgrade is blocked — the common case
+    // behind reverse proxies (our duckdns TLS terminator) and on restrictive mobile
+    // / carrier-NAT networks. Previously this was ['websocket'] only, so any failed
+    // upgrade left the socket permanently disconnected with no recovery path, which
+    // the user experiences as "no conecta / se cae sola". tryAllTransports (socket.io
+    // 4.8+) makes Engine.IO attempt polling in the same shot instead of giving up.
+    transports: ['websocket', 'polling'],
+    tryAllTransports: true,
     auth: { aegisId: identity.aegisId, platform: 'mobile' },
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 8000,
+    reconnectionAttempts: Infinity,
+    timeout: 20000,
   });
 
   socket.on('connect', () => {
@@ -435,8 +458,13 @@ export function connect(identity: Identity): Socket {
         );
         if (result.ok) {
           if (__DEV__) console.log('[socket] re-registered — reconnecting');
-          socket?.disconnect();
-          // Socket.IO's built-in reconnect will re-trigger after disconnect.
+          // The relay already closed this socket server-side (reason
+          // 'io server disconnect'), and that reason does NOT trigger Socket.IO's
+          // auto-reconnect. The previous code called socket.disconnect() here, which
+          // is terminal — it left the user permanently offline after a re-register.
+          // Re-open the socket explicitly so the new identity gets a fresh auth
+          // challenge and comes back online.
+          socket?.connect();
         } else {
           if (__DEV__) console.warn('[socket] re-registration failed:', result.error);
           useConnection.getState().setOnline(false);
@@ -476,9 +504,8 @@ export function connect(identity: Identity): Socket {
       (socket.auth as Record<string, unknown>).deviceId = deviceId;
     }
 
-    // Flush any messages queued while offline
-    void flushOfflineQueue(identity);
-    void flushGroupOfflineQueue(identity);
+    // Flush any messages persisted to the outbox while offline
+    void flushOutbox(identity);
 
     // ── Register push token for silent wake-ups ──────────────────────────────
     // Called AFTER auth:ok so we have an authenticated socket connection.
@@ -1181,6 +1208,20 @@ async function decryptAndAppend(
           cleanMsgBody = '';
           try { groupMsgMediaUri = await saveMediaToCache(dataUri, `img_${env.id}.jpg`); }
           catch { groupMsgMediaUri = dataUri; }
+        } else if (msgBody.startsWith('[video:blob:') && msgBody.endsWith(']')) {
+          const dataUri = msgBody.slice(7, -1); // strip '[video:' and ']'
+          groupMsgType = 'video';
+          cleanMsgBody = '';
+          try {
+            const { downloadAndDecryptMedia } = require('../crypto/media');
+            groupMsgMediaUri = await downloadAndDecryptMedia(dataUri, 'mp4');
+          } catch { groupMsgMediaUri = dataUri; }
+        } else if (msgBody.startsWith('[video:data:') && msgBody.endsWith(']')) {
+          const dataUri = msgBody.slice(7, -1); // strip '[video:' and ']'
+          groupMsgType = 'video';
+          cleanMsgBody = '';
+          try { groupMsgMediaUri = await saveMediaToCache(dataUri, `video_${env.id}.mp4`); }
+          catch { groupMsgMediaUri = dataUri; }
         } else if (msgBody.startsWith('[file:') && msgBody.endsWith(']')) {
           const inner = msgBody.slice(6, -1);
           const blobColonIdx = inner.indexOf(':blob:');
@@ -1218,7 +1259,7 @@ async function decryptAndAppend(
           direction: 'in',
           body: formattedBody,
           createdAt: env.createdAt ?? Date.now(),
-          type: groupMsgType as 'text' | 'image' | 'audio' | 'file' | 'poll' | 'location' | 'view_once',
+          type: groupMsgType as 'text' | 'image' | 'audio' | 'video' | 'file' | 'poll' | 'location' | 'view_once',
           mediaUri: groupMsgMediaUri,
         });
 
@@ -1356,6 +1397,25 @@ async function decryptAndAppend(
       detectedMediaUri = dataUri;
       cleanBody = `[viewonce:${dataUri}]`;
     }
+  } else if (finalBody.startsWith('[video:blob:') && finalBody.endsWith(']')) {
+    const dataUri = finalBody.slice(7, -1); // strip '[video:' and ']'
+    detectedType = 'video';
+    cleanBody = '';
+    try {
+      const { downloadAndDecryptMedia } = require('../crypto/media');
+      detectedMediaUri = await downloadAndDecryptMedia(dataUri, 'mp4');
+    } catch {
+      detectedMediaUri = dataUri;
+    }
+  } else if (finalBody.startsWith('[video:data:') && finalBody.endsWith(']')) {
+    const dataUri = finalBody.slice(7, -1); // strip '[video:' and ']'
+    detectedType = 'video';
+    cleanBody = '';
+    try {
+      detectedMediaUri = await saveMediaToCache(dataUri, `video_${env.id}.mp4`);
+    } catch {
+      detectedMediaUri = dataUri;
+    }
   } else if (finalBody.startsWith('[file:') && finalBody.endsWith(']')) {
     // Format: [file:filename:blob:<id>:<key>:<nonce>]
     const inner = finalBody.slice(6, -1); // remove '[file:' and ']'
@@ -1389,7 +1449,7 @@ async function decryptAndAppend(
     direction: 'in',
     body: cleanBody,
     createdAt: env.createdAt ?? Date.now(),
-    type: detectedType as any,
+    type: detectedType as 'text' | 'image' | 'audio' | 'video' | 'file' | 'poll' | 'location' | 'view_once',
     mediaUri: detectedMediaUri,
     expiresAt: parsedPayload?.expiresAt ?? null,
   });
@@ -1868,20 +1928,6 @@ export async function sendMessage(opts: {
     });
   }
 
-  // If offline, queue for delivery on reconnect — message is already saved locally
-  if (!socket || !connected || !authenticated) {
-    // Cap queue at 200 to prevent OOM during extended offline periods
-    if (offlineQueue.length >= 200) offlineQueue.shift(); // drop oldest
-    offlineQueue.push({
-      msgId: id,
-      recipientAegisId: opts.recipientAegisId,
-      recipientPublicKeyB64: encodeBase64(opts.recipientPublicKey),
-      plaintext: opts.plaintext,
-      replyToId: opts.replyToId,
-    });
-    return; // resolve silently — UI shows "EN COLA" via !online indicator
-  }
-
   // Include senderImage only on the first message to each contact per session.
   // This avoids embedding a large base64 blob in every envelope while still
   // ensuring the recipient always has an up-to-date avatar.
@@ -1903,27 +1949,62 @@ export async function sendMessage(opts: {
     expiresAt,
   };
   const payload = JSON.stringify(payloadObj);
+  const recipientPublicKeyB64 = encodeBase64(opts.recipientPublicKey);
 
-  const session = await getOrCreateSession(opts.recipientAegisId, encodeBase64(opts.recipientPublicKey), opts.identity);
+  // ── Outbox: persist before attempting to emit ────────────────────────────
+  // The job survives app close / crash; flushOutbox() will retry on reconnect.
+  const jobId = Crypto.randomUUID();
+  try {
+    await enqueueOutboxJob({
+      jobId,
+      msgId: id,
+      recipientAegisId: opts.recipientAegisId,
+      recipientPubkeyB64: recipientPublicKeyB64,
+      payload,
+      kind: 'direct',
+      groupId: null,
+      createdAt,
+    });
+  } catch (e) {
+    // If we can't persist to the outbox (e.g. DB not ready on first launch),
+    // still attempt the send — the best-effort path is better than silence.
+    if (__DEV__) console.warn('[socket] enqueueOutboxJob failed (best-effort send anyway):', e);
+  }
+
+  // If offline, the job is already persisted — return so UI shows offline indicator
+  if (!socket || !connected || !authenticated) {
+    return; // flushOutbox() will drain on next auth:ok
+  }
+
+  const session = await getOrCreateSession(opts.recipientAegisId, recipientPublicKeyB64, opts.identity);
   const { envelope, newState } = encryptMessage(
     payload,
     opts.identity.aegisId,
     opts.recipientPublicKey,
     opts.identity.secretKey,
-    session
+    session,
   );
   await saveSessionState(opts.recipientAegisId, newState);
 
-  await new Promise<void>((resolve, reject) => {
-    socket!.emit(
-      'envelope',
-      { id, to: opts.recipientAegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 },
-      (ack: { ok: boolean; queued?: boolean; error?: string } | undefined) => {
-        if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
-        else resolve();
-      }
-    );
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket!.emit(
+        'envelope',
+        { id, to: opts.recipientAegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 },
+        (ack: { ok: boolean; queued?: boolean; error?: string } | undefined) => {
+          if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
+          else resolve();
+        },
+      );
+    });
+    // ACK received — remove from outbox
+    try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
+  } catch (e) {
+    // Emit failed — job stays in outbox for retry on next reconnect
+    if (__DEV__) console.warn('[socket] sendMessage emit failed, job retained in outbox:', e);
+    try { await incrementOutboxAttempts(jobId); } catch { /* non-fatal */ }
+    throw e; // surface to caller so UI can show error
+  }
 
   // Multi-device sync: also push a self-encrypted copy so the user's other
   // devices can render this message as direction:'out'. Best-effort — never
@@ -2078,12 +2159,17 @@ export async function sendGroupMessage(opts: {
   identity: Identity;
   groupId: string;
   plaintext: string;
+  /** Optional message type override: 'audio' | 'image' | 'file' etc. */
+  msgType?: string;
+  /** Optional encrypted blob URI: blob:<id>:<key>:<nonce> */
+  mediaUri?: string;
+  /**
+   * When true, skip the optimistic local append. Use this when the caller
+   * already pre-appended a bubble (e.g. image/video/audio media messages).
+   * Mirrors the same flag on sendMessage() for 1:1 chats.
+   */
+  skipLocalAppend?: boolean;
 }): Promise<void> {
-  if (!socket || !connected || !authenticated) {
-    groupOfflineQueue.push({ groupId: opts.groupId, plaintext: opts.plaintext });
-    return;
-  }
-
   const { getGroup, saveGroup } = require('../db/local');
   const group = await getGroup(opts.groupId);
   if (!group) throw new Error('group_not_found');
@@ -2128,15 +2214,23 @@ export async function sendGroupMessage(opts: {
     : await toDataUri(group.avatarImage ?? null);
   if (groupAvatarImage) profiledGroupImages.add(group.id);
 
-  // Multicast to all members
-  const sendPromises = group.members.map(async (memberId: string) => {
-    if (memberId === opts.identity.aegisId) return;
+  const nowMs = Date.now();
+
+  // ── Per-member outbox fan-out ────────────────────────────────────────────────
+  // Fan-out is sequential so that ratchet state advances monotonically and
+  // FIFO ordering within each session is preserved.
+  // Each member gets its own outbox job so a delivery failure to one member
+  // does NOT silently drop the message — it stays pending for that member
+  // and is retried on the next reconnect/drain.
+  for (const memberId of group.members) {
+    if (memberId === opts.identity.aegisId) continue;
     const contact = contacts.find((c) => c.aegisId === memberId);
-    if (!contact) return;
+    if (!contact) continue;
 
     const senderImage = profiledContacts.has(contact.aegisId) ? null : imageDataUri;
     if (senderImage) profiledContacts.add(contact.aegisId);
 
+    const msgId = Crypto.randomUUID();
     const payload = JSON.stringify({
       type: 'group_msg',
       groupId: group.id,
@@ -2152,7 +2246,30 @@ export async function sendGroupMessage(opts: {
       senderColor,
       senderImage,
       body: opts.plaintext,
+      msgType: opts.msgType ?? null,
+      mediaUri: opts.mediaUri ?? null,
     });
+
+    // Persist to outbox BEFORE emitting so the job survives app close/crash.
+    const jobId = Crypto.randomUUID();
+    try {
+      await enqueueOutboxJob({
+        jobId,
+        msgId,
+        recipientAegisId: contact.aegisId,
+        recipientPubkeyB64: contact.publicKeyB64,
+        payload,
+        kind: 'group',
+        groupId: opts.groupId,
+        createdAt: nowMs,
+      });
+    } catch (e) {
+      // Outbox write failed — still attempt the send (best-effort path)
+      if (__DEV__) console.warn('[socket] group enqueueOutboxJob failed for member', contact.aegisId, e);
+    }
+
+    // If offline, job is already persisted — skip emit; flushOutbox handles it.
+    if (!socket || !connected || !authenticated) continue;
 
     try {
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, opts.identity);
@@ -2161,44 +2278,45 @@ export async function sendGroupMessage(opts: {
         opts.identity.aegisId,
         decodeBase64(contact.publicKeyB64),
         opts.identity.secretKey,
-        session
+        session,
       );
-
       await saveSessionState(contact.aegisId, newState);
 
-      const id = Crypto.randomUUID();
       await new Promise<void>((resolve, reject) => {
         socket!.emit(
           'envelope',
-          {
-            id,
-            to: contact.aegisId,
-            ciphertext: envelope.ciphertextB64,
-            nonce: envelope.nonceB64,
-          },
-          (ack: any) => {
+          { id: msgId, to: contact.aegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 },
+          (ack: { ok: boolean; error?: string } | undefined) => {
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
             else resolve();
-          }
+          },
         );
       });
+      // ACK ok — delete from outbox
+      try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
     } catch (e) {
-      if (__DEV__) console.error('[socket] Multicast E2EE group message failed:', e);
+      // Delivery failed for this member — job stays in outbox for retry.
+      // DO NOT swallow silently: log and increment attempts so monitoring can detect stuck jobs.
+      if (__DEV__) console.warn('[socket] group message delivery failed for member', contact.aegisId, '— job retained in outbox', e);
+      try { await incrementOutboxAttempts(jobId); } catch { /* non-fatal */ }
+      // Continue to next member — one failure must not block others.
     }
-  });
+  }
 
-  await Promise.all(sendPromises);
-
-  const myDisplayName = senderName || opts.identity.aegisId.substring(0, 8);
-
-  const id = Crypto.randomUUID();
-  await useMessages.getState().append({
-    id,
-    chatId: opts.groupId,
-    direction: 'out',
-    body: `${myDisplayName}: ${opts.plaintext}`,
-    createdAt: Date.now(),
-  });
+  // Optimistic local append — skip when caller already pre-appended (e.g. media messages)
+  if (!opts.skipLocalAppend) {
+    const myDisplayName = senderName || opts.identity.aegisId.substring(0, 8);
+    const localId = Crypto.randomUUID();
+    await useMessages.getState().append({
+      id: localId,
+      chatId: opts.groupId,
+      direction: 'out',
+      body: `${myDisplayName}: ${opts.plaintext}`,
+      createdAt: nowMs,
+      type: (opts.msgType as 'text' | 'image' | 'audio' | 'file' | 'poll' | 'location' | 'view_once' | undefined) ?? 'text',
+      mediaUri: opts.mediaUri ?? undefined,
+    });
+  }
 }
 
 /**
@@ -2233,7 +2351,8 @@ export async function sendGroupVote(opts: {
   const plaintext = `[vote:${opts.pollMessageId}:${opts.optionIndex}:${opts.commitment}:${opts.nonceHex}]`;
 
   if (!socket || !connected || !authenticated) {
-    groupOfflineQueue.push({ groupId: opts.groupId, plaintext });
+    // Votes are best-effort (anonymous commitment scheme) — if offline, drop silently.
+    // The user will need to reconnect and re-cast the vote.
     return;
   }
 

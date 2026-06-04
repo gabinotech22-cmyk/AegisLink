@@ -142,14 +142,6 @@ let _ringTimeout: ReturnType<typeof setTimeout> | null = null;
 let _pendingIceCandidates: string[] = [];
 let _remoteDescriptionSet = false;
 
-function bufferOrApplyIce(pc: import('../webrtc/peer').ActivePeer['pc'], candidate: string): void {
-  if (_remoteDescriptionSet) {
-    void addRemoteIce(pc, candidate);
-  } else {
-    _pendingIceCandidates.push(candidate);
-  }
-}
-
 async function flushPendingIce(pc: import('../webrtc/peer').ActivePeer['pc']): Promise<void> {
   _remoteDescriptionSet = true;
   const queued = _pendingIceCandidates.splice(0);
@@ -234,6 +226,10 @@ export function attachCallHandlers(): void {
       }
       return;
     }
+    // Fresh incoming call: clear any leftover ICE buffer from a previous call and
+    // arm the buffer so the caller's candidates that arrive WHILE WE RING are kept
+    // (and later flushed in acceptCall), instead of being dropped.
+    resetIceQueue();
     state.startIncoming(msg.from, msg.callId, msg.media, offer);
 
     // Show native incoming call UI (CallKit on iOS, ConnectionService on Android)
@@ -274,15 +270,25 @@ export function attachCallHandlers(): void {
   });
 
   socket.on('call:ice', async (msg: CallIcePayload) => {
-    const { activePeer, callId } = useCall.getState();
-    if (!activePeer || callId !== msg.callId) return;
+    // Gate on callId only — NOT on activePeer. While the callee is still ringing,
+    // activePeer is null (acceptCall hasn't run yet), but the caller has already
+    // finished trickling its ICE candidates. The old `if (!activePeer) return`
+    // dropped every one of them, leaving the callee with no route back to the
+    // caller, so the call never connected. Buffer them instead and flush once the
+    // peer exists and the remote offer is applied (in acceptCall).
+    const { callId } = useCall.getState();
+    if (callId !== msg.callId) return;
     const candidate = openSignal(msg.from, msg);
     if (!candidate) {
       if (__DEV__) console.warn('[calls] call:ice signal decrypt failed — dropping');
       return;
     }
-    // Buffer candidates if remote description is not yet set
-    bufferOrApplyIce(activePeer.pc, candidate);
+    const { activePeer } = useCall.getState();
+    if (activePeer && _remoteDescriptionSet) {
+      void addRemoteIce(activePeer.pc, candidate);
+    } else {
+      _pendingIceCandidates.push(candidate);
+    }
   });
 
   socket.on('call:hangup', (msg: CallHangupPayload) => {
@@ -308,9 +314,12 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
-  // forceRelay: true keeps both peers' real IPs out of the signaling exchange
-  // (relay-only ICE). Requires a reachable TURN server; degrades gracefully.
-  const turnConfig = await fetchTurnConfig(ownAegisId, true);
+  // forceRelay=false: allow host/srflx (direct + STUN) candidates alongside TURN.
+  // Relay-only produced one-way audio when both peers shared the same coturn
+  // (hairpinning asymmetry). Direct/STUN connects bidirectionally; TURN stays as
+  // fallback. Trade-off: peer IPs may be visible to each other on a direct path —
+  // acceptable for a working first release; can re-tighten to relay-only later.
+  const turnConfig = await fetchTurnConfig(ownAegisId, false);
 
   // Set audio mode for call — earpiece for audio, speakerphone for video
   try {
@@ -390,12 +399,17 @@ export async function acceptCall(): Promise<void> {
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
-  // forceRelay: true keeps both peers' real IPs out of the signaling exchange
-  // (relay-only ICE). Requires a reachable TURN server; degrades gracefully.
-  const turnConfig = await fetchTurnConfig(ownAegisId, true);
+  // forceRelay=false: allow host/srflx (direct + STUN) candidates alongside TURN.
+  // Relay-only produced one-way audio when both peers shared the same coturn
+  // (hairpinning asymmetry). Direct/STUN connects bidirectionally; TURN stays as
+  // fallback. Trade-off: peer IPs may be visible to each other on a direct path —
+  // acceptable for a working first release; can re-tighten to relay-only later.
+  const turnConfig = await fetchTurnConfig(ownAegisId, false);
 
-  // Reset the ICE queue for this new call leg
-  resetIceQueue();
+  // NOTE: do NOT resetIceQueue() here — the buffer was armed in the call:invite
+  // handler and has been collecting the caller's trickled candidates during the
+  // ring. Resetting now would discard exactly the candidates we need. They are
+  // flushed below via flushPendingIce() once the remote offer is set.
 
   // Set audio mode for call — earpiece for audio, speakerphone for video.
   // On iOS this is called before CallKit activates the session; the
