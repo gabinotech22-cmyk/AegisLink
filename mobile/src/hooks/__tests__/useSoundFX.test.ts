@@ -65,6 +65,11 @@ jest.mock(
   () => 5,
   { virtual: true },
 );
+jest.mock(
+  '../../assets/sounds/call_ringback.mp3',
+  () => 6,
+  { virtual: true },
+);
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -74,6 +79,22 @@ import { SoundFX } from '../useSoundFX';
 describe('SoundFX', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Restore default resolved values after clearAllMocks wipes them
+    mockPlayAsync.mockResolvedValue(undefined);
+    mockStopAsync.mockResolvedValue(undefined);
+    mockUnloadAsync.mockResolvedValue(undefined);
+    mockSetPositionAsync.mockResolvedValue(undefined);
+    mockSetIsLoopingAsync.mockResolvedValue(undefined);
+    mockCreateAsync.mockResolvedValue({
+      sound: {
+        playAsync: mockPlayAsync,
+        stopAsync: mockStopAsync,
+        unloadAsync: mockUnloadAsync,
+        setPositionAsync: mockSetPositionAsync,
+        setIsLoopingAsync: mockSetIsLoopingAsync,
+      },
+    });
+    mockSetAudioModeAsync.mockResolvedValue(undefined);
     // Default: reduce motion is OFF (normal operation)
     jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(false);
   });
@@ -110,5 +131,27 @@ describe('SoundFX', () => {
     for (const method of expectedMethods) {
       expect(typeof SoundFX[method]).toBe('function');
     }
+  });
+
+  // ── 4. callRingback is defined ────────────────────────────────────────────
+
+  it('SoundFX.callRingback is defined as a function', () => {
+    expect(typeof SoundFX.callRingback).toBe('function');
+  });
+
+  // ── 5. callRingback resolves without throwing (graceful degradation like other sounds) ──
+
+  it('SoundFX.callRingback() resolves without throwing when sound cannot be loaded', async () => {
+    // Graceful degradation: even if the audio system is unavailable (as it is
+    // in the test environment where expo-av mock may not fully initialise),
+    // callRingback must NOT throw.
+    await expect(SoundFX.callRingback()).resolves.toBeUndefined();
+  });
+
+  // ── 6. All sound keys include 'call_ringback' ─────────────────────────────
+
+  it('callRingback resolves without throwing even when createAsync rejects', async () => {
+    mockCreateAsync.mockRejectedValueOnce(new Error('asset missing'));
+    await expect(SoundFX.callRingback()).resolves.toBeUndefined();
   });
 });

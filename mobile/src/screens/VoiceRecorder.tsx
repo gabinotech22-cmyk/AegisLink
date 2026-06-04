@@ -14,6 +14,22 @@ interface Props {
 
 type Stage = 'idle' | 'recording' | 'recorded' | 'playing';
 
+// ── Module-level recorder singleton ──────────────────────────────────────────
+// expo-av allows only ONE prepared Audio.Recording per JS process. When this
+// screen unmounts mid-recording (e.g. the Modal closes) the cleanup's async
+// stopAndUnloadAsync may not finish before the screen remounts, leaving an
+// orphaned native recorder. The next prepareToRecordAsync then throws
+// "Only one Recording object can be prepared at a given time." A module-level
+// reference survives remounts, so any instance can release the orphan first.
+let activeRecording: Audio.Recording | null = null;
+
+async function releaseActiveRecording(): Promise<void> {
+  if (activeRecording) {
+    try { await activeRecording.stopAndUnloadAsync(); } catch { /* already gone */ }
+    activeRecording = null;
+  }
+}
+
 export function VoiceRecorderScreen({ onBack, onSend }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
@@ -31,11 +47,17 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
   const soundRef = useRef<Audio.Sound | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const meteringIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Synchronous lock so a double-tap (or tap + onSubmit) can't fire two
+  // prepareToRecordAsync calls before the first re-render lands.
+  const busyRef = useRef(false);
 
   useEffect(() => {
     return () => {
       clearTimers();
-      void recordingRef.current?.stopAndUnloadAsync().catch(() => {});
+      // Release via the module-level singleton so an in-flight recording is
+      // torn down even though this instance's ref is about to be discarded.
+      recordingRef.current = null;
+      void releaseActiveRecording();
       void soundRef.current?.unloadAsync().catch(() => {});
     };
   }, []);
@@ -52,12 +74,19 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
   }
 
   async function startRecording() {
+    // Anti double-tap: ignore re-entry while a start/stop is mid-flight.
+    if (busyRef.current) return;
+    busyRef.current = true;
     try {
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) {
         Alert.alert(i18nT('voiceRecorder.permissionTitle'), i18nT('voiceRecorder.permissionMessage'));
         return;
       }
+      // Release any recorder orphaned by a previous mount/attempt before
+      // preparing a new one — otherwise expo-av throws "Only one Recording
+      // object can be prepared at a given time."
+      await releaseActiveRecording();
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -68,9 +97,19 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
         ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
         isMeteringEnabled: true,
       };
-      await rec.prepareToRecordAsync(recordingOptions);
+      try {
+        await rec.prepareToRecordAsync(recordingOptions);
+      } catch {
+        // A stale native recorder survived (e.g. process-level singleton still
+        // bound). Reset the audio session and retry once.
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+        await new Promise<void>((r) => setTimeout(r, 150));
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+        await rec.prepareToRecordAsync(recordingOptions);
+      }
       await rec.startAsync();
       recordingRef.current = rec;
+      activeRecording = rec;
       setElapsedMs(0);
       setWaveformBars(Array(30).fill(0.15));
       setStage('recording');
@@ -94,25 +133,40 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
         })();
       }, 80);
     } catch (e) {
+      // Failed to start — release whatever was half-prepared so the next attempt
+      // (or another screen) is not blocked by an orphaned recorder.
+      await releaseActiveRecording();
+      recordingRef.current = null;
+      setStage('idle');
       Alert.alert(i18nT('common.error'), (e as Error).message);
+    } finally {
+      busyRef.current = false;
     }
   }
 
   async function stopRecording() {
+    if (busyRef.current) return;
+    busyRef.current = true;
     clearTimers();
     try {
-      await recordingRef.current?.stopAndUnloadAsync();
-      const status = await recordingRef.current?.getStatusAsync();
-      const fileUri = recordingRef.current?.getURI() ?? null;
+      const rec = recordingRef.current;
+      await rec?.stopAndUnloadAsync();
+      const status = await rec?.getStatusAsync();
+      const fileUri = rec?.getURI() ?? null;
       recordingRef.current = null;
+      activeRecording = null;
       if (fileUri) {
         setUri(fileUri);
         setDurationMs(status?.durationMillis ?? elapsedMs);
         setStage('recorded');
       }
     } catch (e) {
+      await releaseActiveRecording();
+      recordingRef.current = null;
       Alert.alert(i18nT('common.error'), (e as Error).message);
       setStage('idle');
+    } finally {
+      busyRef.current = false;
     }
   }
 
@@ -230,6 +284,10 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
         {!hasRecording ? (
           <Pressable
             onPress={isRecording ? stopRecording : startRecording}
+            accessibilityRole="button"
+            accessibilityLabel={isRecording
+              ? i18nT('voiceRecorder.stop', 'Detener grabación')
+              : i18nT('voiceRecorder.record', 'Grabar nota de voz')}
             style={({ pressed }) => ({
               width: 80,
               height: 80,

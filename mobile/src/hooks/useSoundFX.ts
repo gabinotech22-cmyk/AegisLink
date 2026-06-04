@@ -57,6 +57,7 @@ type SoundKey =
   | 'msg_sent'
   | 'msg_received'
   | 'call_incoming'
+  | 'call_ringback'
   | 'call_connected'
   | 'call_ended';
 
@@ -73,6 +74,8 @@ function getAsset(key: SoundKey): number | null {
         return require('../../assets/sounds/msg_received.mp3') as number;
       case 'call_incoming':
         return require('../../assets/sounds/call_incoming.mp3') as number;
+      case 'call_ringback':
+        return require('../../assets/sounds/call_ringback.mp3') as number;
       case 'call_connected':
         return require('../../assets/sounds/call_connected.mp3') as number;
       case 'call_ended':
@@ -179,6 +182,14 @@ export const SoundFX = {
     hapticNotification('success');
     if (reduced) return;
     await playSound('msg_received');
+  },
+
+  /** Looping ringback tone while the outgoing call waits for the other party to answer. */
+  async callRingback(): Promise<void> {
+    const reduced = await isReduceMotionEnabled();
+    hapticImpact('light');
+    if (reduced) return;
+    await playSound('call_ringback', /* loop */ true);
   },
 
   /** Looping ring for an incoming call. */

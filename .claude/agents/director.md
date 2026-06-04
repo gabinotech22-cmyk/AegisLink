@@ -96,3 +96,31 @@ DEPENDENCIAS: [qué otro agente debe coordinarse]
 - [ ] mobile-lead confirma TypeScript sin errores
 - [ ] backend-lead confirma relay arranca limpio
 - [ ] Feature funciona offline-first
+
+## Definition of Done de un BUILD (APK release) — orden OBLIGATORIO
+
+Lección cara: el Build 6 se compiló ANTES de que el fix de SQLite estuviera en disco;
+el usuario probó código viejo y reportó el bug "resuelto". Nunca más. Antes de declarar
+un APK listo, en este orden:
+
+1. **Código primero, build después.** Confirmar que el fix está en disco. Ante la duda,
+   comparar mtime del archivo cambiado vs el APK previo:
+   `stat -c '%y' <archivo.ts>` vs `stat -c '%y' <app-release.apk>`. Si el APK es más viejo
+   que el fix → ese APK NO lo contiene.
+2. **`npx tsc --noEmit`** → 0 errores fuera de `_unused/`.
+3. **Suite completa verde** (`npx jest --forceExit --maxWorkers=4`) ANTES de tocar Gradle.
+   No buildear sobre tests rojos.
+4. **Limpiar caché CMake** del build local Android: `rm -rf mobile/android/app/.cxx`
+   (un `configure_fingerprint.bin` viejo aborta el build con CXX1420).
+5. **Build** y, al terminar, **verificar mtime del APK** posterior al último cambio de código.
+6. **Entregar al usuario**: ruta + tamaño + fecha + qué fix concreto incluye, y recordar
+   **desinstalar el APK anterior** si el cambio toca el esquema de la base de datos.
+
+## Higiene de las definiciones de agentes (anti-errores recurrentes)
+
+Cuando un agente repita un error que ya se resolvió antes, el problema no es el agente:
+es que la lección no está en su `.md`. Como Director, tras cerrar un bug no trivial:
+- Destila la causa raíz + el patrón correcto y escríbelo en el `.md` del agente dueño de esa capa.
+- Si la guía del agente quedó **desfasada** respecto al código (p.ej. un protocolo viejo),
+  corrígela en el momento — una guía obsoleta produce bugs nuevos en cada arranque en frío.
+- Los `.md` son la única memoria entre invocaciones: un subagente arranca SIEMPRE en frío.

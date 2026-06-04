@@ -1,22 +1,20 @@
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, Dimensions, Platform, NativeModules } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Dimensions } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import * as AlternateAppIcons from 'expo-alternate-app-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
-import { ss } from '../utils/secureStore';
-
-const ICON_KEY = 'active_app_icon';
 
 const ALL_VARIANTS = [
   { id: 'default', bg: '#06090a', mark: '#5bf2b9', workOnly: false },
   { id: 'light',   bg: '#efece4', mark: '#0d8f5f', workOnly: false },
   { id: 'tinted',  bg: '#14161c', mark: '#bdbdbd', workOnly: false },
-  { id: 'work',    bg: '#1c1f55', mark: '#ffffff', workOnly: true },
+  { id: 'work',    bg: '#1c1f55', mark: '#ffffff', workOnly: true  },
 ] as const;
 
-type IconId = 'default' | 'light' | 'tinted' | 'work';
+type IconId = (typeof ALL_VARIANTS)[number]['id'];
 
 interface Props {
   onBack: () => void;
@@ -39,53 +37,46 @@ export function AppIconScreen({ onBack }: Props) {
   const getLabel = (id: IconId) => {
     switch (id) {
       case 'default': return i18nT('appIcon.dark');
-      case 'light': return i18nT('appIcon.light');
-      case 'tinted': return i18nT('appIcon.tinted');
-      case 'work': return i18nT('appIcon.work');
+      case 'light':   return i18nT('appIcon.light');
+      case 'tinted':  return i18nT('appIcon.tinted');
+      case 'work':    return i18nT('appIcon.work');
     }
   };
 
   const getDesc = (id: IconId) => {
     switch (id) {
       case 'default': return i18nT('appIcon.darkDesc');
-      case 'light': return i18nT('appIcon.lightDesc');
-      case 'tinted': return i18nT('appIcon.tintedDesc');
-      case 'work': return i18nT('appIcon.workDesc');
+      case 'light':   return i18nT('appIcon.lightDesc');
+      case 'tinted':  return i18nT('appIcon.tintedDesc');
+      case 'work':    return i18nT('appIcon.workDesc');
     }
   };
 
+  // Load which icon is currently active — getAppIconName() is synchronous
   useEffect(() => {
-    async function loadCurrentIcon() {
-      if (Platform.OS === 'android' && NativeModules.AppIconModule) {
-        try {
-          const nativeIcon: string = await NativeModules.AppIconModule.getAppIcon();
-          if (nativeIcon && ALL_VARIANTS.some((x) => x.id === nativeIcon)) {
-            setCurrent(nativeIcon as IconId);
-            return;
-          }
-        } catch {
-          // Fall through to SecureStore fallback
-        }
+    try {
+      const name = AlternateAppIcons.getAppIconName();
+      // null means the default icon is active
+      const active = (name ?? 'default') as IconId;
+      if (ALL_VARIANTS.some((v) => v.id === active)) {
+        setCurrent(active);
       }
-      // Fallback: read from SecureStore
-      const stored = await ss.get(ICON_KEY);
-      if (stored && ALL_VARIANTS.some((x) => x.id === stored)) {
-        setCurrent(stored as IconId);
-      }
+    } catch {
+      // API unavailable in Expo Go / dev builds without native module — stay on default
     }
-    void loadCurrentIcon();
   }, []);
 
   async function selectIcon(id: IconId) {
     if (loading || id === current) return;
+    // Gracefully skip if the device doesn't support alternate icons
+    if (!AlternateAppIcons.supportsAlternateIcons && id !== 'default') {
+      Alert.alert(i18nT('common.error'), i18nT('appIcon.changeError'));
+      return;
+    }
     setLoading(true);
     try {
-      if (Platform.OS === 'android' && NativeModules.AppIconModule) {
-        const iconArg = id === 'default' ? null : id;
-        await NativeModules.AppIconModule.setAppIcon(iconArg);
-      }
-      // Save to SecureStore as backup
-      await ss.set(ICON_KEY, id);
+      // null resets to the primary app icon; any other string activates the alternate
+      await AlternateAppIcons.setAlternateAppIcon(id === 'default' ? null : id);
       setCurrent(id);
     } catch {
       Alert.alert(i18nT('common.error'), i18nT('appIcon.changeError'));

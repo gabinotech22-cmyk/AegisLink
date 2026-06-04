@@ -13,6 +13,8 @@
  *   - All errors are surfaced as `{ ok: false, error }` — never thrown to UI.
  */
 
+import nacl from 'tweetnacl';
+import { encodeBase64 } from 'tweetnacl-util';
 import { sha256 } from '@noble/hashes/sha256';
 import { utf8ToBytes } from '@noble/hashes/utils';
 import type {
@@ -42,6 +44,10 @@ interface IdentityPostBody {
 
 interface PreKeysPostBody {
   aegisId: string;
+  /** Ed25519 signature over `${aegisId}:prekeys:${floor(ts/30000)}` — auth for the upload. */
+  sig: string;
+  /** Client timestamp (ms); server requires |now - ts| <= 60s. */
+  ts: number;
   signedPreKey: SignedPreKeyPublic;
   oneTimePreKeys: OneTimePreKeyPublic[];
 }
@@ -68,7 +74,23 @@ function makeTimeoutSignal(ms: number): AbortSignal {
 export async function fetchPowChallenge(
   relayUrl: string,
 ): Promise<PowChallenge> {
-  const res = await fetch(`${trimSlash(relayUrl)}/identity/challenge`, {
+  // Identity/prekeys PoW lives at /identity/challenge. Callers pass the relay
+  // BASE url; the endpoint path is appended here.
+  return fetchPowChallengeAt(`${trimSlash(relayUrl)}/identity/challenge`);
+}
+
+/**
+ * Fetch a PoW challenge from an explicit challenge endpoint URL.
+ *
+ * Unlike `fetchPowChallenge` (which assumes `/identity/challenge`), this takes
+ * the FULL challenge URL so other PoW-gated endpoints can reuse the same solver.
+ * The blob store, for example, has its own dedicated `/blob/challenge` with an
+ * independent rate-limiter — passing the base url here would 404.
+ */
+export async function fetchPowChallengeAt(
+  challengeUrl: string,
+): Promise<PowChallenge> {
+  const res = await fetch(trimSlash(challengeUrl), {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal: makeTimeoutSignal(8000),
@@ -194,8 +216,21 @@ export async function uploadIdentityAndPrekeys(
   // This explicit no-op keeps the type-checker honest about the contract.
   void preKeySecrets;
 
+  // Authenticate the prekeys upload: the server requires an Ed25519 signature
+  // over `${aegisId}:prekeys:${timeBucket}` plus a fresh timestamp. Without
+  // these the POST /prekeys endpoint rejects with HTTP 400 (sig/ts Required),
+  // which silently broke registration for every NEW identity — the account got
+  // an identity row but no prekeys, so it stayed effectively unregistered.
+  const ts = Date.now();
+  const timeBucket = Math.floor(ts / 30_000);
+  const sig = encodeBase64(
+    nacl.sign.detached(utf8ToBytes(`${identity.aegisId}:prekeys:${timeBucket}`), identity.signingSecretKey),
+  );
+
   const prekeysBody: PreKeysPostBody = {
     aegisId: identity.aegisId,
+    sig,
+    ts,
     signedPreKey: signedPreKeyPublic,
     oneTimePreKeys: oneTimePreKeysPublic,
   };

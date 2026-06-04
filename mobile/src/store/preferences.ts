@@ -70,6 +70,12 @@ interface PrefsState extends Preferences {
   hydrate: () => Promise<void>;
   set: <K extends keyof Preferences>(key: K, value: Preferences[K]) => Promise<void>;
   reset: () => Promise<void>;
+  /**
+   * Restore preferences from a backup payload.
+   * Merges the provided partial snapshot with DEFAULTS so that backups that
+   * predate a newly added field still produce a fully initialised state.
+   */
+  restoreFrom: (prefs: Partial<Preferences>) => Promise<void>;
 }
 
 function snapshot(get: () => PrefsState): Preferences {
@@ -132,5 +138,13 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
   async reset() {
     setState({ ...DEFAULTS });
     await ss.delete(STORAGE_KEY);
+  },
+
+  // Restore preferences from a backup payload. Merges over DEFAULTS so a
+  // partial/older backup never leaves required fields undefined, then persists.
+  async restoreFrom(prefs) {
+    const merged = { ...DEFAULTS, ...prefs };
+    setState(merged);
+    await persist(merged);
   },
 }));

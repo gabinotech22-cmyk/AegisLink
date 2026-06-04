@@ -200,6 +200,39 @@ function checkChannelMsgRateLimit(aegisId: string): boolean {
   return entry.count <= 120;
 }
 
+// ── Shared low-frequency rate-limit (FIX D) ───────────────────────────────────
+// typing + msg:read + msg:delete share a single bucket: 30 ops / 10 s per socket.
+// group:rekey has its own stricter bucket: 10 ops / 60 s per aegisId.
+// Keyed by aegisId — no IP involved.
+const lowFreqRateLimit = new Map<string, { count: number; reset: number }>();
+const rekeyRateLimit   = new Map<string, { count: number; reset: number }>();
+
+function checkLowFreqRateLimit(aegisId: string): boolean {
+  const now = Date.now();
+  const entry = lowFreqRateLimit.get(aegisId) ?? { count: 0, reset: now + 10_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 10_000; }
+  entry.count++;
+  lowFreqRateLimit.set(aegisId, entry);
+  if (lowFreqRateLimit.size > RATE_LIMIT_MAP_MAX) {
+    const oldest = lowFreqRateLimit.keys().next().value;
+    if (oldest !== undefined) lowFreqRateLimit.delete(oldest);
+  }
+  return entry.count <= 30;
+}
+
+function checkRekeyRateLimit(aegisId: string): boolean {
+  const now = Date.now();
+  const entry = rekeyRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
+  entry.count++;
+  rekeyRateLimit.set(aegisId, entry);
+  if (rekeyRateLimit.size > RATE_LIMIT_MAP_MAX) {
+    const oldest = rekeyRateLimit.keys().next().value;
+    if (oldest !== undefined) rekeyRateLimit.delete(oldest);
+  }
+  return entry.count <= 10;
+}
+
 const AUTH_TIMEOUT_MS = 5000;
 const DEVICE_LINK_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
@@ -571,6 +604,10 @@ export function attachRelay(io: SocketServer) {
 
     // ─── Typing indicators ───────────────────────────────────────────────────
     socket.on('typing', (raw) => {
+      if (!checkLowFreqRateLimit(me)) {
+        socket.emit('error_msg', { code: 'rate_limited', for: 'typing' });
+        return;
+      }
       const parsed = TypingEvent.safeParse(raw);
       if (!parsed.success) return;
       // 1:1 DM path — forward directly to the target user's sockets
@@ -592,6 +629,10 @@ export function attachRelay(io: SocketServer) {
 
     // ─── Read receipts ───────────────────────────────────────────────────────
     socket.on('msg:read', (raw) => {
+      if (!checkLowFreqRateLimit(me)) {
+        socket.emit('error_msg', { code: 'rate_limited', for: 'msg:read' });
+        return;
+      }
       const parsed = MsgRead.safeParse(raw);
       if (!parsed.success) return;
       const target = sockets.get(parsed.data.to);
@@ -601,6 +642,10 @@ export function attachRelay(io: SocketServer) {
 
     // ─── Remote delete ───────────────────────────────────────────────────────
     socket.on('msg:delete', (raw) => {
+      if (!checkLowFreqRateLimit(me)) {
+        socket.emit('error_msg', { code: 'rate_limited', for: 'msg:delete' });
+        return;
+      }
       const parsed = MsgDelete.safeParse(raw);
       if (!parsed.success) return;
       const target = sockets.get(parsed.data.to);
@@ -1034,6 +1079,10 @@ export function attachRelay(io: SocketServer) {
     // distributor's identity key, and the signed group metadata (group_msg
     // path) governs who is recognised as admin client-side.
     socket.on('group:rekey', (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+      if (!checkRekeyRateLimit(me)) {
+        ack?.({ ok: false, error: 'rate_limited' });
+        return;
+      }
       const parsed = GroupRekeyEvent.safeParse(raw);
       if (!parsed.success) {
         ack?.({ ok: false, error: 'invalid_payload' });
@@ -1071,6 +1120,7 @@ export function attachRelay(io: SocketServer) {
     // anything the server can see. Signaling currently includes `from` so the
     // recipient knows who's calling (sealed call signaling is Fase 4+).
     attachCallSignaling(socket, me, sockets);
+    attachGroupCallSignaling(socket, me, sockets);
 
     socket.on('disconnect', () => {
       const s = sockets.get(me);
@@ -1130,6 +1180,22 @@ const CallHangup = CallTo.extend({ reason: z.string().max(64).optional() });
 const CallEnd = CallTo.extend({ reason: z.string().max(64).optional() });
 const CallReject = CallTo.extend({ reason: z.string().max(64).optional() });
 
+// ─── Group call Zod schemas ──────────────────────────────────────────────────
+const AEGIS_ID_ARRAY = z.array(z.string().regex(AEGIS_ID_RE)).min(1).max(7);
+const GroupCallInvite = z.object({
+  to: AEGIS_ID_ARRAY,
+  callId: z.string().uuid(),
+  groupId: z.string().min(1).max(128),
+  groupName: z.string().min(1).max(64),
+  media: z.enum(['audio', 'video']),
+});
+const GroupCallAccept  = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().uuid() });
+const GroupCallDecline = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().uuid() });
+const GroupCallOffer   = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().uuid(), ciphertext: z.string().min(1).max(65536), nonce: z.string().min(1).max(64) });
+const GroupCallAnswer  = GroupCallOffer;
+const GroupCallIce     = GroupCallOffer;
+const GroupCallHangup  = z.object({ to: AEGIS_ID_ARRAY, callId: z.string().uuid(), reason: z.string().max(64).optional() });
+
 // Rate-limit buckets for call:offer — keyed by aegisId, max 5 per minute
 const callOfferRateLimit = new Map<string, { count: number; reset: number }>();
 
@@ -1145,6 +1211,22 @@ function checkCallOfferRateLimit(aegisId: string): boolean {
     if (oldest !== undefined) callOfferRateLimit.delete(oldest);
   }
   return entry.count <= 5;
+}
+
+// Rate-limit buckets for group_call:invite — keyed by aegisId, max 3 per minute
+const groupCallInviteRateLimit = new Map<string, { count: number; reset: number }>();
+
+function checkGroupCallInviteRateLimit(aegisId: string): boolean {
+  const now = Date.now();
+  const entry = groupCallInviteRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
+  entry.count++;
+  groupCallInviteRateLimit.set(aegisId, entry);
+  if (groupCallInviteRateLimit.size > RATE_LIMIT_MAP_MAX) {
+    const oldest = groupCallInviteRateLimit.keys().next().value;
+    if (oldest !== undefined) groupCallInviteRateLimit.delete(oldest);
+  }
+  return entry.count <= 3;
 }
 
 function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Set<Socket>>) {
@@ -1242,34 +1324,45 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
     forward('call:reject', parsed.data);
   });
 
-  // ── Group call mesh signaling ────────────────────────────────────────────
-  // The relay blindly forwards offer/answer/ICE to the named peer inside the
-  // group call. SDPs and ICE candidates are never stored or inspected.
-  const GroupSignal = z.object({
-    callId: z.string().min(1).max(128),
-    toAegisId: z.string().regex(AEGIS_ID_RE),
-    sdp: z.string().min(1).max(16384).optional(),
-    candidate: z.string().min(1).max(4096).optional(),
-  });
+}
 
-  function forwardGroupSignal(event: string, raw: unknown) {
-    const parsed = GroupSignal.safeParse(raw);
-    if (!parsed.success) {
-      socket.emit('error_msg', { code: 'invalid_payload', for: event });
-      return;
-    }
-    const { callId, toAegisId, ...rest } = parsed.data;
-    const target = sockets.get(toAegisId);
-    if (!target || target.size === 0) {
-      socket.emit('error_msg', { code: 'peer_offline', for: event });
-      return;
-    }
-    for (const s of target) {
-      s.emit(event, { callId, fromAegisId: me, ...rest });
+// ─── Group call mesh signaling (new sealed-sender protocol) ─────────────────
+// The relay is a dumb forwarder: SDP offers/answers and ICE candidates are
+// E2EE-sealed (NaCl box) by the client before sending. The relay only sees
+// opaque ciphertext+nonce and routes them verbatim. It never stores or
+// inspects any SDP or ICE content.
+function attachGroupCallSignaling(socket: Socket, me: string, sockets: Map<string, Set<Socket>>) {
+  // Forward to a single peer, injecting from: me
+  function fwd<T extends { to: string }>(event: string, parsed: T) {
+    const { to, ...rest } = parsed;
+    const target = sockets.get(to);
+    if (target) for (const s of target) s.emit(event, { ...rest, from: me });
+  }
+
+  // Fan-out to multiple peers, skipping self
+  function fanout<T extends { to: string[] }>(event: string, parsed: T) {
+    const { to, ...rest } = parsed;
+    for (const id of to) {
+      if (id === me) continue;
+      const target = sockets.get(id);
+      if (target) for (const s of target) s.emit(event, { ...rest, from: me });
     }
   }
 
-  socket.on('group_offer',  (raw) => forwardGroupSignal('group_offer',  raw));
-  socket.on('group_answer', (raw) => forwardGroupSignal('group_answer', raw));
-  socket.on('group_ice',    (raw) => forwardGroupSignal('group_ice',    raw));
+  socket.on('group_call:invite', (raw) => {
+    const parsed = GroupCallInvite.safeParse(raw);
+    if (!parsed.success) return;
+    if (!checkGroupCallInviteRateLimit(me)) {
+      socket.emit('error_msg', { code: 'rate_limited', for: 'group_call:invite' });
+      return;
+    }
+    fanout('group_call:invite', parsed.data);
+  });
+
+  socket.on('group_call:accept',  (raw) => { const p = GroupCallAccept.safeParse(raw);  if (p.success) fwd('group_call:accept',  p.data); });
+  socket.on('group_call:decline', (raw) => { const p = GroupCallDecline.safeParse(raw); if (p.success) fwd('group_call:decline', p.data); });
+  socket.on('group_call:offer',   (raw) => { const p = GroupCallOffer.safeParse(raw);   if (p.success) fwd('group_call:offer',   p.data); });
+  socket.on('group_call:answer',  (raw) => { const p = GroupCallAnswer.safeParse(raw);  if (p.success) fwd('group_call:answer',  p.data); });
+  socket.on('group_call:ice',     (raw) => { const p = GroupCallIce.safeParse(raw);     if (p.success) fwd('group_call:ice',     p.data); });
+  socket.on('group_call:hangup',  (raw) => { const p = GroupCallHangup.safeParse(raw);  if (p.success) fanout('group_call:hangup', p.data); });
 }

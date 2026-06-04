@@ -87,13 +87,15 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
   const [bioStatus, setBioStatus] = useState('');
   const scanningRef = useRef(false);
+  // Track genuine biometric failures (not user cancellations) for auto-wipe.
+  const bioAttemptsRef = useRef(0);
 
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const [pulse1] = useState(new Animated.Value(0));
   const [pulse2] = useState(new Animated.Value(0));
 
   // Panic gestures — only active while lock screen is visible
-  const { registerTap } = usePanicGesture(onPanic);
+  const { registerTap, registerLongPress } = usePanicGesture(onPanic);
 
   // ── Initialise: detect what's available, pick starting mode ────────────────
   useEffect(() => {
@@ -191,7 +193,31 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           setBioStatus(i18nT('lock.bioCancelled'));
         }
       } else {
+        // Genuine biometric failure (wrong finger/face, lockout, etc.)
+        const newBioAttempts = bioAttemptsRef.current + 1;
+        bioAttemptsRef.current = newBioAttempts;
         setBioStatus(i18nT('lock.bioFailed'));
+
+        if (newBioAttempts >= MAX_ATTEMPTS) {
+          let autoWipe = false;
+          try {
+            const panicRaw = await ss.get('aegis.panic.v1');
+            if (panicRaw) {
+              const cfg = JSON.parse(panicRaw) as { autoWipe?: boolean };
+              autoWipe = cfg.autoWipe === true;
+            }
+          } catch { /* storage unavailable */ }
+
+          if (autoWipe) {
+            setBioStatus(i18nT('lock.wipingData'));
+            setTimeout(async () => {
+              try {
+                await wipeDatabase();
+                await useIdentity.getState().reset();
+              } catch { /* non-recoverable — app will reset on next launch */ }
+            }, 800);
+          }
+        }
       }
     } catch (e) {
       // Library threw — show friendly message, stay on biometric screen
@@ -310,7 +336,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     return (
       <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}>
         {/* Logo — triple tap triggers panic gesture */}
-        <Pressable onPress={registerTap} accessibilityElementsHidden importantForAccessibility="no">
+        <Pressable onPress={registerTap} onLongPress={registerLongPress} delayLongPress={3000} accessibilityElementsHidden importantForAccessibility="no">
           <View style={{ alignItems: 'center', gap: 6 }}>
             <View style={{
               width: 52, height: 52, borderRadius: 26,
