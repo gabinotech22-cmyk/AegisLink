@@ -17,7 +17,7 @@ async function sleep(ms: number): Promise<void> {
 const ALLOWED_MIME = new Set([
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
   'video/mp4', 'video/quicktime',
-  'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg',
+  'audio/mpeg', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/aac', 'audio/ogg', 'audio/webm',
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
