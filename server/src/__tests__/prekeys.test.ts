@@ -97,25 +97,29 @@ describe('POST /prekeys', () => {
 
 describe('GET /prekeys/bundle/:aegisId', () => {
   it('returns a bundle and consumes one OPK per fetch', async () => {
+    // The route now returns a multi-device shape `{ bundles, bundle }` where
+    // `bundle` is the first device's bundle (backward-compat alias). All the
+    // per-device fields (signingPublicKeyB64, signedPreKey, oneTimePreKey) live
+    // inside that object.
     const r1 = await request(app).get(`/prekeys/bundle/${AEGIS_ID}`);
     expect(r1.status).toBe(200);
-    expect(r1.body.signingPublicKeyB64).toBe(encodeBase64(signKeys.publicKey));
-    expect(r1.body.signedPreKey.publicKeyB64).toBeTruthy();
-    expect(r1.body.oneTimePreKey).not.toBeNull();
-    const firstOpkId = r1.body.oneTimePreKey.keyId;
+    expect(r1.body.bundle.signingPublicKeyB64).toBe(encodeBase64(signKeys.publicKey));
+    expect(r1.body.bundle.signedPreKey.publicKeyB64).toBeTruthy();
+    expect(r1.body.bundle.oneTimePreKey).not.toBeNull();
+    const firstOpkId = r1.body.bundle.oneTimePreKey.keyId;
 
     const r2 = await request(app).get(`/prekeys/bundle/${AEGIS_ID}`);
     expect(r2.status).toBe(200);
-    expect(r2.body.oneTimePreKey.keyId).not.toBe(firstOpkId);
+    expect(r2.body.bundle.oneTimePreKey.keyId).not.toBe(firstOpkId);
 
     // Third fetch — only 3 OPKs were uploaded above, so this should be the last.
     const r3 = await request(app).get(`/prekeys/bundle/${AEGIS_ID}`);
-    expect(r3.body.oneTimePreKey).not.toBeNull();
+    expect(r3.body.bundle.oneTimePreKey).not.toBeNull();
 
     // Fourth fetch — OPKs exhausted; bundle still returned with null OPK.
     const r4 = await request(app).get(`/prekeys/bundle/${AEGIS_ID}`);
     expect(r4.status).toBe(200);
-    expect(r4.body.oneTimePreKey).toBeNull();
+    expect(r4.body.bundle.oneTimePreKey).toBeNull();
   });
 
   it('rejects a malformed id', async () => {

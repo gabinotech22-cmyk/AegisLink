@@ -48,6 +48,8 @@ import { FirstContactScreen } from './src/screens/FirstContact';
 import { AppIconScreen } from './src/screens/AppIcon';
 import { CallScreen } from './src/screens/Call';
 import { IncomingCallScreen } from './src/screens/IncomingCall';
+import { GroupCallScreen } from './src/screens/GroupCall';
+import { IncomingGroupCallScreen } from './src/screens/IncomingGroupCall';
 import { FloatingCallBar } from './src/components/FloatingCallBar';
 import { NetworkErrorScreen } from './src/screens/NetworkError';
 import { LockSettingsScreen } from './src/screens/LockSettings';
@@ -65,6 +67,8 @@ import { connect as connectSocket, disconnect as disconnectSocket } from './src/
 import { useConnection } from './src/store/connection';
 import { isPicking } from './src/utils/pickingGuard';
 import { attachCallHandlers, acceptCall, endCall } from './src/socket/calls';
+import { attachGroupCallHandlers, acceptGroupCall, declineGroupCall } from './src/socket/groupCalls';
+import { useGroupCall } from './src/store/groupCall';
 import { registerForPush, setNotificationOpenChatHandler } from './src/notifications/push';
 import { initCallKeep } from './src/calls/callkeep';
 import { WEBRTC_AVAILABLE } from './src/runtime';
@@ -159,7 +163,8 @@ type PushRoute =
   | { name: 'broadcast'; list: import('./src/store/distribution').DistributionList }
   | { name: 'profileSwitcher' }
   | { name: 'createProfile' }
-  | { name: 'groupJoin'; groupId: string; groupName: string; adminId: string };
+  | { name: 'groupJoin'; groupId: string; groupName: string; adminId: string }
+  | { name: 'groupCall' };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -409,7 +414,10 @@ function Shell() {
       // Never connect with the decoy identity — doing so leaks that panic mode is active
       if (usePreferences.getState().duressActive) return;
       connectSocket(identity);
-      if (WEBRTC_AVAILABLE) attachCallHandlers();
+      if (WEBRTC_AVAILABLE) {
+        attachCallHandlers();
+        attachGroupCallHandlers();
+      }
       setNotificationOpenChatHandler((aegisId) => {
         const { useContacts } = require('./src/store/contacts');
         const contact = useContacts.getState().contacts.find((c: StoredContact) => c.aegisId === aegisId);
@@ -504,6 +512,83 @@ function Shell() {
     }
   }
 
+  async function handleVideoPick(contact: StoredContact) {
+    const ImagePicker = require('expo-image-picker') as typeof import('expo-image-picker');
+    const { withPickingGuard } = require('./src/utils/pickingGuard') as typeof import('./src/utils/pickingGuard');
+    const result = await withPickingGuard(() =>
+      ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'] as import('expo-image-picker').MediaType[],
+        quality: 1,
+      })
+    );
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+
+    const { useMessages } = require('./src/store/messages');
+    const { randomUUID } = await import('expo-crypto');
+    const id = randomUUID();
+    await useMessages.getState().append({
+      id,
+      chatId: contact.aegisId,
+      direction: 'out',
+      body: '',
+      createdAt: Date.now(),
+      type: 'video',
+      mediaUri: asset.uri,
+    });
+
+    if (identity) {
+      const { sendMessage } = require('./src/socket/client');
+      const { decodeBase64 } = require('tweetnacl-util');
+      const { encryptAndUploadMedia } = require('./src/crypto/media');
+      try {
+        const blobUri: string = await encryptAndUploadMedia(asset.uri, 'video/mp4');
+        await sendMessage({
+          identity,
+          recipientAegisId: contact.aegisId,
+          recipientPublicKey: decodeBase64(contact.publicKeyB64),
+          plaintext: `[video:${blobUri}]`,
+          skipLocalAppend: true,
+        });
+      } catch { /* queued */ }
+    }
+  }
+
+  async function handleGroupVideoPick(group: StoredGroup) {
+    const ImagePicker = require('expo-image-picker') as typeof import('expo-image-picker');
+    const { withPickingGuard } = require('./src/utils/pickingGuard') as typeof import('./src/utils/pickingGuard');
+    const result = await withPickingGuard(() =>
+      ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'] as import('expo-image-picker').MediaType[],
+        quality: 1,
+      })
+    );
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+
+    const { useMessages } = require('./src/store/messages');
+    const { randomUUID: _uuid } = await import('expo-crypto');
+    const id = _uuid();
+    await useMessages.getState().append({
+      id,
+      chatId: group.id,
+      direction: 'out',
+      body: '',
+      createdAt: Date.now(),
+      type: 'video',
+      mediaUri: asset.uri,
+    });
+
+    if (identity) {
+      const { sendGroupMessage: _sg } = require('./src/socket/client');
+      const { encryptAndUploadMedia: _eu } = require('./src/crypto/media');
+      try {
+        const blobUri: string = await _eu(asset.uri, 'video/mp4');
+        await _sg({ identity, groupId: group.id, plaintext: `[video:${blobUri}]`, skipLocalAppend: true });
+      } catch { /* queued */ }
+    }
+  }
+
   const popAllTo = useCallback((tabId: Tab) => {
     setStack([]);
     setTab(tabId);
@@ -559,6 +644,17 @@ function Shell() {
     callStatus === 'in-call' ||
     callStatus === 'ended';
   const incomingCall = callStatus === 'incoming-ringing';
+
+  // Group call overlay state
+  const groupCallStatus = useGroupCall((s) => s.status);
+  const groupCallId = useGroupCall((s) => s.callId);
+  const groupCallInitiator = useGroupCall((s) => s.initiator);
+  const incomingGroupCall = groupCallStatus === 'ringing-in';
+  const groupCallOverlay =
+    groupCallStatus === 'ringing-out' ||
+    groupCallStatus === 'connecting' ||
+    groupCallStatus === 'in-call' ||
+    groupCallStatus === 'ended';
 
   if (showWipeOverlay) {
     return (
@@ -645,6 +741,24 @@ function Shell() {
     );
   }
 
+  // Group call incoming
+  if (incomingGroupCall && groupCallId && groupCallInitiator) {
+    return (
+      <IncomingGroupCallScreen
+        onAccept={() => void acceptGroupCall(groupCallId, groupCallInitiator)}
+        onReject={() => declineGroupCall(groupCallId, groupCallInitiator)}
+      />
+    );
+  }
+  // Group call active
+  if (groupCallOverlay) {
+    return (
+      <GroupCallScreen
+        onClose={() => { /* group call store resets itself */ }}
+      />
+    );
+  }
+
   // Top of stack wins; otherwise show the current tab.
   const top = stack[stack.length - 1];
   if (top) {
@@ -670,6 +784,13 @@ function Shell() {
             onGroupDetail={() => push({ name: 'groupadmin', group: top.group })}
             onPoll={() => push({ name: 'poll', group: top.group })}
             onAttach={() => push({ name: 'groupAttach', group: top.group })}
+            onGroupCall={() => push({ name: 'groupCall' })}
+          />
+        );
+      case 'groupCall':
+        return (
+          <GroupCallScreen
+            onClose={pop}
           />
         );
       case 'contact':
@@ -781,6 +902,8 @@ function Shell() {
                 push({ name: 'voice', contact: top.contact });
               } else if (kind === 'file') {
                 handleFilePick(top.contact).then(pop).catch(() => {});
+              } else if (kind === 'video') {
+                handleVideoPick(top.contact).then(pop).catch(() => {});
               } else if (kind === 'contact') {
                 const { useContacts } = require('./src/store/contacts');
                 const contacts: StoredContact[] = useContacts.getState().contacts.filter(
@@ -899,6 +1022,8 @@ function Shell() {
                 push({ name: 'groupVoice', group: top.group });
               } else if (kind === 'file') {
                 handleGroupFilePick(top.group).then(pop).catch(() => {});
+              } else if (kind === 'video') {
+                handleGroupVideoPick(top.group).then(pop).catch(() => {});
               } else if (kind === 'contact') {
                 const { useContacts: _uc } = require('./src/store/contacts');
                 const allContacts: StoredContact[] = _uc.getState().contacts.filter(

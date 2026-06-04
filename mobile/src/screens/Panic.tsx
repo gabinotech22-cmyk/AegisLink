@@ -23,7 +23,7 @@ interface Props {
 const GESTURES = [
   { id: 'shake', l: 'SHAKE', s: 'Shake device vigorously', icon: 'Zap' as const },
   { id: 'tap', l: 'TRIPLE TAP', s: 'Tap 3 times rapidly on logo', icon: 'Shield' as const },
-  { id: 'volume', l: 'VOLUME +', s: 'Press volume up 3 times', icon: 'Volume' as const },
+  { id: 'hold', l: 'HOLD 3s', s: 'Hold logo for 3 seconds', icon: 'Timer' as const },
 ] as const;
 
 export function PanicScreen({ onBack }: Props) {
@@ -48,7 +48,7 @@ export function PanicScreen({ onBack }: Props) {
     switch (id) {
       case 'shake': return i18nT('panic.shakeLabel');
       case 'tap': return i18nT('panic.tripleTapLabel');
-      case 'volume': return i18nT('panic.volumeLabel');
+      case 'hold': return i18nT('panic.holdLabel');
       default: return '';
     }
   };
@@ -57,7 +57,7 @@ export function PanicScreen({ onBack }: Props) {
     switch (id) {
       case 'shake': return i18nT('panic.shakeDesc');
       case 'tap': return i18nT('panic.tripleTapDesc');
-      case 'volume': return i18nT('panic.volumeDesc');
+      case 'hold': return i18nT('panic.holdDesc');
       default: return '';
     }
   };

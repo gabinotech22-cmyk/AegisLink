@@ -25,9 +25,6 @@
         "UIBackgroundModes": [
           "voip",
           "audio",
-          "remote-notification",
-          "voip",
-          "audio",
           "remote-notification"
         ],
         "NSAppTransportSecurity": {
@@ -35,8 +32,12 @@
             "aegislink.duckdns.org": {
               "NSIncludesSubdomains": true,
               "NSPinnedCAIdentities": [
-                { "SPKI-SHA256-BASE64": "CMcP8NMKUoqDBl0haU7v7dgEsxIFbWry8NjhhHzgX3c=" },
-                { "SPKI-SHA256-BASE64": "iFvwVyJSxnQdyaUvUERIf+8qk7gRze3612JMwoO3zdU=" }
+                {
+                  "SPKI-SHA256-BASE64": "CMcP8NMKUoqDBl0haU7v7dgEsxIFbWry8NjhhHzgX3c="
+                },
+                {
+                  "SPKI-SHA256-BASE64": "iFvwVyJSxnQdyaUvUERIf+8qk7gRze3612JMwoO3zdU="
+                }
               ]
             }
           }
@@ -67,23 +68,6 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.INTERNET",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.POST_NOTIFICATIONS",
-        "android.permission.VIBRATE",
-        "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT",
-        "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.WAKE_LOCK",
-        "android.permission.BLUETOOTH",
-        "android.permission.MANAGE_OWN_CALLS",
-        "android.permission.READ_PHONE_STATE",
-        "android.permission.READ_PHONE_NUMBERS",
-        "android.permission.CALL_PHONE",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.INTERNET",
@@ -138,6 +122,28 @@
           "sounds": [
             "./assets/sounds/msg_received.mp3",
             "./assets/sounds/call_incoming.mp3"
+          ]
+        }
+      ],
+      [
+        "expo-alternate-app-icons",
+        {
+          "icons": [
+            {
+              "name": "light",
+              "ios": "./assets/icon-light.png",
+              "android": "./assets/icon-light.png"
+            },
+            {
+              "name": "tinted",
+              "ios": "./assets/icon-tinted.png",
+              "android": "./assets/icon-tinted.png"
+            },
+            {
+              "name": "work",
+              "ios": "./assets/icon-work.png",
+              "android": "./assets/icon-work.png"
+            }
           ]
         }
       ]

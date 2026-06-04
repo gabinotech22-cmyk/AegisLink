@@ -408,7 +408,13 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
  * the first occurrence — they are not transient and retrying would not help.
  */
 async function openAndInit(dbName: string): Promise<SQLite.SQLiteDatabase> {
-  const MAX_ATTEMPTS = 4;
+  // x86 Android emulators (BlueStacks) cold-start the expo-sqlite JSI bridge
+  // slowly: the native DB pointer can come back null for the first several
+  // hundred ms, making the first execAsync reject with a NullPointerException.
+  // Be patient — 8 attempts with growing backoff (~0.1s→0.8s, ~3.6s total) lets
+  // the bridge stabilise. On real arm64 devices the first attempt almost always
+  // succeeds, so this costs nothing there.
+  const MAX_ATTEMPTS = 8;
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let d: SQLite.SQLiteDatabase | null = null;
@@ -427,9 +433,10 @@ async function openAndInit(dbName: string): Promise<SQLite.SQLiteDatabase> {
       if (attempt === MAX_ATTEMPTS) throw new DbInitExhaustedError(e);
       // Close the half-initialised handle to avoid leaking native connections.
       try { await d?.closeAsync(); } catch { /* handle may be invalid — ignore */ }
-      // Growing backoff: 60 ms, 120 ms, 180 ms — gives the JSI bridge time to
-      // recover its internal state between attempts.
-      await new Promise<void>((r) => setTimeout(r, 60 * attempt));
+      // Growing backoff: 100, 200, 300 … ms — gives the cold JSI bridge time to
+      // recover its internal state between attempts (BlueStacks needs more than
+      // the original ~60 ms).
+      await new Promise<void>((r) => setTimeout(r, 100 * attempt));
     }
   }
   throw lastErr;
@@ -504,7 +511,8 @@ async function withDbInner<T>(fn: (d: SQLite.SQLiteDatabase) => Promise<T>): Pro
       return await fn(await db());
     } catch (e) {
       lastErr = e;
-      // openAndInit already exhausted its own MAX_ATTEMPTS — don't pile on.
+      // openAndInit already exhausted its own (now 8) cold-start attempts with
+      // growing backoff — don't pile on another full cycle here.
       if (e instanceof DbInitExhaustedError) throw e;
       if (!isRecoverableDbError(e) || attempt === MAX_RETRIES) throw e;
       // CLOSE the wedged handle before reopening — do NOT just null the promise.

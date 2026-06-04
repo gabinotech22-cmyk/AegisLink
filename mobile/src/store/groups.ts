@@ -77,13 +77,38 @@ export const useGroups = create<GroupsState>((set, get) => ({
 
   async createGroup(name, members, avatarColor, avatarImage) {
     const id = 'group_' + Math.random().toString(36).slice(2, 11);
+
+    // If the URI comes from the image picker (file:// or content://), copy it to
+    // DocumentDirectory so it survives cache eviction and app restarts.
+    // The picker writes to a temporary cache dir that Android can clear at any time.
+    let persistentAvatarUri = avatarImage ?? undefined;
+    if (
+      avatarImage &&
+      (avatarImage.startsWith('file://') || avatarImage.startsWith('content://'))
+    ) {
+      try {
+        const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+        const dir = `${FS.documentDirectory}avatars/`;
+        await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+        const rawExt = avatarImage.includes('.')
+          ? avatarImage.split('.').pop()?.toLowerCase()
+          : undefined;
+        const ext = rawExt && rawExt.length <= 4 ? rawExt : 'jpg';
+        const destPath = `${dir}group_${id}_avatar.${ext}`;
+        await FS.copyAsync({ from: avatarImage, to: destPath });
+        persistentAvatarUri = destPath;
+      } catch {
+        // Non-fatal: fall back to the original URI
+      }
+    }
+
     const base: StoredGroup = {
       id,
       name,
       members,
       createdAt: Date.now(),
       avatarColor,
-      avatarImage,
+      avatarImage: persistentAvatarUri,
     };
     // Sign our own metadata as admin. Receivers will reject unsigned groups
     // (see socket/client.ts group_msg handler), so this is mandatory.

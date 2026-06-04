@@ -14,6 +14,28 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+// ── Global storage quota ──────────────────────────────────────────────────────
+// Maximum aggregate bytes allowed in the uploads directory. Prevents disk-fill
+// DoS even when PoW is solved correctly. Cached in memory — updated on every
+// upload and every TTL-cleanup pass so we never call du() on each request.
+const MAX_TOTAL_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
+
+let currentTotalBytes = 0;
+
+// Initialise the counter once at startup by summing existing files.
+(function initStorageCounter() {
+  try {
+    const files = fs.readdirSync(UPLOADS_DIR);
+    for (const file of files) {
+      if (file === '.gitkeep') continue;
+      try {
+        const s = fs.statSync(path.join(UPLOADS_DIR, file));
+        currentTotalBytes += s.size;
+      } catch { /* ignore */ }
+    }
+  } catch { /* uploads dir may not exist yet */ }
+})();
+
 // ── Rate limiter (10 uploads per 15 minutes per IP) ───────────────────────────
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -71,6 +93,12 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
     return;
   }
 
+  // ── Global quota check (FIX A) ────────────────────────────────────────────
+  if (currentTotalBytes + req.body.length > MAX_TOTAL_UPLOAD_BYTES) {
+    res.status(507).json({ error: 'storage_full' });
+    return;
+  }
+
   const id = crypto.randomUUID();
   const filePath = path.join(UPLOADS_DIR, id);
 
@@ -79,6 +107,7 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
       res.status(500).json({ error: 'SERVER_ERROR' });
       return;
     }
+    currentTotalBytes += req.body.length;
     res.json({ id });
   });
 });
@@ -100,11 +129,15 @@ router.get('/download/:id', (req, res) => {
     return;
   }
 
+  // FIX E — force download; prevent browser render/execution of arbitrary blobs.
+  res.set('Content-Type', 'application/octet-stream');
+  res.set('Content-Disposition', 'attachment');
   res.set('X-Content-Type-Options', 'nosniff');
   res.sendFile(filePath);
 });
 
-// Background task to delete files older than 24h
+// Background task to delete files older than 24h.
+// Also keeps currentTotalBytes accurate so the quota check stays correct.
 setInterval(() => {
   fs.readdir(UPLOADS_DIR, (err, files) => {
     if (err) return;
@@ -114,7 +147,11 @@ setInterval(() => {
       const filePath = path.join(UPLOADS_DIR, file);
       fs.stat(filePath, (statErr, stats) => {
         if (!statErr && now - stats.mtimeMs > 24 * 60 * 60 * 1000) {
-          fs.unlink(filePath, () => {});
+          fs.unlink(filePath, (unlinkErr) => {
+            if (!unlinkErr) {
+              currentTotalBytes = Math.max(0, currentTotalBytes - stats.size);
+            }
+          });
         }
       });
     }

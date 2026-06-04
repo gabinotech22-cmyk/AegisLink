@@ -130,6 +130,12 @@ function initSqliteSchema(db: DatabaseSync) {
       PRIMARY KEY (poll_id, voter_hash)
     );
 
+    CREATE TABLE IF NOT EXISTS backups (
+      id_hash    TEXT PRIMARY KEY,
+      envelope   TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS work_orgs (
       org_id     TEXT PRIMARY KEY,
       name       TEXT NOT NULL,
@@ -326,6 +332,15 @@ function initSqliteSchema(db: DatabaseSync) {
   try { db.exec(`ALTER TABLE work_audit_log ADD COLUMN metadata TEXT;`); } catch { /* exists */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_work_audit_actor ON work_audit_log(org_id, actor_id, created_at DESC);`); } catch { /* exists */ }
 
+  // Backup table — migration guard for existing deployments
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS backups (
+      id_hash    TEXT PRIMARY KEY,
+      envelope   TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );`);
+  } catch { /* exists */ }
+
   // Channel-level permission table — migration guard for existing deployments
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS work_channel_permissions (
@@ -444,6 +459,12 @@ async function initPgSchema(): Promise<void> {
       voter_hash   TEXT NOT NULL,
       option_index INTEGER NOT NULL,
       PRIMARY KEY (poll_id, voter_hash)
+    );
+
+    CREATE TABLE IF NOT EXISTS backups (
+      id_hash    TEXT PRIMARY KEY,
+      envelope   TEXT NOT NULL,
+      updated_at BIGINT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS work_orgs (
@@ -1749,5 +1770,45 @@ export const workspaceRepo = {
       [workspaceId, aegisId]
     );
     return row !== undefined;
+  },
+};
+
+// ── backupRepo ────────────────────────────────────────────────────────────────
+// Stores one encrypted backup blob per user.
+// The key is SHA-256(aegisId) so the aegisId itself never appears in the DB row.
+// The envelope column is the raw JSON string of the BackupEnvelope — opaque to
+// the server (server never parses its fields beyond treating it as text).
+
+export interface BackupRow {
+  id_hash: string;
+  envelope: string;
+  updated_at: number;
+}
+
+export const backupRepo = {
+  async upsert(idHash: string, envelope: string): Promise<void> {
+    if (USE_PG) {
+      await dbRun(
+        `INSERT INTO backups (id_hash, envelope, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(id_hash) DO UPDATE SET envelope = EXCLUDED.envelope, updated_at = EXCLUDED.updated_at`,
+        [idHash, envelope, Date.now()]
+      );
+    } else {
+      await dbRun(
+        `INSERT INTO backups (id_hash, envelope, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(id_hash) DO UPDATE SET envelope = excluded.envelope, updated_at = excluded.updated_at`,
+        [idHash, envelope, Date.now()]
+      );
+    }
+  },
+  async get(idHash: string): Promise<BackupRow | undefined> {
+    return dbGet<BackupRow>(
+      `SELECT id_hash, envelope, updated_at FROM backups WHERE id_hash = ?`,
+      [idHash]
+    );
+  },
+  async delete(idHash: string): Promise<boolean> {
+    const result = await dbRun(`DELETE FROM backups WHERE id_hash = ?`, [idHash]);
+    return result.changes > 0;
   },
 };

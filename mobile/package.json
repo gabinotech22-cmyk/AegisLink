@@ -21,6 +21,7 @@
     "@scure/base": "^2.2.0",
     "@testing-library/react-native": "^13.3.3",
     "expo": "~54.0.33",
+    "expo-alternate-app-icons": "^8.0.0",
     "expo-av": "~16.0.8",
     "expo-background-fetch": "~14.0.9",
     "expo-camera": "~17.0.10",

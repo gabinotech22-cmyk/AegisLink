@@ -79,6 +79,25 @@ export interface BackupContact {
   archived?: boolean;
 }
 
+/**
+ * Mirrors StoredGroup from db/local.ts exactly.
+ * Kept as a standalone type here to avoid any circular import with the DB layer.
+ */
+export interface BackupGroup {
+  id: string;
+  name: string;
+  members: string[];
+  createdAt: number;
+  avatarColor?: string;
+  avatarImage?: string;
+  adminOnlyInvite?: boolean;
+  moderateNewMembers?: boolean;
+  adminId?: string;
+  adminSig?: string;
+  moderators?: string[];
+  admins?: string[];
+}
+
 export interface BackupPayload {
   /** Schema version of the inner JSON. Same set as the envelope version. */
   v: BackupEnvelopeVersion;
@@ -98,6 +117,14 @@ export interface BackupPayload {
     profileStatus: string;
   };
   contacts: BackupContact[];
+  /**
+   * Snapshot of data-only fields from usePreferences (runtime flags excluded).
+   * Optional — absent in backups produced before this field was added.
+   * Using Record<string,unknown> to avoid a circular import with the store layer.
+   */
+  preferences?: Record<string, unknown>;
+  /** Groups the user was part of at backup time. Optional — absent in legacy backups. */
+  groups?: BackupGroup[];
 }
 
 export type PassphraseStrength = 'too_short' | 'weak' | 'fair' | 'strong';

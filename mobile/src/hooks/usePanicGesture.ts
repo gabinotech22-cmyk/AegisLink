@@ -9,7 +9,7 @@ const TAP_WINDOW_MS = 800; // window in which 3 taps must occur
 const TAP_COUNT_REQUIRED = 3;
 
 interface PanicConfig {
-  gesture?: string; // 'off' | 'shake' | 'volume' | 'tap'
+  gesture?: string; // 'off' | 'shake' | 'tap' | 'hold' | 'volume' (legacy)
 }
 
 interface AccelerometerMeasurement {
@@ -32,6 +32,12 @@ interface AccelerometerModule {
 export interface UsePanicGestureReturn {
   /** Call this on every tap of the trigger element when gesture === 'tap' */
   registerTap: () => void;
+  /**
+   * Wire to `onLongPress` with `delayLongPress={3000}` on the trigger element.
+   * Only fires when gesture === 'hold'. Triggers directly — a 3-second
+   * intentional press is unambiguous enough to skip the confirmation dialog.
+   */
+  registerLongPress: () => void;
 }
 
 /**
@@ -39,9 +45,10 @@ export interface UsePanicGestureReturn {
  * gesture listener. When the gesture fires, `onTrigger` is called.
  *
  * Supported gestures:
- *   - 'shake'  → Accelerometer magnitude > SHAKE_THRESHOLD
- *   - 'tap'    → call registerTap() 3 times within 800ms
- *   - 'volume' → NOT available in Expo managed workflow; no-op
+ *   - 'shake'  → Accelerometer magnitude > SHAKE_THRESHOLD (shows confirmation)
+ *   - 'tap'    → call registerTap() 3 times within 800ms (shows confirmation)
+ *   - 'hold'   → call registerLongPress() after onLongPress fires (3s, no dialog)
+ *   - 'volume' → legacy value; silently no-op (removed from UI in v2)
  *   - 'off'    → no listeners registered
  *
  * IMPORTANT: wrap `onTrigger` in useCallback at the call site to keep the
@@ -71,7 +78,10 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
         return;
       }
 
-      if (gestureRef.current === 'shake') {
+      if (gestureRef.current === 'hold') {
+        // Nothing to set up — hold is handled entirely via registerLongPress()
+        // which is wired to onLongPress on the trigger element in the component.
+      } else if (gestureRef.current === 'shake') {
         try {
           // require at runtime to avoid a hard dependency on expo-sensors at
           // module load — allows Expo Go environments without the package to
@@ -107,7 +117,9 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
           if (__DEV__) console.warn('[usePanicGesture] expo-sensors not available — shake gesture disabled');
         }
       }
-      // 'volume' is not available in Expo managed workflow — silently no-op.
+      // 'hold' is handled via registerLongPress() — no listener needed here.
+      // 'volume' key is no longer offered in the UI; kept as a silent no-op for
+      //   any configs persisted from older builds.
       // 'tap' is handled via registerTap() below.
       // 'off' — nothing to register.
     }
@@ -159,5 +171,11 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
     }
   }
 
-  return { registerTap };
+  function registerLongPress(): void {
+    if (gestureRef.current !== 'hold') return;
+    // A 3-second intentional long press is deliberate — fire directly.
+    onTriggerRef.current();
+  }
+
+  return { registerTap, registerLongPress };
 }

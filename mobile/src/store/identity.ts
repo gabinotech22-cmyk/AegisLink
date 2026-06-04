@@ -123,9 +123,12 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         return;
       }
 
-      // Load activeSlotId and slotsList first
-      const activeSlotId = (await SecureStore.getItemAsync('aegis.activeSlotId')) || 'self';
-      const slotsListRaw = await SecureStore.getItemAsync('aegis.slotsList');
+      // Parallelize the two independent slot reads — no dependency between them.
+      const [activeSlotIdRaw, slotsListRaw] = await Promise.all([
+        SecureStore.getItemAsync('aegis.activeSlotId'),
+        SecureStore.getItemAsync('aegis.slotsList'),
+      ]);
+      const activeSlotId = activeSlotIdRaw || 'self';
       const slotsList = slotsListRaw ? JSON.parse(slotsListRaw) : ['self'];
 
       // Set the active slot in the database manager
@@ -139,26 +142,60 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       }
       const identity = identityFromStored(stored);
 
-      const displayName = await SecureStore.getItemAsync(getPrefKey('aegis.displayName', activeSlotId)) || identity.aegisId.toLowerCase().replace(/-/g, '');
-      const avatarColor = await SecureStore.getItemAsync(getPrefKey('aegis.avatarColor', activeSlotId)) || '#05b875';
-      const avatarImage = await SecureStore.getItemAsync(getPrefKey('aegis.avatarImage', activeSlotId)) || null;
-      const profileStatus = await SecureStore.getItemAsync(getPrefKey('aegis.profileStatus', activeSlotId)) || '';
+      // Parallelize all five independent SecureStore reads (profile + published flag).
+      const [
+        displayNameRaw,
+        avatarColorRaw,
+        avatarImageRaw,
+        profileStatusRaw,
+        alreadyPublished,
+      ] = await Promise.all([
+        SecureStore.getItemAsync(getPrefKey('aegis.displayName', activeSlotId)),
+        SecureStore.getItemAsync(getPrefKey('aegis.avatarColor', activeSlotId)),
+        SecureStore.getItemAsync(getPrefKey('aegis.avatarImage', activeSlotId)),
+        SecureStore.getItemAsync(getPrefKey('aegis.profileStatus', activeSlotId)),
+        SecureStore.getItemAsync(`aegis.published.${activeSlotId}`),
+      ]);
 
-      // Register identity on server BEFORE marking ready — prevents the race
-      // condition where the socket authenticates before the identity is in the
-      // relay's DB (causing `unknown_identity` and immediate disconnect).
-      await publishToServer(identity);
-      set({
-        identity,
-        activeSlotId,
-        slotsList,
-        displayName,
-        avatarColor,
-        avatarImage,
-        profileStatus,
-        status: 'ready',
-        hydrated: true
-      });
+      const displayName = displayNameRaw ?? identity.aegisId.toLowerCase().replace(/-/g, '');
+      const avatarColor = avatarColorRaw ?? '#05b875';
+      const avatarImage = avatarImageRaw ?? null;
+      const profileStatus = profileStatusRaw ?? '';
+
+      if (alreadyPublished) {
+        // Identity is already registered on the relay — expose the UI immediately.
+        // Re-publish in background to refresh prekeys; the server will 409 the
+        // identity part which is expected and handled silently.
+        set({
+          identity,
+          activeSlotId,
+          slotsList,
+          displayName,
+          avatarColor,
+          avatarImage,
+          profileStatus,
+          status: 'ready',
+          hydrated: true,
+        });
+        void publishToServer(identity).catch(() => {});
+      } else {
+        // First boot for this identity — must await registration so the socket
+        // doesn't race ahead of it (causing `unknown_identity` + disconnect).
+        await publishToServer(identity);
+        // Persist the flag so future hydrations skip the blocking await.
+        void SecureStore.setItemAsync(`aegis.published.${activeSlotId}`, '1', SS_OPTS).catch(() => {});
+        set({
+          identity,
+          activeSlotId,
+          slotsList,
+          displayName,
+          avatarColor,
+          avatarImage,
+          profileStatus,
+          status: 'ready',
+          hydrated: true,
+        });
+      }
     } catch (e) {
       set({ status: 'idle', hydrated: true, error: (e as Error).message });
     }
@@ -166,36 +203,49 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
   async generate() {
     set({ status: 'generating', error: null });
-    const identity = createIdentity();
-    await saveIdentity({
-      aegisId: identity.aegisId,
-      publicKeyB64: identity.publicKeyB64,
-      secretKeyB64: identity.secretKeyB64,
-      signingPublicKeyB64: identity.signingPublicKeyB64,
-      signingSecretKeyB64: identity.signingSecretKeyB64,
-      createdAt: identity.createdAt,
-    });
+    try {
+      const identity = createIdentity();
+      await saveIdentity({
+        aegisId: identity.aegisId,
+        publicKeyB64: identity.publicKeyB64,
+        secretKeyB64: identity.secretKeyB64,
+        signingPublicKeyB64: identity.signingPublicKeyB64,
+        signingSecretKeyB64: identity.signingSecretKeyB64,
+        createdAt: identity.createdAt,
+      });
 
-    const activeSlotId = get().activeSlotId || 'self';
-    const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
-    const defaultColor = '#05b875';
-    await SecureStore.setItemAsync(getPrefKey('aegis.displayName', activeSlotId), defaultName, SS_OPTS);
-    await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor, SS_OPTS);
-    await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', activeSlotId));
+      const activeSlotId = get().activeSlotId || 'self';
+      const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
+      const defaultColor = '#05b875';
+      await SecureStore.setItemAsync(getPrefKey('aegis.displayName', activeSlotId), defaultName, SS_OPTS);
+      await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor, SS_OPTS);
+      await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', activeSlotId));
 
-    // Mark ready immediately — identity is already saved locally.
-    // Server registration is best-effort and must never block onboarding.
-    set({
-      identity,
-      displayName: defaultName,
-      avatarColor: defaultColor,
-      avatarImage: null,
-      profileStatus: '',
-      status: 'ready'
-    });
-    // Fire-and-forget: register with server in background after UI has moved on.
-    void publishToServer(identity);
-    return identity;
+      // Mark ready immediately — identity is already saved locally.
+      // Server registration is best-effort and must never block onboarding.
+      set({
+        identity,
+        displayName: defaultName,
+        avatarColor: defaultColor,
+        avatarImage: null,
+        profileStatus: '',
+        status: 'ready'
+      });
+      // Fire-and-forget: register with server in background after UI has moved on.
+      // Persist the published flag (keyed by slot, not aegisId) once registration
+      // succeeds so that subsequent hydrate() calls skip the blocking await.
+      const _slotId = get().activeSlotId || 'self';
+      void publishToServer(identity)
+        .then(() => SecureStore.setItemAsync(`aegis.published.${_slotId}`, '1', SS_OPTS))
+        .catch(() => {});
+      return identity;
+    } catch (e) {
+      // Reset status to idle so the user can retry without restarting the app.
+      // Surface a human-readable message rather than the raw JSI stack trace.
+      const msg = e instanceof Error ? e.message : String(e);
+      set({ status: 'idle', error: msg });
+      throw e;
+    }
   },
 
   async reset() {
@@ -233,14 +283,40 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
   async updateProfile(displayName, avatarColor, avatarImage) {
     const slotId = get().activeSlotId || 'self';
+
+    // If the URI comes from the image picker (file:// or content://), copy it to
+    // DocumentDirectory so it survives cache eviction and app restarts.
+    // The picker writes to a temporary cache dir that Android can clear at any time.
+    let persistentAvatarUri = avatarImage;
+    if (
+      avatarImage &&
+      (avatarImage.startsWith('file://') || avatarImage.startsWith('content://'))
+    ) {
+      try {
+        const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+        const dir = `${FS.documentDirectory}avatars/`;
+        await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+        const rawExt = avatarImage.includes('.')
+          ? avatarImage.split('.').pop()?.toLowerCase()
+          : undefined;
+        const ext = rawExt && rawExt.length <= 4 ? rawExt : 'jpg';
+        const destPath = `${dir}${slotId}_avatar.${ext}`;
+        await FS.copyAsync({ from: avatarImage, to: destPath });
+        persistentAvatarUri = destPath;
+      } catch (e) {
+        // Non-fatal: fall back to the original URI and log in dev so it is easy to spot
+        if (__DEV__) console.warn('[identity] avatar copy to DocumentDirectory failed:', e);
+      }
+    }
+
     await SecureStore.setItemAsync(getPrefKey('aegis.displayName', slotId), displayName, SS_OPTS);
     await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', slotId), avatarColor, SS_OPTS);
-    if (avatarImage) {
-      await SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', slotId), avatarImage, SS_OPTS);
+    if (persistentAvatarUri) {
+      await SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', slotId), persistentAvatarUri, SS_OPTS);
     } else {
       await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', slotId));
     }
-    set({ displayName, avatarColor, avatarImage });
+    set({ displayName, avatarColor, avatarImage: persistentAvatarUri });
 
     // Propagate the new profile to all contacts
     const identity = get().identity;
@@ -302,8 +378,9 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       await SecureStore.setItemAsync(getPrefKey('aegis.displayName', newSlotId), defaultName, SS_OPTS);
       await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', newSlotId), defaultColor, SS_OPTS);
 
-      // Publish to server
+      // Publish to server, then persist the flag (keyed by slot) so hydrate() fast-paths.
       await publishToServer(identity);
+      void SecureStore.setItemAsync(`aegis.published.${newSlotId}`, '1', SS_OPTS).catch(() => {});
 
       // Reset (don't close) the temp slot's DB reference before switching back.
       // closeAsync() here races against any in-flight DB call and causes

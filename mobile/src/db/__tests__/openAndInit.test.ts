@@ -9,7 +9,7 @@
  *      without throwing, without retrying the open.
  *   3. Non-NPE error during init — propagates immediately, does NOT exhaust
  *      MAX_ATTEMPTS.
- *   4. Persistent NPE across all 4 attempts — propagates after MAX_ATTEMPTS.
+ *   4. Persistent NPE across all 8 attempts — propagates after MAX_ATTEMPTS.
  *
  * Design note:
  *   openAndInit is not exported; we exercise it through saveContact which routes
@@ -124,8 +124,8 @@ describe('openAndInit — retry logic', () => {
       verified: false,
       addedAt: 1_000_000,
     });
-    // Drain the 60 ms backoff for attempt 1.
-    await jest.advanceTimersByTimeAsync(60);
+    // Drain the 100 ms backoff for attempt 1.
+    await jest.advanceTimersByTimeAsync(100);
     await savePromise;
 
     // openDatabaseAsync called twice: db1 failed initSchema, db2 succeeded.
@@ -206,20 +206,24 @@ describe('openAndInit — retry logic', () => {
   });
 
   /**
-   * 4. Persistent NPE across all 4 MAX_ATTEMPTS.
-   *    openAndInit must propagate the error after the 4th failed attempt.
+   * 4. Persistent NPE across all MAX_ATTEMPTS (8).
+   *    openAndInit must propagate the error after the 8th failed attempt.
    *    The NPE is injected on the 3rd execAsync call (CREATE TABLE batch) so that
-   *    WAL and foreign_keys succeed on every attempt before the NPE fires.
+   *    journal_mode = DELETE and foreign_keys succeed on every attempt before the
+   *    NPE fires (journal_mode is itself wrapped in try/catch, so it must NOT throw
+   *    here or the count of survived execAsync calls would shift).
    */
-  it('4. persistent NPE across all 4 attempts propagates after MAX_ATTEMPTS', async () => {
-    const dbs = [makeMockDb(), makeMockDb(), makeMockDb(), makeMockDb()];
+  it('4. persistent NPE across all 8 attempts propagates after MAX_ATTEMPTS', async () => {
+    const MAX_ATTEMPTS = 8;
+    const dbs = Array.from({ length: MAX_ATTEMPTS }, () => makeMockDb());
     const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
     for (const d of dbs) {
       openMock.mockResolvedValueOnce(d);
-      // WAL and foreign_keys succeed; the CREATE TABLE batch always throws NPE.
+      // journal_mode = DELETE and foreign_keys succeed; the CREATE TABLE batch
+      // always throws NPE.
       d.execAsync
-        .mockResolvedValueOnce(undefined) // WAL
-        .mockResolvedValueOnce(undefined) // foreign_keys
+        .mockResolvedValueOnce(undefined) // PRAGMA journal_mode = DELETE
+        .mockResolvedValueOnce(undefined) // PRAGMA foreign_keys = ON
         .mockRejectedValue(makeNpeError()); // CREATE TABLE batch — persistent NPE
     }
 
@@ -238,19 +242,20 @@ describe('openAndInit — retry logic', () => {
       }),
     ).rejects.toThrow('NullPointerException');
 
-    // Drain all three backoffs: 60 + 120 + 180 = 360 ms.
-    await jest.advanceTimersByTimeAsync(360);
+    // Drain all 7 growing backoffs between the 8 attempts:
+    // 100 + 200 + 300 + 400 + 500 + 600 + 700 = 2800 ms.
+    await jest.advanceTimersByTimeAsync(2800);
 
     // Confirm the rejection assertion (throws if it didn't reject as expected).
     await rejectAssertion;
 
-    // Exactly MAX_ATTEMPTS = 4 opens were attempted.
-    expect(openMock).toHaveBeenCalledTimes(4);
-    // Each of the first 3 failed handles was closed before the next attempt.
-    for (let i = 0; i < 3; i++) {
+    // Exactly MAX_ATTEMPTS = 8 opens were attempted.
+    expect(openMock).toHaveBeenCalledTimes(MAX_ATTEMPTS);
+    // Each of the first 7 failed handles was closed before the next attempt.
+    for (let i = 0; i < MAX_ATTEMPTS - 1; i++) {
       expect(dbs[i].closeAsync).toHaveBeenCalledTimes(1);
     }
-    // The 4th handle is NOT closed by openAndInit (it re-throws instead).
-    expect(dbs[3].closeAsync).not.toHaveBeenCalled();
+    // The 8th handle is NOT closed by openAndInit (it re-throws instead).
+    expect(dbs[MAX_ATTEMPTS - 1].closeAsync).not.toHaveBeenCalled();
   });
 });

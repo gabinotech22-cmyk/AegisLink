@@ -1,9 +1,18 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import * as FileSystem from 'expo-file-system/legacy';
-import { SERVER_URL } from '../config';
+import { RELAY_URL as SERVER_URL } from '../config';
+import { fetchPowChallengeAt, solvePoW } from './registration';
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** Exponential-backoff delays for upload/download retries: 0 ms, 500 ms, 1500 ms */
+const RETRY_DELAYS_MS = [0, 500, 1500];
+const MAX_ATTEMPTS = RETRY_DELAYS_MS.length;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 const ALLOWED_MIME = new Set([
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
@@ -61,17 +70,43 @@ export async function encryptAndUploadMedia(fileUri: string, mimeType?: string):
   const tempUri = FileSystem.cacheDirectory + 'upload_tmp_' + Date.now();
   await FileSystem.writeAsStringAsync(tempUri, encodeBase64(ciphertext), { encoding: FileSystem.EncodingType.Base64 });
 
-  // 5. Upload binary ciphertext
-  const uploadUrl = `${SERVER_URL}/blob/upload`;
-  const uploadResult = await FileSystem.uploadAsync(uploadUrl, tempUri, {
-    httpMethod: 'POST',
-    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-  });
+  // 5. Resolve PoW challenge for the blob endpoint, then upload
+  let powChallenge: string;
+  let powNonce: string;
+  try {
+    const challenge = await fetchPowChallengeAt(`${SERVER_URL}/blob/challenge`);
+    powChallenge = challenge.challenge;
+    powNonce = await solvePoW(challenge.challenge, challenge.difficulty);
+  } catch (e) {
+    await FileSystem.deleteAsync(tempUri, { idempotent: true });
+    throw new Error(`blob_pow_failed: ${(e as Error).message}`);
+  }
+
+  const uploadUrl = `${SERVER_URL}/blob/upload?powChallenge=${encodeURIComponent(powChallenge)}&powNonce=${encodeURIComponent(powNonce)}`;
+
+  let uploadResult: Awaited<ReturnType<typeof FileSystem.uploadAsync>> | null = null;
+  let lastUploadError: Error = new Error('upload_not_attempted');
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt]);
+    try {
+      const result = await FileSystem.uploadAsync(uploadUrl, tempUri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+      });
+      if (result.status === 200) {
+        uploadResult = result;
+        break;
+      }
+      lastUploadError = new Error(`upload_http_${result.status}`);
+    } catch (e) {
+      lastUploadError = e instanceof Error ? e : new Error(String(e));
+    }
+  }
 
   await FileSystem.deleteAsync(tempUri, { idempotent: true });
 
-  if (uploadResult.status !== 200) {
-    throw new Error('Failed to upload media');
+  if (!uploadResult) {
+    throw new Error(`Failed to upload media: ${lastUploadError.message}`);
   }
 
   const { id } = JSON.parse(uploadResult.body);
@@ -98,12 +133,26 @@ export async function downloadAndDecryptMedia(mediaUri: string, ext: string = 'j
   const nonce = decodeBase64(nonceB64);
 
   const downloadUrl = `${SERVER_URL}/blob/download/${id}`;
-  
-  // Download encrypted file
+
+  // Download encrypted file (with retry on transient network errors)
   const tempEncryptedUri = FileSystem.cacheDirectory + `enc_${id}`;
-  const downloadResult = await FileSystem.downloadAsync(downloadUrl, tempEncryptedUri);
-  if (downloadResult.status !== 200) {
-    throw new Error('Failed to download media');
+  let downloadResult: Awaited<ReturnType<typeof FileSystem.downloadAsync>> | null = null;
+  let lastDownloadError: Error = new Error('download_not_attempted');
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt]);
+    try {
+      const result = await FileSystem.downloadAsync(downloadUrl, tempEncryptedUri);
+      if (result.status === 200) {
+        downloadResult = result;
+        break;
+      }
+      lastDownloadError = new Error(`download_http_${result.status}`);
+    } catch (e) {
+      lastDownloadError = e instanceof Error ? e : new Error(String(e));
+    }
+  }
+  if (!downloadResult) {
+    throw new Error(`Failed to download media: ${lastDownloadError.message}`);
   }
 
   // Read encrypted data

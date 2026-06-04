@@ -11,7 +11,7 @@
  * to `rtcConfig()` (static env creds or STUN-only) on any fetch failure.
  */
 
-import { SERVER_URL, TURN_SERVER_URL } from '../config';
+import { RELAY_URL as SERVER_URL, TURN_SERVER_URL } from '../config';
 
 export interface RTCConfigShape {
   iceServers: { urls: string | string[]; username?: string; credential?: string }[];
@@ -91,11 +91,21 @@ export async function fetchTurnConfig(aegisId: string, forceRelay: boolean = tru
       { signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 3000); return c.signal; })() },
     );
     if (!res.ok) return rtcConfig(forceRelay);
-    const { username, password } = (await res.json()) as {
+    // Server returns { urls, username, credential, ttl }
+    // Accept both `credential` and legacy `password` field names.
+    const { username, credential, password, urls: turnUrls } = (await res.json()) as {
       username: string;
-      password: string;
+      credential?: string;
+      password?: string;
+      urls?: string[];
       ttl: number;
     };
+    const cred = credential ?? password ?? '';
+    // Prefer the `urls` array returned by the server (includes UDP+TCP+TLS variants).
+    // Fall back to the static TURN_URL env var if the server didn't return urls.
+    const resolvedUrls: string[] = (turnUrls && turnUrls.length > 0)
+      ? turnUrls
+      : (TURN_URL ? [TURN_URL] : []);
     const iceServers: RTCConfigShape['iceServers'] = [
       { urls: [
         'stun:stun.l.google.com:19302',
@@ -103,13 +113,13 @@ export async function fetchTurnConfig(aegisId: string, forceRelay: boolean = tru
         'stun:stun.cloudflare.com:3478',
       ] },
     ];
-    if (TURN_URL) {
-      iceServers.push({ urls: TURN_URL, username, credential: password });
+    if (resolvedUrls.length > 0) {
+      iceServers.push({ urls: resolvedUrls, username, credential: cred });
     }
     const config: RTCConfigShape = { iceServers };
     // Relay-only ICE keeps both peers' real IPs out of the signaling exchange.
     // Only enforce it when ephemeral TURN creds were actually obtained.
-    if (forceRelay && TURN_URL) config.iceTransportPolicy = 'relay';
+    if (forceRelay && resolvedUrls.length > 0) config.iceTransportPolicy = 'relay';
     _cache.set(cacheKey, { config, expiresAt: Date.now() + CACHE_TTL_MS });
     return config;
   } catch {

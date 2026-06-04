@@ -40,6 +40,13 @@ jest.mock('react-native-safe-area-context', () => ({
 
 jest.mock('../../runtime', () => ({ WEBRTC_AVAILABLE: false }));
 
+jest.mock('expo-av', () => ({
+  Audio: {
+    Sound: { createAsync: jest.fn().mockResolvedValue({ sound: { playAsync: jest.fn(), stopAsync: jest.fn(), unloadAsync: jest.fn() } }) },
+    setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
 jest.mock('../../store/call', () => ({
   useCall: (sel: (s: object) => unknown) => sel({
     status: 'in-call',

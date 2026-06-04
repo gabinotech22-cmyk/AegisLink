@@ -14,12 +14,16 @@ import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
 import { acceptCall, endCall, toggleMute, toggleCamera } from '../socket/calls';
 import { useProximitySensor } from '../hooks/useProximitySensor';
+import { SoundFX } from '../hooks/useSoundFX';
 
 interface Props {
   onClose: () => void;
+  /** If provided, a drag-handle appears during `in-call` state that lets the
+   *  user collapse the full-screen UI into the FloatingCallBar overlay. */
+  onMinimize?: () => void;
 }
 
-export function CallScreen({ onClose }: Props) {
+export function CallScreen({ onClose, onMinimize }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -32,6 +36,7 @@ export function CallScreen({ onClose }: Props) {
   const cameraOff = useCall((s) => s.cameraOff);
   const startedAt = useCall((s) => s.startedAt);
   const activePeer = useCall((s) => s.activePeer);
+  const direction = useCall((s) => s.direction);
 
   const peer = useContacts((s) => (peerId ? s.get(peerId) : undefined));
   const peerName = peer?.name ?? peerId ?? 'unknown';
@@ -71,6 +76,38 @@ export function CallScreen({ onClose }: Props) {
     const groups = Array.from({ length: 8 }, (_, i) => hex.slice(i * 4, i * 4 + 4).toUpperCase());
     setSessionFingerprint(groups.join(' '));
   }, [status, activePeer]);
+
+  // Outgoing-call sound management.
+  // IncomingCallScreen owns all sound for the callee side; this effect handles
+  // only the caller side (outgoing-ringing → connecting → in-call → ended).
+  useEffect(() => {
+    if (status === 'incoming-ringing') return; // IncomingCallScreen owns this
+    switch (status) {
+      case 'outgoing-ringing':
+        void SoundFX.callRingback(); // looping ringback until callee answers
+        break;
+      case 'connecting':
+        void SoundFX.stopAll(); // callee answered — ringback ends
+        break;
+      case 'in-call':
+        if (direction === 'out') {
+          // Callee already played callConnected in IncomingCallScreen.handleAccept;
+          // play it here only for the caller.
+          void SoundFX.stopAll();
+          void SoundFX.callConnected();
+        }
+        break;
+      case 'ended':
+        void SoundFX.stopAll();
+        void SoundFX.callEnded();
+        break;
+      default:
+        break;
+    }
+  }, [status, direction]);
+
+  // Ensure sounds stop when the screen unmounts (e.g. navigation pop).
+  useEffect(() => () => { void SoundFX.stopAll(); }, []);
 
   // Auto-close after a brief "ended" state.
   useEffect(() => {
@@ -137,6 +174,34 @@ export function CallScreen({ onClose }: Props) {
         />
       )}
 
+
+      {/* Minimize handle — tap to collapse into FloatingCallBar.
+          Only shown during in-call (not while ringing, connecting, or ended). */}
+      {status === 'in-call' && onMinimize && (
+        <Pressable
+          onPress={onMinimize}
+          hitSlop={20}
+          accessibilityRole="button"
+          accessibilityLabel={i18nT('call.minimize', 'Minimize call')}
+          style={{
+            position: 'absolute',
+            top: insets.top + 10,
+            left: 0,
+            right: 0,
+            alignItems: 'center',
+            zIndex: 10,
+          }}
+        >
+          <View
+            style={{
+              width: 38,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: 'rgba(255,255,255,0.32)',
+            }}
+          />
+        </Pressable>
+      )}
 
       {/* Top: peer info (left) + self-preview (right) — matches JSX design */}
       <View

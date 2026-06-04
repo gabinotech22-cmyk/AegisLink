@@ -107,7 +107,7 @@ const lookupLimiter = rateLimit({
 // ── GET /identity/:id ─────────────────────────────────────────────────────────
 /** Look up a public key by Aegis ID (for adding contacts). */
 router.get('/:id', lookupLimiter, async (req, res) => {
-  const id = req.params.id;
+  const id = String(req.params.id);
   if (!AEGIS_ID_RE.test(id)) {
     res.status(400).json({ error: 'invalid_id_format' });
     return;

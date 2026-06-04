@@ -13,7 +13,7 @@ import { withPickingGuard } from '../utils/pickingGuard';
 
 interface Props {
   onBack: () => void;
-  onPick: (kind: 'scheduled' | 'location' | 'viewoncesend' | 'photo' | 'camera' | 'file' | 'voice' | 'contact') => void;
+  onPick: (kind: 'scheduled' | 'location' | 'viewoncesend' | 'photo' | 'camera' | 'file' | 'voice' | 'video' | 'contact') => void;
 }
 
 export function AttachSheetScreen({ onBack, onPick }: Props) {
@@ -119,6 +119,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     { id: 'photo', icon: <I.Eye size={22} color={t.textDim} />, label: i18nT('attachSheet.photo', 'Photo'), sub: i18nT('attachSheet.gallery', 'Gallery'), handler: handlePhoto },
     { id: 'camera', icon: <I.Video size={22} color={t.textDim} />, label: i18nT('attachSheet.camera', 'Camera'), sub: i18nT('attachSheet.exifRemoved', 'EXIF removed'), handler: handleCamera },
     { id: 'file', icon: <I.Attach size={22} color={t.textDim} />, label: i18nT('attachSheet.file', 'File'), sub: i18nT('attachSheet.anyType', 'Any type') },
+    { id: 'video', icon: <I.Video size={22} color={t.textDim} />, label: i18nT('attachSheet.video', 'Video'), sub: i18nT('attachSheet.videoGallery', 'Gallery · E2EE') },
     { id: 'voice', icon: <I.Mic size={22} color={t.accent} />, label: i18nT('attachSheet.audio', 'Voice note'), sub: i18nT('attachSheet.ephemeral', 'Ephemeral'), accent: true },
     { id: 'viewoncesend', icon: <I.EyeOff size={22} color={t.accent} />, label: i18nT('attachSheet.viewOnce', 'View once'), sub: i18nT('attachSheet.viewOnceSub', 'Non-savable'), accent: true },
     { id: 'scheduled', icon: <I.Timer size={22} color={t.textDim} />, label: i18nT('attachSheet.scheduled', 'Scheduled'), sub: i18nT('attachSheet.delayedSend', 'Delayed send') },
