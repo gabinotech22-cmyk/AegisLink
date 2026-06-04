@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import {
   View, Text, TextInput, Pressable, FlatList,
   KeyboardAvoidingView, Platform, StyleSheet, Alert,
-  Linking, Image, Animated, ActivityIndicator,
+  Linking, Image, Animated, ActivityIndicator, Modal,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import { FormattedText } from '../components/FormattedText';
+import { VideoBubble } from '../components/VideoBubble';
 import { AudioWaveform } from '../components/AudioWaveform';
 import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
@@ -30,6 +31,7 @@ import { useConnection } from '../store/connection';
 import { usePollsStore, type PollResult } from '../store/polls';
 import type { StoredGroup, StoredMessage } from '../db/local';
 import { parseLocationMessage } from '../utils/parseLocationMessage';
+import { VoiceRecorderScreen } from './VoiceRecorder';
 
 const EMPTY_MSGS: StoredMessage[] = [];
 
@@ -47,9 +49,10 @@ interface Props {
   onGroupDetail?: () => void;
   onPoll?: () => void;
   onAttach?: () => void;
+  onGroupCall?: () => void;
 }
 
-export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, onPoll, onAttach }: Props) {
+export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, onPoll, onAttach, onGroupCall }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -72,6 +75,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const [stagedImageUri, setStagedImageUri] = useState<string | null>(null);
   const [imageProcessing, setImageProcessing] = useState(false);
   const [sending, setSending] = useState(false);
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const [replyTo, setReplyTo] = useState<StoredMessage | null>(null);
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
   const [forwardBody, setForwardBody] = useState<string | null>(null);
@@ -83,6 +87,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const flatlistRef = useRef<FlatList>(null);
   const isNearBottomRef = useRef(true);
   const hasInitialScrolledRef = useRef(false);
+  const sendingRef = useRef(false);
   const online = useConnection((s) => s.online);
 
   // Build member name lookup — memoised so GroupBubble receives a stable reference
@@ -166,14 +171,11 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
 
   useEffect(() => {
     if (list.length === 0) return;
-    if (!hasInitialScrolledRef.current) {
-      hasInitialScrolledRef.current = true;
-      const timer = setTimeout(() => {
-        flatlistRef.current?.scrollToEnd({ animated: false });
-        isNearBottomRef.current = true;
-      }, 120);
-      return () => clearTimeout(timer);
-    }
+    // The FIRST landing at the bottom is owned exclusively by onContentSizeChange
+    // (it snaps instantly). Bail until that has happened so we never fire a competing
+    // animated scroll that produces the visible "jump" when opening the group.
+    if (!hasInitialScrolledRef.current) return;
+    // New message arrived while near the bottom — follow it.
     if (isNearBottomRef.current) {
       requestAnimationFrame(() => flatlistRef.current?.scrollToEnd({ animated: true }));
     }
@@ -256,11 +258,12 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   }
 
   async function handleSend() {
-    if (!identity || sending) return;
+    if (!identity || sendingRef.current) return;
     const hasText = draft.trim().length > 0;
     const hasImage = !!stagedImageUri;
     if (!hasText && !hasImage) return;
 
+    sendingRef.current = true;
     const text = draft.trim();
     const imageUri = stagedImageUri;
     const replying = replyTo;
@@ -276,7 +279,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: imageUri });
         const { encryptAndUploadMedia } = require('../crypto/media');
         const blobUri = await encryptAndUploadMedia(imageUri, 'image/jpeg');
-        await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]` });
+        await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]`, skipLocalAppend: true });
       }
       if (hasText) {
         const id = Crypto.randomUUID();
@@ -296,7 +299,59 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       if (imageUri) setStagedImageUri(imageUri);
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
     } finally {
+      sendingRef.current = false;
       setSending(false);
+    }
+  }
+
+  async function handleVoiceSend(uri: string, durationMs: number) {
+    if (!identity) return;
+    setShowVoiceRecorder(false);
+    const durSec = Math.round(durationMs / 1000);
+    try {
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      const blobUri = await encryptAndUploadMedia(uri, 'audio/m4a');
+      const id = Crypto.randomUUID();
+      const body = `[audio:${durSec}s]`;
+      await appendMsg({
+        id,
+        chatId: group.id,
+        direction: 'out',
+        body: `${identity.aegisId.substring(0, 8)}: ${body}`,
+        createdAt: Date.now(),
+        type: 'audio',
+        mediaUri: uri,
+      });
+      await sendGroupMessage({
+        identity,
+        groupId: group.id,
+        plaintext: body,
+        msgType: 'audio',
+        mediaUri: blobUri,
+        skipLocalAppend: true,
+      });
+    } catch (e) {
+      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+    }
+  }
+
+  async function handleGroupCall() {
+    if (!identity) return;
+    const otherMembers = group.members.filter((id) => id !== identity.aegisId);
+    if (otherMembers.length === 0) {
+      Alert.alert(i18nT('groupCall.noMembers', 'Sin miembros'), i18nT('groupCall.noMembersDetail', 'No hay otros miembros en este grupo.'));
+      return;
+    }
+    if (otherMembers.length > 7) {
+      Alert.alert(i18nT('groupCall.tooMany', 'Demasiados participantes'), i18nT('groupCall.tooManyDetail', 'Máx. 8 participantes en llamadas grupales.'));
+      return;
+    }
+    try {
+      const { startGroupCall } = require('../socket/groupCalls') as typeof import('../socket/groupCalls');
+      await startGroupCall(identity, group, otherMembers);
+      onGroupCall?.();
+    } catch (e) {
+      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
@@ -361,6 +416,14 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                 </View>
               </Pressable>
               <Pressable
+                onPress={handleGroupCall}
+                hitSlop={8}
+                style={{ padding: 6 }}
+                accessibilityLabel={i18nT('groupCall.startCall', 'Start group call')}
+              >
+                <I.Phone size={20} color={t.textDim} />
+              </Pressable>
+              <Pressable
                 onPress={() => setSearchActive(true)}
                 hitSlop={8}
                 style={{ padding: 6 }}
@@ -388,7 +451,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
           data={filteredList}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12, gap: 10 }}
-          onLayout={() => list.length > 0 && isNearBottomRef.current && flatlistRef.current?.scrollToEnd({ animated: false })}
+          showsVerticalScrollIndicator={false}
           onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
             isNearBottomRef.current =
               contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
@@ -430,7 +493,17 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
               />
             </SwipeableMessage>
           )}
-          onContentSizeChange={() => isNearBottomRef.current && flatlistRef.current?.scrollToEnd({ animated: false })}
+          onContentSizeChange={() => {
+            if (list.length === 0) return;
+            if (!hasInitialScrolledRef.current) {
+              // First layout pass for this group: snap to the latest message WITHOUT
+              // animation so opening always lands at the bottom cleanly, no jump.
+              flatlistRef.current?.scrollToEnd({ animated: false });
+              hasInitialScrolledRef.current = true;
+            } else if (isNearBottomRef.current) {
+              flatlistRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
         />
 
         {/* @ mention autocomplete */}
@@ -506,16 +579,26 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
             </Pressable>
           )}
           {!draft.trim() && !stagedImageUri && (
-            <Pressable
-              onPress={() => setGifPickerVisible(true)}
-              hitSlop={6}
-              style={{ padding: 6 }}
-              accessibilityLabel="Open GIF picker"
-            >
-              <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
-                GIF
-              </Text>
-            </Pressable>
+            <>
+              <Pressable
+                onPress={() => setGifPickerVisible(true)}
+                hitSlop={6}
+                style={{ padding: 6 }}
+                accessibilityLabel="Open GIF picker"
+              >
+                <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
+                  GIF
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setShowVoiceRecorder(true)}
+                hitSlop={6}
+                style={{ padding: 6 }}
+                accessibilityLabel={i18nT('chat.voiceNote', 'Record voice note')}
+              >
+                <I.Mic size={22} color={t.textDim} />
+              </Pressable>
+            </>
           )}
           <TextInput
             placeholder={i18nT('groupChat.messagePlaceholder', 'Group message…')}
@@ -524,6 +607,14 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
             onChangeText={handleDraftChange}
             accessibilityLabel="Campo de mensaje"
             multiline
+            returnKeyType="send"
+            submitBehavior="submit"
+            onSubmitEditing={() => {
+              // Soft-keyboard "send" key. submitBehavior="submit" (RN 0.81) fires
+              // onSubmitEditing on a multiline input without inserting a newline or
+              // dismissing the keyboard.
+              if (draft.trim() || stagedImageUri) void handleSend();
+            }}
             style={[styles.input, { color: t.text, backgroundColor: t.surface2, borderColor: t.border, fontFamily: t.font }]}
           />
           <Pressable
@@ -563,6 +654,18 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         onDelete={handleDelete}
         onReact={handleReact}
       />
+      {/* Voice recorder — full-screen modal */}
+      <Modal
+        visible={showVoiceRecorder}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowVoiceRecorder(false)}
+      >
+        <VoiceRecorderScreen
+          onBack={() => setShowVoiceRecorder(false)}
+          onSend={handleVoiceSend}
+        />
+      </Modal>
     </KeyboardAvoidingView>
     </GestureHandlerRootView>
   );
@@ -816,6 +919,31 @@ function GroupBubble({
         <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, alignSelf: me ? 'flex-end' : 'flex-start', marginTop: 3, paddingHorizontal: 4 }}>
           {time}
         </Text>
+      </View>
+    );
+  }
+
+  // Video bubble
+  if (m.type === 'video') {
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+        {sender ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: senderColor }}>{sender}</Text>
+            {senderIsAdmin && (
+              <View style={{ backgroundColor: `${t.accent}22`, paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 8, color: t.accent }}>ADMIN</Text>
+              </View>
+            )}
+            {senderIsMod && (
+              <View style={{ backgroundColor: `${t.warn}22`, paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 8, color: t.warn }}>{i18nT('groupChat.modBadge', 'MOD')}</Text>
+              </View>
+            )}
+          </View>
+        ) : null}
+        <VideoBubble t={t} m={m} me={me} time={time} onLongPress={onLongPress} />
+        <ReactionPills t={t} reactions={reactions} me={me} />
       </View>
     );
   }
