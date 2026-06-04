@@ -292,7 +292,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
           type: 'text',
           replyToId: replying?.id,
         });
-        await sendGroupMessage({ identity, groupId: group.id, plaintext: text });
+        await sendGroupMessage({ identity, groupId: group.id, plaintext: text, skipLocalAppend: true });
       }
     } catch (e) {
       setDraft(text);
