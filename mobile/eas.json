@@ -53,7 +53,7 @@
         "APP_ENV": "production",
         "EXPO_PUBLIC_SERVER_URL": "https://aegislink.duckdns.org",
         "EXPO_PUBLIC_RELAY_URL": "https://aegislink.duckdns.org",
-        "EXPO_PUBLIC_TURN_URL": "turn:aegislink.duckdns.org:5349"
+        "EXPO_PUBLIC_TURN_URL": "turn:aegislink.duckdns.org:3478"
       }
     },
     "production-apk": {
