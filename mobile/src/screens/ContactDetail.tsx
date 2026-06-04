@@ -168,7 +168,7 @@ export function ContactDetailScreen({
               {contact.name}
             </Text>
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5, marginTop: 4 }}>
-              {contact.aegisId} · {i18nT('contactDetail.addedAgo', { days: Math.max(1, Math.floor((Date.now() - contact.addedAt) / 86400000)) })}
+              {contact.aegisId} · {i18nT('contactDetail.addedAgo', { count: Math.max(1, Math.floor((Date.now() - contact.addedAt) / 86400000)) })}
             </Text>
             {contact.status ? (
               <Text
