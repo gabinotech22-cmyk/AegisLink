@@ -246,7 +246,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     try {
       const id = Crypto.randomUUID();
       await appendMsg({ id, chatId: group.id, direction: 'out', body: plaintext, createdAt: Date.now(), type: 'text' });
-      await sendGroupMessage({ identity, groupId: group.id, plaintext });
+      await sendGroupMessage({ identity, groupId: group.id, plaintext, skipLocalAppend: true });
     } catch (e) {
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
     }
