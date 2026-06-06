@@ -9,7 +9,7 @@
  *      without throwing, without retrying the open.
  *   3. Non-NPE error during init — propagates immediately, does NOT exhaust
  *      MAX_ATTEMPTS.
- *   4. Persistent NPE across all 8 attempts — propagates after MAX_ATTEMPTS.
+ *   4. Persistent NPE across all 16 attempts — propagates after MAX_ATTEMPTS.
  *
  * Design note:
  *   openAndInit is not exported; we exercise it through saveContact which routes
@@ -213,8 +213,8 @@ describe('openAndInit — retry logic', () => {
    *    NPE fires (journal_mode is itself wrapped in try/catch, so it must NOT throw
    *    here or the count of survived execAsync calls would shift).
    */
-  it('4. persistent NPE across all 8 attempts propagates after MAX_ATTEMPTS', async () => {
-    const MAX_ATTEMPTS = 8;
+  it('4. persistent NPE across all 16 attempts propagates after MAX_ATTEMPTS', async () => {
+    const MAX_ATTEMPTS = 16;
     const dbs = Array.from({ length: MAX_ATTEMPTS }, () => makeMockDb());
     const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
     for (const d of dbs) {
@@ -242,9 +242,9 @@ describe('openAndInit — retry logic', () => {
       }),
     ).rejects.toThrow('NullPointerException');
 
-    // Drain all 7 growing backoffs between the 8 attempts:
-    // 100 + 200 + 300 + 400 + 500 + 600 + 700 = 2800 ms.
-    await jest.advanceTimersByTimeAsync(2800);
+    // Drain all 15 growing-but-capped backoffs between the 16 attempts.
+    // delay(i) = min(100 * i, 500): 100 + 200 + 300 + 400 + 500 + 500*10 = 6500 ms.
+    await jest.advanceTimersByTimeAsync(6500);
 
     // Confirm the rejection assertion (throws if it didn't reject as expected).
     await rejectAssertion;

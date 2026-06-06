@@ -15,11 +15,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { FormattedText } from '../components/FormattedText';
+import { MediaEditorModal } from '../components/MediaEditorModal';
 import { VideoBubble } from '../components/VideoBubble';
 import { AudioWaveform } from '../components/AudioWaveform';
 import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
 import { ImageViewerModal } from '../components/ImageViewerModal';
+import { MediaImage } from '../components/MediaImage';
 import { loadWallpaper, wallpaperBg, type WallpaperOption } from '../components/WallpaperPicker';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
@@ -102,8 +104,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const togglePin = useMessages((s) => s.togglePin);
   const pinnedMsg = useMessages((s) => s.pinnedMsg[contact.aegisId] ?? null);
   const appendMsg = useMessages((s) => s.append);
+  const setMediaUri = useMessages((s) => s.setMediaUri);
   const pendingMediaUri = useMessages((s) => s.pendingMediaUri);
   const setPendingMedia = useMessages((s) => s.setPendingMedia);
+  const pendingVideoUri = useMessages((s) => s.pendingVideoUri);
+  const setPendingVideo = useMessages((s) => s.setPendingVideo);
   const markRead = useMessages((s) => s.markRead);
   const saveDraft = useMessages((s) => s.saveDraft);
   // Ephemeral timer state — read live so the indicator updates immediately
@@ -116,6 +121,8 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   // Image staged for sending — shown as preview in composer until user taps Send
   const [stagedImageUri, setStagedImageUri] = useState<string | null>(null);
   const [imageProcessing, setImageProcessing] = useState(false);
+  // Image currently open in the media editor (crop/rotate/draw/text/caption).
+  const [editorUri, setEditorUri] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchActive, setSearchActive] = useState(false);
   const [searchHits, setSearchHits] = useState<string[]>([]);
@@ -269,32 +276,22 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     };
   }, [contact.aegisId]);
 
-  // When AttachSheet picks an image, compress it and stage it in the composer.
-  // The user sees a preview and taps the send button to actually send.
+  // When AttachSheet picks an image, open the in-app media editor (crop/rotate,
+  // draw, text, caption). The editor produces the final image + caption on send.
   useEffect(() => {
     if (!pendingMediaUri) return;
-    const uri = pendingMediaUri;
+    setEditorUri(pendingMediaUri);
     setPendingMedia(null);
-    setImageProcessing(true);
-    void (async () => {
-      try {
-        const { manipulateAsync, SaveFormat } = require('expo-image-manipulator') as typeof import('expo-image-manipulator');
-        // 400px wide, quality 0.55 → ~25-60 KB base64 — stays well within socket limit
-        const compressed = await manipulateAsync(
-          uri,
-          [{ resize: { width: 400 } }],
-          { compress: 0.55, format: SaveFormat.JPEG }
-        );
-        setStagedImageUri(compressed.uri);
-      } catch {
-        // Compression failed — use original but warn
-        setStagedImageUri(uri);
-      } finally {
-        setImageProcessing(false);
-      }
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingMediaUri]);
+  }, [pendingMediaUri, setPendingMedia]);
+
+  // A trimmed video staged by the editor → upload + send it.
+  useEffect(() => {
+    if (!pendingVideoUri) return;
+    const uri = pendingVideoUri;
+    setPendingVideo(null);
+    void sendVideo(uri);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingVideoUri]);
 
   async function handleCall(media: 'audio' | 'video') {
     if (contact.blocked) {
@@ -357,6 +354,66 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     }
   }
 
+  // Send an image produced by the media editor (crop/rotate/draw/text), plus an
+  // optional caption delivered as a following text message.
+  async function sendEditedImage(uri: string, caption: string) {
+    if (!identity) return;
+    setEditorUri(null);
+    try {
+      const id = Crypto.randomUUID();
+      await appendMsg({
+        id, chatId: contact.aegisId, direction: 'out', body: '',
+        createdAt: Date.now(), type: 'image', mediaUri: uri,
+      });
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      const blobUri = await encryptAndUploadMedia(uri, 'image/jpeg');
+      await setMediaUri(contact.aegisId, id, blobUri);
+      await sendMessage({
+        identity,
+        recipientAegisId: contact.aegisId,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext: `[image:${blobUri}]`,
+        skipLocalAppend: true,
+      });
+      if (caption) {
+        await sendMessage({
+          identity,
+          recipientAegisId: contact.aegisId,
+          recipientPublicKey: decodeBase64(contact.publicKeyB64),
+          plaintext: caption,
+        });
+      }
+      void SoundFX.msgSent();
+    } catch (e) {
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+    }
+  }
+
+  // Upload + send a trimmed video (from the native video editor).
+  async function sendVideo(uri: string) {
+    if (!identity) return;
+    try {
+      const id = Crypto.randomUUID();
+      await appendMsg({
+        id, chatId: contact.aegisId, direction: 'out', body: '',
+        createdAt: Date.now(), type: 'video', mediaUri: uri,
+      });
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      const blobUri = await encryptAndUploadMedia(uri, 'video/mp4');
+      await setMediaUri(contact.aegisId, id, blobUri);
+      await sendMessage({
+        identity,
+        recipientAegisId: contact.aegisId,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext: `[video:${blobUri}]`,
+        skipLocalAppend: true,
+      });
+      void SoundFX.msgSent();
+    } catch (e) {
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+    }
+  }
+
   async function handleSend() {
     if (!identity || sendingRef.current) return;
     const hasText = draft.trim().length > 0;
@@ -390,6 +447,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         });
         const { encryptAndUploadMedia } = require('../crypto/media');
         const blobUri = await encryptAndUploadMedia(imageUri, 'image/jpeg');
+        // Swap the ephemeral picker URI for the persistent encrypted blob ref so
+        // the sent image survives cache purges / restarts (resolveMedia decrypts
+        // the locally-persisted ciphertext on demand). Without this the sender's
+        // bubble goes gray once the picker cache is evicted.
+        await setMediaUri(contact.aegisId, id, blobUri);
         await sendMessage({
           identity,
           recipientAegisId: contact.aegisId,
@@ -962,6 +1024,30 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           </Pressable>
         ) : null}
 
+        {/* Unverified contact warning banner — full-width, ABOVE the composer
+            row. Must NOT live inside the composer (flexDirection:'row') or its
+            width:100% pushes the input controls off-screen. Non-blocking:
+            sending is always allowed. */}
+        {!contact.blocked && !contact.verified && (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              backgroundColor: `${t.warn}18`,
+              borderTopWidth: 1,
+              borderTopColor: `${t.warn}44`,
+            }}
+          >
+            <I.Lock size={13} color={t.warn} />
+            <Text style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.warn, lineHeight: 17 }}>
+              {i18nT('chat.unverifiedContact', 'Contacto no verificado. Verifica su identidad para maxima seguridad.')}
+            </Text>
+          </View>
+        )}
+
         {/* Composer */}
         <View
           style={[
@@ -993,27 +1079,6 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             </View>
           ) : (
             <>
-              {/* Unverified contact warning banner — non-blocking, send always allowed */}
-              {!contact.verified && (
-                <View
-                  style={{
-                    width: '100%',
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 8,
-                    paddingHorizontal: 14,
-                    paddingVertical: 8,
-                    backgroundColor: `${t.warn}18`,
-                    borderTopWidth: 1,
-                    borderTopColor: `${t.warn}44`,
-                  }}
-                >
-                  <I.Lock size={13} color={t.warn} />
-                  <Text style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.warn, lineHeight: 17 }}>
-                    {i18nT('chat.unverifiedContact', 'Contacto no verificado. Verifica su identidad para maxima seguridad.')}
-                  </Text>
-                </View>
-              )}
               {/* Reply banner */}
               {replyTo ? (
                 <View
@@ -1194,6 +1259,15 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         onSelectSticker={handleStickerSelect}
       />
       <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
+
+      <MediaEditorModal
+        t={t}
+        visible={editorUri !== null}
+        imageUri={editorUri}
+        captionPlaceholder={i18nT('chat.addCaption')}
+        onCancel={() => setEditorUri(null)}
+        onSend={({ uri, caption }) => { void sendEditedImage(uri, caption); }}
+      />
 
       <SchedulePicker
         visible={showScheduler}
@@ -1449,10 +1523,10 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
             opacity: queued ? 0.55 : pressed ? 0.9 : 1,
           })}
         >
-          <Image
-            source={{ uri: m.mediaUri }}
+          <MediaImage
+            uri={m.mediaUri}
+            accent={t.accent}
             style={{ width: 220, height: 180, backgroundColor: t.surface2 }}
-            resizeMode="cover"
           />
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
@@ -1661,10 +1735,11 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
   const previewUrl = urlMatch?.[0] ?? null;
 
   return (
-    <View style={{ alignItems: me ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+    <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
       <Pressable
         onLongPress={onLongPress}
         style={({ pressed }) => ({
+          maxWidth: '80%',
           backgroundColor: me ? t.bubbleOut : t.bubbleIn,
           paddingHorizontal: 13,
           paddingTop: quotedMsg ? 8 : 10,

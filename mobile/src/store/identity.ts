@@ -10,7 +10,7 @@ import { createIdentity, identityFromStored, type Identity } from '../crypto/ide
 import { loadIdentity, saveIdentity, clearIdentity } from '../db/local';
 import { ApiError } from '../api';
 import { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } from '../crypto/registration';
-import { generatePreKeys } from '../crypto/signal/x3dh';
+import { ensureDevicePreKeys } from '../crypto/signal/x3dh';
 import { SERVER_URL } from '../config';
 
 interface IdentityState {
@@ -55,8 +55,10 @@ async function publishToServer(identity: Identity): Promise<void> {
     const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
     const nonce = await solvePoW(challenge, difficulty);
 
-    // Generate fresh prekeys to upload alongside the identity.
-    const preKeys = generatePreKeys(identity);
+    // Reuse the device's single durable prekey set (creates it once). Using a
+    // single source of truth prevents concurrent registration routes from
+    // publishing different SPK/OPK sets than the secrets persisted on device.
+    const preKeys = await ensureDevicePreKeys(identity);
     const result = await uploadIdentityAndPrekeys(
       identity,
       {

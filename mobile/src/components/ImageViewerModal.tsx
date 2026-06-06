@@ -1,6 +1,7 @@
-import { Modal, View, Pressable, ScrollView, Image, Dimensions, StatusBar } from 'react-native';
+import { Modal, View, Pressable, ScrollView, Dimensions, StatusBar } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { I } from './icons';
+import { MediaImage } from './MediaImage';
 import type { Theme } from '../theme/vault';
 
 interface Props {
@@ -53,8 +54,9 @@ export function ImageViewerModal({ uri, onClose, t }: Props) {
           centerContent
         >
           {uri ? (
-            <Image
-              source={{ uri }}
+            <MediaImage
+              uri={uri}
+              accent={t.accent}
               style={{ width: SW, height: SH }}
               resizeMode="contain"
             />

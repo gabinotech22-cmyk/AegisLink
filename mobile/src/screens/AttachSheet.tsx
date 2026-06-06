@@ -21,6 +21,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const setPendingMedia = useMessages((s) => s.setPendingMedia);
+  const setPendingVideo = useMessages((s) => s.setPendingVideo);
   const [picking, setPicking] = useState(false);
 
   /**
@@ -115,11 +116,46 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     }
   }
 
+  // Pick a video from the gallery, open the native trimmer (react-native-video-trim),
+  // and stage the trimmed clip; the chat screen uploads + sends it.
+  async function handleVideo() {
+    if (picking) return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          i18nT('attachSheet.permissionRequired', 'Permission required'),
+          i18nT('attachSheet.galleryPermission', 'Access to gallery is required.')
+        );
+        return;
+      }
+      const result = await withPickingGuard(() =>
+        ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['videos'] as ImagePicker.MediaType[],
+          allowsEditing: false,
+          exif: false,
+        })
+      );
+      if (!result.canceled && result.assets[0]) {
+        const uri = result.assets[0].uri;
+        onBack(); // return to the chat; the native trimmer opens over it
+        const { trimVideo } = require('../utils/videoTrim') as typeof import('../utils/videoTrim');
+        const trimmed = await trimVideo(uri);
+        if (trimmed) setPendingVideo(trimmed);
+      }
+    } catch (e) {
+      Alert.alert(
+        i18nT('common.error', 'Error'),
+        `${i18nT('attachSheet.errorGallery', 'Could not open gallery')}: ${(e as Error).message}`
+      );
+    }
+  }
+
   const opts: { id: Parameters<Props['onPick']>[0]; icon: React.ReactNode; label: string; sub: string; accent?: boolean; handler?: () => void }[] = [
     { id: 'photo', icon: <I.Eye size={22} color={t.textDim} />, label: i18nT('attachSheet.photo', 'Photo'), sub: i18nT('attachSheet.gallery', 'Gallery'), handler: handlePhoto },
     { id: 'camera', icon: <I.Video size={22} color={t.textDim} />, label: i18nT('attachSheet.camera', 'Camera'), sub: i18nT('attachSheet.exifRemoved', 'EXIF removed'), handler: handleCamera },
     { id: 'file', icon: <I.Attach size={22} color={t.textDim} />, label: i18nT('attachSheet.file', 'File'), sub: i18nT('attachSheet.anyType', 'Any type') },
-    { id: 'video', icon: <I.Video size={22} color={t.textDim} />, label: i18nT('attachSheet.video', 'Video'), sub: i18nT('attachSheet.videoGallery', 'Gallery · E2EE') },
+    { id: 'video', icon: <I.Video size={22} color={t.textDim} />, label: i18nT('attachSheet.video', 'Video'), sub: i18nT('attachSheet.videoGallery', 'Gallery · E2EE'), handler: handleVideo },
     { id: 'voice', icon: <I.Mic size={22} color={t.accent} />, label: i18nT('attachSheet.audio', 'Voice note'), sub: i18nT('attachSheet.ephemeral', 'Ephemeral'), accent: true },
     { id: 'viewoncesend', icon: <I.EyeOff size={22} color={t.accent} />, label: i18nT('attachSheet.viewOnce', 'View once'), sub: i18nT('attachSheet.viewOnceSub', 'Non-savable'), accent: true },
     { id: 'scheduled', icon: <I.Timer size={22} color={t.textDim} />, label: i18nT('attachSheet.scheduled', 'Scheduled'), sub: i18nT('attachSheet.delayedSend', 'Delayed send') },

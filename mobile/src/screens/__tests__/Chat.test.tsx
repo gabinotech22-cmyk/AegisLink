@@ -69,10 +69,23 @@ jest.mock('../../theme/ThemeContext', () => ({
   }),
 }));
 
-jest.mock('react-native-gesture-handler', () => ({
-  GestureHandlerRootView: ({ children }: { children: React.ReactNode }) => children,
-  Swipeable: ({ children }: { children: React.ReactNode }) => children,
-}));
+// Inert mock incl. the modern Gesture builder API used by MediaEditorModal.
+jest.mock('react-native-gesture-handler', () => {
+  const chain = () => {
+    const g: Record<string, () => unknown> = {};
+    ['enabled', 'minDistance', 'onStart', 'onUpdate', 'onEnd', 'onChange', 'runOnJS',
+      'onBegin', 'onFinalize', 'hitSlop', 'simultaneousWithExternalGesture',
+      'requireExternalGestureToFail'].forEach((m) => { g[m] = () => g; });
+    return g;
+  };
+  const P = (props: { children?: React.ReactNode }) => (props && props.children != null ? props.children : null);
+  return {
+    __esModule: true,
+    Gesture: { Pan: chain, Pinch: chain, Tap: chain, Simultaneous: () => chain(), Race: () => chain(), Exclusive: () => chain() },
+    GestureDetector: P, GestureHandlerRootView: P, Swipeable: P,
+    State: {}, Directions: {},
+  };
+});
 
 jest.mock('react-native-svg', () => ({
   default: ({ children }: { children: React.ReactNode }) => children,

@@ -175,22 +175,18 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
       createdAt: identity.createdAt,
     });
 
-    // 5. Reset (not close) the new slot's connection before switching back.
-    //    closeAsync here would block the WAL flush for no reason; a simple
-    //    reset lets expo-sqlite reuse the shared connection next time.
-    resetDbConnection();
-
-    // 6. Restore the previous active slot.
-    setActiveDbSlot(prevSlot);
-
-    // 6. Register on relay (best-effort; failure does not block profile creation).
+    // 5. Register on relay (best-effort; failure does not block profile creation).
+    //    This MUST run while the NEW slot is still the active DB slot, so the
+    //    prekey secrets persist into the new profile's own database and
+    //    ensureDevicePreKeys reads/creates that profile's single source of
+    //    truth — not the previous slot's.
     try {
       const { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } = require('../crypto/registration') as typeof import('../crypto/registration');
-      const { generatePreKeys } = require('../crypto/signal/x3dh') as typeof import('../crypto/signal/x3dh');
+      const { ensureDevicePreKeys } = require('../crypto/signal/x3dh') as typeof import('../crypto/signal/x3dh');
       const { SERVER_URL } = require('../config') as typeof import('../config');
       const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
       const nonce = await solvePoW(challenge, difficulty);
-      const preKeys = generatePreKeys(identity);
+      const preKeys = await ensureDevicePreKeys(identity);
       await uploadIdentityAndPrekeys(
         identity,
         { signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey }, opkSecrets: preKeys.opkSecrets },
@@ -204,7 +200,15 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
       /* relay registration failed — will retry on next connect */
     }
 
-    // 7. Persist profile metadata.
+    // 6. Reset (not close) the new slot's connection before switching back.
+    //    closeAsync here would block the WAL flush for no reason; a simple
+    //    reset lets expo-sqlite reuse the shared connection next time.
+    resetDbConnection();
+
+    // 7. Restore the previous active slot.
+    setActiveDbSlot(prevSlot);
+
+    // 8. Persist profile metadata.
     const newProfile: Profile = {
       slotId,
       aegisId: identity.aegisId,

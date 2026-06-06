@@ -57,16 +57,24 @@ router.get('/credentials', turnLimiter, (req, res) => {
   const username = `${expiresAt}:${aegisId}`;
   const credential = createHmac('sha1', secret).update(username).digest('base64');
 
-  // TURN server URLs from environment — defaults to localhost for dev
-  const turnHost = process.env.TURN_HOST ?? 'localhost';
-  const turnPort = process.env.TURN_PORT ?? '3478';
-  const turnsPort = process.env.TURNS_PORT ?? '5349';
+  // TURN server URLs from environment — defaults to localhost for dev.
+  // `||` (not `??`) so an empty-string env var falls back to the default
+  // instead of producing a malformed URL like `turns:host:?transport=tcp`,
+  // which makes native libwebrtc reject the WHOLE ICE config and throw
+  // "Failed to initialize PeerConnection".
+  const turnHost = process.env.TURN_HOST || 'localhost';
+  const turnPort = process.env.TURN_PORT || '3478';
+  const turnsPort = process.env.TURNS_PORT || '';
 
   const urls: string[] = [
     `turn:${turnHost}:${turnPort}?transport=udp`,
     `turn:${turnHost}:${turnPort}?transport=tcp`,
-    `turns:${turnHost}:${turnsPort}?transport=tcp`,
   ];
+  // Only advertise TURNS (TLS) when a TLS port is actually configured.
+  // Emitting it with an empty port breaks the entire client RTCConfiguration.
+  if (turnsPort) {
+    urls.push(`turns:${turnHost}:${turnsPort}?transport=tcp`);
+  }
 
   res.json({ urls, username, credential, ttl: TTL_SECS });
 });

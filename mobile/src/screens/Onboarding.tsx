@@ -7,6 +7,7 @@ import {
   Easing,
   Pressable,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,7 +21,7 @@ import { useIdentity } from '../store/identity';
 import { fingerprintHex } from '../crypto/fingerprint';
 import { getOrCreateDID } from '../web3/did/DIDManager';
 import { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } from '../crypto/registration';
-import { generatePreKeys } from '../crypto/signal/x3dh';
+import { ensureDevicePreKeys } from '../crypto/signal/x3dh';
 import { RELAY_URL } from '../config';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
@@ -28,11 +29,13 @@ import type { SupportedLocale } from '../i18n';
 interface Props {
   onDone: () => void;
   onRestore: () => void;
+  /** True once the SQLite DB is confirmed open. Generate button is disabled until then. */
+  dbReady?: boolean;
 }
 
 type Step = 'welcome' | 'generating' | 'show';
 
-export function OnboardingScreen({ onDone, onRestore }: Props) {
+export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   const { t, dark, toggle } = useTheme();
   const { t: i18nT } = useTranslation();
   const { locale, setLocale } = useLocale();
@@ -114,7 +117,8 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
     try {
       const { challenge, difficulty } = await Promise.race([fetchPowChallenge(RELAY_URL), timeout]);
       const nonce = await solvePoW(challenge, difficulty);
-      const preKeys = generatePreKeys(identity);
+      // Single source of truth for the device's prekeys (created once, reused).
+      const preKeys = await ensureDevicePreKeys(identity);
       const result = await uploadIdentityAndPrekeys(
         identity,
         {
@@ -209,7 +213,22 @@ export function OnboardingScreen({ onDone, onRestore }: Props) {
           {i18nT('onboarding.lead')}
         </Text>
         <View style={{ gap: 10 }}>
-          <PrimaryButton t={t} label={i18nT('onboarding.generateBtn')} onPress={handleGenerate} />
+          {/* DB cold-start gate: button is disabled until SQLite is open.
+              The spinner is small and matches t.textDim so it doesn't alarm users. */}
+          {!dbReady && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 2 }}>
+              <ActivityIndicator size="small" color={t.textDim} />
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.5 }}>
+                {i18nT('onboarding.dbInitializing', 'Initializing secure storage…')}
+              </Text>
+            </View>
+          )}
+          <PrimaryButton
+            t={t}
+            label={i18nT('onboarding.generateBtn')}
+            onPress={handleGenerate}
+            disabled={!dbReady}
+          />
           <GhostButton
             t={t}
             label={i18nT('onboarding.restoreBtn')}

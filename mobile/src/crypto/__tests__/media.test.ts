@@ -179,4 +179,22 @@ describe('encryptAndUploadMedia', () => {
 
     expect(mockUploadAsync).toHaveBeenCalledTimes(3); // MAX_ATTEMPTS = 3
   });
+
+  // ── 7. Content-Type header (regression) ───────────────────────────────────────
+  // Without an explicit Content-Type, FileSystem.uploadAsync sends none and the
+  // relay's express.raw body parser (type-is) skips buffering → req.body is not a
+  // Buffer → HTTP 400 body_must_be_binary. This broke ALL media uploads (1:1 and
+  // groups, which share this path). Guard the header so it can't regress.
+  it('declares Content-Type application/octet-stream on the upload request', async () => {
+    setupHappyPath();
+
+    await encryptAndUploadMedia('file:///img.jpg', 'image/jpeg');
+
+    const [, , options] = mockUploadAsync.mock.calls[0] as [
+      string,
+      string,
+      { headers?: Record<string, string> },
+    ];
+    expect(options.headers?.['Content-Type']).toBe('application/octet-stream');
+  });
 });

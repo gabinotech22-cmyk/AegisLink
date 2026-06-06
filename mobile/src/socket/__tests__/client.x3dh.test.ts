@@ -30,6 +30,11 @@ jest.mock('../../db/local', () => ({
   }),
   saveContact: jest.fn(async () => undefined),
   getActiveDbSlot: () => 'self',
+  // Outbox persistence — flushOutbox() runs on auth:ok and drains these.
+  loadOutboxJobs: jest.fn(async () => []),
+  enqueueOutboxJob: jest.fn(async () => undefined),
+  deleteOutboxJob: jest.fn(async () => undefined),
+  incrementOutboxAttempts: jest.fn(async () => undefined),
 }));
 
 const mockLookupIdentity = jest.fn(async (aegisId: string) => ({
@@ -55,6 +60,7 @@ jest.mock('../../store/contacts', () => ({
       const patch = updater(mockContactsState);
       Object.assign(mockContactsState, patch);
     },
+    subscribe: jest.fn(() => () => undefined),
   },
 }));
 

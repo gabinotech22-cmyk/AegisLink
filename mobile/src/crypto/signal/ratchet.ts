@@ -28,6 +28,12 @@ export interface RatchetState {
     spkId: number;
     opkId: number | null;
   };
+
+  // Wall-clock time (ms) at which this session was established via X3DH. Used by
+  // the transport layer to grant a grace period so a stale, in-flight message on
+  // the OLD session cannot trigger a desync-recovery teardown of a freshly
+  // negotiated session. Not key material; safe to persist in cleartext-of-session.
+  createdAtMs?: number;
 }
 
 const ROOT_INFO = new TextEncoder().encode('AegisLinkRoot');
@@ -156,6 +162,7 @@ export function initRatchet(
     Nr: 0,
     PN: 0,
     MKSKIPPED: new Map(),
+    createdAtMs: Date.now(),
   };
 
   if (isAlice) {
@@ -259,49 +266,126 @@ function dhRatchet(state: RatchetState, header: { ratchetKey: Uint8Array; pn: nu
   zeroize(dhOut2);
 }
 
+/**
+ * Deep-copy a RatchetState so decryption can run speculatively and only be
+ * committed if the message authenticates. Copies every Uint8Array and the
+ * skipped-key Map so mutations on the clone never touch the live state.
+ */
+function cloneState(state: RatchetState): RatchetState {
+  const skipped = new Map<string, Uint8Array>();
+  for (const [k, v] of state.MKSKIPPED) skipped.set(k, new Uint8Array(v));
+  return {
+    DHs: {
+      publicKey: new Uint8Array(state.DHs.publicKey),
+      secretKey: new Uint8Array(state.DHs.secretKey),
+    },
+    DHr: state.DHr ? new Uint8Array(state.DHr) : null,
+    RK: new Uint8Array(state.RK),
+    CKs: state.CKs ? new Uint8Array(state.CKs) : null,
+    CKr: state.CKr ? new Uint8Array(state.CKr) : null,
+    Ns: state.Ns,
+    Nr: state.Nr,
+    PN: state.PN,
+    MKSKIPPED: skipped,
+    x3dhInit: state.x3dhInit,
+    createdAtMs: state.createdAtMs,
+  };
+}
+
+/**
+ * Copy every field of `src` into `dst` in place, zeroizing the byte buffers
+ * that `dst` previously held so no key material lingers. Used to atomically
+ * commit a speculative decryption back onto the live ratchet state.
+ */
+function commitState(dst: RatchetState, src: RatchetState): void {
+  zeroize(dst.DHs.secretKey);
+  if (dst.CKs) zeroize(dst.CKs);
+  if (dst.CKr) zeroize(dst.CKr);
+  zeroize(dst.RK);
+  for (const v of dst.MKSKIPPED.values()) zeroize(v);
+
+  dst.DHs = src.DHs;
+  dst.DHr = src.DHr;
+  dst.RK = src.RK;
+  dst.CKs = src.CKs;
+  dst.CKr = src.CKr;
+  dst.Ns = src.Ns;
+  dst.Nr = src.Nr;
+  dst.PN = src.PN;
+  dst.MKSKIPPED = src.MKSKIPPED;
+  dst.x3dhInit = src.x3dhInit;
+  dst.createdAtMs = src.createdAtMs;
+}
+
+/** Zeroize all key material held by a discarded speculative clone. */
+function discardState(s: RatchetState): void {
+  zeroize(s.DHs.secretKey);
+  if (s.CKs) zeroize(s.CKs);
+  if (s.CKr) zeroize(s.CKr);
+  zeroize(s.RK);
+  for (const v of s.MKSKIPPED.values()) zeroize(v);
+}
+
 export function ratchetDecrypt(
   state: RatchetState,
   header: { ratchetKey: Uint8Array; n: number; pn: number },
   ciphertext: Uint8Array,
   nonce: Uint8Array
 ): Uint8Array | null {
-  // Check skipped message keys
+  // Check skipped message keys. Only consume the stored key if the message
+  // actually authenticates — a forged ciphertext must not burn a real key.
   const mkKey = encodeBase64(header.ratchetKey) + ':' + header.n;
   if (state.MKSKIPPED.has(mkKey)) {
     const mk = state.MKSKIPPED.get(mkKey)!;
-    state.MKSKIPPED.delete(mkKey);
-    let pt;
-    try {
-      pt = nacl.secretbox.open(ciphertext, nonce, mk);
-    } finally {
-      // Forward secrecy: wipe the skipped MK from memory immediately after use,
-      // success OR failure (a failed MAC means the key is still consumed).
+    const pt = nacl.secretbox.open(ciphertext, nonce, mk);
+    if (pt) {
+      // Authenticated: consume and wipe the key (it must never be reused).
+      state.MKSKIPPED.delete(mkKey);
       zeroize(mk);
     }
+    // On MAC failure leave the skipped key in place; a later genuine message
+    // for this (DH, n) can still be decrypted. Returns null for the forgery.
     return pt;
   }
 
-  // Check if we need to perform a DH ratchet step
-  if (!state.DHr || !bytesEqual(header.ratchetKey, state.DHr)) {
-    trySkipMessageKeys(state, header.pn);
-    dhRatchet(state, header);
+  // Transactional ratchet advance: run the (possibly DH-ratcheting) state
+  // mutation on a CLONE, attempt to authenticate, and only commit back to the
+  // live state if decryption succeeds. This prevents a malicious relay from
+  // desynchronising the ratchet by injecting a message with a valid-looking
+  // header but a forged ciphertext (Signal Double Ratchet spec §3.4).
+  const work = cloneState(state);
+
+  let plaintext: Uint8Array | null = null;
+  try {
+    if (!work.DHr || !bytesEqual(header.ratchetKey, work.DHr)) {
+      trySkipMessageKeys(work, header.pn);
+      dhRatchet(work, header);
+    }
+
+    trySkipMessageKeys(work, header.n);
+
+    if (!work.CKr) throw new Error('No receiver chain key');
+    const { newCK, messageKey } = kdfChain(work.CKr);
+    const oldCKr = work.CKr;
+    work.CKr = newCK;
+    zeroize(oldCKr);
+    work.Nr += 1;
+
+    try {
+      plaintext = nacl.secretbox.open(ciphertext, nonce, messageKey);
+    } finally {
+      // Wipe message key right after secretbox.open — it must never be reused.
+      zeroize(messageKey);
+    }
+  } catch (e) {
+    discardState(work);
+    throw e;
   }
 
-  trySkipMessageKeys(state, header.n);
-
-  if (!state.CKr) throw new Error('No receiver chain key');
-  const { newCK, messageKey } = kdfChain(state.CKr);
-  const oldCKr = state.CKr;
-  state.CKr = newCK;
-  zeroize(oldCKr);
-  state.Nr += 1;
-
-  let plaintext;
-  try {
-    plaintext = nacl.secretbox.open(ciphertext, nonce, messageKey);
-  } finally {
-    // Wipe message key right after secretbox.open — it must never be reused.
-    zeroize(messageKey);
+  if (plaintext) {
+    commitState(state, work); // authenticated → adopt the advanced ratchet
+  } else {
+    discardState(work); // forged/corrupt → live state is untouched
   }
   return plaintext;
 }

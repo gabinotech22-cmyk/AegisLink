@@ -122,6 +122,11 @@ jest.mock('../crypto/signal/x3dh', () => ({
     opkSecrets: new Map(),
     oneTimePreKeys: [],
   })),
+  ensureDevicePreKeys: jest.fn(async () => ({
+    signedPreKey: { keyId: 1, secretKey: new Uint8Array(32), publicKeyB64: '', signatureB64: '' },
+    opkSecrets: new Map(),
+    oneTimePreKeys: [],
+  })),
 }));
 
 jest.mock('../config', () => ({ SERVER_URL: 'http://localhost:3000' }));

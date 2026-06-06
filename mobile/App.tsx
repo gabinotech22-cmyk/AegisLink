@@ -23,6 +23,7 @@ import { ChatScreen } from './src/screens/Chat';
 import { GroupChatScreen } from './src/screens/GroupChat';
 import { AddContactScreen } from './src/screens/AddContact';
 import { ScanQRScreen } from './src/screens/ScanQR';
+import { VerifyScreen } from './src/screens/Verify';
 import { ProfileScreen } from './src/screens/Profile';
 import { NotificationsScreen } from './src/screens/Notifications';
 import { BackupScreen } from './src/screens/Backup';
@@ -64,6 +65,7 @@ import { useProfiles } from './src/store/profiles';
 
 import { useCall } from './src/store/call';
 import { connect as connectSocket, disconnect as disconnectSocket } from './src/socket/client';
+import { warmUpDb, dbReadyPromise } from './src/db/local';
 import { useConnection } from './src/store/connection';
 import { isPicking } from './src/utils/pickingGuard';
 import { attachCallHandlers, acceptCall, endCall } from './src/socket/calls';
@@ -133,6 +135,7 @@ type PushRoute =
   | { name: 'contact'; contact: StoredContact; keyChanged?: boolean }
   | { name: 'add' }
   | { name: 'scan' }
+  | { name: 'verify'; contactId?: string }
   | { name: 'profile' }
   | { name: 'notifs' }
   | { name: 'backup' }
@@ -211,6 +214,8 @@ function Shell() {
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   // When true, show BackupScreen inside the onboarding flow (restore path)
   const [onboardingRestore, setOnboardingRestore] = useState(false);
+  // true once the SQLite DB connection has been confirmed open (cold-start gate)
+  const [dbReady, setDbReady] = useState(false);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -307,6 +312,15 @@ function Shell() {
   }, []);
 
   useEffect(() => {
+    // ── Cold-start DB warm-up ────────────────────────────────────────────────
+    // Kick off the SQLite connection as early as possible so that the JSI bridge
+    // NPE window (expo-sqlite New Architecture, Android x86) is absorbed during
+    // the loading splash — BEFORE the user can tap "Generate my identity".
+    // warmUpDb() is idempotent: subsequent calls on the same slot are no-ops.
+    warmUpDb();
+    // Resolve the UI gate (dbReady) as soon as the DB is genuinely open.
+    void dbReadyPromise.then(() => setDbReady(true));
+
     void hydrate();
     void hydratePrefs();
     // Startup: prune messages that expired while the app was closed,
@@ -316,6 +330,31 @@ function Shell() {
     const { useMessages: msgStore } = require('./src/store/messages');
     void (msgStore.getState().loadAllEphemeralTimers as () => Promise<void>)();
   }, [hydrate, hydratePrefs]);
+
+  // Eventual-consistency hydration for groups + contacts.
+  //
+  // The Home/Groups screens hydrate their stores on mount, but that is a
+  // one-shot: if a load ever returns empty (DB slot not ready on first mount,
+  // a transient withDb NPE-retry miss, etc.) the list stays empty until some
+  // unrelated event (e.g. an incoming group message) re-hydrates it — which is
+  // exactly the "group vanished from the list but reappeared on a new message"
+  // symptom. Re-hydrating once the identity/DB slot is guaranteed ready, and
+  // again every time the app returns to foreground, makes the lists
+  // self-correct without relying on which screen happens to be mounted.
+  useEffect(() => {
+    if (!hydrated || !identity) return;
+    const rehydrate = () => {
+      const { useGroups } = require('./src/store/groups');
+      const { useContacts } = require('./src/store/contacts');
+      void useGroups.getState().hydrate().catch(() => {});
+      void useContacts.getState().hydrate().catch(() => {});
+    };
+    rehydrate();
+    const sub = AppState.addEventListener('change', (s: AppStateStatus) => {
+      if (s === 'active') rehydrate();
+    });
+    return () => sub.remove();
+  }, [hydrated, identity]);
 
   // Enforce screenshot / screen-recording block
   useEffect(() => {
@@ -688,6 +727,7 @@ function Shell() {
       <OnboardingScreen
         onDone={() => { setShowOnboarding(false); setTab('home'); }}
         onRestore={() => setOnboardingRestore(true)}
+        dbReady={dbReady}
       />
     );
   }
@@ -813,6 +853,7 @@ function Shell() {
               }, 400);
             }}
             onEphemeral={() => push({ name: 'ephemeral', chatId: top.contact.aegisId })}
+            onVerify={() => push({ name: 'verify', contactId: top.contact.aegisId })}
           />
         );
       case 'add':
@@ -833,6 +874,14 @@ function Shell() {
               setStack([]);
               push({ name: 'chat', contact: c });
             }}
+          />
+        );
+      case 'verify':
+        return (
+          <VerifyScreen
+            onBack={pop}
+            onScan={() => push({ name: 'scan' })}
+            contactId={top.contactId}
           />
         );
       case 'profile':

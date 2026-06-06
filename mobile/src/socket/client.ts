@@ -8,6 +8,7 @@ import { SERVER_URL, ONION_URL } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope } from '../crypto/messaging';
 import type { Identity } from '../crypto/identity';
+import { deriveAegisId } from '../crypto/identity';
 import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
@@ -16,10 +17,20 @@ import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SK
 import {
   loadRatchetSession,
   saveRatchetSession,
+  deleteContactRatchetSession,
   enqueueOutboxJob,
   loadOutboxJobs,
   deleteOutboxJob,
   incrementOutboxAttempts,
+  saveSpkSecret,
+  loadSpkSecret,
+  loadLatestSpkSecret,
+  deleteSpkSecret,
+  saveOpkSecret,
+  loadOpkSecret,
+  deleteOpkSecret,
+  setSpkKeyId,
+  getSpkKeyId,
   type OutboxJob,
 } from '../db/local';
 
@@ -35,6 +46,21 @@ const SECURE_OPK_IDS_KEY = () => `aegis.${getSlotPrefix()}opkIds.json`;
 const opkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}opkSecret.${keyId}`;
 const spkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}spkSecret.${keyId}`;
 
+/**
+ * [RDIAG] TEMPORARY — short, non-reversible fingerprint of a derived key (first
+ * 8 hex of SHA-256). Used ONLY to compare that Alice and Bob land on the SAME
+ * X3DH root key on-device. It is a one-way hash of the key, never the key
+ * itself, so logging it does not leak key material. Remove with the other
+ * [RDIAG] instrumentation once the fresh-session desync is confirmed fixed.
+ */
+function rootKeyFp(rk: Uint8Array): string {
+  const { sha256 } = require('@noble/hashes/sha256') as typeof import('@noble/hashes/sha256');
+  const digest = sha256(rk);
+  let hex = '';
+  for (let i = 0; i < 4; i++) hex += digest[i].toString(16).padStart(2, '0');
+  return hex;
+}
+
 interface WireSealedEnvelope {
   id: string;
   to: string;
@@ -42,6 +68,12 @@ interface WireSealedEnvelope {
   ciphertext: string;
   nonce: string;
   createdAt?: number;
+  /**
+   * Sender's X25519 public key (base64). Present on online deliveries and on
+   * queued first-contact (`init`) drains, letting the recipient derive the
+   * sender aegisId and decrypt a first message even when offline at send time.
+   */
+  senderPublicKeyB64?: string;
   /**
    * Multi-device "self-encrypted copy" marker. Set by the sender when an
    * envelope is addressed to its OWN aegisId so this user's other devices
@@ -82,6 +114,15 @@ const profiledContacts = new Set<string>();
 // blob in every multicast envelope. groupAvatarColor (hex string) is always
 // included — it is only 7 bytes and requires no read from disk.
 const profiledGroupImages = new Set<string>();
+
+/**
+ * Forget that a group's avatar was already sent this session, so the next group
+ * message re-includes the (updated) avatar data URI. Called after the admin
+ * changes the group avatar so members pick up the change immediately.
+ */
+export function forgetGroupAvatarSent(groupId: string): void {
+  profiledGroupImages.delete(groupId);
+}
 
 // ── Persistent outbox (replaces in-memory offlineQueue + groupOfflineQueue) ───
 // Jobs are persisted in SQLite via enqueueOutboxJob / loadOutboxJobs so they
@@ -163,6 +204,12 @@ async function flushOutbox(identity: Identity): Promise<void> {
     try {
       const recipientPublicKey = decodeBase64(job.recipientPubkeyB64);
       const session = await getOrCreateSession(job.recipientAegisId, job.recipientPubkeyB64, identity);
+      // X3DH-initial phase: the recipient may not have us as a contact yet. Mark
+      // the envelope `init` so that — if it has to be queued because the
+      // recipient is offline — the relay attaches our public key to the queued
+      // copy. Without this, the first message to a new contact delivered from
+      // the offline queue is undecryptable (no sender info) and lost forever.
+      const isInit = !!session.x3dhInit;
       const { envelope, newState } = encryptMessage(
         job.payload,
         identity.aegisId,
@@ -174,7 +221,7 @@ async function flushOutbox(identity: Identity): Promise<void> {
       await new Promise<void>((resolve, reject) => {
         socket!.emit(
           'envelope',
-          { id: job.msgId, to: job.recipientAegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 },
+          { id: job.msgId, to: job.recipientAegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64, ...(isInit ? { init: true } : {}) },
           (ack: { ok: boolean; error?: string } | undefined) => {
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
             else resolve();
@@ -261,17 +308,29 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   if (!socket) return;
 
   // SPK keyId must be monotonic per Signal X3DH spec — read the previous
-  // keyId from SecureStore and increment. On first run (no stored keyId)
-  // start at 1. The previous SPK secret is deleted after the new one is
-  // persisted so old session material doesn't linger in Keychain/Keystore.
+  // keyId and increment. On first run (no stored keyId) start at 1. The
+  // previous SPK secret is retained for a grace window (see below) so an
+  // in-flight init built from the previous bundle stays decryptable.
+  //
+  // The DB (durable, encrypted-at-rest) is now the SOURCE OF TRUTH for the
+  // keyId; SecureStore is only a secondary cache. Reading the keyId from the
+  // DB first means a Keystore wipe can no longer reset the counter and collide
+  // keyIds with a SPK whose secret the peer already fetched.
   let prevSpkKeyId: number | null = null;
   try {
-    const stored = await SecureStore.getItemAsync(SECURE_SPK_KEYID_KEY());
-    if (stored) {
-      const parsed = parseInt(stored, 10);
-      if (Number.isFinite(parsed) && parsed > 0) prevSpkKeyId = parsed;
-    }
+    prevSpkKeyId = await getSpkKeyId();
   } catch {/* treat as first run */}
+  if (prevSpkKeyId === null) {
+    // Fall back to the legacy SecureStore keyId for installs that pre-date the
+    // DB store, so we keep incrementing monotonically rather than restarting at 1.
+    try {
+      const stored = await SecureStore.getItemAsync(SECURE_SPK_KEYID_KEY());
+      if (stored) {
+        const parsed = parseInt(stored, 10);
+        if (Number.isFinite(parsed) && parsed > 0) prevSpkKeyId = parsed;
+      }
+    } catch {/* treat as first run */}
+  }
   const nextSpkKeyId = (prevSpkKeyId ?? 0) + 1;
 
   const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId);
@@ -282,26 +341,77 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   // secrets into a single JSON blob (~5KB) used to silently fail and break
   // X3DH receiver-side decryption. Store each OPK secret as its own item
   // and keep a separate index of active keyIds for cleanup.
-  try {
-    // Persist the new SPK secret under both the legacy single-slot key
-    // (used by decryptAndAppend for current-session reads) and a
-    // per-keyId slot. Write the per-keyId slot first so the legacy slot
-    // always points at a complete secret.
-    const newSecretB64 = encodeBase64(preKeys.signedPreKey.secretKey);
-    await SecureStore.setItemAsync(spkSecretKey(nextSpkKeyId), newSecretB64);
-    await SecureStore.setItemAsync(SECURE_SPK_SECRET_KEY(), newSecretB64);
-    await SecureStore.setItemAsync(SECURE_SPK_KEYID_KEY(), String(nextSpkKeyId));
+  // Store X3DH private prekeys (SPK/OPK secrets) with the same hardware-backed
+  // keychain accessibility as the identity keys (see db/local.ts). AFTER_FIRST_UNLOCK
+  // is required for Android 14 StrongBox compatibility — without it setItemAsync can
+  // throw a native NPE on first write on some devices. Aligning prevents the same
+  // crash the identity-key path was fixed for, and keeps the secrets unreadable
+  // while the device is locked at rest.
+  const secureOpts = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
 
-    // Forward secrecy: wipe the previous SPK secret from SecureStore once
-    // the new one is fully persisted. Skip if there was no previous keyId
-    // (first arranque) or it matches the new keyId (paranoia guard).
-    if (prevSpkKeyId !== null && prevSpkKeyId !== nextSpkKeyId) {
+  const newSecretB64 = encodeBase64(preKeys.signedPreKey.secretKey);
+
+  // ── PRIMARY durable persistence: SQLite (encrypted at rest) ────────────────
+  // Write the SPK secret + keyId + every OPK secret to the DB FIRST. The DB is
+  // the source of truth. If the SPK secret cannot be persisted-and-read-back,
+  // we MUST NOT publish its public key (the invariant). We retry the SPK write
+  // once before giving up.
+  const persistSpkToDb = async (): Promise<boolean> => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        await SecureStore.deleteItemAsync(spkSecretKey(prevSpkKeyId));
-      } catch {/* best-effort; key may not exist on pre-rotation installs */}
+        await saveSpkSecret(nextSpkKeyId, newSecretB64);
+        const back = await loadSpkSecret(nextSpkKeyId);
+        if (back === newSecretB64) return true;
+      } catch (e) {
+        if (__DEV__) console.warn('[socket] SPK secret DB write attempt failed', attempt, e);
+      }
+    }
+    return false;
+  };
+
+  const spkDbOk = await persistSpkToDb();
+  if (!spkDbOk) {
+    // INVARIANT: never publish a SPK whose secret we cannot read back. Abort the
+    // upload entirely so the peer never fetches a bundle we cannot complete.
+    console.warn(`[RDIAG] prekey-store ABORT spkId=${nextSpkKeyId} dbReadback=NULL — NOT emitting prekeys:upload`);
+    throw new Error(`uploadPreKeys: could not persist SPK secret for keyId ${nextSpkKeyId} — refusing to publish`);
+  }
+
+  // Persist the keyId (durable counter) and every OPK secret to the DB.
+  try {
+    await setSpkKeyId(nextSpkKeyId);
+  } catch (e) {
+    if (__DEV__) console.warn('[socket] could not persist SPK keyId to DB', e);
+  }
+  for (const [keyId, secret] of preKeys.opkSecrets.entries()) {
+    try {
+      await saveOpkSecret(keyId, encodeBase64(secret));
+    } catch (e) {
+      if (__DEV__) console.warn('[socket] could not persist OPK secret to DB', keyId, e);
+    }
+  }
+
+  // Forward secrecy: drop the SPK secret from TWO rotations ago (kept the
+  // immediately-previous one for in-flight inits — see note below).
+  const staleSpkKeyId = nextSpkKeyId - 2;
+  if (staleSpkKeyId >= 1) {
+    try { await deleteSpkSecret(staleSpkKeyId); } catch {/* best-effort */}
+  }
+
+  // ── SECONDARY cache: SecureStore (best-effort; DB is authoritative) ─────────
+  // We still mirror to SecureStore so legacy read paths and other code keep
+  // working, but a failure here is NON-FATAL because the DB already holds the
+  // secrets. This removes the old failure mode where a silent Keystore bulk
+  // write failure left us publishing a SPK whose secret we couldn't read.
+  try {
+    await SecureStore.setItemAsync(spkSecretKey(nextSpkKeyId), newSecretB64, secureOpts);
+    await SecureStore.setItemAsync(SECURE_SPK_SECRET_KEY(), newSecretB64, secureOpts);
+    await SecureStore.setItemAsync(SECURE_SPK_KEYID_KEY(), String(nextSpkKeyId), secureOpts);
+
+    if (staleSpkKeyId >= 1) {
+      try { await SecureStore.deleteItemAsync(spkSecretKey(staleSpkKeyId)); } catch {/* best-effort */}
     }
 
-    // Clean up any previously stored OPK secrets that aren't in this batch.
     try {
       const prevIdsJson = await SecureStore.getItemAsync(SECURE_OPK_IDS_KEY());
       if (prevIdsJson) {
@@ -316,15 +426,20 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
     } catch {/* ignore */}
 
     for (const [keyId, secret] of preKeys.opkSecrets.entries()) {
-      await SecureStore.setItemAsync(opkSecretKey(keyId), encodeBase64(secret));
+      await SecureStore.setItemAsync(opkSecretKey(keyId), encodeBase64(secret), secureOpts);
     }
     await SecureStore.setItemAsync(
       SECURE_OPK_IDS_KEY(),
-      JSON.stringify(Array.from(preKeys.opkSecrets.keys()))
+      JSON.stringify(Array.from(preKeys.opkSecrets.keys())),
+      secureOpts
     );
   } catch (err) {
-    if (__DEV__) console.error('[socket] Failed to persist prekey secrets to SecureStore:', err);
+    // Non-fatal: the DB is the durable source of truth.
+    if (__DEV__) console.warn('[socket] SecureStore prekey cache write failed (DB is authoritative):', err);
   }
+
+  // [RDIAG] confirm the SPK secret is readable back from the DURABLE store.
+  console.warn(`[RDIAG] prekey-store DONE spkId=${nextSpkKeyId} dbReadback=OK opkCount=${preKeys.opkSecrets.size}`);
 
   return new Promise<void>((resolve, reject) => {
     socket!.emit('prekeys:upload', {
@@ -436,10 +551,13 @@ export function connect(identity: Identity): Socket {
       try {
         const { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } = await import('../crypto/registration');
         const { SERVER_URL } = await import('../config');
-        const { generatePreKeys } = await import('../crypto/signal/x3dh');
+        const { ensureDevicePreKeys } = await import('../crypto/signal/x3dh');
         const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
         const nonce = await solvePoW(challenge, difficulty);
-        const preKeys = generatePreKeys(identity);
+        // Reuse the device's single durable prekey set so this re-registration
+        // republishes the SAME public bundle that matches the persisted secrets,
+        // instead of racing publishToServer with a different freshly-generated set.
+        const preKeys = await ensureDevicePreKeys(identity);
         const result = await uploadIdentityAndPrekeys(
           identity,
           {
@@ -554,8 +672,30 @@ export function connect(identity: Identity): Socket {
     }
 
     // Push our profile (name + avatar as data URI) to all contacts on every connect
-    // so they always have our latest image even if they were offline when we updated it
-    void broadcastProfileUpdate(identity);
+    // so they always have our latest image even if they were offline when we updated it.
+    // Guard against a cold-start race: useContacts.hydrate() is async and may not have
+    // finished by the time auth:ok fires. If contacts is still empty (loading=true) we
+    // subscribe to the store and broadcast as soon as the first non-loading snapshot
+    // arrives with at least one contact, then unsubscribe immediately.
+    ((): void => {
+      const contactsState = useContacts.getState();
+      if (!contactsState.loading && contactsState.contacts.length > 0) {
+        void broadcastProfileUpdate(identity);
+        return;
+      }
+      if (contactsState.contacts.length > 0) {
+        // Already has contacts but loading flag is still set — safe to broadcast now
+        void broadcastProfileUpdate(identity);
+        return;
+      }
+      // Contacts not loaded yet — wait for first hydrated snapshot
+      const unsub = useContacts.subscribe((state) => {
+        if (!state.loading) {
+          unsub();
+          void broadcastProfileUpdate(identity);
+        }
+      });
+    })();
   });
 
   socket.on('msg:delivered', ({ msgId, to }: { msgId: string; to: string }) => {
@@ -591,6 +731,7 @@ export function connect(identity: Identity): Socket {
   });
 
   socket.on('envelope', async (env: WireSealedEnvelope) => {
+    console.warn(`[RDIAG] envelope RECV from=${env.from ?? '(none)'} hasSenderPub=${!!env.senderPublicKeyB64} self=${!!env.selfCopy}`);
     await handleIncoming(env, identity);
   });
 
@@ -766,6 +907,49 @@ export function emitDeleteChannelMsg(payload: {
   socket?.emit('channel:delete_msg', payload);
 }
 
+// ─── Per-peer session-establishment lock ─────────────────────────────────────
+//
+// GLARE RACE (first-contact divergence): when two peers add each other almost
+// simultaneously, the HIGHER-aegisId peer (canonical initiator) may build+save
+// its OWN initiator session in getOrCreateSession AND, ~100 ms later, process
+// the LOWER peer's inbound init in decryptAndAppend. If the inbound init is
+// processed BEFORE the initiator's own session is persisted, decryptAndAppend's
+// loadRatchetSession returns null, the glare gate (which required existingJson)
+// is skipped, and the higher peer ADOPTS the lower's init → the two devices end
+// on different root keys → messages never decrypt.
+//
+// Fix: serialise ALL session-establishment work per contact aegisId. The
+// create-init+save path (getOrCreateSession) and the inbound-init adoption path
+// (decryptAndAppend) both run under withSessionLock(contactAegisId, …), so
+// "mint+persist my init" can never interleave with "adopt their init". By the
+// time the higher peer processes the lower's init, its own session is already
+// persisted → the existing glare gate fires and ours wins deterministically.
+//
+// The lock is a simple per-key promise chain: each acquirer awaits the previous
+// holder's settlement before running, then becomes the tail. It never holds
+// across network round-trips that aren't part of session establishment.
+const sessionLocks = new Map<string, Promise<unknown>>();
+
+async function withSessionLock<T>(aegisId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = sessionLocks.get(aegisId) ?? Promise.resolve();
+  // The stored tail is a never-rejecting sequencing promise: the next acquirer
+  // chains off it regardless of whether our critical section resolved or threw,
+  // so one failed section cannot reject (or stall) the next.
+  let release!: () => void;
+  const gate = new Promise<void>((res) => { release = res; });
+  sessionLocks.set(aegisId, prev.then(() => gate, () => gate));
+  // Wait for the previous holder to settle before entering the section.
+  await prev.catch(() => undefined);
+  try {
+    return await fn();
+  } finally {
+    release();
+    // Best-effort cleanup: if no one chained after us, drop the entry so the map
+    // does not grow unbounded for one-shot contacts.
+    if (sessionLocks.get(aegisId) === undefined) sessionLocks.delete(aegisId);
+  }
+}
+
 async function getOrCreateSession(contactAegisId: string, contactPublicKeyB64: string, identity: Identity): Promise<RatchetState> {
   const existingJson = await loadRatchetSession(contactAegisId);
   if (existingJson) {
@@ -861,6 +1045,16 @@ async function getOrCreateSession(contactAegisId: string, contactPublicKeyB64: s
   bundle.identityKeyB64 = contactPublicKeyB64;
 
   const x3dh = performX3DH(identity, bundle);
+
+  // [RDIAG] TEMPORARY (no __DEV__ guard). Alice side: log the SPK/OPK ids she
+  // committed to from the peer's bundle and a short fingerprint of the derived
+  // root key. Compare against Bob's `[RDIAG] x3dh-recv` line: if the fp differs
+  // the two derived DIFFERENT root keys (e.g. SPK rotated under Bob, or OPK
+  // present on Alice but absent on Bob → DH4 omitted asymmetrically).
+  console.warn(
+    `[RDIAG] x3dh-send me=${identity.aegisId} peer=${contactAegisId} spkId=${bundle.signedPreKey.keyId} opkId=${bundle.oneTimePreKey ? bundle.oneTimePreKey.keyId : 'none'} rkFp=${rootKeyFp(x3dh.rootKey)}`,
+  );
+
   const ratchetState = initRatchet(x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
   
   // Attach Alice's Ephemeral Key and Bob's PreKey IDs for Bob's X3DH receiver calculation
@@ -872,6 +1066,251 @@ async function getOrCreateSession(contactAegisId: string, contactPublicKeyB64: s
   
   await saveSessionState(contactAegisId, ratchetState);
   return ratchetState;
+}
+
+// ─── Ratchet desync auto-recovery ────────────────────────────────────────────
+//
+// Two devices whose Double Ratchet sessions have permanently desynchronised
+// (e.g. an emulator userdata rollback) can never decrypt each other's normal
+// messages again, because normal messages never re-run X3DH. We detect this
+// and proactively re-handshake.
+//
+// SECURITY GATE: recovery only fires when the OUTER sealed-sender box has
+// already authenticated the message as coming from the real contact (NaCl box
+// opened with the contact's identity pubkey + our secret). A relay cannot forge
+// that, so "outerBox OK + existing session + no x3dh header + ratchetDecrypt
+// null" is a non-forgeable desync signal. We never recover on an outer-box
+// failure (that could be an attacker), and we never reuse old key material — the
+// replacement session is a full fresh X3DH, preserving forward secrecy.
+//
+// ANTI-STORM: stale messages still in flight on the OLD session would keep
+// failing after a reset and could re-trigger recovery forever. We guard with:
+//   1. A per-contact cooldown: at most one recovery attempt per window.
+//   2. A grace period: never tear down a session that was established < grace
+//      ago, so a late message on the previous session can't kill the new one.
+const RECOVERY_COOLDOWN_MS = 60_000;
+const SESSION_GRACE_MS = 30_000;
+const lastRecoveryAttemptMs = new Map<string, number>();
+
+/**
+ * Attempt automatic recovery from a permanently-desynchronised ratchet session.
+ * Caller MUST have already authenticated the sender via the outer sealed-sender
+ * box. Returns true if a recovery handshake was initiated (caller should treat
+ * the failed message as consumed/dropped), false if recovery was suppressed by
+ * the cooldown or grace guards.
+ */
+// ── Glare resolution (deterministic re-handshake winner) ─────────────────────
+//
+// When BOTH peers detect desync at nearly the same instant (e.g. both drain old
+// queued messages on startup), both would tear down their session and both run a
+// fresh X3DH as Alice. Each then adopts the OTHER's init (the x3dh branch always
+// overwrote), so the two devices end on DIFFERENT sessions and stay desynced.
+//
+// We break the tie deterministically by aegisId, lexicographic compare:
+//   - The peer with the HIGHER aegisId is the canonical INITIATOR. On desync it
+//     deletes its session, runs a fresh X3DH and sends a recovery `init`, and
+//     IGNORES any incoming recovery init from the lower peer (glare gate below).
+//   - The peer with the LOWER aegisId is the NON-INITIATOR. On desync it does
+//     NOT delete its session and does NOT build a new init (doing so saved a
+//     session of its own that CLOBBERED the higher peer's init it was meant to
+//     adopt — the infinite-loop bug). Instead it sends a NUDGE: a normal ratchet
+//     message over its existing (desynced) session. That nudge fails to decrypt
+//     on the higher peer, triggering the higher peer's initiator recovery, whose
+//     init the lower peer then ADOPTS. No session of the lower peer's is ever
+//     saved to be clobbered, so they converge deterministically.
+//
+// Both peers therefore converge on the single session whose Alice == higher
+// aegisId. First-contact (no prior session) is unaffected: adoption gating only
+// applies when a recovery is in progress for that contact.
+function amInitiatorFor(myAegisId: string, peerAegisId: string): boolean {
+  // Strict, stable lexicographic order. Equality is impossible (distinct peers).
+  return myAegisId > peerAegisId;
+}
+
+/**
+ * Per-contact marker: this contact is currently "in recovery" — we recently tore
+ * down its session because of a detected desync. While set, decryptAndAppend
+ * applies the deterministic glare-resolution rule when an X3DH init arrives.
+ * Cleared once we successfully adopt/keep a converged session, or after the
+ * recovery window elapses.
+ */
+const inRecoveryUntilMs = new Map<string, number>();
+const RECOVERY_WINDOW_MS = 90_000;
+/**
+ * After detecting a desync we send a recovery X3DH-init and a lower-aegisId peer
+ * defers its outbound messages (glare avoidance). In the ASYMMETRIC case the
+ * other peer simply ADOPTS our init and never sends one back, so no inbound init
+ * ever arrives to trigger our outbox flush — the deferred messages would be
+ * stuck forever. This short grace lets a genuine glare init arrive first
+ * (clearing recovery via the adoption path); if none does, we treat our own
+ * fresh session as the converged one, clear recovery, and flush.
+ */
+const RECOVERY_FALLBACK_MS = 6_000;
+
+function isInRecovery(aegisId: string): boolean {
+  const until = inRecoveryUntilMs.get(aegisId);
+  return typeof until === 'number' && Date.now() < until;
+}
+
+/**
+ * Encrypt a tiny profile_update over the peer's CURRENT (possibly desynced)
+ * ratchet session and emit it WITHOUT running X3DH. This is the non-initiator's
+ * "nudge": it advances/rotates the existing session (no x3dhInit ⇒ no `x3dh`
+ * header on the wire) so the message is a NORMAL ratchet message. The initiator
+ * peer, decrypting it against ITS own existing session, fails ratchetDecrypt and
+ * — because it is the canonical initiator — runs tryRecoverDesync and sends a
+ * fresh X3DH init that we then ADOPT. Crucially we never delete our session and
+ * never build/save a brand-new initiator session here, so we cannot clobber the
+ * initiator's session that we are about to adopt.
+ *
+ * Returns true if a nudge was emitted, false if there was no existing session to
+ * nudge over (in which case the caller has nothing to do but wait/adopt).
+ */
+async function sendNudgeOverExistingSession(
+  contact: { aegisId: string; publicKeyB64: string },
+  identity: Identity,
+): Promise<boolean> {
+  if (!socket || !connected || !authenticated) return false;
+  const existingJson = await loadRatchetSession(contact.aegisId);
+  if (!existingJson) return false; // nothing to nudge over — just wait/adopt
+  let session: RatchetState;
+  try {
+    const s = JSON.parse(existingJson);
+    s.RK = reviveBytes(s.RK);
+    s.CKs = reviveBytes(s.CKs);
+    s.CKr = reviveBytes(s.CKr);
+    s.DHr = reviveBytes(s.DHr);
+    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
+    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
+    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    session = s as RatchetState;
+  } catch {
+    return false;
+  }
+  // Never let a stale x3dhInit ride along — a nudge must be a plain ratchet
+  // message so it lands on the initiator's EXISTING session and fails decrypt
+  // (the desync signal), rather than being adopted as a fresh handshake.
+  delete session.x3dhInit;
+  try {
+    const { useIdentity } = require('../store/identity');
+    const idState = useIdentity.getState();
+    const payload = JSON.stringify({
+      type: 'profile_update',
+      senderName: idState.displayName,
+      senderColor: idState.avatarColor,
+      senderStatus: idState.profileStatus,
+    });
+    const recipientPub = decodeBase64(contact.publicKeyB64);
+    const { envelope, newState } = encryptMessage(payload, identity.aegisId, recipientPub, identity.secretKey, session);
+    await saveSessionState(contact.aegisId, newState);
+    socket!.emit('envelope', {
+      id: Crypto.randomUUID(),
+      to: contact.aegisId,
+      ciphertext: envelope.ciphertextB64,
+      nonce: envelope.nonceB64,
+    });
+    console.warn(`[RDIAG] nudge sent me=${identity.aegisId} -> peer=${contact.aegisId}`);
+    return true;
+  } catch (e) {
+    if (__DEV__) console.warn('[socket] desync nudge send failed:', (e as Error).message);
+    return false;
+  }
+}
+
+async function tryRecoverDesync(
+  contact: { aegisId: string; publicKeyB64: string },
+  existingState: RatchetState | null,
+  identity: Identity,
+  force = false,
+): Promise<boolean> {
+  const now = Date.now();
+
+  if (!force) {
+    // Grace: a freshly negotiated session must not be destroyed by a stale,
+    // in-flight message that belonged to the previous session.
+    if (existingState && typeof existingState.createdAtMs === 'number' && now - existingState.createdAtMs < SESSION_GRACE_MS) {
+      return false;
+    }
+
+    // Cooldown: collapse a burst of failing stale messages into a single attempt.
+    const last = lastRecoveryAttemptMs.get(contact.aegisId);
+    if (typeof last === 'number' && now - last < RECOVERY_COOLDOWN_MS) {
+      return false;
+    }
+  }
+  lastRecoveryAttemptMs.set(contact.aegisId, now);
+
+  const initiator = amInitiatorFor(identity.aegisId, contact.aegisId);
+
+  // [RDIAG] TEMPORARY (no __DEV__ guard — verify in release; remove later).
+  console.warn(
+    `[RDIAG] desync detected me=${identity.aegisId} peer=${contact.aegisId} decision=${initiator ? 'INITIATE' : 'NUDGE'}`,
+  );
+
+  // Mark in-recovery so the adoption rule applies to inbound inits for this peer.
+  inRecoveryUntilMs.set(contact.aegisId, now + RECOVERY_WINDOW_MS);
+
+  if (!initiator) {
+    // ── NON-INITIATOR (lower aegisId): NUDGE, do NOT re-key ────────────────────
+    // The previous "both send init" design caused a CLOBBER: the lower peer
+    // deleted its session and getOrCreateSession built+SAVED a fresh
+    // initiator session of its OWN (session-Lower). That overwrote the
+    // higher peer's init session the lower was supposed to adopt → the two
+    // diverged → every message re-triggered recovery → infinite loop.
+    //
+    // Fix: the lower peer KEEPS its (desynced) session and sends a NUDGE — a
+    // normal ratchet message over that existing session. It cannot decrypt on
+    // the higher peer (their sessions are desynced), so the higher peer's own
+    // tryRecoverDesync fires and it sends a fresh X3DH init. We ADOPT that init
+    // in decryptAndAppend (replacing our desynced session) → converge. Because
+    // we never deleted or rebuilt our session here, there is nothing to clobber
+    // the adopted init. We hold in-recovery until adoption clears it.
+    const nudged = await sendNudgeOverExistingSession(contact, identity);
+    if (!nudged) {
+      // No existing session to nudge over (rare): we cannot provoke the higher
+      // peer this way. Leave the recovery marker set so any inbound init from
+      // the higher peer is adopted; clear it after the window so we don't get
+      // wedged. Do NOT build/save our own init (that is the clobber we avoid).
+      console.warn(`[RDIAG] non-initiator no-session: waiting for higher peer's init me=${identity.aegisId} peer=${contact.aegisId}`);
+    }
+    // NOTE: we intentionally do NOT flush the outbox here. Flushing now would
+    // emit messages over the desynced session that fail on the peer and
+    // re-trigger recovery (a loop contributor). The outbox is flushed only
+    // AFTER we adopt the initiator's session in decryptAndAppend (converged).
+    return true;
+  }
+
+  // ── INITIATOR (higher aegisId): re-key with a fresh X3DH init ───────────────
+  // Drop the dead session so getOrCreateSession runs a full fresh X3DH and
+  // sendProfileTo emits an `init` envelope. The non-initiator adopts it and we
+  // converge. We IGNORE any inbound init from the lower peer (glare gate in
+  // decryptAndAppend) so our init is the single canonical session.
+  await deleteContactRatchetSession(contact.aegisId);
+
+  console.warn(`[RDIAG] emitting recovery init me=${identity.aegisId} -> peer=${contact.aegisId} initiator=true`);
+  try {
+    await sendProfileTo(contact, identity);
+  } catch (e) {
+    if (__DEV__) console.warn('[socket] desync re-handshake send failed:', (e as Error).message);
+  }
+
+  // Deadlock breaker for the asymmetric case: if the lower peer simply nudged us
+  // (it is NOT in recovery on its side, or its nudge already converged it via our
+  // adoption-reply), no inbound INIT arrives to flush our outbox. After a short
+  // grace — long enough for a glare init from an equal-status peer to arrive and
+  // converge via the adoption path (which clears recovery + flushes) — if we are
+  // STILL in recovery, treat our freshly-created init session as the converged
+  // one, clear recovery, and flush. The lower peer will have adopted our init.
+  const peerId = contact.aegisId;
+  setTimeout(() => {
+    if (isInRecovery(peerId)) {
+      inRecoveryUntilMs.delete(peerId);
+      console.warn(`[RDIAG] recovery fallback flush me=${identity.aegisId} peer=${peerId}`);
+      void flushOutbox(identity).catch(() => {});
+    }
+  }, RECOVERY_FALLBACK_MS);
+
+  return true;
 }
 
 async function saveSessionState(aegisId: string, state: RatchetState) {
@@ -896,6 +1335,7 @@ async function saveSessionState(aegisId: string, state: RatchetState) {
     PN: state.PN,
     MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
     x3dhInit: state.x3dhInit,
+    createdAtMs: state.createdAtMs,
   };
   await saveRatchetSession(aegisId, JSON.stringify(s));
 }
@@ -912,7 +1352,53 @@ async function decryptAndAppend(
   }
 
   let ratchetState: RatchetState;
+  // OPK to consume (delete from SecureStore) only AFTER a successful X3DH-init
+  // decrypt — see the OPK handling note below. null on non-init messages.
+  let consumeOpkIdAfterDecrypt: number | null = null;
   const existingJson = await loadRatchetSession(contact.aegisId);
+
+  // ── Deterministic glare resolution (canonical session = higher aegisId) ─────
+  // If an X3DH init arrives AND we already hold our OWN session for this peer AND
+  // we are the canonical initiator (higher aegisId), we NEVER adopt the lower
+  // peer's init. Instead we keep / (re)assert our own session as the winner: if
+  // we are not already re-initiating, we force a fresh init so the lower peer
+  // adopts OURS. Both peers therefore converge on the higher-aegisId session.
+  //
+  // This now applies on FIRST-CONTACT glare too (not only during recovery) —
+  // when both peers add each other they each create an initiator session, and
+  // without this the two sessions mutually adopt and never converge (the bug
+  // behind "messages don't arrive / profile won't sync"). The lower peer falls
+  // through to the adoption branch below and adopts our init.
+  if (
+    parsed.x3dh &&
+    existingJson &&
+    amInitiatorFor(identity.aegisId, contact.aegisId)
+  ) {
+    // We are the canonical winner (higher aegisId) and already hold a session.
+    // Two sub-cases:
+    //   (a) Our session is a still-pending init (x3dhInit set) — i.e. WE just
+    //       initiated (e.g. both broadcast profile on connect = glare). Our init
+    //       is in flight; the lower peer will adopt IT. We must KEEP our exact
+    //       session and IGNORE theirs. Re-initiating here would mint a 2nd init
+    //       that mismatches the one the lower peer already adopted — the bug that
+    //       made first messages undecryptable.
+    //   (b) We are mid-recovery (deliberately re-initiated after a desync). Same:
+    //       keep our recovery init, ignore the lower's.
+    // In BOTH, ignore the lower peer's init; ours wins and they adopt it.
+    let myInitPending = false;
+    try { myInitPending = !!JSON.parse(existingJson).x3dhInit; } catch { /* treat as established */ }
+    if (myInitPending || isInRecovery(contact.aegisId)) {
+      console.warn(
+        `[RDIAG] glare: higher keeps own init, ignoring lower's me=${identity.aegisId} peer=${contact.aegisId} pending=${myInitPending} recovery=${isInRecovery(contact.aegisId)}`,
+      );
+      return false; // ignore the lower peer's init; ours wins
+    }
+    // Otherwise our session is ESTABLISHED and the lower peer is legitimately
+    // re-initiating (e.g. they reinstalled / re-keyed). Fall through to adopt
+    // their fresh init so we converge on their new keys.
+    console.warn(`[RDIAG] established session + lower re-init → adopting (rekey) me=${identity.aegisId} peer=${contact.aegisId}`);
+  }
+
   if (existingJson && !parsed.x3dh) {
     const s = JSON.parse(existingJson);
     s.RK = reviveBytes(s.RK);
@@ -926,33 +1412,81 @@ async function decryptAndAppend(
   } else {
     // Bob doesn't have a session, or the sender is re-keying/starting a fresh session via X3DH setup!
     if (!parsed.x3dh) {
+      console.warn(`[RDIAG] DROP no-session-no-x3dh from=${contact.aegisId} inRecovery=${isInRecovery(contact.aegisId)}`);
       if (__DEV__) console.warn('[socket] No session and no X3DH headers received — dropping message');
       return false;
     }
 
-    // Load PreKey secrets
-    const spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    // Load PreKey secrets.
+    //
+    // ROOT-CAUSE FIX (fresh-session desync): Bob MUST use the EXACT SPK secret
+    // whose keyId Alice committed to in her X3DH header (parsed.x3dh.spkId), not
+    // simply "the latest" SPK. uploadPreKeys() rotates the SPK and increments the
+    // keyId on every refill, overwriting the legacy single-slot SECURE_SPK_SECRET_KEY.
+    // If Bob refilled prekeys between Alice fetching his bundle and Bob processing
+    // her init, the legacy slot now holds a DIFFERENT secret than the SPK Alice
+    // used → DH1/DH3 diverge → different root key → every fresh session is born
+    // desynced. We persist per-keyId SPK secrets (spkSecretKey(id)); read that
+    // first, fall back to the legacy slot only when the per-keyId slot is absent
+    // (pre-rotation installs).
+    // DURABLE STORE FIRST: read the SPK secret matching the exact keyId Alice
+    // committed to from the SQLite prekey_secrets table (the new source of
+    // truth). Fall back to per-keyId SecureStore, then the legacy single slot,
+    // for sessions that pre-date the DB store.
+    let spkSec: string | null = null;
+    let spkSecFromKeyId = false;
+    if (typeof parsed.x3dh.spkId === 'number') {
+      spkSec = await loadSpkSecret(parsed.x3dh.spkId);
+      if (!spkSec) spkSec = await SecureStore.getItemAsync(spkSecretKey(parsed.x3dh.spkId));
+      spkSecFromKeyId = !!spkSec;
+    }
     if (!spkSec) {
-      if (__DEV__) console.warn('[socket] mySpkSecret not found in SecureStore — cannot decrypt');
+      // Last resort for legacy installs: the latest DB SPK, then the legacy slot.
+      const latest = await loadLatestSpkSecret();
+      spkSec = latest?.b64 ?? null;
+    }
+    if (!spkSec) {
+      spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    }
+    if (!spkSec) {
+      console.warn(`[RDIAG] x3dh-recv ABORT no-spk me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId}`);
+      if (__DEV__) console.warn('[socket] mySpkSecret not found in DB or SecureStore — cannot decrypt');
       return false;
     }
     const mySpkSecret = decodeBase64(spkSec);
 
+    // OPK handling. Alice includes DH4 iff she received an OPK in Bob's bundle.
+    // Bob MUST mirror that: if Alice committed to an opkId, Bob needs the matching
+    // secret. If it is genuinely missing, continuing "without DH4" derives a root
+    // key Alice never derived (she DID use DH4) → guaranteed mismatch. Treat a
+    // missing-but-expected OPK as a hard abort instead of silently mis-deriving.
+    //
+    // FORWARD SECRECY vs CORRECTNESS: we no longer delete the OPK BEFORE deriving
+    // and decrypting. The previous code consumed (deleted) the OPK up-front; if
+    // the subsequent decrypt failed and the message was redelivered, the OPK was
+    // already gone and the retry silently fell into the "missing OPK → no DH4"
+    // mismatch branch — turning a transient failure into a permanent desync. We
+    // defer deletion until AFTER a successful ratchetDecrypt (see below), keeping
+    // the OPK single-use in the success path while making the handshake retryable.
     let myOpkSecret: Uint8Array | null = null;
+    let opkPresent = false;
     if (parsed.x3dh.opkId !== null) {
-      const opkSecBase64 = await SecureStore.getItemAsync(opkSecretKey(parsed.x3dh.opkId));
+      // DURABLE STORE FIRST, SecureStore fallback (legacy sessions).
+      let opkSecBase64 = await loadOpkSecret(parsed.x3dh.opkId);
+      if (!opkSecBase64) opkSecBase64 = await SecureStore.getItemAsync(opkSecretKey(parsed.x3dh.opkId));
       if (opkSecBase64) {
         myOpkSecret = decodeBase64(opkSecBase64);
-        // One-time pre-key — consume it BEFORE proceeding so the same OPK
-        // is never reused, even if decryption or session setup fails later.
-        // await ensures the deletion is committed before we derive the root
-        // key; a fire-and-forget void could leave the OPK live during a
-        // crash/retry window and break forward secrecy.
-        try {
-          await SecureStore.deleteItemAsync(opkSecretKey(parsed.x3dh.opkId));
-        } catch { /* best-effort — OPK may already be absent on retry */ }
+        opkPresent = true;
+        // Defer consumption until after a successful ratchetDecrypt so a
+        // transient decrypt failure (redelivery) can retry with the same OPK
+        // instead of permanently losing DH4 and desyncing.
+        consumeOpkIdAfterDecrypt = parsed.x3dh.opkId;
       } else {
-        if (__DEV__) console.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— continuing without DH4');
+        console.warn(
+          `[RDIAG] x3dh-recv ABORT opk-missing me=${identity.aegisId} peer=${contact.aegisId} opkId=${parsed.x3dh.opkId} — Alice used DH4, Bob cannot; would desync`,
+        );
+        if (__DEV__) console.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— aborting (would desync)');
+        return false;
       }
     }
 
@@ -966,6 +1500,14 @@ async function decryptAndAppend(
       decodeBase64(parsed.x3dh.aliceEKB64)
     );
 
+    // [RDIAG] TEMPORARY (no __DEV__ guard). Bob side: log presence of each secret
+    // and the derived root-key fingerprint. Compare rkFp against Alice's
+    // `[RDIAG] x3dh-send`. Equal fp ⇒ symmetric derivation (fix working);
+    // different fp ⇒ which input diverged (spkFromKeyId / opkPresent narrow it).
+    console.warn(
+      `[RDIAG] x3dh-recv me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId} spkFromKeyId=${spkSecFromKeyId} opkId=${parsed.x3dh.opkId ?? 'none'} opkPresent=${opkPresent} rkFp=${rootKeyFp(rootKey)}`,
+    );
+
     // Initialize Double Ratchet as Bob (Receiver).
     // MUST pass mySpkSecret as DHs so dhRatchet computes the same DH output as Alice:
     //   DH(bobSPK.sec, alice.DHs.pub) == DH(alice.DHs.sec, bobSPK.pub)
@@ -975,6 +1517,32 @@ async function decryptAndAppend(
       publicKey: spkPublicKey,
       secretKey: mySpkSecret,
     });
+
+    // [RDIAG] TEMPORARY (no __DEV__ guard). Adopting an inbound X3DH init.
+    // Logs whether this replaced an existing (recovery) session — the convergence
+    // signal we want to confirm on-device: the WAITING (lower) peer should adopt
+    // the initiator's session here.
+    console.warn(
+      `[RDIAG] adopting inbound init me=${identity.aegisId} peer=${contact.aegisId} replacedExisting=${!!existingJson} inRecovery=${isInRecovery(contact.aegisId)}`,
+    );
+    // Converged: clear the recovery marker so stale in-flight messages on the old
+    // session (now within grace via createdAtMs) don't re-trigger recovery.
+    const wasInRecovery = isInRecovery(contact.aegisId);
+    inRecoveryUntilMs.delete(contact.aegisId);
+    // Bidirectional profile sync: as the responder we just adopted the initiator's
+    // session and (if their init carried a profile_update) applied THEIR profile.
+    // But the initiator ignored OUR init (glare rule), so it never got our profile.
+    // Reply with our profile under the now-converged session — a regular message,
+    // not an init, so it cannot re-trigger adoption and cannot loop. This is what
+    // makes name/avatar sync both ways on first contact.
+    setTimeout(() => { void sendProfileTo(contact, identity).catch(() => {}); }, 300);
+    // Drain any messages the waiting peer deferred while it had no session.
+    if (wasInRecovery) {
+      // Persist this adopted session first so flushOutbox reuses it instead of
+      // building yet another init. saveSessionState runs below after decrypt; we
+      // schedule the flush on the next tick so it sees the persisted state.
+      setTimeout(() => { void flushOutbox(identity); }, 0);
+    }
   }
 
   // Now decrypt the message body using the Double Ratchet session
@@ -986,10 +1554,51 @@ async function decryptAndAppend(
   const rCiphertext = decodeBase64(parsed.ratchet.ciphertextB64);
   const rNonce = decodeBase64(parsed.ratchet.nonceB64);
 
-  const plaintextBytes = ratchetDecrypt(ratchetState, rHeader, rCiphertext, rNonce);
-  if (!plaintextBytes) {
-    if (__DEV__) console.warn('[socket] Double Ratchet decryption failed');
+  // A desync can surface either as a null result (MAC failure on a wrong message
+  // key) OR as a throw (e.g. "Too many skipped messages" / low-order DH). Both,
+  // on an EXISTING non-x3dh session, are non-forgeable desync signals because the
+  // outer sealed-sender box already authenticated the sender. ratchetDecrypt is
+  // transactional, so a throw leaves the live state untouched.
+  let plaintextBytes: Uint8Array | null;
+  try {
+    plaintextBytes = ratchetDecrypt(ratchetState, rHeader, rCiphertext, rNonce);
+  } catch (e) {
+    if (existingJson && !parsed.x3dh) {
+      if (__DEV__) console.warn('[socket] ratchetDecrypt threw on existing session:', (e as Error).message);
+      await tryRecoverDesync(contact, ratchetState, identity);
+    } else if (__DEV__) {
+      console.warn('[socket] Double Ratchet decryption threw:', (e as Error).message);
+    }
     return false;
+  }
+  if (!plaintextBytes) {
+    // Desync auto-recovery: we get here only because the OUTER sealed-sender box
+    // already authenticated this as a genuine message from `contact` (the caller
+    // path opened it with the contact's identity key). If we were decrypting
+    // against an EXISTING session (not an X3DH init) and the Double Ratchet still
+    // returns null, the two sessions are permanently desynchronised. Re-handshake.
+    // We do NOT recover on an x3dh-init failure: that points to a key/handshake
+    // problem, not a recoverable desync.
+    if (existingJson && !parsed.x3dh) {
+      await tryRecoverDesync(contact, ratchetState, identity);
+    } else if (__DEV__) {
+      console.warn('[socket] Double Ratchet decryption failed');
+    }
+    return false;
+  }
+
+  // Handshake succeeded and the first message authenticated: NOW consume the
+  // one-time prekey so it is single-use. Deferring to here (rather than before
+  // derivation) means a transient/redelivered init can retry with the same OPK
+  // instead of permanently losing DH4 — the consumption-before-success race that
+  // turned a recoverable failure into a permanent fresh-session desync.
+  if (consumeOpkIdAfterDecrypt !== null) {
+    const opkId = consumeOpkIdAfterDecrypt;
+    // Delete from the durable store (source of truth) AND the SecureStore cache.
+    try { await deleteOpkSecret(opkId); } catch { /* best-effort */ }
+    try {
+      await SecureStore.deleteItemAsync(opkSecretKey(opkId));
+    } catch { /* best-effort — OPK may already be absent on retry */ }
   }
 
   const body = encodeUTF8(plaintextBytes);
@@ -1198,10 +1807,12 @@ async function decryptAndAppend(
           const dataUri = msgBody.slice(7, -1);
           groupMsgType = 'image';
           cleanMsgBody = '';
+          // Persistent blob ref + lazy decrypt-on-view (see 1:1 path above).
+          groupMsgMediaUri = dataUri;
           try {
-            const { downloadAndDecryptMedia } = require('../crypto/media');
-            groupMsgMediaUri = await downloadAndDecryptMedia(dataUri);
-          } catch { groupMsgMediaUri = dataUri; }
+            const { persistEncryptedBlob } = require('../crypto/media');
+            void persistEncryptedBlob(dataUri);
+          } catch { /* resolveMedia retries on view */ }
         } else if (msgBody.startsWith('[image:data:') && msgBody.endsWith(']')) {
           const dataUri = msgBody.slice(7, -1);
           groupMsgType = 'image';
@@ -1342,12 +1953,14 @@ async function decryptAndAppend(
     const dataUri = finalBody.slice(7, -1); // '[image:' = 7 chars
     detectedType = 'image';
     cleanBody = '';
+    // Store the persistent encrypted blob REFERENCE (not a volatile decrypted
+    // cache path). The bubble decrypts on demand via resolveMedia. Persist the
+    // ciphertext locally now, while online, so it survives the server's 24h TTL.
+    detectedMediaUri = dataUri;
     try {
-      const { downloadAndDecryptMedia } = require('../crypto/media');
-      detectedMediaUri = await downloadAndDecryptMedia(dataUri);
-    } catch {
-      detectedMediaUri = dataUri;
-    }
+      const { persistEncryptedBlob } = require('../crypto/media');
+      void persistEncryptedBlob(dataUri);
+    } catch { /* best-effort — resolveMedia will retry on view */ }
   } else if (finalBody.startsWith('[image:data:') && finalBody.endsWith(']')) {
     const dataUri = finalBody.slice(7, -1); // '[image:' = 7 chars, strip trailing ]
     detectedType = 'image';
@@ -1470,6 +2083,18 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
     return;
   }
 
+  // First-contact recovery: a queued X3DH-initial message arrives with no `from`
+  // (the relay never persists the social graph) but DOES carry the sender's
+  // public key (attached by the relay only for `init` messages). The aegisId is
+  // deterministically derived from the public key, so we can recover the sender
+  // identity locally and auto-add + decrypt even though we were offline when it
+  // was sent. Without this, the first message to a new contact would be lost.
+  if (!env.from && env.senderPublicKeyB64) {
+    try {
+      env.from = deriveAegisId(decodeBase64(env.senderPublicKeyB64));
+    } catch { /* malformed key — fall through to trial decrypt */ }
+  }
+
   const contacts = useContacts.getState().contacts;
   let matchedContact = env.from ? contacts.find(c => c.aegisId === env.from) : null;
 
@@ -1479,10 +2104,23 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
   }
 
   if (!matchedContact && env.from) {
+    let autoAdded = false;
     try {
       matchedContact = await useContacts.getState().addByAegisId(env.from);
+      autoAdded = true;
     } catch (e) {
       if (__DEV__) console.warn('[socket] failed to auto-add unknown sender', e);
+    }
+    // After auto-adding the sender as a new contact, send them our own profile so
+    // they learn our display name without having to wait for our next reconnect
+    // broadcast. Without this, the reverse direction (B→A) never receives a name
+    // because broadcastProfileUpdate already ran at auth:ok when contacts was empty.
+    if (autoAdded && matchedContact) {
+      const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+      const ownIdentity = useIdentity.getState().identity;
+      if (ownIdentity) {
+        void sendProfileTo(matchedContact, ownIdentity).catch(() => {});
+      }
     }
   }
 
@@ -1761,7 +2399,22 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
       if (__DEV__) console.warn('[socket] self-copy: no session and no X3DH headers — dropping');
       return;
     }
-    const spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    const x3dhInit = parsed.x3dh as { aliceEKB64: string; spkId: number; opkId: number | null };
+    // Mirror the primary decrypt path: read the SPK secret matching the keyId the
+    // sender (our other device) committed to, falling back to the legacy slot.
+    // DURABLE STORE FIRST (DB), SecureStore fallback for legacy sessions.
+    let spkSec: string | null = null;
+    if (typeof x3dhInit.spkId === 'number') {
+      spkSec = await loadSpkSecret(x3dhInit.spkId);
+      if (!spkSec) spkSec = await SecureStore.getItemAsync(spkSecretKey(x3dhInit.spkId));
+    }
+    if (!spkSec) {
+      const latest = await loadLatestSpkSecret();
+      spkSec = latest?.b64 ?? null;
+    }
+    if (!spkSec) {
+      spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    }
     if (!spkSec) {
       if (__DEV__) console.warn('[socket] self-copy: missing local SPK secret — dropping (multi-device SPK sync not implemented)');
       return;
@@ -1769,13 +2422,14 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     const mySpkSecret = decodeBase64(spkSec);
 
     let myOpkSecret: Uint8Array | null = null;
-    const x3dhInit = parsed.x3dh as { aliceEKB64: string; spkId: number; opkId: number | null };
     if (x3dhInit.opkId !== null) {
-      const opkB64 = await SecureStore.getItemAsync(opkSecretKey(x3dhInit.opkId));
+      let opkB64 = await loadOpkSecret(x3dhInit.opkId);
+      if (!opkB64) opkB64 = await SecureStore.getItemAsync(opkSecretKey(x3dhInit.opkId));
       if (opkB64) {
         myOpkSecret = decodeBase64(opkB64);
         // Same forward-secrecy guarantee as the primary decrypt path: consume
-        // the OPK atomically before deriving the root key (see comment above).
+        // the OPK from both the durable store and the SecureStore cache.
+        try { await deleteOpkSecret(x3dhInit.opkId); } catch { /* best-effort */ }
         try {
           await SecureStore.deleteItemAsync(opkSecretKey(x3dhInit.opkId));
         } catch { /* best-effort */ }
@@ -1976,6 +2630,22 @@ export async function sendMessage(opts: {
     return; // flushOutbox() will drain on next auth:ok
   }
 
+  // Glare avoidance: if we are the WAITING (lower-aegisId) peer mid-recovery for
+  // this contact, do NOT build a fresh session now — that would create a second
+  // init the higher peer would ignore (and our message would be lost). The job is
+  // already in the outbox; it flushes once the higher peer's init establishes the
+  // converged session. We DO send if we are the initiator (our own init is valid).
+  if (
+    isInRecovery(opts.recipientAegisId) &&
+    !amInitiatorFor(opts.identity.aegisId, opts.recipientAegisId)
+  ) {
+    // [RDIAG] TEMPORARY.
+    console.warn(
+      `[RDIAG] deferring send to outbox (waiting for peer init) me=${opts.identity.aegisId} peer=${opts.recipientAegisId}`,
+    );
+    return; // flushOutbox() drains after convergence
+  }
+
   const session = await getOrCreateSession(opts.recipientAegisId, recipientPublicKeyB64, opts.identity);
   const { envelope, newState } = encryptMessage(
     payload,
@@ -2086,6 +2756,16 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
   const contacts = useContacts.getState().contacts;
   for (const contact of contacts) {
     try {
+      // CRITICAL: a profile broadcast must NEVER initiate a session. When both
+      // peers connect and broadcast, each would run X3DH as initiator for a
+      // contact it has no session with → two mismatched sessions (glare) that
+      // never converge → "messages don't arrive / profile won't sync". Only
+      // refresh the profile over an ALREADY-ESTABLISHED session. For brand-new
+      // contacts the profile is exchanged when the first real message sets up the
+      // session (initiator's message + the responder's adopt-reply in
+      // decryptAndAppend). Skip peers we have no session with.
+      const existing = await loadRatchetSession(contact.aegisId);
+      if (!existing) continue;
       const recipientPub = decodeBase64(contact.publicKeyB64);
       const payload = JSON.stringify({
         type: 'profile_update',
@@ -2095,6 +2775,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
         senderStatus,
       });
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
+      const isInit = !!session.x3dhInit;
       const { envelope, newState } = encryptMessage(
         payload,
         identity.aegisId,
@@ -2110,6 +2791,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
         to: contact.aegisId,
         ciphertext: envelope.ciphertextB64,
         nonce: envelope.nonceB64,
+        ...(isInit ? { init: true } : {}),
       });
     } catch (e) {
       if (__DEV__) console.warn('[socket] profile broadcast failed:', (e as Error).message);
@@ -2132,10 +2814,16 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
     const payload = JSON.stringify({ type: 'profile_update', senderName, senderColor, senderImage, senderStatus });
     const recipientPub = decodeBase64(contact.publicKeyB64);
     const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
+    // Mark first-contact (X3DH-initial) envelopes `init` so the relay attaches
+    // our public key when queued for an offline recipient — otherwise the peer
+    // cannot decrypt this first profile message and never auto-adds us back.
+    const isInit = !!session.x3dhInit;
     const { envelope, newState } = encryptMessage(payload, identity.aegisId, recipientPub, identity.secretKey, session);
     await saveSessionState(contact.aegisId, newState);
-    socket!.emit('envelope', { id: Crypto.randomUUID(), to: contact.aegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 });
+    socket!.emit('envelope', { id: Crypto.randomUUID(), to: contact.aegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64, ...(isInit ? { init: true } : {}) });
+    console.warn(`[RDIAG] sendProfileTo EMITTED to=${contact.aegisId} isInit=${isInit}`);
   } catch (e) {
+    console.warn(`[RDIAG] sendProfileTo FAILED to=${contact.aegisId} err=${(e as Error).message}`);
     if (__DEV__) console.warn('[socket] sendProfileTo failed:', (e as Error).message);
   }
 }
