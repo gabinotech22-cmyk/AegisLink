@@ -4,6 +4,7 @@ import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import type { Video as VideoRef } from 'expo-av';
 import type { Theme } from '../theme/vault';
 import type { StoredMessage } from '../db/local';
+import { resolveMedia } from '../crypto/media';
 import { I } from './icons';
 
 interface VideoBubbleProps {
@@ -19,10 +20,27 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
   const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
   const videoRef = useRef<VideoRef>(null);
+  // Decrypted local file path. `m.mediaUri` is a `blob:<id>:<key>:<nonce>` ref
+  // after upload, which expo-av's <Video> cannot open — we must resolve+decrypt
+  // it to a local file first (same as images via MediaImage). Plain file:// URIs
+  // (a freshly-sent local clip, before the blob swap) are used as-is.
+  const [localUri, setLocalUri] = useState<string | null>(
+    m.mediaUri && !m.mediaUri.startsWith('blob:') ? m.mediaUri : null,
+  );
 
   useEffect(() => {
     setLoadError(false);
     setLoading(true);
+    let alive = true;
+    if (!m.mediaUri) { setLocalUri(null); return; }
+    if (!m.mediaUri.startsWith('blob:')) { setLocalUri(m.mediaUri); return; }
+    setLocalUri(null);
+    void resolveMedia(m.mediaUri, 'mp4').then((p) => {
+      if (!alive) return;
+      setLocalUri(p);
+      if (!p) setLoadError(true);
+    });
+    return () => { alive = false; };
   }, [m.mediaUri]);
 
   const bubbleBg = me ? t.bubbleOut : t.bubbleIn;
@@ -48,8 +66,8 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
     setLoadError(true);
   }
 
-  // Downloading / not yet available
-  if (!m.mediaUri) {
+  // Downloading / decrypting / not yet available
+  if (!localUri && !loadError) {
     return (
       <Pressable
         onLongPress={onLongPress}
@@ -187,7 +205,7 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
       <View style={{ width: 220, height: 160, backgroundColor: t.surface3 }}>
         <Video
           ref={videoRef}
-          source={{ uri: m.mediaUri }}
+          source={{ uri: localUri ?? m.mediaUri }}
           style={{ width: 220, height: 160, borderRadius: 0 }}
           resizeMode={ResizeMode.CONTAIN}
           useNativeControls
