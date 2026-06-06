@@ -3,11 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, StyleSheet, ActivityIndicator, Share } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { AvatarCropModal } from '../components/AvatarCropModal';
 import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
@@ -69,6 +69,10 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onNotifica
   // Image processing state
   const [isProcessingImage, setIsProcessingImage] = useState(false);
 
+  // In-app avatar cropper: holds the freshly-picked image until the user frames
+  // and confirms it. Null when the cropper is closed.
+  const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
+
   // Synchronize state when store hydrates/updates or active identity tab changes
   useEffect(() => {
     setEditName(displayName);
@@ -97,31 +101,8 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onNotifica
     );
   }
 
-  /**
-   * Resize + compress to 256px JPEG using expo-image-manipulator v14 API,
-   * then copy the result to documentDirectory so it survives OS cache clears.
-   * Falls back to the raw URI if any step fails so the user always gets their photo.
-   */
-  async function shrinkToAvatar(uri: string): Promise<string> {
-    try {
-      const result = await manipulateAsync(
-        uri,
-        [{ resize: { width: 256 } }],
-        { compress: 0.7, format: SaveFormat.JPEG }
-      );
-      // Copy to a persistent location — the manipulator writes to a temp/cache dir
-      // that the OS can delete at any time, which would cause other devices to see
-      // an empty avatar once toDataUri() can no longer read the file.
-      const dir = FileSystem.documentDirectory + 'avatars/';
-      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-      const dest = dir + 'self.jpg';
-      await FileSystem.copyAsync({ from: result.uri, to: dest });
-      return dest; // permanent URI that survives app restarts and cache clears
-    } catch (e) {
-      if (__DEV__) console.warn('[avatar] shrinkToAvatar failed, using raw URI:', e);
-      return uri; // graceful fallback — user still gets their photo
-    }
-  }
+  // NOTE: avatar cropping/resizing now lives in <AvatarCropModal> (the in-app
+  // editor). The picker handlers below just hand the raw asset to that modal.
 
   async function handlePickImage() {
     try {
@@ -134,19 +115,15 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onNotifica
       const result = await withPickingGuard(() =>
         ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'] as ImagePicker.MediaType[],
-          allowsEditing: true,
-          aspect: [1, 1],
           quality: 0.8,
         })
       );
       if (result.canceled || !result.assets?.length) return;
-      setIsProcessingImage(true);
-      const uri = await shrinkToAvatar(result.assets[0].uri);
-      setEditImage(uri);
+      const asset = result.assets[0];
+      // Hand off to the in-app cropper; it produces the final 256px avatar on confirm.
+      setCropSource({ uri: asset.uri, width: asset.width ?? 0, height: asset.height ?? 0 });
     } catch (e) {
       Alert.alert(i18nT('common.error'), i18nT('profile.imageLoadError', { message: (e as Error).message }));
-    } finally {
-      setIsProcessingImage(false);
     }
   }
 
@@ -160,19 +137,15 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onNotifica
       const result = await withPickingGuard(() =>
         ImagePicker.launchCameraAsync({
           mediaTypes: ['images'] as ImagePicker.MediaType[],
-          allowsEditing: true,
-          aspect: [1, 1],
           quality: 0.8,
         })
       );
       if (result.canceled || !result.assets?.length) return;
-      setIsProcessingImage(true);
-      const uri = await shrinkToAvatar(result.assets[0].uri);
-      setEditImage(uri);
+      const asset = result.assets[0];
+      // Hand off to the in-app cropper; it produces the final 256px avatar on confirm.
+      setCropSource({ uri: asset.uri, width: asset.width ?? 0, height: asset.height ?? 0 });
     } catch (e) {
       Alert.alert(i18nT('common.error'), i18nT('profile.photoError', { message: (e as Error).message }));
-    } finally {
-      setIsProcessingImage(false);
     }
   }
 
@@ -646,6 +619,19 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onNotifica
           </ScrollView>
         </View>
       </Modal>
+
+      <AvatarCropModal
+        t={t}
+        visible={cropSource !== null}
+        imageUri={cropSource?.uri ?? null}
+        imageWidth={cropSource?.width ?? 0}
+        imageHeight={cropSource?.height ?? 0}
+        title={i18nT('profile.adjustPhoto')}
+        confirmLabel={i18nT('common.confirm')}
+        cancelLabel={i18nT('common.cancel')}
+        onCancel={() => setCropSource(null)}
+        onConfirm={(uri) => { setEditImage(uri); setCropSource(null); }}
+      />
     </View>
   );
 }

@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, TextInput, Image, Share } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { withPickingGuard } from '../utils/pickingGuard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -23,7 +26,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { renameGroup, addMember, removeMember, updateGroupPermissions, leaveGroup } = useGroups();
+  const { renameGroup, updateGroupAvatar, addMember, removeMember, updateGroupPermissions, leaveGroup } = useGroups();
   const contacts = useContacts((s) => s.contacts);
   const identity = useIdentity((s) => s.identity);
   const [editingName, setEditingName] = useState(false);
@@ -52,6 +55,34 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
     if (!trimmed || trimmed === group.name) { setEditingName(false); return; }
     await renameGroup(group.id, trimmed);
     setEditingName(false);
+  }
+
+  async function handlePickGroupAvatar() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(i18nT('groups.permissionDeniedTitle', 'Permiso denegado'), i18nT('groups.permissionDeniedGallery', 'Se necesita acceso a la galería.'));
+      return;
+    }
+    const result = await withPickingGuard(() =>
+      ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'] as ImagePicker.MediaType[],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      })
+    );
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      try {
+        const compressed = await manipulateAsync(
+          result.assets[0].uri,
+          [{ resize: { width: 256 } }],
+          { compress: 0.7, format: SaveFormat.JPEG }
+        );
+        await updateGroupAvatar(group.id, compressed.uri);
+      } catch (e) {
+        Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      }
+    }
   }
 
   function handleAddMember() {
@@ -115,26 +146,51 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         {/* Header */}
         <View style={{ alignItems: 'center', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 18 }}>
-          {group.avatarImage ? (
-            <Image
-              source={{ uri: group.avatarImage }}
-              style={{ width: 76, height: 76, borderRadius: t.radiusL }}
-              resizeMode="cover"
-            />
-          ) : (
-            <View
-              style={{
-                width: 76,
-                height: 76,
-                borderRadius: t.radiusL,
-                backgroundColor: `${group.avatarColor ?? t.accent}22`,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <I.Users size={34} color={group.avatarColor ?? t.accent} />
-            </View>
-          )}
+          <Pressable
+            onPress={amIAdmin ? () => void handlePickGroupAvatar() : undefined}
+            disabled={!amIAdmin}
+            accessibilityLabel={i18nT('groupAdmin.changeAvatar', 'Cambiar imagen del grupo')}
+          >
+            {group.avatarImage ? (
+              <Image
+                source={{ uri: group.avatarImage }}
+                style={{ width: 76, height: 76, borderRadius: t.radiusL }}
+                resizeMode="cover"
+              />
+            ) : (
+              <View
+                style={{
+                  width: 76,
+                  height: 76,
+                  borderRadius: t.radiusL,
+                  backgroundColor: `${group.avatarColor ?? t.accent}22`,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <I.Users size={34} color={group.avatarColor ?? t.accent} />
+              </View>
+            )}
+            {amIAdmin && (
+              <View
+                style={{
+                  position: 'absolute',
+                  right: -2,
+                  bottom: -2,
+                  width: 26,
+                  height: 26,
+                  borderRadius: 13,
+                  backgroundColor: t.accent,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 2,
+                  borderColor: t.bg,
+                }}
+              >
+                <I.Image size={13} color={t.accentInk} />
+              </View>
+            )}
+          </Pressable>
 
           {editingName && amIAdmin ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}>

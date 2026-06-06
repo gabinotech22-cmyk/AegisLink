@@ -7,6 +7,7 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import { FormattedText } from '../components/FormattedText';
+import { MediaEditorModal } from '../components/MediaEditorModal';
 import { VideoBubble } from '../components/VideoBubble';
 import { AudioWaveform } from '../components/AudioWaveform';
 import { LinkPreview } from '../components/LinkPreview';
@@ -24,6 +25,7 @@ import { MessageActionsSheet } from '../components/MessageActionsSheet';
 import { ForwardModal } from '../components/ForwardModal';
 import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
+import { MediaImage } from '../components/MediaImage';
 import { useContacts } from '../store/contacts';
 import { useGroups } from '../store/groups';
 import { sendGroupMessage, sendGroupVote } from '../socket/client';
@@ -70,9 +72,12 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const markRead = useMessages((s) => s.markRead);
   const pendingMediaUri = useMessages((s) => s.pendingMediaUri);
   const setPendingMedia = useMessages((s) => s.setPendingMedia);
+  const pendingVideoUri = useMessages((s) => s.pendingVideoUri);
+  const setPendingVideo = useMessages((s) => s.setPendingVideo);
 
   const [draft, setDraft] = useState('');
   const [stagedImageUri, setStagedImageUri] = useState<string | null>(null);
+  const [editorUri, setEditorUri] = useState<string | null>(null);
   const [imageProcessing, setImageProcessing] = useState(false);
   const [sending, setSending] = useState(false);
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
@@ -131,24 +136,35 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Picked image → open the in-app media editor (crop/rotate/draw/text/caption).
   useEffect(() => {
     if (!pendingMediaUri) return;
-    const uri = pendingMediaUri;
+    setEditorUri(pendingMediaUri);
     setPendingMedia(null);
-    setImageProcessing(true);
-    void (async () => {
-      try {
-        const { manipulateAsync, SaveFormat } = require('expo-image-manipulator') as typeof import('expo-image-manipulator');
-        const compressed = await manipulateAsync(uri, [{ resize: { width: 400 } }], { compress: 0.55, format: SaveFormat.JPEG });
-        setStagedImageUri(compressed.uri);
-      } catch {
-        setStagedImageUri(uri);
-      } finally {
-        setImageProcessing(false);
-      }
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingMediaUri]);
+  }, [pendingMediaUri, setPendingMedia]);
+
+  // Trimmed video staged by the native editor → upload + send it.
+  useEffect(() => {
+    if (!pendingVideoUri) return;
+    const uri = pendingVideoUri;
+    setPendingVideo(null);
+    void sendVideo(uri);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingVideoUri]);
+
+  async function sendVideo(uri: string) {
+    if (!identity) return;
+    try {
+      const id = Crypto.randomUUID();
+      await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'video', mediaUri: uri });
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      const blobUri = await encryptAndUploadMedia(uri, 'video/mp4');
+      await useMessages.getState().setMediaUri(group.id, id, blobUri);
+      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[video:${blobUri}]`, skipLocalAppend: true });
+    } catch (e) {
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+    }
+  }
 
   async function handleVote(pollMessageId: string, optionIndex: number, totalOptions: number) {
     if (!identity) return;
@@ -257,6 +273,25 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     setDraft((prev) => prev + emoji);
   }
 
+  // Send an image produced by the media editor (crop/rotate/draw/text) + caption.
+  async function sendEditedImage(uri: string, caption: string) {
+    if (!identity) return;
+    setEditorUri(null);
+    try {
+      const id = Crypto.randomUUID();
+      await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: uri });
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      const blobUri = await encryptAndUploadMedia(uri, 'image/jpeg');
+      await useMessages.getState().setMediaUri(group.id, id, blobUri);
+      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]`, skipLocalAppend: true });
+      if (caption) {
+        await sendGroupMessage({ identity, groupId: group.id, plaintext: caption, skipLocalAppend: true });
+      }
+    } catch (e) {
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+    }
+  }
+
   async function handleSend() {
     if (!identity || sendingRef.current) return;
     const hasText = draft.trim().length > 0;
@@ -279,6 +314,8 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: imageUri });
         const { encryptAndUploadMedia } = require('../crypto/media');
         const blobUri = await encryptAndUploadMedia(imageUri, 'image/jpeg');
+        // Persist the blob ref so the sent image survives cache purges (decrypt-on-view).
+        await useMessages.getState().setMediaUri(group.id, id, blobUri);
         await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]`, skipLocalAppend: true });
       }
       if (hasText) {
@@ -642,6 +679,14 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         onSelectSticker={handleStickerSelect}
       />
       <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
+      <MediaEditorModal
+        t={t}
+        visible={editorUri !== null}
+        imageUri={editorUri}
+        captionPlaceholder={i18nT('chat.addCaption')}
+        onCancel={() => setEditorUri(null)}
+        onSend={({ uri, caption }) => { void sendEditedImage(uri, caption); }}
+      />
       <MessageActionsSheet
         visible={!!actionsMsg}
         body={actionsMsg?.body ?? ''}
@@ -1057,10 +1102,10 @@ function GroupBubble({
             opacity: pressed ? 0.9 : 1,
           })}
         >
-          <Image
-            source={{ uri: m.mediaUri }}
-            style={{ width: 200, height: 150 }}
-            resizeMode="cover"
+          <MediaImage
+            uri={m.mediaUri}
+            accent={t.accent}
+            style={{ width: 200, height: 150, backgroundColor: t.surface2 }}
           />
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />

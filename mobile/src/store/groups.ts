@@ -61,6 +61,7 @@ interface GroupsState {
   hydrate: () => Promise<void>;
   createGroup: (name: string, members: string[], avatarColor?: string, avatarImage?: string) => Promise<StoredGroup>;
   renameGroup: (id: string, name: string) => Promise<void>;
+  updateGroupAvatar: (id: string, avatarImage: string) => Promise<void>;
   addMember: (id: string, aegisId: string) => Promise<void>;
   removeMember: (id: string, aegisId: string) => Promise<void>;
   updateGroupPermissions: (id: string, patch: Partial<Pick<StoredGroup, 'adminOnlyInvite' | 'moderateNewMembers'>>) => Promise<void>;
@@ -131,6 +132,41 @@ export const useGroups = create<GroupsState>((set, get) => ({
     }
     await saveGroup(updated);
     set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
+  },
+
+  async updateGroupAvatar(id, avatarImage) {
+    const group = get().groups.find((g) => g.id === id);
+    if (!group) return;
+    // Persist picker URIs (file://, content://) into documentDirectory so the
+    // avatar survives cache eviction — same as createGroup.
+    let persistentAvatarUri = avatarImage;
+    if (avatarImage && (avatarImage.startsWith('file://') || avatarImage.startsWith('content://'))) {
+      try {
+        const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+        const dir = `${FS.documentDirectory}avatars/`;
+        await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+        const rawExt = avatarImage.includes('.') ? avatarImage.split('.').pop()?.toLowerCase() : undefined;
+        const ext = rawExt && rawExt.length <= 4 ? rawExt : 'jpg';
+        const destPath = `${dir}group_${id}_avatar_${Date.now()}.${ext}`;
+        await FS.copyAsync({ from: avatarImage, to: destPath });
+        persistentAvatarUri = destPath;
+      } catch { /* fall back to original URI */ }
+    }
+    const updated: StoredGroup = { ...group, avatarImage: persistentAvatarUri };
+    // Re-sign as admin so peers accept the updated metadata.
+    const sig = signAsAdmin(updated);
+    if (sig) {
+      updated.adminId = sig.adminId;
+      updated.adminSig = sig.adminSig;
+    }
+    await saveGroup(updated);
+    set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
+    // Force the new avatar to be re-sent (as a data URI) on the next group
+    // message so members pick up the change this session.
+    try {
+      (require('../socket/client') as { forgetGroupAvatarSent?: (gid: string) => void })
+        .forgetGroupAvatarSent?.(id);
+    } catch { /* non-fatal */ }
   },
 
   async addMember(id, aegisId) {

@@ -6,6 +6,29 @@ import { fetchPowChallengeAt, solvePoW } from './registration';
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
 
+/**
+ * Persistent ENCRYPTED media store. Ciphertext blobs are kept here under
+ * documentDirectory so chat media survives cache purges, app restarts AND the
+ * server's 24h blob TTL — while plaintext is only ever decrypted on demand into
+ * the (purgeable) cache directory. This keeps the "zero plaintext at rest"
+ * forensic posture: at-rest media is always the NaCl-secretbox ciphertext.
+ */
+const MEDIA_DIR = (FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? '') + 'media/';
+
+async function ensureMediaDir(): Promise<void> {
+  try {
+    const info = await FileSystem.getInfoAsync(MEDIA_DIR);
+    if (!info.exists) await FileSystem.makeDirectoryAsync(MEDIA_DIR, { intermediates: true });
+  } catch { /* best-effort */ }
+}
+
+const encPathFor = (id: string): string => `${MEDIA_DIR}${id}.enc`;
+const decPathFor = (id: string, ext: string): string => `${FileSystem.cacheDirectory}dec_${id}.${ext}`;
+
+async function fileExists(uri: string): Promise<boolean> {
+  try { return (await FileSystem.getInfoAsync(uri)).exists; } catch { return false; }
+}
+
 /** Exponential-backoff delays for upload/download retries: 0 ms, 500 ms, 1500 ms */
 const RETRY_DELAYS_MS = [0, 500, 1500];
 const MAX_ATTEMPTS = RETRY_DELAYS_MS.length;
@@ -70,28 +93,37 @@ export async function encryptAndUploadMedia(fileUri: string, mimeType?: string):
   const tempUri = FileSystem.cacheDirectory + 'upload_tmp_' + Date.now();
   await FileSystem.writeAsStringAsync(tempUri, encodeBase64(ciphertext), { encoding: FileSystem.EncodingType.Base64 });
 
-  // 5. Resolve PoW challenge for the blob endpoint, then upload
-  let powChallenge: string;
-  let powNonce: string;
-  try {
-    const challenge = await fetchPowChallengeAt(`${SERVER_URL}/blob/challenge`);
-    powChallenge = challenge.challenge;
-    powNonce = await solvePoW(challenge.challenge, challenge.difficulty);
-  } catch (e) {
-    await FileSystem.deleteAsync(tempUri, { idempotent: true });
-    throw new Error(`blob_pow_failed: ${(e as Error).message}`);
-  }
-
-  const uploadUrl = `${SERVER_URL}/blob/upload?powChallenge=${encodeURIComponent(powChallenge)}&powNonce=${encodeURIComponent(powNonce)}`;
-
+  // 5. Upload with retries. Each attempt resolves a FRESH PoW challenge: the
+  // relay CONSUMES the challenge the instant its PoW check passes — even when the
+  // request then fails for another reason. Reusing the same challenge on a retry
+  // would therefore always come back `challenge_unknown` (403), making the retry
+  // loop useless. Re-solving per attempt lets a retry actually recover.
   let uploadResult: Awaited<ReturnType<typeof FileSystem.uploadAsync>> | null = null;
   let lastUploadError: Error = new Error('upload_not_attempted');
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt]);
+
+    let uploadUrl: string;
+    try {
+      const challenge = await fetchPowChallengeAt(`${SERVER_URL}/blob/challenge`);
+      const powNonce = await solvePoW(challenge.challenge, challenge.difficulty);
+      uploadUrl = `${SERVER_URL}/blob/upload?powChallenge=${encodeURIComponent(challenge.challenge)}&powNonce=${encodeURIComponent(powNonce)}`;
+    } catch (e) {
+      lastUploadError = new Error(`blob_pow_failed: ${(e as Error).message}`);
+      continue;
+    }
+
     try {
       const result = await FileSystem.uploadAsync(uploadUrl, tempUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        // MUST declare a Content-Type: the relay's body parser (express.raw via
+        // type-is) only buffers the request into a Buffer when a Content-Type is
+        // present. Without this header uploadAsync sends none → express.raw skips
+        // → req.body is not a Buffer → 400 body_must_be_binary. This is what broke
+        // ALL media (image/audio/gif), in both 1:1 and group chats, since they all
+        // share this single upload path.
+        headers: { 'Content-Type': 'application/octet-stream' },
       });
       if (result.status === 200) {
         uploadResult = result;
@@ -103,77 +135,110 @@ export async function encryptAndUploadMedia(fileUri: string, mimeType?: string):
     }
   }
 
-  await FileSystem.deleteAsync(tempUri, { idempotent: true });
-
   if (!uploadResult) {
+    await FileSystem.deleteAsync(tempUri, { idempotent: true });
     throw new Error(`Failed to upload media: ${lastUploadError.message}`);
   }
 
   const { id } = JSON.parse(uploadResult.body);
 
-  // 6. Return formatted E2EE uri
+  // 6. Persist the ciphertext locally (encrypted-at-rest) so the sender can
+  // re-render the image after the cache is purged, without depending on the
+  // server blob (which is deleted after 24h). Move the temp ciphertext into
+  // the persistent media dir keyed by the server-assigned id.
+  await ensureMediaDir();
+  try {
+    await FileSystem.moveAsync({ from: tempUri, to: encPathFor(id) });
+  } catch {
+    // Move can fail across volumes — fall back to copy, then drop the temp.
+    try { await FileSystem.copyAsync({ from: tempUri, to: encPathFor(id) }); } catch { /* non-fatal */ }
+    await FileSystem.deleteAsync(tempUri, { idempotent: true });
+  }
+
+  // 7. Return formatted E2EE uri
   const keyB64 = encodeBase64(key);
   const nonceB64 = encodeBase64(nonce);
   return `blob:${id}:${keyB64}:${nonceB64}`;
 }
 
 /**
- * Downloads a ciphertext blob, decrypts it, and saves the plaintext locally.
- * @param mediaUri The formatted URI string `blob:<id>:<keyB64>:<nonceB64>`
- * @returns Local file URI to the decrypted media
+ * Ensure the ENCRYPTED ciphertext for a `blob:` URI is cached locally and
+ * persistently (no decryption). Call this at receive time while online so the
+ * media survives the server's 24h blob TTL and the device going offline.
  */
-export async function downloadAndDecryptMedia(mediaUri: string, ext: string = 'jpg'): Promise<string> {
-  if (!mediaUri.startsWith('blob:')) return mediaUri;
-
+export async function persistEncryptedBlob(mediaUri: string): Promise<void> {
+  if (!mediaUri.startsWith('blob:')) return;
   const parts = mediaUri.split(':');
-  if (parts.length !== 4) throw new Error('Invalid blob URI format');
-  const [_, id, keyB64, nonceB64] = parts;
-
-  const key = decodeBase64(keyB64);
-  const nonce = decodeBase64(nonceB64);
-
+  if (parts.length !== 4) return;
+  const id = parts[1];
+  await ensureMediaDir();
+  if (await fileExists(encPathFor(id))) return; // already persisted
   const downloadUrl = `${SERVER_URL}/blob/download/${id}`;
-
-  // Download encrypted file (with retry on transient network errors)
-  const tempEncryptedUri = FileSystem.cacheDirectory + `enc_${id}`;
-  let downloadResult: Awaited<ReturnType<typeof FileSystem.downloadAsync>> | null = null;
-  let lastDownloadError: Error = new Error('download_not_attempted');
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt]);
     try {
-      const result = await FileSystem.downloadAsync(downloadUrl, tempEncryptedUri);
-      if (result.status === 200) {
-        downloadResult = result;
-        break;
-      }
-      lastDownloadError = new Error(`download_http_${result.status}`);
-    } catch (e) {
-      lastDownloadError = e instanceof Error ? e : new Error(String(e));
-    }
+      const result = await FileSystem.downloadAsync(downloadUrl, encPathFor(id));
+      if (result.status === 200) return;
+      await FileSystem.deleteAsync(encPathFor(id), { idempotent: true });
+    } catch { /* retry */ }
   }
-  if (!downloadResult) {
-    throw new Error(`Failed to download media: ${lastDownloadError.message}`);
+}
+
+/**
+ * Resolve a `blob:<id>:<key>:<nonce>` URI to a local DECRYPTED file path.
+ * Decryption happens on demand into the purgeable cache dir; the ciphertext is
+ * kept persistently in MEDIA_DIR. Returns null if the media can no longer be
+ * recovered (no local ciphertext and the server blob has expired). Non-blob
+ * URIs are returned as-is when the file still exists.
+ */
+export async function resolveMedia(mediaUri: string, ext: string = 'jpg'): Promise<string | null> {
+  if (!mediaUri) return null;
+  if (!mediaUri.startsWith('blob:')) {
+    return (await fileExists(mediaUri)) ? mediaUri : null;
+  }
+  const parts = mediaUri.split(':');
+  if (parts.length !== 4) return null;
+  const [, id, keyB64, nonceB64] = parts;
+
+  const decPath = decPathFor(id, ext);
+  if (await fileExists(decPath)) return decPath; // already decrypted in cache
+
+  await ensureMediaDir();
+  if (!(await fileExists(encPathFor(id)))) {
+    await persistEncryptedBlob(mediaUri);
+    if (!(await fileExists(encPathFor(id)))) return null; // unrecoverable
   }
 
-  // Read encrypted data
-  const encB64Data = await FileSystem.readAsStringAsync(tempEncryptedUri, { encoding: FileSystem.EncodingType.Base64 });
-  const ciphertext = decodeBase64(encB64Data);
-
-  // Decrypt
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, key);
-  if (!plaintext) {
-    await FileSystem.deleteAsync(tempEncryptedUri, { idempotent: true });
-    throw new Error('Media decryption failed (MAC mismatch or invalid key)');
+  try {
+    const encB64 = await FileSystem.readAsStringAsync(encPathFor(id), { encoding: FileSystem.EncodingType.Base64 });
+    const ciphertext = decodeBase64(encB64);
+    const plaintext = nacl.secretbox.open(ciphertext, decodeBase64(nonceB64), decodeBase64(keyB64));
+    if (!plaintext) return null;
+    await FileSystem.writeAsStringAsync(decPath, encodeBase64(plaintext), { encoding: FileSystem.EncodingType.Base64 });
+    return decPath;
+  } catch {
+    return null;
   }
+}
 
-  // Save decrypted data to disk
-  // Extension is configurable so RN can detect the media type (e.g. 'm4a' for audio)
-  const tempDecryptedUri = FileSystem.cacheDirectory + `dec_${id}.${ext}`;
-  const plainB64Data = encodeBase64(plaintext);
-  await FileSystem.writeAsStringAsync(tempDecryptedUri, plainB64Data, { encoding: FileSystem.EncodingType.Base64 });
+/**
+ * Downloads a ciphertext blob, decrypts it, and returns a local plaintext path.
+ * Now backed by the persistent encrypted-at-rest store (resolveMedia), so the
+ * ciphertext is retained locally and the plaintext can be re-derived after a
+ * cache purge. Throws if the media cannot be recovered.
+ * @param mediaUri The formatted URI string `blob:<id>:<keyB64>:<nonceB64>`
+ */
+export async function downloadAndDecryptMedia(mediaUri: string, ext: string = 'jpg'): Promise<string> {
+  if (!mediaUri.startsWith('blob:')) return mediaUri;
+  const local = await resolveMedia(mediaUri, ext);
+  if (!local) throw new Error('Failed to download media: unrecoverable (no local ciphertext and server blob expired)');
+  return local;
+}
 
-  // Cleanup ciphertext
-  await FileSystem.deleteAsync(tempEncryptedUri, { idempotent: true });
-
-  return tempDecryptedUri;
+/** Delete the persistent encrypted copy for a blob URI (e.g. on message delete). */
+export async function deletePersistedMedia(mediaUri: string): Promise<void> {
+  if (!mediaUri.startsWith('blob:')) return;
+  const parts = mediaUri.split(':');
+  if (parts.length !== 4) return;
+  await FileSystem.deleteAsync(encPathFor(parts[1]), { idempotent: true }).catch(() => {});
 }

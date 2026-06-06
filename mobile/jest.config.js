@@ -20,5 +20,6 @@ module.exports = {
     '^expo-asset$': '<rootDir>/__mocks__/expo-asset.js',
     '^expo-sqlite$': '<rootDir>/__mocks__/expo-sqlite.js',
     '^expo-av$': '<rootDir>/__mocks__/expo-av.js',
+    '^react-native-view-shot$': '<rootDir>/__mocks__/react-native-view-shot.js',
   },
 };

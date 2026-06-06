@@ -3,6 +3,7 @@ import { View, Text, Pressable, ScrollView, Alert, TextInput, FlatList, Modal } 
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
+import { previewLabel } from '../utils/messagePreview';
 import Svg, { Circle, Line, G, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -58,6 +59,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   const { contacts } = useContacts();
   const { groups, hydrate, createGroup, leaveGroup } = useGroups();
   const previews = useMessages((s) => s.previews);
+  const unreadCounts = useMessages((s) => s.unreadCounts);
 
   const [isCreating, setIsCreating] = useState(false);
   const [groupName, setGroupName] = useState('');
@@ -524,6 +526,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
           contentContainerStyle={{ paddingBottom: 22 }}
           renderItem={({ item }) => {
             const previewMsg = previews[item.id];
+            const unread = unreadCounts[item.id] ?? 0;
             
             // Format preview message
             let lastText = i18nT('groups.noMessagesPreview');
@@ -532,9 +535,9 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                 const colonIdx = previewMsg.body.indexOf(': ');
                 const sender = previewMsg.body.substring(0, colonIdx);
                 const actual = previewMsg.body.substring(colonIdx + 2);
-                lastText = `${sender.substring(0, 8)}: ${actual}`;
+                lastText = `${sender.substring(0, 8)}: ${previewLabel(actual, i18nT)}`;
               } else {
-                lastText = previewMsg.body;
+                lastText = previewLabel(previewMsg.body, i18nT);
               }
             }
 
@@ -588,6 +591,17 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                     </Text>
                   </View>
                 </View>
+                {unread > 0 ? (
+                  <View style={{
+                    minWidth: 20, height: 20, borderRadius: 10,
+                    backgroundColor: t.accent, alignItems: 'center', justifyContent: 'center',
+                    paddingHorizontal: 4, alignSelf: 'center',
+                  }}>
+                    <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.accentInk }}>
+                      {unread > 99 ? '99+' : String(unread)}
+                    </Text>
+                  </View>
+                ) : null}
               </Pressable>
             );
           }}

@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "expo": "^55.0.25",
     "expo-server-sdk": "^6.1.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.5.2",
@@ -19,6 +18,7 @@
     "socket.io": "^4.8.1",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
+    "tsx": "^4.19.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -34,7 +34,6 @@
     "socket.io-client": "^4.8.3",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.10",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
 }

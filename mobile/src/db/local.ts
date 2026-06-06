@@ -32,9 +32,17 @@ export function getDbEncKeySlot(slot = activeSlot): string {
 }
 
 export function setActiveDbSlot(slot: string): void {
+  if (activeSlot === slot) return; // no-op: same slot, preserve in-progress warm-up
   activeSlot = slot;
   dbPromise = null;
   cachedDbKey = null;
+  // Reset the ready promise for the new slot so that callers waiting on
+  // dbReadyPromise get a fresh signal after the new slot's DB is opened.
+  dbReadyPromise = new Promise<void>((resolve) => {
+    _dbReadyResolve = resolve;
+  });
+  // Immediately kick off the warm-up for the new slot's DB file.
+  warmUpDb();
 }
 
 export async function closeActiveDatabase(): Promise<void> {
@@ -299,11 +307,28 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       attempts             INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_outbox_created ON outbox(created_at);
+
+    -- X3DH prekey SECRETS (durable, encrypted-at-rest primary store).
+    -- ROOT-CAUSE FIX: previously SPK/OPK private keys lived ONLY in SecureStore
+    -- (Android Keystore). Bulk writes (~104 items per refill) can silently fail
+    -- on some emulators/devices; the public SPK was still published, leaving the
+    -- recipient with a prekey whose secret it cannot read → permanent X3DH
+    -- "no-spk" abort. Persisting the secrets here (Signal/Threema style: private
+    -- keys in durable local storage) makes the upload's "never publish a SPK we
+    -- can't read back" invariant enforceable. secret_b64 is stored via encryptBody.
+    --   kind: 'spk' | 'opk'  — key_id is the X3DH keyId.
+    CREATE TABLE IF NOT EXISTS prekey_secrets (
+      slot       TEXT NOT NULL,
+      kind       TEXT NOT NULL,
+      key_id     INTEGER NOT NULL,
+      secret_b64 TEXT NOT NULL,
+      PRIMARY KEY (slot, kind, key_id)
+    );
   `);
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 5;
+  const USER_DB_VERSION = 6;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -347,6 +372,15 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // this branch runs only for existing users upgrading from v4.
     // No ALTER needed — outbox is a brand-new table.
     await d.execAsync('PRAGMA user_version = 5');
+  }
+
+  if (currentVersion < 6) {
+    // v5 → v6: add prekey_secrets table (durable X3DH SPK/OPK secret store).
+    // The CREATE TABLE IF NOT EXISTS above already handles fresh installs and
+    // existing upgrades; the table starts empty and is populated on the next
+    // uploadPreKeys() refill. No data migration of legacy SecureStore secrets is
+    // required — new sessions from that point on derive correctly.
+    await d.execAsync('PRAGMA user_version = 6');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.
@@ -398,23 +432,27 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
  *
  * Retries up to MAX_ATTEMPTS times when the failure is a NullPointerException
  * originating from the expo-sqlite JSI bridge on Android.  This NPE pattern is
- * observed on BlueStacks and some x86 emulators where the WAL shared-memory
- * VFS initialisation races against the JSI thread during cold-start.  Each
- * retry closes the half-initialised handle (to avoid native connection leaks)
- * and introduces a small growing backoff that gives the JSI bridge time to
- * stabilise before the next attempt.
+ * observed on BlueStacks and some x86 emulators where the JSI bridge initialises
+ * the native DB pointer asynchronously during cold-start; the pointer can stay
+ * null for several seconds.  Each retry closes the half-initialised handle (to
+ * avoid native connection leaks) and introduces a capped growing backoff that
+ * gives the JSI bridge time to stabilise before the next attempt.
+ *
+ * MAX_ATTEMPTS = 16 (~10 s total on a very slow x86 emulator; first attempt on
+ * arm64 real hardware almost always succeeds so the extra attempts cost nothing).
  *
  * Non-NPE errors (disk full, file corruption, …) are propagated immediately on
  * the first occurrence — they are not transient and retrying would not help.
  */
 async function openAndInit(dbName: string): Promise<SQLite.SQLiteDatabase> {
-  // x86 Android emulators (BlueStacks) cold-start the expo-sqlite JSI bridge
-  // slowly: the native DB pointer can come back null for the first several
-  // hundred ms, making the first execAsync reject with a NullPointerException.
-  // Be patient — 8 attempts with growing backoff (~0.1s→0.8s, ~3.6s total) lets
-  // the bridge stabilise. On real arm64 devices the first attempt almost always
-  // succeeds, so this costs nothing there.
-  const MAX_ATTEMPTS = 8;
+  // x86 Android emulators (and New Architecture Bridgeless) cold-start the
+  // expo-sqlite JSI bridge slowly: the native DB pointer can come back null for
+  // the first several seconds, making execAsync reject with NullPointerException.
+  // 16 attempts with a backoff capped at 500 ms (~10 s total) outlasts even the
+  // slowest BlueStacks/emulator cold-start. On real arm64 devices the first
+  // attempt almost always succeeds so the extra budget costs nothing in practice.
+  const MAX_ATTEMPTS = 16;
+  const BACKOFF_CAP_MS = 500;
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let d: SQLite.SQLiteDatabase | null = null;
@@ -433,13 +471,72 @@ async function openAndInit(dbName: string): Promise<SQLite.SQLiteDatabase> {
       if (attempt === MAX_ATTEMPTS) throw new DbInitExhaustedError(e);
       // Close the half-initialised handle to avoid leaking native connections.
       try { await d?.closeAsync(); } catch { /* handle may be invalid — ignore */ }
-      // Growing backoff: 100, 200, 300 … ms — gives the cold JSI bridge time to
-      // recover its internal state between attempts (BlueStacks needs more than
-      // the original ~60 ms).
-      await new Promise<void>((r) => setTimeout(r, 100 * attempt));
+      // Capped growing backoff: 100, 200, … ms up to BACKOFF_CAP_MS.
+      // Gives the cold JSI bridge time to recover its internal state between
+      // attempts (BlueStacks / New Architecture Bridgeless may need several
+      // full seconds before the native SQLite pointer becomes non-null).
+      const delay = Math.min(100 * attempt, BACKOFF_CAP_MS);
+      await new Promise<void>((r) => setTimeout(r, delay));
     }
   }
   throw lastErr;
+}
+
+// ─── DB warm-up: kick off the native connection during splash/loading ──────────
+//
+// On Android New Architecture (Bridgeless) the expo-sqlite JSI module is NOT
+// ready at the moment the first JS frame executes.  openAndInit's retry loop can
+// absorb the NPE window, but ONLY if the warm-up starts early enough — before
+// the user taps "Generate my identity".  We therefore expose:
+//
+//   warmUpDb()        — call this as early as possible in App lifecycle (alongside
+//                       hydrate()). It fires the openAndInit chain in the
+//                       background and records the result in dbReadyPromise.
+//
+//   dbReadyPromise    — resolves (never rejects) once the DB is genuinely open
+//                       and schema-initialised, or once all retry attempts have
+//                       been exhausted (in that case the gate lets through with
+//                       "best effort" — withDb will surface the real error when
+//                       the actual operation runs).
+//
+// UI callers (OnboardingScreen) should wait for dbReadyPromise before allowing
+// identity generation so the user never hits the cold-start NPE window.
+
+let _dbReadyResolve: (() => void) | null = null;
+
+/**
+ * A promise that resolves (always — never rejects) once the DB connection has
+ * been confirmed open and schema-initialised, or once the cold-start retry budget
+ * is exhausted.  Consumers use this as a gate: `await dbReadyPromise` before
+ * issuing the first write.
+ *
+ * The promise is replaced whenever the active slot changes (setActiveDbSlot) so
+ * that slot-switch consumers get a fresh ready signal for the new DB file.
+ */
+export let dbReadyPromise: Promise<void> = new Promise<void>((resolve) => {
+  _dbReadyResolve = resolve;
+});
+
+/**
+ * Kicks off the DB warm-up as early as possible in the app lifecycle.
+ *
+ * Call once from App.tsx (e.g. alongside `void hydrate()`) on first mount.
+ * Subsequent calls for the same slot are no-ops because db() memoises the
+ * connection promise.  The function never throws — all errors are absorbed and
+ * dbReadyPromise resolves so the UI gate doesn't block forever.
+ */
+export function warmUpDb(): void {
+  // Fire-and-forget: db() starts openAndInit which retries on NPE.
+  // When it resolves the DB is genuinely open; resolve the ready promise.
+  void db().then(() => {
+    _dbReadyResolve?.();
+    _dbReadyResolve = null;
+  }).catch(() => {
+    // Even on exhausted retries, resolve (not reject) so the UI gate releases
+    // and the real error surfaces when the first actual DB operation runs.
+    _dbReadyResolve?.();
+    _dbReadyResolve = null;
+  });
 }
 
 async function db(): Promise<SQLite.SQLiteDatabase> {
@@ -627,7 +724,8 @@ export async function clearIdentity(): Promise<void> {
        DELETE FROM ratchet_sessions;
        DELETE FROM groups;
        DELETE FROM chat_state;
-       DELETE FROM call_history;`
+       DELETE FROM call_history;
+       DELETE FROM prekey_secrets;`
     );
   });
 }
@@ -923,6 +1021,14 @@ export async function updateMessageDelivery(id: string, status: 'sent' | 'delive
   });
 }
 
+/** Update a message's media reference (stored encrypted, like saveMessage). */
+export async function updateMessageMediaUri(id: string, mediaUri: string): Promise<void> {
+  const encryptedMediaUri = await encryptBody(mediaUri);
+  return withDb(async (d) => {
+    await d.runAsync('UPDATE messages SET media_uri = ? WHERE id = ?', encryptedMediaUri, id);
+  });
+}
+
 export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<MessageRow>(
@@ -1156,6 +1262,10 @@ export async function wipeDatabase(): Promise<void> {
     await d.runAsync('DELETE FROM call_history');
     await d.runAsync('DELETE FROM polls');
     await d.runAsync('DELETE FROM scheduled_messages');
+    // X3DH prekey secrets now live PRIMARILY in this table — wipe them so a
+    // forensic read of the database file after panic cannot recover past
+    // session key material.
+    await d.runAsync('DELETE FROM prekey_secrets');
     // clearIdentity deletes SECRET_KEY_SLOT + SIGN_SECRET_KEY_SLOT and the identity table row.
     await clearIdentity();
     // SQLite DELETE only removes pages from free-list — VACUUM overwrites freed
@@ -1616,5 +1726,155 @@ export async function countOutboxJobs(): Promise<number> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM outbox');
     return row?.n ?? 0;
+  });
+}
+
+// ─── X3DH PreKey Secrets (durable primary store) ──────────────────────────────
+//
+// PRIMARY, durable store for the X3DH private prekeys (SPK secret, OPK secrets,
+// and the current SPK keyId). The previous design kept these ONLY in SecureStore
+// (Android Keystore). Bulk Keystore writes (~104 items on a refill) silently
+// failed on some emulators/devices; the public SPK was published anyway, leaving
+// the recipient unable to complete X3DH ("no-spk" abort) — the root cause of
+// "messages don't arrive". By persisting secrets in the encrypted-at-rest SQLite
+// DB, uploadPreKeys can READ BACK and verify the SPK secret before publishing,
+// enforcing the invariant: never publish a prekey whose secret we cannot read.
+//
+// secret_b64 is encrypted at rest via encryptBody (same DB key as message bodies)
+// so no private key material lands on disk unprotected. Functions are keyed by
+// the active slot so multiple profiles stay isolated.
+
+/** Persist (or replace) the SPK secret for a keyId. b64 is the raw 32-byte X25519 secret, base64. */
+export async function saveSpkSecret(keyId: number, b64: string): Promise<void> {
+  return withDb(async (d) => {
+    const enc = await encryptBody(b64);
+    await d.runAsync(
+      `INSERT OR REPLACE INTO prekey_secrets (slot, kind, key_id, secret_b64) VALUES (?, 'spk', ?, ?)`,
+      activeSlot, keyId, enc,
+    );
+  });
+}
+
+/** Load the SPK secret (base64) for a specific keyId, or null if absent. */
+export async function loadSpkSecret(keyId: number): Promise<string | null> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ secret_b64: string }>(
+      `SELECT secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'spk' AND key_id = ?`,
+      activeSlot, keyId,
+    );
+    if (!row) return null;
+    return decryptBody(row.secret_b64);
+  });
+}
+
+/** Load the SPK secret (base64) for the highest stored keyId, or null if none. */
+export async function loadLatestSpkSecret(): Promise<{ keyId: number; b64: string } | null> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ key_id: number; secret_b64: string }>(
+      `SELECT key_id, secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'spk' ORDER BY key_id DESC LIMIT 1`,
+      activeSlot,
+    );
+    if (!row) return null;
+    return { keyId: row.key_id, b64: await decryptBody(row.secret_b64) };
+  });
+}
+
+/** Delete a stored SPK secret by keyId (forward secrecy after rotation). */
+export async function deleteSpkSecret(keyId: number): Promise<void> {
+  return withDb(async (d) => {
+    await d.runAsync(
+      `DELETE FROM prekey_secrets WHERE slot = ? AND kind = 'spk' AND key_id = ?`,
+      activeSlot, keyId,
+    );
+  });
+}
+
+/** Persist (or replace) a one-time prekey secret for a keyId. */
+export async function saveOpkSecret(keyId: number, b64: string): Promise<void> {
+  return withDb(async (d) => {
+    const enc = await encryptBody(b64);
+    await d.runAsync(
+      `INSERT OR REPLACE INTO prekey_secrets (slot, kind, key_id, secret_b64) VALUES (?, 'opk', ?, ?)`,
+      activeSlot, keyId, enc,
+    );
+  });
+}
+
+/** Load a one-time prekey secret (base64) by keyId, or null if absent/consumed. */
+export async function loadOpkSecret(keyId: number): Promise<string | null> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ secret_b64: string }>(
+      `SELECT secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'opk' AND key_id = ?`,
+      activeSlot, keyId,
+    );
+    if (!row) return null;
+    return decryptBody(row.secret_b64);
+  });
+}
+
+/**
+ * Load EVERY stored one-time prekey secret for the active slot as a
+ * Map<keyId, base64-secret>. Used to reconstruct the PUBLIC OPK bundle for
+ * re-publishing without regenerating keys (the device owns a single,
+ * durable prekey set — see crypto/signal/x3dh.ts:ensureDevicePreKeys).
+ * Only OPKs whose secrets are still present (i.e. not yet consumed) are
+ * returned, so the rebuilt public bundle naturally excludes consumed OPKs.
+ */
+export async function loadAllOpkSecrets(): Promise<Map<number, string>> {
+  return withDb(async (d) => {
+    const rows = await d.getAllAsync<{ key_id: number; secret_b64: string }>(
+      `SELECT key_id, secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'opk' ORDER BY key_id ASC`,
+      activeSlot,
+    );
+    const out = new Map<number, string>();
+    for (const row of rows) {
+      out.set(row.key_id, await decryptBody(row.secret_b64));
+    }
+    return out;
+  });
+}
+
+/** Delete a one-time prekey secret by keyId (single-use consumption). */
+export async function deleteOpkSecret(keyId: number): Promise<void> {
+  return withDb(async (d) => {
+    await d.runAsync(
+      `DELETE FROM prekey_secrets WHERE slot = ? AND kind = 'opk' AND key_id = ?`,
+      activeSlot, keyId,
+    );
+  });
+}
+
+/**
+ * Persist the current SPK keyId so it survives even if SecureStore loses it.
+ * Stored as a kind='spkmeta', key_id=0 sentinel row whose secret_b64 holds the
+ * keyId as a plaintext-equivalent (still encryptBody-wrapped) string.
+ */
+export async function setSpkKeyId(n: number): Promise<void> {
+  return withDb(async (d) => {
+    const enc = await encryptBody(String(n));
+    await d.runAsync(
+      `INSERT OR REPLACE INTO prekey_secrets (slot, kind, key_id, secret_b64) VALUES (?, 'spkmeta', 0, ?)`,
+      activeSlot, enc,
+    );
+  });
+}
+
+/** Read the current SPK keyId, or null if never set. */
+export async function getSpkKeyId(): Promise<number | null> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ secret_b64: string }>(
+      `SELECT secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'spkmeta' AND key_id = 0`,
+      activeSlot,
+    );
+    if (!row) return null;
+    const v = parseInt(await decryptBody(row.secret_b64), 10);
+    return Number.isFinite(v) ? v : null;
+  });
+}
+
+/** Delete every prekey secret for the active slot (panic wipe / slot delete). */
+export async function clearPrekeySecrets(): Promise<void> {
+  return withDb(async (d) => {
+    await d.runAsync('DELETE FROM prekey_secrets WHERE slot = ?', activeSlot);
   });
 }

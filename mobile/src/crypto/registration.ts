@@ -14,6 +14,7 @@
  */
 
 import nacl from 'tweetnacl';
+import * as SecureStore from 'expo-secure-store';
 import { encodeBase64 } from 'tweetnacl-util';
 import { sha256 } from '@noble/hashes/sha256';
 import { utf8ToBytes } from '@noble/hashes/utils';
@@ -23,6 +24,23 @@ import type {
   PreKeySecrets,
   SignedPreKeyPublic,
 } from './types';
+
+// ---------------------------------------------------------------------------
+// SecureStore mirror keys (best-effort secondary cache; DB is authoritative)
+// ---------------------------------------------------------------------------
+// These mirror the slot-scoped keys defined in socket/client.ts so the legacy
+// SecureStore read paths (X3DH receiver lookups) keep working. The DB is the
+// source of truth; SecureStore writes are non-fatal. The slot prefix is read
+// lazily from db/local via dynamic import inside the upload function.
+function secureKeyHelpers(slotPrefix: string) {
+  return {
+    spkSecretKey: (keyId: number) => `aegis.${slotPrefix}spkSecret.${keyId}`,
+    opkSecretKey: (keyId: number) => `aegis.${slotPrefix}opkSecret.${keyId}`,
+    SECURE_SPK_SECRET_KEY: () => `aegis.${slotPrefix}spkSecret.b64`,
+    SECURE_SPK_KEYID_KEY: () => `aegis.${slotPrefix}spk.keyId`,
+    SECURE_OPK_IDS_KEY: () => `aegis.${slotPrefix}opkIds.json`,
+  };
+}
 
 export interface PowChallenge {
   challenge: string;
@@ -212,9 +230,30 @@ export async function uploadIdentityAndPrekeys(
   if (containsAnySecret(signedPreKeyPublic, oneTimePreKeysPublic)) {
     return { ok: false, error: 'prekeys: refusing to upload — secret material detected' };
   }
-  // Touch `preKeySecrets` so callers see we receive (but never serialize) it.
-  // This explicit no-op keeps the type-checker honest about the contract.
-  void preKeySecrets;
+
+  // ── DURABLE persistence of prekey SECRETS (registration path) ───────────────
+  // The relay only ever receives PUBLIC material. But a peer that fetches this
+  // SPK will run X3DH against it, so we MUST be able to read the matching SECRET
+  // back later. Previously the registration path discarded `preKeySecrets`
+  // entirely (`void preKeySecrets`), so a freshly created identity published an
+  // SPK whose secret it could never read → peer hits "ABORT no-spk". This mirrors
+  // the refill path in socket/client.ts:uploadPreKeys.
+  //
+  // INVARIANT: write the SPK secret to the durable, encrypted-at-rest DB FIRST,
+  // read it back by keyId, and ONLY publish the public SPK if that readback
+  // succeeds. Never publish a SPK whose secret we cannot read back.
+  const persistResult = await persistPrekeySecretsDurably(preKeySecrets);
+  if (!persistResult.ok) {
+    // Identity row already exists server-side, but we refuse to publish a SPK we
+    // cannot complete. Caller can retry; until then the bundle stays unpublished.
+    console.warn(
+      `[RDIAG] prekey-store ABORT spkId=${preKeySecrets.signedPreKey.keyId} dbReadback=NULL — NOT POSTing /prekeys`,
+    );
+    return {
+      ok: false,
+      error: `prekeys: could not persist SPK secret for keyId ${preKeySecrets.signedPreKey.keyId} — refusing to publish`,
+    };
+  }
 
   // Authenticate the prekeys upload: the server requires an Ed25519 signature
   // over `${aegisId}:prekeys:${timeBucket}` plus a fresh timestamp. Without
@@ -305,4 +344,95 @@ function containsAnySecret(
     if ('secretKey' in o || 'secretKeyB64' in o) return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Durable prekey-secret persistence (registration path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Persist the SPK secret + keyId + every OPK secret to the durable,
+ * encrypted-at-rest SQLite store. The SPK secret is written and read back
+ * (with one retry) to enforce the publish invariant: we return `{ ok: false }`
+ * if the SPK secret cannot be persisted-and-read-back, in which case the caller
+ * MUST NOT publish the public SPK.
+ *
+ * The SecureStore mirror is best-effort (non-fatal) so legacy read paths keep
+ * working — the DB is authoritative.
+ *
+ * db/local is required lazily (CommonJS, inside the function) to avoid pulling
+ * expo-sqlite / native modules into this otherwise pure-crypto module's static
+ * graph — keeps it side-effect free at import time and Jest-friendly (a dynamic
+ * `import()` would need --experimental-vm-modules; `require` does not).
+ */
+async function persistPrekeySecretsDurably(
+  preKeySecrets: PreKeySecrets,
+): Promise<{ ok: boolean }> {
+  const spkKeyId = preKeySecrets.signedPreKey.keyId;
+  const spkSecretB64 = encodeBase64(preKeySecrets.signedPreKey.secretKey);
+
+  const db = require('../db/local') as typeof import('../db/local');
+
+  // ── PRIMARY: durable SQLite (encrypted at rest). Source of truth. ──────────
+  const persistSpkToDb = async (): Promise<boolean> => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await db.saveSpkSecret(spkKeyId, spkSecretB64);
+        const back = await db.loadSpkSecret(spkKeyId);
+        if (back === spkSecretB64) return true;
+      } catch (e) {
+        if (__DEV__) console.warn('[registration] SPK secret DB write attempt failed', attempt, e);
+      }
+    }
+    return false;
+  };
+
+  if (!(await persistSpkToDb())) {
+    return { ok: false };
+  }
+
+  // Persist the durable keyId counter and every OPK secret.
+  try {
+    await db.setSpkKeyId(spkKeyId);
+  } catch (e) {
+    if (__DEV__) console.warn('[registration] could not persist SPK keyId to DB', e);
+  }
+  for (const [keyId, secret] of preKeySecrets.opkSecrets.entries()) {
+    try {
+      await db.saveOpkSecret(keyId, encodeBase64(secret));
+    } catch (e) {
+      if (__DEV__) console.warn('[registration] could not persist OPK secret to DB', keyId, e);
+    }
+  }
+
+  // ── SECONDARY: SecureStore mirror (best-effort; DB is authoritative). ──────
+  try {
+    const slot = db.getActiveDbSlot();
+    const slotPrefix = slot === 'self' ? '' : `${slot}.`;
+    const keys = secureKeyHelpers(slotPrefix);
+    const secureOpts = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
+
+    await SecureStore.setItemAsync(keys.spkSecretKey(spkKeyId), spkSecretB64, secureOpts);
+    await SecureStore.setItemAsync(keys.SECURE_SPK_SECRET_KEY(), spkSecretB64, secureOpts);
+    await SecureStore.setItemAsync(keys.SECURE_SPK_KEYID_KEY(), String(spkKeyId), secureOpts);
+
+    for (const [keyId, secret] of preKeySecrets.opkSecrets.entries()) {
+      await SecureStore.setItemAsync(keys.opkSecretKey(keyId), encodeBase64(secret), secureOpts);
+    }
+    await SecureStore.setItemAsync(
+      keys.SECURE_OPK_IDS_KEY(),
+      JSON.stringify(Array.from(preKeySecrets.opkSecrets.keys())),
+      secureOpts,
+    );
+  } catch (err) {
+    // Non-fatal: the DB is the durable source of truth.
+    if (__DEV__) console.warn('[registration] SecureStore prekey mirror failed (DB is authoritative):', err);
+  }
+
+  // [RDIAG] confirm the SPK secret is readable back from the DURABLE store.
+  console.warn(
+    `[RDIAG] prekey-store DONE spkId=${spkKeyId} dbReadback=OK opkCount=${preKeySecrets.opkSecrets.size}`,
+  );
+
+  return { ok: true };
 }

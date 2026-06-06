@@ -89,35 +89,23 @@ jest.mock('../../components/icons', () => ({
   I: new Proxy({}, { get: () => () => null }),
 }));
 
-// ── react-native-gesture-handler ───────────────────────────────────────────
+// ── react-native-gesture-handler (incl. modern Gesture builder API) ──────────
 jest.mock('react-native-gesture-handler', () => {
-  const RN = jest.requireActual('react-native');
+  const chain = () => {
+    const g: Record<string, () => unknown> = {};
+    ['enabled', 'minDistance', 'onStart', 'onUpdate', 'onEnd', 'onChange', 'runOnJS',
+      'onBegin', 'onFinalize', 'hitSlop', 'simultaneousWithExternalGesture',
+      'requireExternalGestureToFail'].forEach((m) => { g[m] = () => g; });
+    return g;
+  };
+  const P = (props: { children?: React.ReactNode }) => (props && props.children != null ? props.children : null);
   return {
-    GestureHandlerRootView: RN.View,
-    Swipeable: RN.View,
-    DrawerLayout: RN.View,
-    State: {},
-    ScrollView: RN.ScrollView,
-    Slider: RN.View,
-    Switch: RN.Switch,
-    TextInput: RN.TextInput,
-    ViewPagerAndroid: RN.View,
-    WebView: RN.View,
-    NativeViewGestureHandler: RN.View,
-    TapGestureHandler: RN.View,
-    FlingGestureHandler: RN.View,
-    ForceTouchGestureHandler: RN.View,
-    LongPressGestureHandler: RN.View,
-    PanGestureHandler: RN.View,
-    PinchGestureHandler: RN.View,
-    RotationGestureHandler: RN.View,
-    RawButton: RN.TouchableHighlight,
-    BaseButton: RN.TouchableHighlight,
-    RectButton: RN.TouchableHighlight,
-    BorderlessButton: RN.TouchableHighlight,
-    FlatList: RN.FlatList,
-    gestureHandlerRootHOC: (c: unknown) => c,
-    Directions: {},
+    __esModule: true,
+    Gesture: { Pan: chain, Pinch: chain, Tap: chain, Simultaneous: () => chain(), Race: () => chain(), Exclusive: () => chain() },
+    GestureDetector: P, GestureHandlerRootView: P, Swipeable: P, DrawerLayout: P,
+    PanGestureHandler: P, TapGestureHandler: P, LongPressGestureHandler: P,
+    RectButton: P, BorderlessButton: P, BaseButton: P,
+    State: {}, Directions: {}, gestureHandlerRootHOC: (c: unknown) => c,
   };
 });
 

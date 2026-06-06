@@ -42,6 +42,16 @@ export function CallScreen({ onClose, onMinimize }: Props) {
   const peerName = peer?.name ?? peerId ?? 'unknown';
   const peerInitial = peerName.trim()[0]?.toUpperCase() ?? '?';
 
+  // Per-second tick so the in-call duration label re-renders every second.
+  // Without it, labelFor() computes Date.now()-startedAt only on unrelated
+  // re-renders, leaving the timer frozen at 00:00.
+  const [, setNowTick] = useState(0);
+  useEffect(() => {
+    if (status !== 'in-call') return;
+    const id = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [status]);
+
   // Session fingerprint derived from DTLS certificate fingerprints in the SDP.
   // This is session-specific: a new fingerprint is computed per call.
   // null = not yet available (loading state); string = ready.

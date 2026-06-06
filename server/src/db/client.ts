@@ -54,7 +54,8 @@ function initSqliteSchema(db: DatabaseSync) {
       nonce_b64      TEXT NOT NULL,
       created_at     INTEGER NOT NULL,
       expires_at     INTEGER NOT NULL DEFAULT 0,
-      drained_by     TEXT NOT NULL DEFAULT '[]'
+      drained_by     TEXT NOT NULL DEFAULT '[]',
+      sender_pub_b64 TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_recipient
@@ -315,6 +316,7 @@ function initSqliteSchema(db: DatabaseSync) {
   try { db.exec(`ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages DROP COLUMN sender;`); } catch { /* absent */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN drained_by TEXT NOT NULL DEFAULT '[]';`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE messages ADD COLUMN sender_pub_b64 TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN pinned_by TEXT;`); } catch { /* exists */ }
@@ -385,7 +387,8 @@ async function initPgSchema(): Promise<void> {
       nonce_b64      TEXT NOT NULL,
       created_at     BIGINT NOT NULL,
       expires_at     BIGINT NOT NULL DEFAULT 0,
-      drained_by     TEXT NOT NULL DEFAULT '[]'
+      drained_by     TEXT NOT NULL DEFAULT '[]',
+      sender_pub_b64 TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_recipient
@@ -714,6 +717,13 @@ export interface MessageRow {
   expires_at: number;
   /** JSON-serialized string[]. Device IDs that have already drained this message. */
   drained_by: string;
+  /**
+   * Sender's X25519 public key (base64), attached ONLY for X3DH-initial (`init`)
+   * messages so the recipient can identify+decrypt a first-contact message that
+   * had to be queued. null for all normal sealed-sender messages — the relay
+   * never persists the social graph for those (FND-05).
+   */
+  sender_pub_b64?: string | null;
 }
 
 export interface PushTokenRow {
@@ -914,8 +924,8 @@ export const messageRepo = {
       return { ok: false, reason: 'queue_full' };
     }
     await dbRun(
-      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by) VALUES (?, ?, ?, ?, ?, ?, '[]')`,
-      [row.id, row.recipient, row.ciphertext_b64, row.nonce_b64, row.created_at, expiresAt]
+      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64) VALUES (?, ?, ?, ?, ?, ?, '[]', ?)`,
+      [row.id, row.recipient, row.ciphertext_b64, row.nonce_b64, row.created_at, expiresAt, row.sender_pub_b64 ?? null]
     );
     return { ok: true };
   },
@@ -927,7 +937,7 @@ export const messageRepo = {
   async drainFor(recipient: string, deviceId?: string): Promise<MessageRow[]> {
     const now = Date.now();
     const rows = await dbAll<MessageRow>(
-      `SELECT id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by
+      `SELECT id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64
        FROM messages WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)
        ORDER BY created_at ASC`,
       [recipient, now]

@@ -150,19 +150,30 @@ export function performX3DHReceiver(
   return hkdfSHA256(dhOut, salt, info, 32);
 }
 
+export interface DevicePreKeySet {
+  signedPreKey: {
+    keyId: number;
+    publicKeyB64: string;
+    signatureB64: string;
+    secretKey: Uint8Array;
+  };
+  oneTimePreKeys: { keyId: number; publicKeyB64: string }[];
+  opkSecrets: Map<number, Uint8Array>;
+}
+
 export function generatePreKeys(
   identity: Identity,
   startOpkId = 1,
   count = 100,
   spkKeyId = 1
-) {
+): DevicePreKeySet {
   // Signed PreKey
   const spk = nacl.box.keyPair();
   const signature = nacl.sign.detached(spk.publicKey, identity.signingSecretKey);
 
-  const oneTimePreKeys = [];
+  const oneTimePreKeys: { keyId: number; publicKeyB64: string }[] = [];
   const opkSecrets = new Map<number, Uint8Array>();
-  
+
   for (let i = 0; i < count; i++) {
     const opk = nacl.box.keyPair();
     const keyId = startOpkId + i;
@@ -183,4 +194,127 @@ export function generatePreKeys(
     oneTimePreKeys,
     opkSecrets
   };
+}
+
+/**
+ * Rebuild a DevicePreKeySet (public material + secrets) from persisted SECRETS.
+ *
+ * X25519 public keys are derived deterministically from their secret via
+ * `nacl.scalarMult.base(secret)`; the SPK signature is recomputed with the
+ * identity's Ed25519 signing key. This guarantees the public material we
+ * (re)publish ALWAYS corresponds to the secrets in the durable DB — the
+ * single-source-of-truth invariant that fixes the root-key divergence caused
+ * by concurrent independent `generatePreKeys` calls.
+ */
+function reconstructPreKeySetFromSecrets(
+  identity: Identity,
+  spkKeyId: number,
+  spkSecret: Uint8Array,
+  opkSecretsB64: Map<number, string>,
+): DevicePreKeySet {
+  const spkPublic = nacl.scalarMult.base(spkSecret);
+  const signature = nacl.sign.detached(spkPublic, identity.signingSecretKey);
+
+  const oneTimePreKeys: { keyId: number; publicKeyB64: string }[] = [];
+  const opkSecrets = new Map<number, Uint8Array>();
+  // Stable ascending order so the published bundle is deterministic.
+  const keyIds = Array.from(opkSecretsB64.keys()).sort((a, b) => a - b);
+  for (const keyId of keyIds) {
+    const secret = decodeBase64(opkSecretsB64.get(keyId)!);
+    oneTimePreKeys.push({
+      keyId,
+      publicKeyB64: encodeBase64(nacl.scalarMult.base(secret)),
+    });
+    opkSecrets.set(keyId, secret);
+  }
+
+  return {
+    signedPreKey: {
+      keyId: spkKeyId,
+      publicKeyB64: encodeBase64(spkPublic),
+      signatureB64: encodeBase64(signature),
+      secretKey: spkSecret,
+    },
+    oneTimePreKeys,
+    opkSecrets,
+  };
+}
+
+// ── Single-source-of-truth device prekey set ────────────────────────────────
+// Serializes concurrent callers (publishToServer fire-and-forget, the socket
+// `unknown_identity` handler, Onboarding, profile creation) per active slot so
+// two routes can never publish DIFFERENT sets. The first caller generates and
+// durably persists ONE set; every subsequent caller (concurrent or later)
+// reuses it, reconstructing the public material from the persisted secrets.
+const ensurePreKeysInFlight = new Map<string, Promise<DevicePreKeySet>>();
+
+/**
+ * Return THE device's prekey set for the active slot — creating and durably
+ * persisting it exactly once. All registration / re-registration routes MUST
+ * use this instead of calling `generatePreKeys` directly, so the public bundle
+ * published to the relay always matches the secrets stored on device.
+ *
+ * Invariant preserved: a freshly generated SPK secret is written to the durable
+ * DB and read back BEFORE the set is returned; if the readback fails we throw
+ * (the caller must not publish a SPK whose secret it cannot recover).
+ *
+ * db/local is required lazily (CommonJS) so this otherwise pure-crypto module
+ * stays free of native (expo-sqlite) imports at static-graph load time and
+ * Jest-friendly (`require`, never `await import`).
+ */
+export async function ensureDevicePreKeys(identity: Identity): Promise<DevicePreKeySet> {
+  const db = require('../../db/local') as typeof import('../../db/local');
+  const slot = db.getActiveDbSlot();
+
+  const existing = ensurePreKeysInFlight.get(slot);
+  if (existing) return existing;
+
+  const work = (async (): Promise<DevicePreKeySet> => {
+    // 1. Reuse a persisted set if one exists.
+    const spkKeyId = await db.getSpkKeyId();
+    if (spkKeyId !== null) {
+      const spkSecretB64 = await db.loadSpkSecret(spkKeyId);
+      if (spkSecretB64) {
+        const opkSecretsB64 = await db.loadAllOpkSecrets();
+        return reconstructPreKeySetFromSecrets(
+          identity,
+          spkKeyId,
+          decodeBase64(spkSecretB64),
+          opkSecretsB64,
+        );
+      }
+    }
+
+    // 2. No durable set yet — generate one, persist it (with readback), return it.
+    const set = generatePreKeys(identity, 1, 100, 1);
+    const spkSecretB64 = encodeBase64(set.signedPreKey.secretKey);
+
+    let persisted = false;
+    for (let attempt = 1; attempt <= 2 && !persisted; attempt++) {
+      try {
+        await db.saveSpkSecret(set.signedPreKey.keyId, spkSecretB64);
+        const back = await db.loadSpkSecret(set.signedPreKey.keyId);
+        if (back === spkSecretB64) persisted = true;
+      } catch {/* retry once */}
+    }
+    if (!persisted) {
+      throw new Error(
+        `ensureDevicePreKeys: could not persist SPK secret for keyId ${set.signedPreKey.keyId} — refusing to publish`,
+      );
+    }
+
+    try { await db.setSpkKeyId(set.signedPreKey.keyId); } catch {/* best-effort */}
+    for (const [keyId, secret] of set.opkSecrets.entries()) {
+      try { await db.saveOpkSecret(keyId, encodeBase64(secret)); } catch {/* best-effort */}
+    }
+    return set;
+  })();
+
+  ensurePreKeysInFlight.set(slot, work);
+  try {
+    return await work;
+  } finally {
+    // Release the in-flight latch so a later slot switch / rotation can refresh.
+    ensurePreKeysInFlight.delete(slot);
+  }
 }

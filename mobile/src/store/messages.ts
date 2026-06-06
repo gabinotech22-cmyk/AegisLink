@@ -26,6 +26,8 @@ interface MessagesState {
   /** Per-chat ephemeral timer in seconds (0 = off). Persisted in SQLite. */
   ephemeralTimers: Record<string, number>;
   pendingMediaUri: string | null;
+  /** A trimmed video URI staged by the media editor, to be sent by the chat screen. */
+  pendingVideoUri: string | null;
   /** Unread incoming message count per chatId */
   unreadCounts: Record<string, number>;
   /** Saved draft text per chatId */
@@ -44,6 +46,7 @@ interface MessagesState {
   loadAllEphemeralTimers: () => Promise<void>;
   pruneExpired: () => void;
   setPendingMedia: (uri: string | null) => void;
+  setPendingVideo: (uri: string | null) => void;
   markRead: (chatId: string) => Promise<void>;
   saveDraft: (chatId: string, text: string) => Promise<void>;
   loadAllUnreads: () => Promise<void>;
@@ -52,6 +55,8 @@ interface MessagesState {
   softDelete: (chatId: string, id: string) => Promise<void>;
   toggleReaction: (chatId: string, id: string, emoji: string, aegisId?: string) => Promise<void>;
   updateDelivery: (chatId: string, id: string, status: 'sent' | 'delivered' | 'read') => Promise<void>;
+  /** Replace a message's media reference in place (e.g. local URI → persistent blob ref after upload). */
+  setMediaUri: (chatId: string, id: string, mediaUri: string) => Promise<void>;
   remoteDelete: (chatId: string, id: string) => Promise<void>;
   togglePin: (chatId: string, id: string) => Promise<void>;
   clearChat: (chatId: string) => Promise<void>;
@@ -64,11 +69,16 @@ export const useMessages = create<MessagesState>((set, get) => ({
   ephemeralTimer: 0,
   ephemeralTimers: {},
   pendingMediaUri: null,
+  pendingVideoUri: null,
   unreadCounts: {},
   drafts: {},
 
   setPendingMedia(uri) {
     set({ pendingMediaUri: uri });
+  },
+
+  setPendingVideo(uri) {
+    set({ pendingVideoUri: uri });
   },
 
   async loadChat(chatId) {
@@ -246,6 +256,18 @@ export const useMessages = create<MessagesState>((set, get) => ({
       byChat: {
         ...s.byChat,
         [chatId]: list.map((m) => (m.id === id ? { ...m, deliveryStatus: status } : m)),
+      },
+    }));
+  },
+
+  async setMediaUri(chatId, id, mediaUri) {
+    const { updateMessageMediaUri } = require('../db/local');
+    await updateMessageMediaUri(id, mediaUri);
+    const list = get().byChat[chatId] ?? [];
+    set((s) => ({
+      byChat: {
+        ...s.byChat,
+        [chatId]: list.map((m) => (m.id === id ? { ...m, mediaUri } : m)),
       },
     }));
   },

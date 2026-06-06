@@ -15,6 +15,7 @@ import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
 import { useTyping } from '../store/typing';
 import type { StoredContact, StoredMessage } from '../db/local';
+import { previewLabel } from '../utils/messagePreview';
 
 interface Props {
   onOpenChat: (contact: StoredContact) => void;
@@ -484,8 +485,10 @@ function ContactRow({
   if (isTyping) {
     previewText = i18nT('home.typing');
   } else if (preview) {
-    if (preview.direction === 'out') previewText = `${i18nT('home.you')}${preview.body || (preview.type === 'image' ? '📷 ' + i18nT('attachSheet.image') : preview.type === 'audio' ? '🎙 ' + i18nT('attachSheet.audio') : preview.type === 'file' ? '📎 ' + i18nT('attachSheet.file') : '...')}`;
-    else previewText = preview.body || (preview.type === 'image' ? '📷 ' + i18nT('attachSheet.image') : preview.type === 'audio' ? '🎙 ' + i18nT('attachSheet.audio') : preview.type === 'file' ? '📎 ' + i18nT('attachSheet.file') : '...');
+    const typeFallback = preview.type === 'image' ? '📷 ' + i18nT('attachSheet.image') : preview.type === 'audio' ? '🎙 ' + i18nT('attachSheet.audio') : preview.type === 'file' ? '📎 ' + i18nT('attachSheet.file') : '...';
+    const label = previewLabel(preview.body, i18nT) || typeFallback;
+    if (preview.direction === 'out') previewText = `${i18nT('home.you')}${label}`;
+    else previewText = label;
   } else {
     previewText = i18nT('home.noMessages');
   }

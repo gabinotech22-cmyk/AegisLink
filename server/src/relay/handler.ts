@@ -1,7 +1,9 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { z } from 'zod';
 import nacl from 'tweetnacl';
-import { decodeBase64 } from 'tweetnacl-util';
+import naclUtil from 'tweetnacl-util';
+
+const { decodeBase64 } = naclUtil;
 import { messageRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { notifyRecipient, sendCallWakeUp, type CallMedia } from '../push/expo.js';
@@ -22,6 +24,13 @@ const EnvelopeIn = z.object({
   to: z.string().regex(AEGIS_ID_RE),
   ciphertext: z.string().min(1).max(2097152), // 2 MB — accommodates voice/file messages
   nonce: z.string().min(1).max(64),
+  /**
+   * Set by the sender on X3DH-initial (first-contact) messages. When true and
+   * the recipient is offline, the relay attaches the sender's public key to the
+   * queued copy so the recipient can identify+decrypt a first message it would
+   * otherwise be unable to (no sender info on sealed-sender queue drains).
+   */
+  init: z.boolean().optional(),
 });
 
 // UUID regex reused before the Work-section constants are declared
@@ -90,6 +99,8 @@ export interface QueuedEnvelope {
   ciphertext: string;
   nonce: string;
   createdAt: number;
+  /** Present ONLY on first-contact (`init`) messages — lets the recipient decrypt a queued first message. */
+  senderPublicKeyB64?: string;
 }
 
 const PreKeyUpload = z.object({
@@ -458,6 +469,10 @@ export function attachRelay(io: SocketServer) {
         nonce: row.nonce_b64,
         createdAt: row.created_at,
       };
+      // Attach the sender's public key for first-contact (`init`) messages so the
+      // recipient can identify+decrypt them even though sealed-sender queue
+      // drains otherwise carry no sender info. Only set for init messages.
+      if (row.sender_pub_b64) queued.senderPublicKeyB64 = row.sender_pub_b64;
       socket.emit('envelope', queued);
       await messageRepo.delete(row.id, deviceId);
     }
@@ -500,7 +515,12 @@ export function attachRelay(io: SocketServer) {
         } else {
           const delivered = recipientSockets ? deliver(env, recipientSockets) : false;
           if (!delivered) {
-            // sender is intentionally omitted — relay must not persist the social graph (FND-05).
+            // Sender aegisId is intentionally omitted — the relay must not persist
+            // the social graph (FND-05). EXCEPTION: for X3DH-initial (`init`)
+            // messages we persist ONLY the sender's public key, so a first
+            // message to a new contact survives the offline queue (otherwise the
+            // recipient has no way to identify/decrypt it). Bounded to first
+            // contact; all normal messages still store no sender info.
             void messageRepo.enqueue({
               id: env.id,
               recipient: env.to,
@@ -509,6 +529,7 @@ export function attachRelay(io: SocketServer) {
               created_at: env.createdAt,
               // 0 signals "use default TTL" — messageRepo.enqueue applies MESSAGE_TTL_MS
               expires_at: 0,
+              sender_pub_b64: parsed.data.init ? (mySenderPublicKeyB64 ?? null) : null,
             }).then((result) => {
               if (!result.ok) {
                 ack?.({ ok: false, error: result.reason ?? 'queue_full' });
