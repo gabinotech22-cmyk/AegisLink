@@ -28,6 +28,9 @@ import { TopBar } from '../components/TopBar';
 import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { withPickingGuard } from '../utils/pickingGuard';
+// Shared process-wide recorder singleton — also used by VoiceRecorder so either
+// screen can release a recorder orphaned by the other (see audioRecorder.ts).
+import { acquireRecording, releaseActiveRecording, setActiveRecording } from '../utils/audioRecorder';
 import { useMessages } from '../store/messages';
 import { sendMessage } from '../socket/client';
 import type { StoredContact } from '../db/local';
@@ -125,9 +128,10 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
   useEffect(() => {
     return () => {
       clearInterval(intervalRef.current ?? undefined);
-      const rec = recordingRef.current;
       recordingRef.current = null;
-      void rec?.stopAndUnloadAsync().catch(() => {});
+      // Release via the shared singleton so an in-flight recording is torn down
+      // even though this instance's ref is about to be discarded.
+      void releaseActiveRecording();
       void soundRef.current?.unloadAsync().catch(() => {});
     };
   }, []);
@@ -200,15 +204,19 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
           type: 'view_once',
           mediaUri: uri,
         });
-        const FileSystem = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
-        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-        await sendMessage({
-          identity,
-          recipientAegisId: contact.aegisId,
-          recipientPublicKey: decodeBase64(contact.publicKeyB64),
-          plaintext: `[viewonce:data:video/mp4;base64,${base64}]`,
-          skipLocalAppend: true,
-        });
+        try {
+          const FileSystem = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+          const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+          await sendMessage({
+            identity,
+            recipientAegisId: contact.aegisId,
+            recipientPublicKey: decodeBase64(contact.publicKeyB64),
+            plaintext: `[viewonce:data:video/mp4;base64,${base64}]`,
+            skipLocalAppend: true,
+          });
+        } catch {
+          // queued offline — bubble already shows
+        }
         onSent();
       } catch {
         Alert.alert(i18nT('common.error'), i18nT('viewOnce.processError'));
@@ -401,23 +409,25 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
   // ── Audio recording ─────────────────────────────────────────────────────────
 
   async function startAudioRecording() {
-    // Stop and unload any previous recording that wasn't cleaned up
-    if (recordingRef.current) {
-      try { await recordingRef.current.stopAndUnloadAsync(); } catch { /* ignore */ }
-      recordingRef.current = null;
-    }
+    // Release any recorder orphaned by a previous attempt OR by VoiceRecorder
+    // (the inline composer mic) before preparing a new one — otherwise expo-av
+    // throws "Only one Recording object can be prepared at a given time."
+    try { await recordingRef.current?.stopAndUnloadAsync(); } catch { /* ignore */ }
+    recordingRef.current = null;
     try {
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) { Alert.alert(i18nT('voiceRecorder.permissionTitle'), i18nT('voiceRecorder.permissionMessage')); return; }
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      await rec.startAsync();
+      // acquireRecording() shares the process-wide singleton, frees any orphan,
+      // and retries once after an audio-session reset if the lock is still held.
+      const rec = await acquireRecording();
       recordingRef.current = rec;
       setElapsedMs(0);
       setAudioStage('recording');
       intervalRef.current = setInterval(() => setElapsedMs((p) => p + 100), 100);
     } catch (e) {
+      await releaseActiveRecording();
+      recordingRef.current = null;
+      setAudioStage('idle');
       Alert.alert(i18nT('common.error'), (e as Error).message);
     }
   }
@@ -430,12 +440,15 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
       const status = await recordingRef.current?.getStatusAsync();
       const fileUri = recordingRef.current?.getURI() ?? null;
       recordingRef.current = null;
+      setActiveRecording(null);
       if (fileUri) {
         setAudioUri(fileUri);
         setDurationMs(status?.durationMillis ?? elapsedMs);
         setAudioStage('recorded');
       }
     } catch (e) {
+      await releaseActiveRecording();
+      recordingRef.current = null;
       Alert.alert(i18nT('common.error'), (e as Error).message);
       setAudioStage('idle');
     }
