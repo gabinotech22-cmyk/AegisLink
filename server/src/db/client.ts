@@ -180,7 +180,6 @@ function initSqliteSchema(db: DatabaseSync) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_work_audit_org ON work_audit_log(org_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_work_audit_actor ON work_audit_log(org_id, actor_id, created_at DESC);
 
     CREATE TRIGGER IF NOT EXISTS audit_log_no_update
       BEFORE UPDATE ON work_audit_log
@@ -604,6 +603,37 @@ async function initPgSchema(): Promise<void> {
       PRIMARY KEY (channel_id, role)
     );
   `);
+
+  // ── PG migrations (safe to run repeatedly) ─────────────────────────────────
+  // These mirror the SQLite ALTER TABLE migrations below. Existing deployments
+  // may have tables from an older schema that lack newer columns. Each statement
+  // is wrapped in a DO block so it's a no-op when the column already exists.
+  const pgMigrations = [
+    `ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`,
+    `ALTER TABLE messages ADD COLUMN drained_by TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE messages ADD COLUMN sender_pub_b64 TEXT`,
+    `ALTER TABLE work_messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE work_messages ADD COLUMN pinned_by TEXT`,
+    `ALTER TABLE work_messages ADD COLUMN pinned_at TEXT`,
+    `ALTER TABLE work_messages ADD COLUMN parent_id TEXT`,
+    `ALTER TABLE work_messages ADD COLUMN reply_count INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE work_messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE work_orgs ADD COLUMN display_name TEXT`,
+    `ALTER TABLE work_orgs ADD COLUMN invite_policy TEXT NOT NULL DEFAULT 'invite_only'`,
+    `ALTER TABLE work_channels ADD COLUMN retention_days INTEGER`,
+  ];
+  for (const ddl of pgMigrations) {
+    try { await pool.query(ddl); } catch { /* column already exists — expected */ }
+  }
+
+  // Fix primary key for prekeys_signed if it was created without device_id.
+  // The old PK was (aegis_id) only; the new PK is (aegis_id, device_id).
+  // This is idempotent: if the PK already includes device_id, the constraint
+  // name won't match or the ADD will fail harmlessly.
+  try {
+    await pool.query(`ALTER TABLE prekeys_signed DROP CONSTRAINT IF EXISTS prekeys_signed_pkey`);
+    await pool.query(`ALTER TABLE prekeys_signed ADD PRIMARY KEY (aegis_id, device_id)`);
+  } catch { /* already correct or concurrent migration — safe to ignore */ }
 }
 
 // ── DB init (called once at startup) ─────────────────────────────────────────

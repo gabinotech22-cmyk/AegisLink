@@ -31,9 +31,10 @@ interface Props {
   visible: boolean;
   imageUri: string | null;
   onCancel: () => void;
-  onSend: (result: { uri: string; caption: string }) => void;
+  onSend: (result: { uri: string; caption: string; isViewOnce?: boolean }) => void;
   sendLabel?: string;
   captionPlaceholder?: string;
+  allowViewOnce?: boolean;
 }
 
 const WIN = Dimensions.get('window');
@@ -42,9 +43,29 @@ const PEN_WIDTH = 5;
 
 type Mode = 'view' | 'draw' | 'text';
 
+function getImageDisplayFrame(imgW: number, imgH: number, stageW: number, stageH: number) {
+  const stageRatio = stageW / stageH;
+  const imgRatio = imgW / imgH;
+  let w = stageW;
+  let h = stageH;
+  let x = 0;
+  let y = 0;
+  if (imgRatio > stageRatio) {
+    // Width limited
+    h = stageW / imgRatio;
+    y = (stageH - h) / 2;
+  } else {
+    // Height limited
+    w = stageH * imgRatio;
+    x = (stageW - w) / 2;
+  }
+  return { x, y, w, h };
+}
+
 export function MediaEditorModal({
   t, visible, imageUri, onCancel, onSend,
   sendLabel = 'Send', captionPlaceholder = 'Add a caption…',
+  allowViewOnce = false,
 }: Props) {
   // Working copy of the image (crop/rotate are baked into this uri).
   const [baseUri, setBaseUri] = useState<string | null>(imageUri);
@@ -54,8 +75,10 @@ export function MediaEditorModal({
   const [texts, setTexts] = useState<TextItem[]>([]);
   const [penColor, setPenColor] = useState(PEN_COLORS[2]);
   const [caption, setCaption] = useState('');
+  const [isViewOnce, setIsViewOnce] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [cropOpen, setCropOpen] = useState(false);
+  const [cropBox, setCropBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [imageFrame, setImageFrame] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   // Pristine picked image, so "reset" can undo crop/rotate.
   const origUriRef = useRef<string | null>(imageUri);
@@ -80,9 +103,12 @@ export function MediaEditorModal({
     if (visible) {
       setBaseUri(imageUri);
       origUriRef.current = imageUri;
-      setMode('view'); setCropOpen(false);
+      setMode('view');
+      setCropBox(null);
+      setImageFrame(null);
       setPaths([]); setRedoStack([]); setTexts([]); setCaption('');
       setPenColor(PEN_COLORS[2]); setEditingTextId(null); setCurPath('');
+      setIsViewOnce(false);
     }
   }, [visible, imageUri]);
 
@@ -92,32 +118,178 @@ export function MediaEditorModal({
     });
   }
 
-  // Center-crop the current image to a target aspect ratio (WhatsApp-style quick crop).
-  async function applyAspect(aw: number, ah: number) {
+  async function toggleCropMode() {
     if (!baseUri || busy) return;
+    if (cropBox) {
+      setCropBox(null);
+      setImageFrame(null);
+    } else {
+      setBusy(true);
+      try {
+        const { w, h } = await getSize(baseUri);
+        const frame = getImageDisplayFrame(w, h, stage.width, stage.height);
+        setImageFrame(frame);
+        setCropBox({
+          x: frame.x + 10,
+          y: frame.y + 10,
+          w: frame.w - 20,
+          h: frame.h - 20,
+        });
+      } catch (e) {
+        console.warn('Failed to enter crop mode:', e);
+      } finally {
+        setBusy(false);
+      }
+    }
+  }
+
+  const cropStartRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
+
+  const startCropGesture = () => {
+    if (cropBox) {
+      cropStartRef.current = { ...cropBox };
+    }
+  };
+
+  const tlGesture = Gesture.Pan()
+    .minDistance(0)
+    .onStart(startCropGesture)
+    .onUpdate((e) => {
+      if (!imageFrame) return;
+      const start = cropStartRef.current;
+      const maxLimitX = start.x + start.w - 50;
+      const maxLimitY = start.y + start.h - 50;
+      const targetX = Math.max(imageFrame.x, Math.min(maxLimitX, start.x + e.translationX));
+      const targetY = Math.max(imageFrame.y, Math.min(maxLimitY, start.y + e.translationY));
+      setCropBox({
+        x: targetX,
+        y: targetY,
+        w: start.w - (targetX - start.x),
+        h: start.h - (targetY - start.y),
+      });
+    })
+    .runOnJS(true);
+
+  const trGesture = Gesture.Pan()
+    .minDistance(0)
+    .onStart(startCropGesture)
+    .onUpdate((e) => {
+      if (!imageFrame) return;
+      const start = cropStartRef.current;
+      const maxLimitY = start.y + start.h - 50;
+      const targetY = Math.max(imageFrame.y, Math.min(maxLimitY, start.y + e.translationY));
+      const targetW = Math.max(50, Math.min(imageFrame.x + imageFrame.w - start.x, start.w + e.translationX));
+      setCropBox({
+        x: start.x,
+        y: targetY,
+        w: targetW,
+        h: start.h - (targetY - start.y),
+      });
+    })
+    .runOnJS(true);
+
+  const blGesture = Gesture.Pan()
+    .minDistance(0)
+    .onStart(startCropGesture)
+    .onUpdate((e) => {
+      if (!imageFrame) return;
+      const start = cropStartRef.current;
+      const maxLimitX = start.x + start.w - 50;
+      const targetX = Math.max(imageFrame.x, Math.min(maxLimitX, start.x + e.translationX));
+      const targetH = Math.max(50, Math.min(imageFrame.y + imageFrame.h - start.y, start.h + e.translationY));
+      setCropBox({
+        x: targetX,
+        y: start.y,
+        w: start.w - (targetX - start.x),
+        h: targetH,
+      });
+    })
+    .runOnJS(true);
+
+  const brGesture = Gesture.Pan()
+    .minDistance(0)
+    .onStart(startCropGesture)
+    .onUpdate((e) => {
+      if (!imageFrame) return;
+      const start = cropStartRef.current;
+      const targetW = Math.max(50, Math.min(imageFrame.x + imageFrame.w - start.x, start.w + e.translationX));
+      const targetH = Math.max(50, Math.min(imageFrame.y + imageFrame.h - start.y, start.h + e.translationY));
+      setCropBox({
+        x: start.x,
+        y: start.y,
+        w: targetW,
+        h: targetH,
+      });
+    })
+    .runOnJS(true);
+
+  const centerGesture = Gesture.Pan()
+    .minDistance(0)
+    .onStart(startCropGesture)
+    .onUpdate((e) => {
+      if (!imageFrame) return;
+      const start = cropStartRef.current;
+      const newX = Math.max(imageFrame.x, Math.min(imageFrame.x + imageFrame.w - start.w, start.x + e.translationX));
+      const newY = Math.max(imageFrame.y, Math.min(imageFrame.y + imageFrame.h - start.h, start.y + e.translationY));
+      setCropBox({
+        x: newX,
+        y: newY,
+        w: start.w,
+        h: start.h,
+      });
+    })
+    .runOnJS(true);
+
+  async function applyFreeformCrop() {
+    if (!baseUri || !cropBox || !imageFrame || busy) return;
     setBusy(true);
     try {
-      const { w, h } = await getSize(baseUri);
-      const target = aw / ah;
-      let cw = w, ch = Math.round(w / target);
-      if (ch > h) { ch = h; cw = Math.round(h * target); }
-      const ox = Math.max(0, Math.round((w - cw) / 2));
-      const oy = Math.max(0, Math.round((h - ch) / 2));
+      const { w: imgW, h: imgH } = await getSize(baseUri);
+      const localX = cropBox.x - imageFrame.x;
+      const localY = cropBox.y - imageFrame.y;
+      const localW = cropBox.w;
+      const localH = cropBox.h;
+
+      const scale = imgW / imageFrame.w;
+      const actualX = Math.max(0, Math.round(localX * scale));
+      const actualY = Math.max(0, Math.round(localY * scale));
+      const actualW = Math.min(imgW - actualX, Math.round(localW * scale));
+      const actualH = Math.min(imgH - actualY, Math.round(localH * scale));
+
       const r = await manipulateAsync(
         baseUri,
-        [{ crop: { originX: ox, originY: oy, width: Math.min(cw, w - ox), height: Math.min(ch, h - oy) } }],
+        [{ crop: { originX: actualX, originY: actualY, width: actualW, height: actualH } }],
         { compress: 1, format: SaveFormat.JPEG },
       );
       setBaseUri(r.uri);
       setPaths([]); setRedoStack([]); setTexts([]); setCurPath('');
-    } catch { /* keep current */ }
-    finally { setBusy(false); }
+      setCropBox(null);
+      setImageFrame(null);
+    } catch (e) {
+      console.warn('Freeform crop failed:', e);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function resetCrop() {
+  async function resetCrop() {
     if (origUriRef.current) {
       setBaseUri(origUriRef.current);
       setPaths([]); setRedoStack([]); setTexts([]); setCurPath('');
+      try {
+        const { w, h } = await getSize(origUriRef.current);
+        const frame = getImageDisplayFrame(w, h, stage.width, stage.height);
+        setImageFrame(frame);
+        setCropBox({
+          x: frame.x + 10,
+          y: frame.y + 10,
+          w: frame.w - 20,
+          h: frame.h - 20,
+        });
+      } catch {
+        setCropBox(null);
+        setImageFrame(null);
+      }
     }
   }
 
@@ -208,10 +380,10 @@ export function MediaEditorModal({
       // Copy to a stable cache path the OS won't evict mid-upload.
       const dest = `${FileSystem.cacheDirectory}edited_${Date.now()}.jpg`;
       try { await FileSystem.copyAsync({ from: out.uri, to: dest }); } catch { /* use out.uri */ }
-      onSend({ uri: dest, caption: caption.trim() });
+      onSend({ uri: dest, caption: caption.trim(), isViewOnce });
     } catch {
       // Fallback: send the base image with the caption so the user is never blocked.
-      onSend({ uri: baseUri, caption: caption.trim() });
+      onSend({ uri: baseUri, caption: caption.trim(), isViewOnce });
     } finally {
       setBusy(false);
     }
@@ -231,46 +403,36 @@ export function MediaEditorModal({
             <Text style={styles.topIcon}>✕</Text>
           </Pressable>
           <View style={styles.topTools}>
-            <Pressable onPress={() => setCropOpen((v) => !v)} hitSlop={8} style={toolBtn(cropOpen)}>
+            <Pressable onPress={toggleCropMode} hitSlop={8} style={toolBtn(!!cropBox)}>
               <Text style={styles.toolIcon}>⛶</Text>
             </Pressable>
-            <Pressable onPress={applyRotate} hitSlop={8} style={toolBtn(false)}>
-              <Text style={styles.toolIcon}>↻</Text>
-            </Pressable>
-            <Pressable onPress={applyFlip} hitSlop={8} style={toolBtn(false)}>
-              <Text style={styles.toolIcon}>⇋</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setMode((m) => (m === 'draw' ? 'view' : 'draw'))}
-              hitSlop={8}
-              style={toolBtn(mode === 'draw')}
-            >
-              <Text style={styles.toolIcon}>✎</Text>
-            </Pressable>
-            <Pressable onPress={addText} hitSlop={8} style={toolBtn(mode === 'text')}>
-              <Text style={[styles.toolIcon, { fontWeight: '800' }]}>T</Text>
-            </Pressable>
-            {(paths.length > 0) && (
-              <Pressable onPress={undo} hitSlop={8} style={toolBtn(false)}>
-                <Text style={styles.toolIcon}>⟲</Text>
-              </Pressable>
+            {!cropBox && (
+              <>
+                <Pressable onPress={applyRotate} hitSlop={8} style={toolBtn(false)}>
+                  <Text style={styles.toolIcon}>↻</Text>
+                </Pressable>
+                <Pressable onPress={applyFlip} hitSlop={8} style={toolBtn(false)}>
+                  <Text style={styles.toolIcon}>⇋</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setMode((m) => (m === 'draw' ? 'view' : 'draw'))}
+                  hitSlop={8}
+                  style={toolBtn(mode === 'draw')}
+                >
+                  <Text style={styles.toolIcon}>✎</Text>
+                </Pressable>
+                <Pressable onPress={addText} hitSlop={8} style={toolBtn(mode === 'text')}>
+                  <Text style={[styles.toolIcon, { fontWeight: '800' }]}>T</Text>
+                </Pressable>
+                {(paths.length > 0) && (
+                  <Pressable onPress={undo} hitSlop={8} style={toolBtn(false)}>
+                    <Text style={styles.toolIcon}>⟲</Text>
+                  </Pressable>
+                )}
+              </>
             )}
           </View>
         </View>
-
-        {/* Crop aspect row */}
-        {cropOpen && (
-          <View style={styles.cropRow}>
-            {([['1:1', 1, 1], ['4:5', 4, 5], ['16:9', 16, 9], ['9:16', 9, 16]] as const).map(([label, aw, ah]) => (
-              <Pressable key={label} onPress={() => applyAspect(aw, ah)} style={styles.cropBtn}>
-                <Text style={styles.cropBtnText}>{label}</Text>
-              </Pressable>
-            ))}
-            <Pressable onPress={resetCrop} style={styles.cropBtn}>
-              <Text style={styles.cropBtnText}>⟲</Text>
-            </Pressable>
-          </View>
-        )}
 
         {/* Color row in draw mode */}
         {mode === 'draw' && (
@@ -340,23 +502,123 @@ export function MediaEditorModal({
                 </Svg>
               </View>
             </GestureDetector>
+
+            {/* Crop Overlay */}
+            {cropBox && imageFrame && (
+              <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+                {/* Backdrop overlay */}
+                <View pointerEvents="auto" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: cropBox.y, backgroundColor: 'rgba(0,0,0,0.6)' }} />
+                <View pointerEvents="auto" style={{ position: 'absolute', top: cropBox.y + cropBox.h, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
+                <View pointerEvents="auto" style={{ position: 'absolute', top: cropBox.y, left: 0, width: cropBox.x, height: cropBox.h, backgroundColor: 'rgba(0,0,0,0.6)' }} />
+                <View pointerEvents="auto" style={{ position: 'absolute', top: cropBox.y, left: cropBox.x + cropBox.w, right: 0, height: cropBox.h, backgroundColor: 'rgba(0,0,0,0.6)' }} />
+
+                {/* Box outline */}
+                <GestureDetector gesture={centerGesture}>
+                  <View
+                    style={{
+                      position: 'absolute',
+                      left: cropBox.x,
+                      top: cropBox.y,
+                      width: cropBox.w,
+                      height: cropBox.h,
+                      borderWidth: 1.5,
+                      borderColor: '#ffffff',
+                      borderStyle: 'solid',
+                    }}
+                  >
+                    {/* Grid lines */}
+                    <View style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none' }}>
+                      <View style={{ position: 'absolute', left: '33.3%', top: 0, bottom: 0, width: 0.5, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                      <View style={{ position: 'absolute', left: '66.6%', top: 0, bottom: 0, width: 0.5, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                      <View style={{ position: 'absolute', top: '33.3%', left: 0, right: 0, height: 0.5, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                      <View style={{ position: 'absolute', top: '66.6%', left: 0, right: 0, height: 0.5, backgroundColor: 'rgba(255,255,255,0.4)' }} />
+                    </View>
+                  </View>
+                </GestureDetector>
+
+                {/* Corner Handles */}
+                <GestureDetector gesture={tlGesture}>
+                  <View style={{ position: 'absolute', left: cropBox.x - 22, top: cropBox.y - 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}>
+                    <View style={{ width: 16, height: 16, borderLeftWidth: 3, borderTopWidth: 3, borderColor: '#ffffff' }} />
+                  </View>
+                </GestureDetector>
+
+                <GestureDetector gesture={trGesture}>
+                  <View style={{ position: 'absolute', left: cropBox.x + cropBox.w - 22, top: cropBox.y - 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}>
+                    <View style={{ width: 16, height: 16, borderRightWidth: 3, borderTopWidth: 3, borderColor: '#ffffff' }} />
+                  </View>
+                </GestureDetector>
+
+                <GestureDetector gesture={blGesture}>
+                  <View style={{ position: 'absolute', left: cropBox.x - 22, top: cropBox.y + cropBox.h - 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}>
+                    <View style={{ width: 16, height: 16, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: '#ffffff' }} />
+                  </View>
+                </GestureDetector>
+
+                <GestureDetector gesture={brGesture}>
+                  <View style={{ position: 'absolute', left: cropBox.x + cropBox.w - 22, top: cropBox.y + cropBox.h - 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' }}>
+                    <View style={{ width: 16, height: 16, borderRightWidth: 3, borderBottomWidth: 3, borderColor: '#ffffff' }} />
+                  </View>
+                </GestureDetector>
+              </View>
+            )}
           </View>
         </View>
 
-        {/* Caption + send */}
-        <View style={[styles.bottom, { backgroundColor: 'rgba(0,0,0,0.6)', marginBottom: kbHeight }]}>
-          <TextInput
-            value={caption}
-            onChangeText={setCaption}
-            placeholder={captionPlaceholder}
-            placeholderTextColor="rgba(255,255,255,0.5)"
-            style={[styles.caption, { color: '#fff', backgroundColor: 'rgba(255,255,255,0.12)' }]}
-            multiline
-          />
-          <Pressable onPress={handleSend} disabled={busy} style={[styles.send, { backgroundColor: t.accent, opacity: busy ? 0.6 : 1 }]}>
-            {busy ? <ActivityIndicator color="#06281b" /> : <Text style={styles.sendIcon}>➤</Text>}
-          </Pressable>
-        </View>
+        {/* Caption + send OR Crop confirmation */}
+        {cropBox ? (
+          <View style={[styles.bottom, { backgroundColor: 'rgba(0,0,0,0.8)', paddingVertical: 16, justifyContent: 'space-between', alignItems: 'center', flexDirection: 'row' }]}>
+            <Pressable onPress={() => { setCropBox(null); setImageFrame(null); }} style={styles.cropBtn}>
+              <Text style={styles.cropBtnText}>Cancelar</Text>
+            </Pressable>
+            <Pressable onPress={resetCrop} style={styles.cropBtn}>
+              <Text style={styles.cropBtnText}>Restablecer</Text>
+            </Pressable>
+            <Pressable onPress={applyFreeformCrop} style={[styles.cropBtn, { backgroundColor: t.accent }]}>
+              <Text style={[styles.cropBtnText, { color: '#06281b' }]}>Aceptar</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={[styles.bottom, { backgroundColor: 'rgba(0,0,0,0.6)', marginBottom: kbHeight, alignItems: 'center' }]}>
+            <TextInput
+              value={caption}
+              onChangeText={setCaption}
+              placeholder={captionPlaceholder}
+              placeholderTextColor="rgba(255,255,255,0.5)"
+              style={[styles.caption, { color: '#fff', backgroundColor: 'rgba(255,255,255,0.12)' }]}
+              multiline
+            />
+            {allowViewOnce && (
+              <Pressable
+                onPress={() => setIsViewOnce(!isViewOnce)}
+                accessibilityLabel={isViewOnce ? 'Desactivar ver una vez' : 'Activar ver una vez'}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 19,
+                  backgroundColor: isViewOnce ? t.accent : 'rgba(255,255,255,0.12)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginHorizontal: 2,
+                }}
+              >
+                <Text
+                  style={{
+                    color: isViewOnce ? '#000' : '#fff',
+                    fontSize: 15,
+                    fontWeight: 'bold',
+                    fontFamily: t.fontMono,
+                  }}
+                >
+                  1
+                </Text>
+              </Pressable>
+            )}
+            <Pressable onPress={handleSend} disabled={busy} style={[styles.send, { backgroundColor: t.accent, opacity: busy ? 0.6 : 1 }]}>
+              {busy ? <ActivityIndicator color="#06281b" /> : <Text style={styles.sendIcon}>➤</Text>}
+            </Pressable>
+          </View>
+        )}
       </GestureHandlerRootView>
     </Modal>
   );

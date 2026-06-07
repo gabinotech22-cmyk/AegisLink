@@ -15,43 +15,45 @@ interface Props {
 type RelayState = 'up' | 'down' | 'probing';
 interface RelayStatus { label: string; state: RelayState; detail: string }
 
-const RELAY_LABELS = ['zurich-1', 'berlin-1', 'ny-1', 'sg-1'];
+// The app talks to ONE real relay (config SERVER_URL). We probe its live
+// reachability but show a generic "AegisLink relay" label — no need to surface
+// the real hostname in the UI — instead of the old hard-coded mock list
+// (zurich/berlin/…) that falsely reported every node "UP · ok" even offline.
 
 export function NetworkErrorScreen({ onRetry }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
 
-  const [relays, setRelays] = useState<RelayStatus[]>(
-    RELAY_LABELS.map((label, i) => ({
-      label,
-      state: i === 2 ? 'probing' : 'down',
-      detail: i === 2 ? 're-handshake…' : `timeout · ${10 + i * 2}s`,
-    }))
-  );
+  // Show a generic label instead of the real relay hostname — no need to expose
+  // the actual endpoint in the UI. The status (reachable/unreachable) is still
+  // probed live against the real SERVER_URL below.
+  const host = i18nT('networkError.relayLabel', 'AegisLink relay');
+  const [relays, setRelays] = useState<RelayStatus[]>([
+    { label: host, state: 'probing', detail: i18nT('networkError.probing', 'probing…') },
+  ]);
 
   useEffect(() => {
     let cancelled = false;
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 2000);
+    const timer = setTimeout(() => ctrl.abort(), 4000);
     fetch(`${SERVER_URL}/health`, { signal: ctrl.signal })
-      .then(() => {
-        if (!cancelled) {
-          setRelays(RELAY_LABELS.map((label) => ({ label, state: 'up' as RelayState, detail: 'ok' })));
-        }
+      .then((res) => {
+        if (cancelled) return;
+        setRelays([{
+          label: host,
+          state: res.ok ? 'up' : 'down',
+          detail: res.ok ? i18nT('networkError.reachable', 'reachable') : `http ${res.status}`,
+        }]);
       })
       .catch(() => {
         if (!cancelled) {
-          setRelays(RELAY_LABELS.map((label, i) => ({
-            label,
-            state: i === 2 ? 'probing' : 'down' as RelayState,
-            detail: i === 2 ? 're-handshake…' : `timeout · ${10 + i * 2}s`,
-          })));
+          setRelays([{ label: host, state: 'down', detail: i18nT('networkError.unreachable', 'unreachable') }]);
         }
       })
       .finally(() => clearTimeout(timer));
-    return () => { cancelled = true; };
-  }, []);
+    return () => { cancelled = true; ctrl.abort(); };
+  }, [host, i18nT]);
   return (
     <View
       style={{

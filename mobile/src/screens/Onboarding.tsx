@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
-import { AegisMark } from '../components/AegisMark';
+import { AegisMark, AegisWord } from '../components/AegisMark';
 import { I } from '../components/icons';
 import { PrimaryButton, GhostButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
@@ -203,8 +203,9 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
           </Pressable>
         </View>
 
-        <View style={{ marginTop: 40, marginBottom: 28 }}>
+        <View style={{ marginTop: 40, marginBottom: 28, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <AegisMark t={t} size={56} />
+          <AegisWord t={t} size={30} />
         </View>
         <Text style={[styles.h1, { color: t.text, fontFamily: t.fontDisplay }]}>
           {i18nT('onboarding.tagline')}

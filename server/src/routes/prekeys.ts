@@ -131,7 +131,8 @@ router.post('/', uploadLimiter, async (req, res) => {
     }
 
     res.status(201).json({ uploaded });
-  } catch (_err) {
+  } catch (err) {
+    console.error('[prekeys] upload db_error:', (err as Error).message);
     res.status(500).json({ error: 'db_error' });
   }
 });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, Alert, PanResponder } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, Alert, PanResponder, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -42,13 +42,14 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   const hydrate = useContacts((s) => s.hydrate);
   const archiveContact = useContacts((s) => s.archiveContact);
   const pinContact = useContacts((s) => s.pinContact);
-  const removeContact = useContacts((s) => s.removeContact);
+  const setChatHidden = useContacts((s) => s.setChatHidden);
   const previews = useMessages((s) => s.previews);
   const loadChat = useMessages((s) => s.loadChat);
   const unreadCounts = useMessages((s) => s.unreadCounts);
   const loadAllUnreads = useMessages((s) => s.loadAllUnreads);
   const clearChat = useMessages((s) => s.clearChat);
   const [showArchived, setShowArchived] = useState(false);
+  const [menuContact, setMenuContact] = useState<StoredContact | null>(null);
 
   // ── Panic gesture ─────────────────────────────────────────────────────────
   const handlePanicTrigger = useCallback(async () => {
@@ -81,52 +82,50 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
     });
   }, [contacts, previews]);
 
-  const sorted = allSorted.filter((c) => !c.archived);
-  const archived = allSorted.filter((c) => c.archived);
+  // Hidden chats ("deleted from list" but contact kept) are excluded from both
+  // the main and archived lists; they reappear when a new message arrives.
+  const sorted = allSorted.filter((c) => !c.archived && !c.hidden);
+  const archived = allSorted.filter((c) => c.archived && !c.hidden);
   const displayed = showArchived ? archived : sorted;
   const empty = sorted.length === 0 && !showArchived;
 
+  // Open a bottom-sheet menu. We use a custom sheet (not Alert.alert) because
+  // Android's native AlertDialog only renders up to 3 buttons, which silently
+  // dropped the "Delete chat" / "Delete contact" options.
   function handleLongPressContact(contact: StoredContact) {
-    const isArchived = contact.archived ?? false;
-    const isPinned = contact.pinned ?? false;
+    setMenuContact(contact);
+  }
+
+  function confirmClearChat(contact: StoredContact) {
+    setMenuContact(null);
     Alert.alert(
-      contact.name,
-      undefined,
+      i18nT('home.deleteMessages'),
+      i18nT('home.deleteMessagesConfirm', { name: contact.name }),
       [
-        {
-          text: isPinned ? i18nT('home.unpin', 'Desfijar') : i18nT('home.pin', 'Fijar'),
-          onPress: () => void pinContact(contact.aegisId, !isPinned),
-        },
-        {
-          text: isArchived ? i18nT('home.archive') : i18nT('home.archive'),
-          onPress: () => void archiveContact(contact.aegisId, !isArchived),
-        },
-        {
-          text: i18nT('home.deleteMessages'),
-          onPress: () =>
-            Alert.alert(
-              i18nT('home.deleteMessages'),
-              i18nT('home.deleteMessagesConfirm', { name: contact.name }),
-              [
-                { text: i18nT('common.cancel'), style: 'cancel' },
-                { text: i18nT('common.delete'), style: 'destructive', onPress: () => void clearChat(contact.aegisId) },
-              ]
-            ),
-        },
-        {
-          text: i18nT('home.deleteContact'),
-          style: 'destructive',
-          onPress: () =>
-            Alert.alert(
-              i18nT('home.deleteContact'),
-              i18nT('home.deleteContactConfirm', { name: contact.name }),
-              [
-                { text: i18nT('common.cancel'), style: 'cancel' },
-                { text: i18nT('common.delete'), style: 'destructive', onPress: () => void removeContact(contact.aegisId) },
-              ]
-            ),
-        },
         { text: i18nT('common.cancel'), style: 'cancel' },
+        { text: i18nT('common.delete'), style: 'destructive', onPress: () => void clearChat(contact.aegisId) },
+      ]
+    );
+  }
+
+  // "Delete chat" = remove the conversation from the list but KEEP the contact
+  // (contact deletion lives in the contact's profile). Clears messages + hides;
+  // reappears on the next message.
+  function confirmDeleteChat(contact: StoredContact) {
+    setMenuContact(null);
+    Alert.alert(
+      i18nT('home.deleteChat', 'Eliminar chat'),
+      i18nT('home.deleteChatConfirm', {
+        name: contact.name,
+        defaultValue: '¿Eliminar el chat con {{name}} de la lista? Se borra la conversación pero el contacto se conserva (puedes eliminarlo desde su perfil). Reaparece si hay un nuevo mensaje.',
+      }),
+      [
+        { text: i18nT('common.cancel'), style: 'cancel' },
+        {
+          text: i18nT('common.delete'),
+          style: 'destructive',
+          onPress: () => { void clearChat(contact.aegisId); void setChatHidden(contact.aegisId, true); },
+        },
       ]
     );
   }
@@ -327,6 +326,89 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
       )}
 
       <TabBar t={t} current="home" onChange={onTab} />
+
+      {/* Chat actions bottom-sheet — replaces a 5-button Alert (Android caps
+          native alerts at 3 buttons, which hid the delete options). */}
+      <Modal
+        visible={menuContact !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuContact(null)}
+      >
+        <Pressable
+          onPress={() => setMenuContact(null)}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{
+              backgroundColor: t.surface,
+              borderTopLeftRadius: 18,
+              borderTopRightRadius: 18,
+              paddingTop: 10,
+              paddingBottom: insets.bottom + 14,
+              borderTopWidth: 1,
+              borderColor: t.border,
+            }}
+          >
+            <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: t.border, marginBottom: 10 }} />
+            {menuContact && (
+              <Text style={{ fontFamily: t.fontDisplay, fontSize: 16, fontWeight: '600', color: t.text, paddingHorizontal: 22, paddingBottom: 6 }} numberOfLines={1}>
+                {menuContact.name}
+              </Text>
+            )}
+            {menuContact && [
+              {
+                key: 'pin',
+                icon: '📌',
+                label: (menuContact.pinned ?? false) ? i18nT('home.unpin', 'Desfijar') : i18nT('home.pin', 'Fijar'),
+                onPress: () => { const c = menuContact; setMenuContact(null); void pinContact(c.aegisId, !(c.pinned ?? false)); },
+                danger: false,
+              },
+              {
+                key: 'archive',
+                icon: '🗄',
+                label: (menuContact.archived ?? false) ? i18nT('home.unarchive', 'Desarchivar') : i18nT('home.archive', 'Archivar'),
+                onPress: () => { const c = menuContact; setMenuContact(null); void archiveContact(c.aegisId, !(c.archived ?? false)); },
+                danger: false,
+              },
+              {
+                key: 'clear',
+                icon: '🧹',
+                label: i18nT('home.deleteMessages', 'Eliminar mensajes'),
+                onPress: () => confirmClearChat(menuContact),
+                danger: false,
+              },
+              {
+                key: 'delete',
+                icon: '🗑',
+                label: i18nT('home.deleteChat', 'Eliminar chat'),
+                onPress: () => confirmDeleteChat(menuContact),
+                danger: true,
+              },
+            ].map((opt) => (
+              <Pressable
+                key={opt.key}
+                onPress={opt.onPress}
+                android_ripple={{ color: t.surface2 }}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 14,
+                  paddingHorizontal: 22,
+                  paddingVertical: 15,
+                  backgroundColor: pressed ? t.surface2 : 'transparent',
+                })}
+              >
+                <Text style={{ fontSize: 17 }}>{opt.icon}</Text>
+                <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '500', color: opt.danger ? '#ef4444' : t.text }}>
+                  {opt.label}
+                </Text>
+              </Pressable>
+            ))}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

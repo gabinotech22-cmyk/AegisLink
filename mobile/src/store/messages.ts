@@ -124,6 +124,13 @@ export const useMessages = create<MessagesState>((set, get) => ({
       }
       return next;
     });
+    // A new message (sent or received) un-hides a chat that was "deleted" from
+    // the list, so it reappears — without ever having removed the contact.
+    try {
+      const { useContacts } = require('./contacts');
+      const contact = useContacts.getState().contacts.find((c: { aegisId: string; hidden?: boolean }) => c.aegisId === m.chatId);
+      if (contact?.hidden) void useContacts.getState().setChatHidden(m.chatId, false);
+    } catch { /* ignore */ }
   },
 
   async refreshPreview(chatId) {

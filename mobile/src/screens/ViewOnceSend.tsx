@@ -170,6 +170,56 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
     }
   }
 
+  // ── Ephemeral video pick + send ──────────────────────────────────────────────
+  // Videos skip the drawing editor: pick → encrypt-inline → send. The recipient
+  // already decodes "[viewonce:data:video/mp4;base64,…]" (see socket/client.ts)
+  // and the viewer plays it once before wiping it.
+  async function handlePickVideo() {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) { Alert.alert(i18nT('viewOnce.permissionTitle'), i18nT('viewOnce.permissionMessage')); return; }
+      const result = await withPickingGuard(() =>
+        ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['videos'] as ImagePicker.MediaType[],
+          quality: 0.7,
+          videoMaxDuration: 30,
+          allowsEditing: false,
+        })
+      );
+      if (result.canceled || !result.assets?.[0] || !identity) return;
+      const uri = result.assets[0].uri;
+      setProcessing(true);
+      try {
+        const id = randomUUID();
+        await appendMsg({
+          id,
+          chatId: contact.aegisId,
+          direction: 'out',
+          body: '[viewonce:video]',
+          createdAt: Date.now(),
+          type: 'view_once',
+          mediaUri: uri,
+        });
+        const FileSystem = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+        await sendMessage({
+          identity,
+          recipientAegisId: contact.aegisId,
+          recipientPublicKey: decodeBase64(contact.publicKeyB64),
+          plaintext: `[viewonce:data:video/mp4;base64,${base64}]`,
+          skipLocalAppend: true,
+        });
+        onSent();
+      } catch {
+        Alert.alert(i18nT('common.error'), i18nT('viewOnce.processError'));
+      } finally {
+        setProcessing(false);
+      }
+    } catch (e) {
+      Alert.alert(i18nT('common.error'), i18nT('viewOnce.galleryError', { message: (e as Error).message }));
+    }
+  }
+
   // ── Editor tools ─────────────────────────────────────────────────────────
 
   async function rotateImage() {
@@ -272,14 +322,38 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
   // ── Capture and confirm ──────────────────────────────────────────────────
 
   async function handleEditorDone() {
-    if (!editRef.current) return;
     setProcessing(true);
     try {
-      const captured = await captureRef(editRef, { format: 'jpg', quality: 0.85 });
-      setConfirmedUri(captured);
-      setMode('confirm');
-    } catch (e) {
-      Alert.alert(i18nT('common.error'), i18nT('viewOnce.processError'));
+      // Fast path: if the user added no drawings or text overlays, there is
+      // nothing to flatten — use the already-processed image directly and skip
+      // react-native-view-shot's captureRef entirely. captureRef snapshots a
+      // rendered GPU surface and fails on devices/emulators without hardware
+      // surface capture (e.g. software-rendered emulators), which previously
+      // produced a hard "Could not process the image securely" error.
+      const hasAnnotations = paths.length > 0 || textItems.length > 0;
+      if (!hasAnnotations || !editRef.current) {
+        if (editUri) {
+          setConfirmedUri(editUri);
+          setMode('confirm');
+          return;
+        }
+        Alert.alert(i18nT('common.error'), i18nT('viewOnce.processError'));
+        return;
+      }
+      try {
+        const captured = await captureRef(editRef, { format: 'jpg', quality: 0.85 });
+        setConfirmedUri(captured);
+        setMode('confirm');
+      } catch {
+        // Surface capture unavailable — fall back to the un-annotated base
+        // image so a view-once can still be sent rather than blocking the user.
+        if (editUri) {
+          setConfirmedUri(editUri);
+          setMode('confirm');
+        } else {
+          Alert.alert(i18nT('common.error'), i18nT('viewOnce.processError'));
+        }
+      }
     } finally {
       setProcessing(false);
     }
@@ -520,6 +594,23 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
                 <I.Mic size={26} stroke={1.6} color={t.accent} />
               </View>
               <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.8 }}>{i18nT('viewOnce.mediaAudio')}</Text>
+            </Pressable>
+
+            {/* Video card */}
+            <Pressable
+              onPress={handlePickVideo}
+              style={({ pressed }) => ({
+                flex: 1, height: 140,
+                backgroundColor: t.surface, borderWidth: 1,
+                borderColor: `${t.accent}44`, borderRadius: t.radius,
+                alignItems: 'center', justifyContent: 'center', gap: 10,
+                opacity: pressed ? 0.8 : 1,
+              })}
+            >
+              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: `${t.accent}18`, alignItems: 'center', justifyContent: 'center' }}>
+                <I.Video size={26} stroke={1.6} color={t.accent} />
+              </View>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.8 }}>{i18nT('viewOnce.mediaVideo', 'VIDEO')}</Text>
             </Pressable>
           </View>
 

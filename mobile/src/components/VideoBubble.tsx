@@ -6,6 +6,7 @@ import type { Theme } from '../theme/vault';
 import type { StoredMessage } from '../db/local';
 import { resolveMedia } from '../crypto/media';
 import { I } from './icons';
+import { FormattedText } from './FormattedText';
 
 interface VideoBubbleProps {
   t: Theme;
@@ -14,11 +15,13 @@ interface VideoBubbleProps {
   queued?: boolean;
   time: string;
   onLongPress?: () => void;
+  caption?: string;
 }
 
-export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubbleProps) {
+export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: VideoBubbleProps) {
   const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<VideoRef>(null);
   // Decrypted local file path. `m.mediaUri` is a `blob:<id>:<key>:<nonce>` ref
   // after upload, which expo-av's <Video> cannot open — we must resolve+decrypt
@@ -28,9 +31,25 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
     m.mediaUri && !m.mediaUri.startsWith('blob:') ? m.mediaUri : null,
   );
 
+  const isBlob = !!m.mediaUri && m.mediaUri.startsWith('blob:');
+  const blobId = isBlob ? m.mediaUri!.split(':')[1] : null;
+
+  // Determine the effective URI to play. If it's a blob and we haven't
+  // resolved/decrypted it yet (or the resolved URI is for a different blob),
+  // we treat it as not ready (null) to avoid state lag loading issues.
+  const effectiveUri = (() => {
+    if (!m.mediaUri) return null;
+    if (!isBlob) return m.mediaUri;
+    if (localUri && blobId && localUri.includes(`dec_${blobId}`)) {
+      return localUri;
+    }
+    return null;
+  })();
+
   useEffect(() => {
     setLoadError(false);
     setLoading(true);
+    setIsPlaying(false);
     let alive = true;
     if (!m.mediaUri) { setLocalUri(null); return; }
     if (!m.mediaUri.startsWith('blob:')) { setLocalUri(m.mediaUri); return; }
@@ -46,10 +65,29 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
   const bubbleBg = me ? t.bubbleOut : t.bubbleIn;
   const textColor = me ? t.bubbleOutText : t.bubbleInText;
 
+  const renderCaption = () => {
+    if (!caption) return null;
+    return (
+      <View style={{ paddingHorizontal: 10, paddingTop: 8, paddingBottom: 2 }}>
+        <FormattedText
+          body={caption}
+          t={t}
+          style={{
+            color: textColor,
+            fontFamily: t.font,
+            fontSize: 14,
+            lineHeight: 18,
+          }}
+        />
+      </View>
+    );
+  };
+
   function handlePlaybackStatus(status: AVPlaybackStatus) {
     if (status.isLoaded) {
       setLoading(false);
       setLoadError(false);
+      setIsPlaying(status.isPlaying);
     } else if (status.error) {
       setLoading(false);
       setLoadError(true);
@@ -67,7 +105,7 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
   }
 
   // Downloading / decrypting / not yet available
-  if (!localUri && !loadError) {
+  if (!effectiveUri && !loadError) {
     return (
       <Pressable
         onLongPress={onLongPress}
@@ -105,6 +143,7 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
             DESCARGANDO…
           </Text>
         </View>
+        {renderCaption()}
         <View
           style={{
             flexDirection: 'row',
@@ -165,6 +204,7 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
             ERROR AL CARGAR
           </Text>
         </View>
+        {renderCaption()}
         <View
           style={{
             flexDirection: 'row',
@@ -189,6 +229,7 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
   // Normal playback state
   return (
     <Pressable
+      onPress={() => setIsPlaying(!isPlaying)}
       onLongPress={onLongPress}
       accessibilityLabel="Video message — tap to play"
       style={({ pressed }) => ({
@@ -205,14 +246,14 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
       <View style={{ width: 220, height: 160, backgroundColor: t.surface3 }}>
         <Video
           ref={videoRef}
-          source={{ uri: localUri ?? m.mediaUri }}
+          source={{ uri: effectiveUri! }}
           style={{ width: 220, height: 160, borderRadius: 0 }}
           resizeMode={ResizeMode.CONTAIN}
           useNativeControls
           onPlaybackStatusUpdate={handlePlaybackStatus}
           onLoadStart={handleLoadStart}
           onError={handleError}
-          shouldPlay={false}
+          shouldPlay={isPlaying}
         />
         {loading && (
           <View
@@ -230,7 +271,37 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress }: VideoBubble
             <ActivityIndicator color={t.accent} size="small" />
           </View>
         )}
+        {!isPlaying && !loading && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: 220,
+              height: 160,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(0,0,0,0.25)',
+            }}
+            pointerEvents="none"
+          >
+            <View
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 23,
+                backgroundColor: 'rgba(0,0,0,0.6)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingLeft: 3,
+              }}
+            >
+              <I.Play size={20} color="#fff" />
+            </View>
+          </View>
+        )}
       </View>
+      {renderCaption()}
       <View
         style={{
           flexDirection: 'row',

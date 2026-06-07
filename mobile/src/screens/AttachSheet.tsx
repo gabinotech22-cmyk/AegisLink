@@ -156,7 +156,8 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     { id: 'camera', icon: <I.Video size={22} color={t.textDim} />, label: i18nT('attachSheet.camera', 'Camera'), sub: i18nT('attachSheet.exifRemoved', 'EXIF removed'), handler: handleCamera },
     { id: 'file', icon: <I.Attach size={22} color={t.textDim} />, label: i18nT('attachSheet.file', 'File'), sub: i18nT('attachSheet.anyType', 'Any type') },
     { id: 'video', icon: <I.Video size={22} color={t.textDim} />, label: i18nT('attachSheet.video', 'Video'), sub: i18nT('attachSheet.videoGallery', 'Gallery · E2EE'), handler: handleVideo },
-    { id: 'voice', icon: <I.Mic size={22} color={t.accent} />, label: i18nT('attachSheet.audio', 'Voice note'), sub: i18nT('attachSheet.ephemeral', 'Ephemeral'), accent: true },
+    // Voice note removed from the attach sheet — normal voice notes are now sent
+    // from the inline mic button in the composer (reactive, hides while typing).
     { id: 'viewoncesend', icon: <I.EyeOff size={22} color={t.accent} />, label: i18nT('attachSheet.viewOnce', 'View once'), sub: i18nT('attachSheet.viewOnceSub', 'Non-savable'), accent: true },
     { id: 'scheduled', icon: <I.Timer size={22} color={t.textDim} />, label: i18nT('attachSheet.scheduled', 'Scheduled'), sub: i18nT('attachSheet.delayedSend', 'Delayed send') },
     { id: 'location', icon: <I.Globe size={22} color={t.textDim} />, label: i18nT('attachSheet.location', 'Location'), sub: i18nT('attachSheet.temporary', 'Temporary') },

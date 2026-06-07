@@ -12,6 +12,7 @@ import { TopBar } from '../components/TopBar';
 import { TabBar, type Tab } from '../components/TabBar';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { AvatarCropModal } from '../components/AvatarCropModal';
 import type { Theme } from '../theme/vault';
 import { useGroups } from '../store/groups';
 import { useContacts } from '../store/contacts';
@@ -66,6 +67,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [groupColor, setGroupColor] = useState('#05b875');
   const [groupImage, setGroupImage] = useState<string | undefined>(undefined);
+  const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [joinLinkInput, setJoinLinkInput] = useState('');
 
@@ -88,21 +90,18 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
       Alert.alert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedGallery'));
       return;
     }
+    // Pick WITHOUT the native crop editor — hand off to AvatarCropModal which
+    // has an explicit Confirm button (the native editor's checkmark is missing
+    // on some devices).
     const result = await withPickingGuard(() =>
       ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'] as ImagePicker.MediaType[],
-        allowsEditing: true,
-        aspect: [1, 1],
         quality: 0.8,
       })
     );
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      const compressed = await manipulateAsync(
-        result.assets[0].uri,
-        [{ resize: { width: 256 } }],
-        { compress: 0.7, format: SaveFormat.JPEG }
-      );
-      setGroupImage(compressed.uri);
+      const asset = result.assets[0];
+      setCropSource({ uri: asset.uri, width: asset.width ?? 0, height: asset.height ?? 0 });
     }
   }
 
@@ -115,18 +114,27 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
     const result = await withPickingGuard(() =>
       ImagePicker.launchCameraAsync({
         mediaTypes: ['images'] as ImagePicker.MediaType[],
-        allowsEditing: true,
-        aspect: [1, 1],
         quality: 0.8,
       })
     );
     if (!result.canceled && result.assets && result.assets.length > 0) {
+      const asset = result.assets[0];
+      setCropSource({ uri: asset.uri, width: asset.width ?? 0, height: asset.height ?? 0 });
+    }
+  }
+
+  // Confirm from AvatarCropModal → compress to 256px and stage as group image.
+  async function handleConfirmGroupImage(uri: string) {
+    setCropSource(null);
+    try {
       const compressed = await manipulateAsync(
-        result.assets[0].uri,
+        uri,
         [{ resize: { width: 256 } }],
         { compress: 0.7, format: SaveFormat.JPEG }
       );
       setGroupImage(compressed.uri);
+    } catch (e) {
+      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
@@ -689,6 +697,19 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <AvatarCropModal
+        t={t}
+        visible={cropSource !== null}
+        imageUri={cropSource?.uri ?? null}
+        imageWidth={cropSource?.width ?? 0}
+        imageHeight={cropSource?.height ?? 0}
+        title={i18nT('groups.groupPhoto', 'Imagen del grupo')}
+        confirmLabel={i18nT('common.confirm', 'Confirmar')}
+        cancelLabel={i18nT('common.cancel', 'Cancelar')}
+        onCancel={() => setCropSource(null)}
+        onConfirm={(uri) => { void handleConfirmGroupImage(uri); }}
+      />
 
       <TabBar t={t} current="groups" onChange={onTab} />
     </View>
