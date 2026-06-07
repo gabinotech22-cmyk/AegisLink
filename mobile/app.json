@@ -92,6 +92,13 @@
       "expo-secure-store",
       "expo-sqlite",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "AegisLink accesses your photo library to send encrypted view-once media.",
+          "cameraPermission": "AegisLink uses the camera to capture encrypted view-once media."
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "AegisLink uses the camera to scan QR codes and send encrypted photos."

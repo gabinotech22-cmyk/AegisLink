@@ -6,6 +6,10 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
+import { withPickingGuard } from '../utils/pickingGuard';
+// Shared process-wide recorder singleton — also used by ViewOnceSend so either
+// screen can release a recorder orphaned by the other (see audioRecorder.ts).
+import { setActiveRecording, releaseActiveRecording } from '../utils/audioRecorder';
 
 interface Props {
   onBack: () => void;
@@ -13,22 +17,6 @@ interface Props {
 }
 
 type Stage = 'idle' | 'recording' | 'recorded' | 'playing';
-
-// ── Module-level recorder singleton ──────────────────────────────────────────
-// expo-av allows only ONE prepared Audio.Recording per JS process. When this
-// screen unmounts mid-recording (e.g. the Modal closes) the cleanup's async
-// stopAndUnloadAsync may not finish before the screen remounts, leaving an
-// orphaned native recorder. The next prepareToRecordAsync then throws
-// "Only one Recording object can be prepared at a given time." A module-level
-// reference survives remounts, so any instance can release the orphan first.
-let activeRecording: Audio.Recording | null = null;
-
-async function releaseActiveRecording(): Promise<void> {
-  if (activeRecording) {
-    try { await activeRecording.stopAndUnloadAsync(); } catch { /* already gone */ }
-    activeRecording = null;
-  }
-}
 
 export function VoiceRecorderScreen({ onBack, onSend }: Props) {
   const { t } = useTheme();
@@ -78,7 +66,11 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
     if (busyRef.current) return;
     busyRef.current = true;
     try {
-      const { granted } = await Audio.requestPermissionsAsync();
+      // Guard the mic-permission request: the OS dialog backgrounds the app,
+      // and without this the app-lock fires on resume and reloads the screen
+      // (losing the recording). Only reproduces on a fresh install where the
+      // permission has not been granted yet.
+      const { granted } = await withPickingGuard(() => Audio.requestPermissionsAsync());
       if (!granted) {
         Alert.alert(i18nT('voiceRecorder.permissionTitle'), i18nT('voiceRecorder.permissionMessage'));
         return;
@@ -109,7 +101,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
       }
       await rec.startAsync();
       recordingRef.current = rec;
-      activeRecording = rec;
+      setActiveRecording(rec);
       setElapsedMs(0);
       setWaveformBars(Array(30).fill(0.15));
       setStage('recording');
@@ -154,7 +146,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
       const status = await rec?.getStatusAsync();
       const fileUri = rec?.getURI() ?? null;
       recordingRef.current = null;
-      activeRecording = null;
+      setActiveRecording(null);
       if (fileUri) {
         setUri(fileUri);
         setDurationMs(status?.durationMillis ?? elapsedMs);
