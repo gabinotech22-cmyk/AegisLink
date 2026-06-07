@@ -13,9 +13,11 @@ import {
   Linking,
   Image,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { FormattedText } from '../components/FormattedText';
 import { MediaEditorModal } from '../components/MediaEditorModal';
+import { VoiceRecorderScreen } from './VoiceRecorder';
 import { VideoBubble } from '../components/VideoBubble';
 import { AudioWaveform } from '../components/AudioWaveform';
 import { LinkPreview } from '../components/LinkPreview';
@@ -105,6 +107,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const pinnedMsg = useMessages((s) => s.pinnedMsg[contact.aegisId] ?? null);
   const appendMsg = useMessages((s) => s.append);
   const setMediaUri = useMessages((s) => s.setMediaUri);
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const pendingMediaUri = useMessages((s) => s.pendingMediaUri);
   const setPendingMedia = useMessages((s) => s.setPendingMedia);
   const pendingVideoUri = useMessages((s) => s.pendingVideoUri);
@@ -355,14 +358,14 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   }
 
   // Send an image produced by the media editor (crop/rotate/draw/text), plus an
-  // optional caption delivered as a following text message.
+  // optional caption delivered as part of the image message.
   async function sendEditedImage(uri: string, caption: string) {
     if (!identity) return;
     setEditorUri(null);
     try {
       const id = Crypto.randomUUID();
       await appendMsg({
-        id, chatId: contact.aegisId, direction: 'out', body: '',
+        id, chatId: contact.aegisId, direction: 'out', body: caption.trim(),
         createdAt: Date.now(), type: 'image', mediaUri: uri,
       });
       const { encryptAndUploadMedia } = require('../crypto/media');
@@ -372,17 +375,40 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         identity,
         recipientAegisId: contact.aegisId,
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
-        plaintext: `[image:${blobUri}]`,
+        plaintext: `[image:${blobUri}]${caption.trim()}`,
         skipLocalAppend: true,
       });
-      if (caption) {
-        await sendMessage({
-          identity,
-          recipientAegisId: contact.aegisId,
-          recipientPublicKey: decodeBase64(contact.publicKeyB64),
-          plaintext: caption,
-        });
-      }
+      void SoundFX.msgSent();
+    } catch (e) {
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+    }
+  }
+
+  // Send a view-once image produced by the media editor.
+  async function sendViewOnceImage(uri: string, caption: string) {
+    if (!identity) return;
+    setEditorUri(null);
+    try {
+      const id = Crypto.randomUUID();
+      const bodyText = caption.trim() ? `[viewonce]\n${caption.trim()}` : '[viewonce]';
+      await appendMsg({
+        id, chatId: contact.aegisId, direction: 'out', body: bodyText,
+        createdAt: Date.now(), type: 'image', mediaUri: uri,
+      });
+
+      const FileSystem = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const captionPart = caption.trim() ? `|${caption.trim()}` : '';
+      await sendMessage({
+        identity,
+        recipientAegisId: contact.aegisId,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext: `[viewonce:data:image/jpeg;base64,${base64}${captionPart}]`,
+        skipLocalAppend: true,
+      });
       void SoundFX.msgSent();
     } catch (e) {
       Alert.alert(i18nT('chat.sendError'), (e as Error).message);
@@ -414,6 +440,35 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     }
   }
 
+  // Record + send a normal (non-ephemeral) voice note from the inline mic.
+  // Mirrors sendVideo: optimistic local bubble, then encrypt-upload + send the
+  // blob ref. Receiver parses "[audio:Ns:blob:…]" (see socket/client.ts).
+  async function sendVoiceNote(uri: string, durationMs: number) {
+    if (!identity) return;
+    setShowVoiceRecorder(false);
+    const durSec = Math.max(1, Math.round(durationMs / 1000));
+    try {
+      const id = Crypto.randomUUID();
+      await appendMsg({
+        id, chatId: contact.aegisId, direction: 'out',
+        body: `[audio:${durSec}s]`,
+        createdAt: Date.now(), type: 'audio', mediaUri: uri,
+      });
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      const blobUri = await encryptAndUploadMedia(uri, 'audio/m4a');
+      await sendMessage({
+        identity,
+        recipientAegisId: contact.aegisId,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext: `[audio:${durSec}s:${blobUri}]`,
+        skipLocalAppend: true,
+      });
+      void SoundFX.msgSent();
+    } catch (e) {
+      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+    }
+  }
+
   async function handleSend() {
     if (!identity || sendingRef.current) return;
     const hasText = draft.trim().length > 0;
@@ -436,11 +491,12 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       // Send image first if staged
       if (imageUri) {
         const id = Crypto.randomUUID();
+        const caption = hasText ? text : '';
         await appendMsg({
           id,
           chatId: contact.aegisId,
           direction: 'out',
-          body: '',
+          body: caption,
           createdAt: Date.now(),
           type: 'image',
           mediaUri: imageUri,
@@ -456,12 +512,12 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           identity,
           recipientAegisId: contact.aegisId,
           recipientPublicKey: decodeBase64(contact.publicKeyB64),
-          plaintext: `[image:${blobUri}]`,
+          plaintext: `[image:${blobUri}]${caption}`,
           skipLocalAppend: true,
         });
       }
-      // Send text message if typed
-      if (hasText) {
+      // Send text message if typed and no image was staged
+      if (hasText && !imageUri) {
         await sendMessage({
           identity,
           recipientAegisId: contact.aegisId,
@@ -1140,18 +1196,28 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 <I.Attach size={22} color={t.textDim} />
               </Pressable>
 
-              {/* ── GIF — only visible when input is empty (disappears while typing) ── */}
+              {/* ── GIF + mic — only visible when input is empty (disappear while typing) ── */}
               {!draft.trim() && !stagedImageUri && (
-                <Pressable
-                  onPress={() => setGifPickerVisible(true)}
-                  hitSlop={8}
-                  style={{ padding: 6 }}
-                  accessibilityLabel="Abrir selector de GIF"
-                >
-                  <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
-                    GIF
-                  </Text>
-                </Pressable>
+                <>
+                  <Pressable
+                    onPress={() => setGifPickerVisible(true)}
+                    hitSlop={8}
+                    style={{ padding: 6 }}
+                    accessibilityLabel="Abrir selector de GIF"
+                  >
+                    <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.textDim, letterSpacing: 0.5 }}>
+                      GIF
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setShowVoiceRecorder(true)}
+                    hitSlop={8}
+                    style={{ padding: 6 }}
+                    accessibilityLabel={i18nT('chat.voiceNote', 'Grabar nota de voz')}
+                  >
+                    <I.Mic size={22} color={t.textDim} />
+                  </Pressable>
+                </>
               )}
 
               {/* ── Input field ────────────────────────────────────────── */}
@@ -1260,13 +1326,33 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       />
       <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
 
+      {/* Inline voice note recorder — normal (non-ephemeral) audio */}
+      <Modal
+        visible={showVoiceRecorder}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowVoiceRecorder(false)}
+      >
+        <VoiceRecorderScreen
+          onBack={() => setShowVoiceRecorder(false)}
+          onSend={(uri, durationMs) => { void sendVoiceNote(uri, durationMs); }}
+        />
+      </Modal>
+
       <MediaEditorModal
         t={t}
         visible={editorUri !== null}
         imageUri={editorUri}
         captionPlaceholder={i18nT('chat.addCaption')}
+        allowViewOnce={true}
         onCancel={() => setEditorUri(null)}
-        onSend={({ uri, caption }) => { void sendEditedImage(uri, caption); }}
+        onSend={({ uri, caption, isViewOnce }) => {
+          if (isViewOnce) {
+            void sendViewOnceImage(uri, caption);
+          } else {
+            void sendEditedImage(uri, caption);
+          }
+        }}
       />
 
       <SchedulePicker
@@ -1298,6 +1384,116 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
 // ─── Location message parser ─────────────────────────────────────────────────
 // Defined in mobile/src/utils/parseLocationMessage.ts — imported above
+
+// ─── View-once ephemeral audio bubble ───────────────────────────────────────
+// Plays the received ephemeral voice note exactly once, then deletes the cached
+// file and locks the bubble ("ya escuchado"). The generic view-once Pressable
+// only handled images, so this is the dedicated playable path for audio.
+function ViewOnceAudioBubble({
+  t, m, me, isReceived, durSec, queued, time, onLongPress,
+}: {
+  t: Theme;
+  m: StoredMessage;
+  me: boolean;
+  isReceived: boolean;
+  durSec: number;
+  queued: boolean;
+  time: string;
+  onLongPress: () => void;
+}) {
+  const [played, setPlayed] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  type AudioSound = import('expo-av').Audio.Sound;
+  type AVPlaybackStatus = import('expo-av').AVPlaybackStatus;
+  const soundRef = useRef<AudioSound | null>(null);
+
+  useEffect(() => {
+    return () => { void soundRef.current?.unloadAsync().catch(() => {}); };
+  }, []);
+
+  async function playOnce() {
+    if (!m.mediaUri || playing || played) return;
+    try {
+      const { Audio } = require('expo-av');
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: m.mediaUri },
+        { shouldPlay: true },
+        (status: AVPlaybackStatus) => {
+          if (!status.isLoaded) return;
+          if (status.didJustFinish) {
+            setPlaying(false);
+            setPlayed(true);
+            void soundRef.current?.unloadAsync().catch(() => {});
+            soundRef.current = null;
+            // Ephemeral: destroy the cached audio after the single playback
+            // (received side only — the sender keeps their local copy bubble).
+            if (isReceived && m.mediaUri) {
+              try {
+                const FileSystem = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+                void FileSystem.deleteAsync(m.mediaUri, { idempotent: true }).catch(() => {});
+              } catch { /* ignore */ }
+              // Persist consumption so it doesn't reappear as playable after an
+              // app reload — mirrors the view-once image which soft-deletes once
+              // viewed. Without this the local `played` flag was lost on reload.
+              try {
+                const { useMessages } = require('../store/messages');
+                void useMessages.getState().softDelete(m.chatId, m.id).catch(() => {});
+              } catch { /* ignore */ }
+            }
+          }
+        }
+      );
+      soundRef.current = sound;
+      setPlaying(true);
+    } catch {
+      setPlaying(false);
+    }
+  }
+
+  const canPlay = isReceived && !!m.mediaUri && !played;
+
+  return (
+    <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+      <Pressable
+        onLongPress={onLongPress}
+        onPress={() => { if (canPlay) void playOnce(); }}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          backgroundColor: me ? t.bubbleOut : t.bubbleIn,
+          paddingHorizontal: 14,
+          paddingVertical: 12,
+          borderRadius: t.radius,
+          borderTopRightRadius: me ? t.radiusS : t.radius,
+          borderTopLeftRadius: me ? t.radius : t.radiusS,
+          borderWidth: 1,
+          borderColor: `${t.accent}44`,
+          opacity: pressed ? 0.85 : played ? 0.6 : 1,
+          maxWidth: 240,
+        })}
+      >
+        <I.Mic size={22} color={me ? t.bubbleOutText : t.accent} stroke={1.6} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: me ? t.bubbleOutText : t.text }}>
+            {isReceived ? 'Audio efímero' : 'Audio enviado'}
+          </Text>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? t.bubbleOutText : t.accent, letterSpacing: 0.5, marginTop: 2 }}>
+            {played
+              ? 'ya escuchado'
+              : playing
+                ? 'reproduciendo…'
+                : isReceived
+                  ? (durSec > 0 ? `${durSec}s · toca para escuchar una vez` : 'toca para escuchar una vez')
+                  : (durSec > 0 ? `${durSec}s · escuchar una vez` : 'escuchar una vez')}
+          </Text>
+        </View>
+      </Pressable>
+      <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+    </View>
+  );
+}
 
 // ─── Bubble ──────────────────────────────────────────────────────────────────
 
@@ -1418,7 +1614,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
 
   // Video bubble
   if (m.type === 'video') {
-    return <VideoBubble t={t} m={m} me={me} queued={queued} time={time} onLongPress={onLongPress} />;
+    return <VideoBubble t={t} m={m} me={me} queued={queued} time={time} onLongPress={onLongPress} caption={m.body ?? undefined} />;
   }
 
   // Audio bubble
@@ -1468,6 +1664,24 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
       ? parseInt(m.body.match(/\[viewonce:audio:(\d+)s/)?.[1] ?? '0', 10)
       : 0;
 
+    // Ephemeral audio gets its own playable bubble — the generic view-once
+    // Pressable below only opens the image viewer and had no audio handler,
+    // which left received ephemeral audio impossible to play.
+    if (isAudio) {
+      return (
+        <ViewOnceAudioBubble
+          t={t}
+          m={m}
+          me={me}
+          isReceived={isReceived}
+          durSec={audioDurSec}
+          queued={queued}
+          time={time}
+          onLongPress={onLongPress}
+        />
+      );
+    }
+
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         <Pressable
@@ -1489,14 +1703,16 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
             maxWidth: 240,
           })}
         >
-          {isAudio ? <I.Mic size={22} color={t.accent} stroke={1.6} /> : <I.EyeOff size={22} color={t.accent} stroke={1.6} />}
+          {isAudio
+            ? <I.Mic size={22} color={me ? t.bubbleOutText : t.accent} stroke={1.6} />
+            : <I.EyeOff size={22} color={me ? t.bubbleOutText : t.accent} stroke={1.6} />}
           <View style={{ flex: 1 }}>
             <Text style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: me ? t.bubbleOutText : t.text }}>
               {isAudio
                 ? (isReceived ? 'Audio efímero' : 'Audio enviado')
                 : (isReceived ? i18nT('chat.viewOnceReceived') : i18nT('chat.viewOnceSent'))}
             </Text>
-            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5, marginTop: 2 }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? t.bubbleOutText : t.accent, letterSpacing: 0.5, marginTop: 2 }}>
               {isAudio
                 ? (audioDurSec > 0 ? `${audioDurSec}s · escuchar una vez` : 'escuchar una vez')
                 : (isReceived ? (hasMedia ? i18nT('chat.viewOnceTap') : i18nT('chat.viewOnceSeen')) : i18nT('chat.viewOnceSentLabel'))}
@@ -1510,12 +1726,16 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
 
   // Image bubble
   if (m.type === 'image' && m.mediaUri) {
+    const bubbleBg = me ? t.bubbleOut : t.bubbleIn;
+    const textColor = me ? t.bubbleOutText : t.bubbleInText;
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         <Pressable
           onPress={() => onImagePress?.(m.mediaUri!)}
           onLongPress={onLongPress}
           style={({ pressed }) => ({
+            width: 220,
+            backgroundColor: bubbleBg,
             borderRadius: t.radius,
             borderTopRightRadius: me ? t.radiusS : t.radius,
             borderTopLeftRadius: me ? t.radius : t.radiusS,
@@ -1528,6 +1748,20 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
             accent={t.accent}
             style={{ width: 220, height: 180, backgroundColor: t.surface2 }}
           />
+          {m.body ? (
+            <View style={{ paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6 }}>
+              <FormattedText
+                body={m.body}
+                t={t}
+                style={{
+                  color: textColor,
+                  fontFamily: t.font,
+                  fontSize: 14,
+                  lineHeight: 18,
+                }}
+              />
+            </View>
+          ) : null}
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />

@@ -412,6 +412,9 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   try { await d.execAsync('ALTER TABLE contacts ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
   try { await d.execAsync("ALTER TABLE contacts ADD COLUMN profile TEXT NOT NULL DEFAULT 'personal';"); } catch (e) {}
   try { await d.execAsync('ALTER TABLE contacts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
+  // `hidden` = chat removed from the list but contact kept (reappears on next
+  // message). Distinct from `archived` (moved to the archived section).
+  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE contacts ADD COLUMN last_seen_at INTEGER;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE contacts ADD COLUMN online INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
 
@@ -751,14 +754,16 @@ export interface StoredContact {
   lastSeenAt?: number;
   online?: boolean;
   pinned?: boolean;
+  /** Chat removed from the list but contact kept; reappears on next message. */
+  hidden?: boolean;
 }
 
 export async function saveContact(c: StoredContact): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(
       `INSERT OR REPLACE INTO contacts
-       (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       c.aegisId,
       c.publicKeyB64,
       c.signingPublicKeyB64 || "",
@@ -776,7 +781,8 @@ export async function saveContact(c: StoredContact): Promise<void> {
       c.profile ?? 'personal',
       c.pinned ? 1 : 0,
       c.lastSeenAt ?? null,
-      c.online ? 1 : 0
+      c.online ? 1 : 0,
+      c.hidden ? 1 : 0
     );
   });
 }
@@ -806,6 +812,7 @@ type ContactRow = {
   pinned: number;
   last_seen_at: number | null;
   online: number;
+  hidden: number;
 };
 
 function rowToContact(r: ContactRow): StoredContact {
@@ -828,6 +835,7 @@ function rowToContact(r: ContactRow): StoredContact {
     pinned: r.pinned === 1,
     lastSeenAt: r.last_seen_at ?? undefined,
     online: r.online === 1,
+    hidden: r.hidden === 1,
   };
 }
 
@@ -835,11 +843,11 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
   return withDb(async (d) => {
     const rows = profile
       ? await d.getAllAsync<ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
           profile
         )
       : await d.getAllAsync<ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online FROM contacts ORDER BY added_at DESC`
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden FROM contacts ORDER BY added_at DESC`
         );
     return rows.map(rowToContact);
   });
@@ -848,7 +856,7 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
 export async function getContact(aegisId: string): Promise<StoredContact | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<ContactRow>(
-      `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online FROM contacts WHERE aegis_id = ?`,
+      `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden FROM contacts WHERE aegis_id = ?`,
       aegisId
     );
     if (!row) return null;

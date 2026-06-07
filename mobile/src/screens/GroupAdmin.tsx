@@ -9,6 +9,7 @@ import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { AvatarCropModal } from '../components/AvatarCropModal';
 import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useGroups } from '../store/groups';
@@ -31,6 +32,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
   const identity = useIdentity((s) => s.identity);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(groupProp.name);
+  const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
 
   // Live group from store so edits reflect instantly
   const group = useGroups((s) => s.groups.find((g) => g.id === groupProp.id)) ?? groupProp;
@@ -63,25 +65,35 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
       Alert.alert(i18nT('groups.permissionDeniedTitle', 'Permiso denegado'), i18nT('groups.permissionDeniedGallery', 'Se necesita acceso a la galería.'));
       return;
     }
+    // Pick WITHOUT the native crop editor (allowsEditing) — its confirm
+    // checkmark is unlabeled/missing on some devices. Hand off to the in-app
+    // AvatarCropModal which has an explicit Confirm button (same as the
+    // personal avatar flow).
     const result = await withPickingGuard(() =>
       ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'] as ImagePicker.MediaType[],
-        allowsEditing: true,
-        aspect: [1, 1],
         quality: 0.8,
       })
     );
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      try {
-        const compressed = await manipulateAsync(
-          result.assets[0].uri,
-          [{ resize: { width: 256 } }],
-          { compress: 0.7, format: SaveFormat.JPEG }
-        );
-        await updateGroupAvatar(group.id, compressed.uri);
-      } catch (e) {
-        Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
-      }
+      const asset = result.assets[0];
+      setCropSource({ uri: asset.uri, width: asset.width ?? 0, height: asset.height ?? 0 });
+    }
+  }
+
+  // Called when the user confirms the crop in AvatarCropModal — produces the
+  // final compressed group avatar and persists it.
+  async function handleConfirmGroupAvatar(uri: string) {
+    setCropSource(null);
+    try {
+      const compressed = await manipulateAsync(
+        uri,
+        [{ resize: { width: 256 } }],
+        { compress: 0.7, format: SaveFormat.JPEG }
+      );
+      await updateGroupAvatar(group.id, compressed.uri);
+    } catch (e) {
+      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
@@ -415,6 +427,19 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
           </Pressable>
         </Section>
       </ScrollView>
+
+      <AvatarCropModal
+        t={t}
+        visible={cropSource !== null}
+        imageUri={cropSource?.uri ?? null}
+        imageWidth={cropSource?.width ?? 0}
+        imageHeight={cropSource?.height ?? 0}
+        title={i18nT('groupAdmin.changeAvatar', 'Cambiar imagen del grupo')}
+        confirmLabel={i18nT('common.confirm', 'Confirmar')}
+        cancelLabel={i18nT('common.cancel', 'Cancelar')}
+        onCancel={() => setCropSource(null)}
+        onConfirm={(uri) => { void handleConfirmGroupAvatar(uri); }}
+      />
     </View>
   );
 }

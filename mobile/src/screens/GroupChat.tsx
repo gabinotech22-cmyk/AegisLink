@@ -279,14 +279,11 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     setEditorUri(null);
     try {
       const id = Crypto.randomUUID();
-      await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: uri });
+      await appendMsg({ id, chatId: group.id, direction: 'out', body: caption.trim(), createdAt: Date.now(), type: 'image', mediaUri: uri });
       const { encryptAndUploadMedia } = require('../crypto/media');
       const blobUri = await encryptAndUploadMedia(uri, 'image/jpeg');
       await useMessages.getState().setMediaUri(group.id, id, blobUri);
-      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]`, skipLocalAppend: true });
-      if (caption) {
-        await sendGroupMessage({ identity, groupId: group.id, plaintext: caption, skipLocalAppend: true });
-      }
+      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]${caption.trim()}`, skipLocalAppend: true });
     } catch (e) {
       Alert.alert(i18nT('chat.sendError'), (e as Error).message);
     }
@@ -311,14 +308,15 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     try {
       if (imageUri) {
         const id = Crypto.randomUUID();
-        await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: imageUri });
+        const caption = hasText ? text : '';
+        await appendMsg({ id, chatId: group.id, direction: 'out', body: caption, createdAt: Date.now(), type: 'image', mediaUri: imageUri });
         const { encryptAndUploadMedia } = require('../crypto/media');
         const blobUri = await encryptAndUploadMedia(imageUri, 'image/jpeg');
         // Persist the blob ref so the sent image survives cache purges (decrypt-on-view).
         await useMessages.getState().setMediaUri(group.id, id, blobUri);
-        await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]`, skipLocalAppend: true });
+        await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]${caption}`, skipLocalAppend: true });
       }
-      if (hasText) {
+      if (hasText && !imageUri) {
         const id = Crypto.randomUUID();
         await appendMsg({
           id,
@@ -987,7 +985,7 @@ function GroupBubble({
             )}
           </View>
         ) : null}
-        <VideoBubble t={t} m={m} me={me} time={time} onLongPress={onLongPress} />
+        <VideoBubble t={t} m={m} me={me} time={time} onLongPress={onLongPress} caption={body ?? undefined} />
         <ReactionPills t={t} reactions={reactions} me={me} />
       </View>
     );
@@ -1074,6 +1072,8 @@ function GroupBubble({
 
   // Image bubble
   if (m.type === 'image' && m.mediaUri) {
+    const bubbleBg = me ? t.bubbleOut : t.bubbleIn;
+    const textColor = me ? t.bubbleOutText : t.bubbleInText;
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         {sender ? (
@@ -1095,6 +1095,8 @@ function GroupBubble({
           onPress={() => onImagePress?.(m.mediaUri!)}
           onLongPress={onLongPress}
           style={({ pressed }) => ({
+            width: 200,
+            backgroundColor: bubbleBg,
             borderRadius: t.radius,
             borderTopRightRadius: me ? t.radiusS : t.radius,
             borderTopLeftRadius: me ? t.radius : t.radiusS,
@@ -1107,6 +1109,20 @@ function GroupBubble({
             accent={t.accent}
             style={{ width: 200, height: 150, backgroundColor: t.surface2 }}
           />
+          {body ? (
+            <View style={{ paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6 }}>
+              <FormattedText
+                body={body}
+                t={t}
+                style={{
+                  color: textColor,
+                  fontFamily: t.font,
+                  fontSize: 14,
+                  lineHeight: 18,
+                }}
+              />
+            </View>
+          ) : null}
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, alignSelf: me ? 'flex-end' : 'flex-start', marginTop: 3, paddingHorizontal: 4 }}>

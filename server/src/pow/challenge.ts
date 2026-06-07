@@ -10,7 +10,7 @@ import { createHash, randomBytes } from 'node:crypto';
 export const POW_DIFFICULTY = 14; // ~16 k hashes on average — trivial for a real client, costly for bulk bots
 
 /** Challenge TTL in milliseconds. */
-const CHALLENGE_TTL_MS = 60_000;
+const CHALLENGE_TTL_MS = 300_000;
 
 interface ChallengeEntry {
   challenge: string; // hex

@@ -1803,36 +1803,48 @@ async function decryptAndAppend(
               catch { groupMsgMediaUri = dataUri; }
             }
           }
-        } else if (msgBody.startsWith('[image:blob:') && msgBody.endsWith(']')) {
-          const dataUri = msgBody.slice(7, -1);
-          groupMsgType = 'image';
-          cleanMsgBody = '';
-          // Persistent blob ref + lazy decrypt-on-view (see 1:1 path above).
-          groupMsgMediaUri = dataUri;
-          try {
-            const { persistEncryptedBlob } = require('../crypto/media');
-            void persistEncryptedBlob(dataUri);
-          } catch { /* resolveMedia retries on view */ }
-        } else if (msgBody.startsWith('[image:data:') && msgBody.endsWith(']')) {
-          const dataUri = msgBody.slice(7, -1);
-          groupMsgType = 'image';
-          cleanMsgBody = '';
-          try { groupMsgMediaUri = await saveMediaToCache(dataUri, `img_${env.id}.jpg`); }
-          catch { groupMsgMediaUri = dataUri; }
-        } else if (msgBody.startsWith('[video:blob:') && msgBody.endsWith(']')) {
-          const dataUri = msgBody.slice(7, -1); // strip '[video:' and ']'
-          groupMsgType = 'video';
-          cleanMsgBody = '';
-          try {
-            const { downloadAndDecryptMedia } = require('../crypto/media');
-            groupMsgMediaUri = await downloadAndDecryptMedia(dataUri, 'mp4');
-          } catch { groupMsgMediaUri = dataUri; }
-        } else if (msgBody.startsWith('[video:data:') && msgBody.endsWith(']')) {
-          const dataUri = msgBody.slice(7, -1); // strip '[video:' and ']'
-          groupMsgType = 'video';
-          cleanMsgBody = '';
-          try { groupMsgMediaUri = await saveMediaToCache(dataUri, `video_${env.id}.mp4`); }
-          catch { groupMsgMediaUri = dataUri; }
+        } else if (msgBody.startsWith('[image:blob:')) {
+          const closeIdx = msgBody.indexOf(']');
+          if (closeIdx !== -1) {
+            const dataUri = msgBody.slice(7, closeIdx);
+            groupMsgType = 'image';
+            cleanMsgBody = msgBody.slice(closeIdx + 1);
+            // Persistent blob ref + lazy decrypt-on-view (see 1:1 path above).
+            groupMsgMediaUri = dataUri;
+            try {
+              const { persistEncryptedBlob } = require('../crypto/media');
+              void persistEncryptedBlob(dataUri);
+            } catch { /* resolveMedia retries on view */ }
+          }
+        } else if (msgBody.startsWith('[image:data:')) {
+          const closeIdx = msgBody.indexOf(']');
+          if (closeIdx !== -1) {
+            const dataUri = msgBody.slice(7, closeIdx);
+            groupMsgType = 'image';
+            cleanMsgBody = msgBody.slice(closeIdx + 1);
+            try { groupMsgMediaUri = await saveMediaToCache(dataUri, `img_${env.id}.jpg`); }
+            catch { groupMsgMediaUri = dataUri; }
+          }
+        } else if (msgBody.startsWith('[video:blob:')) {
+          const closeIdx = msgBody.indexOf(']');
+          if (closeIdx !== -1) {
+            const dataUri = msgBody.slice(7, closeIdx);
+            groupMsgType = 'video';
+            cleanMsgBody = msgBody.slice(closeIdx + 1);
+            try {
+              const { downloadAndDecryptMedia } = require('../crypto/media');
+              groupMsgMediaUri = await downloadAndDecryptMedia(dataUri, 'mp4');
+            } catch { groupMsgMediaUri = dataUri; }
+          }
+        } else if (msgBody.startsWith('[video:data:')) {
+          const closeIdx = msgBody.indexOf(']');
+          if (closeIdx !== -1) {
+            const dataUri = msgBody.slice(7, closeIdx);
+            groupMsgType = 'video';
+            cleanMsgBody = msgBody.slice(closeIdx + 1);
+            try { groupMsgMediaUri = await saveMediaToCache(dataUri, `video_${env.id}.mp4`); }
+            catch { groupMsgMediaUri = dataUri; }
+          }
         } else if (msgBody.startsWith('[file:') && msgBody.endsWith(']')) {
           const inner = msgBody.slice(6, -1);
           const blobColonIdx = inner.indexOf(':blob:');
@@ -1949,27 +1961,33 @@ async function decryptAndAppend(
         }
       }
     }
-  } else if (finalBody.startsWith('[image:blob:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(7, -1); // '[image:' = 7 chars
-    detectedType = 'image';
-    cleanBody = '';
-    // Store the persistent encrypted blob REFERENCE (not a volatile decrypted
-    // cache path). The bubble decrypts on demand via resolveMedia. Persist the
-    // ciphertext locally now, while online, so it survives the server's 24h TTL.
-    detectedMediaUri = dataUri;
-    try {
-      const { persistEncryptedBlob } = require('../crypto/media');
-      void persistEncryptedBlob(dataUri);
-    } catch { /* best-effort — resolveMedia will retry on view */ }
-  } else if (finalBody.startsWith('[image:data:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(7, -1); // '[image:' = 7 chars, strip trailing ]
-    detectedType = 'image';
-    cleanBody = '';
-    try {
-      detectedMediaUri = await saveMediaToCache(dataUri, `img_${env.id}.jpg`);
-    } catch {
-      // Last resort: use in-memory data URI (may be slow for large images)
+  } else if (finalBody.startsWith('[image:blob:')) {
+    const closeIdx = finalBody.indexOf(']');
+    if (closeIdx !== -1) {
+      const dataUri = finalBody.slice(7, closeIdx);
+      detectedType = 'image';
+      cleanBody = finalBody.slice(closeIdx + 1);
+      // Store the persistent encrypted blob REFERENCE (not a volatile decrypted
+      // cache path). The bubble decrypts on demand via resolveMedia. Persist the
+      // ciphertext locally now, while online, so it survives the server's 24h TTL.
       detectedMediaUri = dataUri;
+      try {
+        const { persistEncryptedBlob } = require('../crypto/media');
+        void persistEncryptedBlob(dataUri);
+      } catch { /* best-effort — resolveMedia will retry on view */ }
+    }
+  } else if (finalBody.startsWith('[image:data:')) {
+    const closeIdx = finalBody.indexOf(']');
+    if (closeIdx !== -1) {
+      const dataUri = finalBody.slice(7, closeIdx);
+      detectedType = 'image';
+      cleanBody = finalBody.slice(closeIdx + 1);
+      try {
+        detectedMediaUri = await saveMediaToCache(dataUri, `img_${env.id}.jpg`);
+      } catch {
+        // Last resort: use in-memory data URI (may be slow for large images)
+        detectedMediaUri = dataUri;
+      }
     }
   } else if (finalBody.startsWith('[viewonce:audio:') && finalBody.endsWith(']')) {
     // Format: [viewonce:audio:NNs:data:audio/m4a;base64,...]
@@ -1990,44 +2008,64 @@ async function decryptAndAppend(
         }
       }
     }
-  } else if (finalBody.startsWith('[viewonce:blob:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(10, -1); // '[viewonce:' = 10 chars
-    detectedType = 'view_once';
-    cleanBody = '[viewonce]';
-    try {
-      const { downloadAndDecryptMedia } = require('../crypto/media');
-      detectedMediaUri = await downloadAndDecryptMedia(dataUri);
-    } catch {
-      detectedMediaUri = dataUri;
+  } else if (finalBody.startsWith('[viewonce:blob:')) {
+    const closeIdx = finalBody.indexOf(']');
+    if (closeIdx !== -1) {
+      const dataUri = finalBody.slice(10, closeIdx); // '[viewonce:' = 10 chars
+      detectedType = 'view_once';
+      const captionText = finalBody.slice(closeIdx + 1);
+      cleanBody = captionText.trim() ? `[viewonce]\n${captionText.trim()}` : '[viewonce]';
+      try {
+        const { downloadAndDecryptMedia } = require('../crypto/media');
+        detectedMediaUri = await downloadAndDecryptMedia(dataUri);
+      } catch {
+        detectedMediaUri = dataUri;
+      }
     }
   } else if (finalBody.startsWith('[viewonce:data:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(10, -1); // '[viewonce:' = 10 chars, strip ]
-    const ext = dataUri.startsWith('data:video') ? 'mp4' : 'jpg';
+    let dataUri = finalBody.slice(10, -1); // '[viewonce:' = 10 chars, strip ]
+    let captionText = '';
+    const pipeIdx = dataUri.lastIndexOf('|');
+    if (pipeIdx !== -1) {
+      captionText = dataUri.slice(pipeIdx + 1);
+      dataUri = dataUri.slice(0, pipeIdx);
+    }
+    const isVideo = dataUri.startsWith('data:video');
+    const ext = isVideo ? 'mp4' : 'jpg';
+    detectedType = 'view_once';
+    // Tag video view-once with a marker body so the viewer renders a <Video>
+    // player instead of <Image>. Image view-once keeps the plain "[viewonce]".
+    const baseBody = isVideo ? '[viewonce:video]' : '[viewonce]';
+    cleanBody = captionText.trim() ? `${baseBody}\n${captionText.trim()}` : baseBody;
     try {
       detectedMediaUri = await saveMediaToCache(dataUri, `viewonce_${env.id}.${ext}`);
-      cleanBody = '[viewonce]';
-    } catch {
-      detectedMediaUri = dataUri;
-      cleanBody = `[viewonce:${dataUri}]`;
-    }
-  } else if (finalBody.startsWith('[video:blob:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(7, -1); // strip '[video:' and ']'
-    detectedType = 'video';
-    cleanBody = '';
-    try {
-      const { downloadAndDecryptMedia } = require('../crypto/media');
-      detectedMediaUri = await downloadAndDecryptMedia(dataUri, 'mp4');
     } catch {
       detectedMediaUri = dataUri;
     }
-  } else if (finalBody.startsWith('[video:data:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(7, -1); // strip '[video:' and ']'
-    detectedType = 'video';
-    cleanBody = '';
-    try {
-      detectedMediaUri = await saveMediaToCache(dataUri, `video_${env.id}.mp4`);
-    } catch {
-      detectedMediaUri = dataUri;
+  } else if (finalBody.startsWith('[video:blob:')) {
+    const closeIdx = finalBody.indexOf(']');
+    if (closeIdx !== -1) {
+      const dataUri = finalBody.slice(7, closeIdx);
+      detectedType = 'video';
+      cleanBody = finalBody.slice(closeIdx + 1);
+      try {
+        const { downloadAndDecryptMedia } = require('../crypto/media');
+        detectedMediaUri = await downloadAndDecryptMedia(dataUri, 'mp4');
+      } catch {
+        detectedMediaUri = dataUri;
+      }
+    }
+  } else if (finalBody.startsWith('[video:data:')) {
+    const closeIdx = finalBody.indexOf(']');
+    if (closeIdx !== -1) {
+      const dataUri = finalBody.slice(7, closeIdx);
+      detectedType = 'video';
+      cleanBody = finalBody.slice(closeIdx + 1);
+      try {
+        detectedMediaUri = await saveMediaToCache(dataUri, `video_${env.id}.mp4`);
+      } catch {
+        detectedMediaUri = dataUri;
+      }
     }
   } else if (finalBody.startsWith('[file:') && finalBody.endsWith(']')) {
     // Format: [file:filename:blob:<id>:<key>:<nonce>]

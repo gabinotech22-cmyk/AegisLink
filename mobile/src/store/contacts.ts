@@ -32,6 +32,7 @@ interface ContactsState {
   setZeroTrust: (aegisId: string, enabled: boolean) => Promise<void>;
   setBlocked: (aegisId: string, blocked: boolean) => Promise<void>;
   archiveContact: (aegisId: string, archived: boolean) => Promise<void>;
+  setChatHidden: (aegisId: string, hidden: boolean) => Promise<void>;
   pinContact: (aegisId: string, pinned: boolean) => Promise<void>;
   removeContact: (aegisId: string) => Promise<void>;
 }
@@ -207,6 +208,17 @@ export const useContacts = create<ContactsState>((set, get) => ({
     const existing = await getContact(aegisId);
     if (!existing) return;
     const updated = { ...existing, archived };
+    await saveContact(updated);
+    set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
+  },
+
+  // Hide/show a chat in the list WITHOUT deleting the contact. "Delete chat"
+  // sets hidden=true (and clears messages); any new message un-hides it again
+  // (see store/messages appendMsg).
+  async setChatHidden(aegisId, hidden) {
+    const existing = await getContact(aegisId);
+    if (!existing) return;
+    const updated = { ...existing, hidden };
     await saveContact(updated);
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
   },
