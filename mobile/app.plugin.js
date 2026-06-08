@@ -182,11 +182,15 @@ function withNetworkSecurity(config) {
       return config;
     },
   ]);
-  // Wire android:networkSecurityConfig in AndroidManifest <application>
+  // Wire android:networkSecurityConfig + harden the <application> flags.
   config = withAndroidManifest(config, (config) => {
     const app = config.modResults.manifest.application?.[0];
     if (app?.$) {
       app.$['android:networkSecurityConfig'] = '@xml/network_security_config';
+      // Disable adb/cloud backup of the app's private dir — the SQLite
+      // social-graph DB must never be exfiltrable via `adb backup`. Identity
+      // keys live in the Keystore (excluded from backup regardless).
+      app.$['android:allowBackup'] = 'false';
     }
     return config;
   });

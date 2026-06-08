@@ -82,17 +82,22 @@
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.WAKE_LOCK",
-        "android.permission.BLUETOOTH",
-        "android.permission.MANAGE_OWN_CALLS",
-        "android.permission.READ_PHONE_STATE",
-        "android.permission.READ_PHONE_NUMBERS",
-        "android.permission.CALL_PHONE"
+        "android.permission.BLUETOOTH"
       ]
     },
     "plugins": [
       "./app.plugin.js",
       "expo-secure-store",
       "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ],
       [
         "expo-image-picker",
         {

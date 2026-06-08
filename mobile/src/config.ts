@@ -26,7 +26,10 @@ const RELAY_PORT = (process.env.EXPO_PUBLIC_RELAY_PORT as string | undefined) ??
  * Override at any time via EXPO_PUBLIC_SERVER_URL.
  */
 const SERVER_URL_DEV = 'http://10.0.2.2:3001';
-const SERVER_URL_PROD = RELAY_IP ? `http://${RELAY_IP}:${RELAY_PORT}` : SERVER_URL_DEV;
+// Prod fails CLOSED to the canonical HTTPS host (valid cert + pinning) — never
+// cleartext and never the dev loopback, even if RELAY_IP is unset. The explicit
+// EXPO_PUBLIC_SERVER_URL (eas.json) still takes precedence below.
+const SERVER_URL_PROD = RELAY_IP ? `https://${RELAY_IP}` : 'https://aegislink.duckdns.org';
 
 export const SERVER_URL: string =
   (process.env.EXPO_PUBLIC_SERVER_URL as string | undefined) ??
