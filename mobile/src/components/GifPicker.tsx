@@ -15,7 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from './icons';
-import { SERVER_URL } from '../config';
+import { SERVER_URL, isSecureUrl } from '../config';
 import { VAULT_PACK } from './stickers/VaultPack';
 
 // Tab type
@@ -96,7 +96,7 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
           width: preview?.dims[0] ?? 200,
           height: preview?.dims[1] ?? 200,
         };
-      }).filter((r) => r.url);
+      }).filter((r) => r.url && isSecureUrl(r.url) && isSecureUrl(r.previewUrl));
       setResults(mapped);
     } catch {
       setError(true);

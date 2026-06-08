@@ -6,7 +6,7 @@ import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { ss } from '../utils/secureStore';
-import { verifyPIN, hasStoredPIN, hashPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
+import { verifyPIN, hasStoredPIN, verifyPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
 import { usePreferences } from '../store/preferences';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
@@ -262,8 +262,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           pinHash?: string;
         };
         if (config.duressPin && typeof config.pinHash === 'string' && config.pinHash.length > 0) {
-          const candidate = await hashPinWithSalt(pin, DURESS_PIN_SALT);
-          if (candidate === config.pinHash) {
+          if (await verifyPinWithSalt(pin, DURESS_PIN_SALT, config.pinHash)) {
             // Wipe first — if interrupted mid-wipe, real data is already gone.
             // Only after a successful wipe do we surface the decoy UI.
             try {

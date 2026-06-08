@@ -471,6 +471,29 @@ function Shell() {
     }
   }, [identity, status]);
 
+  // Runtime integrity advisory (C1) — local-only, zero telemetry, NON-blocking.
+  // Surface a one-time notice if the device looks rooted/hooked; never prevent
+  // usage. The enforced consequence (refusing off-device key export) lives in
+  // backupUploadAllowed().
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { checkIntegrity } = require('./src/security/integrity') as typeof import('./src/security/integrity');
+        const r = await checkIntegrity();
+        if (!r.compromised) return;
+        const { ss } = require('./src/utils/secureStore') as typeof import('./src/utils/secureStore');
+        const ACK = 'aegis.integrity.ack.v1';
+        if (await ss.get(ACK)) return;
+        const { Alert } = require('react-native') as typeof import('react-native');
+        Alert.alert(
+          'Dispositivo no seguro',
+          'Este dispositivo parece tener root o un hook activo. AegisLink no puede garantizar el aislamiento de tus claves aquí, así que la copia de seguridad fuera del dispositivo queda desactivada. Tus mensajes siguen cifrados de extremo a extremo.',
+          [{ text: 'Entendido', onPress: () => void ss.set(ACK, '1') }],
+        );
+      } catch { /* detection unavailable — never block */ }
+    })();
+  }, []);
+
   const push = useCallback((r: PushRoute) => setStack((s) => [...s, r]), []);
   const pop = useCallback(() => setStack((s) => s.slice(0, -1)), []);
 

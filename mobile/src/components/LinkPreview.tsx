@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Image, Pressable, Linking } from 'react-native';
 import type { Theme } from '../theme/vault';
-import { SERVER_URL } from '../config';
+import { SERVER_URL, isSecureUrl } from '../config';
 
 interface Props {
   url: string;
@@ -58,7 +58,9 @@ export function LinkPreview({ url, t }: Props) {
         const ogData: OGData = {
           title: og.title ?? undefined,
           description: og.description ?? undefined,
-          image: og.image ?? undefined,
+          // Drop a cleartext preview image in production (MITM/privacy) — show
+          // the text preview without it rather than loading http:// content.
+          image: isSecureUrl(og.image) ? (og.image ?? undefined) : undefined,
         };
         cache.set(url, ogData);
         if (!cancelledRef.current) setData(ogData);
