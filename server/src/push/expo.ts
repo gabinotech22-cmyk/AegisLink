@@ -51,9 +51,12 @@ export async function notifyRecipient(aegisId: string): Promise<void> {
 /**
  * High-priority wake-up push for an incoming call.
  *
- * Blind wake-up only — no title, no body, no fromAegisId, no media type.
- * The client wakes up, reconnects the socket, and drains the sealed
- * call:invite which contains caller identity encrypted inside.
+ * Visible heads-up wake-up: when the app is fully killed the JS runtime cannot
+ * run to post a local notification, so the OS itself must ring and display the
+ * incoming call. We send a generic, ZERO-METADATA visible push — no caller
+ * identity, no media type — just enough for the OS to ring with Accept/Decline.
+ * The caller's identity stays sealed inside the call:invite socket event and is
+ * only surfaced (showIncomingCallNotification) once the app wakes and reconnects.
  * TTL is 30 seconds — stale calls are never delivered by the OS.
  */
 export async function sendCallWakeUp(
@@ -73,13 +76,17 @@ export async function sendCallWakeUp(
     }
     messages.push({
       to: row.expo_token,
-      sound: null,
+      sound: 'default',
       priority: 'high',
       _contentAvailable: true,
       ttl: 30,
-      // Blind wake-up: no title, no body, no identity fields.
-      // Caller identity is sealed inside the call:invite socket event.
+      // Generic, zero-metadata title/body so the OS rings + shows a heads-up
+      // even when the app is killed. Caller identity stays sealed in call:invite.
+      title: 'AegisLink',
+      body: 'Llamada entrante · E2EE',
       data: { kind: 'call_wakeup' },
+      categoryId: 'aegislink-call',  // Contestar / Rechazar actions on the heads-up
+      channelId: 'aegislink-calls',  // MAX importance + bypassDnd (created client-side)
     });
   }
 
