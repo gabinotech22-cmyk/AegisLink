@@ -46,16 +46,34 @@ async function legacyHash(pin: string): Promise<string> {
 }
 
 /**
- * Hash a PIN under a caller-supplied domain salt — used for the duress/decoy
- * PIN. Kept on the legacy scheme for now: changing the algorithm would
- * invalidate an already-configured panic PIN (a silent safety regression).
- * TODO: migrate to Argon2id with a stored per-install salt + version tag.
+ * Hash a PIN under a caller-supplied domain salt — used to STORE the
+ * duress/decoy PIN. Now Argon2id (versioned 'a2:') so the most security-
+ * sensitive PIN gets the same brute-force resistance as the main one.
+ * (Per-install salt for duress is a follow-up; the domain salt + Argon2id cost
+ * + Keystore THIS_DEVICE_ONLY storage already make offline enumeration hard.)
  */
 export async function hashPinWithSalt(pin: string, salt: string): Promise<string> {
-  return Crypto.digestStringAsync(
+  return 'a2:' + encodeBase64(argon2id(enc.encode(pin), enc.encode(salt), ARGON));
+}
+
+/**
+ * Verify a PIN against a stored duress hash in constant time, accepting both
+ * the new Argon2id format and a legacy SHA-256 hash so an already-configured
+ * panic PIN keeps working.
+ */
+export async function verifyPinWithSalt(
+  pin: string,
+  salt: string,
+  stored: string,
+): Promise<boolean> {
+  if (stored.startsWith('a2:')) {
+    return constantTimeEq(stored, await hashPinWithSalt(pin, salt));
+  }
+  const legacy = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     salt + pin
   );
+  return constantTimeEq(stored, legacy);
 }
 
 export async function setPIN(pin: string): Promise<void> {

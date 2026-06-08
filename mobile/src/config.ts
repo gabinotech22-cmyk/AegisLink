@@ -83,13 +83,25 @@ if (!__DEV__) {
 }
 
 /**
+ * True when `url` is safe to load in a production build: https, or a Tor .onion
+ * (Tor encrypts its own transport). In __DEV__ everything passes so localhost /
+ * LAN dev servers keep working. Non-throwing — use at render/use boundaries for
+ * external, relay- or message-derived URLs (OG preview images, GIF results).
+ */
+export function isSecureUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  // eslint-disable-next-line no-undef
+  if (__DEV__) return true;
+  return /^https:\/\//i.test(url) || /\.onion(\/|:|$)/i.test(url);
+}
+
+/**
  * Guard a (possibly attacker-influenced) URL before fetching it. Throws in a
- * production build on any non-https scheme except Tor .onion. Use for URLs that
- * originate from message content / the relay rather than from compile-time env.
+ * production build on any insecure scheme. Use for URLs that originate from
+ * message content / the relay rather than from compile-time env.
  */
 export function secureUrl(url: string): string {
-  // eslint-disable-next-line no-undef
-  if (!__DEV__ && !/^https:\/\//i.test(url) && !/\.onion(\/|:|$)/i.test(url)) {
+  if (!isSecureUrl(url)) {
     throw new Error('[config] refusing to fetch an insecure URL in production');
   }
   return url;
