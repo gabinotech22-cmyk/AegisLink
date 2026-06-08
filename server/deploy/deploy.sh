@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AegisLink Relay — Deploy desde tu máquina local a la VM de Oracle Cloud
+# AegisLink Relay — Deploy desde tu máquina local a la instancia AWS EC2
 #
 # Uso:
 #   bash deploy.sh <IP_PUBLICA>
@@ -39,7 +39,7 @@ SCP_OPTS="${SSH_OPTS}"  # unused now — arrays used below
 ARCHIVE="/tmp/aegislink-server-$(date +%s).tar.gz"
 
 echo "╔══════════════════════════════════════════════╗"
-echo "║  AegisLink — Deploy to Oracle Cloud VM       ║"
+echo "║  AegisLink — Deploy to AWS EC2               ║"
 echo "╚══════════════════════════════════════════════╝"
 echo "  Host : ${REMOTE}"
 echo "  Port : ${VM_PORT}"

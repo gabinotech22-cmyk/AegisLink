@@ -3,7 +3,7 @@
 ## First-time setup (run once on the VM)
 
 ```bash
-# 1. SSH into the Oracle Cloud VM
+# 1. SSH into the AWS EC2 instance
 ssh ubuntu@<VM_PUBLIC_IP>
 
 # 2. Ensure the project is cloned/uploaded to /opt/aegislink

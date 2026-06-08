@@ -3,30 +3,30 @@
  *
  * Dev  → defaults to the Android Emulator loopback alias (10.0.2.2) or LAN IP
  *        set in .env via EXPO_PUBLIC_SERVER_URL.
- * Prod → defaults to the Oracle Cloud VM IP running the relay + coturn.
- *        Override via EXPO_PUBLIC_SERVER_URL in a .env.production file or EAS
- *        secret if the IP changes.
+ * Prod → defaults to the AWS EC2 instance running the relay + coturn
+ *        (aegislink.duckdns.org). Override via EXPO_PUBLIC_SERVER_URL in a
+ *        .env.production file or EAS secret if the host changes.
  *
- * Oracle Cloud VM (relay + coturn): set EXPO_PUBLIC_ORACLE_IP in .env or
+ * AWS EC2 instance (relay + coturn): set EXPO_PUBLIC_RELAY_IP in .env or
  * EAS secrets. All production URLs are derived from that single constant.
  */
 
-/** Oracle Cloud public IP. Override via EAS secret or .env.production. */
-const ORACLE_IP = (process.env.EXPO_PUBLIC_ORACLE_IP as string | undefined) ?? '';
+/** AWS relay public IP. Override via EAS secret or .env.production. */
+const RELAY_IP = (process.env.EXPO_PUBLIC_RELAY_IP as string | undefined) ?? '';
 
-/** Relay port on the Oracle VM (matches docker-compose / server config). */
+/** Relay port on the AWS instance (matches docker-compose / server config). */
 const RELAY_PORT = (process.env.EXPO_PUBLIC_RELAY_PORT as string | undefined) ?? '3001';
 
 /**
  * SERVER_URL — relay/identity backend.
  *
  * Dev default:  http://10.0.2.2:3001  (Android Emulator → host machine)
- * Prod default: http://<ORACLE_IP>:<RELAY_PORT>  (Oracle Cloud VM)
+ * Prod default: http://<RELAY_IP>:<RELAY_PORT>  (AWS EC2 instance)
  *
  * Override at any time via EXPO_PUBLIC_SERVER_URL.
  */
 const SERVER_URL_DEV = 'http://10.0.2.2:3001';
-const SERVER_URL_PROD = ORACLE_IP ? `http://${ORACLE_IP}:${RELAY_PORT}` : SERVER_URL_DEV;
+const SERVER_URL_PROD = RELAY_IP ? `http://${RELAY_IP}:${RELAY_PORT}` : SERVER_URL_DEV;
 
 export const SERVER_URL: string =
   (process.env.EXPO_PUBLIC_SERVER_URL as string | undefined) ??
@@ -41,15 +41,15 @@ export const RELAY_URL: string =
   (process.env.EXPO_PUBLIC_RELAY_URL as string | undefined) ?? SERVER_URL;
 
 /**
- * TURN server URL for coturn on the Oracle VM.
+ * TURN server URL for coturn on the AWS instance.
  *
- * Default: turn:<ORACLE_IP>:3478
+ * Default: turn:<RELAY_IP>:3478
  * Override via EXPO_PUBLIC_TURN_URL.
  */
 export const TURN_SERVER_URL: string =
   (process.env.EXPO_PUBLIC_TURN_URL as string | undefined) ??
   // eslint-disable-next-line no-undef
-  (__DEV__ ? '' : ORACLE_IP ? `turn:${ORACLE_IP}:3478` : '');
+  (__DEV__ ? '' : RELAY_IP ? `turn:${RELAY_IP}:3478` : '');
 
 /**
  * ONION_URL — relay Tor hidden service address.

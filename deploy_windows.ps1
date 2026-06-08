@@ -1,5 +1,6 @@
 param(
-    [string]$ServerIp = "80.225.82.8"
+    # AWS EC2 (eu-north-1) — aegislink.duckdns.org
+    [string]$ServerIp = "51.20.60.155"
 )
 
 $KeyPath = "C:\Users\starl\Downloads\ssh-key-2026-05-20.key"
@@ -17,7 +18,7 @@ Set-Location "C:\Users\starl\Desktop\AegisLink"
 if (Test-Path "aegislink-server.zip") { Remove-Item "aegislink-server.zip" }
 Compress-Archive -Path "server\*" -DestinationPath "aegislink-server.zip" -Force
 
-Write-Host "`n=== 3. Subiendo código a Oracle Cloud ===" -ForegroundColor Cyan
+Write-Host "`n=== 3. Subiendo código a AWS ===" -ForegroundColor Cyan
 scp -o StrictHostKeyChecking=accept-new -i $KeyPath aegislink-server.zip "$Remote`:/tmp/"
 
 Write-Host "`n=== 4. Iniciando el Relay con PM2 ===" -ForegroundColor Cyan

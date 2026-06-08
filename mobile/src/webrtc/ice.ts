@@ -21,7 +21,7 @@ export interface RTCConfigShape {
 /**
  * TURN_URL resolution order:
  * 1. EXPO_PUBLIC_TURN_URL env var (explicit override)
- * 2. TURN_SERVER_URL from config (derived from ORACLE_IP in prod, empty in dev)
+ * 2. TURN_SERVER_URL from config (derived from RELAY_IP in prod, empty in dev)
  */
 const TURN_URL =
   (process.env.EXPO_PUBLIC_TURN_URL as string | undefined) ?? TURN_SERVER_URL;
