@@ -29,6 +29,8 @@
           "remote-notification"
         ],
         "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": true,
           "NSPinnedDomains": {
             "aegislink.duckdns.org": {
               "NSIncludesSubdomains": true,
@@ -38,6 +40,9 @@
                 },
                 {
                   "SPKI-SHA256-BASE64": "iFvwVyJSxnQdyaUvUERIf+8qk7gRze3612JMwoO3zdU="
+                },
+                {
+                  "SPKI-SHA256-BASE64": "LvglXAxgB9K5SCOZrLvdX0VVc8UuEU+Bj6r58LSA7r8="
                 }
               ]
             }
