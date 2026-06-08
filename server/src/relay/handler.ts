@@ -477,6 +477,12 @@ export function attachRelay(io: SocketServer) {
       await messageRepo.delete(row.id, deviceId);
     }
 
+    // Re-deliver any call:invite that arrived while this device was offline, so a
+    // call accepted from the killed-state push wake-up can still connect. Held in
+    // memory with a short TTL (see pendingCallInvites / queueCallInvite).
+    const pendingInvite = takePendingCallInvite(me);
+    if (pendingInvite) socket.emit('call:invite', pendingInvite);
+
     socket.on(
       'envelope',
       (raw, ack?: (response: { ok: boolean; queued?: boolean; error?: string }) => void) => {
@@ -1250,6 +1256,45 @@ function checkGroupCallInviteRateLimit(aegisId: string): boolean {
   return entry.count <= 3;
 }
 
+// ── Ephemeral call:invite re-delivery queue ──────────────────────────────────
+// When the callee is offline we fire a visible push wake-up, but the call only
+// connects if the sealed call:invite can be re-delivered once the callee's app
+// cold-starts from the push and reconnects. We hold the invite in MEMORY ONLY
+// (zero metadata at rest), keyed by recipient aegisId, with a short TTL just
+// under the caller's 45s ring window. Purged on drain, caller hangup/end, or TTL.
+interface PendingCallInvite {
+  callId: string;
+  payload: Record<string, unknown>; // exactly what forward() would emit ({ ...rest, from })
+  timer: ReturnType<typeof setTimeout>;
+}
+const pendingCallInvites = new Map<string, PendingCallInvite>();
+const CALL_INVITE_TTL_MS = 35_000;
+
+function queueCallInvite(to: string, callId: string, payload: Record<string, unknown>): void {
+  const existing = pendingCallInvites.get(to);
+  if (existing) clearTimeout(existing.timer);
+  const t = setTimeout(() => { pendingCallInvites.delete(to); }, CALL_INVITE_TTL_MS);
+  // Never let a ringing invite keep the event loop alive.
+  (t as unknown as { unref?: () => void }).unref?.();
+  pendingCallInvites.set(to, { callId, payload, timer: t });
+}
+
+function takePendingCallInvite(to: string): Record<string, unknown> | null {
+  const pending = pendingCallInvites.get(to);
+  if (!pending) return null;
+  clearTimeout(pending.timer);
+  pendingCallInvites.delete(to);
+  return pending.payload;
+}
+
+function cancelCallInvite(to: string, callId: string): void {
+  const pending = pendingCallInvites.get(to);
+  if (pending && pending.callId === callId) {
+    clearTimeout(pending.timer);
+    pendingCallInvites.delete(to);
+  }
+}
+
 function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Set<Socket>>) {
   function forward<T extends { to: string }>(eventOut: string, parsed: T) {
     const target = sockets.get(parsed.to);
@@ -1272,9 +1317,12 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
     }
     const delivered = forward('call:invite', parsed.data);
     if (!delivered) {
-      // Recipient offline — fire high-priority push so the OS wakes their app.
-      // The call:invite will be re-delivered via socket once they reconnect and
-      // emit call:invite again, or they can answer from the CallKit/Notification UI.
+      // Recipient offline. Hold the sealed invite in memory so it can be
+      // re-delivered when their app cold-starts from the push and reconnects
+      // within the ring window, then fire the visible high-priority push so the
+      // OS rings even when the app is killed.
+      const { to, ...rest } = parsed.data;
+      queueCallInvite(to, parsed.data.callId, { ...rest, from: me });
       void sendCallWakeUp(
         parsed.data.to,
         me,
@@ -1296,6 +1344,9 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
   socket.on('call:hangup', (raw) => {
     const parsed = CallHangup.safeParse(raw);
     if (!parsed.success) return;
+    // Caller gave up before the callee came online — drop any queued invite so a
+    // late reconnect doesn't ring a phantom call.
+    cancelCallInvite(parsed.data.to, parsed.data.callId);
     forward('call:hangup', parsed.data);
   });
 
@@ -1323,6 +1374,8 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
     // Notify both the recipient AND reflect back to the sender so both sides
     // tear down the peer connection simultaneously.
     const { to, callId, reason } = parsed.data;
+    // Drop any queued invite so a late reconnect doesn't ring a phantom call.
+    cancelCallInvite(to, callId);
     const target = sockets.get(to);
     if (target) {
       for (const s of target) s.emit('call:end', { callId, reason, from: me });
