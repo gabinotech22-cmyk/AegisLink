@@ -64,7 +64,10 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
         importance: Notifications.AndroidImportance.HIGH,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#5bf2b9',
-        sound: 'default',
+        // On-brand soft bell (see assets/sounds/gen_sounds.py). Channel sound is
+        // immutable after creation — published builds ship it from the first
+        // version, so no channel-id bump is needed.
+        sound: 'msg_received.mp3',
         showBadge: true,
       });
       await Notifications.setNotificationChannelAsync('aegislink-calls', {
@@ -72,7 +75,8 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 500, 200, 500],
         lightColor: '#5bf2b9',
-        sound: 'default',
+        // Calm arpeggiated ring instead of the OS default ringtone.
+        sound: 'call_incoming.mp3',
         bypassDnd: true,
       });
       await Notifications.setNotificationChannelAsync('aegislink-security', {
@@ -294,6 +298,10 @@ export async function showIncomingNotification(
     if (!prefs.notifMaster && !keywordMatch) return;
     if (isMuted && !keywordMatch) return;
 
+    // Per-contact "mentions only": suppress unless a keyword/mention matched.
+    const mentionsOnly = prefs.mentionsOnlyChats?.includes(targetChatId) ?? false;
+    if (mentionsOnly && !keywordMatch) return;
+
     // Avoid displaying alert if the user is already actively looking at the sender's chat
     if (activeChatId === targetChatId) return;
 
@@ -322,7 +330,7 @@ export async function showIncomingNotification(
       content: {
         title,
         body: notificationBody,
-        sound: prefs.notifSound ? 'default' : undefined,
+        sound: prefs.notifSound ? 'msg_received.mp3' : undefined,
         categoryIdentifier: 'aegislink-message',
         data: { fromAegisId: senderAegisId, isGroup, groupName },
         // Android notification channel
@@ -389,7 +397,7 @@ export async function showIncomingCallNotification(
       content: {
         title: `AegisLink · ${isVideo ? '📹' : '📞'} ${callerName}`,
         body: isVideo ? 'Videollamada E2EE entrante' : 'Llamada de voz E2EE entrante',
-        sound: 'default',
+        sound: 'call_incoming.mp3',
         priority: Notifications.AndroidNotificationPriority.MAX,
         categoryIdentifier: 'aegislink-call',
         data: { fromAegisId: callerAegisId, type: 'call', isVideo },

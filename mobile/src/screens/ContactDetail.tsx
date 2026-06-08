@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import { WallpaperPicker, loadWallpaper, type WallpaperOption } from '../components/WallpaperPicker';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,6 +12,7 @@ import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
 import { fingerprintHex } from '../crypto/fingerprint';
 import { useContacts } from '../store/contacts';
+import { usePreferences } from '../store/preferences';
 import type { StoredContact } from '../db/local';
 
 interface Props {
@@ -52,6 +53,30 @@ export function ContactDetailScreen({
   const muted = effectiveMuted;
   const zeroTrust = contact.zeroTrust ?? false;
   const blocked = contact.blocked ?? false;
+
+  // ── Per-contact notification level ──────────────────────────────────────────
+  const mentionsOnlyChats = usePreferences((s) => s.mentionsOnlyChats);
+  const setPref = usePreferences((s) => s.set);
+  const [notifSheet, setNotifSheet] = useState(false);
+  const isMentionsOnly = mentionsOnlyChats.includes(contact.aegisId);
+  const notifLevel: 'all' | 'mentions' | 'none' =
+    muted ? 'none' : isMentionsOnly ? 'mentions' : 'all';
+
+  async function setNotifLevel(level: 'all' | 'mentions' | 'none') {
+    const without = mentionsOnlyChats.filter((id) => id !== contact.aegisId);
+    if (level === 'all') {
+      await setPref('mentionsOnlyChats', without);
+      if (muted) await muteContact(contact.aegisId, false);
+    } else if (level === 'mentions') {
+      await setPref('mentionsOnlyChats', [...without, contact.aegisId]);
+      if (muted) await muteContact(contact.aegisId, false);
+    } else {
+      // none → silence entirely (forever) and drop any mentions-only flag
+      await setPref('mentionsOnlyChats', without);
+      await muteContact(contact.aegisId, true, 0);
+    }
+    setNotifSheet(false);
+  }
 
   useEffect(() => {
     try {
@@ -104,10 +129,7 @@ export function ContactDetailScreen({
   }
 
   function handleNotifications() {
-    Alert.alert(
-      i18nT('contactDetail.notificationsTitle'),
-      i18nT('contactDetail.notificationsDesc')
-    );
+    setNotifSheet(true);
   }
 
   async function handleVaciarYBloquear() {
@@ -404,7 +426,7 @@ export function ContactDetailScreen({
               t={t}
               icon={<I.Bell size={18} color={t.textDim} />}
               label={i18nT('contactDetail.notificationsTitle')}
-              sub={i18nT('contactDetail.notificationsSub')}
+              sub={i18nT(`contactDetail.notifLevel_${notifLevel}`)}
               onPress={handleNotifications}
             />
             <Row
@@ -434,6 +456,61 @@ export function ContactDetailScreen({
         onClose={() => setWallpaperPickerOpen(false)}
         onSelect={(opt) => { setWallpaper(opt); setWallpaperPickerOpen(false); }}
       />
+
+      {/* Per-contact notification level sheet */}
+      <Modal visible={notifSheet} transparent animationType="fade" onRequestClose={() => setNotifSheet(false)}>
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+          onPress={() => setNotifSheet(false)}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{
+              backgroundColor: t.surface,
+              borderTopLeftRadius: t.radius, borderTopRightRadius: t.radius,
+              paddingTop: 10, paddingBottom: insets.bottom + 16, paddingHorizontal: 18,
+              borderTopWidth: 1, borderColor: t.border,
+            }}
+          >
+            <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: t.border, marginBottom: 14 }} />
+            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.8, marginBottom: 12 }}>
+              {i18nT('contactDetail.notificationsTitle').toUpperCase()}
+            </Text>
+            {([
+              { level: 'all' as const, icon: <I.Bell size={20} color={t.accent} /> },
+              { level: 'mentions' as const, icon: <I.Hash size={20} color={t.accent} /> },
+              { level: 'none' as const, icon: <I.BellOff size={20} color={t.warn} /> },
+            ]).map(({ level, icon }) => {
+              const selected = notifLevel === level;
+              return (
+                <Pressable
+                  key={level}
+                  onPress={() => void setNotifLevel(level)}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row', alignItems: 'center', gap: 14,
+                    paddingVertical: 14, paddingHorizontal: 12,
+                    borderRadius: t.radiusS,
+                    backgroundColor: selected ? `${t.accent}14` : (pressed ? t.surface2 : 'transparent'),
+                    borderWidth: 1, borderColor: selected ? `${t.accent}55` : 'transparent',
+                    marginBottom: 8,
+                  })}
+                >
+                  {icon}
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>
+                      {i18nT(`contactDetail.notifLevel_${level}`)}
+                    </Text>
+                    <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
+                      {i18nT(`contactDetail.notifLevel_${level}_desc`)}
+                    </Text>
+                  </View>
+                  {selected ? <I.Check size={18} color={t.accent} /> : null}
+                </Pressable>
+              );
+            })}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

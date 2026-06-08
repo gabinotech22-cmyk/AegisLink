@@ -2,6 +2,14 @@
 Generate AegisLink in-app sound effects.
 Spec: assets/sounds/README.md
 
+Design language (v2 — "calm / secure"):
+  - Soft BELL / glass timbre via additive synthesis (a few decaying partials
+    under an exponential amplitude envelope) instead of raw sine beeps.
+  - Only CONSONANT musical intervals from an A-major pentatonic palette
+    (A C# E F#). No close-frequency pairs — the old ringback beat (440+480 Hz)
+    and the dissonant 480+620 ring are gone.
+  - Gentle attacks + long tails so nothing is piercing or "buzzy".
+
 Run once: python gen_sounds.py
 Requires: numpy (pip install numpy), ffmpeg in PATH
 """
@@ -13,25 +21,60 @@ import numpy as np
 SR = 44100
 OUTDIR = os.path.dirname(os.path.abspath(__file__))
 
+# ── A-major pentatonic palette (Hz) ──────────────────────────────────────────
+A4, Cs5, E5, Fs5, A5 = 440.00, 554.37, 659.25, 739.99, 880.00
+E4 = 329.63
 
-def gen_sine(freq: float, duration_s: float) -> np.ndarray:
-    t = np.linspace(0, duration_s, int(SR * duration_s), endpoint=False)
-    return np.sin(2 * np.pi * freq * t)
+
+def bell(freq: float, duration_s: float, decay: float = 7.0,
+         partials=(1.0, 2.0, 3.01, 4.2), amps=(1.0, 0.45, 0.22, 0.10)) -> np.ndarray:
+    """Soft glass-bell tone: a handful of partials under an exponential decay.
+
+    `decay` is the e-folding rate (higher = shorter tail). A 5 ms raised-cosine
+    attack removes the click; the exponential tail makes it ring like a chime.
+    """
+    n = int(SR * duration_s)
+    t = np.linspace(0, duration_s, n, endpoint=False)
+    sig = np.zeros(n, dtype=np.float64)
+    for p, a in zip(partials, amps):
+        sig += a * np.sin(2 * np.pi * freq * p * t)
+    env = np.exp(-decay * t)
+    # 5 ms raised-cosine attack
+    a_n = int(0.005 * SR)
+    if a_n > 0:
+        env[:a_n] *= 0.5 * (1 - np.cos(np.linspace(0, np.pi, a_n)))
+    return sig * env
 
 
-def apply_fade(sig: np.ndarray, attack_s: float = 0.0, decay_s: float = 0.0) -> np.ndarray:
-    sig = sig.copy()
-    a = int(SR * attack_s)
-    d = int(SR * decay_s)
+def soft_tone(freq: float, duration_s: float, attack_s: float, release_s: float,
+              freq2: float | None = None) -> np.ndarray:
+    """Pure, smooth sine swell (optionally a consonant 2nd voice) with cosine
+    attack/release — used for the ringback so there is NO beating."""
+    n = int(SR * duration_s)
+    t = np.linspace(0, duration_s, n, endpoint=False)
+    sig = np.sin(2 * np.pi * freq * t)
+    if freq2 is not None:
+        sig = 0.6 * sig + 0.4 * np.sin(2 * np.pi * freq2 * t)
+    env = np.ones(n)
+    a = int(attack_s * SR)
+    r = int(release_s * SR)
     if a > 0:
-        sig[:a] *= np.linspace(0, 1, a)
-    if d > 0:
-        sig[-d:] *= np.linspace(1, 0, d)
-    return sig
+        env[:a] = 0.5 * (1 - np.cos(np.linspace(0, np.pi, a)))
+    if r > 0:
+        env[-r:] = 0.5 * (1 + np.cos(np.linspace(0, np.pi, r)))
+    return sig * env
+
+
+def place(buf: np.ndarray, sig: np.ndarray, at_s: float) -> None:
+    """Mix `sig` into `buf` starting at `at_s` seconds (additive, clipped to len)."""
+    s = int(at_s * SR)
+    e = min(s + len(sig), len(buf))
+    if s < len(buf):
+        buf[s:e] += sig[: e - s]
 
 
 def to_mp3(sig: np.ndarray, name: str, volume_db: float) -> None:
-    # Normalize to peak = 1.0 so volume_db maps exactly to dBFS peak
+    # Normalise to peak = 1.0 so volume_db maps to dBFS peak.
     peak = float(np.max(np.abs(sig)))
     if peak > 0:
         sig = sig / peak
@@ -49,7 +92,8 @@ def to_mp3(sig: np.ndarray, name: str, volume_db: float) -> None:
     subprocess.run(
         [
             'ffmpeg', '-y', '-i', wav_path,
-            '-af', f'volume={volume_db}dB',
+            # gentle low-pass to shave any harshness off the top end
+            '-af', f'lowpass=f=7000,volume={volume_db}dB',
             '-ar', '44100', '-ac', '1', '-b:a', '128k',
             mp3_path,
         ],
@@ -62,57 +106,52 @@ def to_mp3(sig: np.ndarray, name: str, volume_db: float) -> None:
 
 
 def main() -> None:
-    print('Generating AegisLink sound effects...\n')
+    print('Generating AegisLink sound effects (v2 calm/secure)...\n')
 
-    # ── msg_sent ────────────────────────────────────────────────────────────────
-    # 880 Hz sine, 100 ms, linear fade-out, -12 dBFS peak
-    sig = apply_fade(gen_sine(880, 0.10), attack_s=0.005, decay_s=0.060)
-    to_mp3(sig, 'msg_sent', -12)
+    # ── msg_sent ─────────────────────────────────────────────────────────────
+    # Single soft pluck, E5, quick tail. Subtle "tick".
+    sig = bell(E5, 0.22, decay=16.0)
+    to_mp3(sig, 'msg_sent', -13)
 
-    # ── msg_received ────────────────────────────────────────────────────────────
-    # 660 Hz sine, 150 ms, short attack + decay, -14 dBFS peak
-    sig = apply_fade(gen_sine(660, 0.15), attack_s=0.015, decay_s=0.055)
-    to_mp3(sig, 'msg_received', -14)
+    # ── msg_received ─────────────────────────────────────────────────────────
+    # Friendly rising major third A4 -> C#5, two soft bells slightly overlapped.
+    buf = np.zeros(int(SR * 0.55), dtype=np.float64)
+    place(buf, bell(A4, 0.30, decay=10.0), 0.00)
+    place(buf, bell(Cs5, 0.34, decay=9.0), 0.12)
+    to_mp3(buf, 'msg_received', -13)
 
-    # ── call_incoming ───────────────────────────────────────────────────────────
-    # Two-tone ring (480 Hz + 620 Hz), ~2 s loopable, repeating pattern, -10 dBFS
-    # Pattern: ring 0–0.4 s, silence 0.4–0.6 s, ring 0.6–1.0 s,
-    #          silence 1.0–1.4 s, ring 1.4–1.8 s, silence 1.8–2.0 s
-    # The file ends in silence so the loop point is click-free.
-    n_total = int(SR * 2.0)
-    sig = np.zeros(n_total, dtype=np.float64)
-    fade_n = int(0.020 * SR)  # 20 ms fade on each burst edge
-    for start_s, end_s in [(0.0, 0.4), (0.6, 1.0), (1.4, 1.8)]:
-        s, e = int(start_s * SR), int(end_s * SR)
-        t = np.linspace(0, end_s - start_s, e - s, endpoint=False)
-        burst = 0.5 * np.sin(2 * np.pi * 480 * t) + 0.5 * np.sin(2 * np.pi * 620 * t)
-        burst[:fade_n] *= np.linspace(0, 1, fade_n)
-        burst[-fade_n:] *= np.linspace(1, 0, fade_n)
-        sig[s:e] = burst
-    to_mp3(sig, 'call_incoming', -10)
+    # ── call_incoming ────────────────────────────────────────────────────────
+    # Calm looping ringtone: ascending A-major arpeggio of soft bells (A C# E),
+    # a bright cap (A5), then a rest. ~2.6 s, ends in silence -> click-free loop.
+    buf = np.zeros(int(SR * 2.6), dtype=np.float64)
+    place(buf, bell(A4, 0.7, decay=6.0), 0.00)
+    place(buf, bell(Cs5, 0.7, decay=6.0), 0.18)
+    place(buf, bell(E5, 0.7, decay=6.0), 0.36)
+    place(buf, bell(A5, 0.9, decay=5.0), 0.54)
+    to_mp3(buf, 'call_incoming', -9)
 
-    # ── call_ringback ───────────────────────────────────────────────────────────
-    # 440 Hz + 480 Hz classic ringback, 1.5 s ring / 1.5 s silence, -12 dBFS
-    # Loops cleanly: file starts with the ring burst and ends in silence.
-    ring = 0.5 * gen_sine(440, 1.5) + 0.5 * gen_sine(480, 1.5)
-    ring = apply_fade(ring, attack_s=0.020, decay_s=0.025)
-    silence = np.zeros(int(SR * 1.5), dtype=np.float64)
+    # ── call_ringback ────────────────────────────────────────────────────────
+    # Smooth consonant swell (E4 + A4, a clean perfect fifth — no beating),
+    # 1.2 s on / 1.6 s silence. Loops cleanly: ring first, ends in silence.
+    ring = soft_tone(E4, 1.2, attack_s=0.12, release_s=0.25, freq2=A4)
+    silence = np.zeros(int(SR * 1.6), dtype=np.float64)
     sig = np.concatenate([ring, silence])
     to_mp3(sig, 'call_ringback', -12)
 
-    # ── call_connected ──────────────────────────────────────────────────────────
-    # Ascending two-note: 440 Hz (90 ms) → 660 Hz (110 ms), soft attack, -14 dBFS
-    s1 = apply_fade(gen_sine(440, 0.09), attack_s=0.020, decay_s=0.020)
-    s2 = apply_fade(gen_sine(660, 0.11), attack_s=0.020, decay_s=0.025)
-    sig = np.concatenate([s1, s2])
-    to_mp3(sig, 'call_connected', -14)
+    # ── call_connected ───────────────────────────────────────────────────────
+    # "Secured" ascending chime A4 -> E5 -> A5, soft bells.
+    buf = np.zeros(int(SR * 0.6), dtype=np.float64)
+    place(buf, bell(A4, 0.22, decay=14.0), 0.00)
+    place(buf, bell(E5, 0.22, decay=13.0), 0.09)
+    place(buf, bell(A5, 0.30, decay=10.0), 0.18)
+    to_mp3(buf, 'call_connected', -13)
 
-    # ── call_ended ──────────────────────────────────────────────────────────────
-    # Descending two-tone: 660 Hz (75 ms) → 440 Hz (75 ms), slight fade, -14 dBFS
-    s1 = apply_fade(gen_sine(660, 0.075), attack_s=0.010, decay_s=0.015)
-    s2 = apply_fade(gen_sine(440, 0.075), attack_s=0.010, decay_s=0.020)
-    sig = np.concatenate([s1, s2])
-    to_mp3(sig, 'call_ended', -14)
+    # ── call_ended ───────────────────────────────────────────────────────────
+    # Gentle descending E5 -> A4, soft and unobtrusive.
+    buf = np.zeros(int(SR * 0.5), dtype=np.float64)
+    place(buf, bell(E5, 0.20, decay=15.0), 0.00)
+    place(buf, bell(A4, 0.28, decay=12.0), 0.10)
+    to_mp3(buf, 'call_ended', -14)
 
     print('\nAll sounds generated.')
 
