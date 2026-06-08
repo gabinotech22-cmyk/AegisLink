@@ -26,6 +26,7 @@ export interface Preferences {
   notifSummary: boolean;
   notifKeywords: string[];
   mutedChats: string[]; // aegisIds or group ids
+  mentionsOnlyChats: string[]; // aegisIds/group ids that only alert on a keyword/mention match
 
   // App lock
   appLockEnabled: boolean;
@@ -54,6 +55,7 @@ const DEFAULTS: Preferences = {
   notifSummary: true,
   notifKeywords: ['urgente', 'multisig', 'audit'],
   mutedChats: [],
+  mentionsOnlyChats: [],
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
@@ -92,6 +94,7 @@ function snapshot(get: () => PrefsState): Preferences {
     notifSummary: s.notifSummary,
     notifKeywords: s.notifKeywords,
     mutedChats: s.mutedChats,
+    mentionsOnlyChats: s.mentionsOnlyChats,
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,
