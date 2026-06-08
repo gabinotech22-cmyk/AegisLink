@@ -99,7 +99,8 @@
         {
           "android": {
             "enableProguardInReleaseBuilds": true,
-            "enableShrinkResourcesInReleaseBuilds": false
+            "enableShrinkResourcesInReleaseBuilds": false,
+            "enableMinifyInReleaseBuilds": true
           }
         }
       ],
@@ -177,7 +178,12 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/f658c210-cfa9-482e-85ae-610cc76152af"
+      "url": "https://u.expo.dev/f658c210-cfa9-482e-85ae-610cc76152af",
+      "codeSigningCertificate": "./certs/certificate.pem",
+      "codeSigningMetadata": {
+        "keyid": "main",
+        "alg": "rsa-v1_5-sha256"
+      }
     }
   }
 }

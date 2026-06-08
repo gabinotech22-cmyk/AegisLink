@@ -43,3 +43,6 @@ yarn-error.*
 
 # Android signing keystores (never commit)
 *.keystore
+
+# expo-updates OTA code-signing PRIVATE key (never commit)
+keys/
