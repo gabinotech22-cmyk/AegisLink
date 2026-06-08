@@ -2,8 +2,11 @@
  * secureStore.ts — Unified SecureStore wrapper
  *
  * Fixes H-1 (Android 14 StrongBox NPE): all calls include
- * keychainAccessible: AFTER_FIRST_UNLOCK so the Keystore
- * hardware binding works correctly on Android 14+.
+ * keychainAccessible: AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY so the
+ * Keystore hardware binding works correctly on Android 14+. The
+ * _THIS_DEVICE_ONLY class also blocks the iOS Keychain item from ever
+ * being restored onto a *different* device via an encrypted iCloud/iTunes
+ * backup — identity & DB-encryption keys must never leave this device.
  *
  * Fixes M-1 (Keystore hang): a 5 s timeout rejects any
  * operation that stalls due to a degraded Keystore, preventing
@@ -19,7 +22,7 @@
 import * as SecureStore from 'expo-secure-store';
 
 const OPTS: SecureStore.SecureStoreOptions = {
-  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
 
 const TIMEOUT_MS = 5000;
