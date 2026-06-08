@@ -131,6 +131,11 @@ function withIconAliases(config) {
 //     | openssl dgst -sha256 -binary | openssl enc -base64
 const SPKI_PRIMARY = 'CMcP8NMKUoqDBl0haU7v7dgEsxIFbWry8NjhhHzgX3c=';
 const SPKI_BACKUP  = 'iFvwVyJSxnQdyaUvUERIf+8qk7gRze3612JMwoO3zdU='; // LE E8 intermediate
+// Independently-held offline backup key (P-256). Private key is COLD-STORED
+// outside the repo (_keystore_backup/aegis-pin-backup.key). If the LE chain or
+// primary key must be abandoned, issue a cert with this key and installed
+// clients still validate. This is the true "key we control" backup pin.
+const SPKI_BACKUP2 = 'LvglXAxgB9K5SCOZrLvdX0VVc8UuEU+Bj6r58LSA7r8=';
 
 const NETWORK_SECURITY_XML = `<?xml version="1.0" encoding="utf-8"?>
 <!--
@@ -150,6 +155,14 @@ const NETWORK_SECURITY_XML = `<?xml version="1.0" encoding="utf-8"?>
   debuggable="true" so production releases NEVER trust user-installed roots.
 -->
 <network-security-config>
+  <!-- Forbid cleartext (plain HTTP) everywhere by default — production fails
+       closed against transport downgrade. Only the explicit dev-loopback
+       domain-config below re-permits cleartext. -->
+  <base-config cleartextTrafficPermitted="false">
+    <trust-anchors>
+      <certificates src="system"/>
+    </trust-anchors>
+  </base-config>
   <domain-config>
     <domain includeSubdomains="true">aegislink.duckdns.org</domain>
     <pin-set expiration="2027-12-31">
@@ -159,7 +172,17 @@ const NETWORK_SECURITY_XML = `<?xml version="1.0" encoding="utf-8"?>
       <!-- BACKUP: SHA-256 SPKI of Let's Encrypt E8 intermediate (issuer=ISRG Root X1)
            Survives leaf-cert rotation as long as LE E8 signs the new cert. -->
       <pin digest="SHA-256">${SPKI_BACKUP}</pin>
+      <!-- BACKUP2: independently-held offline P-256 key (cold-stored). Disaster
+           recovery if the LE chain / primary key must be abandoned. -->
+      <pin digest="SHA-256">${SPKI_BACKUP2}</pin>
     </pin-set>
+  </domain-config>
+  <!-- Dev loopback only: cleartext to the emulator host + Metro bundler.
+       Harmless in production — the app never talks to these hosts there. -->
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="true">10.0.2.2</domain>
+    <domain includeSubdomains="true">localhost</domain>
+    <domain includeSubdomains="true">127.0.0.1</domain>
   </domain-config>
   <debug-overrides>
     <trust-anchors>

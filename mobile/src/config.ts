@@ -62,3 +62,35 @@ export const TURN_SERVER_URL: string =
  */
 export const ONION_URL: string | null =
   (process.env.EXPO_PUBLIC_ONION_URL as string | undefined) ?? null;
+
+/**
+ * Fail-fast transport guard. In a production build every backend base URL MUST
+ * be https — a misconfigured build that fell back to cleartext would defeat
+ * cert pinning and leak identity keys / push tokens / blob ciphertext over the
+ * wire. Refuse to run instead of silently downgrading. (`.onion` is exempt: Tor
+ * provides its own transport encryption.)
+ */
+// eslint-disable-next-line no-undef
+if (!__DEV__) {
+  for (const [name, url] of [
+    ['SERVER_URL', SERVER_URL],
+    ['RELAY_URL', RELAY_URL],
+  ] as const) {
+    if (!/^https:\/\//i.test(url)) {
+      throw new Error(`[config] insecure ${name} in a production build: ${url}`);
+    }
+  }
+}
+
+/**
+ * Guard a (possibly attacker-influenced) URL before fetching it. Throws in a
+ * production build on any non-https scheme except Tor .onion. Use for URLs that
+ * originate from message content / the relay rather than from compile-time env.
+ */
+export function secureUrl(url: string): string {
+  // eslint-disable-next-line no-undef
+  if (!__DEV__ && !/^https:\/\//i.test(url) && !/\.onion(\/|:|$)/i.test(url)) {
+    throw new Error('[config] refusing to fetch an insecure URL in production');
+  }
+  return url;
+}
