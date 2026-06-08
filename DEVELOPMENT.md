@@ -51,8 +51,8 @@ cd mobile && npx expo start
 |----------|---------|-------------|
 | `EXPO_PUBLIC_SERVER_URL` | Mobile | URL del relay para Expo/React Native |
 | `EXPO_PUBLIC_RELAY_URL` | Mobile | Alias opcional; hereda SERVER_URL si no se define |
-| `EXPO_PUBLIC_ORACLE_IP` | Mobile | IP pública Oracle VM (producción alternativa) |
-| `EXPO_PUBLIC_RELAY_PORT` | Mobile | Puerto del relay en Oracle VM (default: 3001) |
+| `EXPO_PUBLIC_RELAY_IP` | Mobile | IP pública AWS EC2 (producción alternativa) |
+| `EXPO_PUBLIC_RELAY_PORT` | Mobile | Puerto del relay en AWS EC2 (default: 3001) |
 | `EXPO_PUBLIC_TURN_URL` | Mobile | Servidor TURN/STUN para llamadas WebRTC |
 | `EXPO_PUBLIC_ONION_URL` | Mobile | Dirección .onion opcional (modo Tor) |
 | `VITE_RELAY_URL` | Desktop | URL del relay para Vite/Electron renderer |
@@ -71,7 +71,7 @@ Abre http://localhost:3001/health — debe responder `{ "ok": true }`.
 - `TURN_SECRET` debe generarse con `openssl rand -hex 32` y rotarse cada 24h.
 - Nunca comitear `.env` con valores reales; solo `.env.example` va al repositorio.
 
-## Deploy a producción (Oracle Cloud)
+## Deploy a producción (AWS)
 
 ### Arquitectura
 ```
@@ -87,9 +87,9 @@ El relay corre en HTTP puro — nginx es quien termina TLS. Si nginx no corre, l
 
 ### Pasos de deploy
 
-1. **SSH al servidor Oracle**
+1. **SSH al servidor AWS**
    ```bash
-   ssh root@<IP_ORACLE>
+   ssh ubuntu@<IP_AWS>
    ```
 
 2. **Verificar nginx**
@@ -108,7 +108,7 @@ El relay corre en HTTP puro — nginx es quien termina TLS. Si nginx no corre, l
 4. **Deploy del relay**
    ```bash
    # Desde tu máquina local:
-   bash server/deploy/deploy.sh <IP_ORACLE>
+   bash server/deploy/deploy.sh <IP_AWS>
    ```
 
 5. **Verificar desde tu máquina local**

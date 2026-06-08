@@ -2,8 +2,8 @@
 #
 # Required GitHub Secrets (Settings → Secrets and variables → Actions):
 #   EXPO_TOKEN           — EAS personal access token (expo.dev → Account Settings → Access Tokens)
-#   DEPLOY_HOST          — IP pública de la VM Oracle Cloud (e.g. 141.xxx.xxx.xxx)
-#   DEPLOY_USER          — Usuario SSH (e.g. "ubuntu" or "opc")
+#   DEPLOY_HOST          — IP pública de la instancia AWS EC2 (e.g. 51.20.60.155)
+#   DEPLOY_USER          — Usuario SSH (e.g. "ubuntu")
 #   DEPLOY_SSH_KEY       — Clave privada SSH completa (contenido de ~/.ssh/id_ed25519)
 #   DEPLOY_PATH          — Directorio de la app en la VM (e.g. /home/aegis/app)
 #
@@ -11,7 +11,7 @@
 #   APPLE_ID             — Apple ID email for App Store Connect
 #   ASC_APP_ID           — App Store Connect numeric app ID
 #
-# Infraestructura: el relay Node.js y coturn ya corren en la VM Oracle Cloud via PM2.
+# Infraestructura: el relay Node.js y coturn ya corren en la instancia AWS EC2 via PM2.
 # El deploy hace pm2 reload (zero-downtime) — no usa Docker.
 # Docker/docker-compose en server/Dockerfile es referencia, no se usa en prod.
 #
@@ -284,7 +284,7 @@ jobs:
             --non-interactive \
             --no-wait
 
-  # ─── Server deploy — SSH + PM2 (relay ya corre en Oracle VM) ────────────────
+  # ─── Server deploy — SSH + PM2 (relay ya corre en AWS EC2) ────────────────
   deploy-server:
     name: Deploy server
     runs-on: ubuntu-latest

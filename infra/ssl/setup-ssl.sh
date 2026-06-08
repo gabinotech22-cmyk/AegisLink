@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# infra/ssl/setup-ssl.sh — First-time SSL setup for AegisLink on Oracle Cloud VM
+# infra/ssl/setup-ssl.sh — First-time SSL setup for AegisLink on AWS EC2
 #
 # Run once on the VM (as root or with sudo):
 #   sudo bash /opt/aegislink/infra/ssl/setup-ssl.sh
@@ -7,7 +7,7 @@
 # Prerequisites:
 #   - aegislink.duckdns.org already resolves to this VM's public IP
 #   - Relay is running via PM2 (port 3001 by default)
-#   - Ports 80 and 443 are open in Oracle Cloud security list and iptables/firewalld
+#   - Ports 80 and 443 are open in the AWS security group and iptables/firewalld
 #
 # Idempotent: safe to run multiple times.
 # AegisLink privacy: nginx access_log is disabled — no user IPs are stored.
