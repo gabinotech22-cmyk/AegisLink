@@ -1,0 +1,27 @@
+# EAS upload ignore.
+#
+# Exclude the local native dirs so EAS does a MANAGED prebuild from app.json +
+# app.plugin.js on the build server. This (a) keeps the upload small — the local
+# android/ holds multi-GB Gradle build artifacts that blew past the 2 GB limit —
+# and (b) GUARANTEES the current app.json / app.plugin.js hardening (R8/ProGuard,
+# cert pins, permission trims, screen-capture, network-security-config) is what
+# actually gets built, instead of a stale prebuilt android/.
+android/
+ios/
+
+# Build output / large local artifacts
+*.apk
+*.aab
+*.keystore
+*.jks
+.expo/
+dist/
+build/
+web-build/
+
+# OTA signing PRIVATE key (the build only needs the public cert in certs/)
+keys/
+
+# Misc local noise
+*.log
+coverage/
