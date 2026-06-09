@@ -1,9 +1,10 @@
 // AegisLink Phone — iOS frame + internal screen navigation + light/dark mode flip
 // Pass theme as `t`. Starts on `initial` (default 'home').
 
-function Phone({ t: baseT, initial = 'home', density = 'regular' }) {
+function Phone({ t: baseT, initial = 'home', density = 'regular', isWork: initialIsWork = true }) {
   const [stack, setStack] = React.useState([{ name: initial, payload: null }]);
   const [flipped, setFlipped] = React.useState(false);
+  const [isWorkMode, setIsWorkMode] = React.useState(initialIsWork);
   const t = flipped ? window.flipMode(baseT) : baseT;
 
   const top = stack[stack.length - 1];
@@ -65,10 +66,12 @@ function Phone({ t: baseT, initial = 'home', density = 'regular' }) {
         <Cmp t={t} nav={nav} density={density}
              contact={top.payload}
              flipped={flipped} setFlipped={setFlipped}
+             isWorkMode={isWorkMode} setIsWorkMode={setIsWorkMode}
              key={top.name + (top.payload?.id || '')}/>
       </div>
     </window.IOSDevice>
   );
 }
+
 
 Object.assign(window, { Phone });

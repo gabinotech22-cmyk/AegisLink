@@ -69,51 +69,139 @@ function Row({ t, children, onClick, noBorder }) {
 }
 
 // ─── 1. Onboarding ────────────────────────────────────────────────────────
-function ScreenOnboarding({ t, nav }) {
+function ScreenOnboarding({ t, nav, isWorkMode, setIsWorkMode }) {
   const [step, setStep] = React.useState(0);
-  const idStr = '7K9-PQ2M-X4VR';
+  const [inviteCode, setInviteCode] = React.useState('CKT-30J2-M3EE');
+  const [atestProgress, setAtestProgress] = React.useState(0);
+  const [atestMsg, setAtestMsg] = React.useState('Conectando al relay corporativo zurich-prime...');
   const fingerprint = ['a7f3', '92e1', 'b4c8', '5d0a', '6f12', 'eb73', '8c9d', '1a45'];
 
+  React.useEffect(() => {
+    if (step === 4) {
+      setAtestProgress(0);
+      setAtestMsg('Conectando al relay corporativo zurich-prime...');
+      
+      const t1 = setTimeout(() => {
+        setAtestProgress(35);
+        setAtestMsg('Atestando firmas del Secure Enclave del dispositivo...');
+      }, 1000);
+
+      const t2 = setTimeout(() => {
+        setAtestProgress(70);
+        setAtestMsg('Sincronizando políticas de seguridad de Cirrus Labs...');
+      }, 2000);
+
+      const t3 = setTimeout(() => {
+        setAtestProgress(100);
+        setAtestMsg('Atestación completa. Firmando identidad en el relay...');
+      }, 3000);
+
+      const t4 = setTimeout(() => {
+        if (setIsWorkMode) setIsWorkMode(true);
+        setStep(5);
+      }, 4000);
+
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
+        clearTimeout(t4);
+      };
+    }
+  }, [step]);
+
+  // Step 0: Welcome Screen for AegisLink Work
   if (step === 0) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
                   padding: '64px 28px 32px', background: t.bg, color: t.text }}>
-      <div style={{ marginTop: 40, marginBottom: 28 }}>
-        <window.AegisMark t={t} size={56}/>
+      <div style={{ marginTop: 40, marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <window.AegisMark t={t} size={48}/>
+        <div>
+          <span style={{ fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, letterSpacing: '-0.02em' }}>AegisLink</span>
+          <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: '0.1em' }}>WORK · ENTERPRISE</div>
+        </div>
       </div>
       <div style={{
-        fontFamily: t.fontDisplay, fontSize: 40, lineHeight: 1.02,
+        fontFamily: t.fontDisplay, fontSize: 36, lineHeight: 1.05,
         fontWeight: t.displayWeight,
         fontStyle: t.italic ? 'italic' : 'normal',
         letterSpacing: '-0.03em', marginBottom: 16,
       }}>
-        Messaging without a trace.
+        Secure Enterprise Messaging.
       </div>
       <div style={{
-        fontFamily: t.font, fontSize: 16, lineHeight: 1.45,
+        fontFamily: t.font, fontSize: 15, lineHeight: 1.45,
         color: t.textDim, marginBottom: 'auto',
       }}>
-        No phone number. No email. No metadata.
-        Your identity is a key, generated and stored only on this device.
+        AegisLink Work is your organization's private communication vault. 
+        Direct end-to-end encryption with zero metadata retention.
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <PrimaryButton t={t} onClick={() => setStep(1)}>Generate my identity</PrimaryButton>
-        <GhostButton t={t} onClick={() => nav('backup')}>Restore from backup</GhostButton>
+        <PrimaryButton t={t} onClick={() => setStep(3)}>Enrol Device (Join Org)</PrimaryButton>
+        <GhostButton t={t} onClick={() => setStep(3)}>Restore Work Profile</GhostButton>
       </div>
       <div style={{
         fontFamily: t.fontMono, fontSize: 10, color: t.textFaint,
         textAlign: 'center', marginTop: 18, letterSpacing: '0.06em',
-      }}>v0.9.2 · OPEN SOURCE · AUDITED 2026 Q1</div>
+      }}>SECURED BY AEGISLINK FOR ENTERPRISES · SWITZERLAND</div>
     </div>
   );
 
-  React.useEffect(() => {
-    if (step === 1) {
-      const timer = setTimeout(() => setStep(2), 3500);
-      return () => clearTimeout(timer);
-    }
-  }, [step]);
+  // Step 3: Enter invitation code
+  if (step === 3) return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
+                  padding: '64px 24px 28px', background: t.bg, color: t.text }}>
+      <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent,
+                    letterSpacing: '0.1em', marginBottom: 14 }}>ORGANIZATION ENROLMENT</div>
+      <div style={{
+        fontFamily: t.fontDisplay, fontSize: 28, fontWeight: t.displayWeight,
+        fontStyle: t.italic ? 'italic' : 'normal',
+        letterSpacing: '-0.02em', marginBottom: 24,
+      }}>
+        Enter invitation code
+      </div>
+      <div style={{
+        fontFamily: t.font, fontSize: 14, color: t.textDim,
+        lineHeight: 1.45, marginBottom: 20
+      }}>
+        Please enter the corporate key code provided by your system administrator to associate this device with your team.
+      </div>
 
-  if (step === 1) return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 'auto' }}>
+        <div>
+          <label style={{ display: 'block', fontSize: 10, fontFamily: t.fontMono, color: t.textDim, marginBottom: 6, letterSpacing: '0.04em' }}>INVITATION CODE</label>
+          <input 
+            type="text"
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+            placeholder="Ej: CKT-XXXX-XXXX"
+            style={{
+              width: '100%', padding: '12px 14px', background: t.surface, color: t.text,
+              border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS,
+              fontFamily: t.fontMono, fontSize: 16, outline: 'none'
+            }}
+          />
+        </div>
+        <GhostButton t={t}>Scan QR Invitation</GhostButton>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+        <button 
+          onClick={() => setStep(0)}
+          style={{
+            background: 'transparent', color: t.textDim, border: `1px solid ${t.border}`,
+            borderRadius: t.radius, padding: '14px 20px',
+            fontFamily: t.font, fontSize: 14, fontWeight: 500, cursor: 'pointer'
+          }}>Atrás</button>
+        <div style={{ flex: 1 }}>
+          <PrimaryButton t={t} onClick={() => setStep(4)}>Validate invitation</PrimaryButton>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Step 4: Cryptographic device attestation simulator
+  if (step === 4) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
                   padding: '80px 28px 40px', background: t.bg, color: t.text,
                   alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
@@ -123,67 +211,83 @@ function ScreenOnboarding({ t, nav }) {
         fontStyle: t.italic ? 'italic' : 'normal',
         fontWeight: t.displayWeight,
         letterSpacing: '-0.02em',
-      }}>Generating your keypair</div>
-      <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim,
+      }}>Hardware Attestation</div>
+      <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent,
                     marginTop: 12, letterSpacing: '0.04em' }}>
-        Curve25519 · 256-bit · on-device
+        {atestMsg}
       </div>
       <div style={{ marginTop: 28, width: '100%' }}>
-        <Progress t={t}/>
+        <div style={{ height: 3, background: t.surface3, borderRadius: 99, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${atestProgress}%`, background: t.accent,
+                        borderRadius: 99, transition: 'width 0.3s ease-out' }}/>
+        </div>
       </div>
-      <button onClick={() => setStep(2)} style={{
+      <button onClick={() => { if (setIsWorkMode) setIsWorkMode(true); setStep(5); }} style={{
         marginTop: 32, background: 'transparent', border: 'none',
         color: t.accent, fontFamily: t.fontMono, fontSize: 11,
         letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
-      }}>SKIP ANIMATION ▸</button>
+      }}>SKIP ATTESTATION ▸</button>
     </div>
   );
 
-  // step 2 — show identity
+  // Step 5: Success Enrolment Screen (Cirrus Labs AG)
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
                   padding: '64px 24px 28px', background: t.bg, color: t.text }}>
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: '50%', background: `${t.accent}22`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.accent
+        }}>
+          <I.Shield size={32} stroke={2}/>
+        </div>
+      </div>
+      
       <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent,
-                    letterSpacing: '0.1em', marginBottom: 14 }}>YOUR IDENTITY</div>
+                    letterSpacing: '0.1em', textAlign: 'center', marginBottom: 10 }}>DEVICE ENROLLED</div>
       <div style={{
-        fontFamily: t.fontDisplay, fontSize: 28, fontWeight: t.displayWeight,
+        fontFamily: t.fontDisplay, fontSize: 26, fontWeight: t.displayWeight,
         fontStyle: t.italic ? 'italic' : 'normal',
-        letterSpacing: '-0.02em', marginBottom: 24,
+        letterSpacing: '-0.02em', marginBottom: 24, textAlign: 'center'
       }}>
-        This is yours.<br/>Nobody else has it.
+        Welcome to Cirrus Labs AG
       </div>
 
       <div style={{
         border: `1px solid ${t.borderStrong}`, borderRadius: t.radius,
-        padding: 20, marginBottom: 16, background: t.surface,
+        padding: 18, marginBottom: 20, background: t.surface,
+        display: 'flex', flexDirection: 'column', gap: 12
       }}>
-        <div style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim,
-                      letterSpacing: '0.1em', marginBottom: 8 }}>AEGIS ID</div>
-        <div style={{ fontFamily: t.fontMono, fontSize: 22, color: t.text, marginBottom: 14 }}>
-          {idStr}
+        <div>
+          <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: '0.06em' }}>ORGANIZATION</div>
+          <div style={{ fontFamily: t.font, fontSize: 14, fontWeight: 600, color: t.text, marginTop: 2 }}>Cirrus Labs AG</div>
         </div>
-        <div style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim,
-                      letterSpacing: '0.1em', marginBottom: 8 }}>PUBLIC KEY FINGERPRINT</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6 }}>
-          {fingerprint.map(f => (
-            <div key={f} style={{
-              fontFamily: t.fontMono, fontSize: 12, color: t.text,
-              padding: '6px 4px', background: t.surface2,
-              borderRadius: t.radiusS, textAlign: 'center',
-            }}>{f}</div>
-          ))}
+        <div style={{ borderBottom: `1px solid ${t.divider}` }}/>
+        <div>
+          <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: '0.06em' }}>YOUR CORPORATE AEGIS ID</div>
+          <div style={{ fontFamily: t.fontMono, fontSize: 18, fontWeight: 500, color: t.text, marginTop: 2 }}>{inviteCode}</div>
+        </div>
+        <div style={{ borderBottom: `1px solid ${t.divider}` }}/>
+        <div>
+          <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: '0.06em' }}>SECURITY DIRECTIVES APPLIED</div>
+          <div style={{ fontFamily: t.font, fontSize: 12, color: t.accent, marginTop: 4, lineHeight: 1.4 }}>
+            ✔ Enforce MFA (2FA) Active<br/>
+            ✔ Block Screenshots Active<br/>
+            ✔ Ephemeral Auto-burn: 30 days
+          </div>
         </div>
       </div>
 
-      <div style={{ fontFamily: t.font, fontSize: 13, color: t.textDim,
-                    lineHeight: 1.5, marginBottom: 'auto' }}>
-        Write this down or back it up encrypted. If you lose it, no one — not even us — can recover it.
+      <div style={{ fontFamily: t.font, fontSize: 12, color: t.textDim,
+                    lineHeight: 1.5, marginBottom: 'auto', textAlign: 'center', padding: '0 10px' }}>
+        This device has been cryptographically associated. Key material is backed up locally under corporate directy.
       </div>
 
-      <PrimaryButton t={t} onClick={() => nav('emptyHome')}>Enter AegisLink</PrimaryButton>
+      <PrimaryButton t={t} onClick={() => nav('home')}>Enter AegisLink Work</PrimaryButton>
     </div>
   );
 }
+
 
 function KeySpinner({ t }) {
   return (
@@ -239,16 +343,13 @@ function GhostButton({ t, children, onClick }) {
 
 // ─── 2. Home / chat list ──────────────────────────────────────────────────
 const CHATS = [
-  { id: 1, name: 'satoshi.eth',     last: 'Bridge confirmed. Sending the tx hash.',  time: '12:42', unread: 2, verified: true, color: '#8b5cf6' },
-  { id: 2, name: 'Pseudonym 4B2',   last: 'I can hop on a call in five.',            time: '11:08', unread: 0, verified: true, color: '#5bf2b9' },
-  { id: 3, name: 'DAO · Treasury',  last: 'Alex: multisig is signed by 3/5',         time: '09:30', unread: 5, group: true, color: '#f59e0b' },
-  { id: 4, name: 'vitalik.lens',    last: 'You: thanks, will review the spec',       time: 'Tue',   unread: 0, verified: true, color: '#ec4899' },
-  { id: 5, name: '0xC3F…91A',       last: 'attachment · keystore.json',              time: 'Tue',   unread: 0, ephemeral: true, color: '#06b6d4' },
-  { id: 6, name: 'PrivacyOps',      last: 'Maya: rolling our new relay tomorrow',    time: 'Mon',   unread: 0, group: true, color: '#ef4444' },
-  { id: 7, name: 'lex.cryptopunk',  last: 'You: see attached fingerprint',           time: 'Mon',   unread: 0, color: '#a78bfa' },
+  { id: 101, name: 'Alice (Lead)',   last: 'Confirmada la clave de atestación del relay principal.', time: '12:42', unread: 1, verified: true, color: '#8b5cf6' },
+  { id: 102, name: 'Bob',            last: 'Dispositivo enrolado. Enviando logs de depuración.',   time: '11:08', unread: 0, verified: true, color: '#5bf2b9' },
+  { id: 103, name: 'Carol (Legal)',  last: 'Políticas de retención actualizadas a 30 días.',       time: '09:30', unread: 0, verified: true, color: '#f59e0b' },
+  { id: 104, name: 'DAO · Treasury', last: 'Votación anónima aprobada para la rotación de llaves.', time: 'Tue',   unread: 2, group: true, color: '#ec4899' },
 ];
 
-function ScreenHome({ t, nav, density }) {
+function ScreenHome({ t, nav, density, isWorkMode }) {
   const pad = density === 'compact' ? 9 : density === 'comfy' ? 16 : 12;
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
@@ -260,7 +361,10 @@ function ScreenHome({ t, nav, density }) {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: t.text }}>
           <window.AegisMark t={t} size={26}/>
-          <window.AegisWord t={t} size={26}/>
+          <div>
+            <window.AegisWord t={t} size={18}/>
+            <div style={{ fontFamily: t.fontMono, fontSize: 8, color: t.accent, letterSpacing: '0.08em', marginTop: -2 }}>WORK</div>
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: t.textDim }}>
           <button onClick={() => nav('search')} style={btnIcon(t)}><I.Search size={20}/></button>
@@ -276,7 +380,7 @@ function ScreenHome({ t, nav, density }) {
         fontFamily: t.fontMono, fontSize: 11, color: t.textDim,
         letterSpacing: '0.04em',
       }}>
-        <I.Lock size={14}/> <span>END-TO-END ENCRYPTED · ZERO METADATA</span>
+        <I.Shield size={14} color={t.accent}/> <span style={{ color: t.accent, fontWeight: 600 }}>CIRRUS LABS AG · SECURED NODE</span>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -322,6 +426,7 @@ function ScreenHome({ t, nav, density }) {
   );
 }
 
+
 function btnIcon(t) {
   return {
     background: 'transparent', border: 'none', color: t.textDim,
@@ -363,18 +468,18 @@ function TabBar({ t, nav, current }) {
 }
 
 // ─── 3. Chat conversation ────────────────────────────────────────────────
-const MESSAGES = [
-  { id: 1, me: false, text: 'Bridge confirmed.', time: '12:38' },
-  { id: 2, me: false, text: 'Sending the tx hash now — give me a sec.', time: '12:38' },
-  { id: 3, me: true,  text: 'standing by 👍', time: '12:39' },
-  { id: 4, me: false, text: '0x4f8a…c21d  ·  signed by treasury multisig', time: '12:40', mono: true },
-  { id: 5, me: true,  text: 'received. checking on-chain.', time: '12:41' },
-  { id: 6, me: false, text: 'Also — moved our keys to the cold quorum. New fingerprint is in the verify tab.', time: '12:42', ephemeral: true },
+const WORK_MESSAGES = [
+  { id: 1, me: false, text: 'Hola Alice, dispositivo corporativo enrolado correctamente.', time: '12:38' },
+  { id: 2, me: false, text: 'Hemos verificado tu firma local Ed25519 con el Secure Enclave del dispositivo.', time: '12:38' },
+  { id: 3, me: true,  text: 'Excelente, atestación exitosa y relays configurados 👍', time: '12:39' },
+  { id: 4, me: false, text: 'Recuerda que las directivas del relay suizo están activas. El borrado automático está configurado para 30 días en este canal.', time: '12:40' },
+  { id: 5, me: true,  text: 'Entendido. ¿La rotación de claves se ejecutará hoy?', time: '12:41' },
+  { id: 6, me: false, text: 'Sí, la rotación preventiva se completará a las 14:00. Verás el aviso en tu registro.', time: '12:42', ephemeral: true },
 ];
 
-function ScreenChat({ t, nav, density, contact }) {
+function ScreenChat({ t, nav, density, contact, isWorkMode }) {
   const c = contact || CHATS[0];
-  const [msgs, setMsgs] = React.useState(MESSAGES);
+  const [msgs, setMsgs] = React.useState(WORK_MESSAGES);
   const [input, setInput] = React.useState('');
   const [moreOpen, setMoreOpen] = React.useState(false);
   const moreRef = React.useRef(null);
@@ -461,6 +566,17 @@ function ScreenChat({ t, nav, density, contact }) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* policy banner */}
+      <div style={{
+        padding: '8px 14px', background: `${t.danger}15`,
+        borderBottom: `1px solid ${t.danger}33`,
+        fontFamily: t.fontMono, fontSize: 10, color: t.danger,
+        textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+      }}>
+        <I.Shield size={12} stroke={2}/>
+        <span>🔒 DIRECTIVA ACTIVA: CAPTURAS BLOQUEADAS · BORRADO EN 30 DÍAS</span>
       </div>
 
       {/* system note */}
@@ -823,13 +939,11 @@ function ScreenGroups({ t, nav }) {
 function ScreenSettings({ t, nav, flipped, setFlipped }) {
   const [readReceipts, setRR] = React.useState(false);
   const [typing, setTyping] = React.useState(false);
-  const [screenshot, setSS] = React.useState(true);
-  const [tor, setTor] = React.useState(true);
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
                   background: t.bg, color: t.text, overflow: 'hidden' }}>
-      <TopBar t={t} title="Privacy" big
+      <TopBar t={t} title="Work Privacy" big
         left={<button onClick={() => nav('home')} style={btnIcon(t)}><I.ChevronL size={22}/></button>}/>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 24px' }}>
@@ -844,9 +958,10 @@ function ScreenSettings({ t, nav, flipped, setFlipped }) {
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: t.fontDisplay, fontSize: 17,
                             fontStyle: t.italic ? 'italic' : 'normal',
-                            fontWeight: t.displayWeight }}>You</div>
+                            fontWeight: t.displayWeight }}>You (Corporate)</div>
               <div style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent,
-                            letterSpacing: '0.04em', marginTop: 2 }}>7K9-PQ2M-X4VR</div>
+                            letterSpacing: '0.04em', marginTop: 2 }}>CKT-30J2-M3EE</div>
+              <div style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 2 }}>Enrolado en Cirrus Labs AG · Admin</div>
             </div>
             <I.Chevron size={16} style={{ color: t.textFaint }}/>
           </div>
@@ -863,11 +978,67 @@ function ScreenSettings({ t, nav, flipped, setFlipped }) {
         <Section t={t} label="DATA SHARING">
           <Toggle t={t} label="Read receipts" sub="Confirm when you've read a message" value={readReceipts} onChange={setRR}/>
           <Toggle t={t} label="Typing indicator" sub="Let others see when you're typing" value={typing} onChange={setTyping}/>
-          <Toggle t={t} label="Block screenshots" sub="App contents hidden in screen recording" value={screenshot} onChange={setSS}/>
+          
+          {/* Forced Policy Switch: Block Screenshots */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '12px 16px', borderBottom: `1px solid ${t.divider}`,
+            opacity: 0.85
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>Block screenshots</div>
+              <div style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
+                App contents hidden in screen recording
+              </div>
+              <div style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, marginTop: 4, fontWeight: 500 }}>
+                ★ Forzado por administrador de Cirrus Labs AG
+              </div>
+            </div>
+            <button disabled style={{
+              width: 44, height: 26, borderRadius: 99,
+              background: t.accent, border: 'none', cursor: 'not-allowed',
+              position: 'relative', flexShrink: 0, opacity: 0.6
+            }}>
+              <span style={{
+                position: 'absolute', top: 3, left: 21,
+                width: 20, height: 20, borderRadius: '50%',
+                background: t.accentInk,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+              }}/>
+            </button>
+          </div>
         </Section>
 
         <Section t={t} label="NETWORK">
-          <Toggle t={t} label="Route via Tor" sub="Hide your IP from AegisLink relays" value={tor} onChange={setTor}/>
+          {/* Forced Policy Switch: Route via Swiss Relay */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '12px 16px', borderBottom: `1px solid ${t.divider}`,
+            opacity: 0.85
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>Route via Tor / Swiss Relay</div>
+              <div style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
+                Enforce routing via Zurich-Prime private relays only
+              </div>
+              <div style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, marginTop: 4, fontWeight: 500 }}>
+                ★ Forzado por directiva de infraestructura
+              </div>
+            </div>
+            <button disabled style={{
+              width: 44, height: 26, borderRadius: 99,
+              background: t.accent, border: 'none', cursor: 'not-allowed',
+              position: 'relative', flexShrink: 0, opacity: 0.6
+            }}>
+              <span style={{
+                position: 'absolute', top: 3, left: 21,
+                width: 20, height: 20, borderRadius: '50%',
+                background: t.accentInk,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+              }}/>
+            </button>
+          </div>
+
           <Row t={t} onClick={() => nav('backup')}>
             <I.Cloud size={20} style={{ color: t.textDim }}/>
             <div style={{ flex: 1 }}>
@@ -878,17 +1049,20 @@ function ScreenSettings({ t, nav, flipped, setFlipped }) {
             </div>
             <I.Chevron size={16} style={{ color: t.textFaint }}/>
           </Row>
-          <Row t={t} onClick={() => nav('ephemeral')} noBorder>
+          
+          {/* Forced Policy Value: Disappearing messages */}
+          <Row t={t} noBorder>
             <I.Timer size={20} style={{ color: t.textDim }}/>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: t.font, fontSize: 14 }}>Disappearing messages</div>
-              <div style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
-                Default: off
+              <div style={{ fontFamily: t.font, fontSize: 12, color: t.accent, marginTop: 2 }}>
+                30 días (Fijo por directiva corporativa)
               </div>
             </div>
-            <I.Chevron size={16} style={{ color: t.textFaint }}/>
+            <span style={{ fontSize: 10, fontFamily: t.fontMono, color: t.textFaint }}>BLOQUEADO</span>
           </Row>
         </Section>
+
 
         <Section t={t} label="ALERTAS & DATOS">
           <Row t={t} onClick={() => nav('notifs')}>
