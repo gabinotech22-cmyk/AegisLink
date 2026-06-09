@@ -162,6 +162,21 @@ function clearRingTimeout(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Finalize-once guard
+// ---------------------------------------------------------------------------
+// A call must be finalized (history persisted + peer torn down) EXACTLY ONCE.
+// The peer connection fires 'failed'/'closed' as a side effect of our own
+// pc.close() during teardown, and peer.ts dispatches each transition through
+// BOTH the connectionstatechange and iceconnectionstatechange listeners — so a
+// single hang-up can re-enter the finalizer up to ~4 times. Without this guard
+// each re-entry re-runs the persist block, and because `status` has already
+// moved to 'ended' it re-derives the call as 'missed', appending duplicate
+// `[call:missed:…]` rows and stacking duplicate "Call failed" alerts.
+//
+// Keyed by callId so a brand-new call (always a fresh UUID) is never blocked.
+let _finalizedCallId: string | null = null;
+
 interface CallInvitePayload extends SealedSignalWire {
   callId: string;
   from: string;
@@ -230,6 +245,7 @@ export function attachCallHandlers(): void {
     // arm the buffer so the caller's candidates that arrive WHILE WE RING are kept
     // (and later flushed in acceptCall), instead of being dropped.
     resetIceQueue();
+    _finalizedCallId = null; // re-arm the finalize-once guard for this new call
     state.startIncoming(msg.from, msg.callId, msg.media, offer);
 
     // Show native incoming call UI (CallKit on iOS, ConnectionService on Android)
@@ -292,14 +308,15 @@ export function attachCallHandlers(): void {
   });
 
   socket.on('call:hangup', (msg: CallHangupPayload) => {
-    const { callId, activePeer } = useCall.getState();
+    const { callId } = useCall.getState();
     if (callId !== msg.callId) return;
-    activePeer?.cleanup();
-    // Dismiss native CallKit / ConnectionService UI for remote-initiated hangups
-    endNativeCall(msg.callId);
-    resetIceQueue();
-    useCall.getState().setStatus('ended');
-    setTimeout(() => useCall.getState().reset(), 800);
+    // Persist history + tear down through the shared finalizer (emitHangup:false
+    // — the peer initiated this, no need to echo a hangup back). This replaces
+    // the old path that let activePeer.cleanup() drive the connection to 'closed'
+    // and reach the rtc_failure branch, which logged answered calls as 'missed'
+    // on the receiver and popped a spurious "Call failed" alert. The status is
+    // captured BEFORE we move to 'ended', so a connected call is logged 'answered'.
+    finalizeCall(msg.reason ?? 'remote_hangup', { emitHangup: false });
   });
 }
 
@@ -310,6 +327,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   if (!socket) throw new Error('no_socket');
 
   const callId = Crypto.randomUUID();
+  _finalizedCallId = null; // re-arm the finalize-once guard for this new call
   useCall.getState().startOutgoing(toAegisId, callId, media);
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
@@ -354,12 +372,23 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
         const { callId: cid } = useCall.getState();
         if (cid) reportCallConnected(cid);
       }
-      if (state === 'failed' || state === 'closed') {
+      // 'closed' is the NORMAL terminal state after pc.close() during teardown —
+      // it is NEVER a failure and must not surface an alert (this was the bug
+      // behind the "Call failed" dialog appearing ~4× on every hang-up). Only a
+      // genuine 'failed' (ICE found no working path) is a real media failure,
+      // and even then we only alert when the call never reached 'in-call' — i.e.
+      // it failed to *establish*. A 'failed' that arrives as a side effect of
+      // teardown (status already 'ended') or after a connected call is just noise.
+      if (state === 'failed') {
+        const { status } = useCall.getState();
+        const neverConnected = status !== 'in-call' && status !== 'ended';
         endCall('rtc_failure');
-        Alert.alert(
-          'Call failed',
-          'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
-        );
+        if (neverConnected) {
+          Alert.alert(
+            'Call failed',
+            'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
+          );
+        }
       }
     },
   }, turnConfig);
@@ -444,12 +473,23 @@ export async function acceptCall(): Promise<void> {
         const { callId: cid } = useCall.getState();
         if (cid) reportCallConnected(cid);
       }
-      if (state === 'failed' || state === 'closed') {
+      // 'closed' is the NORMAL terminal state after pc.close() during teardown —
+      // it is NEVER a failure and must not surface an alert (this was the bug
+      // behind the "Call failed" dialog appearing ~4× on every hang-up). Only a
+      // genuine 'failed' (ICE found no working path) is a real media failure,
+      // and even then we only alert when the call never reached 'in-call' — i.e.
+      // it failed to *establish*. A 'failed' that arrives as a side effect of
+      // teardown (status already 'ended') or after a connected call is just noise.
+      if (state === 'failed') {
+        const { status } = useCall.getState();
+        const neverConnected = status !== 'in-call' && status !== 'ended';
         endCall('rtc_failure');
-        Alert.alert(
-          'Call failed',
-          'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
-        );
+        if (neverConnected) {
+          Alert.alert(
+            'Call failed',
+            'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
+          );
+        }
       }
     },
   }, turnConfig);
@@ -475,13 +515,30 @@ export async function acceptCall(): Promise<void> {
   useCall.getState().setPendingOffer(null);
 }
 
-/** Reject an incoming call or end an active one. */
-export function endCall(reason: string = 'hangup'): void {
-  clearRingTimeout(); // always cancel the no-answer timer, regardless of call direction
-  resetIceQueue();
+/**
+ * Finalize a call EXACTLY ONCE: optionally signal the peer, persist history,
+ * restore audio, tear down the peer connection, and move the store to 'ended'.
+ *
+ * Re-entrant invocations for the same callId are no-ops — this is the single
+ * point that neutralizes the peer connection's teardown-time 'failed'/'closed'
+ * events (dispatched twice over connectionstatechange + iceconnectionstatechange)
+ * so they can no longer double-log the call as 'missed' or stack alerts.
+ *
+ * `status` is read at entry, BEFORE the transition to 'ended', so a connected
+ * call (status === 'in-call') is always logged 'answered' and never 'missed'.
+ */
+function finalizeCall(reason: string, opts: { emitHangup: boolean }): void {
   const { peer: peerId, callId, activePeer, status, media, startedAt, direction } = useCall.getState();
+
+  // Idempotency guard — keyed by callId so a brand-new call is never blocked.
+  if (callId && _finalizedCallId === callId) return;
+  if (callId) _finalizedCallId = callId;
+
+  clearRingTimeout(); // always cancel the no-answer timer, regardless of direction
+  resetIceQueue();
+
   const socket = getSocket();
-  if (socket && peerId && callId) {
+  if (opts.emitHangup && socket && peerId && callId) {
     socket.emit('call:hangup', { callId, to: peerId, reason });
   }
 
@@ -531,11 +588,15 @@ export function endCall(reason: string = 'hangup'): void {
   activePeer?.cleanup();
 
   // Dismiss native call UI
-  const { callId: cid } = useCall.getState();
-  if (cid) endNativeCall(cid);
+  if (callId) endNativeCall(callId);
 
   useCall.getState().setStatus('ended');
   setTimeout(() => useCall.getState().reset(), 600);
+}
+
+/** Reject an incoming call or end an active one (local-initiated — signals the peer). */
+export function endCall(reason: string = 'hangup'): void {
+  finalizeCall(reason, { emitHangup: true });
 }
 
 export function toggleMute(): void {
