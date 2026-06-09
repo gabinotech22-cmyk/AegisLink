@@ -15,7 +15,7 @@
  * exacto del envío — ver store/scheduledMessages.ts.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, Pressable, ScrollView, Image, Alert, StyleSheet,
 } from 'react-native';
@@ -52,6 +52,14 @@ interface Props {
 }
 
 type WhenChip = '1h' | 'today' | 'tomorrow' | 'custom';
+
+/** Best-effort unlink of a staged image file. Cleanup only — never throws. */
+async function deleteStagedFile(path: string): Promise<void> {
+  try {
+    const FS = await import('expo-file-system/legacy');
+    await FS.deleteAsync(path, { idempotent: true });
+  } catch { /* best-effort */ }
+}
 
 // ─── Tiempo ───────────────────────────────────────────────────────────────────
 
@@ -139,7 +147,18 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
   // Decrypted queue rows (id → text + options), hydrated from the store list.
   const [decrypted, setDecrypted] = useState<Record<string, { text: string; options: GroupPostOptions }>>({});
 
+  // Staged image files picked THIS session and not yet saved into a post.
+  // Anything still here on replace/remove/unmount is unreferenced plaintext on
+  // disk and must be unlinked; once a post is scheduled the path is persisted
+  // (the store owns its cleanup from then on) and leaves this set.
+  const freshImagePaths = useRef<Set<string>>(new Set());
+
   useEffect(() => { void loadPending(); }, [loadPending]);
+
+  useEffect(() => {
+    const fresh = freshImagePaths.current;
+    return () => { for (const p of fresh) void deleteStagedFile(p); };
+  }, []);
 
   const queue = scheduled.filter(
     (m) => m.groupId === group.id && (m.status === 'pending' || m.status === 'draft'),
@@ -197,11 +216,25 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
       const dest = `${dir}post_${Crypto.randomUUID()}.jpg`;
       await FS.copyAsync({ from: compressed.uri, to: dest });
       const rawName = asset.fileName ?? asset.uri.split('/').pop() ?? 'imagen.jpg';
-      setImage({ path: dest, name: rawName.length > 22 ? rawName.slice(0, 19) + '…' : rawName });
+      freshImagePaths.current.add(dest);
+      setImage((prev) => {
+        // Replacing an image picked this session: unlink the orphaned file.
+        // A persisted image (edit mode) stays — its row still references it
+        // until the update is saved, at which point the store unlinks it.
+        if (prev && freshImagePaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
+        return { path: dest, name: rawName.length > 22 ? rawName.slice(0, 19) + '…' : rawName };
+      });
     } catch (e) {
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }, [i18nT]);
+
+  const handleRemoveImage = useCallback(() => {
+    setImage((prev) => {
+      if (prev && freshImagePaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
+      return null;
+    });
+  }, []);
 
   // ── Programar / borrador ──
   const sendAt = chipSendAt(when, customTs);
@@ -222,8 +255,13 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
           imagePath: image?.path, imageName: image?.name,
         },
       });
+      // Saved into the row — the store owns the staged file's cleanup now.
+      if (image) freshImagePaths.current.delete(image.path);
       setText(''); setImage(null); setPin(false); setNotify(true);
       setReplies(true); setRepeat(false); setEditingId(null);
+      // Reset the schedule too: without this, the NEXT compose silently
+      // inherits the previous post's (possibly edited/past) timestamp.
+      setWhen('tomorrow'); setCustomTs(null);
       setTab('queue');
     } catch (e) {
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
@@ -420,7 +458,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
                   <View style={{ borderRadius: t.radius, overflow: 'hidden', borderWidth: 1, borderColor: `${t.accent}44` }}>
                     <Image source={{ uri: image.path }} style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: t.surface2 }} resizeMode="cover" />
                     <Pressable
-                      onPress={() => setImage(null)}
+                      onPress={handleRemoveImage}
                       accessibilityLabel={i18nT('groupPosts.removeImage', 'Quitar imagen')}
                       style={{
                         position: 'absolute', top: 8, right: 8, width: 26, height: 26, borderRadius: 13,
