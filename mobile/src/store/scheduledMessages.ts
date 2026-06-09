@@ -66,6 +66,36 @@ export function canScheduleGroupPost(
   return group.moderators?.includes(myAegisId) ?? false;
 }
 
+/**
+ * Decrypt + parse the at-rest post options, falling back to defaults on any
+ * missing/corrupt input. Shared by the fire path and the cleanup paths.
+ */
+async function decryptPostOptions(postMeta: string | undefined): Promise<GroupPostOptions> {
+  if (!postMeta) return DEFAULT_POST_OPTIONS;
+  const { decryptBody } = require('../db/local') as typeof import('../db/local');
+  const metaJson = await decryptBody(postMeta);
+  if (!metaJson || metaJson === '[DECRYPTION_ERROR]') return DEFAULT_POST_OPTIONS;
+  try {
+    return { ...DEFAULT_POST_OPTIONS, ...(JSON.parse(metaJson) as Partial<GroupPostOptions>) };
+  } catch {
+    return DEFAULT_POST_OPTIONS;
+  }
+}
+
+/**
+ * Best-effort removal of a staged post image. The staged file is the only
+ * plaintext artifact of a scheduled post, so every path that stops referencing
+ * it (cancel, edit-replace, publish) must unlink it. Cleanup only — never
+ * throws, and refuses paths outside the staging directory.
+ */
+async function deleteStagedPostImage(path: string | undefined): Promise<void> {
+  if (!path || !path.includes('scheduledposts/')) return;
+  try {
+    const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+    await FS.deleteAsync(path, { idempotent: true });
+  } catch { /* best-effort */ }
+}
+
 /** Revive JSON-deserialized byte fields back into Uint8Array. Mirrors client.ts logic. */
 function reviveBytes(o: unknown): Uint8Array | null {
   if (o === null || o === undefined) return null;
@@ -147,7 +177,7 @@ interface ScheduledState {
   processDue(): Promise<void>;
 }
 
-export const useScheduledMessages = create<ScheduledState>((set) => ({
+export const useScheduledMessages = create<ScheduledState>((set, get) => ({
   scheduled: [],
 
   async scheduleMessage({ identity, recipientAegisId, recipientPublicKeyB64, plaintext, sendAt }) {
@@ -267,6 +297,13 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
 
   async scheduleGroupPost({ groupId, plaintext, sendAt, options, id, status }) {
     const { encryptBody } = require('../db/local') as typeof import('../db/local');
+    // When updating, capture the previously staged image so a replaced or
+    // removed file doesn't linger on disk once the row stops referencing it.
+    let previousImagePath: string | undefined;
+    if (id) {
+      const prev = get().scheduled.find((m) => m.id === id);
+      if (prev) previousImagePath = (await decryptPostOptions(prev.postMeta)).imagePath;
+    }
     // At-rest encryption with the SecureStore-held DB key — same protection
     // level as the outbox plaintext and ratchet sessions. Ratchet encryption
     // happens at fire time (processDue) against fresh group membership.
@@ -284,6 +321,9 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
       retryCount: 0,
     };
     await saveScheduled(stored); // INSERT OR REPLACE — same id updates in place
+    if (previousImagePath && previousImagePath !== (options ?? DEFAULT_POST_OPTIONS).imagePath) {
+      await deleteStagedPostImage(previousImagePath);
+    }
     set((s) => {
       const exists = s.scheduled.some((m) => m.id === stored.id);
       return {
@@ -295,8 +335,14 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
   },
 
   async cancelScheduled(id) {
+    const msg = get().scheduled.find((m) => m.id === id);
     await deleteScheduled(id);
     set((s) => ({ scheduled: s.scheduled.filter((m) => m.id !== id) }));
+    // Group post: also unlink its staged image — the row no longer exists, so
+    // the file would otherwise be orphaned plaintext on disk forever.
+    if (msg?.groupId && msg.postMeta) {
+      await deleteStagedPostImage((await decryptPostOptions(msg.postMeta)).imagePath);
+    }
   },
 
   async loadPending() {
@@ -364,13 +410,7 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
           }
 
           // Publish options → wire marker flags (see utils/groupPost.ts)
-          let options: GroupPostOptions = DEFAULT_POST_OPTIONS;
-          if (msg.postMeta) {
-            const metaJson = await decryptBody(msg.postMeta);
-            if (metaJson && metaJson !== '[DECRYPTION_ERROR]') {
-              try { options = { ...DEFAULT_POST_OPTIONS, ...JSON.parse(metaJson) }; } catch { /* defaults */ }
-            }
-          }
+          const options = await decryptPostOptions(msg.postMeta);
           const { buildGroupPostBody } = require('../utils/groupPost') as typeof import('../utils/groupPost');
           const textBody = buildGroupPostBody(plaintext, {
             asGroup: options.asGroup,
@@ -415,6 +455,9 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
             }));
           } else {
             await markScheduledSent(msg.id);
+            // Published and never firing again — the staged image already
+            // travelled inline (base64), so unlink the plaintext file.
+            await deleteStagedPostImage(options.imagePath);
             set((s) => ({
               scheduled: s.scheduled.map((m) =>
                 m.id === msg.id ? { ...m, status: 'sent' as const } : m,

@@ -51,9 +51,11 @@ jest.mock('../identity', () => ({
 
 // ── expo-crypto / expo-file-system ───────────────────────────────────────────
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn().mockReturnValue('uuid-1') }));
+const mockDeleteAsync = jest.fn().mockResolvedValue(undefined);
 jest.mock('expo-file-system/legacy', () => ({
   __esModule: true,
   readAsStringAsync: jest.fn().mockResolvedValue('B64DATA'),
+  deleteAsync: (...a: unknown[]) => mockDeleteAsync(...a),
   EncodingType: { Base64: 'base64' },
 }));
 
@@ -223,5 +225,81 @@ describe('scheduled group posts — fire path', () => {
     const inMem = useScheduledMessages.getState().scheduled;
     expect(inMem).toHaveLength(1);
     expect(inMem[0].encryptedPayload).toBe('enc:Editado');
+  });
+});
+
+// ── Staged image cleanup ──────────────────────────────────────────────────────
+// The staged JPEG is the only plaintext artifact of a scheduled post, so every
+// path that stops referencing it must unlink it from disk.
+
+const IMG = 'file:///doc/scheduledposts/p.jpg';
+
+function imagePost(over: Partial<StoredScheduledMessage> = {}): StoredScheduledMessage {
+  return pendingPost({
+    postMeta: 'enc:' + JSON.stringify({
+      asGroup: true, pinned: false, notify: true, replies: true, repeatWeekly: false,
+      imagePath: IMG, imageName: 'p.jpg',
+    }),
+    ...over,
+  });
+}
+
+describe('scheduled group posts — staged image cleanup', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockOnline = true;
+    mockIdentity = { aegisId: 'me-admin' };
+    mockGetGroup.mockResolvedValue(GROUP);
+    useScheduledMessages.setState({ scheduled: [] });
+  });
+
+  it('cancelScheduled unlinks the staged image of a group post', async () => {
+    useScheduledMessages.setState({ scheduled: [imagePost()] });
+    await useScheduledMessages.getState().cancelScheduled('post-1');
+    expect(mockDeleteAsync).toHaveBeenCalledWith(IMG, { idempotent: true });
+  });
+
+  it('publishing a NON-recurring image post unlinks the staged file; recurring keeps it', async () => {
+    mockLoadPending.mockResolvedValue([imagePost()]);
+    await useScheduledMessages.getState().processDue();
+    expect(mockDeleteAsync).toHaveBeenCalledWith(IMG, { idempotent: true });
+
+    jest.clearAllMocks();
+    mockGetGroup.mockResolvedValue(GROUP);
+    mockLoadPending.mockResolvedValue([imagePost({
+      postMeta: 'enc:' + JSON.stringify({
+        asGroup: true, pinned: false, notify: true, replies: true, repeatWeekly: true,
+        imagePath: IMG, imageName: 'p.jpg',
+      }),
+    })]);
+    await useScheduledMessages.getState().processDue();
+    expect(mockSendGroupMessage).toHaveBeenCalledTimes(1);
+    expect(mockDeleteAsync).not.toHaveBeenCalled(); // re-armed next week — file still needed
+  });
+
+  it('editing a post replacing/removing its image unlinks the OLD file only', async () => {
+    useScheduledMessages.setState({ scheduled: [imagePost()] });
+    const NEW_IMG = 'file:///doc/scheduledposts/q.jpg';
+    await useScheduledMessages.getState().scheduleGroupPost({
+      groupId: 'g-1', plaintext: 'Editado', sendAt: Date.now() + 60_000, id: 'post-1',
+      options: {
+        asGroup: true, pinned: false, notify: true, replies: true, repeatWeekly: false,
+        imagePath: NEW_IMG, imageName: 'q.jpg',
+      },
+    });
+    expect(mockDeleteAsync).toHaveBeenCalledWith(IMG, { idempotent: true });
+    expect(mockDeleteAsync).not.toHaveBeenCalledWith(NEW_IMG, expect.anything());
+
+    // Same image kept on edit → nothing unlinked.
+    jest.clearAllMocks();
+    useScheduledMessages.setState({ scheduled: [imagePost()] });
+    await useScheduledMessages.getState().scheduleGroupPost({
+      groupId: 'g-1', plaintext: 'Editado 2', sendAt: Date.now() + 60_000, id: 'post-1',
+      options: {
+        asGroup: true, pinned: false, notify: true, replies: true, repeatWeekly: false,
+        imagePath: IMG, imageName: 'p.jpg',
+      },
+    });
+    expect(mockDeleteAsync).not.toHaveBeenCalled();
   });
 });
