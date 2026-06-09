@@ -21,9 +21,11 @@ import type { StoredGroup } from '../db/local';
 interface Props {
   group: StoredGroup;
   onBack: () => void;
+  /** Owner/moderators: open the scheduled posts (compose + queue) screen. */
+  onOpenPosts?: () => void;
 }
 
-export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
+export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -340,6 +342,39 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
           </Pressable>
           )}
         </Section>
+
+        {/* Scheduled posts — owner & moderators only (design: entry from Group info) */}
+        {(amIAdmin || (!!identity && (group.moderators?.includes(identity.aegisId) ?? false))) && onOpenPosts && (
+          <Section t={t} label={i18nT('groupPosts.adminSection', 'Publicaciones').toUpperCase()}>
+            <Pressable
+              onPress={onOpenPosts}
+              accessibilityRole="button"
+              accessibilityLabel={i18nT('groupPosts.entryLabel', 'Publicaciones programadas')}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 12,
+                paddingHorizontal: 14, paddingVertical: 12,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <View style={{
+                width: 34, height: 34, borderRadius: t.radiusS,
+                backgroundColor: `${t.accent}18`,
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <I.Timer size={17} color={t.accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>
+                  {i18nT('groupPosts.entryLabel', 'Publicaciones programadas')}
+                </Text>
+                <Text style={{ fontFamily: t.font, fontSize: 11.5, color: t.textDim, marginTop: 1 }}>
+                  {i18nT('groupPosts.entrySub', 'Anuncios con fecha y hora · solo admins')}
+                </Text>
+              </View>
+              <I.Chevron size={16} color={t.textFaint} />
+            </Pressable>
+          </Section>
+        )}
 
         {/* Permissions — only admin can change these */}
         {amIAdmin && (

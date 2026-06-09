@@ -116,6 +116,16 @@ const profiledContacts = new Set<string>();
 const profiledGroupImages = new Set<string>();
 
 /**
+ * Body of a metadata-only group sync. It carries fresh name/members/avatar
+ * (applied by the group_msg receive handler like any other group message) but
+ * renders NO chat bubble — it is intercepted and suppressed on receipt, and
+ * sent with skipLocalAppend on the admin. Used to push avatar/name/membership
+ * changes to members immediately instead of waiting for the admin's next real
+ * message. Keep in sync with the receive-handler intercept.
+ */
+const GROUP_META_SYNC_BODY = '[group:meta]';
+
+/**
  * Forget that a group's avatar was already sent this session, so the next group
  * message re-includes the (updated) avatar data URI. Called after the admin
  * changes the group avatar so members pick up the change immediately.
@@ -1760,6 +1770,15 @@ async function decryptAndAppend(
         // NOT used to attribute the vote — anonymity is enforced by the
         // commitment scheme (sha256(aegisId + pollId + nonceHex)) which lets
         // receivers deduplicate without learning who voted for what.
+        // ── Metadata-only sync intercept ───────────────────────────────────────
+        // The admin's name/members/avatar change was already applied above (the
+        // metadata block runs for every group_msg). This body carries nothing to
+        // render, so suppress the bubble — mirrors skipLocalAppend on the sender.
+        if (msgBody === GROUP_META_SYNC_BODY) {
+          await saveSessionState(contact.aegisId, ratchetState);
+          return true;
+        }
+
         if (msgBody.startsWith('[vote:') && msgBody.endsWith(']')) {
           const inner = msgBody.slice(6, -1); // strip '[vote:' and ']'
           const parts = inner.split(':');
@@ -1886,9 +1905,15 @@ async function decryptAndAppend(
           mediaUri: groupMsgMediaUri,
         });
 
-        // Trigger local notification in alignment with AegisLink notifications spec
-        const { showIncomingNotification } = require('../notifications/push');
-        void showIncomingNotification(senderId, parsedPayload.senderName || senderId.substring(0, 8), cleanMsgBody, true, trustedGroupName, groupId);
+        // Trigger local notification in alignment with AegisLink notifications spec.
+        // Scheduled posts carry a [post:flags] marker: strip it from the banner
+        // text and honour the 's' (silent) flag — the admin chose no notification.
+        const { parseGroupPostMarker } = require('../utils/groupPost') as typeof import('../utils/groupPost');
+        const postInfo = parseGroupPostMarker(cleanMsgBody);
+        if (!postInfo.silent) {
+          const { showIncomingNotification } = require('../notifications/push');
+          void showIncomingNotification(senderId, parsedPayload.senderName || senderId.substring(0, 8), postInfo.text, true, trustedGroupName, groupId);
+        }
 
         return true;
       } else if (
@@ -3047,6 +3072,28 @@ export async function sendGroupMessage(opts: {
       mediaUri: opts.mediaUri ?? undefined,
     });
   }
+}
+
+/**
+ * Push the current (already-persisted, re-signed) group metadata — name,
+ * members, avatar color/image — to every member RIGHT NOW, without waiting for
+ * the admin's next chat message and without showing a bubble on either side.
+ *
+ * Members apply the change through the normal group_msg metadata path (which
+ * runs for every group message); the `[group:meta]` body is then suppressed on
+ * receipt. The avatar image data URI rides along only when the caller has
+ * re-armed it via forgetGroupAvatarSent() (e.g. after updateGroupAvatar).
+ *
+ * Offline-safe: sendGroupMessage enqueues per-member outbox jobs, so the sync
+ * is retried on the next reconnect if the admin is offline.
+ */
+export async function broadcastGroupMetadata(identity: Identity, groupId: string): Promise<void> {
+  await sendGroupMessage({
+    identity,
+    groupId,
+    plaintext: GROUP_META_SYNC_BODY,
+    skipLocalAppend: true,
+  });
 }
 
 /**
