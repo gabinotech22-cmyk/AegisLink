@@ -37,3 +37,7 @@ promo-video/node_modules/
 
 # Internal session handoff — contains infra/access details, keep out of history
 docs/SESSION_HANDOFF.md
+
+# Signing keystore backup + ad-hoc test scripts — never commit
+/_keystore_backup/
+/_powtest.mjs
