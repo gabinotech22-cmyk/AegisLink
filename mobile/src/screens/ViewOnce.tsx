@@ -33,7 +33,7 @@ export function ViewOnceScreen({ contact, mediaUri, messageId, onBack }: Props) 
     if (contact?.aegisId && messageId) {
       const { useMessages } = require('../store/messages');
       const messages = useMessages.getState().byChat[contact.aegisId] || [];
-      const msg = messages.find((m: any) => m.id === messageId);
+      const msg = messages.find((m: { id: string; body?: string }) => m.id === messageId);
       if (msg && msg.body) {
         if (msg.body.startsWith('[viewonce:video')) setIsVideo(true);
         if (msg.body.includes('\n')) {
