@@ -9,6 +9,10 @@
 android/
 ios/
 
+# Dependencies — EAS reinstalls from package-lock on the build server. In
+# EAS_NO_VCS mode this is NOT auto-excluded, and it is the multi-GB bulk.
+node_modules/
+
 # Build output / large local artifacts
 *.apk
 *.aab
