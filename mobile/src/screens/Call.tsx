@@ -4,6 +4,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { WEBRTC_AVAILABLE } from '../runtime';
 const RTCView: React.ComponentType<{ streamURL: string; style?: object; objectFit?: string; mirror?: boolean }> | null =
   WEBRTC_AVAILABLE ? (require('react-native-webrtc') as { RTCView: React.ComponentType<{ streamURL: string; style?: object; objectFit?: string; mirror?: boolean }> }).RTCView : null;
@@ -556,7 +557,7 @@ export function CallScreen({ onClose, onMinimize }: Props) {
   );
 }
 
-function labelFor(status: string, startedAt: number | null, i18nT: (key: string, opts?: string | Record<string, unknown>) => string): string {
+function labelFor(status: string, startedAt: number | null, i18nT: TFunction): string {
   switch (status) {
     case 'outgoing-ringing':
       return i18nT('call.calling', 'CALLING…');
