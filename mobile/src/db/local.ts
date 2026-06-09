@@ -280,7 +280,13 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       group_id   TEXT NOT NULL
     );
 
-    -- Scheduled messages: ciphertext stored, plaintext never on disk
+    -- Scheduled messages: ciphertext stored, plaintext never on disk.
+    -- 1:1 rows: encrypted_payload = pre-ratcheted wire envelope, group_id NULL.
+    -- Group rows: group_id set, recipient_aegis_id = group_id, encrypted_payload =
+    -- encryptBody(plaintext) — encrypted at fire time via sendGroupMessage so the
+    -- fan-out always uses fresh membership and a fresh admin signature.
+    -- post_meta: encryptBody(JSON GroupPostOptions) — publish-as, pin, notify,
+    -- replies, weekly repeat, staged image path/name. Group rows only.
     CREATE TABLE IF NOT EXISTS scheduled_messages (
       id                TEXT PRIMARY KEY,
       recipient_aegis_id TEXT NOT NULL,
@@ -288,7 +294,9 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       send_at           INTEGER NOT NULL,
       created_at        INTEGER NOT NULL,
       status            TEXT NOT NULL DEFAULT 'pending',
-      retry_count       INTEGER NOT NULL DEFAULT 0
+      retry_count       INTEGER NOT NULL DEFAULT 0,
+      group_id          TEXT,
+      post_meta         TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_scheduled_send_at ON scheduled_messages(send_at, status);
 
@@ -328,7 +336,7 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 6;
+  const USER_DB_VERSION = 7;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -381,6 +389,14 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // uploadPreKeys() refill. No data migration of legacy SecureStore secrets is
     // required — new sessions from that point on derive correctly.
     await d.execAsync('PRAGMA user_version = 6');
+  }
+
+  if (currentVersion < 7) {
+    // v6 → v7: add group_id + post_meta to scheduled_messages (scheduled group
+    // posts). Fresh installs already have the columns via CREATE TABLE above.
+    try { await d.execAsync('ALTER TABLE scheduled_messages ADD COLUMN group_id TEXT;'); } catch {}
+    try { await d.execAsync('ALTER TABLE scheduled_messages ADD COLUMN post_meta TEXT;'); } catch {}
+    await d.execAsync('PRAGMA user_version = 7');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.
@@ -1539,13 +1555,23 @@ export async function updatePollVotes(id: string, votes: number[]): Promise<void
 
 export interface StoredScheduledMessage {
   id: string;
+  /** 1:1: the contact's aegisId. Group posts: the groupId (mirrors group_id). */
   recipientAegisId: string;
-  /** SealedEnvelope JSON — already E2EE ciphertext, plaintext NEVER stored */
+  /**
+   * 1:1: SealedEnvelope JSON — already E2EE ciphertext, plaintext NEVER stored.
+   * Group: encryptBody(plaintext) — at-rest encrypted, ratcheted at fire time
+   * via sendGroupMessage so membership and admin signature are always fresh.
+   */
   encryptedPayload: string;
   sendAt: number;
   createdAt: number;
-  status: 'pending' | 'sent' | 'failed';
+  /** 'draft' is group-posts only: kept locally, never fired by processDue. */
+  status: 'pending' | 'sent' | 'failed' | 'draft';
   retryCount: number;
+  /** Set only for scheduled group posts. */
+  groupId?: string;
+  /** encryptBody(JSON GroupPostOptions) — group posts only. */
+  postMeta?: string;
 }
 
 type ScheduledRow = {
@@ -1556,6 +1582,8 @@ type ScheduledRow = {
   created_at: number;
   status: string;
   retry_count: number;
+  group_id: string | null;
+  post_meta: string | null;
 };
 
 function rowToScheduled(r: ScheduledRow): StoredScheduledMessage {
@@ -1565,8 +1593,10 @@ function rowToScheduled(r: ScheduledRow): StoredScheduledMessage {
     encryptedPayload: r.encrypted_payload,
     sendAt: r.send_at,
     createdAt: r.created_at,
-    status: r.status as 'pending' | 'sent' | 'failed',
+    status: r.status as 'pending' | 'sent' | 'failed' | 'draft',
     retryCount: r.retry_count,
+    groupId: r.group_id ?? undefined,
+    postMeta: r.post_meta ?? undefined,
   };
 }
 
@@ -1574,8 +1604,8 @@ export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> 
   return withDb(async (d) => {
     await d.runAsync(
       `INSERT OR REPLACE INTO scheduled_messages
-       (id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       msg.id,
       msg.recipientAegisId,
       msg.encryptedPayload,
@@ -1583,6 +1613,8 @@ export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> 
       msg.createdAt,
       msg.status,
       msg.retryCount,
+      msg.groupId ?? null,
+      msg.postMeta ?? null,
     );
   });
 }
@@ -1590,7 +1622,7 @@ export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> 
 export async function loadPendingScheduled(): Promise<StoredScheduledMessage[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<ScheduledRow>(
-      `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count
+      `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta
        FROM scheduled_messages WHERE status = 'pending' ORDER BY send_at ASC`,
     );
     return rows.map(rowToScheduled);
@@ -1600,7 +1632,7 @@ export async function loadPendingScheduled(): Promise<StoredScheduledMessage[]> 
 export async function loadAllScheduled(): Promise<StoredScheduledMessage[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<ScheduledRow>(
-      `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count
+      `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta
        FROM scheduled_messages ORDER BY send_at ASC`,
     );
     return rows.map(rowToScheduled);

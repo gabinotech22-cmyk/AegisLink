@@ -132,6 +132,13 @@ export const useGroups = create<GroupsState>((set, get) => ({
     }
     await saveGroup(updated);
     set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
+    // Push the new name to members now instead of on the admin's next message.
+    try {
+      const client = require('../socket/client') as typeof import('../socket/client');
+      const { useIdentity } = require('./identity') as typeof import('./identity');
+      const identity = useIdentity.getState().identity;
+      if (identity) await client.broadcastGroupMetadata(identity, id);
+    } catch { /* non-fatal — change still propagates on the next group message */ }
   },
 
   async updateGroupAvatar(id, avatarImage) {
@@ -161,12 +168,16 @@ export const useGroups = create<GroupsState>((set, get) => ({
     }
     await saveGroup(updated);
     set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
-    // Force the new avatar to be re-sent (as a data URI) on the next group
-    // message so members pick up the change this session.
+    // Re-arm the avatar so the sync below re-includes the (updated) image data
+    // URI, then push the change to all members immediately — otherwise the new
+    // avatar only reaches them on the admin's next group message.
     try {
-      (require('../socket/client') as { forgetGroupAvatarSent?: (gid: string) => void })
-        .forgetGroupAvatarSent?.(id);
-    } catch { /* non-fatal */ }
+      const client = require('../socket/client') as typeof import('../socket/client');
+      client.forgetGroupAvatarSent?.(id);
+      const { useIdentity } = require('./identity') as typeof import('./identity');
+      const identity = useIdentity.getState().identity;
+      if (identity) await client.broadcastGroupMetadata(identity, id);
+    } catch { /* non-fatal — change still propagates on the next group message */ }
   },
 
   async addMember(id, aegisId) {

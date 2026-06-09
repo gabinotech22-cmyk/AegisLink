@@ -23,8 +23,48 @@ import {
 import type { Identity } from '../crypto/identity';
 
 const MAX_RETRIES = 3;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type ScheduledMessage = StoredScheduledMessage;
+
+/**
+ * Publish-time options for a scheduled group post (mirrors the compose screen
+ * toggles). Persisted at-rest encrypted in scheduled_messages.post_meta.
+ */
+export interface GroupPostOptions {
+  /** Publish as the group identity (announcement) instead of as the author. */
+  asGroup: boolean;
+  /** Highlight/pin the announcement on publish. */
+  pinned: boolean;
+  /** When false the wire body carries the 's' flag → receivers skip the banner. */
+  notify: boolean;
+  /** When false the post renders as read-only ('r' flag). */
+  replies: boolean;
+  /** Re-schedule +7 días after each publish, until cancelled. */
+  repeatWeekly: boolean;
+  /** Local file:// path of the staged, EXIF-stripped image (documentDirectory). */
+  imagePath?: string;
+  /** Display name shown on the EXIF-stripped badge and queue thumbnail. */
+  imageName?: string;
+}
+
+export const DEFAULT_POST_OPTIONS: GroupPostOptions = {
+  asGroup: true, pinned: false, notify: true, replies: true, repeatWeekly: false,
+};
+
+/**
+ * Permission gate for scheduled group posts: only the group owner (adminId)
+ * and moderators may create them. Pure function so the UI gate and the
+ * fire-time re-check share one definition.
+ */
+export function canScheduleGroupPost(
+  group: { adminId?: string; moderators?: string[] } | undefined | null,
+  myAegisId: string | undefined | null,
+): boolean {
+  if (!group || !myAegisId) return false;
+  if (group.adminId === myAegisId) return true;
+  return group.moderators?.includes(myAegisId) ?? false;
+}
 
 /** Revive JSON-deserialized byte fields back into Uint8Array. Mirrors client.ts logic. */
 function reviveBytes(o: unknown): Uint8Array | null {
@@ -76,6 +116,24 @@ interface ScheduledState {
     sendAt: number;
   }): Promise<void>;
 
+  /**
+   * Schedule (or update, when `id` is given) a group post — owner/moderators
+   * only; enforce with canScheduleGroupPost at the call site (re-checked at
+   * fire time). Text and options are stored at-rest encrypted (encryptBody /
+   * SecureStore key) and ratchet-encrypted at FIRE time via sendGroupMessage,
+   * so the fan-out always uses fresh membership and a fresh admin signature.
+   * status 'draft' parks the post in the queue without firing.
+   */
+  scheduleGroupPost(opts: {
+    groupId: string;
+    plaintext: string;
+    sendAt: number;
+    options?: GroupPostOptions;
+    /** Provide to update an existing post/draft in place. */
+    id?: string;
+    status?: 'pending' | 'draft';
+  }): Promise<void>;
+
   /** Cancel (delete) a pending scheduled message. */
   cancelScheduled(id: string): Promise<void>;
 
@@ -93,13 +151,13 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
   scheduled: [],
 
   async scheduleMessage({ identity, recipientAegisId, recipientPublicKeyB64, plaintext, sendAt }) {
-    const { encryptMessage } = await import('../crypto/messaging');
-    const { loadRatchetSession, saveRatchetSession } = await import('../db/local');
-    const { decodeBase64 } = await import('tweetnacl-util');
-    const { trimOldSkippedKeys, MAX_SKIPPED_KEYS } = await import('../crypto/signal/ratchet');
-    const { getSocket, isConnected } = await import('../socket/client');
+    const { encryptMessage } = require('../crypto/messaging') as typeof import('../crypto/messaging');
+    const { loadRatchetSession, saveRatchetSession } = require('../db/local') as typeof import('../db/local');
+    const { decodeBase64 } = require('tweetnacl-util') as typeof import('tweetnacl-util');
+    const { trimOldSkippedKeys, MAX_SKIPPED_KEYS } = require('../crypto/signal/ratchet') as typeof import('../crypto/signal/ratchet');
+    const { getSocket, isConnected } = require('../socket/client') as typeof import('../socket/client');
 
-    const { useIdentity } = await import('./identity');
+    const { useIdentity } = require('./identity') as typeof import('./identity');
     const idState = useIdentity.getState();
     const senderName = idState.displayName;
     const senderColor = idState.avatarColor;
@@ -132,12 +190,12 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
       if (!sock || !isConnected()) {
         throw new Error('Debes estar conectado para cifrar el primer mensaje a este contacto.');
       }
-      const { useContacts } = await import('./contacts');
+      const { useContacts } = require('./contacts') as typeof import('./contacts');
       const contact = useContacts.getState().contacts.find((c) => c.aegisId === recipientAegisId);
       if (!contact) throw new Error('Contacto no encontrado');
 
-      const { performX3DH } = await import('../crypto/signal/x3dh');
-      const { initRatchet } = await import('../crypto/signal/ratchet');
+      const { performX3DH } = require('../crypto/signal/x3dh') as typeof import('../crypto/signal/x3dh');
+      const { initRatchet } = require('../crypto/signal/ratchet') as typeof import('../crypto/signal/ratchet');
       type PreKeyBundle = import('../crypto/signal/x3dh').PreKeyBundle;
       type AckType = { ok: true; bundle: PreKeyBundle } | { ok: false; error?: string };
 
@@ -207,6 +265,35 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
     set((s) => ({ scheduled: [...s.scheduled, stored] }));
   },
 
+  async scheduleGroupPost({ groupId, plaintext, sendAt, options, id, status }) {
+    const { encryptBody } = require('../db/local') as typeof import('../db/local');
+    // At-rest encryption with the SecureStore-held DB key — same protection
+    // level as the outbox plaintext and ratchet sessions. Ratchet encryption
+    // happens at fire time (processDue) against fresh group membership.
+    const encryptedPayload = await encryptBody(plaintext);
+    const postMeta = await encryptBody(JSON.stringify(options ?? DEFAULT_POST_OPTIONS));
+    const stored: StoredScheduledMessage = {
+      id: id ?? Crypto.randomUUID(),
+      recipientAegisId: groupId,
+      groupId,
+      encryptedPayload,
+      postMeta,
+      sendAt,
+      createdAt: Date.now(),
+      status: status ?? 'pending',
+      retryCount: 0,
+    };
+    await saveScheduled(stored); // INSERT OR REPLACE — same id updates in place
+    set((s) => {
+      const exists = s.scheduled.some((m) => m.id === stored.id);
+      return {
+        scheduled: exists
+          ? s.scheduled.map((m) => (m.id === stored.id ? stored : m))
+          : [...s.scheduled, stored],
+      };
+    });
+  },
+
   async cancelScheduled(id) {
     await deleteScheduled(id);
     set((s) => ({ scheduled: s.scheduled.filter((m) => m.id !== id) }));
@@ -223,30 +310,128 @@ export const useScheduledMessages = create<ScheduledState>((set) => ({
     const due = pending.filter((m) => m.sendAt <= now);
     if (due.length === 0) return;
 
-    const { getSocket, isConnected } = await import('../socket/client');
+    const { getSocket, isConnected } = require('../socket/client') as typeof import('../socket/client');
     const sock = getSocket();
     const online = sock !== null && isConnected();
 
+    // Local helpers shared by the group branch (mirror the 1:1 retry/fail style)
+    const failNow = async (msg: ScheduledMessage, retryCount: number) => {
+      await markScheduledFailed(msg.id, retryCount);
+      set((s) => ({
+        scheduled: s.scheduled.map((m) =>
+          m.id === msg.id ? { ...m, status: 'failed' as const, retryCount } : m,
+        ),
+      }));
+    };
+    const bumpRetry = async (msg: ScheduledMessage) => {
+      const nextRetry = msg.retryCount + 1;
+      if (nextRetry >= MAX_RETRIES) {
+        await failNow(msg, nextRetry);
+      } else {
+        await incrementScheduledRetry(msg.id, nextRetry);
+        set((s) => ({
+          scheduled: s.scheduled.map((m) =>
+            m.id === msg.id ? { ...m, retryCount: nextRetry } : m,
+          ),
+        }));
+      }
+    };
+
     for (const msg of due) {
-      if (!online) {
-        const nextRetry = msg.retryCount + 1;
-        if (nextRetry >= MAX_RETRIES) {
-          await markScheduledFailed(msg.id, nextRetry);
-          set((s) => ({
-            scheduled: s.scheduled.map((m) =>
-              m.id === msg.id ? { ...m, status: 'failed' as const, retryCount: nextRetry } : m,
-            ),
-          }));
-        } else {
-          await incrementScheduledRetry(msg.id, nextRetry);
-          set((s) => ({
-            scheduled: s.scheduled.map((m) =>
-              m.id === msg.id ? { ...m, retryCount: nextRetry } : m,
-            ),
-          }));
+      // ── Scheduled GROUP post: decrypt at-rest plaintext and fan out through
+      //    sendGroupMessage with FRESH membership + admin signature. Offline is
+      //    fine — sendGroupMessage persists per-member outbox jobs that drain on
+      //    reconnect, so no `online` gate here.
+      if (msg.groupId) {
+        const { useIdentity } = require('./identity') as typeof import('./identity');
+        const identity = useIdentity.getState().identity;
+        // Identity locked/not loaded (e.g. background wake before unlock):
+        // skip WITHOUT burning a retry — it fires on the next run.
+        if (!identity) continue;
+        try {
+          const { getGroup, decryptBody } = require('../db/local') as typeof import('../db/local');
+          const group = await getGroup(msg.groupId);
+          // Group gone (left/deleted) or author demoted since scheduling —
+          // permanent failure, never silently post without authorization.
+          if (!group || !canScheduleGroupPost(group, identity.aegisId)) {
+            await failNow(msg, msg.retryCount);
+            continue;
+          }
+          const plaintext = await decryptBody(msg.encryptedPayload);
+          if (!plaintext || plaintext === '[DECRYPTION_ERROR]') {
+            await failNow(msg, msg.retryCount);
+            continue;
+          }
+
+          // Publish options → wire marker flags (see utils/groupPost.ts)
+          let options: GroupPostOptions = DEFAULT_POST_OPTIONS;
+          if (msg.postMeta) {
+            const metaJson = await decryptBody(msg.postMeta);
+            if (metaJson && metaJson !== '[DECRYPTION_ERROR]') {
+              try { options = { ...DEFAULT_POST_OPTIONS, ...JSON.parse(metaJson) }; } catch { /* defaults */ }
+            }
+          }
+          const { buildGroupPostBody } = require('../utils/groupPost') as typeof import('../utils/groupPost');
+          const textBody = buildGroupPostBody(plaintext, {
+            asGroup: options.asGroup,
+            pinned: options.pinned,
+            silent: !options.notify,
+            repliesOff: !options.replies,
+          });
+
+          // Attached image: read the staged EXIF-stripped file and ride the
+          // existing [image:data:…] media pipeline; the marker starts the caption.
+          let wireBody = textBody;
+          let msgType: 'image' | undefined;
+          let mediaUri: string | undefined;
+          if (options.imagePath) {
+            try {
+              const { readAsStringAsync, EncodingType } = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+              const b64 = await readAsStringAsync(options.imagePath, { encoding: EncodingType.Base64 });
+              wireBody = `[image:data:image/jpeg;base64,${b64}]${textBody}`;
+              msgType = 'image';
+              mediaUri = options.imagePath;
+            } catch {
+              // Image file lost (cache cleared) — publish text-only rather than dropping the post.
+            }
+          }
+
+          const { sendGroupMessage } = require('../socket/client') as typeof import('../socket/client');
+          await sendGroupMessage({
+            identity,
+            groupId: msg.groupId,
+            plaintext: wireBody,
+            ...(msgType ? { msgType, mediaUri } : {}),
+          });
+
+          if (options.repeatWeekly) {
+            // Recurring post: re-arm one week ahead instead of marking sent.
+            const next: StoredScheduledMessage = {
+              ...msg, sendAt: msg.sendAt + WEEK_MS, retryCount: 0, status: 'pending',
+            };
+            await saveScheduled(next);
+            set((s) => ({
+              scheduled: s.scheduled.map((m) => (m.id === msg.id ? next : m)),
+            }));
+          } else {
+            await markScheduledSent(msg.id);
+            set((s) => ({
+              scheduled: s.scheduled.map((m) =>
+                m.id === msg.id ? { ...m, status: 'sent' as const } : m,
+              ),
+            }));
+          }
+        } catch {
+          await bumpRetry(msg);
         }
         continue;
       }
+
+      // Offline: leave the message pending WITHOUT burning a retry — the
+      // runner ticks every few seconds, so counting offline ticks as attempts
+      // would mark messages 'failed' after seconds of bad signal. Retries are
+      // reserved for actual send failures below.
+      if (!online) continue;
 
       try {
         const wirePayload = JSON.parse(msg.encryptedPayload) as {

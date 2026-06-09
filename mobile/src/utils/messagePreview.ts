@@ -41,5 +41,14 @@ export function previewLabel(
     const name = body.slice(6).split(':')[0]?.trim();
     return `📎 ${name || t('attachSheet.file', 'File')}`;
   }
+  // Scheduled group post marker — appears at the start of the text portion,
+  // possibly after the group sender prefix ("Sender: [post:gp]Hola").
+  const postIdx = body.indexOf('[post:');
+  if (postIdx !== -1 && (postIdx === 0 || body.slice(0, postIdx).endsWith(': '))) {
+    const close = body.indexOf(']', postIdx);
+    if (close !== -1 && /^[a-z]{0,8}$/.test(body.slice(postIdx + 6, close))) {
+      return `📣 ${body.slice(0, postIdx)}${body.slice(close + 1)}`;
+    }
+  }
   return body;
 }

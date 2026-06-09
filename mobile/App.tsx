@@ -21,6 +21,7 @@ import { GroupsScreen } from './src/screens/Groups';
 import { PrivacyScreen } from './src/screens/Privacy';
 import { ChatScreen } from './src/screens/Chat';
 import { GroupChatScreen } from './src/screens/GroupChat';
+import { GroupPostsScreen } from './src/screens/GroupPosts';
 import { AddContactScreen } from './src/screens/AddContact';
 import { ScanQRScreen } from './src/screens/ScanQR';
 import { VerifyScreen } from './src/screens/Verify';
@@ -85,39 +86,18 @@ const SCHEDULED_TASK_NAME = 'aegis.scheduled-sender';
     const BackgroundFetch = require('expo-background-fetch');
     TaskManager.defineTask(SCHEDULED_TASK_NAME, async () => {
       try {
-        const raw = await SecureStore.getItemAsync('aegis.scheduled.v1');
-        if (!raw) return BackgroundFetch.BackgroundFetchResult.NoData;
-        const loaded = JSON.parse(raw) as Array<{
-          id: string;
-          toContact: { aegisId: string; publicKeyB64: string };
-          text: string;
-          sendAt: number;
-        }>;
+        // processDue() reads the SQLite scheduled_messages table — the SAME
+        // store that scheduleMessage/scheduleGroupPost write to. (The previous
+        // implementation read a legacy 'aegis.scheduled.v1' SecureStore key
+        // that nothing wrote anymore, so scheduled messages never fired.)
+        const { loadPendingScheduled } = require('./src/db/local') as typeof import('./src/db/local');
+        const pending = await loadPendingScheduled();
         const now = Date.now();
-        const due = loaded.filter((i) => i.sendAt <= now);
-        if (due.length === 0) return BackgroundFetch.BackgroundFetchResult.NoData;
-
-        const remaining = loaded.filter((i) => i.sendAt > now);
-        await SecureStore.setItemAsync('aegis.scheduled.v1', JSON.stringify(remaining));
-
-        const { useIdentity } = require('./src/store/identity');
-        const identity = useIdentity.getState().identity;
-        if (!identity) return BackgroundFetch.BackgroundFetchResult.Failed;
-
-        const { sendMessage } = require('./src/socket/client');
-        const { decodeBase64 } = require('tweetnacl-util');
-        for (const item of due) {
-          try {
-            await sendMessage({
-              identity,
-              recipientAegisId: item.toContact.aegisId,
-              recipientPublicKey: decodeBase64(item.toContact.publicKeyB64),
-              plaintext: item.text,
-            });
-          } catch {
-            /* best effort per message */
-          }
+        if (!pending.some((m) => m.sendAt <= now)) {
+          return BackgroundFetch.BackgroundFetchResult.NoData;
         }
+        const { useScheduledMessages } = require('./src/store/scheduledMessages') as typeof import('./src/store/scheduledMessages');
+        await useScheduledMessages.getState().processDue();
         return BackgroundFetch.BackgroundFetchResult.NewData;
       } catch {
         return BackgroundFetch.BackgroundFetchResult.Failed;
@@ -154,6 +134,7 @@ type PushRoute =
   | { name: 'search' }
   | { name: 'groupadmin'; group: StoredGroup }
   | { name: 'groupChat'; group: StoredGroup }
+  | { name: 'groupPosts'; group: StoredGroup; initialText?: string }
   | { name: 'groupAttach'; group: StoredGroup }
   | { name: 'groupVoice'; group: StoredGroup }
   | { name: 'poll'; group?: StoredGroup }
@@ -400,36 +381,24 @@ function Shell() {
       }
     })();
 
-    const interval = setInterval(async () => {
+    // One-time cleanup: the legacy scheduler stored PLAINTEXT scheduled
+    // messages under this SecureStore key. Nothing writes it anymore (the
+    // store writes E2EE/at-rest-encrypted rows to SQLite), so wipe any
+    // residue from old builds rather than leaving plaintext at rest.
+    void SecureStore.deleteItemAsync('aegis.scheduled.v1').catch(() => {});
+
+    // Foreground runner: fire due scheduled messages (1:1 + group posts) from
+    // the SQLite-backed store. processDue() is cheap when nothing is due (one
+    // indexed SELECT), and offline ticks leave messages pending without
+    // burning retries.
+    const interval = setInterval(() => {
       try {
-        const raw = await SecureStore.getItemAsync('aegis.scheduled.v1');
-        if (!raw) return;
-        const loaded = JSON.parse(raw) as any[];
-        const now = Date.now();
-        const due = loaded.filter((i) => i.sendAt <= now);
-        if (due.length === 0) return;
-
-        const remaining = loaded.filter((i) => i.sendAt > now);
-        await SecureStore.setItemAsync('aegis.scheduled.v1', JSON.stringify(remaining));
-
-        for (const item of due) {
-          try {
-            const { sendMessage } = require('./src/socket/client');
-            const { decodeBase64 } = require('tweetnacl-util');
-            await sendMessage({
-              identity,
-              recipientAegisId: item.toContact.aegisId,
-              recipientPublicKey: decodeBase64(item.toContact.publicKeyB64),
-              plaintext: item.text,
-            });
-          } catch (e) {
-            if (__DEV__) console.error('[global-scheduler] Failed to send scheduled message:', e);
-          }
-        }
+        const { useScheduledMessages } = require('./src/store/scheduledMessages') as typeof import('./src/store/scheduledMessages');
+        void useScheduledMessages.getState().processDue();
       } catch (err) {
         if (__DEV__) console.warn('[global-scheduler] error in runner:', err);
       }
-    }, 1500);
+    }, 10_000);
 
     return () => clearInterval(interval);
   }, [identity, status]);
@@ -457,10 +426,20 @@ function Shell() {
         attachCallHandlers();
         attachGroupCallHandlers();
       }
-      setNotificationOpenChatHandler((aegisId) => {
-        const { useContacts } = require('./src/store/contacts');
-        const contact = useContacts.getState().contacts.find((c: StoredContact) => c.aegisId === aegisId);
-        if (contact) { setStack([]); push({ name: 'chat', contact }); }
+      setNotificationOpenChatHandler((target) => {
+        // Group tap → open the group chat by id.
+        if (target.groupId) {
+          const { useGroups } = require('./src/store/groups');
+          const group = useGroups.getState().groups.find((g: { id: string }) => g.id === target.groupId);
+          if (group) { setStack([]); push({ name: 'groupChat', group }); }
+          return;
+        }
+        // 1:1 tap → open the contact chat.
+        if (target.aegisId) {
+          const { useContacts } = require('./src/store/contacts');
+          const contact = useContacts.getState().contacts.find((c: StoredContact) => c.aegisId === target.aegisId);
+          if (contact) { setStack([]); push({ name: 'chat', contact }); }
+        }
       });
       void registerForPush(identity);
       initCallKeep();
@@ -848,6 +827,15 @@ function Shell() {
             onPoll={() => push({ name: 'poll', group: top.group })}
             onAttach={() => push({ name: 'groupAttach', group: top.group })}
             onGroupCall={() => push({ name: 'groupCall' })}
+            onSchedulePost={(draftText) => push({ name: 'groupPosts', group: top.group, initialText: draftText })}
+          />
+        );
+      case 'groupPosts':
+        return (
+          <GroupPostsScreen
+            group={top.group}
+            initialText={top.initialText}
+            onBack={pop}
           />
         );
       case 'groupCall':
@@ -1185,7 +1173,13 @@ function Shell() {
           />
         );
       case 'groupadmin':
-        return <GroupAdminScreen group={top.group} onBack={pop} />;
+        return (
+          <GroupAdminScreen
+            group={top.group}
+            onBack={pop}
+            onOpenPosts={() => push({ name: 'groupPosts', group: top.group })}
+          />
+        );
       case 'poll':
         return (
           <PollScreen

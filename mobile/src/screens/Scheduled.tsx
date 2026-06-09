@@ -21,6 +21,7 @@ import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { useScheduledMessages } from '../store/scheduledMessages';
 import { useContacts } from '../store/contacts';
+import { useGroups } from '../store/groups';
 import type { ScheduledMessage } from '../store/scheduledMessages';
 import type { StoredContact } from '../db/local';
 
@@ -54,6 +55,7 @@ export function ScheduledScreen({ onBack }: Props) {
   const insets = useSafeAreaInsets();
   const { scheduled, loadPending, cancelScheduled } = useScheduledMessages();
   const contacts = useContacts((s) => s.contacts);
+  const groups = useGroups((s) => s.groups);
 
   useEffect(() => {
     void loadPending();
@@ -144,8 +146,14 @@ export function ScheduledScreen({ onBack }: Props) {
           </View>
         }
         renderItem={({ item }) => {
-          const contact = contactFor(item.recipientAegisId);
-          const displayName = contact?.name ?? item.recipientAegisId.slice(0, 12) + '…';
+          const isGroupPost = !!item.groupId;
+          const groupName = isGroupPost
+            ? groups.find((g) => g.id === item.groupId)?.name
+            : undefined;
+          const contact = isGroupPost ? undefined : contactFor(item.recipientAegisId);
+          const displayName = isGroupPost
+            ? (groupName ?? 'Grupo')
+            : (contact?.name ?? item.recipientAegisId.slice(0, 12) + '…');
           const isPending = item.status === 'pending';
 
           return (
@@ -159,7 +167,11 @@ export function ScheduledScreen({ onBack }: Props) {
               <View
                 style={[styles.iconBox, { backgroundColor: t.surface2 }]}
               >
-                <I.Timer size={18} color={isPending ? t.accent : t.textFaint} />
+                {isGroupPost ? (
+                  <I.Users size={18} color={isPending ? t.accent : t.textFaint} />
+                ) : (
+                  <I.Timer size={18} color={isPending ? t.accent : t.textFaint} />
+                )}
               </View>
 
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -194,7 +206,7 @@ export function ScheduledScreen({ onBack }: Props) {
                 )}
 
                 <Text style={[styles.e2eeTag, { color: t.textFaint, fontFamily: t.fontMono }]}>
-                  E2EE · CIFRADO EN ORIGEN
+                  {isGroupPost ? 'POST DE GRUPO · E2EE AL ENVIAR' : 'E2EE · CIFRADO EN ORIGEN'}
                 </Text>
               </View>
 

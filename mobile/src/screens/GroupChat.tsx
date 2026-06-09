@@ -28,6 +28,8 @@ import { useMessages } from '../store/messages';
 import { MediaImage } from '../components/MediaImage';
 import { useContacts } from '../store/contacts';
 import { useGroups } from '../store/groups';
+import { canScheduleGroupPost } from '../store/scheduledMessages';
+import { parseGroupPostMarker } from '../utils/groupPost';
 import { sendGroupMessage, sendGroupVote } from '../socket/client';
 import { useConnection } from '../store/connection';
 import { usePollsStore, type PollResult } from '../store/polls';
@@ -52,9 +54,11 @@ interface Props {
   onPoll?: () => void;
   onAttach?: () => void;
   onGroupCall?: () => void;
+  /** Owner/mods: open the scheduled-posts composer with the current draft. */
+  onSchedulePost?: (draftText: string) => void;
 }
 
-export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, onPoll, onAttach, onGroupCall }: Props) {
+export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, onPoll, onAttach, onGroupCall, onSchedulePost }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -76,6 +80,8 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const setPendingVideo = useMessages((s) => s.setPendingVideo);
 
   const [draft, setDraft] = useState('');
+  // Scheduled group posts — owner/moderators only (gate shared with fire-time check)
+  const canSchedulePost = canScheduleGroupPost(group, identity?.aegisId);
   const [stagedImageUri, setStagedImageUri] = useState<string | null>(null);
   const [editorUri, setEditorUri] = useState<string | null>(null);
   const [imageProcessing, setImageProcessing] = useState(false);
@@ -521,6 +527,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                 memberNames={memberNames}
                 adminId={group.adminId}
                 moderators={group.moderators}
+                groupName={group.name}
                 onLongPress={() => setActionsMsg(item)}
                 pollResult={pollResults[item.id]}
                 onVote={(optionIndex, totalOptions) => void handleVote(item.id, optionIndex, totalOptions)}
@@ -654,7 +661,11 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
           />
           <Pressable
             onPress={() => void handleSend()}
+            // Owner/moderators: long-press hands the draft to the full scheduled
+            // posts composer (GroupPosts screen). Members get no gesture.
+            onLongPress={() => { if (canSchedulePost && draft.trim()) onSchedulePost?.(draft.trim()); }}
             disabled={(!draft.trim() && !stagedImageUri) || sending || imageProcessing}
+            accessibilityLabel={canSchedulePost ? i18nT('groupChat.sendOrSchedule', 'Send — long-press to schedule post') : undefined}
             style={({ pressed }) => [
               styles.sendBtn,
               { backgroundColor: (draft.trim() || stagedImageUri) && online ? t.accent : t.surface2, opacity: pressed ? 0.8 : 1 },
@@ -709,6 +720,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
           onSend={handleVoiceSend}
         />
       </Modal>
+
     </KeyboardAvoidingView>
     </GestureHandlerRootView>
   );
@@ -733,6 +745,8 @@ interface GroupBubbleProps {
   memberNames: Record<string, string>;
   adminId?: string;
   moderators?: string[];
+  /** For announcement posts published "as the group" (post marker 'g'). */
+  groupName?: string;
   onLongPress: () => void;
   pollResult?: PollResult;
   onVote: (optionIndex: number, totalOptions: number) => void;
@@ -746,6 +760,7 @@ function GroupBubble({
   memberNames,
   adminId,
   moderators,
+  groupName,
   onLongPress,
   pollResult,
   onVote,
@@ -784,6 +799,15 @@ function GroupBubble({
   // member map — prevents display-name spoofing attacks.
   const senderIsAdmin = senderVerified && senderId && adminId ? senderId === adminId : false;
   const senderIsMod = senderVerified && senderId && moderators ? moderators.includes(senderId) : false;
+
+  // Scheduled-post marker: strip it from the display body up-front so every
+  // downstream branch (text, image caption, etc.) renders clean text. Text
+  // posts get the dedicated announcement card below. Only honour announcement
+  // styling from verified admins/mods — a regular member crafting the marker
+  // gets it stripped but NO announcement framing (anti-spoofing).
+  const postParsed = parseGroupPostMarker(body);
+  if (postParsed.isPost) body = postParsed.text;
+  const isAnnouncement = postParsed.isPost && (me || senderIsAdmin || senderIsMod);
 
   if (m.deleted) {
     return (
@@ -874,6 +898,81 @@ function GroupBubble({
             </Text>
           </View>
         </View>
+        <ReactionPills t={t} reactions={reactions} me={me} />
+      </View>
+    );
+  }
+
+  // ── Scheduled announcement card (text posts) ──────────────────────────────
+  // Accent-framed card with ANUNCIO chip; "as group" posts show the group name
+  // as author, otherwise the sender chip row renders as usual above the card.
+  if (isAnnouncement && (m.type === 'text' || !m.type)) {
+    const showGroupAuthor = postParsed.asGroup;
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+        {!showGroupAuthor && sender ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: senderColor }}>{sender}</Text>
+            {senderIsAdmin && (
+              <View style={{ backgroundColor: `${t.accent}22`, paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 8, color: t.accent }}>ADMIN</Text>
+              </View>
+            )}
+            {senderIsMod && (
+              <View style={{ backgroundColor: `${t.warn}22`, paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 8, color: t.warn }}>{i18nT('groupChat.modBadge', 'MOD')}</Text>
+              </View>
+            )}
+          </View>
+        ) : null}
+        <Pressable
+          onLongPress={onLongPress}
+          style={{
+            maxWidth: 290,
+            backgroundColor: me ? t.bubbleOut : t.bubbleIn,
+            borderWidth: 1,
+            borderColor: `${t.accent}55`,
+            borderRadius: t.radius,
+            borderTopRightRadius: me ? t.radiusS : t.radius,
+            borderTopLeftRadius: me ? t.radius : t.radiusS,
+            padding: 12,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <I.Users size={13} color={t.accent} />
+            {showGroupAuthor && groupName ? (
+              <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: t.font, fontSize: 12, fontWeight: '600', color: me ? t.bubbleOutText : t.text }}>
+                {groupName}
+              </Text>
+            ) : null}
+            <View style={{ borderWidth: 1, borderColor: `${t.accent}55`, borderRadius: 99, paddingHorizontal: 6, paddingVertical: 1 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 8.5, color: t.accent, letterSpacing: 0.5 }}>
+                {i18nT('groupPosts.announceChip', 'ANUNCIO')}
+              </Text>
+            </View>
+            {postParsed.pinned && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderWidth: 1, borderColor: `${t.accent}55`, borderRadius: 99, paddingHorizontal: 6, paddingVertical: 1 }}>
+                <I.Shield size={9} color={t.accent} />
+                <Text style={{ fontFamily: t.fontMono, fontSize: 8.5, color: t.accent, letterSpacing: 0.5 }}>
+                  {i18nT('groupPosts.pinnedChip', 'FIJADO')}
+                </Text>
+              </View>
+            )}
+          </View>
+          <FormattedText
+            body={body}
+            t={t}
+            style={{ color: me ? t.bubbleOutText : t.text, fontFamily: t.font, fontSize: 14.5, lineHeight: 21 }}
+          />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: me ? 'rgba(255,255,255,0.15)' : t.divider }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: me ? t.bubbleOutText : t.textDim, letterSpacing: 0.5 }}>
+              {postParsed.repliesOff ? i18nT('groupPosts.readOnlyTag', 'SOLO LECTURA') : ''}
+            </Text>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 9.5, color: me ? t.bubbleOutText : t.textDim }}>
+              {time}
+            </Text>
+          </View>
+        </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
       </View>
     );

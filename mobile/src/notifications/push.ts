@@ -19,12 +19,41 @@ function makeSignal(ms: number): AbortSignal {
  */
 
 let registered = false;
+// Whether the LOCAL notification behavior (tap routing, cold-start deep link,
+// activeChatId reset, channels, categories) has been wired up. Tracked
+// separately from `registered` because it must succeed even when the remote
+// push-token registration fails (e.g. an emulator with no FCM).
+let localHandlersAttached = false;
 
-// Callback set by App.tsx to handle deep links from notification taps
-let _onOpenChat: ((aegisId: string) => void) | null = null;
+// Callback set by App.tsx to handle deep links from notification taps.
+// A tap can target either a 1:1 chat (aegisId) or a group chat (groupId) — the
+// App handler routes to whichever is present. For group messages `aegisId` is
+// the message SENDER (not the chat), so groupId MUST be provided to open the
+// correct screen.
+export interface NotificationOpenTarget {
+  aegisId?: string;
+  groupId?: string;
+}
+let _onOpenChat: ((target: NotificationOpenTarget) => void) | null = null;
 
-export function setNotificationOpenChatHandler(fn: (aegisId: string) => void) {
+export function setNotificationOpenChatHandler(fn: (target: NotificationOpenTarget) => void) {
   _onOpenChat = fn;
+}
+
+/**
+ * Resolve which chat a notification tap should open from its `data` payload.
+ * Group messages carry `isGroup:true` + `groupId` (the `fromAegisId` is the
+ * SENDER, not the chat) → route by groupId. 1:1 messages route by fromAegisId.
+ * Returns null when there isn't enough to route (e.g. a contentless server
+ * wake-up push, which by design carries no chat identity).
+ */
+export function resolveNotificationOpenTarget(
+  data: Record<string, unknown> | undefined,
+): NotificationOpenTarget | null {
+  const fromAegisId = data?.fromAegisId as string | undefined;
+  const groupId = data?.groupId as string | undefined;
+  if (data?.isGroup === true) return groupId ? { groupId } : null;
+  return fromAegisId ? { aegisId: fromAegisId } : null;
 }
 
 // Notification handler: suppress the server's generic wake-up push when the
@@ -54,41 +83,176 @@ Notifications.setNotificationHandler({
   },
 });
 
+/**
+ * Wire up everything LOCAL about notifications: Android channels, tap/action
+ * response routing, the cold-start deep link, the background→activeChatId reset,
+ * and the action categories. Idempotent and side-effect-only.
+ *
+ * CRITICAL: this must run independently of getExpoPushTokenAsync(), which throws
+ * on devices without a working FCM stack (e.g. most emulators). Previously all
+ * of this lived AFTER the token call inside registerForPush, so a token failure
+ * silently disabled notification taps (taps opened nothing) AND the
+ * activeChatId reset (banners for the currently-open chat were suppressed even
+ * while backgrounded — which manifested as "group notifications don't work"
+ * whenever the group was the last-open screen).
+ */
+function attachLocalNotificationHandlers(): void {
+  if (localHandlersAttached) return;
+  localHandlersAttached = true;
+
+  if (Platform.OS === 'android') {
+    void Notifications.setNotificationChannelAsync('aegislink-messages', {
+      name: 'Mensajes',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#5bf2b9',
+      // On-brand soft bell (see assets/sounds/gen_sounds.py). Channel sound is
+      // immutable after creation — published builds ship it from the first
+      // version, so no channel-id bump is needed.
+      sound: 'msg_received.mp3',
+      showBadge: true,
+    });
+    void Notifications.setNotificationChannelAsync('aegislink-calls', {
+      name: 'Llamadas',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 500, 200, 500],
+      lightColor: '#5bf2b9',
+      // Calm arpeggiated ring instead of the OS default ringtone.
+      sound: 'call_incoming.mp3',
+      bypassDnd: true,
+    });
+    void Notifications.setNotificationChannelAsync('aegislink-security', {
+      name: 'Seguridad',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 100, 100, 100, 100, 100],
+      lightColor: '#ff6b6b',
+      sound: 'default',
+      bypassDnd: true,
+    });
+  }
+
+  // Handle notification action taps (Reply, Mark read) and default tap to open chat
+  Notifications.addNotificationResponseReceivedListener((response) => {
+    const data = response.notification.request.content.data as Record<string, unknown>;
+    const fromAegisId = data?.fromAegisId as string | undefined;
+    const actionId = response.actionIdentifier;
+
+    if (actionId === 'REPLY') {
+      // User replied from notification — send the text via socket without opening app
+      const replyText = (response as { userText?: string }).userText;
+      if (replyText && fromAegisId) {
+        try {
+          const { sendMessage } = require('../socket/client') as { sendMessage: (to: string, text: string) => void };
+          sendMessage(fromAegisId, replyText);
+          void Notifications.dismissNotificationAsync(response.notification.request.identifier);
+        } catch (e) {
+          if (__DEV__) console.warn('[push] inline reply failed:', e);
+        }
+      }
+    } else if (actionId === 'MARK_READ') {
+      if (fromAegisId) {
+        try {
+          const { useMessages } = require('../store/messages') as { useMessages: { getState: () => { markRead: (id: string) => Promise<void> } } };
+          void useMessages.getState().markRead(fromAegisId);
+          void Notifications.dismissNotificationAsync(response.notification.request.identifier);
+        } catch (e) {
+          if (__DEV__) console.warn('[push] mark-read action failed:', e);
+        }
+      }
+    } else if ((data?.type as string) === 'call_invite') {
+      // App was woken by a call push — reconnect socket so the relay can
+      // re-deliver call:invite once the authenticated socket is established.
+      try {
+        const { reconnect } = require('../socket/client') as { reconnect: () => void };
+        reconnect();
+      } catch { /* socket module not yet loaded — no-op */ }
+      // Also surface the incoming call screen if caller info is available
+      if (fromAegisId && _onOpenChat) {
+        _onOpenChat({ aegisId: fromAegisId });
+      }
+    } else {
+      // Default tap — open the group chat (by groupId) or the 1:1 chat.
+      const target = resolveNotificationOpenTarget(data);
+      if (target && _onOpenChat) _onOpenChat(target);
+    }
+  });
+
+  // Check if app was opened from a notification (cold-start deep link)
+  void (async () => {
+    try {
+      const lastResponse = await Notifications.getLastNotificationResponseAsync();
+      if (!lastResponse) return;
+      const data = lastResponse.notification.request.content.data as Record<string, unknown>;
+      const fromAegisId = data?.fromAegisId as string | undefined;
+      if ((data?.type as string) === 'call_invite') {
+        // Cold-start from a call push — reconnect socket first, then navigate
+        try {
+          const { reconnect } = require('../socket/client') as { reconnect: () => void };
+          reconnect();
+        } catch { /* socket module not yet loaded — no-op */ }
+        if (fromAegisId && _onOpenChat) {
+          setTimeout(() => _onOpenChat?.({ aegisId: fromAegisId }), 500);
+        }
+      } else {
+        // Route by groupId for group messages (fromAegisId is the sender).
+        const target = resolveNotificationOpenTarget(data);
+        if (target && _onOpenChat) setTimeout(() => _onOpenChat?.(target), 500);
+      }
+    } catch { /* no last response / module not ready — no-op */ }
+  })();
+
+  // When the app moves to the background or becomes inactive, clear activeChatId
+  // so that notifications are shown for the previously-focused chat. Without this,
+  // a user who backgrounds the app while in a chat would never receive banners for
+  // new messages in that chat until the app is foregrounded and navigated away.
+  const { AppState } = require('react-native') as typeof import('react-native');
+  AppState.addEventListener('change', (nextState: string) => {
+    if (nextState === 'background' || nextState === 'inactive') {
+      activeChatId = null;
+    }
+  });
+
+  // Register notification action categories (Reply + Mark as read)
+  void Notifications.setNotificationCategoryAsync('aegislink-message', [
+    {
+      identifier: 'REPLY',
+      buttonTitle: 'Responder',
+      textInput: {
+        submitButtonTitle: 'Enviar',
+        placeholder: 'Mensaje cifrado…',
+      },
+      options: { opensAppToForeground: false },
+    },
+    {
+      identifier: 'MARK_READ',
+      buttonTitle: 'Marcar leído',
+      options: { opensAppToForeground: false, isDestructive: false },
+    },
+  ]);
+
+  void Notifications.setNotificationCategoryAsync('aegislink-call', [
+    {
+      identifier: 'ACCEPT_CALL',
+      buttonTitle: 'Contestar',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: 'DECLINE_CALL',
+      buttonTitle: 'Rechazar',
+      options: { opensAppToForeground: false, isDestructive: true },
+    },
+  ]);
+}
+
 export async function registerForPush(identity: Identity): Promise<{ token: string | null }> {
+  // Local notification UX (tap routing, cold-start, activeChatId reset, channels,
+  // categories) must work even when the remote push token can't be obtained —
+  // attach it FIRST, unconditionally, before anything that may throw.
+  attachLocalNotificationHandlers();
+
   if (registered) return { token: null };
 
   try {
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('aegislink-messages', {
-        name: 'Mensajes',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#5bf2b9',
-        // On-brand soft bell (see assets/sounds/gen_sounds.py). Channel sound is
-        // immutable after creation — published builds ship it from the first
-        // version, so no channel-id bump is needed.
-        sound: 'msg_received.mp3',
-        showBadge: true,
-      });
-      await Notifications.setNotificationChannelAsync('aegislink-calls', {
-        name: 'Llamadas',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 500, 200, 500],
-        lightColor: '#5bf2b9',
-        // Calm arpeggiated ring instead of the OS default ringtone.
-        sound: 'call_incoming.mp3',
-        bypassDnd: true,
-      });
-      await Notifications.setNotificationChannelAsync('aegislink-security', {
-        name: 'Seguridad',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 100, 100, 100, 100, 100],
-        lightColor: '#ff6b6b',
-        sound: 'default',
-        bypassDnd: true,
-      });
-    }
-
     const perm = await Notifications.getPermissionsAsync();
     let granted = perm.granted || perm.status === 'granted';
     if (!granted && perm.canAskAgain) {
@@ -117,118 +281,13 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
       return { token: null };
     }
 
-    // Handle notification action taps (Reply, Mark read) and default tap to open chat
-    Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as Record<string, unknown>;
-      const fromAegisId = data?.fromAegisId as string | undefined;
-      const actionId = response.actionIdentifier;
-
-      if (actionId === 'REPLY') {
-        // User replied from notification — send the text via socket without opening app
-        const replyText = (response as { userText?: string }).userText;
-        if (replyText && fromAegisId) {
-          try {
-            const { sendMessage } = require('../socket/client') as { sendMessage: (to: string, text: string) => void };
-            sendMessage(fromAegisId, replyText);
-            void Notifications.dismissNotificationAsync(response.notification.request.identifier);
-          } catch (e) {
-            if (__DEV__) console.warn('[push] inline reply failed:', e);
-          }
-        }
-      } else if (actionId === 'MARK_READ') {
-        if (fromAegisId) {
-          try {
-            const { useMessages } = require('../store/messages') as { useMessages: { getState: () => { markRead: (id: string) => Promise<void> } } };
-            void useMessages.getState().markRead(fromAegisId);
-            void Notifications.dismissNotificationAsync(response.notification.request.identifier);
-          } catch (e) {
-            if (__DEV__) console.warn('[push] mark-read action failed:', e);
-          }
-        }
-      } else if ((data?.type as string) === 'call_invite') {
-        // App was woken by a call push — reconnect socket so the relay can
-        // re-deliver call:invite once the authenticated socket is established.
-        try {
-          const { reconnect } = require('../socket/client') as { reconnect: () => void };
-          reconnect();
-        } catch { /* socket module not yet loaded — no-op */ }
-        // Also surface the incoming call screen if caller info is available
-        if (fromAegisId && _onOpenChat) {
-          _onOpenChat(fromAegisId);
-        }
-      } else if (fromAegisId && _onOpenChat) {
-        // Default tap — open chat
-        _onOpenChat(fromAegisId);
-      }
-    });
-
-    // Check if app was opened from a notification (cold-start deep link)
-    const lastResponse = await Notifications.getLastNotificationResponseAsync();
-    if (lastResponse) {
-      const data = lastResponse.notification.request.content.data as Record<string, unknown>;
-      const fromAegisId = data?.fromAegisId as string | undefined;
-      if ((data?.type as string) === 'call_invite') {
-        // Cold-start from a call push — reconnect socket first, then navigate
-        try {
-          const { reconnect } = require('../socket/client') as { reconnect: () => void };
-          reconnect();
-        } catch { /* socket module not yet loaded — no-op */ }
-        if (fromAegisId && _onOpenChat) {
-          setTimeout(() => _onOpenChat?.(fromAegisId), 500);
-        }
-      } else if (fromAegisId && _onOpenChat) {
-        setTimeout(() => _onOpenChat?.(fromAegisId), 500);
-      }
-    }
-
     registered = true;
     if (__DEV__) console.log('[push] registered for wake-ups, token:', expoToken);
-
-    // When the app moves to the background or becomes inactive, clear activeChatId
-    // so that notifications are shown for the previously-focused chat. Without this,
-    // a user who backgrounds the app while in a chat would never receive banners for
-    // new messages in that chat until the app is foregrounded and navigated away.
-    const { AppState } = require('react-native') as typeof import('react-native');
-    AppState.addEventListener('change', (nextState: string) => {
-      if (nextState === 'background' || nextState === 'inactive') {
-        activeChatId = null;
-      }
-    });
-
-    // Register notification action categories (Reply + Mark as read)
-    await Notifications.setNotificationCategoryAsync('aegislink-message', [
-      {
-        identifier: 'REPLY',
-        buttonTitle: 'Responder',
-        textInput: {
-          submitButtonTitle: 'Enviar',
-          placeholder: 'Mensaje cifrado…',
-        },
-        options: { opensAppToForeground: false },
-      },
-      {
-        identifier: 'MARK_READ',
-        buttonTitle: 'Marcar leído',
-        options: { opensAppToForeground: false, isDestructive: false },
-      },
-    ]);
-
-    await Notifications.setNotificationCategoryAsync('aegislink-call', [
-      {
-        identifier: 'ACCEPT_CALL',
-        buttonTitle: 'Contestar',
-        options: { opensAppToForeground: true },
-      },
-      {
-        identifier: 'DECLINE_CALL',
-        buttonTitle: 'Rechazar',
-        options: { opensAppToForeground: false, isDestructive: true },
-      },
-    ]);
-
     return { token: expoToken };
   } catch (e) {
-    if (__DEV__) console.warn('[push] registration failed:', (e as Error).message);
+    // Token acquisition/registration failed (e.g. emulator without FCM). Local
+    // notifications + tap routing already work via attachLocalNotificationHandlers().
+    if (__DEV__) console.warn('[push] remote token registration failed (local notifications still active):', (e as Error).message);
     return { token: null };
   }
 }
@@ -332,7 +391,10 @@ export async function showIncomingNotification(
         body: notificationBody,
         sound: prefs.notifSound ? 'msg_received.mp3' : undefined,
         categoryIdentifier: 'aegislink-message',
-        data: { fromAegisId: senderAegisId, isGroup, groupName },
+        // groupId is REQUIRED for a group tap to open the right screen — without
+        // it the tap handler can only see fromAegisId (the sender) and would open
+        // a 1:1 chat with whoever sent the group message.
+        data: { fromAegisId: senderAegisId, isGroup, groupId, groupName },
         // Android notification channel
         ...(Platform.OS === 'android' ? { channelId: 'aegislink-messages' } : {}),
       },
