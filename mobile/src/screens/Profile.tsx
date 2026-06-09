@@ -38,7 +38,7 @@ const PROFILE_COLORS = [
 ];
 
 
-export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onNotifications, onExport, onProfileSwitcher }: Props) {
+export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, onProfileSwitcher }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -357,14 +357,8 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onNotifica
             label={i18nT('profile.linkedDevices')}
             onPress={onDevices}
           />
-          {onNotifications && (
-            <Row
-              t={t}
-              icon={<I.Bell size={18} color={t.textDim} />}
-              label={i18nT('privacy.notifications')}
-              onPress={onNotifications}
-            />
-          )}
+          {/* Notifications live in the Privacy tab (alerts section) — removed
+              here to avoid a duplicate entry. */}
           {onExport && (
             <Row
               t={t}
