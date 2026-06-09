@@ -556,7 +556,7 @@ export function CallScreen({ onClose, onMinimize }: Props) {
   );
 }
 
-function labelFor(status: string, startedAt: number | null, i18nT: (key: string, opts?: Record<string, unknown>) => string): string {
+function labelFor(status: string, startedAt: number | null, i18nT: (key: string, opts?: string | Record<string, unknown>) => string): string {
   switch (status) {
     case 'outgoing-ringing':
       return i18nT('call.calling', 'CALLING…');
