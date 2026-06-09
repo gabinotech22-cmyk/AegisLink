@@ -25,3 +25,15 @@ aegislink-server.zip
 desktop/node_modules/
 server/node_modules/
 promo-video/node_modules/
+
+# Debug artifacts from emulator sessions (screenshots, UI dumps, logs)
+/_*.png
+/_*.xml
+/.log_*
+/.tmp_*
+/.raw_*
+/bugreport-*/
+*.apk
+
+# Internal session handoff — contains infra/access details, keep out of history
+docs/SESSION_HANDOFF.md

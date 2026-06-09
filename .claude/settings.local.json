@@ -97,7 +97,22 @@
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('webrtc version:', d['version']\\)\")",
       "Bash(python -c ' *)",
       "Bash(npm show *)",
-      "Bash(python -c \"import sys,json; versions=json.load\\(sys.stdin\\); v15=[v for v in versions if v.startswith\\('15.'\\)]; print\\('v15.x disponibles:', v15[-8:]\\)\")"
+      "Bash(python -c \"import sys,json; versions=json.load\\(sys.stdin\\); v15=[v for v in versions if v.startswith\\('15.'\\)]; print\\('v15.x disponibles:', v15[-8:]\\)\")",
+      "Bash(adb devices *)",
+      "PowerShell($adb = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"; if \\(Test-Path $adb\\) { & $adb devices -l } else { \"no en $adb\"; Get-ChildItem \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\" -Filter adb.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 3 FullName })",
+      "Bash(cd /c/Users/starl/Desktop/AegisLink/mobile && grep -rn \"getPendingResultAsync\" node_modules/expo-image-picker/build/*.d.ts node_modules/expo-image-picker/build/*.js 2>/dev/null | head -20; echo \"---version---\"; grep '\"version\"' node_modules/expo-image-picker/package.json)",
+      "Bash(git add *)",
+      "Bash(git push *)",
+      "Bash(gh pr *)",
+      "Bash(git credential *)",
+      "Bash(python gen_sounds.py)",
+      "Bash(grep -rnE \"aegislink-messages|aegislink-calls|aegislink-security\" mobile/src)",
+      "Bash(grep -rnE \"aegislink-messages|aegislink-calls|aegislink-security\" server/src)",
+      "Bash(sed -i 's/First-time SSL setup for AegisLink on Oracle Cloud VM/First-time SSL setup for AegisLink on AWS EC2/' infra/ssl/setup-ssl.sh)",
+      "Bash(sed -i 's/Ports 80 and 443 are open in Oracle Cloud security list and/Ports 80 and 443 are open in the AWS security group and/' infra/ssl/setup-ssl.sh)",
+      "Bash(sed -i 's/# 1\\\\. SSH into the Oracle Cloud VM/# 1. SSH into the AWS EC2 instance/' infra/ssl/README.md)",
+      "Bash(sed -i 's/relay Node\\\\.js en Oracle Cloud VM/relay Node.js en AWS EC2/' .github/SECRETS.md)",
+      "Bash(sed -i 's/IP pública de la VM Oracle/IP pública de la instancia AWS EC2/' .github/SECRETS.md)"
     ]
   }
 }
