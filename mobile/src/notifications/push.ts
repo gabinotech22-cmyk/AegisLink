@@ -342,7 +342,7 @@ export async function showIncomingNotification(
     if (prefs.notifBadge) {
       const { useMessages } = require('../store/messages');
       const unreadCounts = useMessages.getState().unreadCounts ?? {};
-      const totalUnread = Object.values(unreadCounts).reduce((acc: number, val: any) => acc + (typeof val === 'number' ? val : 0), 0);
+      const totalUnread = Object.values(unreadCounts).reduce((acc: number, val: unknown) => acc + (typeof val === 'number' ? val : 0), 0);
       await Notifications.setBadgeCountAsync(totalUnread + 1);
     }
   } catch (err) {
