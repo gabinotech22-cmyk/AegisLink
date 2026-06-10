@@ -560,8 +560,21 @@ export function connect(identity: Identity): Socket {
 
   socket.on('error_msg', async (e: { code?: string; for?: string }) => {
     if (__DEV__) console.warn('[socket] server error:', e);
-    if (e?.code === 'peer_offline') {
-      // The relay couldn't deliver our call:invite — callee is not connected.
+    if (e?.code === 'peer_offline' && e?.for === 'call:invite') {
+      // Only fatal for call:invite: the relay could not deliver our invite to
+      // the callee (no WebSocket connection AND no push tokens). In that case
+      // we must tear down the outgoing ringing state immediately.
+      //
+      // When e.for is anything else — e.g. 'call:ice' (trickle ICE candidate
+      // the relay couldn't forward) — the loss is non-fatal: WebRTC will
+      // complete ICE with the remaining candidates. Hanging up on an
+      // undeliverable ICE candidate would be a false positive that kills a
+      // call that is or will be connected.
+      //
+      // Note: if the callee HAS push tokens the relay enqueues the invite,
+      // sends an FCM/APNs wake-up, and does NOT emit peer_offline. The
+      // 45-second no_answer timeout in calls.ts handles the case where the
+      // callee never responds after waking up.
       const { endCall } = require('./calls') as typeof import('./calls');
       endCall('peer_offline');
       Alert.alert('Contact offline', 'The contact is not currently connected to the server. Try again later.');
