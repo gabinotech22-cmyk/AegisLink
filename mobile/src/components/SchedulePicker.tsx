@@ -101,8 +101,8 @@ export function SchedulePicker({ visible, onClose, onConfirm }: Props) {
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={[styles.sheet, { backgroundColor: t.surface, borderColor: t.border }]}>
-          <View style={styles.handle} />
+        <Pressable style={[styles.sheet, { backgroundColor: t.surface, borderColor: t.border, borderTopLeftRadius: t.radiusL, borderTopRightRadius: t.radiusL }]}>
+          <View style={[styles.handle, { backgroundColor: t.surface3 }]} />
 
           <Text style={[styles.title, { color: t.text, fontFamily: t.fontDisplay }]}>
             Programar mensaje
@@ -182,8 +182,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
     borderWidth: 1,
     borderBottomWidth: 0,
     padding: 20,
@@ -195,7 +193,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#555',
     marginBottom: 4,
   },
   title: {
