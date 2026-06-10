@@ -34,6 +34,17 @@ import {
   type OutboxJob,
 } from '../db/local';
 
+/**
+ * Ratchet/X3DH recovery diagnostics — DEV BUILDS ONLY. These trace who talks
+ * to whom (aegisIds, prekey ids, root-key fingerprints): exactly the
+ * communication metadata a release build must never write to the OS log
+ * (logcat is readable by adb and privileged apps). Belt and suspenders with
+ * babel's transform-remove-console, which also strips warn in production.
+ */
+function rdiag(msg: string): void {
+  if (__DEV__) console.warn(msg);
+}
+
 const getSlotPrefix = () => {
   const { getActiveDbSlot } = require('../db/local');
   const slot = getActiveDbSlot();
@@ -47,7 +58,7 @@ const opkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}opkSecret.${key
 const spkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}spkSecret.${keyId}`;
 
 /**
- * [RDIAG] TEMPORARY — short, non-reversible fingerprint of a derived key (first
+ * [RDIAG] Dev-only — short, non-reversible fingerprint of a derived key (first
  * 8 hex of SHA-256). Used ONLY to compare that Alice and Bob land on the SAME
  * X3DH root key on-device. It is a one-way hash of the key, never the key
  * itself, so logging it does not leak key material. Remove with the other
@@ -383,7 +394,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   if (!spkDbOk) {
     // INVARIANT: never publish a SPK whose secret we cannot read back. Abort the
     // upload entirely so the peer never fetches a bundle we cannot complete.
-    console.warn(`[RDIAG] prekey-store ABORT spkId=${nextSpkKeyId} dbReadback=NULL — NOT emitting prekeys:upload`);
+    rdiag(`[RDIAG] prekey-store ABORT spkId=${nextSpkKeyId} dbReadback=NULL — NOT emitting prekeys:upload`);
     throw new Error(`uploadPreKeys: could not persist SPK secret for keyId ${nextSpkKeyId} — refusing to publish`);
   }
 
@@ -449,7 +460,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   }
 
   // [RDIAG] confirm the SPK secret is readable back from the DURABLE store.
-  console.warn(`[RDIAG] prekey-store DONE spkId=${nextSpkKeyId} dbReadback=OK opkCount=${preKeys.opkSecrets.size}`);
+  rdiag(`[RDIAG] prekey-store DONE spkId=${nextSpkKeyId} dbReadback=OK opkCount=${preKeys.opkSecrets.size}`);
 
   return new Promise<void>((resolve, reject) => {
     socket!.emit('prekeys:upload', {
@@ -741,7 +752,7 @@ export function connect(identity: Identity): Socket {
   });
 
   socket.on('envelope', async (env: WireSealedEnvelope) => {
-    console.warn(`[RDIAG] envelope RECV from=${env.from ?? '(none)'} hasSenderPub=${!!env.senderPublicKeyB64} self=${!!env.selfCopy}`);
+    rdiag(`[RDIAG] envelope RECV from=${env.from ?? '(none)'} hasSenderPub=${!!env.senderPublicKeyB64} self=${!!env.selfCopy}`);
     await handleIncoming(env, identity);
   });
 
@@ -1056,12 +1067,12 @@ async function getOrCreateSession(contactAegisId: string, contactPublicKeyB64: s
 
   const x3dh = performX3DH(identity, bundle);
 
-  // [RDIAG] TEMPORARY (no __DEV__ guard). Alice side: log the SPK/OPK ids she
+  // [RDIAG] Dev-only (rdiag). Alice side: log the SPK/OPK ids she
   // committed to from the peer's bundle and a short fingerprint of the derived
   // root key. Compare against Bob's `[RDIAG] x3dh-recv` line: if the fp differs
   // the two derived DIFFERENT root keys (e.g. SPK rotated under Bob, or OPK
   // present on Alice but absent on Bob → DH4 omitted asymmetrically).
-  console.warn(
+  rdiag(
     `[RDIAG] x3dh-send me=${identity.aegisId} peer=${contactAegisId} spkId=${bundle.signedPreKey.keyId} opkId=${bundle.oneTimePreKey ? bundle.oneTimePreKey.keyId : 'none'} rkFp=${rootKeyFp(x3dh.rootKey)}`,
   );
 
@@ -1219,7 +1230,7 @@ async function sendNudgeOverExistingSession(
       ciphertext: envelope.ciphertextB64,
       nonce: envelope.nonceB64,
     });
-    console.warn(`[RDIAG] nudge sent me=${identity.aegisId} -> peer=${contact.aegisId}`);
+    rdiag(`[RDIAG] nudge sent me=${identity.aegisId} -> peer=${contact.aegisId}`);
     return true;
   } catch (e) {
     if (__DEV__) console.warn('[socket] desync nudge send failed:', (e as Error).message);
@@ -1252,8 +1263,8 @@ async function tryRecoverDesync(
 
   const initiator = amInitiatorFor(identity.aegisId, contact.aegisId);
 
-  // [RDIAG] TEMPORARY (no __DEV__ guard — verify in release; remove later).
-  console.warn(
+  // [RDIAG] Dev-only (rdiag).
+  rdiag(
     `[RDIAG] desync detected me=${identity.aegisId} peer=${contact.aegisId} decision=${initiator ? 'INITIATE' : 'NUDGE'}`,
   );
 
@@ -1281,7 +1292,7 @@ async function tryRecoverDesync(
       // peer this way. Leave the recovery marker set so any inbound init from
       // the higher peer is adopted; clear it after the window so we don't get
       // wedged. Do NOT build/save our own init (that is the clobber we avoid).
-      console.warn(`[RDIAG] non-initiator no-session: waiting for higher peer's init me=${identity.aegisId} peer=${contact.aegisId}`);
+      rdiag(`[RDIAG] non-initiator no-session: waiting for higher peer's init me=${identity.aegisId} peer=${contact.aegisId}`);
     }
     // NOTE: we intentionally do NOT flush the outbox here. Flushing now would
     // emit messages over the desynced session that fail on the peer and
@@ -1297,7 +1308,7 @@ async function tryRecoverDesync(
   // decryptAndAppend) so our init is the single canonical session.
   await deleteContactRatchetSession(contact.aegisId);
 
-  console.warn(`[RDIAG] emitting recovery init me=${identity.aegisId} -> peer=${contact.aegisId} initiator=true`);
+  rdiag(`[RDIAG] emitting recovery init me=${identity.aegisId} -> peer=${contact.aegisId} initiator=true`);
   try {
     await sendProfileTo(contact, identity);
   } catch (e) {
@@ -1315,7 +1326,7 @@ async function tryRecoverDesync(
   setTimeout(() => {
     if (isInRecovery(peerId)) {
       inRecoveryUntilMs.delete(peerId);
-      console.warn(`[RDIAG] recovery fallback flush me=${identity.aegisId} peer=${peerId}`);
+      rdiag(`[RDIAG] recovery fallback flush me=${identity.aegisId} peer=${peerId}`);
       void flushOutbox(identity).catch(() => {});
     }
   }, RECOVERY_FALLBACK_MS);
@@ -1398,7 +1409,7 @@ async function decryptAndAppend(
     let myInitPending = false;
     try { myInitPending = !!JSON.parse(existingJson).x3dhInit; } catch { /* treat as established */ }
     if (myInitPending || isInRecovery(contact.aegisId)) {
-      console.warn(
+      rdiag(
         `[RDIAG] glare: higher keeps own init, ignoring lower's me=${identity.aegisId} peer=${contact.aegisId} pending=${myInitPending} recovery=${isInRecovery(contact.aegisId)}`,
       );
       return false; // ignore the lower peer's init; ours wins
@@ -1406,7 +1417,7 @@ async function decryptAndAppend(
     // Otherwise our session is ESTABLISHED and the lower peer is legitimately
     // re-initiating (e.g. they reinstalled / re-keyed). Fall through to adopt
     // their fresh init so we converge on their new keys.
-    console.warn(`[RDIAG] established session + lower re-init → adopting (rekey) me=${identity.aegisId} peer=${contact.aegisId}`);
+    rdiag(`[RDIAG] established session + lower re-init → adopting (rekey) me=${identity.aegisId} peer=${contact.aegisId}`);
   }
 
   if (existingJson && !parsed.x3dh) {
@@ -1422,7 +1433,7 @@ async function decryptAndAppend(
   } else {
     // Bob doesn't have a session, or the sender is re-keying/starting a fresh session via X3DH setup!
     if (!parsed.x3dh) {
-      console.warn(`[RDIAG] DROP no-session-no-x3dh from=${contact.aegisId} inRecovery=${isInRecovery(contact.aegisId)}`);
+      rdiag(`[RDIAG] DROP no-session-no-x3dh from=${contact.aegisId} inRecovery=${isInRecovery(contact.aegisId)}`);
       if (__DEV__) console.warn('[socket] No session and no X3DH headers received — dropping message');
       return false;
     }
@@ -1459,7 +1470,7 @@ async function decryptAndAppend(
       spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
     }
     if (!spkSec) {
-      console.warn(`[RDIAG] x3dh-recv ABORT no-spk me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId}`);
+      rdiag(`[RDIAG] x3dh-recv ABORT no-spk me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId}`);
       if (__DEV__) console.warn('[socket] mySpkSecret not found in DB or SecureStore — cannot decrypt');
       return false;
     }
@@ -1492,7 +1503,7 @@ async function decryptAndAppend(
         // instead of permanently losing DH4 and desyncing.
         consumeOpkIdAfterDecrypt = parsed.x3dh.opkId;
       } else {
-        console.warn(
+        rdiag(
           `[RDIAG] x3dh-recv ABORT opk-missing me=${identity.aegisId} peer=${contact.aegisId} opkId=${parsed.x3dh.opkId} — Alice used DH4, Bob cannot; would desync`,
         );
         if (__DEV__) console.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— aborting (would desync)');
@@ -1510,11 +1521,11 @@ async function decryptAndAppend(
       decodeBase64(parsed.x3dh.aliceEKB64)
     );
 
-    // [RDIAG] TEMPORARY (no __DEV__ guard). Bob side: log presence of each secret
+    // [RDIAG] Dev-only (rdiag). Bob side: log presence of each secret
     // and the derived root-key fingerprint. Compare rkFp against Alice's
     // `[RDIAG] x3dh-send`. Equal fp ⇒ symmetric derivation (fix working);
     // different fp ⇒ which input diverged (spkFromKeyId / opkPresent narrow it).
-    console.warn(
+    rdiag(
       `[RDIAG] x3dh-recv me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId} spkFromKeyId=${spkSecFromKeyId} opkId=${parsed.x3dh.opkId ?? 'none'} opkPresent=${opkPresent} rkFp=${rootKeyFp(rootKey)}`,
     );
 
@@ -1528,11 +1539,11 @@ async function decryptAndAppend(
       secretKey: mySpkSecret,
     });
 
-    // [RDIAG] TEMPORARY (no __DEV__ guard). Adopting an inbound X3DH init.
+    // [RDIAG] Dev-only (rdiag). Adopting an inbound X3DH init.
     // Logs whether this replaced an existing (recovery) session — the convergence
     // signal we want to confirm on-device: the WAITING (lower) peer should adopt
     // the initiator's session here.
-    console.warn(
+    rdiag(
       `[RDIAG] adopting inbound init me=${identity.aegisId} peer=${contact.aegisId} replacedExisting=${!!existingJson} inRecovery=${isInRecovery(contact.aegisId)}`,
     );
     // Converged: clear the recovery marker so stale in-flight messages on the old
@@ -2702,8 +2713,8 @@ export async function sendMessage(opts: {
     isInRecovery(opts.recipientAegisId) &&
     !amInitiatorFor(opts.identity.aegisId, opts.recipientAegisId)
   ) {
-    // [RDIAG] TEMPORARY.
-    console.warn(
+    // [RDIAG] Dev-only (rdiag).
+    rdiag(
       `[RDIAG] deferring send to outbox (waiting for peer init) me=${opts.identity.aegisId} peer=${opts.recipientAegisId}`,
     );
     return; // flushOutbox() drains after convergence
@@ -2884,9 +2895,9 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
     const { envelope, newState } = encryptMessage(payload, identity.aegisId, recipientPub, identity.secretKey, session);
     await saveSessionState(contact.aegisId, newState);
     socket!.emit('envelope', { id: Crypto.randomUUID(), to: contact.aegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64, ...(isInit ? { init: true } : {}) });
-    console.warn(`[RDIAG] sendProfileTo EMITTED to=${contact.aegisId} isInit=${isInit}`);
+    rdiag(`[RDIAG] sendProfileTo EMITTED to=${contact.aegisId} isInit=${isInit}`);
   } catch (e) {
-    console.warn(`[RDIAG] sendProfileTo FAILED to=${contact.aegisId} err=${(e as Error).message}`);
+    rdiag(`[RDIAG] sendProfileTo FAILED to=${contact.aegisId} err=${(e as Error).message}`);
     if (__DEV__) console.warn('[socket] sendProfileTo failed:', (e as Error).message);
   }
 }
