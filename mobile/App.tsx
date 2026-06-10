@@ -109,6 +109,9 @@ const SCHEDULED_TASK_NAME = 'aegis.scheduled-sender';
 })();
 import type { Tab } from './src/components/TabBar';
 import type { StoredContact, StoredGroup } from './src/db/local';
+import { useTranslation } from 'react-i18next';
+import { useContacts as useContactsStore } from './src/store/contacts';
+import { ContactPickerSheet } from './src/components/ContactPickerSheet';
 
 type PushRoute =
   | { name: 'chat'; contact: StoredContact }
@@ -181,7 +184,9 @@ function AnimatedScreen({ children, stackDepth }: { children: React.ReactNode; s
 
 function Shell() {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const { identity, status, hydrated, hydrate } = useIdentity();
+  const allContacts = useContactsStore((s) => s.contacts);
   const blockScreenshots = usePreferences((s) => s.blockScreenshots);
   const hideRecents = usePreferences((s) => s.hideRecents);
   const hydratePrefs = usePreferences((s) => s.hydrate);
@@ -635,8 +640,56 @@ function Shell() {
     setTab(tabId);
   }, []);
 
+  // ── Compartir contacto (1:1 y grupos) — Vault sheet, no Alert nativo ───────
+  const [contactShare, setContactShare] = useState<{
+    isGroup: boolean;
+    targetId: string;
+    targetKeyB64?: string;
+    exclude: string[];
+  } | null>(null);
+
+  const shareContactCard = useCallback(async (picked: StoredContact) => {
+    const share = contactShare;
+    setContactShare(null);
+    if (!share) return;
+    const body = `[contact:${picked.name}:${picked.aegisId}]`;
+    const { useMessages } = require('./src/store/messages');
+    const { randomUUID } = await import('expo-crypto');
+    await useMessages.getState().append({
+      id: randomUUID(),
+      chatId: share.targetId,
+      direction: 'out',
+      body,
+      createdAt: Date.now(),
+      type: 'text',
+    });
+    if (identity) {
+      try {
+        if (share.isGroup) {
+          const { sendGroupMessage } = require('./src/socket/client');
+          await sendGroupMessage({ identity, groupId: share.targetId, plaintext: body, skipLocalAppend: true });
+        } else {
+          const { sendMessage } = require('./src/socket/client');
+          const { decodeBase64 } = require('tweetnacl-util');
+          await sendMessage({
+            identity,
+            recipientAegisId: share.targetId,
+            recipientPublicKey: decodeBase64(share.targetKeyB64 ?? ''),
+            plaintext: body,
+          });
+        }
+      } catch { /* queued by outbox */ }
+    }
+    pop(); // close the attach screen under the sheet
+  }, [contactShare, identity, pop]);
+
   // ── Deep link handling ──────────────────────────────────────────────────────
   const handleDeepLink = useCallback(async (url: string) => {
+    // https universal links (aegislink.duckdns.org/g#…, /a#…) normalize to
+    // their aegislink:// equivalent. Panic has NO universal form by design —
+    // only the raw scheme can ever reach the wipe branch below.
+    const { universalToScheme } = require('./src/crypto/qr') as typeof import('./src/crypto/qr');
+    url = universalToScheme(url) ?? url;
     if (!url.startsWith('aegislink://')) return;
 
     // Remote panic wipe — handlePanicDeepLink does full Ed25519 + token
@@ -666,7 +719,43 @@ function Shell() {
       }
       return;
     }
-  }, [push]);
+
+    // Contact link: aegislink://v1/<AEGIS_ID>/<pubkeyB64> — same payload as the
+    // identity QR. Confirm before adding (TOFU via addFromQR, which detects a
+    // key change for an existing contact and refuses to overwrite silently).
+    if (url.startsWith('aegislink://v1/')) {
+      const { parseIdentityQR } = require('./src/crypto/qr') as typeof import('./src/crypto/qr');
+      const parsed = parseIdentityQR(url);
+      if (!parsed) return;
+      const { Alert } = require('react-native');
+      Alert.alert(
+        i18nT('addContact.linkConfirmTitle', 'Agregar contacto'),
+        i18nT('addContact.linkConfirmDesc', '¿Agregar a {{id}} como contacto?', { id: parsed.aegisId }),
+        [
+          { text: i18nT('common.cancel', 'Cancelar'), style: 'cancel' },
+          {
+            text: i18nT('addContact.linkConfirmAdd', 'Agregar'),
+            onPress: () => {
+              void (async () => {
+                const { useContacts } = require('./src/store/contacts') as typeof import('./src/store/contacts');
+                const res = await useContacts.getState().addFromQR(parsed.aegisId, parsed.publicKeyB64);
+                if (res.kind === 'mitm_detected') {
+                  Alert.alert(
+                    i18nT('addContact.keyMismatchTitle', 'Clave distinta'),
+                    i18nT('addContact.keyMismatchDesc', 'Ya tienes este contacto con OTRA clave pública. No se ha modificado. Verifica con la otra persona antes de continuar.'),
+                  );
+                  return;
+                }
+                const contact = res.contact;
+                if (contact) push({ name: 'contact', contact });
+              })();
+            },
+          },
+        ],
+      );
+      return;
+    }
+  }, [push, i18nT]);
 
   useEffect(() => {
     Linking.getInitialURL().then((url: string | null) => {
@@ -965,52 +1054,12 @@ function Shell() {
               } else if (kind === 'video') {
                 handleVideoPick(top.contact).then(pop).catch(() => {});
               } else if (kind === 'contact') {
-                const { useContacts } = require('./src/store/contacts');
-                const contacts: StoredContact[] = useContacts.getState().contacts.filter(
-                  (c: StoredContact) => c.aegisId !== top.contact.aegisId
-                );
-                if (contacts.length === 0) {
-                  const { Alert } = require('react-native');
-                  Alert.alert('Sin contactos', 'No tienes otros contactos para compartir.');
-                  return;
-                }
-                const { Alert } = require('react-native');
-                Alert.alert(
-                  'Compartir contacto',
-                  'Selecciona un contacto para compartir su ID',
-                  [
-                    ...contacts.slice(0, 5).map((c: StoredContact) => ({
-                      text: c.name,
-                      onPress: async () => {
-                        const { useMessages } = require('./src/store/messages');
-                        const { randomUUID } = await import('expo-crypto');
-                        const msgId = randomUUID();
-                        await useMessages.getState().append({
-                          id: msgId,
-                          chatId: top.contact.aegisId,
-                          direction: 'out',
-                          body: `[contact:${c.name}:${c.aegisId}]`,
-                          createdAt: Date.now(),
-                          type: 'text',
-                        });
-                        if (identity) {
-                          const { sendMessage } = require('./src/socket/client');
-                          const { decodeBase64 } = require('tweetnacl-util');
-                          try {
-                            await sendMessage({
-                              identity,
-                              recipientAegisId: top.contact.aegisId,
-                              recipientPublicKey: decodeBase64(top.contact.publicKeyB64),
-                              plaintext: `[contact:${c.name}:${c.aegisId}]`,
-                            });
-                          } catch { /* queued */ }
-                        }
-                        pop();
-                      },
-                    })),
-                    { text: 'Cancelar', style: 'cancel' },
-                  ]
-                );
+                setContactShare({
+                  isGroup: false,
+                  targetId: top.contact.aegisId,
+                  targetKeyB64: top.contact.publicKeyB64,
+                  exclude: [top.contact.aegisId],
+                });
               }
               else pop();
             }}
@@ -1085,46 +1134,11 @@ function Shell() {
               } else if (kind === 'video') {
                 handleGroupVideoPick(top.group).then(pop).catch(() => {});
               } else if (kind === 'contact') {
-                const { useContacts: _uc } = require('./src/store/contacts');
-                const allContacts: StoredContact[] = _uc.getState().contacts.filter(
-                  (c: StoredContact) => !top.group.members.includes(c.aegisId),
-                );
-                if (allContacts.length === 0) {
-                  const { Alert: A } = require('react-native');
-                  A.alert('Sin contactos', 'No tienes contactos fuera del grupo para compartir.');
-                  return;
-                }
-                const { Alert: A } = require('react-native');
-                A.alert(
-                  'Compartir contacto',
-                  'Selecciona un contacto para compartir su ID',
-                  [
-                    ...allContacts.slice(0, 5).map((c: StoredContact) => ({
-                      text: c.name,
-                      onPress: async () => {
-                        const { useMessages: _um } = require('./src/store/messages');
-                        const { randomUUID: _uuid } = await import('expo-crypto');
-                        const msgId = _uuid();
-                        await _um.getState().append({
-                          id: msgId,
-                          chatId: top.group.id,
-                          direction: 'out',
-                          body: `[contact:${c.name}:${c.aegisId}]`,
-                          createdAt: Date.now(),
-                          type: 'text',
-                        });
-                        if (identity) {
-                          const { sendGroupMessage: _sg } = require('./src/socket/client');
-                          try {
-                            await _sg({ identity, groupId: top.group.id, plaintext: `[contact:${c.name}:${c.aegisId}]` });
-                          } catch { /* queued */ }
-                        }
-                        pop();
-                      },
-                    })),
-                    { text: 'Cancelar', style: 'cancel' },
-                  ],
-                );
+                setContactShare({
+                  isGroup: true,
+                  targetId: top.group.id,
+                  exclude: top.group.members,
+                });
               } else {
                 // scheduled, location, viewoncesend — not yet implemented for groups
                 pop();
@@ -1235,6 +1249,16 @@ function Shell() {
     return (
       <AnimatedScreen stackDepth={stack.length}>
         {renderTop() ?? null}
+        <ContactPickerSheet
+          t={t}
+          visible={contactShare !== null}
+          contacts={allContacts.filter((c) => !(contactShare?.exclude ?? []).includes(c.aegisId))}
+          title={i18nT('attach.shareContactTitle', 'Compartir contacto')}
+          emptyText={i18nT('attach.shareContactEmpty', 'No tienes contactos disponibles para compartir.')}
+          trailingIcon="send"
+          onClose={() => setContactShare(null)}
+          onPick={(c) => { void shareContactCard(c); }}
+        />
       </AnimatedScreen>
     );
   }
