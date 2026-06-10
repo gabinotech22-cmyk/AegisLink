@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-HOST="${DEPLOY_HOST:-51.20.60.155}"
+HOST="${DEPLOY_HOST:?Set DEPLOY_HOST to the VM public IP or hostname}"
 USER="${DEPLOY_USER:-ubuntu}"
 SSH_KEY="${SSH_KEY:?Set SSH_KEY to the path of the VM private key}"
 
