@@ -341,9 +341,9 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     strong: i18nT('backup.strong'),
   };
   const strengthColor: Record<PassphraseStrength, string> = {
-    too_short: '#ef4444',
-    weak: '#f59e0b',
-    fair: '#eab308',
+    too_short: t.danger,
+    weak: t.warn,
+    fair: t.accentDeep,
     strong: t.accent,
   };
 
