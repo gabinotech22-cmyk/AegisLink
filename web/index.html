@@ -1,0 +1,1383 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Mensajería sin rastro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="description" content="Mensajería cifrada de extremo a extremo, anónima y sin metadatos. Sin teléfono, sin email, sin cuentas. Código abierto (MIT), cliente y servidor."/>
+  <meta property="og:type" content="website"/>
+  <meta property="og:title" content="AegisLink — Mensajería sin rastro"/>
+  <meta property="og:description" content="Mensajería E2EE anónima y sin metadatos. Sin teléfono, sin email. Código abierto (MIT), cliente y servidor."/>
+  <meta property="og:url" content="https://aegislink.duckdns.org"/>
+  <meta property="og:site_name" content="AegisLink"/>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2040%2040'%3E%3Cpath%20d='M20%202%20L35%2010%20L35%2030%20L20%2038%20L5%2030%20L5%2010%20Z'%20fill='none'%20stroke='%235bf2b9'%20stroke-width='2.4'%20stroke-linejoin='round'/%3E%3Crect%20x='13'%20y='15'%20width='14'%20height='3.2'%20rx='0.4'%20fill='%235bf2b9'/%3E%3Crect%20x='13'%20y='21.8'%20width='14'%20height='3.2'%20rx='0.4'%20fill='%235bf2b9'%20opacity='0.55'/%3E%3C/svg%3E"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:wght@400;500;600&display=swap"/>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+  <style>
+    :root {
+      --bg: #07090a;
+      --bg-2: #0d1112;
+      --surface: #11181a;
+      --surface-2: #1a2326;
+      --border: rgba(255,255,255,0.08);
+      --border-strong: rgba(255,255,255,0.16);
+      --text: #e8f0ec;
+      --text-dim: rgba(232,240,236,0.62);
+      --text-faint: rgba(232,240,236,0.36);
+      --accent: #5bf2b9;
+      --accent-deep: #1f8a5b;
+      --danger: #ff6b6b;
+      --warn: #f0c674;
+      --serif: 'EB Garamond', Garamond, serif;
+      --sans: 'Space Grotesk', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+                 font-family: var(--sans); -webkit-font-smoothing: antialiased;
+                 line-height: 1.5; }
+    a { color: inherit; text-decoration: none; }
+    button { font-family: inherit; cursor: pointer; }
+    section[id], header[id] { scroll-margin-top: 76px; }
+
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 0 32px; }
+
+    /* ── Nav ────────────────────────────────────────── */
+    .nav {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      background: rgba(7,9,10,0.7);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 0; gap: 24px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand svg { display: block; }
+    .brand-name { font-family: var(--serif); font-weight: 500; font-size: 22px;
+                  letter-spacing: -0.01em; }
+    .nav-links { display: flex; gap: 28px; }
+    .nav-links a { font-size: 13px; color: var(--text-dim);
+                   transition: color 0.15s; }
+    .nav-links a:hover { color: var(--text); }
+    .btn { display: inline-flex; align-items: center; gap: 6px;
+           padding: 9px 16px; border-radius: 999px; font-size: 13px;
+           font-weight: 600; transition: transform 0.15s; }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary { background: var(--accent); color: #06231a; border: none; }
+    .btn-ghost { background: transparent; color: var(--text);
+                 border: 1px solid var(--border-strong); }
+    .btn-disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-disabled:hover { transform: none; }
+    .soon-tag {
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+      color: var(--accent); border: 1px solid rgba(91,242,185,0.45);
+      border-radius: 99px; padding: 1px 7px; margin-left: 4px;
+      text-transform: uppercase;
+    }
+
+    /* ── Hero ───────────────────────────────────────── */
+    .hero { padding: 92px 0 80px; position: relative; overflow: hidden; }
+    .hero-bg {
+      position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(60% 50% at 20% 30%, rgba(91,242,185,0.10), transparent 60%),
+        radial-gradient(50% 40% at 90% 80%, rgba(91,242,185,0.06), transparent 70%);
+    }
+    .hero-grid {
+      position: absolute; inset: 0; opacity: 0.4; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(91,242,185,0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(91,242,185,0.05) 1px, transparent 1px);
+      background-size: 64px 64px;
+      mask-image: radial-gradient(circle at 50% 30%, black, transparent 75%);
+      -webkit-mask-image: radial-gradient(circle at 50% 30%, black, transparent 75%);
+      animation: grid-drift 24s linear infinite;
+    }
+    @keyframes grid-drift {
+      from { background-position: 0 0, 0 0; }
+      to   { background-position: 0 64px, 64px 0; }
+    }
+    .hero-scan {
+      position: absolute; inset: -100% 0 0 0; pointer-events: none; opacity: 0.05;
+      background: repeating-linear-gradient(
+        180deg, transparent 0px, transparent 3px,
+        rgba(91,242,185,0.6) 3px, rgba(91,242,185,0.6) 4px);
+      animation: scan-fall 14s linear infinite;
+      mask-image: radial-gradient(circle at 50% 60%, black, transparent 80%);
+      -webkit-mask-image: radial-gradient(circle at 50% 60%, black, transparent 80%);
+    }
+    @keyframes scan-fall {
+      from { transform: translateY(0); }
+      to   { transform: translateY(50%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .hero-grid, .hero-scan { animation: none; }
+      .hero-scan { display: none; }
+    }
+    .hero-inner { position: relative; display: grid; grid-template-columns: 1.05fr 1fr;
+                  gap: 64px; align-items: center; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 12px; border-radius: 999px;
+      background: rgba(91,242,185,0.10);
+      border: 1px solid rgba(91,242,185,0.30);
+      font-family: var(--mono); font-size: 11px; color: var(--accent);
+      letter-spacing: 0.1em;
+    }
+    .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    h1.hero-title {
+      font-family: var(--serif); font-weight: 500;
+      font-size: clamp(56px, 7.5vw, 110px); line-height: 0.95;
+      letter-spacing: -0.025em; margin: 22px 0 18px;
+    }
+    h1.hero-title em { font-style: italic; color: var(--accent); }
+    .hero-sub { font-size: 19px; color: var(--text-dim); max-width: 480px;
+                margin-bottom: 28px; }
+    .hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+    .hero-meta {
+      margin-top: 36px; display: flex; gap: 28px; flex-wrap: wrap;
+      font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+      letter-spacing: 0.08em;
+    }
+    .hero-meta b { color: var(--text); font-weight: 600; }
+
+    /* Hero visual — 3D + phone with overlay terminal */
+    .hero-visual { position: relative; min-height: 540px; }
+    .hero3d {
+      position: absolute; inset: -120px -90px; z-index: 0; pointer-events: none;
+    }
+    .hero3d canvas { display: block; width: 100%; height: 100%; }
+    .hero-fallback {
+      position: absolute; inset: -60px; z-index: 0; pointer-events: none;
+      display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(45% 45% at 50% 50%, rgba(91,242,185,0.14), transparent 70%);
+      transition: opacity 0.8s;
+    }
+    .hero-fallback svg { opacity: 0.16; filter: drop-shadow(0 0 32px rgba(91,242,185,0.5)); }
+    .hero-fallback.hidden3d { opacity: 0; }
+    .phone-mock {
+      position: relative; z-index: 2;
+      width: 320px; height: 660px;
+      border-radius: 44px;
+      padding: 12px;
+      background: linear-gradient(180deg, #11181a, #0a0e0d);
+      box-shadow: 0 40px 80px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05),
+                  0 0 90px rgba(91,242,185,0.07);
+      margin: 0 auto;
+    }
+    .phone-screen {
+      width: 100%; height: 100%; border-radius: 34px; overflow: hidden;
+      background: #06090a; position: relative;
+      display: flex; flex-direction: column;
+      padding: 38px 18px 18px;
+    }
+    .phone-screen .notch {
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      width: 90px; height: 22px; background: #000; border-radius: 16px;
+    }
+    .ps-head {
+      display: flex; justify-content: space-between; align-items: center;
+      padding-bottom: 14px; border-bottom: 1px solid var(--border);
+    }
+    .ps-head .name { font-family: var(--mono); font-size: 13px; }
+    .ps-head .e2ee {
+      font-family: var(--mono); font-size: 9px; color: var(--accent);
+      letter-spacing: 0.08em; padding: 2px 6px;
+      border: 1px solid var(--accent); border-radius: 99px;
+    }
+    .ps-msgs { padding: 12px 4px; display: flex; flex-direction: column; gap: 8px; flex: 1;
+               overflow: hidden; transition: opacity 0.5s; }
+    .ps-msgs.fading { opacity: 0; }
+    .bubble { padding: 9px 12px; border-radius: 14px; max-width: 78%;
+              font-size: 13px; line-height: 1.35; }
+    .bubble.them { background: #1a2326; align-self: flex-start;
+                   border-top-left-radius: 6px; }
+    .bubble.me   { background: var(--accent); color: #06231a;
+                   align-self: flex-end; border-top-right-radius: 6px; font-weight: 500; }
+    .bubble.mono { font-family: var(--mono); font-size: 11px; }
+    .bubble-meta { font-family: var(--mono); font-size: 9px;
+                   color: var(--text-faint); padding: 2px 4px;
+                   letter-spacing: 0.06em; }
+    .bubble-meta.me { align-self: flex-end; }
+    .typing-dots { display: inline-flex; gap: 4px; align-items: center; height: 12px; }
+    .typing-dots i {
+      width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim);
+      animation: tdots 1s infinite;
+    }
+    .typing-dots i:nth-child(2) { animation-delay: 0.15s; }
+    .typing-dots i:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes tdots {
+      0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+      30% { opacity: 1; transform: translateY(-2px); }
+    }
+    .ps-composer {
+      display: flex; gap: 6px; padding: 8px 4px;
+      align-items: center;
+    }
+    .ps-composer .input { flex: 1; padding: 8px 12px; background: #1a2326;
+                          border-radius: 99px; font-size: 12px; color: var(--text-dim); }
+    .ps-composer .send { width: 30px; height: 30px; border-radius: 50%;
+                         background: var(--accent); }
+
+    /* Floating cards next to phone */
+    .float-card {
+      position: absolute; z-index: 3; padding: 12px 14px;
+      background: rgba(17,24,26,0.92); backdrop-filter: blur(14px);
+      border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+      font-size: 12px;
+    }
+    .float-card .label { font-family: var(--mono); font-size: 9px;
+                         color: var(--accent); letter-spacing: 0.1em;
+                         text-transform: uppercase; margin-bottom: 4px; }
+    .float-card .v { font-family: var(--mono); font-size: 13px; color: var(--text); }
+    .fc-1 { left: -32px; top: 92px; }
+    .fc-2 { right: -28px; top: 230px; }
+    .fc-3 { left: 8px; bottom: 80px; }
+
+    /* ── Scroll reveal ──────────────────────────────── */
+    .reveal { opacity: 0; transform: translateY(26px);
+              transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1); }
+    .reveal.in { opacity: 1; transform: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .reveal { opacity: 1; transform: none; transition: none; }
+    }
+
+    /* ── Tagline strip ──────────────────────────────── */
+    .tagline {
+      padding: 36px 0; border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .tagline-row {
+      display: flex; justify-content: space-around; align-items: center;
+      flex-wrap: wrap; gap: 24px;
+      font-family: var(--mono); font-size: 13px; letter-spacing: 0.06em;
+      color: var(--text-dim);
+    }
+    .tagline-row b { color: var(--accent); }
+
+    /* ── Pillars ────────────────────────────────────── */
+    .section { padding: 100px 0; position: relative; }
+    .section-head { margin-bottom: 56px; max-width: 760px; }
+    .section-eyebrow {
+      font-family: var(--mono); font-size: 11px; color: var(--accent);
+      letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 14px;
+    }
+    .section-title {
+      font-family: var(--serif); font-weight: 500;
+      font-size: clamp(38px, 4.5vw, 64px); line-height: 1; letter-spacing: -0.02em;
+      margin: 0 0 18px;
+    }
+    .section-lead { font-size: 18px; color: var(--text-dim); max-width: 560px; }
+
+    .pillars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+    .pillar {
+      padding: 26px 22px; border: 1px solid var(--border);
+      border-radius: 14px; background: var(--surface);
+      transition: border-color 0.2s, transform 0.2s;
+      will-change: transform;
+    }
+    .pillar:hover { border-color: rgba(91,242,185,0.4); }
+    .pillar .n { font-family: var(--mono); font-size: 11px; color: var(--accent);
+                 letter-spacing: 0.1em; margin-bottom: 14px; }
+    .pillar h3 { font-family: var(--serif); font-weight: 500; font-size: 24px;
+                 letter-spacing: -0.01em; margin: 0 0 10px; line-height: 1.2; }
+    .pillar p { font-size: 13.5px; color: var(--text-dim); line-height: 1.5; margin: 0; }
+
+    /* ── How it works ──────────────────────────────── */
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .step {
+      padding: 28px 24px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 14px;
+      position: relative; overflow: hidden;
+      transition: border-color 0.2s, transform 0.2s;
+      will-change: transform;
+    }
+    .step:hover { border-color: rgba(91,242,185,0.4); }
+    .step-num {
+      font-family: var(--serif); font-weight: 500; font-size: 96px;
+      color: rgba(91,242,185,0.12); position: absolute; right: 16px; top: -16px;
+      line-height: 1; letter-spacing: -0.04em;
+    }
+    .step h4 { font-family: var(--serif); font-weight: 500; font-size: 28px;
+               letter-spacing: -0.01em; margin: 0 0 12px; position: relative; line-height: 1.1; }
+    .step p { font-size: 14px; color: var(--text-dim); line-height: 1.55; margin: 0; position: relative; }
+    .step .glyph {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: rgba(91,242,185,0.10); color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 18px; position: relative;
+    }
+
+    /* ── Features grid ──────────────────────────────── */
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+                background: var(--border); border: 1px solid var(--border);
+                border-radius: 14px; overflow: hidden; }
+    .feat { padding: 30px 26px; background: var(--bg-2);
+            display: flex; flex-direction: column; gap: 10px;
+            transition: background 0.15s; }
+    .feat:hover { background: var(--surface); }
+    .feat .ico {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: rgba(91,242,185,0.08); color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 4px;
+    }
+    .feat h5 { font-family: var(--sans); font-weight: 600; font-size: 16px;
+               margin: 0; letter-spacing: -0.01em; }
+    .feat p { font-size: 13px; color: var(--text-dim); margin: 0; line-height: 1.5; }
+
+    /* ── Security panel ─────────────────────────────── */
+    .trust {
+      padding: 56px 48px;
+      background: linear-gradient(135deg, #0c1717, #06090a);
+      border: 1px solid var(--border); border-radius: 18px;
+      position: relative; overflow: hidden;
+    }
+    .trust-grid {
+      position: absolute; inset: 0; opacity: 0.4;
+      background-image:
+        linear-gradient(rgba(91,242,185,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(91,242,185,0.06) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at 80% 50%, black, transparent 70%);
+      -webkit-mask-image: radial-gradient(ellipse at 80% 50%, black, transparent 70%);
+    }
+    .trust-inner { position: relative; display: grid; grid-template-columns: 1.2fr 1fr;
+                   gap: 56px; align-items: center; }
+    .trust .checks { display: flex; flex-direction: column; gap: 16px;
+                     padding: 22px; background: rgba(255,255,255,0.02);
+                     border: 1px solid var(--border); border-radius: 14px; }
+    .check { display: flex; gap: 12px; align-items: flex-start; }
+    .check .ok {
+      width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
+      color: #06231a; display: flex; align-items: center; justify-content: center;
+      font-weight: 700; flex-shrink: 0; font-size: 13px;
+    }
+    .check .body strong { display: block; font-family: var(--sans);
+                          font-weight: 600; margin-bottom: 2px; }
+    .check .body span { font-size: 13px; color: var(--text-dim); }
+
+    /* ── Comparison ─────────────────────────────────── */
+    .compare {
+      border: 1px solid var(--border); border-radius: 14px;
+      overflow: hidden; background: var(--surface);
+    }
+    .compare-scroll { overflow-x: auto; }
+    .compare table { width: 100%; border-collapse: collapse; min-width: 640px; }
+    .compare th, .compare td { padding: 14px 18px; text-align: left;
+                               border-bottom: 1px solid var(--border);
+                               font-size: 13.5px; }
+    .compare thead th { font-family: var(--mono); font-size: 11px;
+                        color: var(--text-dim); letter-spacing: 0.08em;
+                        text-transform: uppercase; }
+    .compare thead th.col-us {
+      color: var(--accent); background: rgba(91,242,185,0.05);
+    }
+    .compare tbody tr:last-child td { border-bottom: none; }
+    .compare td.us { background: rgba(91,242,185,0.04); color: var(--accent);
+                     font-weight: 600; }
+    .compare td.muted { color: var(--text-faint); }
+    .compare td .y { color: var(--accent); }
+    .compare td .n { color: var(--danger); }
+    .compare td .partial { color: var(--warn); }
+    .compare-note { font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+                    letter-spacing: 0.04em; margin-top: 14px; }
+
+    /* ── Work KPI panel ─────────────────────────────── */
+    .work-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: center; }
+    .kpi-panel { padding: 24px; background: var(--surface);
+                 border: 1px solid var(--border); border-radius: 14px; position: relative; }
+    .kpi-tag { position: absolute; top: -10px; right: 16px;
+               font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+               color: var(--warn); background: var(--bg);
+               border: 1px solid rgba(240,198,116,0.4); border-radius: 99px;
+               padding: 2px 8px; text-transform: uppercase; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    .kpi { padding: 16px; background: rgba(255,255,255,0.02); border-radius: 10px; }
+    .kpi .l { font-family: var(--mono); font-size: 9px; color: rgba(232,240,236,0.55);
+              letter-spacing: 0.08em; margin-bottom: 8px; }
+    .kpi .v { font-family: var(--serif); font-weight: 500; font-size: 36px;
+              line-height: 1; letter-spacing: -0.02em; color: var(--text); }
+    .kpi .v.accent { color: var(--accent); }
+
+    /* ── CTA ────────────────────────────────────────── */
+    .cta {
+      padding: 80px 56px; text-align: center;
+      background: linear-gradient(135deg, rgba(91,242,185,0.08), rgba(91,242,185,0.02));
+      border: 1px solid rgba(91,242,185,0.25);
+      border-radius: 24px; margin: 0 0 80px;
+      position: relative; overflow: hidden;
+    }
+    .cta::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(91,242,185,0.15), transparent 60%);
+    }
+    .cta h2 {
+      position: relative; font-family: var(--serif); font-weight: 500;
+      font-size: clamp(40px, 5vw, 72px); line-height: 1; letter-spacing: -0.025em;
+      margin: 0 0 18px;
+    }
+    .cta p { position: relative; font-size: 17px; color: var(--text-dim);
+             max-width: 520px; margin: 0 auto 28px; }
+    .cta .ctas { position: relative; display: inline-flex; gap: 12px; flex-wrap: wrap;
+                 justify-content: center; }
+    .cta .note { position: relative; margin-top: 20px;
+                 font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+                 letter-spacing: 0.08em; }
+
+    /* ── Footer ─────────────────────────────────────── */
+    footer {
+      padding: 48px 0 32px; border-top: 1px solid var(--border);
+      color: var(--text-dim); font-size: 13px;
+    }
+    .foot-row { display: grid; grid-template-columns: 1.5fr repeat(3, 1fr); gap: 32px; }
+    .foot-col h6 { font-family: var(--mono); font-size: 11px; color: var(--text);
+                   letter-spacing: 0.1em; text-transform: uppercase;
+                   margin: 0 0 12px; font-weight: 500; }
+    .foot-col a { display: block; padding: 4px 0; transition: color 0.15s; }
+    .foot-col a:hover { color: var(--text); }
+    .foot-meta { margin-top: 36px; padding-top: 24px;
+                 border-top: 1px solid var(--border);
+                 display: flex; justify-content: space-between;
+                 font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+                 color: var(--text-faint); flex-wrap: wrap; gap: 12px; }
+
+    /* ── Mobile ─────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .nav-links { display: none; }
+      .hero-inner { grid-template-columns: 1fr; gap: 48px; }
+      .hero-visual { min-height: auto; }
+      .hero3d { inset: -60px -32px; }
+      .pillars { grid-template-columns: 1fr 1fr; }
+      .steps   { grid-template-columns: 1fr; }
+      .features{ grid-template-columns: 1fr 1fr; }
+      .trust-inner { grid-template-columns: 1fr; gap: 28px; }
+      .trust { padding: 36px 24px; }
+      .work-grid { grid-template-columns: 1fr; }
+      .foot-row { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      .pillars { grid-template-columns: 1fr; }
+      .features{ grid-template-columns: 1fr; }
+      .foot-row { grid-template-columns: 1fr; }
+      .fc-1 { left: 0; top: 60px; }
+      .fc-2 { right: 0; top: 200px; }
+      .fc-3 { left: 0; bottom: 60px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ─── Nav ──────────────────────────────────────── -->
+  <nav class="nav">
+    <div class="wrap nav-row">
+      <a href="#top" class="brand">
+        <svg width="26" height="26" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z"
+                stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+          <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+          <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+        </svg>
+        <span class="brand-name">AegisLink</span>
+      </a>
+      <div class="nav-links">
+        <a href="#why">Por qué</a>
+        <a href="#how">Cómo funciona</a>
+        <a href="#features">Features</a>
+        <a href="#trust">Seguridad</a>
+        <a href="#compare">Comparar</a>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">GitHub</a>
+        <a href="#download" class="btn btn-primary">Descargar</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ─── Hero ─────────────────────────────────────── -->
+  <header class="hero" id="top">
+    <div class="hero-bg"></div>
+    <div class="hero-grid"></div>
+    <div class="hero-scan"></div>
+    <div class="wrap hero-inner">
+      <div>
+        <span class="eyebrow">
+          <span class="dot"></span>
+          v1.0.0 · OPEN SOURCE · MIT
+        </span>
+        <h1 class="hero-title">Mensajería <em>sin</em> rastro.</h1>
+        <p class="hero-sub">
+          Cifrado de extremo a extremo, anclado a una llave que sólo existe
+          en tu dispositivo. Sin teléfono. Sin email. Sin metadatos.
+        </p>
+        <div class="hero-ctas">
+          <a href="#download" class="btn btn-primary">
+            Descargar AegisLink
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12h14M13 5l7 7-7 7"/>
+            </svg>
+          </a>
+          <a href="#how" class="btn btn-ghost">Cómo funciona</a>
+        </div>
+        <div class="hero-meta">
+          <span>iOS · Android — próximamente</span>
+          <span><b data-scramble>0 B</b> · metadatos guardados</span>
+          <span>Código abierto · cliente + servidor</span>
+        </div>
+      </div>
+
+      <div class="hero-visual">
+        <!-- Fallback estático: visible si no hay WebGL o reduced-motion -->
+        <div class="hero-fallback" id="heroFallback" aria-hidden="true">
+          <svg width="420" height="420" viewBox="0 0 40 40" fill="none">
+            <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z"
+                  stroke="#5bf2b9" stroke-width="0.8" stroke-linejoin="round"/>
+            <path d="M20 6 L31.5 12.2 L31.5 27.8 L20 34 L8.5 27.8 L8.5 12.2 Z"
+                  stroke="#5bf2b9" stroke-width="0.5" stroke-linejoin="round" opacity="0.5"/>
+            <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.8"/>
+            <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.45"/>
+          </svg>
+        </div>
+        <!-- Escena 3D (Three.js, lazy) -->
+        <div class="hero3d" id="hero3d" aria-hidden="true"></div>
+
+        <div class="phone-mock">
+          <div class="phone-screen">
+            <div class="notch"></div>
+            <div class="ps-head">
+              <span class="name">aegis:k7m2…x9q4</span>
+              <span class="e2ee">● E2EE</span>
+            </div>
+            <div class="ps-msgs" id="psMsgs"></div>
+            <div class="ps-composer">
+              <div class="input">Mensaje cifrado…</div>
+              <div class="send"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Floating cards -->
+        <div class="float-card fc-1">
+          <div class="label">◆ Huella de claves</div>
+          <div class="v">a7f3 · 92e1 · b4c8</div>
+        </div>
+        <div class="float-card fc-2">
+          <div class="label">⌬ Relay propio</div>
+          <div class="v">paquetes opacos</div>
+        </div>
+        <div class="float-card fc-3">
+          <div class="label">◍ Metadatos retenidos</div>
+          <div class="v" style="color:#5bf2b9;" data-scramble>0 bytes</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── Tagline strip ────────────────────────────── -->
+  <section class="tagline">
+    <div class="wrap tagline-row">
+      <span><b>NO</b> teléfono</span>
+      <span>·</span>
+      <span><b>NO</b> email</span>
+      <span>·</span>
+      <span><b>NO</b> metadatos</span>
+      <span>·</span>
+      <span><b>SÍ</b> llaves en tu dispositivo</span>
+    </div>
+  </section>
+
+  <!-- ─── Pillars ──────────────────────────────────── -->
+  <section class="section" id="why">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="section-eyebrow">Por qué AegisLink</div>
+        <h2 class="section-title">Privacidad técnica, <span style="font-style:italic; color: var(--accent);">no marketing</span>.</h2>
+        <p class="section-lead">
+          La mayoría de apps "privadas" piden tu teléfono y guardan metadatos.
+          AegisLink se construyó sobre cuatro decisiones no-negociables.
+        </p>
+      </div>
+
+      <div class="pillars">
+        <div class="pillar reveal tilt">
+          <div class="n">01</div>
+          <h3>Anónimo por defecto</h3>
+          <p>Tu identidad es una keypair Curve25519 generada en tu dispositivo. Sin teléfono, sin email, sin nombre real. Obtienes un Aegis-ID anónimo y nada que te vincule fuera de la app.</p>
+        </div>
+        <div class="pillar reveal tilt">
+          <div class="n">02</div>
+          <h3>Cero metadatos</h3>
+          <p>El servidor tiene los registros de acceso desactivados: no guarda IPs ni patrones de acceso. Solo enruta paquetes opacos — no puede ver con quién hablas ni qué dices.</p>
+        </div>
+        <div class="pillar reveal tilt">
+          <div class="n">03</div>
+          <h3>Abierto y verificable</h3>
+          <p>Cliente y servidor publicados bajo licencia MIT en GitHub. La criptografía es auditable por cualquiera. No nos creas — lee el código.</p>
+        </div>
+        <div class="pillar reveal tilt">
+          <div class="n">04</div>
+          <h3>Verifica a la persona</h3>
+          <p>La confianza se establece comparando huellas de claves — por QR o visualmente. El handshake humano protege contra cualquier intermediario.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── How it works ─────────────────────────────── -->
+  <section class="section" id="how" style="padding-top: 40px;">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="section-eyebrow">Cómo funciona</div>
+        <h2 class="section-title">Tres pasos.<br/>Después, simplemente <em style="font-style:italic; color: var(--accent);">hablas</em>.</h2>
+      </div>
+
+      <div class="steps">
+        <div class="step reveal tilt">
+          <span class="step-num">01</span>
+          <div class="glyph">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="8" cy="14" r="4"/>
+              <path d="M11 13l9-9M17 7l3 3M14 10l3 3"/>
+            </svg>
+          </div>
+          <h4>Generas tu llave</h4>
+          <p>La app crea una keypair Curve25519 (TweetNaCl) en tu dispositivo. La clave privada nunca abandona el teléfono. Obtienes un Aegis-ID anónimo.</p>
+        </div>
+        <div class="step reveal tilt">
+          <span class="step-num">02</span>
+          <div class="glyph">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1"/>
+              <rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/>
+              <path d="M14 14h3v3h-3zM21 14v3M14 21h7M17 17v4"/>
+            </svg>
+          </div>
+          <h4>Verificas contactos</h4>
+          <p>Escaneas el QR de tu contacto o comparáis la huella de vuestras claves. El handshake humano protege contra cualquier intermediario.</p>
+        </div>
+        <div class="step reveal tilt">
+          <span class="step-num">03</span>
+          <div class="glyph">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/>
+            </svg>
+          </div>
+          <h4>Hablas tranquilo</h4>
+          <p>X3DH + Double Ratchet con perfect forward secrecy y XSalsa20-Poly1305. Mensajes, archivos, llamadas, grupos — los servidores sólo enrutan paquetes opacos.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Features ─────────────────────────────────── -->
+  <section class="section" id="features">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="section-eyebrow">Lo que incluye</div>
+        <h2 class="section-title">Todo lo esperado. <em style="font-style:italic; color: var(--accent);">Más</em> lo que solo nosotros hacemos.</h2>
+      </div>
+
+      <div class="features reveal">
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/></svg></div>
+          <h5>Chat 1:1 E2EE</h5>
+          <p>X3DH + Double Ratchet con perfect forward secrecy. Cada mensaje, con una clave distinta.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg></div>
+          <h5>Mensajes que se queman</h5>
+          <p>Timer configurable por chat. Al expirar, desaparecen del dispositivo — y el servidor nunca los tuvo en claro.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></div>
+          <h5>Adjuntos cifrados</h5>
+          <p>Fotos, vídeo, audio y documentos, cifrados de extremo a extremo. Con editor integrado antes de enviar.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2l20 20M9 4.5a3 3 0 016 0V11M15 14.5a3 3 0 01-6 0V9"/></svg></div>
+          <h5>Ver una vez</h5>
+          <p>Medios que se borran al cerrarse. No se pueden reenviar ni guardar.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.9"/></svg></div>
+          <h5>Grupos sin espías</h5>
+          <p>Encuestas anónimas y enlaces de invitación con aprobación del admin. Nadie entra sin permiso.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M22 8l-6 4 6 4V8z"/></svg></div>
+          <h5>Llamadas cifradas</h5>
+          <p>Voz y vídeo E2EE con WebRTC y DTLS-SRTP, a través de nuestro propio servidor TURN.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div>
+          <h5>Modo pánico</h5>
+          <p>PIN señuelo que abre un perfil vacío y borrado instantáneo de todos tus datos cuando lo necesites.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 17H7a4 4 0 01-1-7.9 6 6 0 0111.6 1.6A3.5 3.5 0 0118 17z"/></svg></div>
+          <h5>Backup cifrado</h5>
+          <p>Respaldo protegido con tu passphrase y Argon2id. Solo tú tienes la clave — nosotros no podemos leerlo.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z"/></svg></div>
+          <h5>Múltiples identidades</h5>
+          <p>Perfiles aislados con claves separadas — personal, trabajo, lo que necesites. Nadie puede vincularlos.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
+          <h5>Mensajes programados</h5>
+          <p>Se quedan cifrados en tu dispositivo hasta enviarse a la hora exacta que elijas.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></div>
+          <h5>Stickers animados</h5>
+          <p>Porque la privacidad no está reñida con la expresividad. Packs animados integrados.</p>
+        </div>
+
+        <div class="feat">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/></svg></div>
+          <h5>Tu idioma, tu tema</h5>
+          <p>Español, inglés e italiano. Tema claro y oscuro. La privacidad, cómoda.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Trust ────────────────────────────────────── -->
+  <section class="section" id="trust" style="padding-top: 40px;">
+    <div class="wrap">
+      <div class="trust reveal">
+        <div class="trust-grid"></div>
+        <div class="trust-inner">
+          <div>
+            <div class="section-eyebrow">Confianza · verificable</div>
+            <h2 class="section-title" style="font-size: clamp(36px, 4.2vw, 56px); margin-bottom: 14px;">
+              No nos creas a nosotros — <em style="font-style:italic; color: var(--accent);">lee el código</em>.
+            </h2>
+            <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;">
+              Cada decisión de seguridad es comprobable: el cliente, el servidor y
+              la criptografía están publicados bajo licencia MIT, abiertos a
+              cualquier auditoría independiente.
+            </p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+              <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">Ver código (GitHub)</a>
+              <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener" class="btn btn-ghost">Política de seguridad</a>
+            </div>
+          </div>
+
+          <div class="checks">
+            <div class="check">
+              <span class="ok">✓</span>
+              <div class="body">
+                <strong>Código abierto bajo MIT</strong>
+                <span>Cliente + servidor publicados en GitHub. La criptografía es verificable por terceros.</span>
+              </div>
+            </div>
+            <div class="check">
+              <span class="ok">✓</span>
+              <div class="body">
+                <strong>Push sin contenido</strong>
+                <span>FCM/APNs solo despiertan la app. El payload va siempre cifrado: tu contenido nunca pasa por Google ni Apple.</span>
+              </div>
+            </div>
+            <div class="check">
+              <span class="ok">✓</span>
+              <div class="body">
+                <strong>Sin registros de acceso</strong>
+                <span>access_log OFF en el servidor: no se guardan IPs, timestamps ni patrones de acceso.</span>
+              </div>
+            </div>
+            <div class="check">
+              <span class="ok">✓</span>
+              <div class="body">
+                <strong>Infraestructura propia</strong>
+                <span>Relay propio (Node.js) y TURN/STUN propio (coturn). Sin Firebase ni Supabase en el camino de tus mensajes.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Comparison ───────────────────────────────── -->
+  <section class="section" id="compare" style="padding-top: 40px;">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="section-eyebrow">Comparar</div>
+        <h2 class="section-title">¿Por qué no <em style="font-style:italic; color: var(--accent);">Signal</em> o <em style="font-style:italic; color: var(--accent);">Threema</em>?</h2>
+        <p class="section-lead">
+          Ambas son excelentes. AegisLink toma sus mejores ideas y añade lo que
+          a quien de verdad necesita privacidad le falta.
+        </p>
+      </div>
+
+      <div class="compare reveal">
+        <div class="compare-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Capacidad</th>
+              <th class="col-us">AegisLink</th>
+              <th>Signal</th>
+              <th>Threema</th>
+              <th>WhatsApp</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Sin teléfono ni email</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="n">✗</span></td>
+              <td><span class="y">✓</span></td>
+              <td><span class="n">✗</span></td>
+            </tr>
+            <tr>
+              <td>Cifrado E2EE por defecto</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="y">✓</span></td>
+              <td><span class="y">✓</span></td>
+              <td><span class="y">✓</span></td>
+            </tr>
+            <tr>
+              <td>Cero metadatos retenidos</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="partial">parcial*</span></td>
+              <td><span class="y">✓</span></td>
+              <td><span class="n">✗</span></td>
+            </tr>
+            <tr>
+              <td>Push sin contenido (solo wake-up)</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="y">✓</span></td>
+              <td><span class="y">✓</span></td>
+              <td><span class="partial">parcial</span></td>
+            </tr>
+            <tr>
+              <td>Múltiples identidades</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="n">✗</span></td>
+              <td><span class="n">✗</span></td>
+              <td><span class="n">✗</span></td>
+            </tr>
+            <tr>
+              <td>Modo pánico + PIN señuelo</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="n">✗</span></td>
+              <td><span class="n">✗</span></td>
+              <td><span class="n">✗</span></td>
+            </tr>
+            <tr>
+              <td>Mensajes programados</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="n">✗</span></td>
+              <td><span class="n">✗</span></td>
+              <td><span class="n">✗</span></td>
+            </tr>
+            <tr>
+              <td>Encuestas anónimas en grupo</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="n">✗</span></td>
+              <td><span class="n">✗</span></td>
+              <td><span class="partial">no anon.</span></td>
+            </tr>
+            <tr>
+              <td>Servidor autohospedable</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="partial">parcial</span></td>
+              <td><span class="partial">OnPrem</span></td>
+              <td><span class="n">✗</span></td>
+            </tr>
+            <tr>
+              <td>Código abierto · cliente + servidor</td>
+              <td class="us"><span class="y">✓</span></td>
+              <td><span class="y">✓</span></td>
+              <td><span class="partial">cliente</span></td>
+              <td><span class="n">✗</span></td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+      <p class="compare-note reveal">* Signal aplica sealed sender, pero el registro requiere un número de teléfono.</p>
+    </div>
+  </section>
+
+  <!-- ─── Work cross-promo ─────────────────────────── -->
+  <section class="section" id="work" style="padding-top: 0;">
+    <div class="wrap">
+      <div class="work-grid">
+        <div class="reveal">
+          <div class="section-eyebrow">AegisLink Work · en desarrollo</div>
+          <h2 class="section-title" style="font-size: clamp(32px, 4vw, 52px); margin-bottom: 14px;">
+            Privacidad <em style="font-style:italic; color: var(--accent);">para equipos</em>.
+          </h2>
+          <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;">
+            La versión para empresas — salas, roles y políticas por equipo,
+            con la misma regla de oro: cero metadatos de conversación.
+            Está en desarrollo; síguela en el repositorio.
+          </p>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">Seguir el desarrollo →</a>
+        </div>
+        <div class="kpi-panel reveal">
+          <span class="kpi-tag">Vista previa · en desarrollo</span>
+          <div class="kpi-grid">
+            <div class="kpi"><div class="l">SALAS POR EQUIPO</div><div class="v">∞</div></div>
+            <div class="kpi"><div class="l">ROLES Y PERMISOS</div><div class="v">✓</div></div>
+            <div class="kpi"><div class="l">CLAVES EN SERVIDOR</div><div class="v">0</div></div>
+            <div class="kpi"><div class="l">METADATA STORED</div><div class="v accent">0 B</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── CTA ──────────────────────────────────────── -->
+  <section class="wrap" id="download">
+    <div class="cta reveal">
+      <h2>Empieza hoy.<br/><em style="font-style:italic; color: var(--accent);">Sin dar tu número.</em></h2>
+      <p>Gratis y de código abierto. Sin cuentas, sin anuncios, sin metadatos.</p>
+      <div class="ctas">
+        <span class="btn btn-ghost btn-disabled" aria-disabled="true" role="link">
+          App Store <span class="soon-tag">Próximamente</span>
+        </span>
+        <span class="btn btn-ghost btn-disabled" aria-disabled="true" role="link">
+          Google Play <span class="soon-tag">Próximamente</span>
+        </span>
+        <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-primary">
+          Ver el código
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+        </a>
+      </div>
+      <div class="note">v1.0.0 · iOS y Android en camino</div>
+    </div>
+  </section>
+
+  <!-- ─── Footer ───────────────────────────────────── -->
+  <footer>
+    <div class="wrap">
+      <div class="foot-row">
+        <div class="foot-col">
+          <a href="#top" class="brand" style="margin-bottom: 14px;">
+            <svg width="22" height="22" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+              <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z"
+                    stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+              <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+              <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+            </svg>
+            <span style="font-family: var(--serif); font-size: 18px;">AegisLink</span>
+          </a>
+          <p style="font-size: 12.5px; max-width: 280px; color: var(--text-dim);">
+            Mensajería cifrada anónima, sin metadatos. Proyecto de código abierto bajo licencia MIT.
+          </p>
+        </div>
+        <div class="foot-col">
+          <h6>Producto</h6>
+          <a href="#features">Features</a>
+          <a href="#how">Cómo funciona</a>
+          <a href="#download">Descargar</a>
+          <a href="#work">AegisLink Work</a>
+        </div>
+        <div class="foot-col">
+          <h6>Seguridad</h6>
+          <a href="#trust">Por qué confiar</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener">Política de seguridad</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener">Repositorio (GitHub)</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/LICENSE" target="_blank" rel="noopener">Licencia MIT</a>
+        </div>
+        <div class="foot-col">
+          <h6>Legal</h6>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/privacy-policy.md" target="_blank" rel="noopener">Privacidad</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/terms-of-service.md" target="_blank" rel="noopener">Términos</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/issues" target="_blank" rel="noopener">Contacto (Issues)</a>
+        </div>
+      </div>
+      <div class="foot-meta">
+        <span>© 2026 AegisLink · Proyecto open source (MIT)</span>
+        <span>v1.0.0 · Hecho para la privacidad</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ─── UI: reveals, tilt, typing, scramble (sin dependencias) ── -->
+  <script>
+    (function () {
+      'use strict';
+      var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      /* ── Scroll reveals ── */
+      var revealEls = Array.prototype.slice.call(document.querySelectorAll('.reveal'));
+      if (!reduced && 'IntersectionObserver' in window) {
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              var el = e.target;
+              var siblings = el.parentElement
+                ? Array.prototype.slice.call(el.parentElement.children).filter(function (c) {
+                    return c.classList && c.classList.contains('reveal');
+                  })
+                : [el];
+              var idx = siblings.indexOf(el);
+              el.style.transitionDelay = (Math.max(idx, 0) % 4) * 70 + 'ms';
+              el.classList.add('in');
+              io.unobserve(el);
+            }
+          });
+        }, { rootMargin: '0px 0px -10% 0px', threshold: 0.08 });
+        revealEls.forEach(function (el) { io.observe(el); });
+      } else {
+        revealEls.forEach(function (el) { el.classList.add('in'); });
+      }
+
+      /* ── Tilt 3D en tarjetas (solo punteros finos con hover) ── */
+      var canTilt = !reduced &&
+        window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      if (canTilt) {
+        Array.prototype.slice.call(document.querySelectorAll('.tilt')).forEach(function (card) {
+          card.addEventListener('pointermove', function (ev) {
+            var r = card.getBoundingClientRect();
+            var px = (ev.clientX - r.left) / r.width - 0.5;
+            var py = (ev.clientY - r.top) / r.height - 0.5;
+            card.style.transform =
+              'perspective(700px) rotateX(' + (-py * 6).toFixed(2) + 'deg)' +
+              ' rotateY(' + (px * 8).toFixed(2) + 'deg) translateY(-2px)';
+          });
+          card.addEventListener('pointerleave', function () {
+            card.style.transform = '';
+          });
+        });
+      }
+
+      /* ── Contadores "0 B" con efecto scramble ── */
+      var GLYPHS = '0123456789abcdef';
+      function scramble(el) {
+        var target = el.getAttribute('data-final') || el.textContent;
+        el.setAttribute('data-final', target);
+        var frames = 22, frame = 0;
+        var timer = setInterval(function () {
+          frame++;
+          if (frame >= frames) {
+            clearInterval(timer);
+            el.textContent = target;
+            return;
+          }
+          el.textContent = target.replace(/[0-9a-zA-Z]/g, function (ch) {
+            return Math.random() < frame / frames
+              ? ch
+              : GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+          });
+        }, 45);
+      }
+      var scrambleEls = Array.prototype.slice.call(document.querySelectorAll('[data-scramble]'));
+      if (!reduced && 'IntersectionObserver' in window) {
+        var sio = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) { scramble(e.target); sio.unobserve(e.target); }
+          });
+        }, { threshold: 0.5 });
+        scrambleEls.forEach(function (el) { sio.observe(el); });
+      }
+
+      /* ── Conversación que se escribe en bucle en el mock ── */
+      var msgsHost = document.getElementById('psMsgs');
+      if (!msgsHost) return;
+
+      var SCRIPT = [
+        { who: 'them', text: '¿Este chat es seguro de verdad?' },
+        { who: 'me',   text: 'E2EE con Double Ratchet. Mi clave nunca sale del teléfono.' },
+        { who: 'them', text: '¿Y los metadatos? ¿Quién ve con quién hablo?' },
+        { who: 'me',   text: 'Nadie. El relay solo enruta paquetes opacos.' },
+        { who: 'them', mono: true, text: '⏱ mensajes efímeros · 24 h · activado' },
+        { who: 'me',   text: 'Y esto se autodestruye mañana.' }
+      ];
+
+      function makeBubble(m) {
+        var b = document.createElement('div');
+        b.className = 'bubble ' + m.who + (m.mono ? ' mono' : '');
+        return b;
+      }
+
+      function renderAllStatic() {
+        SCRIPT.forEach(function (m) {
+          var b = makeBubble(m);
+          b.textContent = m.text;
+          msgsHost.appendChild(b);
+        });
+        var meta = document.createElement('span');
+        meta.className = 'bubble-meta me';
+        meta.textContent = '12:39 · ✓✓';
+        msgsHost.appendChild(meta);
+      }
+
+      if (reduced) { renderAllStatic(); return; }
+
+      function sleep(ms) {
+        return new Promise(function (res) { setTimeout(res, ms); });
+      }
+      async function waitVisible() {
+        while (document.hidden) { await sleep(600); }
+      }
+
+      async function playLoop() {
+        for (;;) {
+          msgsHost.classList.remove('fading');
+          msgsHost.innerHTML = '';
+          for (var i = 0; i < SCRIPT.length; i++) {
+            await waitVisible();
+            var m = SCRIPT[i];
+            if (m.who === 'them') {
+              var t = document.createElement('div');
+              t.className = 'bubble them';
+              t.innerHTML = '<span class="typing-dots"><i></i><i></i><i></i></span>';
+              msgsHost.appendChild(t);
+              await sleep(950);
+              t.classList.add(m.mono ? 'mono' : 'x');
+              t.textContent = m.text;
+            } else {
+              var b = makeBubble(m);
+              msgsHost.appendChild(b);
+              for (var c = 1; c <= m.text.length; c++) {
+                b.textContent = m.text.slice(0, c);
+                await sleep(24);
+              }
+            }
+            await sleep(650);
+          }
+          var meta = document.createElement('span');
+          meta.className = 'bubble-meta me';
+          meta.textContent = 'enviado · ✓✓ · efímero 24 h';
+          msgsHost.appendChild(meta);
+          await sleep(4200);
+          msgsHost.classList.add('fading');
+          await sleep(550);
+        }
+      }
+      playLoop();
+    })();
+  </script>
+
+  <!-- ─── Escena 3D del hero (Three.js, lazy + fallbacks) ── -->
+  <script type="module">
+    const host = document.getElementById('hero3d');
+    const fallback = document.getElementById('heroFallback');
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function webglAvailable() {
+      try {
+        const c = document.createElement('canvas');
+        return !!(window.WebGLRenderingContext &&
+          (c.getContext('webgl2') || c.getContext('webgl')));
+      } catch (e) { return false; }
+    }
+
+    // Sin movimiento o sin WebGL → se queda el fallback estático del prototipo.
+    if (host && !reduced && webglAvailable()) {
+      let started = false;
+      const lazyIO = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting && !started) {
+            started = true;
+            lazyIO.disconnect();
+            init().catch(() => { /* fallback estático permanece visible */ });
+          }
+        });
+      }, { rootMargin: '160px' });
+      lazyIO.observe(host);
+
+      async function init() {
+        const THREE = await import('three');
+
+        const narrow = window.matchMedia('(max-width: 900px)').matches;
+        const ACCENT = 0x5bf2b9;
+
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setClearColor(0x000000, 0);
+        host.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 60);
+        camera.position.set(0, 0.2, 8.2);
+
+        const group = new THREE.Group();
+        scene.add(group);
+
+        /* Escudo hexagonal del logo, extruido en wireframe */
+        const pts = [[0, 1.8], [1.5, 1.0], [1.5, -1.0], [0, -1.8], [-1.5, -1.0], [-1.5, 1.0]];
+        const shape = new THREE.Shape();
+        shape.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i][0], pts[i][1]);
+        shape.closePath();
+
+        function edgeLines(geometry, opacity) {
+          const edges = new THREE.EdgesGeometry(geometry, 12);
+          const mat = new THREE.LineBasicMaterial({
+            color: ACCENT, transparent: true, opacity,
+            blending: THREE.AdditiveBlending, depthWrite: false
+          });
+          return new THREE.LineSegments(edges, mat);
+        }
+
+        const extrude = new THREE.ExtrudeGeometry(shape, { depth: 0.55, bevelEnabled: false });
+        extrude.translate(0, 0, -0.275);
+        const shield = edgeLines(extrude, 0.9);
+        group.add(shield);
+
+        const inner = edgeLines(extrude, 0.28);
+        inner.scale.setScalar(0.78);
+        group.add(inner);
+
+        /* Las dos barras del logo */
+        const barGeo = new THREE.BoxGeometry(1.26, 0.29, 0.18);
+        const barTop = edgeLines(barGeo, 0.85);
+        barTop.position.y = 0.31;
+        const barBottom = edgeLines(barGeo, 0.4);
+        barBottom.position.y = -0.31;
+        group.add(barTop, barBottom);
+
+        /* Glow aditivo central (sprite con gradiente radial) */
+        const glowCanvas = document.createElement('canvas');
+        glowCanvas.width = glowCanvas.height = 128;
+        const gctx = glowCanvas.getContext('2d');
+        const grad = gctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        grad.addColorStop(0, 'rgba(91,242,185,0.55)');
+        grad.addColorStop(0.4, 'rgba(91,242,185,0.16)');
+        grad.addColorStop(1, 'rgba(91,242,185,0)');
+        gctx.fillStyle = grad;
+        gctx.fillRect(0, 0, 128, 128);
+        const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: new THREE.CanvasTexture(glowCanvas),
+          blending: THREE.AdditiveBlending, depthWrite: false, transparent: true
+        }));
+        glow.scale.setScalar(6.5);
+        group.add(glow);
+
+        /* Campo de partículas orbitales (≤ 3000; menos en móvil) */
+        function particleField(count, rMin, rMax, size, opacity) {
+          const pos = new Float32Array(count * 3);
+          for (let i = 0; i < count; i++) {
+            const r = rMin + Math.pow(Math.random(), 0.65) * (rMax - rMin);
+            const th = Math.random() * Math.PI * 2;
+            const ph = Math.acos(2 * Math.random() - 1);
+            pos[i * 3]     = r * Math.sin(ph) * Math.cos(th);
+            pos[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th) * 0.72;
+            pos[i * 3 + 2] = r * Math.cos(ph);
+          }
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+          const mat = new THREE.PointsMaterial({
+            color: ACCENT, size, transparent: true, opacity,
+            blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+          });
+          return new THREE.Points(geo, mat);
+        }
+        const dust = particleField(narrow ? 800 : 2400, 2.6, 5.4, 0.030, 0.5);
+        const sparks = particleField(narrow ? 100 : 300, 2.2, 3.4, 0.055, 0.85);
+        scene.add(dust, sparks);
+
+        /* Parallax sutil con el ratón */
+        let targetX = 0, targetY = 0, curX = 0, curY = 0;
+        const hero = document.querySelector('.hero');
+        const fine = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+        if (fine && hero) {
+          hero.addEventListener('pointermove', (ev) => {
+            targetX = (ev.clientX / window.innerWidth - 0.5) * 0.5;
+            targetY = (ev.clientY / window.innerHeight - 0.5) * 0.3;
+          });
+          hero.addEventListener('pointerleave', () => { targetX = 0; targetY = 0; });
+        }
+
+        /* Resize con cap de devicePixelRatio */
+        function resize() {
+          const w = host.clientWidth || 1;
+          const h = host.clientHeight || 1;
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+          renderer.setSize(w, h, false);
+          camera.aspect = w / h;
+          camera.updateProjectionMatrix();
+        }
+        resize();
+        if ('ResizeObserver' in window) {
+          new ResizeObserver(resize).observe(host);
+        } else {
+          window.addEventListener('resize', resize);
+        }
+
+        /* Bucle de render: pausa fuera de viewport y con pestaña oculta */
+        let inView = true, running = false, raf = 0;
+
+        function update(t) {
+          curX += (targetX - curX) * 0.05;
+          curY += (targetY - curY) * 0.05;
+          group.rotation.y = t * 0.00035 + curX;
+          group.rotation.x = Math.sin(t * 0.00022) * 0.08 + curY;
+          inner.rotation.z = t * 0.00018;
+          dust.rotation.y = -t * 0.00008;
+          sparks.rotation.y = t * 0.00014;
+          const breathe = 1 + Math.sin(t * 0.0009) * 0.04;
+          glow.scale.setScalar(6.5 * breathe);
+        }
+        function loop(t) {
+          if (!running) return;
+          update(t);
+          renderer.render(scene, camera);
+          raf = requestAnimationFrame(loop);
+        }
+        function play() {
+          if (running || !inView || document.hidden) return;
+          running = true;
+          raf = requestAnimationFrame(loop);
+        }
+        function pause() {
+          running = false;
+          cancelAnimationFrame(raf);
+        }
+
+        const visIO = new IntersectionObserver((entries) => {
+          entries.forEach((e) => {
+            inView = e.isIntersecting;
+            if (inView) play(); else pause();
+          });
+        }, { threshold: 0.02 });
+        visIO.observe(host);
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) pause(); else play();
+        });
+
+        // Primer frame ok → ocultamos el fallback estático.
+        renderer.render(scene, camera);
+        if (fallback) fallback.classList.add('hidden3d');
+        play();
+      }
+    }
+  </script>
+</body>
+</html>
