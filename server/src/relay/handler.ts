@@ -480,8 +480,16 @@ export function attachRelay(io: SocketServer) {
     // Re-deliver any call:invite that arrived while this device was offline, so a
     // call accepted from the killed-state push wake-up can still connect. Held in
     // memory with a short TTL (see pendingCallInvites / queueCallInvite).
-    const pendingInvite = takePendingCallInvite(me);
-    if (pendingInvite) socket.emit('call:invite', pendingInvite);
+    // After the invite, drain any trickle ICE candidates that arrived while
+    // the callee was still offline — emit them in order so the callee's peer
+    // connection can begin processing candidates immediately.
+    const takenInvite = takePendingCallInvite(me);
+    if (takenInvite) {
+      socket.emit('call:invite', takenInvite.payload);
+      for (const candidate of takenInvite.ice) {
+        socket.emit('call:ice', candidate);
+      }
+    }
 
     socket.on(
       'envelope',
@@ -1262,9 +1270,16 @@ function checkGroupCallInviteRateLimit(aegisId: string): boolean {
 // cold-starts from the push and reconnects. We hold the invite in MEMORY ONLY
 // (zero metadata at rest), keyed by recipient aegisId, with a short TTL just
 // under the caller's 45s ring window. Purged on drain, caller hangup/end, or TTL.
+//
+// `ice` accumulates trickle ICE candidates emitted by the caller while the
+// callee is offline — bounded to ICE_BUFFER_CAP entries; silently discarded
+// beyond that. Purged together with the invite on TTL / drain / cancel.
+const ICE_BUFFER_CAP = 32;
+
 interface PendingCallInvite {
   callId: string;
   payload: Record<string, unknown>; // exactly what forward() would emit ({ ...rest, from })
+  ice: Record<string, unknown>[];   // buffered trickle ICE candidates (max ICE_BUFFER_CAP)
   timer: ReturnType<typeof setTimeout>;
 }
 const pendingCallInvites = new Map<string, PendingCallInvite>();
@@ -1276,15 +1291,20 @@ function queueCallInvite(to: string, callId: string, payload: Record<string, unk
   const t = setTimeout(() => { pendingCallInvites.delete(to); }, CALL_INVITE_TTL_MS);
   // Never let a ringing invite keep the event loop alive.
   (t as unknown as { unref?: () => void }).unref?.();
-  pendingCallInvites.set(to, { callId, payload, timer: t });
+  pendingCallInvites.set(to, { callId, payload, ice: [], timer: t });
 }
 
-function takePendingCallInvite(to: string): Record<string, unknown> | null {
+interface TakenCallInvite {
+  payload: Record<string, unknown>;
+  ice: Record<string, unknown>[];
+}
+
+function takePendingCallInvite(to: string): TakenCallInvite | null {
   const pending = pendingCallInvites.get(to);
   if (!pending) return null;
   clearTimeout(pending.timer);
   pendingCallInvites.delete(to);
-  return pending.payload;
+  return { payload: pending.payload, ice: pending.ice };
 }
 
 function cancelCallInvite(to: string, callId: string): void {
@@ -1296,10 +1316,12 @@ function cancelCallInvite(to: string, callId: string): void {
 }
 
 function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Set<Socket>>) {
-  function forward<T extends { to: string }>(eventOut: string, parsed: T) {
+  // `silent`: when true, suppresses the peer_offline error_msg emit so callers
+  // that handle offline specially (call:ice buffering) can avoid the false error.
+  function forward<T extends { to: string }>(eventOut: string, parsed: T, silent = false): boolean {
     const target = sockets.get(parsed.to);
     if (!target || target.size === 0) {
-      socket.emit('error_msg', { code: 'peer_offline', for: eventOut });
+      if (!silent) socket.emit('error_msg', { code: 'peer_offline', for: eventOut });
       return false;
     }
     const { to: _to, ...rest } = parsed;
@@ -1315,20 +1337,41 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
       socket.emit('error_msg', { code: 'rate_limited', for: 'call:invite' });
       return;
     }
-    const delivered = forward('call:invite', parsed.data);
+    // Use silent=true: if the callee is offline we decide below whether to emit
+    // peer_offline based on whether the push wake-up succeeded. An immediate
+    // peer_offline from forward() would incorrectly tear the call down even when
+    // the callee is reachable via push (Doze/killed app scenario).
+    const delivered = forward('call:invite', parsed.data, /* silent */ true);
     if (!delivered) {
       // Recipient offline. Hold the sealed invite in memory so it can be
       // re-delivered when their app cold-starts from the push and reconnects
       // within the ring window, then fire the visible high-priority push so the
       // OS rings even when the app is killed.
+      //
+      // Critically: we only tell the caller peer_offline if we could not reach
+      // the callee via push either (no tokens registered). If push succeeded we
+      // stay silent — the caller's 45s no-answer timeout handles the case where
+      // the callee never connects.
       const { to, ...rest } = parsed.data;
       queueCallInvite(to, parsed.data.callId, { ...rest, from: me });
-      void sendCallWakeUp(
+      sendCallWakeUp(
         parsed.data.to,
         me,
         parsed.data.media as CallMedia,
         parsed.data.callId,
-      ).catch(() => { /* push subsystem unavailable — call will be missed */ });
+      ).then((pushed) => {
+        if (!pushed) {
+          // Callee unreachable: no push tokens — cancel the queued invite and
+          // notify the caller immediately so they can tear down.
+          cancelCallInvite(parsed.data.to, parsed.data.callId);
+          socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
+        }
+        // pushed === true: silent — caller keeps ringing, 45s timeout covers it.
+      }).catch(() => {
+        // Push subsystem down — treat as unreachable.
+        cancelCallInvite(parsed.data.to, parsed.data.callId);
+        socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
+      });
     }
   });
   socket.on('call:answer', (raw) => {
@@ -1339,7 +1382,22 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
   socket.on('call:ice', (raw) => {
     const parsed = CallIce.safeParse(raw);
     if (!parsed.success) return;
-    forward('call:ice', parsed.data);
+    // Attempt delivery silently — never emit peer_offline for ICE candidates.
+    // If the callee is offline but we have a matching pending call:invite,
+    // buffer the candidate (up to ICE_BUFFER_CAP) so it can be drained when
+    // the callee reconnects and the invite is re-delivered.
+    const delivered = forward('call:ice', parsed.data, /* silent */ true);
+    if (!delivered) {
+      const pending = pendingCallInvites.get(parsed.data.to);
+      if (pending && pending.callId === parsed.data.callId) {
+        if (pending.ice.length < ICE_BUFFER_CAP) {
+          const { to: _to, ...rest } = parsed.data;
+          pending.ice.push({ ...rest, from: me });
+        }
+        // else: silently discard — cap reached
+      }
+      // No matching pending invite → silently discard. Never emit peer_offline.
+    }
   });
   socket.on('call:hangup', (raw) => {
     const parsed = CallHangup.safeParse(raw);

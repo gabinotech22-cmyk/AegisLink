@@ -59,14 +59,21 @@ export async function notifyRecipient(aegisId: string): Promise<void> {
  * only surfaced (showIncomingCallNotification) once the app wakes and reconnects.
  * TTL is 30 seconds — stale calls are never delivered by the OS.
  */
+/**
+ * Returns `true` if at least one valid push token was found and the wake-up
+ * was dispatched; `false` if the recipient has no registered tokens (or all
+ * tokens were invalid/pruned). The caller uses this to decide whether the
+ * callee is reachable via push, or truly unreachable and should be told
+ * peer_offline immediately.
+ */
 export async function sendCallWakeUp(
   toAegisId: string,
   _fromAegisId: string,
   _media: CallMedia,
   _callId: string,
-): Promise<void> {
+): Promise<boolean> {
   const tokens = await pushRepo.forRecipient(toAegisId);
-  if (tokens.length === 0) return;
+  if (tokens.length === 0) return false;
 
   const messages: ExpoPushMessage[] = [];
   for (const row of tokens) {
@@ -90,7 +97,9 @@ export async function sendCallWakeUp(
     });
   }
 
+  if (messages.length === 0) return false;
   await sendChunked(messages);
+  return true;
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
