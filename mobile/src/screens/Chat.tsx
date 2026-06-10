@@ -47,6 +47,7 @@ import { useTyping } from '../store/typing';
 import { useConnection } from '../store/connection';
 import { usePreferences } from '../store/preferences';
 import { useContacts } from '../store/contacts';
+import { useGroups } from '../store/groups';
 import { sendMessage, emitTyping, sendReadReceipts, sendDeleteForEveryone } from '../socket/client';
 import { startCall } from '../socket/calls';
 import { WEBRTC_AVAILABLE } from '../runtime';
@@ -1497,6 +1498,167 @@ function ViewOnceAudioBubble({
 
 // ─── Bubble ──────────────────────────────────────────────────────────────────
 
+// ── Group join-request card ───────────────────────────────────────────────────
+// Wire format: [join_request:<groupId>:<groupName>], sent 1:1 to the group
+// admin by GroupJoinScreen when someone opens an invite link. The requester is
+// the chat peer (m.chatId). Accepting adds them to the group and broadcasts
+// the re-signed membership, which creates the group on the requester's device
+// through the authenticated group_msg metadata path.
+function JoinRequestBubble({ t, m, me, time }: { t: Theme; m: StoredMessage; me: boolean; time: string }) {
+  const { t: i18nT } = useTranslation();
+  const groups = useGroups((s) => s.groups);
+  const addMember = useGroups((s) => s.addMember);
+  const contacts = useContacts((s) => s.contacts);
+  const identity = useIdentity((s) => s.identity);
+  const [busy, setBusy] = useState(false);
+
+  // [join_request:<groupId>:<groupName>] — groupName is display-only.
+  const inner = m.body.slice('[join_request:'.length, -1);
+  const sep = inner.indexOf(':');
+  const groupId = sep >= 0 ? inner.slice(0, sep) : inner;
+  const wireGroupName = sep >= 0 ? inner.slice(sep + 1) : '';
+
+  const group = groups.find((g) => g.id === groupId);
+  // Prefer the locally-trusted name; the wire name is attacker-controlled.
+  const groupName = group?.name ?? wireGroupName;
+  const requesterId = m.chatId;
+  const requesterName = contacts.find((c) => c.aegisId === requesterId)?.name ?? requesterId;
+  const isAdmin = !!group && !!identity && group.adminId === identity.aegisId;
+  const alreadyMember = !!group && group.members.includes(requesterId);
+
+  async function handleAccept() {
+    if (!group || !identity || busy) return;
+    setBusy(true);
+    try {
+      await addMember(group.id, requesterId);
+      // Push the re-signed member list to everyone NOW — this is what makes
+      // the group appear on the requester's device.
+      const client = require('../socket/client') as typeof import('../socket/client');
+      await client.broadcastGroupMetadata(identity, group.id);
+    } catch {
+      Alert.alert(
+        i18nT('chat.joinRequestErrorTitle', 'Could not add member'),
+        i18nT('chat.joinRequestErrorDesc', 'Check your connection and try again.'),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (me) {
+    // Requester side: confirmation that the request went out.
+    return (
+      <View style={{ alignItems: 'center', marginVertical: 4 }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+            backgroundColor: t.surface2,
+            paddingHorizontal: 14,
+            paddingVertical: 9,
+            borderRadius: 99,
+            borderWidth: 1,
+            borderColor: t.border,
+          }}
+        >
+          <I.Users size={14} color={t.accent} />
+          <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.text }}>
+            {i18nT('chat.joinRequestSentCard', 'Join request sent · {{group}}', { group: groupName })}
+          </Text>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint }}>{time}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ alignItems: 'flex-start' }}>
+      <View
+        style={{
+          width: 260,
+          backgroundColor: t.bubbleIn,
+          borderRadius: t.radius,
+          borderTopLeftRadius: t.radiusS,
+          borderWidth: 1,
+          borderColor: `${t.accent}33`,
+          overflow: 'hidden',
+        }}
+      >
+        <View style={{ padding: 12, gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: t.radiusS,
+                backgroundColor: `${t.accent}22`,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <I.Users size={17} color={t.accent} />
+            </View>
+            <Text
+              style={{
+                flex: 1,
+                fontFamily: t.fontMono,
+                fontSize: 10,
+                color: t.textDim,
+                letterSpacing: 0.6,
+              }}
+            >
+              {i18nT('chat.joinRequestLabel', 'GROUP JOIN REQUEST').toUpperCase()}
+            </Text>
+          </View>
+          <Text style={{ fontFamily: t.font, fontSize: 14, color: t.bubbleInText, lineHeight: 20 }}>
+            {i18nT('chat.joinRequestIncoming', '{{name}} wants to join "{{group}}"', {
+              name: requesterName,
+              group: groupName,
+            })}
+          </Text>
+
+          {alreadyMember ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 2 }}>
+              <I.Check size={15} color={t.accent} />
+              <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.accent }}>
+                {i18nT('chat.joinRequestAdded', 'Added to the group')}
+              </Text>
+            </View>
+          ) : isAdmin ? (
+            <Pressable
+              onPress={() => void handleAccept()}
+              disabled={busy}
+              style={({ pressed }) => ({
+                backgroundColor: t.accent,
+                borderRadius: t.radiusS,
+                paddingVertical: 10,
+                alignItems: 'center',
+                opacity: pressed || busy ? 0.7 : 1,
+              })}
+            >
+              <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.accentInk }}>
+                {busy
+                  ? i18nT('chat.joinRequestAdding', 'Adding…')
+                  : i18nT('chat.joinRequestAdd', 'Add to group')}
+              </Text>
+            </Pressable>
+          ) : (
+            <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim }}>
+              {group
+                ? i18nT('chat.joinRequestNotAdmin', 'Only the group admin can approve this request')
+                : i18nT('chat.joinRequestUnknownGroup', 'Group not available on this device')}
+            </Text>
+          )}
+        </View>
+      </View>
+      <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, marginTop: 3, paddingHorizontal: 4 }}>
+        {time}
+      </Text>
+    </View>
+  );
+}
+
 interface BubbleProps {
   t: Theme;
   m: StoredMessage;
@@ -1826,6 +1988,11 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
         </View>
       </View>
     );
+  }
+
+  // Group join-request card — [join_request:<groupId>:<groupName>]
+  if (m.body?.startsWith('[join_request:') && m.body.endsWith(']')) {
+    return <JoinRequestBubble t={t} m={m} me={me} time={time} />;
   }
 
   // Contact card bubble

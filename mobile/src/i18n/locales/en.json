@@ -126,7 +126,18 @@
     "missedCall": "Missed call",
     "declinedCall": "Declined call",
     "voiceCall": "Voice call",
-    "videoCall": "Video call"
+    "videoCall": "Video call",
+    "joinRequestLabel": "Group join request",
+    "joinRequestIncoming": "{{name}} wants to join \"{{group}}\"",
+    "joinRequestSentCard": "Join request sent · {{group}}",
+    "joinRequestAdd": "Add to group",
+    "joinRequestAdding": "Adding…",
+    "joinRequestAdded": "Added to the group",
+    "joinRequestNotAdmin": "Only the group admin can approve this request",
+    "joinRequestUnknownGroup": "Group not available on this device",
+    "joinRequestPreview": "Join request",
+    "joinRequestErrorTitle": "Could not add member",
+    "joinRequestErrorDesc": "Check your connection and try again."
   },
   "contacts": {
     "title": "Contacts",
