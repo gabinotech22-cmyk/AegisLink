@@ -93,6 +93,37 @@ describe('FormattedText', () => {
     expect(urlTexts.length).toBeGreaterThan(0);
   });
 
+  it('linkifies group invite deep links (tappable to join)', () => {
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText
+        body="Únete: aegislink://group/v1/g-123/MiGrupo/ADM-1111-2222"
+        t={t}
+      />,
+    );
+    const { Text } = require('react-native');
+    const linkTexts = UNSAFE_getAllByType(Text).filter(
+      (node: any) =>
+        node.props.style?.textDecorationLine === 'underline' &&
+        typeof node.props.onPress === 'function',
+    );
+    expect(linkTexts.length).toBe(1);
+    expect(linkTexts[0].props.children).toContain('aegislink://group/v1/');
+  });
+
+  it('NEVER linkifies aegislink://panic (remote wipe must not be tappable from chat)', () => {
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText
+        body="mira aegislink://panic?token=abc&sig=def"
+        t={t}
+      />,
+    );
+    const { Text } = require('react-native');
+    const linkTexts = UNSAFE_getAllByType(Text).filter(
+      (node: any) => typeof node.props.onPress === 'function',
+    );
+    expect(linkTexts.length).toBe(0);
+  });
+
   it('passes selectable prop to root Text', () => {
     const { UNSAFE_getByType } = render(
       <FormattedText body="selectable text" t={t} selectable />,

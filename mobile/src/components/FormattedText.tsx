@@ -31,9 +31,12 @@ type Segment =
   | { kind: 'url'; text: string; href: string }
   | { kind: 'mention'; text: string };
 
-// Combined regex: order matters — code first (avoids greedy overlap), then url, mention, bold, italic, strike
+// Combined regex: order matters — code first (avoids greedy overlap), then url, mention, bold, italic, strike.
+// aegislink:// is linkified ONLY for group invites (group/v1/): other scheme
+// URLs — notably aegislink://panic, which remote-wipes the device — must
+// never become tappable from a message body an attacker controls.
 const TOKEN_RE =
-  /(`[^`]+`)|(\bhttps?:\/\/[^\s<>"')\]]+)|((?:^|\s)@[A-Za-z0-9_-]{3,})|(\*[^*\n]+\*)|(_[^_\n]+_)|(~[^~\n]+~)/g;
+  /(`[^`]+`)|(\bhttps?:\/\/[^\s<>"')\]]+|\baegislink:\/\/group\/v1\/[^\s<>"')\]]+)|((?:^|\s)@[A-Za-z0-9_-]{3,})|(\*[^*\n]+\*)|(_[^_\n]+_)|(~[^~\n]+~)/g;
 
 function parse(body: string): Segment[] {
   const segments: Segment[] = [];
