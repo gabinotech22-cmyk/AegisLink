@@ -104,7 +104,7 @@ export const useBackup = create<BackupState>((set) => ({
   async createLocalBackup(payload, passphrase) {
     set({ isBackingUp: true });
     try {
-      const envelope = encryptBackup(payload, passphrase);
+      const envelope = await encryptBackup(payload, passphrase);
       const uri = await writeEnvelopeToCacheDir(envelope);
       const now = Date.now();
       await ss.set(LAST_AT_KEY, String(now));
@@ -149,7 +149,7 @@ export const useBackup = create<BackupState>((set) => ({
       }
 
       // Decrypt — throws on bad passphrase or MAC failure
-      const payload = decryptBackup(parsed, passphrase);
+      const payload = await decryptBackup(parsed, passphrase);
 
       // Close the active DB so the restore can write to it cleanly
       await closeActiveDatabase();

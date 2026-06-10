@@ -12,9 +12,11 @@
 
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 
-// Argon2id (v3 backup format) is intentionally slow — bump the timeout so
-// per-test 5 s default doesn't flake on slower CI workers.
-jest.setTimeout(60_000);
+// Argon2id (v3 backup format) is intentionally slow, and the pure-JS compute
+// runs ~15-20× slower under jest than plain Node — a single 64 MiB derivation
+// takes tens of seconds here, and several tests perform two. Bump the timeout
+// accordingly so CI doesn't flake.
+jest.setTimeout(300_000);
 
 import {
   encryptBackup,
@@ -59,51 +61,51 @@ function samplePayload(): BackupPayload {
 const PASS = 'correct horse battery staple 9!';
 
 describe('encrypted backup', () => {
-  it('round-trips the full payload', () => {
-    const env = encryptBackup(samplePayload(), PASS);
+  it('round-trips the full payload', async () => {
+    const env = await encryptBackup(samplePayload(), PASS);
     expect(isBackupEnvelope(env)).toBe(true);
-    const restored = decryptBackup(env, PASS);
+    const restored = await decryptBackup(env, PASS);
     expect(restored).toEqual(samplePayload());
     expect(restored.identity.secretKeyB64).toBe('c2VjcmV0S2V5QjY0VmVyeVNlY3JldA==');
   });
 
-  it('throws on the wrong passphrase (MAC failure, no silent garbage)', () => {
-    const env = encryptBackup(samplePayload(), PASS);
-    expect(() => decryptBackup(env, 'wrong passphrase here!!')).toThrow();
+  it('throws on the wrong passphrase (MAC failure, no silent garbage)', async () => {
+    const env = await encryptBackup(samplePayload(), PASS);
+    await expect(decryptBackup(env, 'wrong passphrase here!!')).rejects.toThrow();
   });
 
-  it('throws on a tampered ciphertext', () => {
-    const env = encryptBackup(samplePayload(), PASS);
+  it('throws on a tampered ciphertext', async () => {
+    const env = await encryptBackup(samplePayload(), PASS);
     const bytes = decodeBase64(env.ciphertext);
     bytes[0] ^= 0x01;
     const tampered = { ...env, ciphertext: encodeBase64(bytes) };
-    expect(() => decryptBackup(tampered, PASS)).toThrow();
+    await expect(decryptBackup(tampered, PASS)).rejects.toThrow();
   });
 
-  it('does not leak private keys in the envelope', () => {
-    const env = encryptBackup(samplePayload(), PASS);
+  it('does not leak private keys in the envelope', async () => {
+    const env = await encryptBackup(samplePayload(), PASS);
     const wire = JSON.stringify(env);
     expect(wire).not.toContain('c2VjcmV0S2V5QjY0VmVyeVNlY3JldA==');
     expect(wire).not.toContain('c2lnblNlY3JldFZlcnlTZWNyZXQ=');
     expect(wire).not.toContain('Anon');
   });
 
-  it('enforces minimum passphrase length on encrypt', () => {
-    expect(() => encryptBackup(samplePayload(), 'short')).toThrow();
+  it('enforces minimum passphrase length on encrypt', async () => {
+    await expect(encryptBackup(samplePayload(), 'short')).rejects.toThrow();
     expect(BACKUP_MIN_PASSPHRASE_LEN).toBeGreaterThanOrEqual(12);
   });
 
-  it('uses a fresh random salt + nonce on each encryption', () => {
-    const a = encryptBackup(samplePayload(), PASS);
-    const b = encryptBackup(samplePayload(), PASS);
+  it('uses a fresh random salt + nonce on each encryption', async () => {
+    const a = await encryptBackup(samplePayload(), PASS);
+    const b = await encryptBackup(samplePayload(), PASS);
     expect(a.salt).not.toEqual(b.salt);
     expect(a.nonce).not.toEqual(b.nonce);
     expect(a.ciphertext).not.toEqual(b.ciphertext);
   });
 
-  it('rejects an unsupported version on decrypt', () => {
-    const env = encryptBackup(samplePayload(), PASS);
-    expect(() => decryptBackup({ ...env, v: 99 as typeof BACKUP_VERSION }, PASS)).toThrow();
+  it('rejects an unsupported version on decrypt', async () => {
+    const env = await encryptBackup(samplePayload(), PASS);
+    await expect(decryptBackup({ ...env, v: 99 as typeof BACKUP_VERSION }, PASS)).rejects.toThrow();
   });
 
   it('rates passphrase strength sensibly', () => {

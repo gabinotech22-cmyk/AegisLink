@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import { argon2idAsync } from '@noble/hashes/argon2';
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import { KDF_ASYNC_TICK_MS } from '../crypto/nobleNextTickPatch';
 import { ss } from '../utils/secureStore';
 
 const PIN_HASH_KEY = 'aegis.pin.hash';
@@ -19,13 +20,14 @@ export const DURESS_PIN_SALT = 'aegislink:panic:v1:';
 // rate-limits to 5 attempts — so the KDF adds friction against an attacker
 // who already extracted the hash from a compromised device, nothing more.
 // v3 keeps Argon2id with a per-install random salt but at ~1 s of Hermes
-// work, and ALL hashing goes through argon2idAsync, which yields to the
-// event loop so the UI never freezes regardless of cost.
-const ARGON_V3 = { t: 1, m: 2048, p: 1, dkLen: 32 } as const;
+// work, and ALL hashing goes through argon2idAsync, which (with the
+// nobleNextTickPatch side-effect import) yields to the event loop so the UI
+// never freezes regardless of cost.
+const ARGON_V3 = { t: 1, m: 2048, p: 1, dkLen: 32, asyncTick: KDF_ASYNC_TICK_MS } as const;
 // v2 cost kept ONLY to verify (and transparently upgrade) hashes created
 // before the recalibration. Verifying one is slow (~80 s) but non-blocking,
 // and happens at most once per install thanks to the re-hash on success.
-const ARGON_V2 = { t: 3, m: 47104, p: 1, dkLen: 32 } as const;
+const ARGON_V2 = { t: 3, m: 47104, p: 1, dkLen: 32, asyncTick: KDF_ASYNC_TICK_MS } as const;
 const enc = new TextEncoder();
 
 /** Constant-time string comparison to avoid leaking the hash via timing. */

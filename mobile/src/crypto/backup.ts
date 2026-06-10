@@ -1,8 +1,9 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
-import { pbkdf2 } from '@noble/hashes/pbkdf2';
+import { pbkdf2Async } from '@noble/hashes/pbkdf2';
 import { sha256 } from '@noble/hashes/sha256';
-import { argon2id } from '@noble/hashes/argon2';
+import { argon2idAsync } from '@noble/hashes/argon2';
+import { KDF_ASYNC_TICK_MS } from './nobleNextTickPatch';
 
 // ─── AegisLink encrypted backup format ────────────────────────────────────────
 //
@@ -25,8 +26,16 @@ import { argon2id } from '@noble/hashes/argon2';
 //   so the cost asymmetry must be maximised. Argon2id (winner of the
 //   2015 Password Hashing Competition, OWASP top recommendation) requires
 //   ~64 MiB of RAM per attempt, which collapses GPU/ASIC parallelism by
-//   orders of magnitude. Parameters are chosen so that a single derivation
-//   completes in well under 2 s on commodity mobile hardware.
+//   orders of magnitude.
+//
+// Runtime note: all KDFs here run as pure JS on Hermes (no JIT), which is
+// ~60× slower than Node/V8 for this workload — a v3 derivation takes on the
+// order of MINUTES, and even the legacy v2 PBKDF2 takes tens of seconds.
+// Every derivation therefore uses the *Async variants, which yield to the
+// event loop so the UI stays responsive behind a progress indicator. The v3
+// cost itself CANNOT be lowered without a version bump: KDF parameters are
+// implied by `v`, not stored in the envelope, so changing them would break
+// decryption of every existing v3 backup.
 //
 // Symmetric cipher in all versions: nacl.secretbox (XSalsa20-Poly1305) —
 // authenticated, so MAC failure on wrong passphrase is detected explicitly.
@@ -143,21 +152,23 @@ export function ratePassphrase(pw: string): PassphraseStrength {
 
 // ─── KDF dispatch ─────────────────────────────────────────────────────────────
 
-function derivePbkdf2(passphrase: string, salt: Uint8Array, iterations: number): Uint8Array {
+function derivePbkdf2(passphrase: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
   const pwBytes = decodeUTF8(passphrase);
-  return pbkdf2(sha256, pwBytes, salt, {
+  return pbkdf2Async(sha256, pwBytes, salt, {
     c: iterations,
     dkLen: BACKUP_KEY_BYTES,
+    asyncTick: KDF_ASYNC_TICK_MS,
   });
 }
 
-function deriveArgon2id(passphrase: string, salt: Uint8Array): Uint8Array {
+function deriveArgon2id(passphrase: string, salt: Uint8Array): Promise<Uint8Array> {
   const pwBytes = decodeUTF8(passphrase);
-  return argon2id(pwBytes, salt, {
+  return argon2idAsync(pwBytes, salt, {
     m: BACKUP_ARGON2_MEMORY,
     t: BACKUP_ARGON2_TIME,
     p: BACKUP_ARGON2_PARALLELISM,
     dkLen: BACKUP_KEY_BYTES,
+    asyncTick: KDF_ASYNC_TICK_MS,
   });
 }
 
@@ -169,7 +180,7 @@ function deriveKeyForVersion(
   passphrase: string,
   salt: Uint8Array,
   version: BackupEnvelopeVersion,
-): Uint8Array {
+): Promise<Uint8Array> {
   if (version === 1) return derivePbkdf2(passphrase, salt, BACKUP_PBKDF2_ITERATIONS_V1);
   if (version === 2) return derivePbkdf2(passphrase, salt, BACKUP_PBKDF2_ITERATIONS_V2);
   if (version === 3) return deriveArgon2id(passphrase, salt);
@@ -181,13 +192,13 @@ function deriveKeyForVersion(
  * The derived key is wiped from local scope as soon as ciphertext is produced.
  * Always emits BACKUP_VERSION (v3 / Argon2id).
  */
-export function encryptBackup(payload: BackupPayload, passphrase: string): BackupEnvelope {
+export async function encryptBackup(payload: BackupPayload, passphrase: string): Promise<BackupEnvelope> {
   if (passphrase.length < BACKUP_MIN_PASSPHRASE_LEN) {
     throw new Error(`Passphrase must be at least ${BACKUP_MIN_PASSPHRASE_LEN} characters`);
   }
   const salt = nacl.randomBytes(BACKUP_SALT_BYTES);
   const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const key = deriveKeyForVersion(passphrase, salt, BACKUP_VERSION);
+  const key = await deriveKeyForVersion(passphrase, salt, BACKUP_VERSION);
   try {
     const plaintext = decodeUTF8(JSON.stringify(payload));
     const ciphertext = nacl.secretbox(plaintext, nonce, key);
@@ -209,14 +220,14 @@ export function encryptBackup(payload: BackupPayload, passphrase: string): Backu
  *
  * Supports envelope versions 1, 2 and 3 (see header for KDF per version).
  */
-export function decryptBackup(envelope: BackupEnvelope, passphrase: string): BackupPayload {
+export async function decryptBackup(envelope: BackupEnvelope, passphrase: string): Promise<BackupPayload> {
   if (envelope.v !== 1 && envelope.v !== 2 && envelope.v !== 3) {
     throw new Error(`Unsupported backup version: ${(envelope as { v: number }).v}`);
   }
   const salt = decodeBase64(envelope.salt);
   const nonce = decodeBase64(envelope.nonce);
   const ciphertext = decodeBase64(envelope.ciphertext);
-  const key = deriveKeyForVersion(passphrase, salt, envelope.v);
+  const key = await deriveKeyForVersion(passphrase, salt, envelope.v);
   try {
     const opened = nacl.secretbox.open(ciphertext, nonce, key);
     if (!opened) {
