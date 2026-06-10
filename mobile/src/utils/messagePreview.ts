@@ -30,6 +30,11 @@ export function previewLabel(
     if (status === 'declined') return `${icon} ${t('chat.declinedCall', 'Llamada rechazada')}`;
     return `${icon} ${media === 'video' ? t('chat.videoCall', 'Videollamada') : t('chat.voiceCall', 'Llamada de voz')}`;
   }
+  if (body.startsWith('[join_request:')) {
+    // Wire format: [join_request:<groupId>:<groupName>]
+    const name = body.slice(14, -1).split(':')[1]?.trim();
+    return `👥 ${t('chat.joinRequestPreview', 'Group join request')}${name ? ` · ${name}` : ''}`;
+  }
   if (body.startsWith('[gif:')) return '🎞 GIF';
   if (body.startsWith('[sticker:')) return `🖼 ${t('attachSheet.sticker', 'Sticker')}`;
   if (body.startsWith('[image:')) return `📷 ${t('attachSheet.image', 'Image')}`;

@@ -126,7 +126,18 @@
     "missedCall": "Llamada perdida",
     "declinedCall": "Llamada rechazada",
     "voiceCall": "Llamada de voz",
-    "videoCall": "Videollamada"
+    "videoCall": "Videollamada",
+    "joinRequestLabel": "Solicitud de grupo",
+    "joinRequestIncoming": "{{name}} quiere unirse a «{{group}}»",
+    "joinRequestSentCard": "Solicitud enviada · {{group}}",
+    "joinRequestAdd": "Añadir al grupo",
+    "joinRequestAdding": "Añadiendo…",
+    "joinRequestAdded": "Añadido al grupo",
+    "joinRequestNotAdmin": "Solo el administrador del grupo puede aprobar esta solicitud",
+    "joinRequestUnknownGroup": "Grupo no disponible en este dispositivo",
+    "joinRequestPreview": "Solicitud de unión",
+    "joinRequestErrorTitle": "No se pudo añadir",
+    "joinRequestErrorDesc": "Comprueba tu conexión e inténtalo de nuevo."
   },
   "contacts": {
     "title": "Contactos",
