@@ -159,7 +159,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     setBusy(true);
     try {
       const payload = buildPayload();
-      const envelope = encryptBackup(payload, passphrase);
+      const envelope = await encryptBackup(payload, passphrase);
       const filename = `aegislink-backup-${Date.now()}.${BACKUP_FILE_EXTENSION}`;
       const file = new File(Paths.cache, filename);
       file.create({ overwrite: true });
@@ -224,7 +224,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     try {
       const envelope = JSON.parse(pendingEnvelope) as unknown;
       if (!isBackupEnvelope(envelope)) throw new Error('Invalid backup envelope');
-      const payload = decryptBackup(envelope, passphrase);
+      const payload = await decryptBackup(envelope, passphrase);
       // Wipe passphrase BEFORE touching storage.
       resetPassphrase();
 
