@@ -42,6 +42,13 @@ jest.mock('../../socket/client', () => ({
   sendGroupMessage: (...a: unknown[]) => mockSendGroupMessage(...a),
 }));
 
+// ── crypto/media (E2EE blob upload for document posts) ──────────────────────
+const mockUpload = jest.fn().mockResolvedValue('blob:b1:k1:n1');
+jest.mock('../../crypto/media', () => ({
+  __esModule: true,
+  encryptAndUploadMedia: (...a: unknown[]) => mockUpload(...a),
+}));
+
 // ── store/identity ───────────────────────────────────────────────────────────
 let mockIdentity: { aegisId: string } | null = { aegisId: 'me-admin' };
 jest.mock('../identity', () => ({
@@ -301,5 +308,118 @@ describe('scheduled group posts — staged image cleanup', () => {
       },
     });
     expect(mockDeleteAsync).not.toHaveBeenCalled();
+  });
+});
+
+// ── File / poll / link attachments — fire path ───────────────────────────────
+
+const DOC = 'file:///doc/scheduledposts/d.pdf';
+
+function postWith(extra: Record<string, unknown>, over: Partial<StoredScheduledMessage> = {}): StoredScheduledMessage {
+  return pendingPost({
+    postMeta: 'enc:' + JSON.stringify({
+      asGroup: true, pinned: false, notify: true, replies: true, repeatWeekly: false, ...extra,
+    }),
+    ...over,
+  });
+}
+
+describe('scheduled group posts — file/poll/link attachments', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockOnline = true;
+    mockIdentity = { aegisId: 'me-admin' };
+    mockGetGroup.mockResolvedValue(GROUP);
+    useScheduledMessages.setState({ scheduled: [] });
+  });
+
+  it('document post: uploads the blob first, announcement then [file:…] message', async () => {
+    mockLoadPending.mockResolvedValue([postWith({ filePath: DOC, fileName: 'informe.pdf' })]);
+
+    await useScheduledMessages.getState().processDue();
+
+    expect(mockUpload).toHaveBeenCalledWith(DOC);
+    expect(mockSendGroupMessage).toHaveBeenCalledTimes(2);
+    expect(mockSendGroupMessage.mock.calls[0][0]).toMatchObject({ plaintext: '[post:g]Hola anuncio' });
+    expect(mockSendGroupMessage.mock.calls[1][0]).toMatchObject({
+      plaintext: '[file:informe.pdf:blob:b1:k1:n1]', msgType: 'file', mediaUri: 'blob:b1:k1:n1',
+    });
+    // Non-recurring → staged document unlinked after publish.
+    expect(mockDeleteAsync).toHaveBeenCalledWith(DOC, { idempotent: true });
+  });
+
+  it('document-only post (empty text) sends just the [file:…] message and sanitizes the name', async () => {
+    mockLoadPending.mockResolvedValue([postWith(
+      { filePath: DOC, fileName: 'ra:ro[1].pdf' },
+      { encryptedPayload: 'enc:' }, // decrypts to '' — must NOT be treated as failure
+    )]);
+
+    await useScheduledMessages.getState().processDue();
+
+    expect(mockMarkFailed).not.toHaveBeenCalled();
+    expect(mockSendGroupMessage).toHaveBeenCalledTimes(1);
+    expect(mockSendGroupMessage.mock.calls[0][0]).toMatchObject({
+      plaintext: '[file:raro1.pdf:blob:b1:k1:n1]', msgType: 'file',
+    });
+  });
+
+  it('document post offline: waits WITHOUT burning a retry (blob upload needs the relay)', async () => {
+    mockOnline = false;
+    mockLoadPending.mockResolvedValue([postWith({ filePath: DOC, fileName: 'informe.pdf' })]);
+
+    await useScheduledMessages.getState().processDue();
+
+    expect(mockUpload).not.toHaveBeenCalled();
+    expect(mockSendGroupMessage).not.toHaveBeenCalled();
+    expect(mockIncrementRetry).not.toHaveBeenCalled();
+    expect(mockMarkFailed).not.toHaveBeenCalled();
+  });
+
+  it('upload failure burns a retry and nothing fans out', async () => {
+    mockUpload.mockRejectedValueOnce(new Error('relay down'));
+    mockLoadPending.mockResolvedValue([postWith({ filePath: DOC, fileName: 'informe.pdf' })]);
+
+    await useScheduledMessages.getState().processDue();
+
+    expect(mockSendGroupMessage).not.toHaveBeenCalled();
+    expect(mockIncrementRetry).toHaveBeenCalledWith('post-1', 1);
+  });
+
+  it('poll post fires the [poll:q|…] message after the announcement', async () => {
+    mockLoadPending.mockResolvedValue([postWith({
+      poll: { question: '¿Quedamos?', options: ['Sí', 'No', 'Luego'] },
+    })]);
+
+    await useScheduledMessages.getState().processDue();
+
+    expect(mockSendGroupMessage).toHaveBeenCalledTimes(2);
+    expect(mockSendGroupMessage.mock.calls[1][0]).toMatchObject({
+      plaintext: '[poll:¿Quedamos?|Sí|No|Luego]', msgType: 'poll',
+    });
+  });
+
+  it('link rides the announcement text inside the marker body', async () => {
+    mockLoadPending.mockResolvedValue([postWith({ linkUrl: 'https://aegis.link/x' })]);
+
+    await useScheduledMessages.getState().processDue();
+
+    expect(mockSendGroupMessage).toHaveBeenCalledTimes(1);
+    expect(mockSendGroupMessage.mock.calls[0][0]).toMatchObject({
+      plaintext: '[post:g]Hola anuncio\n\nhttps://aegis.link/x',
+    });
+  });
+
+  it('link-only post (empty text) publishes the URL as the announcement body', async () => {
+    mockLoadPending.mockResolvedValue([postWith(
+      { linkUrl: 'https://aegis.link/x' },
+      { encryptedPayload: 'enc:' },
+    )]);
+
+    await useScheduledMessages.getState().processDue();
+
+    expect(mockSendGroupMessage).toHaveBeenCalledTimes(1);
+    expect(mockSendGroupMessage.mock.calls[0][0]).toMatchObject({
+      plaintext: '[post:g]https://aegis.link/x',
+    });
   });
 });

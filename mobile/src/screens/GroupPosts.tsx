@@ -17,9 +17,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, Pressable, ScrollView, Image, Alert, StyleSheet,
+  View, Text, TextInput, Pressable, ScrollView, Image, Alert, StyleSheet, Modal,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import * as Crypto from 'expo-crypto';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -53,12 +54,33 @@ interface Props {
 
 type WhenChip = '1h' | 'today' | 'tomorrow' | 'custom';
 
-/** Best-effort unlink of a staged image file. Cleanup only — never throws. */
+/** Best-effort unlink of a staged file. Cleanup only — never throws. */
 async function deleteStagedFile(path: string): Promise<void> {
   try {
     const FS = await import('expo-file-system/legacy');
     await FS.deleteAsync(path, { idempotent: true });
   } catch { /* best-effort */ }
+}
+
+/** Copy a picked asset into the staging dir so it survives cache eviction. */
+async function stageFile(fromUri: string, ext: string): Promise<string> {
+  const FS = await import('expo-file-system/legacy');
+  const dir = `${FS.documentDirectory}scheduledposts/`;
+  await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+  const dest = `${dir}post_${Crypto.randomUUID()}.${ext}`;
+  await FS.copyAsync({ from: fromUri, to: dest });
+  return dest;
+}
+
+const MAX_FILE_BYTES = 50 * 1024 * 1024; // mirror crypto/media MAX_BYTES
+
+function shortName(name: string, max = 22): string {
+  return name.length > max ? name.slice(0, max - 3) + '…' : name;
+}
+
+/** Strip characters that would corrupt the [poll:q|opt|…] wire format. */
+function sanitizePollText(s: string): string {
+  return s.replace(/[|[\]\n]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 // ─── Tiempo ───────────────────────────────────────────────────────────────────
@@ -136,6 +158,11 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
   const [asGroup, setAsGroup] = useState(true);
   const [text, setText] = useState(initialText ?? '');
   const [image, setImage] = useState<{ path: string; name: string } | null>(null);
+  const [file, setFile] = useState<{ path: string; name: string } | null>(null);
+  const [poll, setPoll] = useState<{ question: string; options: string[] } | null>(null);
+  const [linkUrl, setLinkUrl] = useState<string | null>(null);
+  const [showPollModal, setShowPollModal] = useState(false);
+  const [showLinkModal, setShowLinkModal] = useState(false);
   const [when, setWhen] = useState<WhenChip>('tomorrow');
   const [customTs, setCustomTs] = useState<number | null>(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -151,12 +178,12 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
   // Anything still here on replace/remove/unmount is unreferenced plaintext on
   // disk and must be unlinked; once a post is scheduled the path is persisted
   // (the store owns its cleanup from then on) and leaves this set.
-  const freshImagePaths = useRef<Set<string>>(new Set());
+  const freshStagedPaths = useRef<Set<string>>(new Set());
 
   useEffect(() => { void loadPending(); }, [loadPending]);
 
   useEffect(() => {
-    const fresh = freshImagePaths.current;
+    const fresh = freshStagedPaths.current;
     return () => { for (const p of fresh) void deleteStagedFile(p); };
   }, []);
 
@@ -210,19 +237,15 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
       );
       // Persist into documentDirectory so the staged file survives cache eviction
       // until the scheduled fire time.
-      const FS = await import('expo-file-system/legacy');
-      const dir = `${FS.documentDirectory}scheduledposts/`;
-      await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-      const dest = `${dir}post_${Crypto.randomUUID()}.jpg`;
-      await FS.copyAsync({ from: compressed.uri, to: dest });
+      const dest = await stageFile(compressed.uri, 'jpg');
       const rawName = asset.fileName ?? asset.uri.split('/').pop() ?? 'imagen.jpg';
-      freshImagePaths.current.add(dest);
+      freshStagedPaths.current.add(dest);
       setImage((prev) => {
         // Replacing an image picked this session: unlink the orphaned file.
         // A persisted image (edit mode) stays — its row still references it
         // until the update is saved, at which point the store unlinks it.
-        if (prev && freshImagePaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
-        return { path: dest, name: rawName.length > 22 ? rawName.slice(0, 19) + '…' : rawName };
+        if (prev && freshStagedPaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
+        return { path: dest, name: shortName(rawName) };
       });
     } catch (e) {
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
@@ -231,7 +254,43 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
 
   const handleRemoveImage = useCallback(() => {
     setImage((prev) => {
-      if (prev && freshImagePaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
+      if (prev && freshStagedPaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
+      return null;
+    });
+  }, []);
+
+  // ── Documento: picker → staging (mismo ciclo de vida que la imagen) ──
+  const handlePickFile = useCallback(async () => {
+    const result = await withPickingGuard(() =>
+      DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false }),
+    );
+    if (!result || result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    if (asset.size != null && asset.size > MAX_FILE_BYTES) {
+      Alert.alert(
+        i18nT('groupPosts.fileTooBigTitle', 'Archivo demasiado grande'),
+        i18nT('groupPosts.fileTooBigDesc', 'El máximo es 50 MB.'),
+      );
+      return;
+    }
+    try {
+      const rawName = asset.name ?? asset.uri.split('/').pop() ?? 'archivo';
+      const rawExt = rawName.includes('.') ? rawName.split('.').pop() ?? '' : '';
+      const ext = /^[a-zA-Z0-9]{1,8}$/.test(rawExt) ? rawExt.toLowerCase() : 'bin';
+      const dest = await stageFile(asset.uri, ext);
+      freshStagedPaths.current.add(dest);
+      setFile((prev) => {
+        if (prev && freshStagedPaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
+        return { path: dest, name: rawName };
+      });
+    } catch (e) {
+      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+    }
+  }, [i18nT]);
+
+  const handleRemoveFile = useCallback(() => {
+    setFile((prev) => {
+      if (prev && freshStagedPaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
       return null;
     });
   }, []);
@@ -239,9 +298,11 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
   // ── Programar / borrador ──
   const sendAt = chipSendAt(when, customTs);
 
+  const hasContent = !!(text.trim() || image || file || poll || linkUrl);
+
   const handleSchedule = useCallback(async (status: 'pending' | 'draft') => {
     const trimmed = text.trim();
-    if (!trimmed && !image) return;
+    if (!trimmed && !image && !file && !poll && !linkUrl) return;
     if (!canPost) return;
     try {
       await scheduleGroupPost({
@@ -253,12 +314,16 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
         options: {
           asGroup, pinned: pin, notify, replies, repeatWeekly: repeat,
           imagePath: image?.path, imageName: image?.name,
+          filePath: file?.path, fileName: file?.name,
+          poll: poll ?? undefined,
+          linkUrl: linkUrl ?? undefined,
         },
       });
-      // Saved into the row — the store owns the staged file's cleanup now.
-      if (image) freshImagePaths.current.delete(image.path);
-      setText(''); setImage(null); setPin(false); setNotify(true);
-      setReplies(true); setRepeat(false); setEditingId(null);
+      // Saved into the row — the store owns the staged files' cleanup now.
+      if (image) freshStagedPaths.current.delete(image.path);
+      if (file) freshStagedPaths.current.delete(file.path);
+      setText(''); setImage(null); setFile(null); setPoll(null); setLinkUrl(null);
+      setPin(false); setNotify(true); setReplies(true); setRepeat(false); setEditingId(null);
       // Reset the schedule too: without this, the NEXT compose silently
       // inherits the previous post's (possibly edited/past) timestamp.
       setWhen('tomorrow'); setCustomTs(null);
@@ -266,7 +331,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
     } catch (e) {
       Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
     }
-  }, [text, image, canPost, scheduleGroupPost, group.id, sendAt, editingId, asGroup, pin, notify, replies, repeat, i18nT]);
+  }, [text, image, file, poll, linkUrl, canPost, scheduleGroupPost, group.id, sendAt, editingId, asGroup, pin, notify, replies, repeat, i18nT]);
 
   const handleEdit = useCallback((m: ScheduledMessage) => {
     const d = decrypted[m.id];
@@ -279,6 +344,9 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
     setReplies(d.options.replies);
     setRepeat(d.options.repeatWeekly);
     setImage(d.options.imagePath ? { path: d.options.imagePath, name: d.options.imageName ?? 'imagen.jpg' } : null);
+    setFile(d.options.filePath ? { path: d.options.filePath, name: d.options.fileName ?? 'archivo' } : null);
+    setPoll(d.options.poll ?? null);
+    setLinkUrl(d.options.linkUrl ?? null);
     setCustomTs(m.sendAt);
     setWhen('custom');
     setTab('compose');
@@ -480,24 +548,72 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
                 </View>
               )}
 
-              {/* add-media row — Archivo/Encuesta/Enlace son visuales (como en el
-                  mockup); solo Imagen está cableado en v1 */}
+              {/* attachment chips: documento / encuesta / enlace */}
+              {(file || poll || linkUrl) && (
+                <View style={{ paddingHorizontal: 14, paddingBottom: 12, gap: 6 }}>
+                  {file && (
+                    <View style={[styles.attachCard, { borderColor: `${t.accent}44`, backgroundColor: t.surface2, borderRadius: t.radius }]}>
+                      <I.Attach size={15} color={t.accent} />
+                      <Text numberOfLines={1} style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: t.text, letterSpacing: 0.3 }}>
+                        {shortName(file.name, 30)}
+                      </Text>
+                      <Pressable onPress={handleRemoveFile} hitSlop={8} accessibilityLabel={i18nT('groupPosts.removeFile', 'Quitar archivo')}>
+                        <I.X size={14} color={t.textDim} />
+                      </Pressable>
+                    </View>
+                  )}
+                  {poll && (
+                    <Pressable
+                      onPress={() => setShowPollModal(true)}
+                      accessibilityLabel={i18nT('groupPosts.editPoll', 'Editar encuesta')}
+                      style={[styles.attachCard, { borderColor: `${t.accent}44`, backgroundColor: t.surface2, borderRadius: t.radius }]}
+                    >
+                      <I.Check size={15} color={t.accent} />
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 12.5, color: t.text }}>{poll.question}</Text>
+                        <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 0.5, marginTop: 1 }}>
+                          {i18nT('groupPosts.pollOptionsCount', '{{n}} OPCIONES · VOTO ANÓNIMO', { n: poll.options.length })}
+                        </Text>
+                      </View>
+                      <Pressable onPress={() => setPoll(null)} hitSlop={8} accessibilityLabel={i18nT('groupPosts.removePoll', 'Quitar encuesta')}>
+                        <I.X size={14} color={t.textDim} />
+                      </Pressable>
+                    </Pressable>
+                  )}
+                  {linkUrl && (
+                    <Pressable
+                      onPress={() => setShowLinkModal(true)}
+                      accessibilityLabel={i18nT('groupPosts.editLink', 'Editar enlace')}
+                      style={[styles.attachCard, { borderColor: `${t.accent}44`, backgroundColor: t.surface2, borderRadius: t.radius }]}
+                    >
+                      <I.Globe size={15} color={t.accent} />
+                      <Text numberOfLines={1} style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: t.text, letterSpacing: 0.3 }}>
+                        {linkUrl.replace(/^https?:\/\//, '')}
+                      </Text>
+                      <Pressable onPress={() => setLinkUrl(null)} hitSlop={8} accessibilityLabel={i18nT('groupPosts.removeLink', 'Quitar enlace')}>
+                        <I.X size={14} color={t.textDim} />
+                      </Pressable>
+                    </Pressable>
+                  )}
+                </View>
+              )}
+
+              {/* add-media row */}
               <View style={{ flexDirection: 'row', gap: 4, paddingHorizontal: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: t.divider }}>
                 {([
-                  { ic: <I.Eye size={17} color={t.textDim} />, l: i18nT('groupPosts.mediaImage', 'Imagen'), on: () => { void handlePickImage(); }, enabled: true },
-                  { ic: <I.Attach size={17} color={t.textFaint} />, l: i18nT('groupPosts.mediaFile', 'Archivo'), on: () => {}, enabled: false },
-                  { ic: <I.Timer size={17} color={t.textFaint} />, l: i18nT('groupPosts.mediaPoll', 'Encuesta'), on: () => {}, enabled: false },
-                  { ic: <I.Globe size={17} color={t.textFaint} />, l: i18nT('groupPosts.mediaLink', 'Enlace'), on: () => {}, enabled: false },
+                  { ic: <I.Eye size={17} color={t.textDim} />, l: i18nT('groupPosts.mediaImage', 'Imagen'), on: () => { void handlePickImage(); } },
+                  { ic: <I.Attach size={17} color={t.textDim} />, l: i18nT('groupPosts.mediaFile', 'Archivo'), on: () => { void handlePickFile(); } },
+                  { ic: <I.Timer size={17} color={t.textDim} />, l: i18nT('groupPosts.mediaPoll', 'Encuesta'), on: () => setShowPollModal(true) },
+                  { ic: <I.Globe size={17} color={t.textDim} />, l: i18nT('groupPosts.mediaLink', 'Enlace'), on: () => setShowLinkModal(true) },
                 ]).map((m) => (
                   <Pressable
                     key={m.l}
                     onPress={m.on}
-                    disabled={!m.enabled}
                     accessibilityLabel={m.l}
-                    style={{ flex: 1, alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 4, borderRadius: t.radiusS, opacity: m.enabled ? 1 : 0.45 }}
+                    style={({ pressed }) => ({ flex: 1, alignItems: 'center', gap: 4, paddingVertical: 8, paddingHorizontal: 4, borderRadius: t.radiusS, opacity: pressed ? 0.6 : 1 })}
                   >
                     {m.ic}
-                    <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: m.enabled ? t.textDim : t.textFaint, letterSpacing: 0.4 }}>
+                    <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 0.4 }}>
                       {m.l.toUpperCase()}
                     </Text>
                   </Pressable>
@@ -590,13 +706,13 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
                     ? i18nT('groupPosts.scheduleRecurring', 'Programar publicación recurrente')
                     : i18nT('groupPosts.schedulePost', 'Programar publicación')
               }
-              disabled={(!text.trim() && !image) || (when === 'custom' && customTs === null)}
+              disabled={!hasContent || (when === 'custom' && customTs === null)}
               onPress={() => { void handleSchedule('pending'); }}
             />
             <GhostButton
               t={t}
               label={i18nT('groupPosts.saveDraft', 'Guardar como borrador')}
-              disabled={!text.trim() && !image}
+              disabled={!hasContent}
               onPress={() => { void handleSchedule('draft'); }}
             />
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 2 }}>
@@ -663,6 +779,15 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
                       </Text>
                     </View>
                   )}
+                  {opts.filePath && <I.Attach size={11} color={t.textDim} />}
+                  {opts.poll && (
+                    <View style={[styles.smallChip, { borderColor: t.border }]}>
+                      <Text style={{ fontFamily: t.fontMono, fontSize: 8.5, color: t.textDim, letterSpacing: 0.5 }}>
+                        {i18nT('groupPosts.pollChip', 'ENCUESTA')}
+                      </Text>
+                    </View>
+                  )}
+                  {opts.linkUrl && <I.Globe size={11} color={t.textDim} />}
                   <View style={{ flex: 1 }} />
                   <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: isDraft ? t.textFaint : t.accent, letterSpacing: 0.6 }}>
                     {isDraft ? i18nT('groupPosts.draftChip', 'BORRADOR') : formatCountdown(q.sendAt - Date.now(), i18nT)}
@@ -683,12 +808,16 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
                       backgroundColor: t.surface2, borderWidth: 1, borderColor: t.border,
                       alignItems: 'center', justifyContent: 'center',
                     }}>
-                      <I.Bell size={20} color={t.textDim} />
+                      {opts.filePath
+                        ? <I.Attach size={20} color={t.textDim} />
+                        : opts.poll
+                          ? <I.Check size={20} color={t.textDim} />
+                          : <I.Bell size={20} color={t.textDim} />}
                     </View>
                   )}
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text numberOfLines={3} style={{ fontFamily: t.font, fontSize: 12.5, color: t.text, lineHeight: 17.5 }}>
-                      {d?.text ?? '…'}
+                      {d?.text || opts.poll?.question || opts.fileName || opts.linkUrl || '…'}
                     </Text>
                   </View>
                 </View>
@@ -726,7 +855,172 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
         onClose={() => setShowPicker(false)}
         onConfirm={(ts) => { setCustomTs(ts); setWhen('custom'); }}
       />
+      <PollComposerModal
+        t={t}
+        visible={showPollModal}
+        initial={poll}
+        onClose={() => setShowPollModal(false)}
+        onSave={(p) => { setPoll(p); setShowPollModal(false); }}
+      />
+      <LinkComposerModal
+        t={t}
+        visible={showLinkModal}
+        initial={linkUrl}
+        onClose={() => setShowLinkModal(false)}
+        onSave={(url) => { setLinkUrl(url); setShowLinkModal(false); }}
+      />
     </View>
+  );
+}
+
+// ─── Poll composer (mini editor de encuesta adjunta) ─────────────────────────
+
+function PollComposerModal({ t, visible, initial, onClose, onSave }: {
+  t: Theme;
+  visible: boolean;
+  initial: { question: string; options: string[] } | null;
+  onClose: () => void;
+  onSave: (poll: { question: string; options: string[] }) => void;
+}) {
+  const { t: i18nT } = useTranslation();
+  const [question, setQuestion] = useState('');
+  const [options, setOptions] = useState<string[]>(['', '']);
+
+  // Re-seed from the attached poll each time the modal opens.
+  useEffect(() => {
+    if (visible) {
+      setQuestion(initial?.question ?? '');
+      setOptions(initial?.options?.length ? [...initial.options] : ['', '']);
+    }
+  }, [visible, initial]);
+
+  const handleSave = () => {
+    const q = sanitizePollText(question);
+    const opts = options.map(sanitizePollText).filter((o) => o.length > 0);
+    if (!q) {
+      Alert.alert(i18nT('poll.missingQuestion', 'Falta la pregunta'), i18nT('poll.missingQuestionDesc', 'Escribe la pregunta de la encuesta.'));
+      return;
+    }
+    if (opts.length < 2) {
+      Alert.alert(i18nT('poll.fewOptions', 'Faltan opciones'), i18nT('poll.fewOptionsDesc', 'Añade al menos 2 opciones.'));
+      return;
+    }
+    onSave({ question: q, options: opts });
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable style={[styles.sheet, { backgroundColor: t.surface, borderColor: t.border, borderRadius: t.radius }]} onPress={() => {}}>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1, marginBottom: 10 }}>
+            {i18nT('groupPosts.pollModalTitle', 'ENCUESTA ADJUNTA · VOTO ANÓNIMO')}
+          </Text>
+          <TextInput
+            value={question}
+            onChangeText={setQuestion}
+            placeholder={i18nT('poll.question', 'Pregunta')}
+            placeholderTextColor={t.textDim}
+            accessibilityLabel={i18nT('poll.question', 'Pregunta')}
+            style={[styles.modalInput, { color: t.text, fontFamily: t.font, backgroundColor: t.surface2, borderColor: t.border, borderRadius: t.radiusS }]}
+          />
+          {options.map((opt, idx) => (
+            <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <TextInput
+                value={opt}
+                onChangeText={(v) => setOptions((prev) => prev.map((o, i) => (i === idx ? v : o)))}
+                placeholder={i18nT('poll.optionPlaceholder', 'Opción {{letter}}', { letter: String.fromCharCode(65 + idx) })}
+                placeholderTextColor={t.textDim}
+                accessibilityLabel={i18nT('poll.optionPlaceholder', 'Opción {{letter}}', { letter: String.fromCharCode(65 + idx) })}
+                style={[styles.modalInput, { flex: 1, color: t.text, fontFamily: t.font, backgroundColor: t.surface2, borderColor: t.border, borderRadius: t.radiusS }]}
+              />
+              {options.length > 2 && (
+                <Pressable
+                  onPress={() => setOptions((prev) => prev.filter((_, i) => i !== idx))}
+                  hitSlop={8}
+                  accessibilityLabel={i18nT('groupPosts.removeOption', 'Quitar opción')}
+                >
+                  <I.X size={15} color={t.textDim} />
+                </Pressable>
+              )}
+            </View>
+          ))}
+          {options.length < 6 && (
+            <Pressable
+              onPress={() => setOptions((prev) => [...prev, ''])}
+              accessibilityLabel={i18nT('poll.addOption', 'Añadir opción')}
+              style={{ paddingVertical: 8, alignItems: 'center' }}
+            >
+              <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 0.5 }}>
+                + {i18nT('poll.addOption', 'Añadir opción').toUpperCase()}
+              </Text>
+            </Pressable>
+          )}
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+            <GhostButton t={t} label={i18nT('common.cancel', 'Cancelar')} onPress={onClose} full={false} style={{ flex: 1 }} />
+            <PrimaryButton t={t} label={i18nT('common.ok', 'OK')} onPress={handleSave} full={false} style={{ flex: 1 }} />
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ─── Link composer ────────────────────────────────────────────────────────────
+
+function LinkComposerModal({ t, visible, initial, onClose, onSave }: {
+  t: Theme;
+  visible: boolean;
+  initial: string | null;
+  onClose: () => void;
+  onSave: (url: string) => void;
+}) {
+  const { t: i18nT } = useTranslation();
+  const [url, setUrl] = useState('');
+
+  useEffect(() => { if (visible) setUrl(initial ?? ''); }, [visible, initial]);
+
+  const handleSave = () => {
+    let u = url.trim();
+    if (u && !/^https?:\/\//i.test(u)) u = `https://${u}`;
+    // Minimal sanity: scheme + host with a dot, no spaces.
+    if (!/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(u)) {
+      Alert.alert(
+        i18nT('groupPosts.badLinkTitle', 'Enlace no válido'),
+        i18nT('groupPosts.badLinkDesc', 'Escribe una URL válida (https://…).'),
+      );
+      return;
+    }
+    onSave(u);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable style={[styles.sheet, { backgroundColor: t.surface, borderColor: t.border, borderRadius: t.radius }]} onPress={() => {}}>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1, marginBottom: 10 }}>
+            {i18nT('groupPosts.linkModalTitle', 'ENLACE ADJUNTO')}
+          </Text>
+          <TextInput
+            value={url}
+            onChangeText={setUrl}
+            placeholder="https://…"
+            placeholderTextColor={t.textDim}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            accessibilityLabel={i18nT('groupPosts.linkModalTitle', 'ENLACE ADJUNTO')}
+            style={[styles.modalInput, { color: t.text, fontFamily: t.fontMono, backgroundColor: t.surface2, borderColor: t.border, borderRadius: t.radiusS }]}
+          />
+          <Text style={{ fontFamily: t.font, fontSize: 11.5, color: t.textDim, marginTop: 2, lineHeight: 16 }}>
+            {i18nT('groupPosts.linkModalSub', 'Se añade al final del anuncio y los miembros pueden tocarlo.')}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+            <GhostButton t={t} label={i18nT('common.cancel', 'Cancelar')} onPress={onClose} full={false} style={{ flex: 1 }} />
+            <PrimaryButton t={t} label={i18nT('common.ok', 'OK')} onPress={handleSave} full={false} style={{ flex: 1 }} />
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -780,5 +1074,18 @@ const styles = StyleSheet.create({
   smallChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     borderWidth: 1, borderRadius: 99, paddingHorizontal: 6, paddingVertical: 1,
+  },
+  attachCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 9,
+    borderWidth: 1, paddingHorizontal: 11, paddingVertical: 9,
+  },
+  backdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', paddingHorizontal: 24,
+  },
+  sheet: {
+    borderWidth: 1, padding: 16, gap: 8,
+  },
+  modalInput: {
+    borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13.5,
   },
 });

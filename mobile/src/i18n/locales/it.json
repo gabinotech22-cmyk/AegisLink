@@ -1148,6 +1148,21 @@
     "inD": "TRA {{d}} G",
     "adminSection": "Post",
     "entryLabel": "Post programmati",
-    "entrySub": "Annunci con data e ora · solo admin"
+    "entrySub": "Annunci con data e ora · solo admin",
+    "fileTooBigTitle": "File troppo grande",
+    "fileTooBigDesc": "Il massimo è 50 MB.",
+    "removeFile": "Rimuovi file",
+    "editPoll": "Modifica sondaggio",
+    "removePoll": "Rimuovi sondaggio",
+    "editLink": "Modifica link",
+    "removeLink": "Rimuovi link",
+    "removeOption": "Rimuovi opzione",
+    "pollOptionsCount": "{{n}} OPZIONI · VOTO ANONIMO",
+    "pollChip": "SONDAGGIO",
+    "pollModalTitle": "SONDAGGIO ALLEGATO · VOTO ANONIMO",
+    "linkModalTitle": "LINK ALLEGATO",
+    "linkModalSub": "Aggiunto alla fine dell'annuncio; i membri possono toccarlo.",
+    "badLinkTitle": "Link non valido",
+    "badLinkDesc": "Inserisci un URL valido (https://…)."
   }
 }

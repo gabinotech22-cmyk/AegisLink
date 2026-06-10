@@ -1197,6 +1197,21 @@
     "inD": "EN {{d}} D",
     "adminSection": "Publicaciones",
     "entryLabel": "Publicaciones programadas",
-    "entrySub": "Anuncios con fecha y hora · solo admins"
+    "entrySub": "Anuncios con fecha y hora · solo admins",
+    "fileTooBigTitle": "Archivo demasiado grande",
+    "fileTooBigDesc": "El máximo es 50 MB.",
+    "removeFile": "Quitar archivo",
+    "editPoll": "Editar encuesta",
+    "removePoll": "Quitar encuesta",
+    "editLink": "Editar enlace",
+    "removeLink": "Quitar enlace",
+    "removeOption": "Quitar opción",
+    "pollOptionsCount": "{{n}} OPCIONES · VOTO ANÓNIMO",
+    "pollChip": "ENCUESTA",
+    "pollModalTitle": "ENCUESTA ADJUNTA · VOTO ANÓNIMO",
+    "linkModalTitle": "ENLACE ADJUNTO",
+    "linkModalSub": "Se añade al final del anuncio y los miembros pueden tocarlo.",
+    "badLinkTitle": "Enlace no válido",
+    "badLinkDesc": "Escribe una URL válida (https://…)."
   }
 }
