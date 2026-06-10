@@ -32,11 +32,12 @@ type Segment =
   | { kind: 'mention'; text: string };
 
 // Combined regex: order matters — code first (avoids greedy overlap), then url, mention, bold, italic, strike.
-// aegislink:// is linkified ONLY for group invites (group/v1/): other scheme
-// URLs — notably aegislink://panic, which remote-wipes the device — must
-// never become tappable from a message body an attacker controls.
+// aegislink:// is linkified ONLY for group invites (group/v1/) and contact
+// links (v1/): other scheme URLs — notably aegislink://panic, which
+// remote-wipes the device — must never become tappable from a message body
+// an attacker controls.
 const TOKEN_RE =
-  /(`[^`]+`)|(\bhttps?:\/\/[^\s<>"')\]]+|\baegislink:\/\/group\/v1\/[^\s<>"')\]]+)|((?:^|\s)@[A-Za-z0-9_-]{3,})|(\*[^*\n]+\*)|(_[^_\n]+_)|(~[^~\n]+~)/g;
+  /(`[^`]+`)|(\bhttps?:\/\/[^\s<>"')\]]+|\baegislink:\/\/(?:group\/)?v1\/[^\s<>"')\]]+)|((?:^|\s)@[A-Za-z0-9_-]{3,})|(\*[^*\n]+\*)|(_[^_\n]+_)|(~[^~\n]+~)/g;
 
 function parse(body: string): Segment[] {
   const segments: Segment[] = [];
@@ -136,7 +137,12 @@ export function FormattedText({ body, t, style, selectable }: Props) {
                 style={{ color: t.accent, textDecorationLine: 'underline' }}
                 accessibilityRole="link"
                 accessibilityLabel={seg.href}
-                onPress={() => Linking.openURL(seg.href).catch(() => {})}
+                onPress={() => {
+                  // Our own universal links open in-app directly (via their
+                  // scheme equivalent) instead of bouncing through the browser.
+                  const { universalToScheme } = require('../crypto/qr') as typeof import('../crypto/qr');
+                  void Linking.openURL(universalToScheme(seg.href) ?? seg.href).catch(() => {});
+                }}
               >
                 {seg.text}
               </Text>

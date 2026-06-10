@@ -59,6 +59,17 @@
     "android": {
       "package": "com.aegislink.app",
       "googleServicesFile": "./google-services.json",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            { "scheme": "https", "host": "aegislink.duckdns.org", "path": "/g" },
+            { "scheme": "https", "host": "aegislink.duckdns.org", "path": "/a" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "buildToolsVersion": "35.0.0",

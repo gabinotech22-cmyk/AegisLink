@@ -20,7 +20,7 @@ import { I } from '../components/icons';
 import { PrimaryButton, GhostButton } from '../components/Button';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
-import { encodeIdentityQR, parseIdentityQR } from '../crypto/qr';
+import { encodeIdentityQR, encodeIdentityLink, parseIdentityQR } from '../crypto/qr';
 import type { StoredContact } from '../db/local';
 import type { Theme } from '../theme/vault';
 import type { Identity } from '../crypto/identity';
@@ -432,7 +432,10 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
 
 // ── Enlace de invitación ─────────────────────────────────────────────────────
 function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded }: any) {
-  const link = identity ? `https://aegislink.app/add/${identity.aegisId}` : '';
+  // Real universal link on OUR domain (aegislink.app was a placeholder we do
+  // not own). Includes the public key → the receiver gets the same TOFU
+  // guarantees as scanning the QR; the fragment never reaches the server.
+  const link = identity ? encodeIdentityLink(identity.aegisId, identity.publicKeyB64) : '';
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -540,7 +543,11 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
 
   const handlePaste = async () => {
     const text = await Clipboard.getStringAsync();
-    if (text) setAegisId(text.trim());
+    if (!text) return;
+    // A pasted invite link (https universal or aegislink:// QR payload) is
+    // accepted directly — extract the id instead of failing validation.
+    const parsed = parseIdentityQR(text.trim());
+    setAegisId(parsed ? parsed.aegisId : text.trim());
   };
 
   const handleAdd = async () => {

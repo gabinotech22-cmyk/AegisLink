@@ -408,7 +408,12 @@
     "scanQR": "Scan QR",
     "invalidId": "Invalid Aegis ID",
     "alreadyAdded": "Contact already added",
-    "addError": "Could not add contact"
+    "addError": "Could not add contact",
+    "linkConfirmTitle": "Add contact",
+    "linkConfirmDesc": "Add {{id}} as a contact?",
+    "linkConfirmAdd": "Add",
+    "keyMismatchTitle": "Different key",
+    "keyMismatchDesc": "You already have this contact with a DIFFERENT public key. Nothing was changed. Verify with the other person before continuing."
   },
   "backup": {
     "title": "Encrypted Backup",
@@ -1213,5 +1218,9 @@
     "linkModalSub": "Added at the end of the announcement; members can tap it.",
     "badLinkTitle": "Invalid link",
     "badLinkDesc": "Enter a valid URL (https://…)."
+  },
+  "attach": {
+    "shareContactTitle": "Share contact",
+    "shareContactEmpty": "No contacts available to share."
   }
 }

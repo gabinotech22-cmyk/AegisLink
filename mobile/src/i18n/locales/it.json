@@ -408,7 +408,12 @@
     "scanQR": "Scansiona QR",
     "invalidId": "Aegis ID non valido",
     "alreadyAdded": "Contatto già aggiunto",
-    "addError": "Impossibile aggiungere il contatto"
+    "addError": "Impossibile aggiungere il contatto",
+    "linkConfirmTitle": "Aggiungi contatto",
+    "linkConfirmDesc": "Aggiungere {{id}} come contatto?",
+    "linkConfirmAdd": "Aggiungi",
+    "keyMismatchTitle": "Chiave diversa",
+    "keyMismatchDesc": "Hai già questo contatto con una chiave pubblica DIVERSA. Non è stato modificato nulla. Verifica con l'altra persona prima di continuare."
   },
   "backup": {
     "title": "Backup cifrato",
@@ -1164,5 +1169,9 @@
     "linkModalSub": "Aggiunto alla fine dell'annuncio; i membri possono toccarlo.",
     "badLinkTitle": "Link non valido",
     "badLinkDesc": "Inserisci un URL valido (https://…)."
+  },
+  "attach": {
+    "shareContactTitle": "Condividi contatto",
+    "shareContactEmpty": "Nessun contatto disponibile da condividere."
   }
 }
