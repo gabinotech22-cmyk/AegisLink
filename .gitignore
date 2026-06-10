@@ -22,6 +22,7 @@ google-service-account.json
 
 aegislink-server.zip
 *.zip
+*.tar.gz
 desktop/node_modules/
 server/node_modules/
 promo-video/node_modules/
