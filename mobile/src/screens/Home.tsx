@@ -554,7 +554,7 @@ function ContactRow({
               justifyContent: 'center',
             }}
           >
-            <Text style={{ fontSize: 18 }}>📌</Text>
+            <I.Pin size={18} color={t.accentInk} />
             <Text style={{ color: t.accentInk, fontFamily: t.fontMono, fontSize: 9, letterSpacing: 0.4, marginTop: 3 }}>
               {isPinned ? i18nT('home.unpin', 'Desfijar') : i18nT('home.pin', 'Fijar')}
             </Text>
@@ -564,13 +564,13 @@ function ContactRow({
             accessibilityLabel="Archivar conversación"
             style={{
               width: 72,
-              backgroundColor: '#ef4444',
+              backgroundColor: t.danger,
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <I.Archive size={18} color="#fff" />
-            <Text style={{ color: '#fff', fontFamily: t.fontMono, fontSize: 9, letterSpacing: 0.4, marginTop: 3 }}>{i18nT('home.archiveAction')}</Text>
+            <I.Archive size={18} color={t.accentInk} />
+            <Text style={{ color: t.accentInk, fontFamily: t.fontMono, fontSize: 9, letterSpacing: 0.4, marginTop: 3 }}>{i18nT('home.archiveAction')}</Text>
           </Pressable>
         </View>
       )}
