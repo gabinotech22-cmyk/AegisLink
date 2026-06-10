@@ -32,6 +32,12 @@ import type {
 // SecureStore read paths (X3DH receiver lookups) keep working. The DB is the
 // source of truth; SecureStore writes are non-fatal. The slot prefix is read
 // lazily from db/local via dynamic import inside the upload function.
+
+/** Prekey-store diagnostics — dev builds only (see rdiag in socket/client.ts). */
+function rdiag(msg: string): void {
+  if (__DEV__) console.warn(msg);
+}
+
 function secureKeyHelpers(slotPrefix: string) {
   return {
     spkSecretKey: (keyId: number) => `aegis.${slotPrefix}spkSecret.${keyId}`,
@@ -246,7 +252,7 @@ export async function uploadIdentityAndPrekeys(
   if (!persistResult.ok) {
     // Identity row already exists server-side, but we refuse to publish a SPK we
     // cannot complete. Caller can retry; until then the bundle stays unpublished.
-    console.warn(
+    rdiag(
       `[RDIAG] prekey-store ABORT spkId=${preKeySecrets.signedPreKey.keyId} dbReadback=NULL — NOT POSTing /prekeys`,
     );
     return {
@@ -430,7 +436,7 @@ async function persistPrekeySecretsDurably(
   }
 
   // [RDIAG] confirm the SPK secret is readable back from the DURABLE store.
-  console.warn(
+  rdiag(
     `[RDIAG] prekey-store DONE spkId=${spkKeyId} dbReadback=OK opkCount=${preKeySecrets.opkSecrets.size}`,
   );
 
