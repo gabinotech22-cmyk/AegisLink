@@ -1,6 +1,10 @@
 name: Deploy to Production
 
-# Triggers: every push to main (automatic) or manual dispatch.
+# Trigger: MANUAL ONLY (workflow_dispatch). The push-to-main trigger was
+# removed on purpose: production is deployed manually over SSH (systemd
+# service `aegislink`, /home/ubuntu/aegislink), and this workflow still
+# assumes the old pm2//opt layout. Do not re-enable the automatic trigger
+# without rewriting the script below for the current infrastructure.
 # Required GitHub secrets:
 #   DEPLOY_HOST       — public IP or hostname of the production server
 #   DEPLOY_USER       — SSH user (e.g. ubuntu, aegis)
@@ -12,8 +16,6 @@ name: Deploy to Production
 #   FCM_SERVER_KEY, APNS_KEY_ID, APNS_TEAM_ID, EXTERNAL_IP, PORT, TRUST_PROXY
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
