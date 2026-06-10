@@ -561,7 +561,13 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                   backgroundColor: pressed ? t.surface2 : 'transparent',
                 })}
               >
-                <Avatar t={t} name={name} color={colorFromId(id)} size={28} />
+                <Avatar
+                  t={t}
+                  name={name}
+                  color={contacts.find((c) => c.aegisId === id)?.color ?? colorFromId(id)}
+                  size={28}
+                  photoUri={contacts.find((c) => c.aegisId === id)?.avatarImage}
+                />
                 <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>@{name}</Text>
               </Pressable>
             ))}

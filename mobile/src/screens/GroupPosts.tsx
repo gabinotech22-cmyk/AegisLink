@@ -146,6 +146,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const identity = useIdentity((s) => s.identity);
+  const myAvatarImage = useIdentity((s) => s.avatarImage);
   const group = useGroups((s) => s.groups.find((g) => g.id === groupProp.id)) ?? groupProp;
   const scheduled = useScheduledMessages((s) => s.scheduled);
   const { scheduleGroupPost, cancelScheduled, loadPending } = useScheduledMessages();
@@ -494,7 +495,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
                     <I.Users size={15} color={group.avatarColor ?? t.accent} />
                   </View>
                 ) : (
-                  <Avatar t={t} name={i18nT('groupAdmin.youLabel', 'Tú')} color={t.accent} size={30} />
+                  <Avatar t={t} name={i18nT('groupAdmin.youLabel', 'Tú')} color={t.accent} size={30} photoUri={myAvatarImage} />
                 )}
                 <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.text }}>
                   {asGroup ? group.name : i18nT('groupAdmin.youLabel', 'Tú')}

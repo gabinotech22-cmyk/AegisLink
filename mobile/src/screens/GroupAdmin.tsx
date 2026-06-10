@@ -32,6 +32,8 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   const { renameGroup, updateGroupAvatar, addMember, removeMember, updateGroupPermissions, leaveGroup } = useGroups();
   const contacts = useContacts((s) => s.contacts);
   const identity = useIdentity((s) => s.identity);
+  const myAvatarImage = useIdentity((s) => s.avatarImage);
+  const myAvatarColor = useIdentity((s) => s.avatarColor);
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(groupProp.name);
   const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
@@ -45,12 +47,13 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   }
 
   function getMemberColor(aegisId: string) {
-    if (aegisId === identity?.aegisId) return t.accent;
+    if (aegisId === identity?.aegisId) return myAvatarColor || t.accent;
     return contacts.find((c) => c.aegisId === aegisId)?.color ?? t.surface3;
   }
 
   function getMemberAvatar(aegisId: string) {
-    if (aegisId === identity?.aegisId) return undefined;
+    // Own row uses the profile avatar — contacts never contains self.
+    if (aegisId === identity?.aegisId) return myAvatarImage ?? undefined;
     return contacts.find((c) => c.aegisId === aegisId)?.avatarImage;
   }
 
