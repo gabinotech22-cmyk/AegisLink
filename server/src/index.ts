@@ -117,6 +117,16 @@ attachRelay(io);
 app.use('/work', createWorkRouter(io));
 app.use('/devices', createDeviceLinkRouter(io));
 
+// CORS rejections from the origin callback above would otherwise surface as a
+// generic 500 — turn them into a clean 403 with no stack/detail leakage.
+app.use((err: Error, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err.message === 'CORS blocked') {
+    res.status(403).json({ error: 'cors_blocked' });
+    return;
+  }
+  next(err);
+});
+
 // Bootstrap DB then start server.
 initDb().then(() => {
   httpServer.listen(PORT, '0.0.0.0', () => {
