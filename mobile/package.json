@@ -13,7 +13,7 @@
     "test": "jest",
     "gen-icons": "node scripts/gen-icons.mjs",
     "build:apk": "eas build --platform android --profile production-apk --local",
-    "build:native": "npx expo prebuild --platform android && cd android && gradlew assembleRelease"
+    "build:native": "npx expo prebuild --platform android && cd android && .\\gradlew.bat assembleRelease"
   },
   "dependencies": {
     "@noble/hashes": "^1.6.1",
