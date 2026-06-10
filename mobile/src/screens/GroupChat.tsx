@@ -914,6 +914,10 @@ function GroupBubble({
   // as author, otherwise the sender chip row renders as usual above the card.
   if (isAnnouncement && (m.type === 'text' || !m.type)) {
     const showGroupAuthor = postParsed.asGroup;
+    // In the Vault palettes `accent` and `bubbleOut` are the SAME colour, so
+    // accent-coloured framing (border, icon, chips) is invisible on our own
+    // outgoing bubble. Frame with the bubble's text colour on `me` instead.
+    const frame = me ? t.bubbleOutText : t.accent;
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         {!showGroupAuthor && sender ? (
@@ -937,7 +941,7 @@ function GroupBubble({
             maxWidth: 290,
             backgroundColor: me ? t.bubbleOut : t.bubbleIn,
             borderWidth: 1,
-            borderColor: `${t.accent}55`,
+            borderColor: `${frame}55`,
             borderRadius: t.radius,
             borderTopRightRadius: me ? t.radiusS : t.radius,
             borderTopLeftRadius: me ? t.radius : t.radiusS,
@@ -945,21 +949,21 @@ function GroupBubble({
           }}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <I.Users size={13} color={t.accent} />
+            <I.Users size={13} color={frame} />
             {showGroupAuthor && groupName ? (
               <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: t.font, fontSize: 12, fontWeight: '600', color: me ? t.bubbleOutText : t.text }}>
                 {groupName}
               </Text>
             ) : null}
-            <View style={{ borderWidth: 1, borderColor: `${t.accent}55`, borderRadius: 99, paddingHorizontal: 6, paddingVertical: 1 }}>
-              <Text style={{ fontFamily: t.fontMono, fontSize: 8.5, color: t.accent, letterSpacing: 0.5 }}>
+            <View style={{ borderWidth: 1, borderColor: `${frame}55`, borderRadius: 99, paddingHorizontal: 6, paddingVertical: 1 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 8.5, color: frame, letterSpacing: 0.5 }}>
                 {i18nT('groupPosts.announceChip', 'ANUNCIO')}
               </Text>
             </View>
             {postParsed.pinned && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderWidth: 1, borderColor: `${t.accent}55`, borderRadius: 99, paddingHorizontal: 6, paddingVertical: 1 }}>
-                <I.Shield size={9} color={t.accent} />
-                <Text style={{ fontFamily: t.fontMono, fontSize: 8.5, color: t.accent, letterSpacing: 0.5 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, borderWidth: 1, borderColor: `${frame}55`, borderRadius: 99, paddingHorizontal: 6, paddingVertical: 1 }}>
+                <I.Shield size={9} color={frame} />
+                <Text style={{ fontFamily: t.fontMono, fontSize: 8.5, color: frame, letterSpacing: 0.5 }}>
                   {i18nT('groupPosts.pinnedChip', 'FIJADO')}
                 </Text>
               </View>
