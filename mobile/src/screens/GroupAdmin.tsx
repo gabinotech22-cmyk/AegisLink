@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, TextInput, Image, Share } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, TextInput, Image, Share, Modal, FlatList } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
@@ -37,6 +37,8 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(groupProp.name);
   const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [memberQuery, setMemberQuery] = useState('');
 
   // Live group from store so edits reflect instantly
   const group = useGroups((s) => s.groups.find((g) => g.id === groupProp.id)) ?? groupProp;
@@ -103,22 +105,8 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   }
 
   function handleAddMember() {
-    const eligible = contacts.filter((c) => !group.members.includes(c.aegisId));
-    if (eligible.length === 0) {
-      Alert.alert(i18nT('groupAdmin.noContactsTitle'), i18nT('groupAdmin.noContactsDesc'));
-      return;
-    }
-    Alert.alert(
-      i18nT('groupAdmin.addMemberTitle'),
-      i18nT('groupAdmin.addMemberDesc'),
-      [
-        ...eligible.slice(0, 5).map((c) => ({
-          text: c.name,
-          onPress: () => void addMember(group.id, c.aegisId),
-        })),
-        { text: i18nT('common.cancel'), style: 'cancel' as const },
-      ]
-    );
+    setMemberQuery('');
+    setShowAddMember(true);
   }
 
   function handleRemoveMember(aegisId: string) {
@@ -478,6 +466,90 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
         onCancel={() => setCropSource(null)}
         onConfirm={(uri) => { void handleConfirmGroupAvatar(uri); }}
       />
+
+      {/* Add member — Vault bottom sheet (same pattern as ForwardModal), NOT a
+          native Alert: themed, scrollable, searchable, shows avatar + aegisId. */}
+      <Modal transparent visible={showAddMember} animationType="slide" onRequestClose={() => setShowAddMember(false)}>
+        <Pressable onPress={() => setShowAddMember(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+          <Pressable
+            onPress={(e) => e.stopPropagation?.()}
+            style={{
+              backgroundColor: t.surface,
+              borderTopLeftRadius: 18,
+              borderTopRightRadius: 18,
+              borderTopWidth: 1,
+              borderColor: t.borderStrong,
+              maxHeight: '75%',
+              paddingTop: 10,
+              paddingBottom: insets.bottom + 8,
+            }}
+          >
+            <View style={{ alignItems: 'center', paddingBottom: 12 }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.surface3 }} />
+            </View>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.8, paddingHorizontal: 22, paddingBottom: 10 }}>
+              {i18nT('groupAdmin.addMemberTitle').toUpperCase()} · {i18nT('groupAdmin.fromContacts').toUpperCase()}
+            </Text>
+
+            <View
+              style={{
+                flexDirection: 'row', alignItems: 'center',
+                marginHorizontal: 16, marginBottom: 8,
+                backgroundColor: t.surface2, borderRadius: 12,
+                borderWidth: 1, borderColor: t.border,
+                paddingHorizontal: 12, gap: 8,
+              }}
+            >
+              <I.Search size={15} color={t.textDim} />
+              <TextInput
+                value={memberQuery}
+                onChangeText={setMemberQuery}
+                placeholder={i18nT('common.search') + '...'}
+                placeholderTextColor={t.textDim}
+                accessibilityLabel={i18nT('common.search')}
+                style={{ flex: 1, fontFamily: t.font, fontSize: 14, color: t.text, paddingVertical: 9 }}
+              />
+            </View>
+
+            <FlatList
+              data={contacts
+                .filter((c) => !group.members.includes(c.aegisId))
+                .filter((c) =>
+                  !memberQuery.trim() ||
+                  c.name.toLowerCase().includes(memberQuery.toLowerCase()) ||
+                  c.aegisId.toLowerCase().includes(memberQuery.toLowerCase()))}
+              keyExtractor={(item) => item.aegisId}
+              renderItem={({ item }) => (
+                <Pressable
+                  onPress={() => {
+                    void addMember(group.id, item.aegisId);
+                    setShowAddMember(false);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${i18nT('groupAdmin.addMemberTitle')}: ${item.name}`}
+                  style={({ pressed }) => ({
+                    flexDirection: 'row', alignItems: 'center', gap: 12,
+                    paddingHorizontal: 22, paddingVertical: 12,
+                    backgroundColor: pressed ? t.surface2 : 'transparent',
+                  })}
+                >
+                  <Avatar t={t} name={item.avatarImage || item.name} color={item.color ?? t.accent} size={40} photoUri={item.avatarImage} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 14, color: t.text, fontWeight: '500' }}>{item.name}</Text>
+                    <Text numberOfLines={1} style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim }}>{item.aegisId}</Text>
+                  </View>
+                  <I.Plus size={16} color={t.accent} />
+                </Pressable>
+              )}
+              ListEmptyComponent={
+                <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, textAlign: 'center', paddingVertical: 24, paddingHorizontal: 22 }}>
+                  {i18nT('groupAdmin.noContactsDesc')}
+                </Text>
+              }
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
