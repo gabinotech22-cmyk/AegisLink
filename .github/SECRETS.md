@@ -16,7 +16,7 @@ Configura en: **repo → Settings → Secrets and variables → Actions → New 
 
 | Secret | Descripción | Ejemplo |
 |--------|-------------|---------|
-| `DEPLOY_HOST` | IP pública de la instancia AWS EC2 | `51.20.60.155` |
+| `DEPLOY_HOST` | IP pública de la instancia AWS EC2 | `<IP_DE_TU_VM>` |
 | `DEPLOY_USER` | Usuario SSH de la instancia AWS | `ubuntu` |
 | `DEPLOY_SSH_KEY` | Clave privada SSH completa | Contenido de `~/.ssh/id_ed25519` |
 | `DEPLOY_PATH` | Directorio de la app en la VM | `/home/aegis/app` |
