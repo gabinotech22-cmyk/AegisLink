@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, Animated, Easing } from 'react-native';
 import { WallpaperPicker, loadWallpaper, type WallpaperOption } from '../components/WallpaperPicker';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -58,9 +58,22 @@ export function ContactDetailScreen({
   const mentionsOnlyChats = usePreferences((s) => s.mentionsOnlyChats);
   const setPref = usePreferences((s) => s.set);
   const [notifSheet, setNotifSheet] = useState(false);
+  const notifSheetProgress = useRef(new Animated.Value(0)).current;
   const isMentionsOnly = mentionsOnlyChats.includes(contact.aegisId);
   const notifLevel: 'all' | 'mentions' | 'none' =
     muted ? 'none' : isMentionsOnly ? 'mentions' : 'all';
+
+  useEffect(() => {
+    if (notifSheet) {
+      notifSheetProgress.setValue(0);
+      Animated.timing(notifSheetProgress, {
+        toValue: 1,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [notifSheet, notifSheetProgress]);
 
   async function setNotifLevel(level: 'all' | 'mentions' | 'none') {
     const without = mentionsOnlyChats.filter((id) => id !== contact.aegisId);
@@ -457,58 +470,105 @@ export function ContactDetailScreen({
         onSelect={(opt) => { setWallpaper(opt); setWallpaperPickerOpen(false); }}
       />
 
-      {/* Per-contact notification level sheet */}
+      {/* Per-contact notification level — floating menu */}
       <Modal visible={notifSheet} transparent animationType="fade" onRequestClose={() => setNotifSheet(false)}>
         <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
           onPress={() => setNotifSheet(false)}
+          accessibilityRole="button"
+          accessibilityLabel={i18nT('common.close', 'Close')}
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingHorizontal: 28,
+          }}
         >
-          <Pressable
-            onPress={() => {}}
-            style={{
-              backgroundColor: t.surface,
-              borderTopLeftRadius: t.radius, borderTopRightRadius: t.radius,
-              paddingTop: 10, paddingBottom: insets.bottom + 16, paddingHorizontal: 18,
-              borderTopWidth: 1, borderColor: t.border,
-            }}
+          <Animated.View
+            style={[
+              {
+                width: '100%',
+                maxWidth: 340,
+                alignSelf: 'center',
+                backgroundColor: t.surface,
+                borderRadius: t.radiusL,
+                borderWidth: 1,
+                borderColor: t.border,
+                overflow: 'hidden',
+                paddingVertical: 8,
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.3,
+                shadowRadius: 24,
+                elevation: 16,
+              },
+              {
+                opacity: notifSheetProgress,
+                transform: [
+                  {
+                    scale: notifSheetProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.92, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
           >
-            <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: t.border, marginBottom: 14 }} />
-            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.8, marginBottom: 12 }}>
-              {i18nT('contactDetail.notificationsTitle').toUpperCase()}
-            </Text>
-            {([
-              { level: 'all' as const, icon: <I.Bell size={20} color={t.accent} /> },
-              { level: 'mentions' as const, icon: <I.Hash size={20} color={t.accent} /> },
-              { level: 'none' as const, icon: <I.BellOff size={20} color={t.warn} /> },
-            ]).map(({ level, icon }) => {
-              const selected = notifLevel === level;
-              return (
-                <Pressable
-                  key={level}
-                  onPress={() => void setNotifLevel(level)}
-                  style={({ pressed }) => ({
-                    flexDirection: 'row', alignItems: 'center', gap: 14,
-                    paddingVertical: 14, paddingHorizontal: 12,
-                    borderRadius: t.radiusS,
-                    backgroundColor: selected ? `${t.accent}14` : (pressed ? t.surface2 : 'transparent'),
-                    borderWidth: 1, borderColor: selected ? `${t.accent}55` : 'transparent',
-                    marginBottom: 8,
-                  })}
-                >
-                  {icon}
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>
-                      {i18nT(`contactDetail.notifLevel_${level}`)}
-                    </Text>
-                    <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
-                      {i18nT(`contactDetail.notifLevel_${level}_desc`)}
-                    </Text>
-                  </View>
-                  {selected ? <I.Check size={18} color={t.accent} /> : null}
-                </Pressable>
-              );
-            })}
-          </Pressable>
+            <Pressable onPress={(e) => e.stopPropagation?.()}>
+              <Text
+                style={{
+                  fontFamily: t.fontMono,
+                  fontSize: 10,
+                  color: t.textDim,
+                  letterSpacing: 1,
+                  textTransform: 'uppercase',
+                  paddingHorizontal: 18,
+                  paddingTop: 14,
+                  paddingBottom: 10,
+                  borderBottomWidth: 1,
+                  borderBottomColor: t.divider,
+                }}
+              >
+                {i18nT('contactDetail.notificationsTitle')}
+              </Text>
+              <View style={{ paddingHorizontal: 10, paddingVertical: 8, gap: 6 }}>
+                {([
+                  { level: 'all' as const, icon: <I.Bell size={20} color={t.accent} /> },
+                  { level: 'mentions' as const, icon: <I.Hash size={20} color={t.accent} /> },
+                  { level: 'none' as const, icon: <I.BellOff size={20} color={t.warn} /> },
+                ]).map(({ level, icon }) => {
+                  const selected = notifLevel === level;
+                  return (
+                    <Pressable
+                      key={level}
+                      onPress={() => void setNotifLevel(level)}
+                      accessibilityRole="button"
+                      accessibilityLabel={i18nT(`contactDetail.notifLevel_${level}`)}
+                      style={({ pressed }) => ({
+                        flexDirection: 'row', alignItems: 'center', gap: 14,
+                        paddingVertical: 14, paddingHorizontal: 12,
+                        borderRadius: t.radiusS,
+                        backgroundColor: selected ? `${t.accent}14` : (pressed ? t.surface2 : 'transparent'),
+                        borderWidth: 1, borderColor: selected ? `${t.accent}55` : 'transparent',
+                      })}
+                    >
+                      {icon}
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>
+                          {i18nT(`contactDetail.notifLevel_${level}`)}
+                        </Text>
+                        <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
+                          {i18nT(`contactDetail.notifLevel_${level}_desc`)}
+                        </Text>
+                      </View>
+                      {selected ? <I.Check size={18} color={t.accent} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </Pressable>
+          </Animated.View>
         </Pressable>
       </Modal>
     </View>

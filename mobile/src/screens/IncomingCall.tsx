@@ -266,18 +266,18 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
             onPress={(e) => e.stopPropagation?.()}
             style={{
               backgroundColor: t.surface,
-              borderTopLeftRadius: 18,
-              borderTopRightRadius: 18,
+              borderTopLeftRadius: t.radiusL,
+              borderTopRightRadius: t.radiusL,
               borderTopWidth: 1,
-              borderColor: 'rgba(255,255,255,0.1)',
+              borderColor: t.border,
               paddingTop: 12,
               paddingBottom: insets.bottom + 16,
             }}
           >
             <View style={{ alignItems: 'center', paddingBottom: 12 }}>
-              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.surface3 }} />
             </View>
-            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 0.8, paddingHorizontal: 22, paddingBottom: 8 }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.8, paddingHorizontal: 22, paddingBottom: 8 }}>
               {i18nT('incomingCall.replyAndReject', 'REPLY AND REJECT').toUpperCase()}
             </Text>
             <ScrollView>
@@ -289,11 +289,11 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
                     paddingHorizontal: 22,
                     paddingVertical: 16,
                     borderTopWidth: 1,
-                    borderTopColor: 'rgba(255,255,255,0.07)',
-                    backgroundColor: pressed ? 'rgba(255,255,255,0.05)' : 'transparent',
+                    borderTopColor: t.divider,
+                    backgroundColor: pressed ? t.surface2 : 'transparent',
                   })}
                 >
-                  <Text style={{ fontFamily: t.font, fontSize: 15, color: '#fff' }}>{reply}</Text>
+                  <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text }}>{reply}</Text>
                 </Pressable>
               ))}
             </ScrollView>

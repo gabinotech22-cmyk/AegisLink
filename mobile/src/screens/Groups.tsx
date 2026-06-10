@@ -13,6 +13,7 @@ import { TabBar, type Tab } from '../components/TabBar';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { AvatarCropModal } from '../components/AvatarCropModal';
+import { FloatingMenu } from '../components/FloatingMenu';
 import type { Theme } from '../theme/vault';
 import { useGroups } from '../store/groups';
 import { useContacts } from '../store/contacts';
@@ -70,6 +71,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [joinLinkInput, setJoinLinkInput] = useState('');
+  const [menuGroup, setMenuGroup] = useState<StoredGroup | null>(null);
 
   useEffect(() => {
     void hydrate();
@@ -552,20 +554,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
             return (
               <Pressable
                 onPress={() => onOpenGroupChat(item)}
-                onLongPress={() => {
-                  Alert.alert(
-                    item.name,
-                    i18nT('groups.deleteGroupConfirm'),
-                    [
-                      { text: i18nT('common.cancel'), style: 'cancel' },
-                      {
-                        text: i18nT('groups.leaveGroup'),
-                        style: 'destructive',
-                        onPress: () => void leaveGroup(item.id),
-                      },
-                    ]
-                  );
-                }}
+                onLongPress={() => setMenuGroup(item)}
                 style={({ pressed }) => ({
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -615,6 +604,37 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
           }}
         />
       )}
+
+      {/* Group actions floating menu */}
+      <FloatingMenu
+        t={t}
+        visible={menuGroup !== null}
+        onClose={() => setMenuGroup(null)}
+        title={menuGroup?.name}
+        items={
+          menuGroup
+            ? [
+                {
+                  key: 'leave',
+                  icon: <I.Trash size={20} color={t.danger} />,
+                  label: i18nT('groups.leaveGroup'),
+                  onPress: () => {
+                    const group = menuGroup;
+                    Alert.alert(group.name, i18nT('groups.deleteGroupConfirm'), [
+                      { text: i18nT('common.cancel'), style: 'cancel' },
+                      {
+                        text: i18nT('groups.leaveGroup'),
+                        style: 'destructive',
+                        onPress: () => void leaveGroup(group.id),
+                      },
+                    ]);
+                  },
+                  danger: true,
+                },
+              ]
+            : []
+        }
+      />
 
       {/* Join by link modal */}
       <Modal

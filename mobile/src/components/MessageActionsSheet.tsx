@@ -1,8 +1,7 @@
-import { Modal, View, Text, Pressable } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, Text, Pressable } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
-import type { Theme } from '../theme/vault';
+import { FloatingMenu, type FloatingMenuItem } from './FloatingMenu';
 import { I } from './icons';
 import * as Clipboard from 'expo-clipboard';
 
@@ -45,148 +44,103 @@ export function MessageActionsSheet({
 }: MessageActionsSheetProps) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
-  const insets = useSafeAreaInsets();
 
   async function handleCopy() {
     try {
       await Clipboard.setStringAsync(body);
     } catch {/* ignore */}
     onCopy?.();
+  }
+
+  function handleReact(emoji: string) {
     onClose();
+    onReact(emoji);
+  }
+
+  const items: FloatingMenuItem[] = [
+    { key: 'reply', icon: <I.Reply size={20} color={t.textDim} />, label: i18nT('messageActions.reply'), onPress: onReply },
+    { key: 'forward', icon: <I.Forward size={20} color={t.textDim} />, label: i18nT('messageActions.forward'), onPress: onForward },
+  ];
+
+  if (body) {
+    items.push({ key: 'copy', icon: <I.Copy size={20} color={t.textDim} />, label: i18nT('messageActions.copy'), onPress: () => void handleCopy() });
+  }
+
+  items.push({
+    key: 'star',
+    icon: <I.Star size={20} color={starred ? t.accent : t.textDim} />,
+    label: starred ? i18nT('messageActions.unstar') : i18nT('messageActions.star'),
+    onPress: onStar,
+  });
+
+  if (onPin) {
+    items.push({
+      key: 'pin',
+      icon: <I.Pin size={20} color={pinned ? t.accent : t.textDim} />,
+      label: pinned ? i18nT('messageActions.unpin') : i18nT('messageActions.pin'),
+      onPress: onPin,
+    });
+  }
+
+  if (canDelete) {
+    items.push({
+      key: 'delete',
+      icon: <I.Trash size={20} color={t.danger} />,
+      label: i18nT('messageActions.delete'),
+      onPress: onDelete,
+      danger: true,
+    });
+  }
+
+  if (canDelete && onDeleteForAll) {
+    items.push({
+      key: 'deleteForAll',
+      icon: <I.Trash size={20} color={t.danger} />,
+      label: i18nT('messageActions.deleteForAll'),
+      onPress: onDeleteForAll,
+      danger: true,
+    });
   }
 
   return (
-    <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
-      <Pressable
-          onPress={onClose}
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
-      >
-        <Pressable
-          onPress={(e) => e.stopPropagation?.()}
+    <FloatingMenu
+      t={t}
+      visible={visible}
+      onClose={onClose}
+      items={items}
+      topContent={
+        <View
           style={{
-            backgroundColor: t.surface,
-            borderTopLeftRadius: 18,
-            borderTopRightRadius: 18,
-            borderTopWidth: 1,
-            borderColor: t.borderStrong,
-            paddingTop: 10,
-            paddingBottom: 8 + insets.bottom,
+            flexDirection: 'row',
+            justifyContent: 'space-around',
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            margin: 12,
+            backgroundColor: t.surface2,
+            borderRadius: 99,
           }}
         >
-          <View style={{ alignItems: 'center', paddingBottom: 10 }}>
-            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.surface3 }} />
-          </View>
-
-          {/* Quick reactions row */}
-          <View
-            style={{
-              flexDirection: 'row',
-              justifyContent: 'space-around',
-              paddingHorizontal: 14,
-              paddingVertical: 10,
-              marginHorizontal: 14,
-              marginBottom: 6,
-              backgroundColor: t.surface2,
-              borderRadius: 99,
-            }}
-          >
-            {QUICK_EMOJIS.map((emoji) => (
-              <Pressable
-                key={emoji}
-                onPress={() => { onReact(emoji); onClose(); }}
-                hitSlop={8}
-                style={({ pressed }) => ({
-                  width: 42,
-                  height: 42,
-                  borderRadius: 21,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: pressed ? t.surface3 : 'transparent',
-                })}
-              >
-                <Text style={{ fontSize: 26 }}>{emoji}</Text>
-              </Pressable>
-            ))}
-          </View>
-
-          <ActionRow t={t} icon={<I.Reply size={20} color={t.text} />} label={i18nT('messageActions.reply')} onPress={() => { onReply(); onClose(); }} />
-          <ActionRow t={t} icon={<I.Forward size={20} color={t.text} />} label={i18nT('messageActions.forward')} onPress={() => { onForward(); onClose(); }} />
-          {body ? (
-            <ActionRow t={t} icon={<I.Copy size={20} color={t.text} />} label={i18nT('messageActions.copy')} onPress={handleCopy} />
-          ) : null}
-          <ActionRow
-            t={t}
-            icon={<I.Star size={20} color={starred ? t.accent : t.text} />}
-            label={starred ? i18nT('messageActions.unstar') : i18nT('messageActions.star')}
-            onPress={() => { onStar(); onClose(); }}
-          />
-          {onPin ? (
-            <ActionRow
-              t={t}
-              icon={<I.Pin size={20} color={pinned ? t.accent : t.text} />}
-              label={pinned ? i18nT('messageActions.unpin') : i18nT('messageActions.pin')}
-              onPress={() => { onPin(); onClose(); }}
-            />
-          ) : null}
-          {canDelete ? (
-            <ActionRow
-              t={t}
-              icon={<I.Trash size={20} color={t.danger} />}
-              label={i18nT('messageActions.delete')}
-              danger
-              onPress={() => { onDelete(); onClose(); }}
-            />
-          ) : null}
-          {canDelete && onDeleteForAll ? (
-            <ActionRow
-              t={t}
-              icon={<I.Trash size={20} color={t.danger} />}
-              label={i18nT('messageActions.deleteForAll')}
-              danger
-              onPress={() => { onDeleteForAll(); onClose(); }}
-              noBorder
-            />
-          ) : null}
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-function ActionRow({
-  t,
-  icon,
-  label,
-  onPress,
-  danger,
-  noBorder,
-}: {
-  t: Theme;
-  icon: React.ReactNode;
-  label: string;
-  onPress: () => void;
-  danger?: boolean;
-  noBorder?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      android_ripple={{ color: t.surface2 }}
-      style={({ pressed }) => ({
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 14,
-        paddingHorizontal: 22,
-        paddingVertical: 14,
-        backgroundColor: pressed ? t.surface2 : 'transparent',
-        borderTopWidth: noBorder ? 0 : undefined,
-        borderTopColor: t.divider,
-      })}
-    >
-      {icon}
-      <Text style={{ fontFamily: t.font, fontSize: 15, color: danger ? t.danger : t.text, fontWeight: '500' }}>
-        {label}
-      </Text>
-    </Pressable>
+          {QUICK_EMOJIS.map((emoji) => (
+            <Pressable
+              key={emoji}
+              onPress={() => handleReact(emoji)}
+              accessibilityRole="button"
+              accessibilityLabel={`${i18nT('messageActions.react')}: ${emoji}`}
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: pressed ? t.surface3 : 'transparent',
+              })}
+            >
+              <Text style={{ fontSize: 24 }}>{emoji}</Text>
+            </Pressable>
+          ))}
+        </View>
+      }
+    />
   );
 }
