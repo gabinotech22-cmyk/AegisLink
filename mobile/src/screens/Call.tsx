@@ -413,8 +413,8 @@ export function CallScreen({ onClose, onMinimize }: Props) {
             onPress={(e) => e.stopPropagation?.()}
             style={{
               backgroundColor: t.surface,
-              borderTopLeftRadius: 20,
-              borderTopRightRadius: 20,
+              borderTopLeftRadius: t.radiusL,
+              borderTopRightRadius: t.radiusL,
               borderTopWidth: 1,
               borderColor: t.border,
               paddingTop: 12,
@@ -423,7 +423,7 @@ export function CallScreen({ onClose, onMinimize }: Props) {
           >
             {/* Handle */}
             <View style={{ alignItems: 'center', paddingBottom: 14 }}>
-              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.border }} />
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.surface3 }} />
             </View>
 
             {/* Option: Teclado */}

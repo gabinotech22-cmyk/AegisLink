@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, Alert, PanResponder, Modal } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, Alert, PanResponder } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { AegisMark, AegisWord } from '../components/AegisMark';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { FloatingMenu } from '../components/FloatingMenu';
 import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
@@ -327,88 +328,46 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
 
       <TabBar t={t} current="home" onChange={onTab} />
 
-      {/* Chat actions bottom-sheet — replaces a 5-button Alert (Android caps
+      {/* Chat actions floating menu — replaces a 5-button Alert (Android caps
           native alerts at 3 buttons, which hid the delete options). */}
-      <Modal
+      <FloatingMenu
+        t={t}
         visible={menuContact !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuContact(null)}
-      >
-        <Pressable
-          onPress={() => setMenuContact(null)}
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
-        >
-          <Pressable
-            onPress={() => {}}
-            style={{
-              backgroundColor: t.surface,
-              borderTopLeftRadius: 18,
-              borderTopRightRadius: 18,
-              paddingTop: 10,
-              paddingBottom: insets.bottom + 14,
-              borderTopWidth: 1,
-              borderColor: t.border,
-            }}
-          >
-            <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: t.border, marginBottom: 10 }} />
-            {menuContact && (
-              <Text style={{ fontFamily: t.fontDisplay, fontSize: 16, fontWeight: '600', color: t.text, paddingHorizontal: 22, paddingBottom: 6 }} numberOfLines={1}>
-                {menuContact.name}
-              </Text>
-            )}
-            {menuContact && [
-              {
-                key: 'pin',
-                icon: '📌',
-                label: (menuContact.pinned ?? false) ? i18nT('home.unpin', 'Desfijar') : i18nT('home.pin', 'Fijar'),
-                onPress: () => { const c = menuContact; setMenuContact(null); void pinContact(c.aegisId, !(c.pinned ?? false)); },
-                danger: false,
-              },
-              {
-                key: 'archive',
-                icon: '🗄',
-                label: (menuContact.archived ?? false) ? i18nT('home.unarchive', 'Desarchivar') : i18nT('home.archive', 'Archivar'),
-                onPress: () => { const c = menuContact; setMenuContact(null); void archiveContact(c.aegisId, !(c.archived ?? false)); },
-                danger: false,
-              },
-              {
-                key: 'clear',
-                icon: '🧹',
-                label: i18nT('home.deleteMessages', 'Eliminar mensajes'),
-                onPress: () => confirmClearChat(menuContact),
-                danger: false,
-              },
-              {
-                key: 'delete',
-                icon: '🗑',
-                label: i18nT('home.deleteChat', 'Eliminar chat'),
-                onPress: () => confirmDeleteChat(menuContact),
-                danger: true,
-              },
-            ].map((opt) => (
-              <Pressable
-                key={opt.key}
-                onPress={opt.onPress}
-                android_ripple={{ color: t.surface2 }}
-                style={({ pressed }) => ({
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 14,
-                  paddingHorizontal: 22,
-                  paddingVertical: 15,
-                  backgroundColor: pressed ? t.surface2 : 'transparent',
-                })}
-              >
-                <Text style={{ fontSize: 17 }}>{opt.icon}</Text>
-                <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '500', color: opt.danger ? '#ef4444' : t.text }}>
-                  {opt.label}
-                </Text>
-              </Pressable>
-            ))}
-          </Pressable>
-        </Pressable>
-      </Modal>
+        onClose={() => setMenuContact(null)}
+        title={menuContact?.name}
+        subtitle={menuContact?.aegisId}
+        items={
+          menuContact
+            ? [
+                {
+                  key: 'pin',
+                  icon: <I.Pin size={20} color={t.textDim} />,
+                  label: (menuContact.pinned ?? false) ? i18nT('home.unpin', 'Desfijar') : i18nT('home.pin', 'Fijar'),
+                  onPress: () => void pinContact(menuContact.aegisId, !(menuContact.pinned ?? false)),
+                },
+                {
+                  key: 'archive',
+                  icon: <I.Archive size={20} color={t.textDim} />,
+                  label: (menuContact.archived ?? false) ? i18nT('home.unarchive', 'Desarchivar') : i18nT('home.archive', 'Archivar'),
+                  onPress: () => void archiveContact(menuContact.aegisId, !(menuContact.archived ?? false)),
+                },
+                {
+                  key: 'clear',
+                  icon: <I.Eraser size={20} color={t.textDim} />,
+                  label: i18nT('home.deleteMessages', 'Eliminar mensajes'),
+                  onPress: () => confirmClearChat(menuContact),
+                },
+                {
+                  key: 'delete',
+                  icon: <I.Trash size={20} color={t.danger} />,
+                  label: i18nT('home.deleteChat', 'Eliminar chat'),
+                  onPress: () => confirmDeleteChat(menuContact),
+                  danger: true,
+                },
+              ]
+            : []
+        }
+      />
     </View>
   );
 }
