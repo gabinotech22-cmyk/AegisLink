@@ -46,6 +46,21 @@ export interface GroupPostOptions {
   imagePath?: string;
   /** Display name shown on the EXIF-stripped badge and queue thumbnail. */
   imageName?: string;
+  /**
+   * Local file:// path of a staged document (documentDirectory). At fire time
+   * it is E2EE-uploaded (encryptAndUploadMedia) and fans out as a second
+   * `[file:name:blob…]` message right after the announcement text.
+   */
+  filePath?: string;
+  /** Display name for the staged document ('s' and ':' stripped at fire). */
+  fileName?: string;
+  /**
+   * Poll attached to the post — fans out as a `[poll:q|opt|…]` message after
+   * the announcement, reusing the anonymous-voting pipeline untouched.
+   */
+  poll?: { question: string; options: string[] };
+  /** URL appended to the announcement text (FormattedText renders it tappable). */
+  linkUrl?: string;
 }
 
 export const DEFAULT_POST_OPTIONS: GroupPostOptions = {
@@ -83,17 +98,23 @@ async function decryptPostOptions(postMeta: string | undefined): Promise<GroupPo
 }
 
 /**
- * Best-effort removal of a staged post image. The staged file is the only
- * plaintext artifact of a scheduled post, so every path that stops referencing
- * it (cancel, edit-replace, publish) must unlink it. Cleanup only — never
- * throws, and refuses paths outside the staging directory.
+ * Best-effort removal of a staged post file (image or document). Staged files
+ * are the only plaintext artifacts of a scheduled post, so every path that
+ * stops referencing them (cancel, edit-replace, publish) must unlink them.
+ * Cleanup only — never throws, and refuses paths outside the staging directory.
  */
-async function deleteStagedPostImage(path: string | undefined): Promise<void> {
+async function deleteStagedPostFile(path: string | undefined): Promise<void> {
   if (!path || !path.includes('scheduledposts/')) return;
   try {
     const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
     await FS.deleteAsync(path, { idempotent: true });
   } catch { /* best-effort */ }
+}
+
+/** Unlink every staged file referenced by a post's options. */
+async function deleteStagedPostFiles(options: GroupPostOptions): Promise<void> {
+  await deleteStagedPostFile(options.imagePath);
+  await deleteStagedPostFile(options.filePath);
 }
 
 /** Revive JSON-deserialized byte fields back into Uint8Array. Mirrors client.ts logic. */
@@ -297,12 +318,13 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
 
   async scheduleGroupPost({ groupId, plaintext, sendAt, options, id, status }) {
     const { encryptBody } = require('../db/local') as typeof import('../db/local');
-    // When updating, capture the previously staged image so a replaced or
-    // removed file doesn't linger on disk once the row stops referencing it.
-    let previousImagePath: string | undefined;
+    // When updating, capture the previously staged files so a replaced or
+    // removed image/document doesn't linger on disk once the row stops
+    // referencing it.
+    let previousOptions: GroupPostOptions | null = null;
     if (id) {
       const prev = get().scheduled.find((m) => m.id === id);
-      if (prev) previousImagePath = (await decryptPostOptions(prev.postMeta)).imagePath;
+      if (prev) previousOptions = await decryptPostOptions(prev.postMeta);
     }
     // At-rest encryption with the SecureStore-held DB key — same protection
     // level as the outbox plaintext and ratchet sessions. Ratchet encryption
@@ -321,8 +343,14 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
       retryCount: 0,
     };
     await saveScheduled(stored); // INSERT OR REPLACE — same id updates in place
-    if (previousImagePath && previousImagePath !== (options ?? DEFAULT_POST_OPTIONS).imagePath) {
-      await deleteStagedPostImage(previousImagePath);
+    if (previousOptions) {
+      const next = options ?? DEFAULT_POST_OPTIONS;
+      if (previousOptions.imagePath && previousOptions.imagePath !== next.imagePath) {
+        await deleteStagedPostFile(previousOptions.imagePath);
+      }
+      if (previousOptions.filePath && previousOptions.filePath !== next.filePath) {
+        await deleteStagedPostFile(previousOptions.filePath);
+      }
     }
     set((s) => {
       const exists = s.scheduled.some((m) => m.id === stored.id);
@@ -338,10 +366,10 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
     const msg = get().scheduled.find((m) => m.id === id);
     await deleteScheduled(id);
     set((s) => ({ scheduled: s.scheduled.filter((m) => m.id !== id) }));
-    // Group post: also unlink its staged image — the row no longer exists, so
-    // the file would otherwise be orphaned plaintext on disk forever.
+    // Group post: also unlink its staged files — the row no longer exists, so
+    // they would otherwise be orphaned plaintext on disk forever.
     if (msg?.groupId && msg.postMeta) {
-      await deleteStagedPostImage((await decryptPostOptions(msg.postMeta)).imagePath);
+      await deleteStagedPostFiles(await decryptPostOptions(msg.postMeta));
     }
   },
 
@@ -404,45 +432,90 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
             continue;
           }
           const plaintext = await decryptBody(msg.encryptedPayload);
-          if (!plaintext || plaintext === '[DECRYPTION_ERROR]') {
+          // Empty text is legitimate (document-only / poll-only posts) — only
+          // an actual decryption failure is fatal.
+          if (typeof plaintext !== 'string' || plaintext === '[DECRYPTION_ERROR]') {
             await failNow(msg, msg.retryCount);
             continue;
           }
 
           // Publish options → wire marker flags (see utils/groupPost.ts)
           const options = await decryptPostOptions(msg.postMeta);
+
+          // Posts with a document need the relay NOW for the E2EE blob upload —
+          // wait online WITHOUT burning retries (mirrors the 1:1 semantics).
+          if (options.filePath && !online) continue;
+
+          // 1) Upload the document blob FIRST — the only remote op that can
+          //    fail midway; nothing has fanned out yet if it throws (clean retry).
+          let fileWire: { body: string; mediaUri: string } | null = null;
+          if (options.filePath) {
+            const { encryptAndUploadMedia } = require('../crypto/media') as typeof import('../crypto/media');
+            const blobUri = await encryptAndUploadMedia(options.filePath);
+            // ':', '[' and ']' would break the [file:name:blob…] parser.
+            const safeName = (options.fileName ?? 'file').replace(/[:[\]]/g, '') || 'file';
+            fileWire = { body: `[file:${safeName}:${blobUri}]`, mediaUri: blobUri };
+          }
+
           const { buildGroupPostBody } = require('../utils/groupPost') as typeof import('../utils/groupPost');
-          const textBody = buildGroupPostBody(plaintext, {
+          // The link rides the announcement text — FormattedText already
+          // renders https?:// URLs as tappable links in the bubble.
+          const baseText = options.linkUrl
+            ? (plaintext.trim().length > 0 ? `${plaintext}\n\n${options.linkUrl}` : options.linkUrl)
+            : plaintext;
+          const textBody = buildGroupPostBody(baseText, {
             asGroup: options.asGroup,
             pinned: options.pinned,
             silent: !options.notify,
             repliesOff: !options.replies,
           });
 
-          // Attached image: read the staged EXIF-stripped file and ride the
-          // existing [image:data:…] media pipeline; the marker starts the caption.
-          let wireBody = textBody;
-          let msgType: 'image' | undefined;
-          let mediaUri: string | undefined;
-          if (options.imagePath) {
-            try {
-              const { readAsStringAsync, EncodingType } = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
-              const b64 = await readAsStringAsync(options.imagePath, { encoding: EncodingType.Base64 });
-              wireBody = `[image:data:image/jpeg;base64,${b64}]${textBody}`;
-              msgType = 'image';
-              mediaUri = options.imagePath;
-            } catch {
-              // Image file lost (cache cleared) — publish text-only rather than dropping the post.
+          const { sendGroupMessage } = require('../socket/client') as typeof import('../socket/client');
+
+          // 2) Announcement (text/link, image riding the [image:data:…] media
+          //    pipeline with the marker in the caption). Skipped for posts that
+          //    are only a document and/or poll.
+          if (baseText.trim().length > 0 || options.imagePath) {
+            let wireBody = textBody;
+            let msgType: 'image' | undefined;
+            let mediaUri: string | undefined;
+            if (options.imagePath) {
+              try {
+                const { readAsStringAsync, EncodingType } = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+                const b64 = await readAsStringAsync(options.imagePath, { encoding: EncodingType.Base64 });
+                wireBody = `[image:data:image/jpeg;base64,${b64}]${textBody}`;
+                msgType = 'image';
+                mediaUri = options.imagePath;
+              } catch {
+                // Image file lost (cache cleared) — publish text-only rather than dropping the post.
+              }
             }
+            await sendGroupMessage({
+              identity,
+              groupId: msg.groupId,
+              plaintext: wireBody,
+              ...(msgType ? { msgType, mediaUri } : {}),
+            });
           }
 
-          const { sendGroupMessage } = require('../socket/client') as typeof import('../socket/client');
-          await sendGroupMessage({
-            identity,
-            groupId: msg.groupId,
-            plaintext: wireBody,
-            ...(msgType ? { msgType, mediaUri } : {}),
-          });
+          // 3) Document and 4) poll fan out as their own messages so receivers
+          //    reuse the existing file/poll bubbles untouched. Each call
+          //    persists per-member outbox jobs, so it is durable once made.
+          //    (Known limit: these carry no [post:] marker, so the silent flag
+          //    only applies to the announcement message.)
+          if (fileWire) {
+            await sendGroupMessage({
+              identity, groupId: msg.groupId,
+              plaintext: fileWire.body, msgType: 'file', mediaUri: fileWire.mediaUri,
+            });
+          }
+          if (options.poll && options.poll.options.length >= 2) {
+            await sendGroupMessage({
+              identity, groupId: msg.groupId,
+              plaintext: `[poll:${options.poll.question}|${options.poll.options.join('|')}]`,
+              msgType: 'poll',
+            });
+          }
 
           if (options.repeatWeekly) {
             // Recurring post: re-arm one week ahead instead of marking sent.
@@ -455,9 +528,10 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
             }));
           } else {
             await markScheduledSent(msg.id);
-            // Published and never firing again — the staged image already
-            // travelled inline (base64), so unlink the plaintext file.
-            await deleteStagedPostImage(options.imagePath);
+            // Published and never firing again — the staged image travelled
+            // inline (base64) and the document went up as an E2EE blob, so
+            // unlink the plaintext staging files.
+            await deleteStagedPostFiles(options);
             set((s) => ({
               scheduled: s.scheduled.map((m) =>
                 m.id === msg.id ? { ...m, status: 'sent' as const } : m,

@@ -1197,6 +1197,21 @@
     "inD": "IN {{d}} D",
     "adminSection": "Posts",
     "entryLabel": "Scheduled posts",
-    "entrySub": "Dated announcements · admins only"
+    "entrySub": "Dated announcements · admins only",
+    "fileTooBigTitle": "File too large",
+    "fileTooBigDesc": "The maximum is 50 MB.",
+    "removeFile": "Remove file",
+    "editPoll": "Edit poll",
+    "removePoll": "Remove poll",
+    "editLink": "Edit link",
+    "removeLink": "Remove link",
+    "removeOption": "Remove option",
+    "pollOptionsCount": "{{n}} OPTIONS · ANONYMOUS VOTE",
+    "pollChip": "POLL",
+    "pollModalTitle": "ATTACHED POLL · ANONYMOUS VOTE",
+    "linkModalTitle": "ATTACHED LINK",
+    "linkModalSub": "Added at the end of the announcement; members can tap it.",
+    "badLinkTitle": "Invalid link",
+    "badLinkDesc": "Enter a valid URL (https://…)."
   }
 }
