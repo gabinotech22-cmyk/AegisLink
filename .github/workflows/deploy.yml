@@ -1,59 +1,103 @@
-name: Deploy to Production
-
-# Trigger: MANUAL ONLY (workflow_dispatch). The push-to-main trigger was
-# removed on purpose: production is deployed manually over SSH (systemd
-# service `aegislink`, /home/ubuntu/aegislink), and this workflow still
-# assumes the old pm2//opt layout. Do not re-enable the automatic trigger
-# without rewriting the script below for the current infrastructure.
-# Required GitHub secrets:
-#   DEPLOY_HOST       — public IP or hostname of the production server
-#   DEPLOY_USER       — SSH user (e.g. ubuntu, aegis)
-#   DEPLOY_SSH_KEY    — private SSH key (PEM, no passphrase) for that user
-#   TURN_SECRET       — HMAC-SHA1 seed for coturn ephemeral credentials (rotate every 24 h)
-#   CORS_ORIGIN       — e.g. https://aegislink.duckdns.org
+# Deploy relay to production — MANUAL ONLY (workflow_dispatch).
 #
-# Optional secrets forwarded to the server env:
-#   FCM_SERVER_KEY, APNS_KEY_ID, APNS_TEAM_ID, EXTERNAL_IP, PORT, TRUST_PROXY
+# Matches the real VM layout (verified over SSH 2026-06-11):
+#   - code:    /home/ubuntu/aegislink/server   (no git checkout on the VM)
+#   - service: systemd unit `aegislink` → node_modules/.bin/tsx src/index.ts
+#   - env:     /home/ubuntu/aegislink/.env (EnvironmentFile — never touched here)
+#   - nginx, coturn and the landing are managed separately
+#     (infra/nginx/*, infra/deploy-web.sh, run manually over SSH)
+#
+# Required GitHub secrets:
+#   DEPLOY_HOST     — public IP or hostname of the VM
+#   DEPLOY_USER     — SSH user (ubuntu)
+#   DEPLOY_SSH_KEY  — private key authorized on the VM (dedicated CI key)
+#
+# Safety: backs up the running code, restarts, health-checks against
+# localhost, and rolls back automatically if /health does not come back.
+
+name: Deploy relay (manual)
 
 on:
   workflow_dispatch:
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
-    name: Deploy relay + coturn
+    name: Deploy relay via SSH
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          # All secrets are injected as env vars; deploy.sh reads them.
-          # TURN_SECRET is consumed by deploy.sh (envsubst into coturn conf)
-          # and by docker-compose (relay container env).
-          # No secret ever appears in the remote shell command string itself.
-          envs: TURN_SECRET,CORS_ORIGIN,FCM_SERVER_KEY,APNS_KEY_ID,APNS_TEAM_ID,EXTERNAL_IP,PORT,TRUST_PROXY
-          script: |
-            export TURN_SECRET="${TURN_SECRET}"
-            export CORS_ORIGIN="${CORS_ORIGIN}"
-            export FCM_SERVER_KEY="${FCM_SERVER_KEY:-}"
-            export APNS_KEY_ID="${APNS_KEY_ID:-}"
-            export APNS_TEAM_ID="${APNS_TEAM_ID:-}"
-            export EXTERNAL_IP="${EXTERNAL_IP:-}"
-            export PORT="${PORT:-3001}"
-            export TRUST_PROXY="${TRUST_PROXY:-1}"
-            cd /opt/aegislink
-            bash infra/deploy.sh
-        env:
-          TURN_SECRET: ${{ secrets.TURN_SECRET }}
-          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
-          FCM_SERVER_KEY: ${{ secrets.FCM_SERVER_KEY }}
-          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
-          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
-          EXTERNAL_IP: ${{ secrets.EXTERNAL_IP }}
-          PORT: ${{ secrets.PORT }}
-          TRUST_PROXY: ${{ secrets.TRUST_PROXY }}
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Package server sources
+        run: |
+          tar -czf /tmp/aegislink-server-src.tar.gz \
+            -C server src package.json package-lock.json tsconfig.json jest.config.cjs
+
+      - name: Upload to VM
+        run: |
+          scp -i ~/.ssh/deploy_key /tmp/aegislink-server-src.tar.gz \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/"
+
+      - name: Deploy, restart, health-check (rollback on failure)
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -s << 'ENDSSH'
+          set -euo pipefail
+          APP=/home/ubuntu/aegislink/server
+          STAMP=$(date +%Y%m%d-%H%M%S)
+          BACKUP=/home/ubuntu/aegislink/backup-$STAMP
+
+          echo "==> Backing up running code to $BACKUP"
+          mkdir -p "$BACKUP"
+          cp -r "$APP/src" "$APP/package.json" "$APP/package-lock.json" "$BACKUP/"
+
+          echo "==> Extracting new sources"
+          tar -xzf /tmp/aegislink-server-src.tar.gz -C "$APP"
+          rm -f /tmp/aegislink-server-src.tar.gz
+
+          echo "==> Installing dependencies (prod only)"
+          cd "$APP"
+          npm ci --omit=dev --silent
+
+          echo "==> Restarting systemd service"
+          sudo systemctl restart aegislink
+
+          echo "==> Health check (localhost, up to 60 s)"
+          ok=0
+          for i in $(seq 1 12); do
+            sleep 5
+            if curl -sf --max-time 5 http://127.0.0.1:3001/health | grep -q '"ok":true'; then
+              ok=1; break
+            fi
+          done
+
+          if [ "$ok" = "1" ]; then
+            echo "==> Deploy OK"
+            # Keep only the 3 most recent backups
+            ls -dt /home/ubuntu/aegislink/backup-* 2>/dev/null | tail -n +4 | xargs -r rm -rf
+          else
+            echo "==> Health check FAILED — rolling back to $BACKUP"
+            rm -rf "$APP/src"
+            cp -r "$BACKUP/src" "$APP/src"
+            cp "$BACKUP/package.json" "$BACKUP/package-lock.json" "$APP/"
+            npm ci --omit=dev --silent
+            sudo systemctl restart aegislink
+            exit 1
+          fi
+          ENDSSH
+
+      - name: Public health check
+        run: |
+          sleep 3
+          curl -sf --max-time 10 https://aegislink.duckdns.org/health | grep -q '"ok":true'
+          echo "Public HTTPS health check PASSED"

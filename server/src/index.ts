@@ -20,6 +20,20 @@ import { createDeviceLinkRouter } from './routes/deviceLink.js';
 import { attachRelay } from './relay/handler.js';
 import { initDb, messageRepo, pruneExpiredWorkMessages } from './db/client.js';
 
+// ── Last-resort error handlers ───────────────────────────────────────────────
+// Log only the error itself (never envelope payloads or user identifiers) to
+// journald and exit non-zero so systemd (Restart=always, RestartSec=5) replaces
+// the process with a clean one. A half-broken relay must never keep serving:
+// clients retry and the offline queue absorbs the ~5 s restart window.
+process.on('uncaughtException', (err) => {
+  console.error('[aegislink-server] FATAL uncaughtException:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[aegislink-server] FATAL unhandledRejection:', reason);
+  process.exit(1);
+});
+
 const PORT = Number(process.env.PORT ?? 3001);
 // Default '*' so React Native / Expo Go (which doesn't send a stable Origin)
 // can connect from physical phones on LAN. Lock down to specific hosts in prod
