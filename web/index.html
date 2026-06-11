@@ -4,13 +4,17 @@
   <meta charset="utf-8"/>
   <title>AegisLink — Mensajería sin rastro</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <meta name="description" content="Mensajería cifrada de extremo a extremo, anónima y sin metadatos. Sin teléfono, sin email, sin cuentas. Código abierto (MIT), cliente y servidor."/>
+  <meta name="description" content="Mensajería cifrada de extremo a extremo, anónima y sin metadatos. Sin teléfono, sin email, sin cuentas. Código abierto (GPL-3.0), cliente y servidor."/>
   <meta property="og:type" content="website"/>
   <meta property="og:title" content="AegisLink — Mensajería sin rastro"/>
-  <meta property="og:description" content="Mensajería E2EE anónima y sin metadatos. Sin teléfono, sin email. Código abierto (MIT), cliente y servidor."/>
+  <meta property="og:description" content="Mensajería E2EE anónima y sin metadatos. Sin teléfono, sin email. Código abierto (GPL-3.0), cliente y servidor."/>
   <meta property="og:url" content="https://aegis-link.it"/>
   <meta property="og:site_name" content="AegisLink"/>
   <link rel="canonical" href="https://aegis-link.it/"/>
+  <link rel="alternate" hreflang="es" href="https://aegis-link.it/"/>
+  <link rel="alternate" hreflang="en" href="https://aegis-link.it/?lang=en"/>
+  <link rel="alternate" hreflang="it" href="https://aegis-link.it/?lang=it"/>
+  <link rel="alternate" hreflang="x-default" href="https://aegis-link.it/"/>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2040%2040'%3E%3Cpath%20d='M20%202%20L35%2010%20L35%2030%20L20%2038%20L5%2030%20L5%2010%20Z'%20fill='none'%20stroke='%235bf2b9'%20stroke-width='2.4'%20stroke-linejoin='round'/%3E%3Crect%20x='13'%20y='15'%20width='14'%20height='3.2'%20rx='0.4'%20fill='%235bf2b9'/%3E%3Crect%20x='13'%20y='21.8'%20width='14'%20height='3.2'%20rx='0.4'%20fill='%235bf2b9'%20opacity='0.55'/%3E%3C/svg%3E"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -89,6 +93,19 @@
       border-radius: 99px; padding: 1px 7px; margin-left: 4px;
       text-transform: uppercase;
     }
+
+    /* ── Language switcher ──────────────────────────── */
+    .lang-switch {
+      display: inline-flex; border: 1px solid var(--border-strong);
+      border-radius: 999px; overflow: hidden; flex-shrink: 0;
+    }
+    .lang-switch button {
+      background: transparent; border: none; color: var(--text-faint);
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+      padding: 7px 10px; transition: color 0.15s, background 0.15s;
+    }
+    .lang-switch button:hover { color: var(--text); }
+    .lang-switch button.active { background: rgba(91,242,185,0.14); color: var(--accent); }
 
     /* ── Hero ───────────────────────────────────────── */
     .hero { padding: 92px 0 80px; position: relative; overflow: hidden; }
@@ -497,15 +514,20 @@
         <span class="brand-name">AegisLink</span>
       </a>
       <div class="nav-links">
-        <a href="#why">Por qué</a>
-        <a href="#how">Cómo funciona</a>
-        <a href="#features">Features</a>
-        <a href="#trust">Seguridad</a>
-        <a href="#compare">Comparar</a>
+        <a href="#why" data-i18n="nav_why">Por qué</a>
+        <a href="#how" data-i18n="nav_how">Cómo funciona</a>
+        <a href="#features" data-i18n="nav_features">Features</a>
+        <a href="#trust" data-i18n="nav_trust">Seguridad</a>
+        <a href="#compare" data-i18n="nav_compare">Comparar</a>
       </div>
       <div style="display:flex; gap:10px; align-items:center;">
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" data-lang="es" lang="es">ES</button>
+          <button type="button" data-lang="en" lang="en">EN</button>
+          <button type="button" data-lang="it" lang="it">IT</button>
+        </div>
         <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">GitHub</a>
-        <a href="#download" class="btn btn-primary">Descargar</a>
+        <a href="#download" class="btn btn-primary" data-i18n="nav_download">Descargar</a>
       </div>
     </div>
   </nav>
@@ -519,26 +541,26 @@
       <div>
         <span class="eyebrow">
           <span class="dot"></span>
-          v1.0.0 · OPEN SOURCE · MIT
+          v1.0.0 · OPEN SOURCE · GPL-3.0
         </span>
-        <h1 class="hero-title">Mensajería <em>sin</em> rastro.</h1>
-        <p class="hero-sub">
+        <h1 class="hero-title" data-i18n="hero_title">Mensajería <em>sin</em> rastro.</h1>
+        <p class="hero-sub" data-i18n="hero_sub">
           Cifrado de extremo a extremo, anclado a una llave que sólo existe
           en tu dispositivo. Sin teléfono. Sin email. Sin metadatos.
         </p>
         <div class="hero-ctas">
           <a href="#download" class="btn btn-primary">
-            Descargar AegisLink
+            <span data-i18n="hero_cta1">Descargar AegisLink</span>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M5 12h14M13 5l7 7-7 7"/>
             </svg>
           </a>
-          <a href="#how" class="btn btn-ghost">Cómo funciona</a>
+          <a href="#how" class="btn btn-ghost" data-i18n="hero_cta2">Cómo funciona</a>
         </div>
         <div class="hero-meta">
-          <span>iOS · Android — próximamente</span>
-          <span><b data-scramble>0 B</b> · metadatos guardados</span>
-          <span>Código abierto · cliente + servidor</span>
+          <span data-i18n="hero_meta1">iOS · Android — próximamente</span>
+          <span><b data-scramble>0 B</b> <span data-i18n="hero_meta2">· metadatos guardados</span></span>
+          <span data-i18n="hero_meta3">Código abierto · cliente + servidor</span>
         </div>
       </div>
 
@@ -566,7 +588,7 @@
             </div>
             <div class="ps-msgs" id="psMsgs"></div>
             <div class="ps-composer">
-              <div class="input">Mensaje cifrado…</div>
+              <div class="input" data-i18n="phone_compose">Mensaje cifrado…</div>
               <div class="send"></div>
             </div>
           </div>
@@ -574,15 +596,15 @@
 
         <!-- Floating cards -->
         <div class="float-card fc-1">
-          <div class="label">◆ Huella de claves</div>
+          <div class="label" data-i18n="fc1_label">◆ Huella de claves</div>
           <div class="v">a7f3 · 92e1 · b4c8</div>
         </div>
         <div class="float-card fc-2">
-          <div class="label">⌬ Relay propio</div>
-          <div class="v">paquetes opacos</div>
+          <div class="label" data-i18n="fc2_label">⌬ Relay propio</div>
+          <div class="v" data-i18n="fc2_value">paquetes opacos</div>
         </div>
         <div class="float-card fc-3">
-          <div class="label">◍ Metadatos retenidos</div>
+          <div class="label" data-i18n="fc3_label">◍ Metadatos retenidos</div>
           <div class="v" style="color:#5bf2b9;" data-scramble>0 bytes</div>
         </div>
       </div>
@@ -592,13 +614,13 @@
   <!-- ─── Tagline strip ────────────────────────────── -->
   <section class="tagline">
     <div class="wrap tagline-row">
-      <span><b>NO</b> teléfono</span>
+      <span data-i18n="tag_1"><b>NO</b> teléfono</span>
       <span>·</span>
-      <span><b>NO</b> email</span>
+      <span data-i18n="tag_2"><b>NO</b> email</span>
       <span>·</span>
-      <span><b>NO</b> metadatos</span>
+      <span data-i18n="tag_3"><b>NO</b> metadatos</span>
       <span>·</span>
-      <span><b>SÍ</b> llaves en tu dispositivo</span>
+      <span data-i18n="tag_4"><b>SÍ</b> llaves en tu dispositivo</span>
     </div>
   </section>
 
@@ -606,9 +628,9 @@
   <section class="section" id="why">
     <div class="wrap">
       <div class="section-head reveal">
-        <div class="section-eyebrow">Por qué AegisLink</div>
-        <h2 class="section-title">Privacidad técnica, <span style="font-style:italic; color: var(--accent);">no marketing</span>.</h2>
-        <p class="section-lead">
+        <div class="section-eyebrow" data-i18n="why_eyebrow">Por qué AegisLink</div>
+        <h2 class="section-title" data-i18n="why_title">Privacidad técnica, <span style="font-style:italic; color: var(--accent);">no marketing</span>.</h2>
+        <p class="section-lead" data-i18n="why_lead">
           La mayoría de apps "privadas" piden tu teléfono y guardan metadatos.
           AegisLink se construyó sobre cuatro decisiones no-negociables.
         </p>
@@ -617,23 +639,23 @@
       <div class="pillars">
         <div class="pillar reveal tilt">
           <div class="n">01</div>
-          <h3>Anónimo por defecto</h3>
-          <p>Tu identidad es una keypair Curve25519 generada en tu dispositivo. Sin teléfono, sin email, sin nombre real. Obtienes un Aegis-ID anónimo y nada que te vincule fuera de la app.</p>
+          <h3 data-i18n="p1_title">Anónimo por defecto</h3>
+          <p data-i18n="p1_body">Tu identidad es una keypair Curve25519 generada en tu dispositivo. Sin teléfono, sin email, sin nombre real. Obtienes un Aegis-ID anónimo y nada que te vincule fuera de la app.</p>
         </div>
         <div class="pillar reveal tilt">
           <div class="n">02</div>
-          <h3>Cero metadatos</h3>
-          <p>El servidor tiene los registros de acceso desactivados: no guarda IPs ni patrones de acceso. Solo enruta paquetes opacos — no puede ver con quién hablas ni qué dices.</p>
+          <h3 data-i18n="p2_title">Cero metadatos</h3>
+          <p data-i18n="p2_body">El servidor tiene los registros de acceso desactivados: no guarda IPs ni patrones de acceso. Solo enruta paquetes opacos — no puede ver con quién hablas ni qué dices.</p>
         </div>
         <div class="pillar reveal tilt">
           <div class="n">03</div>
-          <h3>Abierto y verificable</h3>
-          <p>Cliente y servidor publicados bajo licencia MIT en GitHub. La criptografía es auditable por cualquiera. No nos creas — lee el código.</p>
+          <h3 data-i18n="p3_title">Abierto y verificable</h3>
+          <p data-i18n="p3_body">Cliente bajo GPL-3.0 y servidor bajo AGPL-3.0, publicados en GitHub. La criptografía es auditable por cualquiera. No nos creas — lee el código.</p>
         </div>
         <div class="pillar reveal tilt">
           <div class="n">04</div>
-          <h3>Verifica a la persona</h3>
-          <p>La confianza se establece comparando huellas de claves — por QR o visualmente. El handshake humano protege contra cualquier intermediario.</p>
+          <h3 data-i18n="p4_title">Verifica a la persona</h3>
+          <p data-i18n="p4_body">La confianza se establece comparando huellas de claves — por QR o visualmente. El handshake humano protege contra cualquier intermediario.</p>
         </div>
       </div>
     </div>
@@ -643,8 +665,8 @@
   <section class="section" id="how" style="padding-top: 40px;">
     <div class="wrap">
       <div class="section-head reveal">
-        <div class="section-eyebrow">Cómo funciona</div>
-        <h2 class="section-title">Tres pasos.<br/>Después, simplemente <em style="font-style:italic; color: var(--accent);">hablas</em>.</h2>
+        <div class="section-eyebrow" data-i18n="how_eyebrow">Cómo funciona</div>
+        <h2 class="section-title" data-i18n="how_title">Tres pasos.<br/>Después, simplemente <em style="font-style:italic; color: var(--accent);">hablas</em>.</h2>
       </div>
 
       <div class="steps">
@@ -656,8 +678,8 @@
               <path d="M11 13l9-9M17 7l3 3M14 10l3 3"/>
             </svg>
           </div>
-          <h4>Generas tu llave</h4>
-          <p>La app crea una keypair Curve25519 (TweetNaCl) en tu dispositivo. La clave privada nunca abandona el teléfono. Obtienes un Aegis-ID anónimo.</p>
+          <h4 data-i18n="s1_title">Generas tu llave</h4>
+          <p data-i18n="s1_body">La app crea una keypair Curve25519 (TweetNaCl) en tu dispositivo. La clave privada nunca abandona el teléfono. Obtienes un Aegis-ID anónimo.</p>
         </div>
         <div class="step reveal tilt">
           <span class="step-num">02</span>
@@ -669,8 +691,8 @@
               <path d="M14 14h3v3h-3zM21 14v3M14 21h7M17 17v4"/>
             </svg>
           </div>
-          <h4>Verificas contactos</h4>
-          <p>Escaneas el QR de tu contacto o comparáis la huella de vuestras claves. El handshake humano protege contra cualquier intermediario.</p>
+          <h4 data-i18n="s2_title">Verificas contactos</h4>
+          <p data-i18n="s2_body">Escaneas el QR de tu contacto o comparáis la huella de vuestras claves. El handshake humano protege contra cualquier intermediario.</p>
         </div>
         <div class="step reveal tilt">
           <span class="step-num">03</span>
@@ -679,8 +701,8 @@
               <path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/>
             </svg>
           </div>
-          <h4>Hablas tranquilo</h4>
-          <p>X3DH + Double Ratchet con perfect forward secrecy y XSalsa20-Poly1305. Mensajes, archivos, llamadas, grupos — los servidores sólo enrutan paquetes opacos.</p>
+          <h4 data-i18n="s3_title">Hablas tranquilo</h4>
+          <p data-i18n="s3_body">X3DH + Double Ratchet con perfect forward secrecy y XSalsa20-Poly1305. Mensajes, archivos, llamadas, grupos — los servidores sólo enrutan paquetes opacos.</p>
         </div>
       </div>
     </div>
@@ -690,82 +712,82 @@
   <section class="section" id="features">
     <div class="wrap">
       <div class="section-head reveal">
-        <div class="section-eyebrow">Lo que incluye</div>
-        <h2 class="section-title">Todo lo esperado. <em style="font-style:italic; color: var(--accent);">Más</em> lo que solo nosotros hacemos.</h2>
+        <div class="section-eyebrow" data-i18n="feat_eyebrow">Lo que incluye</div>
+        <h2 class="section-title" data-i18n="feat_title">Todo lo esperado. <em style="font-style:italic; color: var(--accent);">Más</em> lo que solo nosotros hacemos.</h2>
       </div>
 
       <div class="features reveal">
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/></svg></div>
-          <h5>Chat 1:1 E2EE</h5>
-          <p>X3DH + Double Ratchet con perfect forward secrecy. Cada mensaje, con una clave distinta.</p>
+          <h5 data-i18n="f1_title">Chat 1:1 E2EE</h5>
+          <p data-i18n="f1_body">X3DH + Double Ratchet con perfect forward secrecy. Cada mensaje, con una clave distinta.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg></div>
-          <h5>Mensajes que se queman</h5>
-          <p>Timer configurable por chat. Al expirar, desaparecen del dispositivo — y el servidor nunca los tuvo en claro.</p>
+          <h5 data-i18n="f2_title">Mensajes que se queman</h5>
+          <p data-i18n="f2_body">Timer configurable por chat. Al expirar, desaparecen del dispositivo — y el servidor nunca los tuvo en claro.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></div>
-          <h5>Adjuntos cifrados</h5>
-          <p>Fotos, vídeo, audio y documentos, cifrados de extremo a extremo. Con editor integrado antes de enviar.</p>
+          <h5 data-i18n="f3_title">Adjuntos cifrados</h5>
+          <p data-i18n="f3_body">Fotos, vídeo, audio y documentos, cifrados de extremo a extremo. Con editor integrado antes de enviar.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2l20 20M9 4.5a3 3 0 016 0V11M15 14.5a3 3 0 01-6 0V9"/></svg></div>
-          <h5>Ver una vez</h5>
-          <p>Medios que se borran al cerrarse. No se pueden reenviar ni guardar.</p>
+          <h5 data-i18n="f4_title">Ver una vez</h5>
+          <p data-i18n="f4_body">Medios que se borran al cerrarse. No se pueden reenviar ni guardar.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.9"/></svg></div>
-          <h5>Grupos sin espías</h5>
-          <p>Encuestas anónimas y enlaces de invitación con aprobación del admin. Nadie entra sin permiso.</p>
+          <h5 data-i18n="f5_title">Grupos sin espías</h5>
+          <p data-i18n="f5_body">Encuestas anónimas y enlaces de invitación con aprobación del admin. Nadie entra sin permiso.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M22 8l-6 4 6 4V8z"/></svg></div>
-          <h5>Llamadas cifradas</h5>
-          <p>Voz y vídeo E2EE con WebRTC y DTLS-SRTP, a través de nuestro propio servidor TURN.</p>
+          <h5 data-i18n="f6_title">Llamadas cifradas</h5>
+          <p data-i18n="f6_body">Voz y vídeo E2EE con WebRTC y DTLS-SRTP, a través de nuestro propio servidor TURN.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div>
-          <h5>Modo pánico</h5>
-          <p>PIN señuelo que abre un perfil vacío y borrado instantáneo de todos tus datos cuando lo necesites.</p>
+          <h5 data-i18n="f7_title">Modo pánico</h5>
+          <p data-i18n="f7_body">PIN señuelo que abre un perfil vacío y borrado instantáneo de todos tus datos cuando lo necesites.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 17H7a4 4 0 01-1-7.9 6 6 0 0111.6 1.6A3.5 3.5 0 0118 17z"/></svg></div>
-          <h5>Backup cifrado</h5>
-          <p>Respaldo protegido con tu passphrase y Argon2id. Solo tú tienes la clave — nosotros no podemos leerlo.</p>
+          <h5 data-i18n="f8_title">Backup cifrado</h5>
+          <p data-i18n="f8_body">Respaldo protegido con tu passphrase y Argon2id. Solo tú tienes la clave — nosotros no podemos leerlo.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z"/></svg></div>
-          <h5>Múltiples identidades</h5>
-          <p>Perfiles aislados con claves separadas — personal, trabajo, lo que necesites. Nadie puede vincularlos.</p>
+          <h5 data-i18n="f9_title">Múltiples identidades</h5>
+          <p data-i18n="f9_body">Perfiles aislados con claves separadas — personal, trabajo, lo que necesites. Nadie puede vincularlos.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
-          <h5>Mensajes programados</h5>
-          <p>Se quedan cifrados en tu dispositivo hasta enviarse a la hora exacta que elijas.</p>
+          <h5 data-i18n="f10_title">Mensajes programados</h5>
+          <p data-i18n="f10_body">Se quedan cifrados en tu dispositivo hasta enviarse a la hora exacta que elijas.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></div>
-          <h5>Stickers animados</h5>
-          <p>Porque la privacidad no está reñida con la expresividad. Packs animados integrados.</p>
+          <h5 data-i18n="f11_title">Stickers animados</h5>
+          <p data-i18n="f11_body">Porque la privacidad no está reñida con la expresividad. Packs animados integrados.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/></svg></div>
-          <h5>Tu idioma, tu tema</h5>
-          <p>Español, inglés e italiano. Tema claro y oscuro. La privacidad, cómoda.</p>
+          <h5 data-i18n="f12_title">Tu idioma, tu tema</h5>
+          <p data-i18n="f12_body">Español, inglés e italiano. Tema claro y oscuro. La privacidad, cómoda.</p>
         </div>
 
       </div>
@@ -779,18 +801,18 @@
         <div class="trust-grid"></div>
         <div class="trust-inner">
           <div>
-            <div class="section-eyebrow">Confianza · verificable</div>
-            <h2 class="section-title" style="font-size: clamp(36px, 4.2vw, 56px); margin-bottom: 14px;">
+            <div class="section-eyebrow" data-i18n="trust_eyebrow">Confianza · verificable</div>
+            <h2 class="section-title" style="font-size: clamp(36px, 4.2vw, 56px); margin-bottom: 14px;" data-i18n="trust_title">
               No nos creas a nosotros — <em style="font-style:italic; color: var(--accent);">lee el código</em>.
             </h2>
-            <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;">
+            <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;" data-i18n="trust_lead">
               Cada decisión de seguridad es comprobable: el cliente, el servidor y
-              la criptografía están publicados bajo licencia MIT, abiertos a
-              cualquier auditoría independiente.
+              la criptografía están publicados bajo licencias GPL-3.0 y AGPL-3.0,
+              abiertos a cualquier auditoría independiente.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-              <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">Ver código (GitHub)</a>
-              <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener" class="btn btn-ghost">Política de seguridad</a>
+              <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost" data-i18n="trust_btn1">Ver código (GitHub)</a>
+              <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener" class="btn btn-ghost" data-i18n="trust_btn2">Política de seguridad</a>
             </div>
           </div>
 
@@ -798,29 +820,29 @@
             <div class="check">
               <span class="ok">✓</span>
               <div class="body">
-                <strong>Código abierto bajo MIT</strong>
-                <span>Cliente + servidor publicados en GitHub. La criptografía es verificable por terceros.</span>
+                <strong data-i18n="c1_title">Código abierto bajo GPL-3.0 / AGPL-3.0</strong>
+                <span data-i18n="c1_body">Cliente + servidor publicados en GitHub. La criptografía es verificable por terceros.</span>
               </div>
             </div>
             <div class="check">
               <span class="ok">✓</span>
               <div class="body">
-                <strong>Push sin contenido</strong>
-                <span>FCM/APNs solo despiertan la app. El payload va siempre cifrado: tu contenido nunca pasa por Google ni Apple.</span>
+                <strong data-i18n="c2_title">Push sin contenido</strong>
+                <span data-i18n="c2_body">FCM/APNs solo despiertan la app. El payload va siempre cifrado: tu contenido nunca pasa por Google ni Apple.</span>
               </div>
             </div>
             <div class="check">
               <span class="ok">✓</span>
               <div class="body">
-                <strong>Sin registros de acceso</strong>
-                <span>access_log OFF en el servidor: no se guardan IPs, timestamps ni patrones de acceso.</span>
+                <strong data-i18n="c3_title">Sin registros de acceso</strong>
+                <span data-i18n="c3_body">access_log OFF en el servidor: no se guardan IPs, timestamps ni patrones de acceso.</span>
               </div>
             </div>
             <div class="check">
               <span class="ok">✓</span>
               <div class="body">
-                <strong>Infraestructura propia</strong>
-                <span>Relay propio (Node.js) y TURN/STUN propio (coturn). Sin Firebase ni Supabase en el camino de tus mensajes.</span>
+                <strong data-i18n="c4_title">Infraestructura propia</strong>
+                <span data-i18n="c4_body">Relay propio (Node.js) y TURN/STUN propio (coturn). Sin Firebase ni Supabase en el camino de tus mensajes.</span>
               </div>
             </div>
           </div>
@@ -833,9 +855,9 @@
   <section class="section" id="compare" style="padding-top: 40px;">
     <div class="wrap">
       <div class="section-head reveal">
-        <div class="section-eyebrow">Comparar</div>
-        <h2 class="section-title">¿Por qué no <em style="font-style:italic; color: var(--accent);">Signal</em> o <em style="font-style:italic; color: var(--accent);">Threema</em>?</h2>
-        <p class="section-lead">
+        <div class="section-eyebrow" data-i18n="cmp_eyebrow">Comparar</div>
+        <h2 class="section-title" data-i18n="cmp_title">¿Por qué no <em style="font-style:italic; color: var(--accent);">Signal</em> o <em style="font-style:italic; color: var(--accent);">Threema</em>?</h2>
+        <p class="section-lead" data-i18n="cmp_lead">
           Ambas son excelentes. AegisLink toma sus mejores ideas y añade lo que
           a quien de verdad necesita privacidad le falta.
         </p>
@@ -846,7 +868,7 @@
         <table>
           <thead>
             <tr>
-              <th>Capacidad</th>
+              <th data-i18n="cmp_capability">Capacidad</th>
               <th class="col-us">AegisLink</th>
               <th>Signal</th>
               <th>Threema</th>
@@ -855,80 +877,80 @@
           </thead>
           <tbody>
             <tr>
-              <td>Sin teléfono ni email</td>
+              <td data-i18n="r1">Sin teléfono ni email</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Cifrado E2EE por defecto</td>
+              <td data-i18n="r2">Cifrado E2EE por defecto</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
             </tr>
             <tr>
-              <td>Cero metadatos retenidos</td>
+              <td data-i18n="r3">Cero metadatos retenidos</td>
               <td class="us"><span class="y">✓</span></td>
-              <td><span class="partial">parcial*</span></td>
+              <td><span class="partial" data-i18n="w_partial_star">parcial*</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Push sin contenido (solo wake-up)</td>
+              <td data-i18n="r4">Push sin contenido (solo wake-up)</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
-              <td><span class="partial">parcial</span></td>
+              <td><span class="partial" data-i18n="w_partial1">parcial</span></td>
             </tr>
             <tr>
-              <td>Múltiples identidades</td>
+              <td data-i18n="r5">Múltiples identidades</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Modo pánico + PIN señuelo</td>
+              <td data-i18n="r6">Modo pánico + PIN señuelo</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Mensajes programados</td>
+              <td data-i18n="r7">Mensajes programados</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Encuestas anónimas en grupo</td>
+              <td data-i18n="r8">Encuestas anónimas en grupo</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
-              <td><span class="partial">no anon.</span></td>
+              <td><span class="partial" data-i18n="w_noanon">no anon.</span></td>
             </tr>
             <tr>
-              <td>Servidor autohospedable</td>
+              <td data-i18n="r9">Servidor autohospedable</td>
               <td class="us"><span class="y">✓</span></td>
-              <td><span class="partial">parcial</span></td>
+              <td><span class="partial" data-i18n="w_partial2">parcial</span></td>
               <td><span class="partial">OnPrem</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Código abierto · cliente + servidor</td>
+              <td data-i18n="r10">Código abierto · cliente + servidor</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
-              <td><span class="partial">cliente</span></td>
+              <td><span class="partial" data-i18n="w_client">cliente</span></td>
               <td><span class="n">✗</span></td>
             </tr>
           </tbody>
         </table>
         </div>
       </div>
-      <p class="compare-note reveal">* Signal aplica sealed sender, pero el registro requiere un número de teléfono.</p>
+      <p class="compare-note reveal" data-i18n="cmp_note">* Signal aplica sealed sender, pero el registro requiere un número de teléfono.</p>
     </div>
   </section>
 
@@ -937,24 +959,24 @@
     <div class="wrap">
       <div class="work-grid">
         <div class="reveal">
-          <div class="section-eyebrow">AegisLink Work · en desarrollo</div>
-          <h2 class="section-title" style="font-size: clamp(32px, 4vw, 52px); margin-bottom: 14px;">
+          <div class="section-eyebrow" data-i18n="work_eyebrow">AegisLink Work · en desarrollo</div>
+          <h2 class="section-title" style="font-size: clamp(32px, 4vw, 52px); margin-bottom: 14px;" data-i18n="work_title">
             Privacidad <em style="font-style:italic; color: var(--accent);">para equipos</em>.
           </h2>
-          <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;">
+          <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;" data-i18n="work_lead">
             La versión para empresas — salas, roles y políticas por equipo,
             con la misma regla de oro: cero metadatos de conversación.
             Está en desarrollo; síguela en el repositorio.
           </p>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">Seguir el desarrollo →</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost" data-i18n="work_btn">Seguir el desarrollo →</a>
         </div>
         <div class="kpi-panel reveal">
-          <span class="kpi-tag">Vista previa · en desarrollo</span>
+          <span class="kpi-tag" data-i18n="kpi_tag">Vista previa · en desarrollo</span>
           <div class="kpi-grid">
-            <div class="kpi"><div class="l">SALAS POR EQUIPO</div><div class="v">∞</div></div>
-            <div class="kpi"><div class="l">ROLES Y PERMISOS</div><div class="v">✓</div></div>
-            <div class="kpi"><div class="l">CLAVES EN SERVIDOR</div><div class="v">0</div></div>
-            <div class="kpi"><div class="l">METADATA STORED</div><div class="v accent">0 B</div></div>
+            <div class="kpi"><div class="l" data-i18n="kpi1">SALAS POR EQUIPO</div><div class="v">∞</div></div>
+            <div class="kpi"><div class="l" data-i18n="kpi2">ROLES Y PERMISOS</div><div class="v">✓</div></div>
+            <div class="kpi"><div class="l" data-i18n="kpi3">CLAVES EN SERVIDOR</div><div class="v">0</div></div>
+            <div class="kpi"><div class="l" data-i18n="kpi4">METADATA STORED</div><div class="v accent">0 B</div></div>
           </div>
         </div>
       </div>
@@ -964,21 +986,21 @@
   <!-- ─── CTA ──────────────────────────────────────── -->
   <section class="wrap" id="download">
     <div class="cta reveal">
-      <h2>Empieza hoy.<br/><em style="font-style:italic; color: var(--accent);">Sin dar tu número.</em></h2>
-      <p>Gratis y de código abierto. Sin cuentas, sin anuncios, sin metadatos.</p>
+      <h2 data-i18n="cta_title">Empieza hoy.<br/><em style="font-style:italic; color: var(--accent);">Sin dar tu número.</em></h2>
+      <p data-i18n="cta_sub">Gratis y de código abierto. Sin cuentas, sin anuncios, sin metadatos.</p>
       <div class="ctas">
         <span class="btn btn-ghost btn-disabled" aria-disabled="true" role="link">
-          App Store <span class="soon-tag">Próximamente</span>
+          App Store <span class="soon-tag" data-i18n="soon1">Próximamente</span>
         </span>
         <span class="btn btn-ghost btn-disabled" aria-disabled="true" role="link">
-          Google Play <span class="soon-tag">Próximamente</span>
+          Google Play <span class="soon-tag" data-i18n="soon2">Próximamente</span>
         </span>
         <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-primary">
-          Ver el código
+          <span data-i18n="cta_code">Ver el código</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
         </a>
       </div>
-      <div class="note">v1.0.0 · iOS y Android en camino</div>
+      <div class="note" data-i18n="cta_note">v1.0.0 · iOS y Android en camino</div>
     </div>
   </section>
 
@@ -996,37 +1018,351 @@
             </svg>
             <span style="font-family: var(--serif); font-size: 18px;">AegisLink</span>
           </a>
-          <p style="font-size: 12.5px; max-width: 280px; color: var(--text-dim);">
-            Mensajería cifrada anónima, sin metadatos. Proyecto de código abierto bajo licencia MIT.
+          <p style="font-size: 12.5px; max-width: 280px; color: var(--text-dim);" data-i18n="foot_tag">
+            Mensajería cifrada anónima, sin metadatos. Proyecto de código abierto bajo licencia GPL-3.0.
           </p>
         </div>
         <div class="foot-col">
-          <h6>Producto</h6>
-          <a href="#features">Features</a>
-          <a href="#how">Cómo funciona</a>
-          <a href="#download">Descargar</a>
+          <h6 data-i18n="foot_product">Producto</h6>
+          <a href="#features" data-i18n="foot_features">Features</a>
+          <a href="#how" data-i18n="foot_how">Cómo funciona</a>
+          <a href="#download" data-i18n="foot_download">Descargar</a>
           <a href="#work">AegisLink Work</a>
         </div>
         <div class="foot-col">
-          <h6>Seguridad</h6>
-          <a href="#trust">Por qué confiar</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener">Política de seguridad</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener">Repositorio (GitHub)</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/LICENSE" target="_blank" rel="noopener">Licencia MIT</a>
+          <h6 data-i18n="foot_security">Seguridad</h6>
+          <a href="#trust" data-i18n="foot_trust">Por qué confiar</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener" data-i18n="foot_policy">Política de seguridad</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" data-i18n="foot_repo">Repositorio (GitHub)</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/LICENSE" target="_blank" rel="noopener" data-i18n="foot_license">Licencia GPL-3.0</a>
         </div>
         <div class="foot-col">
           <h6>Legal</h6>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/privacy-policy.md" target="_blank" rel="noopener">Privacidad</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/terms-of-service.md" target="_blank" rel="noopener">Términos</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/issues" target="_blank" rel="noopener">Contacto (Issues)</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/privacy-policy.md" target="_blank" rel="noopener" data-i18n="foot_privacy">Privacidad</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/terms-of-service.md" target="_blank" rel="noopener" data-i18n="foot_terms">Términos</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/issues" target="_blank" rel="noopener" data-i18n="foot_contact">Contacto (Issues)</a>
         </div>
       </div>
       <div class="foot-meta">
-        <span>© 2026 AegisLink · Proyecto open source (MIT)</span>
-        <span>v1.0.0 · Hecho para la privacidad</span>
+        <span data-i18n="foot_copy">© 2026 AegisLink · Proyecto open source (GPL-3.0)</span>
+        <span data-i18n="foot_built">v1.0.0 · Hecho para la privacidad</span>
       </div>
     </div>
   </footer>
+
+  <!-- ─── i18n: ES (base, capturado del DOM) · EN · IT ── -->
+  <script>
+    (function () {
+      'use strict';
+
+      /* El español es el idioma base: se captura del propio HTML al cargar,
+         así el diccionario ES nunca se desincroniza del contenido. */
+      var es = {
+        _title: document.title,
+        _desc: "Mensajería cifrada de extremo a extremo, anónima y sin metadatos. Sin teléfono, sin email, sin cuentas. Código abierto (GPL-3.0), cliente y servidor.",
+        chat: [
+          { who: "them", text: "¿Este chat es seguro de verdad?" },
+          { who: "me",   text: "E2EE con Double Ratchet. Mi clave nunca sale del teléfono." },
+          { who: "them", text: "¿Y los metadatos? ¿Quién ve con quién hablo?" },
+          { who: "me",   text: "Nadie. El relay solo enruta paquetes opacos." },
+          { who: "them", mono: true, text: "⏱ mensajes efímeros · 24 h · activado" },
+          { who: "me",   text: "Y esto se autodestruye mañana." }
+        ],
+        sent: "enviado · ✓✓ · efímero 24 h"
+      };
+      document.querySelectorAll('[data-i18n]').forEach(function (el) {
+        es[el.getAttribute('data-i18n')] = el.innerHTML;
+      });
+
+      var en = {
+        _title: "AegisLink — Messaging without a trace",
+        _desc: "End-to-end encrypted messaging, anonymous and metadata-free. No phone, no email, no accounts. Open source (GPL-3.0), client and server.",
+        nav_why: "Why", nav_how: "How it works", nav_features: "Features",
+        nav_trust: "Security", nav_compare: "Compare", nav_download: "Download",
+        hero_title: "Messaging <em>without</em> a trace.",
+        hero_sub: "End-to-end encryption, anchored to a key that exists only on your device. No phone. No email. No metadata.",
+        hero_cta1: "Download AegisLink", hero_cta2: "How it works",
+        hero_meta1: "iOS · Android — coming soon",
+        hero_meta2: "· metadata stored",
+        hero_meta3: "Open source · client + server",
+        phone_compose: "Encrypted message…",
+        fc1_label: "◆ Key fingerprint", fc2_label: "⌬ Own relay", fc2_value: "opaque packets",
+        fc3_label: "◍ Metadata retained",
+        tag_1: "<b>NO</b> phone", tag_2: "<b>NO</b> email",
+        tag_3: "<b>NO</b> metadata", tag_4: "<b>YES</b> keys on your device",
+        why_eyebrow: "Why AegisLink",
+        why_title: "Technical privacy, <span style='font-style:italic; color: var(--accent);'>not marketing</span>.",
+        why_lead: "Most \"private\" apps ask for your phone number and keep metadata. AegisLink was built on four non-negotiable decisions.",
+        p1_title: "Anonymous by default",
+        p1_body: "Your identity is a Curve25519 keypair generated on your device. No phone, no email, no real name. You get an anonymous Aegis-ID and nothing linking you outside the app.",
+        p2_title: "Zero metadata",
+        p2_body: "The server has access logs disabled: it stores no IPs and no access patterns. It only routes opaque packets — it cannot see who you talk to or what you say.",
+        p3_title: "Open & verifiable",
+        p3_body: "Client under GPL-3.0 and server under AGPL-3.0, published on GitHub. The cryptography can be audited by anyone. Don't take our word for it — read the code.",
+        p4_title: "Verify the person",
+        p4_body: "Trust is established by comparing key fingerprints — via QR or visually. The human handshake protects against any man in the middle.",
+        how_eyebrow: "How it works",
+        how_title: "Three steps.<br/>Then you simply <em style='font-style:italic; color: var(--accent);'>talk</em>.",
+        s1_title: "Generate your key",
+        s1_body: "The app creates a Curve25519 keypair (TweetNaCl) on your device. The private key never leaves the phone. You get an anonymous Aegis-ID.",
+        s2_title: "Verify contacts",
+        s2_body: "Scan your contact's QR or compare your key fingerprints. The human handshake protects against any man in the middle.",
+        s3_title: "Talk freely",
+        s3_body: "X3DH + Double Ratchet with perfect forward secrecy and XSalsa20-Poly1305. Messages, files, calls, groups — servers only route opaque packets.",
+        feat_eyebrow: "What's included",
+        feat_title: "Everything you expect. <em style='font-style:italic; color: var(--accent);'>Plus</em> what only we do.",
+        f1_title: "1:1 E2EE chat",
+        f1_body: "X3DH + Double Ratchet with perfect forward secrecy. Every message, a different key.",
+        f2_title: "Burn-after-reading",
+        f2_body: "Configurable timer per chat. When it expires they vanish from the device — and the server never had them in the clear.",
+        f3_title: "Encrypted attachments",
+        f3_body: "Photos, video, audio and documents, end-to-end encrypted. With a built-in editor before sending.",
+        f4_title: "View once",
+        f4_body: "Media that deletes itself when closed. Cannot be forwarded or saved.",
+        f5_title: "Groups without spies",
+        f5_body: "Anonymous polls and invite links with admin approval. Nobody gets in without permission.",
+        f6_title: "Encrypted calls",
+        f6_body: "E2EE voice and video with WebRTC and DTLS-SRTP, through our own TURN server.",
+        f7_title: "Panic mode",
+        f7_body: "A decoy PIN that opens an empty profile, and instant wipe of all your data when you need it.",
+        f8_title: "Encrypted backup",
+        f8_body: "Backup protected with your passphrase and Argon2id. Only you hold the key — we cannot read it.",
+        f9_title: "Multiple identities",
+        f9_body: "Isolated profiles with separate keys — personal, work, whatever you need. Nobody can link them.",
+        f10_title: "Scheduled messages",
+        f10_body: "They stay encrypted on your device until they are sent at the exact time you choose.",
+        f11_title: "Animated stickers",
+        f11_body: "Because privacy is not at odds with expressiveness. Built-in animated packs.",
+        f12_title: "Your language, your theme",
+        f12_body: "Spanish, English and Italian. Light and dark theme. Privacy, made comfortable.",
+        trust_eyebrow: "Trust · verifiable",
+        trust_title: "Don't take our word for it — <em style='font-style:italic; color: var(--accent);'>read the code</em>.",
+        trust_lead: "Every security decision is verifiable: the client, the server and the cryptography are published under the GPL-3.0 and AGPL-3.0 licenses, open to any independent audit.",
+        trust_btn1: "View code (GitHub)", trust_btn2: "Security policy",
+        c1_title: "Open source under GPL-3.0 / AGPL-3.0",
+        c1_body: "Client + server published on GitHub. The cryptography is verifiable by third parties.",
+        c2_title: "Content-free push",
+        c2_body: "FCM/APNs only wake the app. The payload is always encrypted: your content never passes through Google or Apple.",
+        c3_title: "No access logs",
+        c3_body: "access_log OFF on the server: no IPs, timestamps or access patterns are stored.",
+        c4_title: "Self-hosted infrastructure",
+        c4_body: "Own relay (Node.js) and own TURN/STUN (coturn). No Firebase or Supabase in the path of your messages.",
+        cmp_eyebrow: "Compare",
+        cmp_title: "Why not <em style='font-style:italic; color: var(--accent);'>Signal</em> or <em style='font-style:italic; color: var(--accent);'>Threema</em>?",
+        cmp_lead: "Both are excellent. AegisLink takes their best ideas and adds what people who truly need privacy are missing.",
+        cmp_capability: "Capability",
+        r1: "No phone or email", r2: "E2EE by default",
+        r3: "Zero metadata retained", r4: "Content-free push (wake-up only)",
+        r5: "Multiple identities", r6: "Panic mode + decoy PIN",
+        r7: "Scheduled messages", r8: "Anonymous group polls",
+        r9: "Self-hostable server", r10: "Open source · client + server",
+        w_partial_star: "partial*", w_partial1: "partial", w_partial2: "partial",
+        w_noanon: "not anon.", w_client: "client",
+        cmp_note: "* Signal uses sealed sender, but registration requires a phone number.",
+        work_eyebrow: "AegisLink Work · in development",
+        work_title: "Privacy <em style='font-style:italic; color: var(--accent);'>for teams</em>.",
+        work_lead: "The business edition — rooms, roles and per-team policies, with the same golden rule: zero conversation metadata. It is in development; follow it in the repository.",
+        work_btn: "Follow the development →",
+        kpi_tag: "Preview · in development",
+        kpi1: "ROOMS PER TEAM", kpi2: "ROLES & PERMISSIONS",
+        kpi3: "KEYS ON SERVER", kpi4: "METADATA STORED",
+        cta_title: "Start today.<br/><em style='font-style:italic; color: var(--accent);'>Without giving your number.</em>",
+        cta_sub: "Free and open source. No accounts, no ads, no metadata.",
+        soon1: "Coming soon", soon2: "Coming soon",
+        cta_code: "View the code",
+        cta_note: "v1.0.0 · iOS and Android on the way",
+        foot_tag: "Anonymous encrypted messaging, zero metadata. Open source project under the GPL-3.0 license.",
+        foot_product: "Product", foot_features: "Features", foot_how: "How it works",
+        foot_download: "Download",
+        foot_security: "Security", foot_trust: "Why trust us",
+        foot_policy: "Security policy", foot_repo: "Repository (GitHub)",
+        foot_license: "GPL-3.0 license",
+        foot_privacy: "Privacy", foot_terms: "Terms", foot_contact: "Contact (Issues)",
+        foot_copy: "© 2026 AegisLink · Open source project (GPL-3.0)",
+        foot_built: "v1.0.0 · Built for privacy",
+        chat: [
+          { who: "them", text: "Is this chat really secure?" },
+          { who: "me",   text: "E2EE with Double Ratchet. My key never leaves the phone." },
+          { who: "them", text: "And metadata? Who sees who I talk to?" },
+          { who: "me",   text: "No one. The relay only routes opaque packets." },
+          { who: "them", mono: true, text: "⏱ ephemeral messages · 24 h · enabled" },
+          { who: "me",   text: "And this self-destructs tomorrow." }
+        ],
+        sent: "sent · ✓✓ · ephemeral 24 h"
+      };
+
+      var it = {
+        _title: "AegisLink — Messaggi senza tracce",
+        _desc: "Messaggistica cifrata end-to-end, anonima e senza metadati. Niente telefono, niente email, niente account. Open source (GPL-3.0), client e server.",
+        nav_why: "Perché", nav_how: "Come funziona", nav_features: "Funzionalità",
+        nav_trust: "Sicurezza", nav_compare: "Confronta", nav_download: "Scarica",
+        hero_title: "Messaggi <em>senza</em> tracce.",
+        hero_sub: "Cifratura end-to-end, ancorata a una chiave che esiste solo sul tuo dispositivo. Niente telefono. Niente email. Niente metadati.",
+        hero_cta1: "Scarica AegisLink", hero_cta2: "Come funziona",
+        hero_meta1: "iOS · Android — in arrivo",
+        hero_meta2: "· metadati salvati",
+        hero_meta3: "Open source · client + server",
+        phone_compose: "Messaggio cifrato…",
+        fc1_label: "◆ Impronta delle chiavi", fc2_label: "⌬ Relay proprio", fc2_value: "pacchetti opachi",
+        fc3_label: "◍ Metadati conservati",
+        tag_1: "<b>NO</b> telefono", tag_2: "<b>NO</b> email",
+        tag_3: "<b>NO</b> metadati", tag_4: "<b>SÌ</b> chiavi sul tuo dispositivo",
+        why_eyebrow: "Perché AegisLink",
+        why_title: "Privacy tecnica, <span style='font-style:italic; color: var(--accent);'>non marketing</span>.",
+        why_lead: "La maggior parte delle app \"private\" chiede il telefono e conserva metadati. AegisLink è costruita su quattro decisioni non negoziabili.",
+        p1_title: "Anonimo di default",
+        p1_body: "La tua identità è una keypair Curve25519 generata sul tuo dispositivo. Niente telefono, niente email, niente nome reale. Ottieni un Aegis-ID anonimo e nulla che ti colleghi fuori dall'app.",
+        p2_title: "Zero metadati",
+        p2_body: "Il server ha i log di accesso disattivati: non salva IP né pattern di accesso. Instrada solo pacchetti opachi — non può vedere con chi parli né cosa dici.",
+        p3_title: "Aperto e verificabile",
+        p3_body: "Client con licenza GPL-3.0 e server con licenza AGPL-3.0, pubblicati su GitHub. La crittografia è verificabile da chiunque. Non crederci sulla parola — leggi il codice.",
+        p4_title: "Verifica la persona",
+        p4_body: "La fiducia si stabilisce confrontando le impronte delle chiavi — via QR o visivamente. La stretta di mano umana protegge da qualsiasi intermediario.",
+        how_eyebrow: "Come funziona",
+        how_title: "Tre passi.<br/>Poi, semplicemente <em style='font-style:italic; color: var(--accent);'>parli</em>.",
+        s1_title: "Generi la tua chiave",
+        s1_body: "L'app crea una keypair Curve25519 (TweetNaCl) sul tuo dispositivo. La chiave privata non lascia mai il telefono. Ottieni un Aegis-ID anonimo.",
+        s2_title: "Verifichi i contatti",
+        s2_body: "Scansioni il QR del tuo contatto o confrontate le impronte delle vostre chiavi. La stretta di mano umana protegge da qualsiasi intermediario.",
+        s3_title: "Parli tranquillo",
+        s3_body: "X3DH + Double Ratchet con perfect forward secrecy e XSalsa20-Poly1305. Messaggi, file, chiamate, gruppi — i server instradano solo pacchetti opachi.",
+        feat_eyebrow: "Cosa include",
+        feat_title: "Tutto il previsto. <em style='font-style:italic; color: var(--accent);'>Più</em> ciò che facciamo solo noi.",
+        f1_title: "Chat 1:1 E2EE",
+        f1_body: "X3DH + Double Ratchet con perfect forward secrecy. Ogni messaggio, una chiave diversa.",
+        f2_title: "Messaggi che bruciano",
+        f2_body: "Timer configurabile per chat. Alla scadenza spariscono dal dispositivo — e il server non li ha mai avuti in chiaro.",
+        f3_title: "Allegati cifrati",
+        f3_body: "Foto, video, audio e documenti, cifrati end-to-end. Con editor integrato prima dell'invio.",
+        f4_title: "Visualizza una volta",
+        f4_body: "Media che si cancellano alla chiusura. Non si possono inoltrare né salvare.",
+        f5_title: "Gruppi senza spie",
+        f5_body: "Sondaggi anonimi e link di invito con approvazione dell'admin. Nessuno entra senza permesso.",
+        f6_title: "Chiamate cifrate",
+        f6_body: "Voce e video E2EE con WebRTC e DTLS-SRTP, attraverso il nostro server TURN.",
+        f7_title: "Modalità panico",
+        f7_body: "PIN esca che apre un profilo vuoto e cancellazione istantanea di tutti i tuoi dati quando serve.",
+        f8_title: "Backup cifrato",
+        f8_body: "Backup protetto con la tua passphrase e Argon2id. Solo tu hai la chiave — noi non possiamo leggerlo.",
+        f9_title: "Identità multiple",
+        f9_body: "Profili isolati con chiavi separate — personale, lavoro, ciò che ti serve. Nessuno può collegarli.",
+        f10_title: "Messaggi programmati",
+        f10_body: "Restano cifrati sul tuo dispositivo finché non vengono inviati all'ora esatta che scegli.",
+        f11_title: "Sticker animati",
+        f11_body: "Perché la privacy non è in conflitto con l'espressività. Pack animati integrati.",
+        f12_title: "La tua lingua, il tuo tema",
+        f12_body: "Spagnolo, inglese e italiano. Tema chiaro e scuro. La privacy, comoda.",
+        trust_eyebrow: "Fiducia · verificabile",
+        trust_title: "Non crederci sulla parola — <em style='font-style:italic; color: var(--accent);'>leggi il codice</em>.",
+        trust_lead: "Ogni decisione di sicurezza è verificabile: il client, il server e la crittografia sono pubblicati con licenze GPL-3.0 e AGPL-3.0, aperti a qualsiasi audit indipendente.",
+        trust_btn1: "Vedi il codice (GitHub)", trust_btn2: "Politica di sicurezza",
+        c1_title: "Open source con licenze GPL-3.0 / AGPL-3.0",
+        c1_body: "Client + server pubblicati su GitHub. La crittografia è verificabile da terzi.",
+        c2_title: "Push senza contenuto",
+        c2_body: "FCM/APNs svegliano solo l'app. Il payload è sempre cifrato: il tuo contenuto non passa mai da Google né da Apple.",
+        c3_title: "Nessun log di accesso",
+        c3_body: "access_log OFF sul server: non vengono salvati IP, timestamp né pattern di accesso.",
+        c4_title: "Infrastruttura propria",
+        c4_body: "Relay proprio (Node.js) e TURN/STUN proprio (coturn). Niente Firebase né Supabase sul percorso dei tuoi messaggi.",
+        cmp_eyebrow: "Confronta",
+        cmp_title: "Perché non <em style='font-style:italic; color: var(--accent);'>Signal</em> o <em style='font-style:italic; color: var(--accent);'>Threema</em>?",
+        cmp_lead: "Entrambe sono eccellenti. AegisLink prende le loro idee migliori e aggiunge ciò che manca a chi ha davvero bisogno di privacy.",
+        cmp_capability: "Capacità",
+        r1: "Senza telefono né email", r2: "E2EE di default",
+        r3: "Zero metadati conservati", r4: "Push senza contenuto (solo wake-up)",
+        r5: "Identità multiple", r6: "Modalità panico + PIN esca",
+        r7: "Messaggi programmati", r8: "Sondaggi anonimi nei gruppi",
+        r9: "Server self-hostable", r10: "Open source · client + server",
+        w_partial_star: "parziale*", w_partial1: "parziale", w_partial2: "parziale",
+        w_noanon: "non anon.", w_client: "client",
+        cmp_note: "* Signal applica il sealed sender, ma la registrazione richiede un numero di telefono.",
+        work_eyebrow: "AegisLink Work · in sviluppo",
+        work_title: "Privacy <em style='font-style:italic; color: var(--accent);'>per i team</em>.",
+        work_lead: "La versione per aziende — stanze, ruoli e politiche per team, con la stessa regola d'oro: zero metadati di conversazione. È in sviluppo; seguila nel repository.",
+        work_btn: "Segui lo sviluppo →",
+        kpi_tag: "Anteprima · in sviluppo",
+        kpi1: "STANZE PER TEAM", kpi2: "RUOLI E PERMESSI",
+        kpi3: "CHIAVI SUL SERVER", kpi4: "METADATI SALVATI",
+        cta_title: "Inizia oggi.<br/><em style='font-style:italic; color: var(--accent);'>Senza dare il tuo numero.</em>",
+        cta_sub: "Gratis e open source. Niente account, niente pubblicità, niente metadati.",
+        soon1: "In arrivo", soon2: "In arrivo",
+        cta_code: "Vedi il codice",
+        cta_note: "v1.0.0 · iOS e Android in arrivo",
+        foot_tag: "Messaggistica cifrata anonima, senza metadati. Progetto open source con licenza GPL-3.0.",
+        foot_product: "Prodotto", foot_features: "Funzionalità", foot_how: "Come funziona",
+        foot_download: "Scarica",
+        foot_security: "Sicurezza", foot_trust: "Perché fidarsi",
+        foot_policy: "Politica di sicurezza", foot_repo: "Repository (GitHub)",
+        foot_license: "Licenza GPL-3.0",
+        foot_privacy: "Privacy", foot_terms: "Termini", foot_contact: "Contatto (Issues)",
+        foot_copy: "© 2026 AegisLink · Progetto open source (GPL-3.0)",
+        foot_built: "v1.0.0 · Fatto per la privacy",
+        chat: [
+          { who: "them", text: "Questa chat è davvero sicura?" },
+          { who: "me",   text: "E2EE con Double Ratchet. La mia chiave non lascia mai il telefono." },
+          { who: "them", text: "E i metadati? Chi vede con chi parlo?" },
+          { who: "me",   text: "Nessuno. Il relay instrada solo pacchetti opachi." },
+          { who: "them", mono: true, text: "⏱ messaggi effimeri · 24 h · attivo" },
+          { who: "me",   text: "E questo si autodistrugge domani." }
+        ],
+        sent: "inviato · ✓✓ · effimero 24 h"
+      };
+
+      var I18N = { es: es, en: en, it: it };
+
+      /* Idioma inicial: ?lang= → localStorage → idioma del navegador → en */
+      function detectLang() {
+        try {
+          var q = new URLSearchParams(location.search).get('lang');
+          if (q && I18N[q]) return q;
+        } catch (e) { /* ignore */ }
+        try {
+          var saved = localStorage.getItem('aegis-lang');
+          if (saved && I18N[saved]) return saved;
+        } catch (e) { /* private mode */ }
+        var nav = (navigator.language || 'en').slice(0, 2).toLowerCase();
+        return I18N[nav] ? nav : 'en';
+      }
+
+      function applyLang(l) {
+        var dict = I18N[l];
+        if (!dict) return;
+        document.documentElement.lang = l;
+        document.title = dict._title;
+        var md = document.querySelector('meta[name="description"]');
+        if (md) md.setAttribute('content', dict._desc);
+        var ogt = document.querySelector('meta[property="og:title"]');
+        if (ogt) ogt.setAttribute('content', dict._title);
+        var ogd = document.querySelector('meta[property="og:description"]');
+        if (ogd) ogd.setAttribute('content', dict._desc);
+        document.querySelectorAll('[data-i18n]').forEach(function (el) {
+          var v = dict[el.getAttribute('data-i18n')];
+          if (v != null) el.innerHTML = v;
+        });
+        document.querySelectorAll('.lang-switch button').forEach(function (b) {
+          b.classList.toggle('active', b.getAttribute('data-lang') === l);
+        });
+        /* El mock del teléfono lee esto en cada iteración del bucle */
+        window.AEGIS_CHAT = { script: dict.chat, sent: dict.sent };
+        if (window.__aegisChatStatic) window.__aegisChatStatic();
+        try { localStorage.setItem('aegis-lang', l); } catch (e) { /* ignore */ }
+        try {
+          var url = new URL(location.href);
+          if (l === 'es') url.searchParams.delete('lang');
+          else url.searchParams.set('lang', l);
+          history.replaceState(null, '', url);
+        } catch (e) { /* ignore */ }
+      }
+
+      document.querySelectorAll('.lang-switch button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          applyLang(b.getAttribute('data-lang'));
+        });
+      });
+
+      applyLang(detectLang());
+    })();
+  </script>
 
   <!-- ─── UI: reveals, tilt, typing, scramble (sin dependencias) ── -->
   <script>
@@ -1111,14 +1447,22 @@
       var msgsHost = document.getElementById('psMsgs');
       if (!msgsHost) return;
 
-      var SCRIPT = [
-        { who: 'them', text: '¿Este chat es seguro de verdad?' },
-        { who: 'me',   text: 'E2EE con Double Ratchet. Mi clave nunca sale del teléfono.' },
-        { who: 'them', text: '¿Y los metadatos? ¿Quién ve con quién hablo?' },
-        { who: 'me',   text: 'Nadie. El relay solo enruta paquetes opacos.' },
-        { who: 'them', mono: true, text: '⏱ mensajes efímeros · 24 h · activado' },
-        { who: 'me',   text: 'Y esto se autodestruye mañana.' }
-      ];
+      /* La conversación traducida la publica el script de i18n en
+         window.AEGIS_CHAT; este fallback solo cubre un fallo de carga. */
+      var FALLBACK_CHAT = {
+        script: [
+          { who: 'them', text: '¿Este chat es seguro de verdad?' },
+          { who: 'me',   text: 'E2EE con Double Ratchet. Mi clave nunca sale del teléfono.' },
+          { who: 'them', text: '¿Y los metadatos? ¿Quién ve con quién hablo?' },
+          { who: 'me',   text: 'Nadie. El relay solo enruta paquetes opacos.' },
+          { who: 'them', mono: true, text: '⏱ mensajes efímeros · 24 h · activado' },
+          { who: 'me',   text: 'Y esto se autodestruye mañana.' }
+        ],
+        sent: 'enviado · ✓✓ · efímero 24 h'
+      };
+      function currentChat() {
+        return (window.AEGIS_CHAT && window.AEGIS_CHAT.script) ? window.AEGIS_CHAT : FALLBACK_CHAT;
+      }
 
       function makeBubble(m) {
         var b = document.createElement('div');
@@ -1127,18 +1471,25 @@
       }
 
       function renderAllStatic() {
-        SCRIPT.forEach(function (m) {
+        var chat = currentChat();
+        msgsHost.innerHTML = '';
+        chat.script.forEach(function (m) {
           var b = makeBubble(m);
           b.textContent = m.text;
           msgsHost.appendChild(b);
         });
         var meta = document.createElement('span');
         meta.className = 'bubble-meta me';
-        meta.textContent = '12:39 · ✓✓';
+        meta.textContent = chat.sent;
         msgsHost.appendChild(meta);
       }
 
-      if (reduced) { renderAllStatic(); return; }
+      if (reduced) {
+        /* Con reduced-motion el cambio de idioma re-renderiza el chat estático */
+        window.__aegisChatStatic = renderAllStatic;
+        renderAllStatic();
+        return;
+      }
 
       function sleep(ms) {
         return new Promise(function (res) { setTimeout(res, ms); });
@@ -1149,11 +1500,12 @@
 
       async function playLoop() {
         for (;;) {
+          var chat = currentChat();
           msgsHost.classList.remove('fading');
           msgsHost.innerHTML = '';
-          for (var i = 0; i < SCRIPT.length; i++) {
+          for (var i = 0; i < chat.script.length; i++) {
             await waitVisible();
-            var m = SCRIPT[i];
+            var m = chat.script[i];
             if (m.who === 'them') {
               var t = document.createElement('div');
               t.className = 'bubble them';
@@ -1174,7 +1526,7 @@
           }
           var meta = document.createElement('span');
           meta.className = 'bubble-meta me';
-          meta.textContent = 'enviado · ✓✓ · efímero 24 h';
+          meta.textContent = chat.sent;
           msgsHost.appendChild(meta);
           await sleep(4200);
           msgsHost.classList.add('fading');
