@@ -1,19 +1,17 @@
-# CI/CD Pipeline — AegisLink
+# CI Pipeline — AegisLink (tests + typecheck + EAS builds; NO deploys)
 #
 # Required GitHub Secrets (Settings → Secrets and variables → Actions):
 #   EXPO_TOKEN           — EAS personal access token (expo.dev → Account Settings → Access Tokens)
-#   DEPLOY_HOST          — IP pública de la instancia AWS EC2 (e.g. 51.20.60.155)
-#   DEPLOY_USER          — Usuario SSH (e.g. "ubuntu")
-#   DEPLOY_SSH_KEY       — Clave privada SSH completa (contenido de ~/.ssh/id_ed25519)
-#   DEPLOY_PATH          — Directorio de la app en la VM (e.g. /home/aegis/app)
 #
 # Optional / EAS Submit secrets (only needed for store submissions):
 #   APPLE_ID             — Apple ID email for App Store Connect
 #   ASC_APP_ID           — App Store Connect numeric app ID
 #
-# Infraestructura: el relay Node.js y coturn ya corren en la instancia AWS EC2 via PM2.
-# El deploy hace pm2 reload (zero-downtime) — no usa Docker.
-# Docker/docker-compose en server/Dockerfile es referencia, no se usa en prod.
+# Deploys are NOT part of CI. The relay is deployed exclusively via the
+# manual "Deploy relay (manual)" workflow (deploy.yml, workflow_dispatch),
+# which matches the real VM layout: systemd unit `aegislink` running tsx
+# from /home/ubuntu/aegislink/server. The old auto-deploy job (PM2,
+# /home/aegis/app) targeted an infrastructure that no longer exists.
 #
 # NOTE: Never add user data, real IPs, or encryption keys to these secrets.
 
@@ -25,12 +23,6 @@ on:
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
-    inputs:
-      restart_coturn:
-        description: 'Restart coturn on the VM after deploy'
-        required: false
-        default: 'false'
-        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -78,7 +70,7 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test -- --passWithNoTests --testPathIgnorePatterns="auth.test|prekeys.test|ratelimit.test|web3DeviceRevoke.test"
+        run: npm test
 
   # ─── Mobile — typecheck ───────────────────────────────────────────────────
   mobile-typecheck:
@@ -284,115 +276,3 @@ jobs:
             --non-interactive \
             --no-wait
 
-  # ─── Server deploy — SSH + PM2 (relay ya corre en AWS EC2) ────────────────
-  deploy-server:
-    name: Deploy server
-    runs-on: ubuntu-latest
-    needs: [server-typecheck, server-test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Package server
-        run: |
-          cd server
-          tar \
-            --exclude='./node_modules' \
-            --exclude='./data' \
-            --exclude='./.git' \
-            --exclude='./.env' \
-            -czf /tmp/aegislink-server.tar.gz .
-
-      - name: Upload archive to VM
-        run: |
-          scp -i ~/.ssh/deploy_key \
-              -o StrictHostKeyChecking=yes \
-              /tmp/aegislink-server.tar.gz \
-              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/tmp/aegislink-server.tar.gz"
-
-      - name: Deploy on VM via PM2
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        run: |
-          ssh -i ~/.ssh/deploy_key \
-              -o StrictHostKeyChecking=yes \
-              "$DEPLOY_USER@$DEPLOY_HOST" << 'ENDSSH'
-          set -euo pipefail
-          APP_DIR="${DEPLOY_PATH:-/home/aegis/app}"
-
-          echo "==> Extracting..."
-          mkdir -p "$APP_DIR"
-          tar -xzf /tmp/aegislink-server.tar.gz -C "$APP_DIR"
-          cd "$APP_DIR"
-
-          echo "==> npm install (prod only)..."
-          npm install --omit=dev --silent
-
-          echo "==> Reloading via PM2..."
-          if pm2 describe aegislink-relay > /dev/null 2>&1; then
-            pm2 reload aegislink-relay --update-env
-          else
-            pm2 start npm --name aegislink-relay -- start
-          fi
-          pm2 save --force
-          ENDSSH
-
-      - name: Sync nginx config and reload
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-        run: |
-          # Copy the canonical nginx config to the VM and reload if nginx is installed.
-          # This is idempotent and skipped cleanly when nginx is absent.
-          scp -i ~/.ssh/deploy_key \
-              -o StrictHostKeyChecking=yes \
-              infra/nginx/aegislink.conf \
-              "$DEPLOY_USER@$DEPLOY_HOST:/tmp/aegislink-nginx.conf"
-
-          ssh -i ~/.ssh/deploy_key \
-              -o StrictHostKeyChecking=yes \
-              "$DEPLOY_USER@$DEPLOY_HOST" << 'ENDSSH'
-          set -euo pipefail
-          if command -v nginx &>/dev/null; then
-            NGINX_CONF="/etc/nginx/sites-available/aegislink"
-            sudo cp /tmp/aegislink-nginx.conf "$NGINX_CONF"
-            sudo ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/aegislink
-            sudo nginx -t
-            sudo nginx -s reload
-            echo "==> nginx config updated and reloaded."
-          else
-            echo "==> nginx not installed — skipping config sync."
-          fi
-          rm -f /tmp/aegislink-nginx.conf
-          ENDSSH
-
-      - name: Restart coturn (manual dispatch only)
-        if: github.event.inputs.restart_coturn == 'true'
-        run: |
-          ssh -i ~/.ssh/deploy_key \
-              -o StrictHostKeyChecking=yes \
-              "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
-              "sudo systemctl restart coturn && sudo systemctl status coturn --no-pager"
-
-      - name: Health check
-        run: |
-          sleep 5
-          # Prefer HTTPS via domain if SSL is set up; fall back to direct HTTP port.
-          if curl --fail --silent --max-time 10 \
-              "https://aegislink.duckdns.org/health" | grep -q '"ok"'; then
-            echo "Health check PASSED (HTTPS)"
-          else
-            curl --fail --silent --max-time 10 \
-              "http://${{ secrets.DEPLOY_HOST }}:3001/health" | grep -q '"ok"'
-            echo "Health check PASSED (HTTP fallback)"
-          fi

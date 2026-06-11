@@ -1,0 +1,80 @@
+# Health watchdog — external uptime monitoring with zero third parties.
+#
+# Runs on GitHub's infrastructure (outside our VM) every ~10 minutes and probes
+# the public endpoints. When a probe fails the run goes red and GitHub emails
+# the workflow author (enable: Settings → Notifications → Actions → "Failed
+# workflows only").
+#
+# Privacy: probes only /health, the Socket.IO handshake and the landing page —
+# no user data, no identifiers, nothing stored beyond the public run log.
+#
+# Limitations (acceptable for a free first alarm):
+#   - schedule is best-effort; runs may lag a few minutes
+#   - GitHub pauses schedules after 60 days without repo activity (any commit
+#     re-enables them)
+# If the project outgrows this, replace with a dedicated uptime service.
+
+name: Health watchdog
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: none
+
+concurrency:
+  group: health-watchdog
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Probe production endpoints
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Each probe retries 3× with 15 s pauses so a transient blip never pages.
+      - name: Relay /health
+        run: |
+          for attempt in 1 2 3; do
+            if curl -sf --max-time 10 https://aegislink.duckdns.org/health | grep -q '"ok":true'; then
+              echo "relay /health OK (attempt $attempt)"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Relay /health failed 3 attempts — relay or nginx down"
+          exit 1
+
+      - name: Socket.IO handshake
+        run: |
+          # Polling handshake exercises the same nginx proxy path the app uses;
+          # catches the "relay up but ws proxy broken" failure mode.
+          for attempt in 1 2 3; do
+            if curl -sf --max-time 10 'https://aegislink.duckdns.org/socket.io/?EIO=4&transport=polling' | grep -q '"sid"'; then
+              echo "socket.io handshake OK (attempt $attempt)"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Socket.IO handshake failed 3 attempts — proxy or relay broken"
+          exit 1
+
+      # TODO(launch blocker): re-enable once aegis-link.it has DNS A records
+      # pointing at the VM and a certificate issued (certbot via
+      # infra/deploy-web.sh). As of 2026-06-11 the landing domains do not
+      # resolve in public DNS, so this probe would be permanently red.
+      #
+      # - name: Landing aegis-link.it
+      #   run: |
+      #     for attempt in 1 2 3; do
+      #       code=$(curl -o /dev/null -sw '%{http_code}' --max-time 10 https://aegis-link.it/ || echo 000)
+      #       if [ "$code" = "200" ]; then
+      #         echo "landing OK (attempt $attempt)"
+      #         exit 0
+      #       fi
+      #       sleep 15
+      #     done
+      #     echo "::error::Landing returned HTTP $code after 3 attempts"
+      #     exit 1
