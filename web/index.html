@@ -218,7 +218,16 @@
       border: 1px solid var(--accent); border-radius: 99px;
     }
     .ps-msgs { padding: 12px 4px; display: flex; flex-direction: column; gap: 8px; flex: 1;
-               overflow: hidden; transition: opacity 0.5s; }
+               overflow-y: auto; overflow-x: hidden; transition: opacity 0.5s;
+               scrollbar-width: none; }
+    .ps-msgs::-webkit-scrollbar { display: none; }
+    .ps-head .back {
+      background: none; border: none; color: var(--text-dim); font-size: 22px;
+      line-height: 1; padding: 0 8px 3px 0; margin-left: -4px; flex-shrink: 0;
+      transition: color 0.15s;
+    }
+    .ps-head .back:hover { color: var(--accent); }
+    .ps-head .name { flex: 1; }
     .ps-msgs.fading { opacity: 0; }
     .bubble { padding: 9px 12px; border-radius: 14px; max-width: 78%;
               font-size: 13px; line-height: 1.35; }
@@ -475,6 +484,298 @@
                  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
                  color: var(--text-faint); flex-wrap: wrap; gap: 12px; }
 
+    /* ── Film grain global ──────────────────────────── */
+    .grain {
+      position: fixed; inset: -50%; z-index: 999; pointer-events: none;
+      opacity: 0.045;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      animation: grain-jitter 6s steps(8) infinite;
+    }
+    @keyframes grain-jitter {
+      0% { transform: translate(0,0); } 25% { transform: translate(-2%,1%); }
+      50% { transform: translate(1%,-2%); } 75% { transform: translate(-1%,-1%); }
+      100% { transform: translate(0,0); }
+    }
+    @media (prefers-reduced-motion: reduce) { .grain { animation: none; } }
+
+    /* ── Cursor spotlight en cards ──────────────────── */
+    .glow { position: relative; }
+    .glow::after {
+      content: ''; position: absolute; inset: -1px; border-radius: inherit;
+      padding: 1px; pointer-events: none; opacity: 0;
+      background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%),
+                  rgba(91,242,185,0.55), transparent 70%);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+              mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+              mask-composite: exclude;
+      transition: opacity 0.3s;
+    }
+    .glow:hover::after { opacity: 1; }
+    .glow-fill { position: relative; overflow: hidden; }
+    .glow-fill::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+      background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%),
+                  rgba(91,242,185,0.07), transparent 65%);
+      transition: opacity 0.3s;
+    }
+    .glow-fill:hover::before { opacity: 1; }
+
+    /* ── Hero: reveal por palabras ──────────────────── */
+    .hero-title .w { display: inline-block; overflow: hidden; vertical-align: bottom; }
+    .hero-title .wi {
+      display: inline-block; transform: translateY(115%);
+      animation: word-in 0.75s cubic-bezier(0.2, 0.65, 0.2, 1) forwards;
+      animation-delay: var(--d, 0s);
+    }
+    @keyframes word-in { to { transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) {
+      .hero-title .wi { transform: none; animation: none; }
+    }
+
+    /* ── Botones magnéticos ─────────────────────────── */
+    .magnetic { transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.3, 1); will-change: transform; }
+
+    /* ── Marquee infinito (tagline) ─────────────────── */
+    .tagline { overflow: hidden; }
+    .marquee-track {
+      display: flex; width: max-content; gap: 64px; align-items: center;
+      animation: marquee-roll 26s linear infinite;
+    }
+    .marquee-track:hover { animation-play-state: paused; }
+    .marquee-track .tagline-row { flex-wrap: nowrap; white-space: nowrap; gap: 64px;
+                                  justify-content: flex-start; }
+    @keyframes marquee-roll {
+      from { transform: translateX(0); }
+      to   { transform: translateX(calc(-50% - 32px)); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .marquee-track { animation: none; }
+      .marquee-track .tagline-row[aria-hidden] { display: none; }
+      .marquee-track .tagline-row { flex-wrap: wrap; white-space: normal; }
+    }
+
+    /* ── Journey: el viaje de un mensaje ────────────── */
+    .journey { position: relative; height: 300vh; }
+    .journey-sticky {
+      position: sticky; top: 0; height: 100vh;
+      display: flex; flex-direction: column; justify-content: center;
+      overflow: hidden;
+    }
+    .journey-stage {
+      display: grid; grid-template-columns: 1fr 0.8fr 1fr; gap: 24px;
+      align-items: stretch; position: relative; margin-top: 40px;
+    }
+    .jr-node {
+      padding: 22px 20px; border: 1px solid var(--border); border-radius: 14px;
+      background: var(--surface); position: relative; min-height: 190px;
+      display: flex; flex-direction: column; gap: 10px;
+      transition: border-color 0.4s, box-shadow 0.4s;
+    }
+    .jr-node.lit { border-color: rgba(91,242,185,0.5);
+                   box-shadow: 0 0 40px rgba(91,242,185,0.08); }
+    .jr-node .l { font-family: var(--mono); font-size: 10px; color: var(--accent);
+                  letter-spacing: 0.12em; }
+    .jr-node .note { font-size: 12.5px; color: var(--text-dim); line-height: 1.5;
+                     margin-top: auto; }
+    .jr-msg {
+      font-family: var(--mono); font-size: 13px; line-height: 1.6;
+      padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border); min-height: 86px;
+      word-break: break-all; color: var(--text);
+    }
+    .jr-msg .ct { color: var(--accent); opacity: 0.85; }
+    .jr-relay-box {
+      display: flex; flex-direction: column; gap: 8px; align-items: center;
+      justify-content: center; text-align: center;
+    }
+    .jr-relay-meta { font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+                     letter-spacing: 0.06em; }
+    .jr-wire {
+      position: absolute; top: 50%; height: 1px; z-index: 0;
+      background: repeating-linear-gradient(90deg,
+        rgba(91,242,185,0.35) 0 6px, transparent 6px 12px);
+    }
+    .jr-wire.w1 { left: calc(33.33% - 12px); width: 24px; }
+    .jr-wire.w2 { right: calc(33.33% - 12px); width: 24px; }
+    .jr-packet {
+      position: absolute; top: 50%; width: 12px; height: 12px; z-index: 4;
+      border-radius: 3px; background: var(--accent);
+      box-shadow: 0 0 18px rgba(91,242,185,0.9), 0 0 40px rgba(91,242,185,0.4);
+      transform: translate(-50%, -50%) rotate(45deg); opacity: 0;
+    }
+    .jr-progress {
+      margin-top: 28px; display: flex; gap: 8px; align-items: center;
+      font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+      letter-spacing: 0.1em;
+    }
+    .jr-bar { flex: 1; height: 2px; background: var(--border); border-radius: 2px;
+              overflow: hidden; }
+    .jr-bar i { display: block; height: 100%; width: 0;
+                background: var(--accent); border-radius: 2px; }
+    .jr-hint { text-align: center; margin-top: 18px; font-family: var(--mono);
+               font-size: 10px; letter-spacing: 0.14em; color: var(--text-faint);
+               text-transform: uppercase; animation: hint-pulse 2.4s ease-in-out infinite; }
+    @keyframes hint-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) {
+      .journey { height: auto; }
+      .journey-sticky { position: static; height: auto; padding: 40px 0; }
+      .jr-hint { display: none; }
+    }
+
+    /* ── Phone: tour de pantallas ───────────────────── */
+    .app-screens { position: relative; flex: 1; min-height: 0; }
+    .app-screen {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      opacity: 0; transform: translateX(14px); pointer-events: none;
+      transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
+    }
+    .app-screen.active { opacity: 1; transform: none; pointer-events: auto; }
+    .app-screen.from-left { transform: translateX(-14px); }
+    .app-screen.active.from-left { transform: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .app-screen { transition: opacity 0.2s linear; transform: none; }
+    }
+    .app-tabbar {
+      display: flex; border-top: 1px solid var(--border); margin-top: 8px;
+      padding-top: 8px; gap: 2px;
+    }
+    .app-tab {
+      flex: 1; background: none; border: none; color: var(--text-faint);
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      font-family: var(--mono); font-size: 8px; letter-spacing: 0.08em;
+      padding: 4px 0 2px; border-radius: 8px;
+      transition: color 0.2s, background 0.2s; text-transform: uppercase;
+    }
+    .app-tab:hover { color: var(--text-dim); }
+    .app-tab.active { color: var(--accent); background: rgba(91,242,185,0.08); }
+    .scr-title { font-family: var(--sans); font-weight: 600; font-size: 17px;
+                 padding: 2px 4px 12px; letter-spacing: -0.01em;
+                 display: flex; justify-content: space-between; align-items: center;
+                 border-bottom: 1px solid var(--border); }
+    .scr-title .mini { font-family: var(--mono); font-size: 9px; color: var(--text-faint);
+                       letter-spacing: 0.08em; font-weight: 400; }
+
+    /* Chats list */
+    .chat-rows { display: flex; flex-direction: column; padding-top: 6px; }
+    .chat-row {
+      display: flex; gap: 10px; align-items: center; padding: 11px 6px;
+      border-radius: 12px; cursor: pointer; border: none; background: none;
+      text-align: left; color: inherit; width: 100%;
+      transition: background 0.15s;
+    }
+    .chat-row:hover { background: rgba(255,255,255,0.04); }
+    .chat-ava {
+      width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(91,242,185,0.10); color: var(--accent);
+      font-family: var(--mono); font-size: 12px;
+    }
+    .chat-row .cbody { flex: 1; min-width: 0; }
+    .chat-row .cname { font-family: var(--mono); font-size: 11.5px; margin-bottom: 3px;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chat-row .cprev { font-size: 11px; color: var(--text-dim); white-space: nowrap;
+                       overflow: hidden; text-overflow: ellipsis; }
+    .chat-row .cprev.ct { font-family: var(--mono); color: var(--text-faint); }
+    .chat-row .cmeta { font-family: var(--mono); font-size: 8.5px; color: var(--text-faint);
+                       display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+    .chat-row .cmeta .eph { color: var(--accent); }
+
+    /* Ephemeral screen */
+    .eph-body { display: flex; flex-direction: column; align-items: center; gap: 18px;
+                padding-top: 26px; flex: 1; }
+    .eph-ring { position: relative; width: 130px; height: 130px; }
+    .eph-ring svg { transform: rotate(-90deg); }
+    .eph-ring .track { stroke: rgba(255,255,255,0.08); }
+    .eph-ring .arc { stroke: var(--accent); stroke-linecap: round;
+                     transition: stroke-dashoffset 0.6s cubic-bezier(0.2, 0.7, 0.2, 1); }
+    .eph-ring .mid {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 2px;
+    }
+    .eph-ring .mid b { font-family: var(--serif); font-size: 30px; font-weight: 500; }
+    .eph-ring .mid span { font-family: var(--mono); font-size: 8px;
+                          letter-spacing: 0.1em; color: var(--text-faint);
+                          text-transform: uppercase; }
+    .eph-chips { display: flex; gap: 8px; }
+    .eph-chip {
+      font-family: var(--mono); font-size: 11px; padding: 7px 14px;
+      border-radius: 99px; border: 1px solid var(--border-strong);
+      background: none; color: var(--text-dim); transition: all 0.2s;
+    }
+    .eph-chip:hover { color: var(--text); }
+    .eph-chip.active { background: rgba(91,242,185,0.14); color: var(--accent);
+                       border-color: rgba(91,242,185,0.5); }
+    .eph-note { font-size: 11px; color: var(--text-dim); text-align: center;
+                max-width: 210px; line-height: 1.5; }
+
+    /* Panic screen */
+    .panic-body { display: flex; flex-direction: column; align-items: center;
+                  gap: 14px; padding-top: 14px; flex: 1; }
+    .pin-dots { display: flex; gap: 12px; padding: 8px 0; }
+    .pin-dots i { width: 11px; height: 11px; border-radius: 50%;
+                  border: 1px solid var(--border-strong); transition: all 0.15s; }
+    .pin-dots i.on { background: var(--accent); border-color: var(--accent);
+                     box-shadow: 0 0 10px rgba(91,242,185,0.6); }
+    .pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+               width: 100%; max-width: 200px; }
+    .pin-key {
+      font-family: var(--mono); font-size: 16px; padding: 11px 0;
+      background: rgba(255,255,255,0.03); color: var(--text);
+      border: 1px solid var(--border); border-radius: 12px;
+      transition: background 0.12s, transform 0.08s;
+    }
+    .pin-key:hover { background: rgba(255,255,255,0.07); }
+    .pin-key:active { transform: scale(0.94); background: rgba(91,242,185,0.15); }
+    .panic-hint { font-family: var(--mono); font-size: 9px; color: var(--text-faint);
+                  letter-spacing: 0.06em; text-align: center; line-height: 1.7; }
+    .panic-hint b { color: var(--warn); font-weight: 500; }
+    .panic-hint .real { color: var(--accent); }
+    .panic-result {
+      position: absolute; inset: 0; display: none; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px; text-align: center;
+      background: #06090a; z-index: 5; padding: 0 14px;
+    }
+    .panic-result.show { display: flex; }
+    .panic-result .big { font-family: var(--serif); font-size: 22px; line-height: 1.25; }
+    .panic-result .sub { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
+    .panic-result .reset {
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+      color: var(--accent); background: none; border: 1px solid rgba(91,242,185,0.45);
+      border-radius: 99px; padding: 7px 16px; margin-top: 6px;
+    }
+    .shake { animation: pin-shake 0.4s; }
+    @keyframes pin-shake {
+      0%,100% { transform: translateX(0); }
+      20% { transform: translateX(-6px); } 40% { transform: translateX(6px); }
+      60% { transform: translateX(-4px); } 80% { transform: translateX(4px); }
+    }
+
+    /* Demo crypto: composer real + envelope */
+    .ps-composer input {
+      flex: 1; padding: 8px 12px; background: #1a2326; border: none;
+      border-radius: 99px; font-size: 12px; color: var(--text);
+      font-family: var(--sans); outline: none; min-width: 0;
+    }
+    .ps-composer input::placeholder { color: var(--text-dim); }
+    .ps-composer input:focus { box-shadow: 0 0 0 1px rgba(91,242,185,0.5); }
+    .ps-composer .send {
+      border: none; display: flex; align-items: center; justify-content: center;
+      color: #06231a; flex-shrink: 0; transition: transform 0.12s;
+    }
+    .ps-composer .send:active { transform: scale(0.9); }
+    .envelope {
+      align-self: stretch; margin: 2px 2px 4px;
+      border: 1px dashed rgba(91,242,185,0.35); border-radius: 10px;
+      padding: 8px 10px; background: rgba(91,242,185,0.04);
+    }
+    .envelope .env-label { font-family: var(--mono); font-size: 8px;
+                           letter-spacing: 0.12em; color: var(--accent); margin-bottom: 4px; }
+    .envelope .env-hex { font-family: var(--mono); font-size: 9.5px; line-height: 1.5;
+                         color: var(--text-dim); word-break: break-all; }
+    .envelope .env-meta { font-family: var(--mono); font-size: 8px; color: var(--text-faint);
+                          margin-top: 4px; letter-spacing: 0.06em; }
+
     /* ── Mobile ─────────────────────────────────────── */
     @media (max-width: 900px) {
       .nav-links { display: none; }
@@ -488,6 +789,11 @@
       .trust { padding: 36px 24px; }
       .work-grid { grid-template-columns: 1fr; }
       .foot-row { grid-template-columns: 1fr 1fr; }
+      .journey { height: auto; }
+      .journey-sticky { position: static; height: auto; padding: 48px 0; overflow: visible; }
+      .journey-stage { grid-template-columns: 1fr; gap: 14px; }
+      .jr-node { min-height: 0; }
+      .jr-wire, .jr-packet, .jr-hint, .jr-progress { display: none; }
     }
     @media (max-width: 560px) {
       .pillars { grid-template-columns: 1fr; }
@@ -500,6 +806,8 @@
   </style>
 </head>
 <body>
+
+  <div class="grain" aria-hidden="true"></div>
 
   <!-- ─── Nav ──────────────────────────────────────── -->
   <nav class="nav">
@@ -582,14 +890,129 @@
         <div class="phone-mock">
           <div class="phone-screen">
             <div class="notch"></div>
-            <div class="ps-head">
-              <span class="name">aegis:k7m2…x9q4</span>
-              <span class="e2ee">● E2EE</span>
+            <div class="app-screens" id="appScreens">
+
+              <!-- Pantalla: lista de chats -->
+              <section class="app-screen from-left" data-screen="chats">
+                <div class="scr-title">
+                  <span data-i18n="scr_chats">Chats</span>
+                  <span class="mini" data-i18n="scr_chats_mini">3 · cifrados</span>
+                </div>
+                <div class="chat-rows">
+                  <button class="chat-row" data-goto="chat" type="button">
+                    <span class="chat-ava">k7</span>
+                    <span class="cbody">
+                      <span class="cname">aegis:k7m2…x9q4</span>
+                      <span class="cprev" data-i18n="cr1_prev">Y esto se autodestruye mañana.</span>
+                    </span>
+                    <span class="cmeta"><span>✓✓</span><span class="eph">⏱ 24 h</span></span>
+                  </button>
+                  <button class="chat-row" type="button">
+                    <span class="chat-ava">p4</span>
+                    <span class="cbody">
+                      <span class="cname">aegis:p4n8…w2r5</span>
+                      <span class="cprev ct">9f3a 02c1 7e88 b4d0 …</span>
+                    </span>
+                    <span class="cmeta"><span>✓</span><span class="eph">⏱ 1 h</span></span>
+                  </button>
+                  <button class="chat-row" type="button">
+                    <span class="chat-ava">◆</span>
+                    <span class="cbody">
+                      <span class="cname" data-i18n="cr3_name">Equipo Aurora · 4</span>
+                      <span class="cprev" data-i18n="cr3_prev">📊 Encuesta anónima activa</span>
+                    </span>
+                    <span class="cmeta"><span>✓✓</span></span>
+                  </button>
+                </div>
+              </section>
+
+              <!-- Pantalla: conversación (demo de cifrado real) -->
+              <section class="app-screen active" data-screen="chat">
+                <div class="ps-head">
+                  <button class="back" data-goto="chats" type="button" aria-label="Chats">‹</button>
+                  <span class="name">aegis:k7m2…x9q4</span>
+                  <span class="e2ee">● E2EE</span>
+                </div>
+                <div class="ps-msgs" id="psMsgs"></div>
+                <div class="ps-composer">
+                  <input id="demoInput" type="text" maxlength="120" autocomplete="off"
+                         data-i18n-ph="demo_ph" placeholder="Escribe — se cifra de verdad…"/>
+                  <button class="send" id="demoSend" type="button" aria-label="Enviar">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+                  </button>
+                </div>
+              </section>
+
+              <!-- Pantalla: mensajes efímeros -->
+              <section class="app-screen" data-screen="ephemeral">
+                <div class="scr-title">
+                  <span data-i18n="scr_eph">Mensajes efímeros</span>
+                  <span class="mini">⏱</span>
+                </div>
+                <div class="eph-body">
+                  <div class="eph-ring">
+                    <svg width="130" height="130" viewBox="0 0 130 130" fill="none" aria-hidden="true">
+                      <circle class="track" cx="65" cy="65" r="56" stroke-width="6" fill="none"/>
+                      <circle class="arc" id="ephArc" cx="65" cy="65" r="56" stroke-width="6" fill="none"
+                              stroke-dasharray="351.86" stroke-dashoffset="140.74"/>
+                    </svg>
+                    <div class="mid"><b id="ephVal">24</b><span id="ephUnit">h</span></div>
+                  </div>
+                  <div class="eph-chips" role="group">
+                    <button class="eph-chip" data-eph="1h" type="button">1 h</button>
+                    <button class="eph-chip active" data-eph="24h" type="button">24 h</button>
+                    <button class="eph-chip" data-eph="7d" type="button">7 d</button>
+                  </div>
+                  <p class="eph-note" data-i18n="eph_note">Los mensajes nuevos se borran solos al expirar — en los dos teléfonos a la vez.</p>
+                </div>
+              </section>
+
+              <!-- Pantalla: modo pánico -->
+              <section class="app-screen" data-screen="panic">
+                <div class="scr-title">
+                  <span data-i18n="scr_panic">Modo pánico</span>
+                  <span class="mini">⛨</span>
+                </div>
+                <div class="panic-body">
+                  <p class="panic-hint" data-i18n="panic_hint">Pruébalo: el PIN señuelo <b>0000</b> abre un perfil vacío.<br/>El PIN real <span class="real">7319</span> abre tus chats.</p>
+                  <div class="pin-dots" id="pinDots"><i></i><i></i><i></i><i></i></div>
+                  <div class="pin-pad" id="pinPad">
+                    <button class="pin-key" type="button">1</button>
+                    <button class="pin-key" type="button">2</button>
+                    <button class="pin-key" type="button">3</button>
+                    <button class="pin-key" type="button">4</button>
+                    <button class="pin-key" type="button">5</button>
+                    <button class="pin-key" type="button">6</button>
+                    <button class="pin-key" type="button">7</button>
+                    <button class="pin-key" type="button">8</button>
+                    <button class="pin-key" type="button">9</button>
+                    <span aria-hidden="true"></span>
+                    <button class="pin-key" type="button">0</button>
+                    <button class="pin-key" type="button" data-k="back">⌫</button>
+                  </div>
+                </div>
+                <div class="panic-result" id="panicResult">
+                  <div class="big" id="panicBig"></div>
+                  <div class="sub" id="panicSub"></div>
+                  <button class="reset" id="panicReset" type="button" data-i18n="panic_reset">↺ Probar otra vez</button>
+                </div>
+              </section>
+
             </div>
-            <div class="ps-msgs" id="psMsgs"></div>
-            <div class="ps-composer">
-              <div class="input" data-i18n="phone_compose">Mensaje cifrado…</div>
-              <div class="send"></div>
+
+            <div class="app-tabbar" role="tablist" aria-label="Demo">
+              <button class="app-tab active" data-goto="chats" type="button" role="tab" aria-selected="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/></svg>
+                <span data-i18n="tab_chats">Chats</span>
+              </button>
+              <button class="app-tab" data-goto="ephemeral" type="button" role="tab" aria-selected="false">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg>
+                <span data-i18n="tab_eph">Efímeros</span>
+              </button>
+              <button class="app-tab" data-goto="panic" type="button" role="tab" aria-selected="false">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z"/></svg>
+                <span data-i18n="tab_panic">Pánico</span>
+              </button>
             </div>
           </div>
         </div>
@@ -611,16 +1034,29 @@
     </div>
   </header>
 
-  <!-- ─── Tagline strip ────────────────────────────── -->
+  <!-- ─── Tagline strip (marquee) ──────────────────── -->
   <section class="tagline">
-    <div class="wrap tagline-row">
-      <span data-i18n="tag_1"><b>NO</b> teléfono</span>
-      <span>·</span>
-      <span data-i18n="tag_2"><b>NO</b> email</span>
-      <span>·</span>
-      <span data-i18n="tag_3"><b>NO</b> metadatos</span>
-      <span>·</span>
-      <span data-i18n="tag_4"><b>SÍ</b> llaves en tu dispositivo</span>
+    <div class="marquee-track">
+      <div class="tagline-row">
+        <span data-i18n="tag_1"><b>NO</b> teléfono</span>
+        <span>·</span>
+        <span data-i18n="tag_2"><b>NO</b> email</span>
+        <span>·</span>
+        <span data-i18n="tag_3"><b>NO</b> metadatos</span>
+        <span>·</span>
+        <span data-i18n="tag_4"><b>SÍ</b> llaves en tu dispositivo</span>
+        <span>·</span>
+      </div>
+      <div class="tagline-row" aria-hidden="true">
+        <span data-i18n="tag_1"><b>NO</b> teléfono</span>
+        <span>·</span>
+        <span data-i18n="tag_2"><b>NO</b> email</span>
+        <span>·</span>
+        <span data-i18n="tag_3"><b>NO</b> metadatos</span>
+        <span>·</span>
+        <span data-i18n="tag_4"><b>SÍ</b> llaves en tu dispositivo</span>
+        <span>·</span>
+      </div>
     </div>
   </section>
 
@@ -704,6 +1140,49 @@
           <h4 data-i18n="s3_title">Hablas tranquilo</h4>
           <p data-i18n="s3_body">X3DH + Double Ratchet con perfect forward secrecy y XSalsa20-Poly1305. Mensajes, archivos, llamadas, grupos — los servidores sólo enrutan paquetes opacos.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Journey: el viaje de un mensaje (scroll) ── -->
+  <section class="journey" id="journey">
+    <div class="journey-sticky">
+      <div class="wrap" style="width: 100%;">
+        <div class="section-head" style="margin-bottom: 12px;">
+          <div class="section-eyebrow" data-i18n="jr_eyebrow">El viaje de un mensaje</div>
+          <h2 class="section-title" style="font-size: clamp(32px, 4vw, 54px);" data-i18n="jr_title">
+            Qué ve cada uno. <em style="font-style:italic; color: var(--accent);">Y qué no.</em>
+          </h2>
+        </div>
+        <div class="journey-stage" id="jrStage">
+          <div class="jr-wire w1" id="jrW1"></div>
+          <div class="jr-wire w2" id="jrW2"></div>
+          <div class="jr-packet" id="jrPacket"></div>
+          <div class="jr-node" id="jrA">
+            <div class="l" data-i18n="jr_a_l">TU DISPOSITIVO</div>
+            <div class="jr-msg" id="jrMsgA">Nos vemos a las 21:00 en el sitio de siempre.</div>
+            <div class="note" data-i18n="jr_a_note">Se cifra aquí, con una clave que nunca sale de tu teléfono.</div>
+          </div>
+          <div class="jr-node" id="jrB">
+            <div class="l" data-i18n="jr_b_l">EL RELAY</div>
+            <div class="jr-msg" id="jrMsgB"><span class="jr-relay-meta" id="jrRelayMeta">—</span></div>
+            <div class="note" data-i18n="jr_b_note">Solo enruta un paquete opaco. No sabe qué dice, ni de quién es, ni lo guarda.</div>
+          </div>
+          <div class="jr-node" id="jrC">
+            <div class="l" data-i18n="jr_c_l">SU DISPOSITIVO</div>
+            <div class="jr-msg" id="jrMsgC">Nos vemos a las 21:00 en el sitio de siempre.</div>
+            <div class="note" data-i18n="jr_c_note">Solo la llave de tu contacto puede abrirlo. Ahí vuelve a ser texto.</div>
+          </div>
+        </div>
+        <div class="jr-progress" aria-hidden="true">
+          <span data-i18n="jr_p1">CIFRADO</span>
+          <div class="jr-bar"><i id="jrBar1"></i></div>
+          <span data-i18n="jr_p2">TRÁNSITO</span>
+          <div class="jr-bar"><i id="jrBar2"></i></div>
+          <span data-i18n="jr_p3">DESCIFRADO</span>
+          <div class="jr-bar"><i id="jrBar3"></i></div>
+        </div>
+        <div class="jr-hint" data-i18n="jr_hint">▼ sigue bajando — el mensaje se cifra con el scroll</div>
       </div>
     </div>
   </section>
@@ -1068,10 +1547,29 @@
           { who: "them", mono: true, text: "⏱ mensajes efímeros · 24 h · activado" },
           { who: "me",   text: "Y esto se autodestruye mañana." }
         ],
-        sent: "enviado · ✓✓ · efímero 24 h"
+        sent: "enviado · ✓✓ · efímero 24 h",
+        jr_msg: "Nos vemos a las 21:00 en el sitio de siempre.",
+        demo: {
+          replies: [
+            "Eso se acaba de cifrar en tu navegador con TweetNaCl — la misma librería que usa la app.",
+            "El relay solo vio los bytes de arriba. Ni tu texto, ni tu nombre, ni tu IP.",
+            "Cada mensaje lleva un nonce nuevo: el mismo texto nunca produce los mismos bytes."
+          ],
+          relay: "EL RELAY SOLO VE",
+          verified: "XSalsa20-Poly1305 · nonce 24 B · verificado ✓",
+          sim: "cifrado de demostración",
+          units: { h: "horas", h1: "hora", d: "días" },
+          panicDecoyBig: "Perfil señuelo",
+          panicDecoySub: "Vacío: sin chats, sin contactos, sin rastro del perfil real.",
+          panicRealBig: "Perfil real ✓",
+          panicRealSub: "Tus chats siguen aquí, cifrados como siempre."
+        }
       };
       document.querySelectorAll('[data-i18n]').forEach(function (el) {
         es[el.getAttribute('data-i18n')] = el.innerHTML;
+      });
+      document.querySelectorAll('[data-i18n-ph]').forEach(function (el) {
+        es[el.getAttribute('data-i18n-ph')] = el.getAttribute('placeholder');
       });
 
       var en = {
@@ -1180,6 +1678,40 @@
         foot_privacy: "Privacy", foot_terms: "Terms", foot_contact: "Contact (Issues)",
         foot_copy: "© 2026 AegisLink · Open source project (GPL-3.0)",
         foot_built: "v1.0.0 · Built for privacy",
+        demo_ph: "Type — it gets really encrypted…",
+        scr_chats: "Chats", scr_chats_mini: "3 · encrypted",
+        cr1_prev: "And this self-destructs tomorrow.",
+        cr3_name: "Team Aurora · 4", cr3_prev: "📊 Anonymous poll active",
+        scr_eph: "Ephemeral messages",
+        eph_note: "New messages delete themselves when they expire — on both phones at once.",
+        scr_panic: "Panic mode",
+        panic_hint: "Try it: the decoy PIN <b>0000</b> opens an empty profile.<br/>The real PIN <span class='real'>7319</span> opens your chats.",
+        panic_reset: "↺ Try again",
+        tab_chats: "Chats", tab_eph: "Ephemeral", tab_panic: "Panic",
+        jr_eyebrow: "A message's journey",
+        jr_title: "What each one sees. <em style='font-style:italic; color: var(--accent);'>And what they don't.</em>",
+        jr_a_l: "YOUR DEVICE", jr_b_l: "THE RELAY", jr_c_l: "THEIR DEVICE",
+        jr_a_note: "It is encrypted here, with a key that never leaves your phone.",
+        jr_b_note: "It only routes an opaque packet. It doesn't know what it says, who it's from — and it stores nothing.",
+        jr_c_note: "Only your contact's key can open it. There, it becomes text again.",
+        jr_p1: "ENCRYPT", jr_p2: "TRANSIT", jr_p3: "DECRYPT",
+        jr_hint: "▼ keep scrolling — the message encrypts as you go",
+        jr_msg: "See you at 9 pm at the usual place.",
+        demo: {
+          replies: [
+            "That was just encrypted in your browser with TweetNaCl — the same library the app uses.",
+            "The relay only saw the bytes above. Not your text, not your name, not your IP.",
+            "Every message carries a fresh nonce: the same text never produces the same bytes."
+          ],
+          relay: "THE RELAY ONLY SEES",
+          verified: "XSalsa20-Poly1305 · 24 B nonce · verified ✓",
+          sim: "demo encryption",
+          units: { h: "hours", h1: "hour", d: "days" },
+          panicDecoyBig: "Decoy profile",
+          panicDecoySub: "Empty: no chats, no contacts, no trace of the real profile.",
+          panicRealBig: "Real profile ✓",
+          panicRealSub: "Your chats are still here, encrypted as always."
+        },
         chat: [
           { who: "them", text: "Is this chat really secure?" },
           { who: "me",   text: "E2EE with Double Ratchet. My key never leaves the phone." },
@@ -1297,6 +1829,40 @@
         foot_privacy: "Privacy", foot_terms: "Termini", foot_contact: "Contatto (Issues)",
         foot_copy: "© 2026 AegisLink · Progetto open source (GPL-3.0)",
         foot_built: "v1.0.0 · Fatto per la privacy",
+        demo_ph: "Scrivi — viene cifrato davvero…",
+        scr_chats: "Chat", scr_chats_mini: "3 · cifrate",
+        cr1_prev: "E questo si autodistrugge domani.",
+        cr3_name: "Team Aurora · 4", cr3_prev: "📊 Sondaggio anonimo attivo",
+        scr_eph: "Messaggi effimeri",
+        eph_note: "I nuovi messaggi si cancellano da soli alla scadenza — su entrambi i telefoni.",
+        scr_panic: "Modalità panico",
+        panic_hint: "Provalo: il PIN esca <b>0000</b> apre un profilo vuoto.<br/>Il PIN reale <span class='real'>7319</span> apre le tue chat.",
+        panic_reset: "↺ Riprova",
+        tab_chats: "Chat", tab_eph: "Effimeri", tab_panic: "Panico",
+        jr_eyebrow: "Il viaggio di un messaggio",
+        jr_title: "Cosa vede ognuno. <em style='font-style:italic; color: var(--accent);'>E cosa no.</em>",
+        jr_a_l: "IL TUO DISPOSITIVO", jr_b_l: "IL RELAY", jr_c_l: "IL SUO DISPOSITIVO",
+        jr_a_note: "Viene cifrato qui, con una chiave che non lascia mai il tuo telefono.",
+        jr_b_note: "Instrada solo un pacchetto opaco. Non sa cosa dice, né di chi è — e non conserva nulla.",
+        jr_c_note: "Solo la chiave del tuo contatto può aprirlo. Lì torna a essere testo.",
+        jr_p1: "CIFRATURA", jr_p2: "TRANSITO", jr_p3: "DECIFRATURA",
+        jr_hint: "▼ continua a scorrere — il messaggio si cifra con lo scroll",
+        jr_msg: "Ci vediamo alle 21:00 nel solito posto.",
+        demo: {
+          replies: [
+            "Questo è stato appena cifrato nel tuo browser con TweetNaCl — la stessa libreria dell'app.",
+            "Il relay ha visto solo i byte qui sopra. Né il tuo testo, né il tuo nome, né il tuo IP.",
+            "Ogni messaggio porta un nonce nuovo: lo stesso testo non produce mai gli stessi byte."
+          ],
+          relay: "IL RELAY VEDE SOLO",
+          verified: "XSalsa20-Poly1305 · nonce 24 B · verificato ✓",
+          sim: "cifratura dimostrativa",
+          units: { h: "ore", h1: "ora", d: "giorni" },
+          panicDecoyBig: "Profilo esca",
+          panicDecoySub: "Vuoto: niente chat, niente contatti, nessuna traccia del profilo reale.",
+          panicRealBig: "Profilo reale ✓",
+          panicRealSub: "Le tue chat sono ancora qui, cifrate come sempre."
+        },
         chat: [
           { who: "them", text: "Questa chat è davvero sicura?" },
           { who: "me",   text: "E2EE con Double Ratchet. La mia chiave non lascia mai il telefono." },
@@ -1339,12 +1905,19 @@
           var v = dict[el.getAttribute('data-i18n')];
           if (v != null) el.innerHTML = v;
         });
+        document.querySelectorAll('[data-i18n-ph]').forEach(function (el) {
+          var v = dict[el.getAttribute('data-i18n-ph')];
+          if (v != null) el.setAttribute('placeholder', v);
+        });
         document.querySelectorAll('.lang-switch button').forEach(function (b) {
           b.classList.toggle('active', b.getAttribute('data-lang') === l);
         });
         /* El mock del teléfono lee esto en cada iteración del bucle */
         window.AEGIS_CHAT = { script: dict.chat, sent: dict.sent };
+        window.AEGIS_DEMO = dict.demo;
+        window.AEGIS_JR = dict.jr_msg;
         if (window.__aegisChatStatic) window.__aegisChatStatic();
+        if (window.__aegisAfterLang) window.__aegisAfterLang(l);
         try { localStorage.setItem('aegis-lang', l); } catch (e) { /* ignore */ }
         try {
           var url = new URL(location.href);
@@ -1413,6 +1986,76 @@
         });
       }
 
+      /* ── Spotlight de cursor en cards (borde + relleno) ── */
+      Array.prototype.slice.call(
+        document.querySelectorAll('.pillar, .step, .kpi-panel, .trust .checks')
+      ).forEach(function (el) { el.classList.add('glow'); });
+      Array.prototype.slice.call(document.querySelectorAll('.feat'))
+        .forEach(function (el) { el.classList.add('glow-fill'); });
+
+      var finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      if (finePointer) {
+        document.addEventListener('pointermove', function (e) {
+          if (!e.target || !e.target.closest) return;
+          var card = e.target.closest('.glow, .glow-fill');
+          if (!card) return;
+          var r = card.getBoundingClientRect();
+          card.style.setProperty('--mx', (e.clientX - r.left).toFixed(1) + 'px');
+          card.style.setProperty('--my', (e.clientY - r.top).toFixed(1) + 'px');
+        }, { passive: true });
+      }
+
+      /* ── Botones magnéticos (CTAs principales) ── */
+      if (canTilt) {
+        Array.prototype.slice.call(
+          document.querySelectorAll('.hero-ctas .btn, .cta .ctas .btn')
+        ).forEach(function (b) {
+          b.classList.add('magnetic');
+          b.addEventListener('pointermove', function (e) {
+            var r = b.getBoundingClientRect();
+            var dx = e.clientX - (r.left + r.width / 2);
+            var dy = e.clientY - (r.top + r.height / 2);
+            b.style.transform =
+              'translate(' + (dx * 0.18).toFixed(1) + 'px,' + (dy * 0.22).toFixed(1) + 'px)';
+          });
+          b.addEventListener('pointerleave', function () { b.style.transform = ''; });
+        });
+      }
+
+      /* ── Hero: reveal por palabras (re-aplicable tras i18n) ── */
+      function splitHero() {
+        if (reduced) return;
+        var h = document.querySelector('.hero-title');
+        if (!h || h.querySelector('.wi')) return;
+        var delay = 0;
+        function wrapWords(node) {
+          Array.prototype.slice.call(node.childNodes).forEach(function (child) {
+            if (child.nodeType === 3) {
+              var frag = document.createDocumentFragment();
+              child.textContent.split(/(\s+)/).forEach(function (part) {
+                if (!part) return;
+                if (/^\s+$/.test(part)) {
+                  frag.appendChild(document.createTextNode(part));
+                  return;
+                }
+                var w = document.createElement('span'); w.className = 'w';
+                var wi = document.createElement('span'); wi.className = 'wi';
+                wi.textContent = part;
+                wi.style.setProperty('--d', (delay * 0.085).toFixed(3) + 's');
+                delay++;
+                w.appendChild(wi);
+                frag.appendChild(w);
+              });
+              node.replaceChild(frag, child);
+            } else if (child.nodeType === 1) {
+              wrapWords(child);
+            }
+          });
+        }
+        wrapWords(h);
+      }
+      splitHero();
+
       /* ── Contadores "0 B" con efecto scramble ── */
       var GLYPHS = '0123456789abcdef';
       function scramble(el) {
@@ -1433,7 +2076,8 @@
           });
         }, 45);
       }
-      var scrambleEls = Array.prototype.slice.call(document.querySelectorAll('[data-scramble]'));
+      var scrambleEls = Array.prototype.slice.call(
+        document.querySelectorAll('[data-scramble], .section-eyebrow'));
       if (!reduced && 'IntersectionObserver' in window) {
         var sio = new IntersectionObserver(function (entries) {
           entries.forEach(function (e) {
@@ -1443,10 +2087,22 @@
         scrambleEls.forEach(function (el) { sio.observe(el); });
       }
 
-      /* ── Conversación que se escribe en bucle en el mock ── */
+      /* ── Estado compartido del tour del teléfono ── */
       var msgsHost = document.getElementById('psMsgs');
-      if (!msgsHost) return;
+      var userMode = false;        /* true tras el primer mensaje real del visitante */
+      var composerFocus = false;   /* pausa suave del guion mientras escribe */
+      var activeScreen = 'chat';
 
+      function sleep(ms) {
+        return new Promise(function (res) { setTimeout(res, ms); });
+      }
+      function esc(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+      }
+
+      /* ── Conversación que se escribe en bucle en el mock ── */
       /* La conversación traducida la publica el script de i18n en
          window.AEGIS_CHAT; este fallback solo cubre un fallo de carga. */
       var FALLBACK_CHAT = {
@@ -1471,6 +2127,7 @@
       }
 
       function renderAllStatic() {
+        if (userMode) return; /* no pisar la conversación real del visitante */
         var chat = currentChat();
         msgsHost.innerHTML = '';
         chat.script.forEach(function (m) {
@@ -1484,27 +2141,21 @@
         msgsHost.appendChild(meta);
       }
 
-      if (reduced) {
-        /* Con reduced-motion el cambio de idioma re-renderiza el chat estático */
-        window.__aegisChatStatic = renderAllStatic;
-        renderAllStatic();
-        return;
-      }
-
-      function sleep(ms) {
-        return new Promise(function (res) { setTimeout(res, ms); });
-      }
-      async function waitVisible() {
-        while (document.hidden) { await sleep(600); }
+      async function waitTurn() {
+        while (document.hidden || composerFocus || activeScreen !== 'chat') {
+          await sleep(600);
+        }
       }
 
       async function playLoop() {
         for (;;) {
+          if (userMode) return;
           var chat = currentChat();
           msgsHost.classList.remove('fading');
           msgsHost.innerHTML = '';
           for (var i = 0; i < chat.script.length; i++) {
-            await waitVisible();
+            await waitTurn();
+            if (userMode) return;
             var m = chat.script[i];
             if (m.who === 'them') {
               var t = document.createElement('div');
@@ -1512,6 +2163,7 @@
               t.innerHTML = '<span class="typing-dots"><i></i><i></i><i></i></span>';
               msgsHost.appendChild(t);
               await sleep(950);
+              if (userMode) return;
               t.classList.add(m.mono ? 'mono' : 'x');
               t.textContent = m.text;
             } else {
@@ -1520,20 +2172,407 @@
               for (var c = 1; c <= m.text.length; c++) {
                 b.textContent = m.text.slice(0, c);
                 await sleep(24);
+                if (userMode) return;
               }
             }
             await sleep(650);
+            if (userMode) return;
           }
           var meta = document.createElement('span');
           meta.className = 'bubble-meta me';
           meta.textContent = chat.sent;
           msgsHost.appendChild(meta);
           await sleep(4200);
+          if (userMode) return;
           msgsHost.classList.add('fading');
           await sleep(550);
         }
       }
-      playLoop();
+
+      if (msgsHost) {
+        if (reduced) {
+          /* Con reduced-motion el cambio de idioma re-renderiza el chat estático */
+          window.__aegisChatStatic = renderAllStatic;
+          renderAllStatic();
+        } else {
+          playLoop();
+        }
+      }
+
+      /* ── Tour de pantallas del teléfono ── */
+      var phoneScreen = document.querySelector('.phone-screen');
+      var screens = Array.prototype.slice.call(document.querySelectorAll('.app-screen'));
+      var tabs = Array.prototype.slice.call(document.querySelectorAll('.app-tab'));
+      var SWIPE_ORDER = ['chats', 'ephemeral', 'panic'];
+
+      function showScreen(name) {
+        activeScreen = name;
+        screens.forEach(function (s) {
+          s.classList.toggle('active', s.getAttribute('data-screen') === name);
+        });
+        var tabName = (name === 'chat') ? 'chats' : name;
+        tabs.forEach(function (t) {
+          var on = t.getAttribute('data-goto') === tabName;
+          t.classList.toggle('active', on);
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+      }
+
+      if (phoneScreen) {
+        phoneScreen.addEventListener('click', function (e) {
+          var g = e.target && e.target.closest ? e.target.closest('[data-goto]') : null;
+          if (!g) return;
+          showScreen(g.getAttribute('data-goto'));
+        });
+        /* Swipe horizontal entre tabs */
+        var touchX = null;
+        phoneScreen.addEventListener('touchstart', function (e) {
+          touchX = e.touches[0].clientX;
+        }, { passive: true });
+        phoneScreen.addEventListener('touchend', function (e) {
+          if (touchX == null) return;
+          var dx = e.changedTouches[0].clientX - touchX;
+          touchX = null;
+          if (Math.abs(dx) < 44) return;
+          var cur = (activeScreen === 'chat') ? 'chats' : activeScreen;
+          var i = SWIPE_ORDER.indexOf(cur);
+          if (i < 0) return;
+          var next = SWIPE_ORDER[dx < 0 ? Math.min(SWIPE_ORDER.length - 1, i + 1)
+                                        : Math.max(0, i - 1)];
+          if (next !== cur) showScreen(next);
+        }, { passive: true });
+      }
+
+      /* ── Demo: cifrado real en el composer (TweetNaCl lazy) ── */
+      var demoInput = document.getElementById('demoInput');
+      var demoSend = document.getElementById('demoSend');
+      var naclPromise = null;
+      var sessionKey = null;
+      var replyIdx = 0;
+
+      function demoDict() {
+        return window.AEGIS_DEMO || {
+          replies: ['Cifrado en tu navegador con TweetNaCl.'],
+          relay: 'EL RELAY SOLO VE', verified: 'XSalsa20-Poly1305 · verificado ✓',
+          sim: 'cifrado de demostración', units: { h: 'h', h1: 'h', d: 'd' }
+        };
+      }
+      function loadNacl() {
+        if (naclPromise) return naclPromise;
+        naclPromise = new Promise(function (res) {
+          if (window.nacl) return res(window.nacl);
+          var s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js';
+          s.async = true;
+          s.onload = function () { res(window.nacl || null); };
+          s.onerror = function () { res(null); };
+          document.head.appendChild(s);
+        });
+        return naclPromise;
+      }
+      function toHex(arr) {
+        var out = '';
+        for (var i = 0; i < arr.length; i++) out += ('0' + arr[i].toString(16)).slice(-2);
+        return out;
+      }
+      function groupHex(h) { return h.replace(/(.{4})/g, '$1 ').trim(); }
+      function scrollMsgs() { msgsHost.scrollTop = msgsHost.scrollHeight; }
+
+      var sendBusy = false;
+      async function demoSendMsg() {
+        var text = (demoInput.value || '').trim();
+        if (!text || sendBusy) return;
+        sendBusy = true;
+        demoInput.value = '';
+        var first = !userMode;
+        userMode = true;
+        if (first) {
+          await sleep(60); /* deja abortar al guion */
+          msgsHost.classList.remove('fading');
+          msgsHost.innerHTML = '';
+        }
+        var b = document.createElement('div');
+        b.className = 'bubble me';
+        b.textContent = text;
+        msgsHost.appendChild(b);
+        scrollMsgs();
+
+        var nacl = await loadNacl();
+        var d = demoDict();
+        var envHex, metaText, byteLen;
+        if (nacl) {
+          if (!sessionKey) sessionKey = nacl.randomBytes(32);
+          var nonce = nacl.randomBytes(24);
+          var ct = nacl.secretbox(new TextEncoder().encode(text), nonce, sessionKey);
+          var ok = nacl.secretbox.open(ct, nonce, sessionKey) !== null;
+          byteLen = ct.length + nonce.length;
+          envHex = groupHex(toHex(nonce).slice(0, 16)) + ' · ' +
+                   groupHex(toHex(ct).slice(0, 44)) + '…';
+          metaText = d.verified + (ok ? '' : ' ✗');
+        } else {
+          var fake = new Uint8Array(40 + text.length);
+          (window.crypto || {}).getRandomValues
+            ? crypto.getRandomValues(fake)
+            : fake.forEach(function (_, i) { fake[i] = (i * 73 + 41) % 256; });
+          byteLen = fake.length;
+          envHex = groupHex(toHex(fake).slice(0, 60)) + '…';
+          metaText = d.sim;
+        }
+        await sleep(380);
+        var env = document.createElement('div');
+        env.className = 'envelope';
+        env.innerHTML =
+          '<div class="env-label">' + esc(d.relay) + ' · ' + byteLen + ' B</div>' +
+          '<div class="env-hex">' + envHex + '</div>' +
+          '<div class="env-meta">' + esc(metaText) + '</div>';
+        msgsHost.appendChild(env);
+        scrollMsgs();
+
+        await sleep(700);
+        var t = document.createElement('div');
+        t.className = 'bubble them';
+        t.innerHTML = '<span class="typing-dots"><i></i><i></i><i></i></span>';
+        msgsHost.appendChild(t);
+        scrollMsgs();
+        await sleep(reduced ? 250 : 900);
+        t.textContent = d.replies[replyIdx % d.replies.length];
+        replyIdx++;
+        scrollMsgs();
+        sendBusy = false;
+      }
+
+      if (demoInput && demoSend) {
+        demoInput.addEventListener('focus', function () {
+          composerFocus = true;
+          loadNacl(); /* precarga al primer interés */
+        });
+        demoInput.addEventListener('blur', function () { composerFocus = false; });
+        demoSend.addEventListener('click', demoSendMsg);
+        demoInput.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') demoSendMsg();
+        });
+      }
+
+      /* ── Pantalla: mensajes efímeros ── */
+      var ephArc = document.getElementById('ephArc');
+      var ephVal = document.getElementById('ephVal');
+      var ephUnit = document.getElementById('ephUnit');
+      var EPH_C = 351.86;
+      var EPH_OPTS = {
+        '1h':  { v: '1',  u: 'h1', f: 0.22 },
+        '24h': { v: '24', u: 'h',  f: 0.60 },
+        '7d':  { v: '7',  u: 'd',  f: 0.94 }
+      };
+      var ephCurrent = '24h';
+      function ephApply() {
+        var o = EPH_OPTS[ephCurrent];
+        if (!o || !ephArc) return;
+        ephArc.style.strokeDashoffset = (EPH_C * (1 - o.f)).toFixed(2);
+        ephVal.textContent = o.v;
+        ephUnit.textContent = (demoDict().units || {})[o.u] || o.u;
+      }
+      Array.prototype.slice.call(document.querySelectorAll('.eph-chip')).forEach(function (ch) {
+        ch.addEventListener('click', function () {
+          ephCurrent = ch.getAttribute('data-eph');
+          Array.prototype.slice.call(document.querySelectorAll('.eph-chip')).forEach(function (c) {
+            c.classList.toggle('active', c === ch);
+          });
+          ephApply();
+        });
+      });
+      ephApply();
+
+      /* ── Pantalla: modo pánico (PIN señuelo interactivo) ── */
+      var pinPad = document.getElementById('pinPad');
+      var pinDots = document.getElementById('pinDots');
+      var panicResult = document.getElementById('panicResult');
+      var PIN_DECOY = '0000', PIN_REAL = '7319';
+      var pinBuf = '';
+
+      function pinPaint() {
+        var dots = pinDots.children;
+        for (var i = 0; i < dots.length; i++) {
+          dots[i].classList.toggle('on', i < pinBuf.length);
+        }
+      }
+      function panicShow(big, sub) {
+        document.getElementById('panicBig').textContent = big;
+        document.getElementById('panicSub').textContent = sub;
+        panicResult.classList.add('show');
+      }
+      if (pinPad) {
+        pinPad.addEventListener('click', function (e) {
+          var k = e.target && e.target.closest ? e.target.closest('.pin-key') : null;
+          if (!k) return;
+          if (k.getAttribute('data-k') === 'back') {
+            pinBuf = pinBuf.slice(0, -1);
+            pinPaint();
+            return;
+          }
+          if (pinBuf.length >= 4) return;
+          pinBuf += k.textContent.trim();
+          pinPaint();
+          if (pinBuf.length === 4) {
+            var d = demoDict();
+            var entered = pinBuf;
+            setTimeout(function () {
+              if (entered === PIN_DECOY) panicShow(d.panicDecoyBig, d.panicDecoySub);
+              else if (entered === PIN_REAL) panicShow(d.panicRealBig, d.panicRealSub);
+              else {
+                pinDots.classList.add('shake');
+                setTimeout(function () { pinDots.classList.remove('shake'); }, 450);
+              }
+              pinBuf = '';
+              pinPaint();
+            }, 220);
+          }
+        });
+        document.getElementById('panicReset').addEventListener('click', function (e) {
+          e.stopPropagation();
+          panicResult.classList.remove('show');
+          pinBuf = '';
+          pinPaint();
+        });
+      }
+
+      /* ── Journey: el mensaje se cifra con el scroll ── */
+      var jr = document.getElementById('journey');
+      var lastP = 0;
+      var jrRefresh = null;
+      if (jr) {
+        var jrMsgA = document.getElementById('jrMsgA');
+        var jrMsgC = document.getElementById('jrMsgC');
+        var jrRelayMeta = document.getElementById('jrRelayMeta');
+        var jrPacket = document.getElementById('jrPacket');
+        var jrStage = document.getElementById('jrStage');
+        var nA = document.getElementById('jrA');
+        var nB = document.getElementById('jrB');
+        var nC = document.getElementById('jrC');
+        var w1 = document.getElementById('jrW1');
+        var w2 = document.getElementById('jrW2');
+        var bar1 = document.getElementById('jrBar1');
+        var bar2 = document.getElementById('jrBar2');
+        var bar3 = document.getElementById('jrBar3');
+
+        function jrMsg() {
+          return window.AEGIS_JR || 'Nos vemos a las 21:00 en el sitio de siempre.';
+        }
+        function jrBytes() {
+          try { return new TextEncoder().encode(jrMsg()).length + 40; }
+          catch (e) { return jrMsg().length + 40; }
+        }
+        function cipherChar(i, ch) {
+          return GLYPHS[(i * 31 + ch.charCodeAt(0)) % GLYPHS.length];
+        }
+        function cipherSlice(msg, from, to) {
+          var out = '';
+          for (var i = from; i < to; i++) out += cipherChar(i, msg[i]);
+          return out;
+        }
+        function jrStatic() {
+          var msg = jrMsg();
+          jrMsgA.textContent = msg;
+          jrRelayMeta.textContent = jrBytes() + ' B · 0x' +
+            cipherSlice(msg, 0, Math.min(10, msg.length));
+          jrMsgC.innerHTML = esc(msg) +
+            ' <span class="ct">✓</span>';
+          nA.classList.add('lit'); nB.classList.add('lit'); nC.classList.add('lit');
+        }
+        function clamp01(v) { return Math.min(1, Math.max(0, v)); }
+
+        function jrRender(p) {
+          lastP = p;
+          var msg = jrMsg();
+          var n = msg.length;
+          var encP = clamp01(p / 0.32);
+          var transP = clamp01((p - 0.32) / 0.36);
+          var decP = clamp01((p - 0.72) / 0.28);
+
+          /* A: se cifra de izquierda a derecha */
+          var k = Math.round(encP * n);
+          jrMsgA.innerHTML =
+            '<span class="ct">' + cipherSlice(msg, 0, k) + '</span>' + esc(msg.slice(k));
+
+          /* B: el relay solo ve tamaño + bytes */
+          if (transP > 0.18) {
+            jrRelayMeta.textContent = jrBytes() + ' B · 0x' +
+              cipherSlice(msg, 0, Math.min(10, n));
+          } else {
+            jrRelayMeta.textContent = '—';
+          }
+
+          /* C: llega cifrado y se descifra */
+          if (p < 0.66) {
+            jrMsgC.innerHTML = '<span style="color: var(--text-faint);">· · ·</span>';
+          } else {
+            var dk = Math.round(decP * n);
+            jrMsgC.innerHTML =
+              esc(msg.slice(0, dk)) + '<span class="ct">' + cipherSlice(msg, dk, n) + '</span>';
+          }
+
+          /* Paquete viajando A → C */
+          if (transP > 0 && transP < 1) {
+            var rs = jrStage.getBoundingClientRect();
+            var ra = nA.getBoundingClientRect();
+            var rc = nC.getBoundingClientRect();
+            var x0 = ra.left + ra.width / 2 - rs.left;
+            var x1 = rc.left + rc.width / 2 - rs.left;
+            jrPacket.style.left = (x0 + (x1 - x0) * transP).toFixed(1) + 'px';
+            jrPacket.style.opacity = '1';
+          } else {
+            jrPacket.style.opacity = '0';
+          }
+
+          /* Barras + nodos iluminados */
+          bar1.style.width = (encP * 100).toFixed(1) + '%';
+          bar2.style.width = (transP * 100).toFixed(1) + '%';
+          bar3.style.width = (decP * 100).toFixed(1) + '%';
+          nA.classList.toggle('lit', p < 0.38);
+          nB.classList.toggle('lit', p >= 0.38 && p < 0.7);
+          nC.classList.toggle('lit', p >= 0.7);
+        }
+
+        function jrLayoutWires() {
+          var rs = jrStage.getBoundingClientRect();
+          var ra = nA.getBoundingClientRect();
+          var rb = nB.getBoundingClientRect();
+          var rc = nC.getBoundingClientRect();
+          w1.style.left = (ra.right - rs.left) + 'px';
+          w1.style.width = Math.max(0, rb.left - ra.right) + 'px';
+          w2.style.left = (rb.right - rs.left) + 'px';
+          w2.style.width = Math.max(0, rc.left - rb.right) + 'px';
+        }
+
+        function jrAnimated() {
+          return !reduced && window.matchMedia('(min-width: 901px)').matches;
+        }
+        jrRefresh = function () {
+          if (jrAnimated()) { jrLayoutWires(); jrRender(lastP); }
+          else { jrStatic(); }
+        };
+
+        var jrTick = false;
+        function jrOnScroll() {
+          if (!jrAnimated() || jrTick) return;
+          jrTick = true;
+          requestAnimationFrame(function () {
+            jrTick = false;
+            var r = jr.getBoundingClientRect();
+            var total = r.height - window.innerHeight;
+            jrRender(total > 0 ? clamp01(-r.top / total) : 1);
+          });
+        }
+        window.addEventListener('scroll', jrOnScroll, { passive: true });
+        window.addEventListener('resize', function () { jrRefresh(); }, { passive: true });
+        jrRefresh();
+      }
+
+      /* ── Hook: re-aplicar efectos al cambiar de idioma ── */
+      window.__aegisAfterLang = function () {
+        splitHero();
+        ephApply();
+        if (jrRefresh) jrRefresh();
+      };
     })();
   </script>
 
@@ -1604,6 +2643,33 @@
         const shield = edgeLines(extrude, 0.9);
         group.add(shield);
 
+        /* Cristal fresnel dentro del wireframe: brillo en los bordes rasantes */
+        const fresnelMat = new THREE.ShaderMaterial({
+          uniforms: { uColor: { value: new THREE.Color(ACCENT) }, uTime: { value: 0 } },
+          vertexShader: [
+            'varying vec3 vN; varying vec3 vV;',
+            'void main() {',
+            '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+            '  vN = normalize(normalMatrix * normal);',
+            '  vV = normalize(-mv.xyz);',
+            '  gl_Position = projectionMatrix * mv;',
+            '}'
+          ].join('\n'),
+          fragmentShader: [
+            'uniform vec3 uColor; uniform float uTime;',
+            'varying vec3 vN; varying vec3 vV;',
+            'void main() {',
+            '  float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2);',
+            '  float pulse = 0.8 + 0.2 * sin(uTime * 0.0012);',
+            '  gl_FragColor = vec4(uColor, f * 0.34 * pulse);',
+            '}'
+          ].join('\n'),
+          transparent: true, blending: THREE.AdditiveBlending,
+          depthWrite: false, side: THREE.DoubleSide
+        });
+        const shieldGlass = new THREE.Mesh(extrude, fresnelMat);
+        group.add(shieldGlass);
+
         const inner = edgeLines(extrude, 0.28);
         inner.scale.setScalar(0.78);
         group.add(inner);
@@ -1656,6 +2722,45 @@
         const sparks = particleField(narrow ? 100 : 300, 2.2, 3.4, 0.055, 0.85);
         scene.add(dust, sparks);
 
+        /* Órbitas de tráfico cifrado: anillos dashed + paquetes que viajan.
+           Círculos perfectos: rotar la línea en Z mueve los dashes sin
+           deformar la forma; la inclinación del holder da la elipse visual. */
+        const orbits = [];
+        const orbitCount = narrow ? 2 : 3;
+        for (let i = 0; i < orbitCount; i++) {
+          const radius = 2.95 + i * 0.62;
+          const seg = 140;
+          const pts3 = [];
+          for (let s = 0; s <= seg; s++) {
+            const a = (s / seg) * Math.PI * 2;
+            pts3.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0));
+          }
+          const lineGeo = new THREE.BufferGeometry().setFromPoints(pts3);
+          const lineMat = new THREE.LineDashedMaterial({
+            color: ACCENT, transparent: true, opacity: 0.28,
+            dashSize: 0.45, gapSize: 0.32,
+            blending: THREE.AdditiveBlending, depthWrite: false
+          });
+          const line = new THREE.Line(lineGeo, lineMat);
+          line.computeLineDistances();
+          const holder = new THREE.Group();
+          holder.add(line);
+          holder.rotation.set(1.18 + i * 0.26, i * 1.05, i * 0.45);
+          scene.add(holder);
+          const pk = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: glow.material.map, transparent: true,
+            blending: THREE.AdditiveBlending, depthWrite: false
+          }));
+          pk.scale.setScalar(0.5);
+          holder.add(pk);
+          orbits.push({
+            line, pk, radius,
+            speed: 0.00045 + i * 0.00012,
+            phase: i * 2.1,
+            dir: i % 2 ? -1 : 1
+          });
+        }
+
         /* Parallax sutil con el ratón */
         let targetX = 0, targetY = 0, curX = 0, curY = 0;
         const hero = document.querySelector('.hero');
@@ -1667,6 +2772,12 @@
           });
           hero.addEventListener('pointerleave', () => { targetX = 0; targetY = 0; });
         }
+
+        /* Cámara reactiva al scroll: se aleja y se eleva al bajar */
+        let scrollTarget = 0, scrollCur = 0;
+        window.addEventListener('scroll', () => {
+          scrollTarget = Math.min(1, (window.scrollY || 0) / 760);
+        }, { passive: true });
 
         /* Resize con cap de devicePixelRatio */
         function resize() {
@@ -1690,13 +2801,22 @@
         function update(t) {
           curX += (targetX - curX) * 0.05;
           curY += (targetY - curY) * 0.05;
+          scrollCur += (scrollTarget - scrollCur) * 0.06;
           group.rotation.y = t * 0.00035 + curX;
-          group.rotation.x = Math.sin(t * 0.00022) * 0.08 + curY;
+          group.rotation.x = Math.sin(t * 0.00022) * 0.08 + curY + scrollCur * 0.22;
           inner.rotation.z = t * 0.00018;
           dust.rotation.y = -t * 0.00008;
           sparks.rotation.y = t * 0.00014;
           const breathe = 1 + Math.sin(t * 0.0009) * 0.04;
           glow.scale.setScalar(6.5 * breathe);
+          fresnelMat.uniforms.uTime.value = t;
+          camera.position.z = 8.2 + scrollCur * 1.7;
+          camera.position.y = 0.2 + scrollCur * 0.55;
+          orbits.forEach((o) => {
+            o.line.rotation.z = t * 0.00008 * o.dir;
+            const a = t * o.speed * o.dir + o.phase;
+            o.pk.position.set(Math.cos(a) * o.radius, Math.sin(a) * o.radius, 0);
+          });
         }
         function loop(t) {
           if (!running) return;
