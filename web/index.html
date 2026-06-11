@@ -4,13 +4,17 @@
   <meta charset="utf-8"/>
   <title>AegisLink — Mensajería sin rastro</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <meta name="description" content="Mensajería cifrada de extremo a extremo, anónima y sin metadatos. Sin teléfono, sin email, sin cuentas. Código abierto (MIT), cliente y servidor."/>
+  <meta name="description" content="Mensajería cifrada de extremo a extremo, anónima y sin metadatos. Sin teléfono, sin email, sin cuentas. Código abierto (GPL-3.0), cliente y servidor."/>
   <meta property="og:type" content="website"/>
   <meta property="og:title" content="AegisLink — Mensajería sin rastro"/>
-  <meta property="og:description" content="Mensajería E2EE anónima y sin metadatos. Sin teléfono, sin email. Código abierto (MIT), cliente y servidor."/>
+  <meta property="og:description" content="Mensajería E2EE anónima y sin metadatos. Sin teléfono, sin email. Código abierto (GPL-3.0), cliente y servidor."/>
   <meta property="og:url" content="https://aegis-link.it"/>
   <meta property="og:site_name" content="AegisLink"/>
   <link rel="canonical" href="https://aegis-link.it/"/>
+  <link rel="alternate" hreflang="es" href="https://aegis-link.it/"/>
+  <link rel="alternate" hreflang="en" href="https://aegis-link.it/?lang=en"/>
+  <link rel="alternate" hreflang="it" href="https://aegis-link.it/?lang=it"/>
+  <link rel="alternate" hreflang="x-default" href="https://aegis-link.it/"/>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2040%2040'%3E%3Cpath%20d='M20%202%20L35%2010%20L35%2030%20L20%2038%20L5%2030%20L5%2010%20Z'%20fill='none'%20stroke='%235bf2b9'%20stroke-width='2.4'%20stroke-linejoin='round'/%3E%3Crect%20x='13'%20y='15'%20width='14'%20height='3.2'%20rx='0.4'%20fill='%235bf2b9'/%3E%3Crect%20x='13'%20y='21.8'%20width='14'%20height='3.2'%20rx='0.4'%20fill='%235bf2b9'%20opacity='0.55'/%3E%3C/svg%3E"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -89,6 +93,19 @@
       border-radius: 99px; padding: 1px 7px; margin-left: 4px;
       text-transform: uppercase;
     }
+
+    /* ── Language switcher ──────────────────────────── */
+    .lang-switch {
+      display: inline-flex; border: 1px solid var(--border-strong);
+      border-radius: 999px; overflow: hidden; flex-shrink: 0;
+    }
+    .lang-switch button {
+      background: transparent; border: none; color: var(--text-faint);
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+      padding: 7px 10px; transition: color 0.15s, background 0.15s;
+    }
+    .lang-switch button:hover { color: var(--text); }
+    .lang-switch button.active { background: rgba(91,242,185,0.14); color: var(--accent); }
 
     /* ── Hero ───────────────────────────────────────── */
     .hero { padding: 92px 0 80px; position: relative; overflow: hidden; }
@@ -201,7 +218,16 @@
       border: 1px solid var(--accent); border-radius: 99px;
     }
     .ps-msgs { padding: 12px 4px; display: flex; flex-direction: column; gap: 8px; flex: 1;
-               overflow: hidden; transition: opacity 0.5s; }
+               overflow-y: auto; overflow-x: hidden; transition: opacity 0.5s;
+               scrollbar-width: none; }
+    .ps-msgs::-webkit-scrollbar { display: none; }
+    .ps-head .back {
+      background: none; border: none; color: var(--text-dim); font-size: 22px;
+      line-height: 1; padding: 0 8px 3px 0; margin-left: -4px; flex-shrink: 0;
+      transition: color 0.15s;
+    }
+    .ps-head .back:hover { color: var(--accent); }
+    .ps-head .name { flex: 1; }
     .ps-msgs.fading { opacity: 0; }
     .bubble { padding: 9px 12px; border-radius: 14px; max-width: 78%;
               font-size: 13px; line-height: 1.35; }
@@ -458,6 +484,298 @@
                  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
                  color: var(--text-faint); flex-wrap: wrap; gap: 12px; }
 
+    /* ── Film grain global ──────────────────────────── */
+    .grain {
+      position: fixed; inset: -50%; z-index: 999; pointer-events: none;
+      opacity: 0.045;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      animation: grain-jitter 6s steps(8) infinite;
+    }
+    @keyframes grain-jitter {
+      0% { transform: translate(0,0); } 25% { transform: translate(-2%,1%); }
+      50% { transform: translate(1%,-2%); } 75% { transform: translate(-1%,-1%); }
+      100% { transform: translate(0,0); }
+    }
+    @media (prefers-reduced-motion: reduce) { .grain { animation: none; } }
+
+    /* ── Cursor spotlight en cards ──────────────────── */
+    .glow { position: relative; }
+    .glow::after {
+      content: ''; position: absolute; inset: -1px; border-radius: inherit;
+      padding: 1px; pointer-events: none; opacity: 0;
+      background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%),
+                  rgba(91,242,185,0.55), transparent 70%);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+              mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+              mask-composite: exclude;
+      transition: opacity 0.3s;
+    }
+    .glow:hover::after { opacity: 1; }
+    .glow-fill { position: relative; overflow: hidden; }
+    .glow-fill::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+      background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%),
+                  rgba(91,242,185,0.07), transparent 65%);
+      transition: opacity 0.3s;
+    }
+    .glow-fill:hover::before { opacity: 1; }
+
+    /* ── Hero: reveal por palabras ──────────────────── */
+    .hero-title .w { display: inline-block; overflow: hidden; vertical-align: bottom; }
+    .hero-title .wi {
+      display: inline-block; transform: translateY(115%);
+      animation: word-in 0.75s cubic-bezier(0.2, 0.65, 0.2, 1) forwards;
+      animation-delay: var(--d, 0s);
+    }
+    @keyframes word-in { to { transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) {
+      .hero-title .wi { transform: none; animation: none; }
+    }
+
+    /* ── Botones magnéticos ─────────────────────────── */
+    .magnetic { transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.3, 1); will-change: transform; }
+
+    /* ── Marquee infinito (tagline) ─────────────────── */
+    .tagline { overflow: hidden; }
+    .marquee-track {
+      display: flex; width: max-content; gap: 64px; align-items: center;
+      animation: marquee-roll 26s linear infinite;
+    }
+    .marquee-track:hover { animation-play-state: paused; }
+    .marquee-track .tagline-row { flex-wrap: nowrap; white-space: nowrap; gap: 64px;
+                                  justify-content: flex-start; }
+    @keyframes marquee-roll {
+      from { transform: translateX(0); }
+      to   { transform: translateX(calc(-50% - 32px)); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .marquee-track { animation: none; }
+      .marquee-track .tagline-row[aria-hidden] { display: none; }
+      .marquee-track .tagline-row { flex-wrap: wrap; white-space: normal; }
+    }
+
+    /* ── Journey: el viaje de un mensaje ────────────── */
+    .journey { position: relative; height: 300vh; }
+    .journey-sticky {
+      position: sticky; top: 0; height: 100vh;
+      display: flex; flex-direction: column; justify-content: center;
+      overflow: hidden;
+    }
+    .journey-stage {
+      display: grid; grid-template-columns: 1fr 0.8fr 1fr; gap: 24px;
+      align-items: stretch; position: relative; margin-top: 40px;
+    }
+    .jr-node {
+      padding: 22px 20px; border: 1px solid var(--border); border-radius: 14px;
+      background: var(--surface); position: relative; min-height: 190px;
+      display: flex; flex-direction: column; gap: 10px;
+      transition: border-color 0.4s, box-shadow 0.4s;
+    }
+    .jr-node.lit { border-color: rgba(91,242,185,0.5);
+                   box-shadow: 0 0 40px rgba(91,242,185,0.08); }
+    .jr-node .l { font-family: var(--mono); font-size: 10px; color: var(--accent);
+                  letter-spacing: 0.12em; }
+    .jr-node .note { font-size: 12.5px; color: var(--text-dim); line-height: 1.5;
+                     margin-top: auto; }
+    .jr-msg {
+      font-family: var(--mono); font-size: 13px; line-height: 1.6;
+      padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border); min-height: 86px;
+      word-break: break-all; color: var(--text);
+    }
+    .jr-msg .ct { color: var(--accent); opacity: 0.85; }
+    .jr-relay-box {
+      display: flex; flex-direction: column; gap: 8px; align-items: center;
+      justify-content: center; text-align: center;
+    }
+    .jr-relay-meta { font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+                     letter-spacing: 0.06em; }
+    .jr-wire {
+      position: absolute; top: 50%; height: 1px; z-index: 0;
+      background: repeating-linear-gradient(90deg,
+        rgba(91,242,185,0.35) 0 6px, transparent 6px 12px);
+    }
+    .jr-wire.w1 { left: calc(33.33% - 12px); width: 24px; }
+    .jr-wire.w2 { right: calc(33.33% - 12px); width: 24px; }
+    .jr-packet {
+      position: absolute; top: 50%; width: 12px; height: 12px; z-index: 4;
+      border-radius: 3px; background: var(--accent);
+      box-shadow: 0 0 18px rgba(91,242,185,0.9), 0 0 40px rgba(91,242,185,0.4);
+      transform: translate(-50%, -50%) rotate(45deg); opacity: 0;
+    }
+    .jr-progress {
+      margin-top: 28px; display: flex; gap: 8px; align-items: center;
+      font-family: var(--mono); font-size: 10px; color: var(--text-faint);
+      letter-spacing: 0.1em;
+    }
+    .jr-bar { flex: 1; height: 2px; background: var(--border); border-radius: 2px;
+              overflow: hidden; }
+    .jr-bar i { display: block; height: 100%; width: 0;
+                background: var(--accent); border-radius: 2px; }
+    .jr-hint { text-align: center; margin-top: 18px; font-family: var(--mono);
+               font-size: 10px; letter-spacing: 0.14em; color: var(--text-faint);
+               text-transform: uppercase; animation: hint-pulse 2.4s ease-in-out infinite; }
+    @keyframes hint-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) {
+      .journey { height: auto; }
+      .journey-sticky { position: static; height: auto; padding: 40px 0; }
+      .jr-hint { display: none; }
+    }
+
+    /* ── Phone: tour de pantallas ───────────────────── */
+    .app-screens { position: relative; flex: 1; min-height: 0; }
+    .app-screen {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      opacity: 0; transform: translateX(14px); pointer-events: none;
+      transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
+    }
+    .app-screen.active { opacity: 1; transform: none; pointer-events: auto; }
+    .app-screen.from-left { transform: translateX(-14px); }
+    .app-screen.active.from-left { transform: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .app-screen { transition: opacity 0.2s linear; transform: none; }
+    }
+    .app-tabbar {
+      display: flex; border-top: 1px solid var(--border); margin-top: 8px;
+      padding-top: 8px; gap: 2px;
+    }
+    .app-tab {
+      flex: 1; background: none; border: none; color: var(--text-faint);
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      font-family: var(--mono); font-size: 8px; letter-spacing: 0.08em;
+      padding: 4px 0 2px; border-radius: 8px;
+      transition: color 0.2s, background 0.2s; text-transform: uppercase;
+    }
+    .app-tab:hover { color: var(--text-dim); }
+    .app-tab.active { color: var(--accent); background: rgba(91,242,185,0.08); }
+    .scr-title { font-family: var(--sans); font-weight: 600; font-size: 17px;
+                 padding: 2px 4px 12px; letter-spacing: -0.01em;
+                 display: flex; justify-content: space-between; align-items: center;
+                 border-bottom: 1px solid var(--border); }
+    .scr-title .mini { font-family: var(--mono); font-size: 9px; color: var(--text-faint);
+                       letter-spacing: 0.08em; font-weight: 400; }
+
+    /* Chats list */
+    .chat-rows { display: flex; flex-direction: column; padding-top: 6px; }
+    .chat-row {
+      display: flex; gap: 10px; align-items: center; padding: 11px 6px;
+      border-radius: 12px; cursor: pointer; border: none; background: none;
+      text-align: left; color: inherit; width: 100%;
+      transition: background 0.15s;
+    }
+    .chat-row:hover { background: rgba(255,255,255,0.04); }
+    .chat-ava {
+      width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(91,242,185,0.10); color: var(--accent);
+      font-family: var(--mono); font-size: 12px;
+    }
+    .chat-row .cbody { flex: 1; min-width: 0; }
+    .chat-row .cname { font-family: var(--mono); font-size: 11.5px; margin-bottom: 3px;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chat-row .cprev { font-size: 11px; color: var(--text-dim); white-space: nowrap;
+                       overflow: hidden; text-overflow: ellipsis; }
+    .chat-row .cprev.ct { font-family: var(--mono); color: var(--text-faint); }
+    .chat-row .cmeta { font-family: var(--mono); font-size: 8.5px; color: var(--text-faint);
+                       display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+    .chat-row .cmeta .eph { color: var(--accent); }
+
+    /* Ephemeral screen */
+    .eph-body { display: flex; flex-direction: column; align-items: center; gap: 18px;
+                padding-top: 26px; flex: 1; }
+    .eph-ring { position: relative; width: 130px; height: 130px; }
+    .eph-ring svg { transform: rotate(-90deg); }
+    .eph-ring .track { stroke: rgba(255,255,255,0.08); }
+    .eph-ring .arc { stroke: var(--accent); stroke-linecap: round;
+                     transition: stroke-dashoffset 0.6s cubic-bezier(0.2, 0.7, 0.2, 1); }
+    .eph-ring .mid {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 2px;
+    }
+    .eph-ring .mid b { font-family: var(--serif); font-size: 30px; font-weight: 500; }
+    .eph-ring .mid span { font-family: var(--mono); font-size: 8px;
+                          letter-spacing: 0.1em; color: var(--text-faint);
+                          text-transform: uppercase; }
+    .eph-chips { display: flex; gap: 8px; }
+    .eph-chip {
+      font-family: var(--mono); font-size: 11px; padding: 7px 14px;
+      border-radius: 99px; border: 1px solid var(--border-strong);
+      background: none; color: var(--text-dim); transition: all 0.2s;
+    }
+    .eph-chip:hover { color: var(--text); }
+    .eph-chip.active { background: rgba(91,242,185,0.14); color: var(--accent);
+                       border-color: rgba(91,242,185,0.5); }
+    .eph-note { font-size: 11px; color: var(--text-dim); text-align: center;
+                max-width: 210px; line-height: 1.5; }
+
+    /* Panic screen */
+    .panic-body { display: flex; flex-direction: column; align-items: center;
+                  gap: 14px; padding-top: 14px; flex: 1; }
+    .pin-dots { display: flex; gap: 12px; padding: 8px 0; }
+    .pin-dots i { width: 11px; height: 11px; border-radius: 50%;
+                  border: 1px solid var(--border-strong); transition: all 0.15s; }
+    .pin-dots i.on { background: var(--accent); border-color: var(--accent);
+                     box-shadow: 0 0 10px rgba(91,242,185,0.6); }
+    .pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+               width: 100%; max-width: 200px; }
+    .pin-key {
+      font-family: var(--mono); font-size: 16px; padding: 11px 0;
+      background: rgba(255,255,255,0.03); color: var(--text);
+      border: 1px solid var(--border); border-radius: 12px;
+      transition: background 0.12s, transform 0.08s;
+    }
+    .pin-key:hover { background: rgba(255,255,255,0.07); }
+    .pin-key:active { transform: scale(0.94); background: rgba(91,242,185,0.15); }
+    .panic-hint { font-family: var(--mono); font-size: 9px; color: var(--text-faint);
+                  letter-spacing: 0.06em; text-align: center; line-height: 1.7; }
+    .panic-hint b { color: var(--warn); font-weight: 500; }
+    .panic-hint .real { color: var(--accent); }
+    .panic-result {
+      position: absolute; inset: 0; display: none; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px; text-align: center;
+      background: #06090a; z-index: 5; padding: 0 14px;
+    }
+    .panic-result.show { display: flex; }
+    .panic-result .big { font-family: var(--serif); font-size: 22px; line-height: 1.25; }
+    .panic-result .sub { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
+    .panic-result .reset {
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+      color: var(--accent); background: none; border: 1px solid rgba(91,242,185,0.45);
+      border-radius: 99px; padding: 7px 16px; margin-top: 6px;
+    }
+    .shake { animation: pin-shake 0.4s; }
+    @keyframes pin-shake {
+      0%,100% { transform: translateX(0); }
+      20% { transform: translateX(-6px); } 40% { transform: translateX(6px); }
+      60% { transform: translateX(-4px); } 80% { transform: translateX(4px); }
+    }
+
+    /* Demo crypto: composer real + envelope */
+    .ps-composer input {
+      flex: 1; padding: 8px 12px; background: #1a2326; border: none;
+      border-radius: 99px; font-size: 12px; color: var(--text);
+      font-family: var(--sans); outline: none; min-width: 0;
+    }
+    .ps-composer input::placeholder { color: var(--text-dim); }
+    .ps-composer input:focus { box-shadow: 0 0 0 1px rgba(91,242,185,0.5); }
+    .ps-composer .send {
+      border: none; display: flex; align-items: center; justify-content: center;
+      color: #06231a; flex-shrink: 0; transition: transform 0.12s;
+    }
+    .ps-composer .send:active { transform: scale(0.9); }
+    .envelope {
+      align-self: stretch; margin: 2px 2px 4px;
+      border: 1px dashed rgba(91,242,185,0.35); border-radius: 10px;
+      padding: 8px 10px; background: rgba(91,242,185,0.04);
+    }
+    .envelope .env-label { font-family: var(--mono); font-size: 8px;
+                           letter-spacing: 0.12em; color: var(--accent); margin-bottom: 4px; }
+    .envelope .env-hex { font-family: var(--mono); font-size: 9.5px; line-height: 1.5;
+                         color: var(--text-dim); word-break: break-all; }
+    .envelope .env-meta { font-family: var(--mono); font-size: 8px; color: var(--text-faint);
+                          margin-top: 4px; letter-spacing: 0.06em; }
+
     /* ── Mobile ─────────────────────────────────────── */
     @media (max-width: 900px) {
       .nav-links { display: none; }
@@ -471,6 +789,11 @@
       .trust { padding: 36px 24px; }
       .work-grid { grid-template-columns: 1fr; }
       .foot-row { grid-template-columns: 1fr 1fr; }
+      .journey { height: auto; }
+      .journey-sticky { position: static; height: auto; padding: 48px 0; overflow: visible; }
+      .journey-stage { grid-template-columns: 1fr; gap: 14px; }
+      .jr-node { min-height: 0; }
+      .jr-wire, .jr-packet, .jr-hint, .jr-progress { display: none; }
     }
     @media (max-width: 560px) {
       .pillars { grid-template-columns: 1fr; }
@@ -483,6 +806,8 @@
   </style>
 </head>
 <body>
+
+  <div class="grain" aria-hidden="true"></div>
 
   <!-- ─── Nav ──────────────────────────────────────── -->
   <nav class="nav">
@@ -497,15 +822,20 @@
         <span class="brand-name">AegisLink</span>
       </a>
       <div class="nav-links">
-        <a href="#why">Por qué</a>
-        <a href="#how">Cómo funciona</a>
-        <a href="#features">Features</a>
-        <a href="#trust">Seguridad</a>
-        <a href="#compare">Comparar</a>
+        <a href="#why" data-i18n="nav_why">Por qué</a>
+        <a href="#how" data-i18n="nav_how">Cómo funciona</a>
+        <a href="#features" data-i18n="nav_features">Features</a>
+        <a href="#trust" data-i18n="nav_trust">Seguridad</a>
+        <a href="#compare" data-i18n="nav_compare">Comparar</a>
       </div>
       <div style="display:flex; gap:10px; align-items:center;">
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" data-lang="es" lang="es">ES</button>
+          <button type="button" data-lang="en" lang="en">EN</button>
+          <button type="button" data-lang="it" lang="it">IT</button>
+        </div>
         <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">GitHub</a>
-        <a href="#download" class="btn btn-primary">Descargar</a>
+        <a href="#download" class="btn btn-primary" data-i18n="nav_download">Descargar</a>
       </div>
     </div>
   </nav>
@@ -519,26 +849,26 @@
       <div>
         <span class="eyebrow">
           <span class="dot"></span>
-          v1.0.0 · OPEN SOURCE · MIT
+          v1.0.0 · OPEN SOURCE · GPL-3.0
         </span>
-        <h1 class="hero-title">Mensajería <em>sin</em> rastro.</h1>
-        <p class="hero-sub">
+        <h1 class="hero-title" data-i18n="hero_title">Mensajería <em>sin</em> rastro.</h1>
+        <p class="hero-sub" data-i18n="hero_sub">
           Cifrado de extremo a extremo, anclado a una llave que sólo existe
           en tu dispositivo. Sin teléfono. Sin email. Sin metadatos.
         </p>
         <div class="hero-ctas">
           <a href="#download" class="btn btn-primary">
-            Descargar AegisLink
+            <span data-i18n="hero_cta1">Descargar AegisLink</span>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M5 12h14M13 5l7 7-7 7"/>
             </svg>
           </a>
-          <a href="#how" class="btn btn-ghost">Cómo funciona</a>
+          <a href="#how" class="btn btn-ghost" data-i18n="hero_cta2">Cómo funciona</a>
         </div>
         <div class="hero-meta">
-          <span>iOS · Android — próximamente</span>
-          <span><b data-scramble>0 B</b> · metadatos guardados</span>
-          <span>Código abierto · cliente + servidor</span>
+          <span data-i18n="hero_meta1">iOS · Android — próximamente</span>
+          <span><b data-scramble>0 B</b> <span data-i18n="hero_meta2">· metadatos guardados</span></span>
+          <span data-i18n="hero_meta3">Código abierto · cliente + servidor</span>
         </div>
       </div>
 
@@ -560,45 +890,173 @@
         <div class="phone-mock">
           <div class="phone-screen">
             <div class="notch"></div>
-            <div class="ps-head">
-              <span class="name">aegis:k7m2…x9q4</span>
-              <span class="e2ee">● E2EE</span>
+            <div class="app-screens" id="appScreens">
+
+              <!-- Pantalla: lista de chats -->
+              <section class="app-screen from-left" data-screen="chats">
+                <div class="scr-title">
+                  <span data-i18n="scr_chats">Chats</span>
+                  <span class="mini" data-i18n="scr_chats_mini">3 · cifrados</span>
+                </div>
+                <div class="chat-rows">
+                  <button class="chat-row" data-goto="chat" type="button">
+                    <span class="chat-ava">k7</span>
+                    <span class="cbody">
+                      <span class="cname">aegis:k7m2…x9q4</span>
+                      <span class="cprev" data-i18n="cr1_prev">Y esto se autodestruye mañana.</span>
+                    </span>
+                    <span class="cmeta"><span>✓✓</span><span class="eph">⏱ 24 h</span></span>
+                  </button>
+                  <button class="chat-row" type="button">
+                    <span class="chat-ava">p4</span>
+                    <span class="cbody">
+                      <span class="cname">aegis:p4n8…w2r5</span>
+                      <span class="cprev ct">9f3a 02c1 7e88 b4d0 …</span>
+                    </span>
+                    <span class="cmeta"><span>✓</span><span class="eph">⏱ 1 h</span></span>
+                  </button>
+                  <button class="chat-row" type="button">
+                    <span class="chat-ava">◆</span>
+                    <span class="cbody">
+                      <span class="cname" data-i18n="cr3_name">Equipo Aurora · 4</span>
+                      <span class="cprev" data-i18n="cr3_prev">📊 Encuesta anónima activa</span>
+                    </span>
+                    <span class="cmeta"><span>✓✓</span></span>
+                  </button>
+                </div>
+              </section>
+
+              <!-- Pantalla: conversación (demo de cifrado real) -->
+              <section class="app-screen active" data-screen="chat">
+                <div class="ps-head">
+                  <button class="back" data-goto="chats" type="button" aria-label="Chats">‹</button>
+                  <span class="name">aegis:k7m2…x9q4</span>
+                  <span class="e2ee">● E2EE</span>
+                </div>
+                <div class="ps-msgs" id="psMsgs"></div>
+                <div class="ps-composer">
+                  <input id="demoInput" type="text" maxlength="120" autocomplete="off"
+                         data-i18n-ph="demo_ph" placeholder="Escribe — se cifra de verdad…"/>
+                  <button class="send" id="demoSend" type="button" aria-label="Enviar">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+                  </button>
+                </div>
+              </section>
+
+              <!-- Pantalla: mensajes efímeros -->
+              <section class="app-screen" data-screen="ephemeral">
+                <div class="scr-title">
+                  <span data-i18n="scr_eph">Mensajes efímeros</span>
+                  <span class="mini">⏱</span>
+                </div>
+                <div class="eph-body">
+                  <div class="eph-ring">
+                    <svg width="130" height="130" viewBox="0 0 130 130" fill="none" aria-hidden="true">
+                      <circle class="track" cx="65" cy="65" r="56" stroke-width="6" fill="none"/>
+                      <circle class="arc" id="ephArc" cx="65" cy="65" r="56" stroke-width="6" fill="none"
+                              stroke-dasharray="351.86" stroke-dashoffset="140.74"/>
+                    </svg>
+                    <div class="mid"><b id="ephVal">24</b><span id="ephUnit">h</span></div>
+                  </div>
+                  <div class="eph-chips" role="group">
+                    <button class="eph-chip" data-eph="1h" type="button">1 h</button>
+                    <button class="eph-chip active" data-eph="24h" type="button">24 h</button>
+                    <button class="eph-chip" data-eph="7d" type="button">7 d</button>
+                  </div>
+                  <p class="eph-note" data-i18n="eph_note">Los mensajes nuevos se borran solos al expirar — en los dos teléfonos a la vez.</p>
+                </div>
+              </section>
+
+              <!-- Pantalla: modo pánico -->
+              <section class="app-screen" data-screen="panic">
+                <div class="scr-title">
+                  <span data-i18n="scr_panic">Modo pánico</span>
+                  <span class="mini">⛨</span>
+                </div>
+                <div class="panic-body">
+                  <p class="panic-hint" data-i18n="panic_hint">Pruébalo: el PIN señuelo <b>0000</b> abre un perfil vacío.<br/>El PIN real <span class="real">7319</span> abre tus chats.</p>
+                  <div class="pin-dots" id="pinDots"><i></i><i></i><i></i><i></i></div>
+                  <div class="pin-pad" id="pinPad">
+                    <button class="pin-key" type="button">1</button>
+                    <button class="pin-key" type="button">2</button>
+                    <button class="pin-key" type="button">3</button>
+                    <button class="pin-key" type="button">4</button>
+                    <button class="pin-key" type="button">5</button>
+                    <button class="pin-key" type="button">6</button>
+                    <button class="pin-key" type="button">7</button>
+                    <button class="pin-key" type="button">8</button>
+                    <button class="pin-key" type="button">9</button>
+                    <span aria-hidden="true"></span>
+                    <button class="pin-key" type="button">0</button>
+                    <button class="pin-key" type="button" data-k="back">⌫</button>
+                  </div>
+                </div>
+                <div class="panic-result" id="panicResult">
+                  <div class="big" id="panicBig"></div>
+                  <div class="sub" id="panicSub"></div>
+                  <button class="reset" id="panicReset" type="button" data-i18n="panic_reset">↺ Probar otra vez</button>
+                </div>
+              </section>
+
             </div>
-            <div class="ps-msgs" id="psMsgs"></div>
-            <div class="ps-composer">
-              <div class="input">Mensaje cifrado…</div>
-              <div class="send"></div>
+
+            <div class="app-tabbar" role="tablist" aria-label="Demo">
+              <button class="app-tab active" data-goto="chats" type="button" role="tab" aria-selected="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/></svg>
+                <span data-i18n="tab_chats">Chats</span>
+              </button>
+              <button class="app-tab" data-goto="ephemeral" type="button" role="tab" aria-selected="false">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg>
+                <span data-i18n="tab_eph">Efímeros</span>
+              </button>
+              <button class="app-tab" data-goto="panic" type="button" role="tab" aria-selected="false">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z"/></svg>
+                <span data-i18n="tab_panic">Pánico</span>
+              </button>
             </div>
           </div>
         </div>
 
         <!-- Floating cards -->
         <div class="float-card fc-1">
-          <div class="label">◆ Huella de claves</div>
+          <div class="label" data-i18n="fc1_label">◆ Huella de claves</div>
           <div class="v">a7f3 · 92e1 · b4c8</div>
         </div>
         <div class="float-card fc-2">
-          <div class="label">⌬ Relay propio</div>
-          <div class="v">paquetes opacos</div>
+          <div class="label" data-i18n="fc2_label">⌬ Relay propio</div>
+          <div class="v" data-i18n="fc2_value">paquetes opacos</div>
         </div>
         <div class="float-card fc-3">
-          <div class="label">◍ Metadatos retenidos</div>
+          <div class="label" data-i18n="fc3_label">◍ Metadatos retenidos</div>
           <div class="v" style="color:#5bf2b9;" data-scramble>0 bytes</div>
         </div>
       </div>
     </div>
   </header>
 
-  <!-- ─── Tagline strip ────────────────────────────── -->
+  <!-- ─── Tagline strip (marquee) ──────────────────── -->
   <section class="tagline">
-    <div class="wrap tagline-row">
-      <span><b>NO</b> teléfono</span>
-      <span>·</span>
-      <span><b>NO</b> email</span>
-      <span>·</span>
-      <span><b>NO</b> metadatos</span>
-      <span>·</span>
-      <span><b>SÍ</b> llaves en tu dispositivo</span>
+    <div class="marquee-track">
+      <div class="tagline-row">
+        <span data-i18n="tag_1"><b>NO</b> teléfono</span>
+        <span>·</span>
+        <span data-i18n="tag_2"><b>NO</b> email</span>
+        <span>·</span>
+        <span data-i18n="tag_3"><b>NO</b> metadatos</span>
+        <span>·</span>
+        <span data-i18n="tag_4"><b>SÍ</b> llaves en tu dispositivo</span>
+        <span>·</span>
+      </div>
+      <div class="tagline-row" aria-hidden="true">
+        <span data-i18n="tag_1"><b>NO</b> teléfono</span>
+        <span>·</span>
+        <span data-i18n="tag_2"><b>NO</b> email</span>
+        <span>·</span>
+        <span data-i18n="tag_3"><b>NO</b> metadatos</span>
+        <span>·</span>
+        <span data-i18n="tag_4"><b>SÍ</b> llaves en tu dispositivo</span>
+        <span>·</span>
+      </div>
     </div>
   </section>
 
@@ -606,9 +1064,9 @@
   <section class="section" id="why">
     <div class="wrap">
       <div class="section-head reveal">
-        <div class="section-eyebrow">Por qué AegisLink</div>
-        <h2 class="section-title">Privacidad técnica, <span style="font-style:italic; color: var(--accent);">no marketing</span>.</h2>
-        <p class="section-lead">
+        <div class="section-eyebrow" data-i18n="why_eyebrow">Por qué AegisLink</div>
+        <h2 class="section-title" data-i18n="why_title">Privacidad técnica, <span style="font-style:italic; color: var(--accent);">no marketing</span>.</h2>
+        <p class="section-lead" data-i18n="why_lead">
           La mayoría de apps "privadas" piden tu teléfono y guardan metadatos.
           AegisLink se construyó sobre cuatro decisiones no-negociables.
         </p>
@@ -617,23 +1075,23 @@
       <div class="pillars">
         <div class="pillar reveal tilt">
           <div class="n">01</div>
-          <h3>Anónimo por defecto</h3>
-          <p>Tu identidad es una keypair Curve25519 generada en tu dispositivo. Sin teléfono, sin email, sin nombre real. Obtienes un Aegis-ID anónimo y nada que te vincule fuera de la app.</p>
+          <h3 data-i18n="p1_title">Anónimo por defecto</h3>
+          <p data-i18n="p1_body">Tu identidad es una keypair Curve25519 generada en tu dispositivo. Sin teléfono, sin email, sin nombre real. Obtienes un Aegis-ID anónimo y nada que te vincule fuera de la app.</p>
         </div>
         <div class="pillar reveal tilt">
           <div class="n">02</div>
-          <h3>Cero metadatos</h3>
-          <p>El servidor tiene los registros de acceso desactivados: no guarda IPs ni patrones de acceso. Solo enruta paquetes opacos — no puede ver con quién hablas ni qué dices.</p>
+          <h3 data-i18n="p2_title">Cero metadatos</h3>
+          <p data-i18n="p2_body">El servidor tiene los registros de acceso desactivados: no guarda IPs ni patrones de acceso. Solo enruta paquetes opacos — no puede ver con quién hablas ni qué dices.</p>
         </div>
         <div class="pillar reveal tilt">
           <div class="n">03</div>
-          <h3>Abierto y verificable</h3>
-          <p>Cliente y servidor publicados bajo licencia MIT en GitHub. La criptografía es auditable por cualquiera. No nos creas — lee el código.</p>
+          <h3 data-i18n="p3_title">Abierto y verificable</h3>
+          <p data-i18n="p3_body">Cliente bajo GPL-3.0 y servidor bajo AGPL-3.0, publicados en GitHub. La criptografía es auditable por cualquiera. No nos creas — lee el código.</p>
         </div>
         <div class="pillar reveal tilt">
           <div class="n">04</div>
-          <h3>Verifica a la persona</h3>
-          <p>La confianza se establece comparando huellas de claves — por QR o visualmente. El handshake humano protege contra cualquier intermediario.</p>
+          <h3 data-i18n="p4_title">Verifica a la persona</h3>
+          <p data-i18n="p4_body">La confianza se establece comparando huellas de claves — por QR o visualmente. El handshake humano protege contra cualquier intermediario.</p>
         </div>
       </div>
     </div>
@@ -643,8 +1101,8 @@
   <section class="section" id="how" style="padding-top: 40px;">
     <div class="wrap">
       <div class="section-head reveal">
-        <div class="section-eyebrow">Cómo funciona</div>
-        <h2 class="section-title">Tres pasos.<br/>Después, simplemente <em style="font-style:italic; color: var(--accent);">hablas</em>.</h2>
+        <div class="section-eyebrow" data-i18n="how_eyebrow">Cómo funciona</div>
+        <h2 class="section-title" data-i18n="how_title">Tres pasos.<br/>Después, simplemente <em style="font-style:italic; color: var(--accent);">hablas</em>.</h2>
       </div>
 
       <div class="steps">
@@ -656,8 +1114,8 @@
               <path d="M11 13l9-9M17 7l3 3M14 10l3 3"/>
             </svg>
           </div>
-          <h4>Generas tu llave</h4>
-          <p>La app crea una keypair Curve25519 (TweetNaCl) en tu dispositivo. La clave privada nunca abandona el teléfono. Obtienes un Aegis-ID anónimo.</p>
+          <h4 data-i18n="s1_title">Generas tu llave</h4>
+          <p data-i18n="s1_body">La app crea una keypair Curve25519 (TweetNaCl) en tu dispositivo. La clave privada nunca abandona el teléfono. Obtienes un Aegis-ID anónimo.</p>
         </div>
         <div class="step reveal tilt">
           <span class="step-num">02</span>
@@ -669,8 +1127,8 @@
               <path d="M14 14h3v3h-3zM21 14v3M14 21h7M17 17v4"/>
             </svg>
           </div>
-          <h4>Verificas contactos</h4>
-          <p>Escaneas el QR de tu contacto o comparáis la huella de vuestras claves. El handshake humano protege contra cualquier intermediario.</p>
+          <h4 data-i18n="s2_title">Verificas contactos</h4>
+          <p data-i18n="s2_body">Escaneas el QR de tu contacto o comparáis la huella de vuestras claves. El handshake humano protege contra cualquier intermediario.</p>
         </div>
         <div class="step reveal tilt">
           <span class="step-num">03</span>
@@ -679,9 +1137,52 @@
               <path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/>
             </svg>
           </div>
-          <h4>Hablas tranquilo</h4>
-          <p>X3DH + Double Ratchet con perfect forward secrecy y XSalsa20-Poly1305. Mensajes, archivos, llamadas, grupos — los servidores sólo enrutan paquetes opacos.</p>
+          <h4 data-i18n="s3_title">Hablas tranquilo</h4>
+          <p data-i18n="s3_body">X3DH + Double Ratchet con perfect forward secrecy y XSalsa20-Poly1305. Mensajes, archivos, llamadas, grupos — los servidores sólo enrutan paquetes opacos.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Journey: el viaje de un mensaje (scroll) ── -->
+  <section class="journey" id="journey">
+    <div class="journey-sticky">
+      <div class="wrap" style="width: 100%;">
+        <div class="section-head" style="margin-bottom: 12px;">
+          <div class="section-eyebrow" data-i18n="jr_eyebrow">El viaje de un mensaje</div>
+          <h2 class="section-title" style="font-size: clamp(32px, 4vw, 54px);" data-i18n="jr_title">
+            Qué ve cada uno. <em style="font-style:italic; color: var(--accent);">Y qué no.</em>
+          </h2>
+        </div>
+        <div class="journey-stage" id="jrStage">
+          <div class="jr-wire w1" id="jrW1"></div>
+          <div class="jr-wire w2" id="jrW2"></div>
+          <div class="jr-packet" id="jrPacket"></div>
+          <div class="jr-node" id="jrA">
+            <div class="l" data-i18n="jr_a_l">TU DISPOSITIVO</div>
+            <div class="jr-msg" id="jrMsgA">Nos vemos a las 21:00 en el sitio de siempre.</div>
+            <div class="note" data-i18n="jr_a_note">Se cifra aquí, con una clave que nunca sale de tu teléfono.</div>
+          </div>
+          <div class="jr-node" id="jrB">
+            <div class="l" data-i18n="jr_b_l">EL RELAY</div>
+            <div class="jr-msg" id="jrMsgB"><span class="jr-relay-meta" id="jrRelayMeta">—</span></div>
+            <div class="note" data-i18n="jr_b_note">Solo enruta un paquete opaco. No sabe qué dice, ni de quién es, ni lo guarda.</div>
+          </div>
+          <div class="jr-node" id="jrC">
+            <div class="l" data-i18n="jr_c_l">SU DISPOSITIVO</div>
+            <div class="jr-msg" id="jrMsgC">Nos vemos a las 21:00 en el sitio de siempre.</div>
+            <div class="note" data-i18n="jr_c_note">Solo la llave de tu contacto puede abrirlo. Ahí vuelve a ser texto.</div>
+          </div>
+        </div>
+        <div class="jr-progress" aria-hidden="true">
+          <span data-i18n="jr_p1">CIFRADO</span>
+          <div class="jr-bar"><i id="jrBar1"></i></div>
+          <span data-i18n="jr_p2">TRÁNSITO</span>
+          <div class="jr-bar"><i id="jrBar2"></i></div>
+          <span data-i18n="jr_p3">DESCIFRADO</span>
+          <div class="jr-bar"><i id="jrBar3"></i></div>
+        </div>
+        <div class="jr-hint" data-i18n="jr_hint">▼ sigue bajando — el mensaje se cifra con el scroll</div>
       </div>
     </div>
   </section>
@@ -690,82 +1191,82 @@
   <section class="section" id="features">
     <div class="wrap">
       <div class="section-head reveal">
-        <div class="section-eyebrow">Lo que incluye</div>
-        <h2 class="section-title">Todo lo esperado. <em style="font-style:italic; color: var(--accent);">Más</em> lo que solo nosotros hacemos.</h2>
+        <div class="section-eyebrow" data-i18n="feat_eyebrow">Lo que incluye</div>
+        <h2 class="section-title" data-i18n="feat_title">Todo lo esperado. <em style="font-style:italic; color: var(--accent);">Más</em> lo que solo nosotros hacemos.</h2>
       </div>
 
       <div class="features reveal">
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/></svg></div>
-          <h5>Chat 1:1 E2EE</h5>
-          <p>X3DH + Double Ratchet con perfect forward secrecy. Cada mensaje, con una clave distinta.</p>
+          <h5 data-i18n="f1_title">Chat 1:1 E2EE</h5>
+          <p data-i18n="f1_body">X3DH + Double Ratchet con perfect forward secrecy. Cada mensaje, con una clave distinta.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg></div>
-          <h5>Mensajes que se queman</h5>
-          <p>Timer configurable por chat. Al expirar, desaparecen del dispositivo — y el servidor nunca los tuvo en claro.</p>
+          <h5 data-i18n="f2_title">Mensajes que se queman</h5>
+          <p data-i18n="f2_body">Timer configurable por chat. Al expirar, desaparecen del dispositivo — y el servidor nunca los tuvo en claro.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></div>
-          <h5>Adjuntos cifrados</h5>
-          <p>Fotos, vídeo, audio y documentos, cifrados de extremo a extremo. Con editor integrado antes de enviar.</p>
+          <h5 data-i18n="f3_title">Adjuntos cifrados</h5>
+          <p data-i18n="f3_body">Fotos, vídeo, audio y documentos, cifrados de extremo a extremo. Con editor integrado antes de enviar.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 2l20 20M9 4.5a3 3 0 016 0V11M15 14.5a3 3 0 01-6 0V9"/></svg></div>
-          <h5>Ver una vez</h5>
-          <p>Medios que se borran al cerrarse. No se pueden reenviar ni guardar.</p>
+          <h5 data-i18n="f4_title">Ver una vez</h5>
+          <p data-i18n="f4_body">Medios que se borran al cerrarse. No se pueden reenviar ni guardar.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.9"/></svg></div>
-          <h5>Grupos sin espías</h5>
-          <p>Encuestas anónimas y enlaces de invitación con aprobación del admin. Nadie entra sin permiso.</p>
+          <h5 data-i18n="f5_title">Grupos sin espías</h5>
+          <p data-i18n="f5_body">Encuestas anónimas y enlaces de invitación con aprobación del admin. Nadie entra sin permiso.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M22 8l-6 4 6 4V8z"/></svg></div>
-          <h5>Llamadas cifradas</h5>
-          <p>Voz y vídeo E2EE con WebRTC y DTLS-SRTP, a través de nuestro propio servidor TURN.</p>
+          <h5 data-i18n="f6_title">Llamadas cifradas</h5>
+          <p data-i18n="f6_body">Voz y vídeo E2EE con WebRTC y DTLS-SRTP, a través de nuestro propio servidor TURN.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div>
-          <h5>Modo pánico</h5>
-          <p>PIN señuelo que abre un perfil vacío y borrado instantáneo de todos tus datos cuando lo necesites.</p>
+          <h5 data-i18n="f7_title">Modo pánico</h5>
+          <p data-i18n="f7_body">PIN señuelo que abre un perfil vacío y borrado instantáneo de todos tus datos cuando lo necesites.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 17H7a4 4 0 01-1-7.9 6 6 0 0111.6 1.6A3.5 3.5 0 0118 17z"/></svg></div>
-          <h5>Backup cifrado</h5>
-          <p>Respaldo protegido con tu passphrase y Argon2id. Solo tú tienes la clave — nosotros no podemos leerlo.</p>
+          <h5 data-i18n="f8_title">Backup cifrado</h5>
+          <p data-i18n="f8_body">Respaldo protegido con tu passphrase y Argon2id. Solo tú tienes la clave — nosotros no podemos leerlo.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z"/></svg></div>
-          <h5>Múltiples identidades</h5>
-          <p>Perfiles aislados con claves separadas — personal, trabajo, lo que necesites. Nadie puede vincularlos.</p>
+          <h5 data-i18n="f9_title">Múltiples identidades</h5>
+          <p data-i18n="f9_body">Perfiles aislados con claves separadas — personal, trabajo, lo que necesites. Nadie puede vincularlos.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
-          <h5>Mensajes programados</h5>
-          <p>Se quedan cifrados en tu dispositivo hasta enviarse a la hora exacta que elijas.</p>
+          <h5 data-i18n="f10_title">Mensajes programados</h5>
+          <p data-i18n="f10_body">Se quedan cifrados en tu dispositivo hasta enviarse a la hora exacta que elijas.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></div>
-          <h5>Stickers animados</h5>
-          <p>Porque la privacidad no está reñida con la expresividad. Packs animados integrados.</p>
+          <h5 data-i18n="f11_title">Stickers animados</h5>
+          <p data-i18n="f11_body">Porque la privacidad no está reñida con la expresividad. Packs animados integrados.</p>
         </div>
 
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/></svg></div>
-          <h5>Tu idioma, tu tema</h5>
-          <p>Español, inglés e italiano. Tema claro y oscuro. La privacidad, cómoda.</p>
+          <h5 data-i18n="f12_title">Tu idioma, tu tema</h5>
+          <p data-i18n="f12_body">Español, inglés e italiano. Tema claro y oscuro. La privacidad, cómoda.</p>
         </div>
 
       </div>
@@ -779,18 +1280,18 @@
         <div class="trust-grid"></div>
         <div class="trust-inner">
           <div>
-            <div class="section-eyebrow">Confianza · verificable</div>
-            <h2 class="section-title" style="font-size: clamp(36px, 4.2vw, 56px); margin-bottom: 14px;">
+            <div class="section-eyebrow" data-i18n="trust_eyebrow">Confianza · verificable</div>
+            <h2 class="section-title" style="font-size: clamp(36px, 4.2vw, 56px); margin-bottom: 14px;" data-i18n="trust_title">
               No nos creas a nosotros — <em style="font-style:italic; color: var(--accent);">lee el código</em>.
             </h2>
-            <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;">
+            <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;" data-i18n="trust_lead">
               Cada decisión de seguridad es comprobable: el cliente, el servidor y
-              la criptografía están publicados bajo licencia MIT, abiertos a
-              cualquier auditoría independiente.
+              la criptografía están publicados bajo licencias GPL-3.0 y AGPL-3.0,
+              abiertos a cualquier auditoría independiente.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-              <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">Ver código (GitHub)</a>
-              <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener" class="btn btn-ghost">Política de seguridad</a>
+              <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost" data-i18n="trust_btn1">Ver código (GitHub)</a>
+              <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener" class="btn btn-ghost" data-i18n="trust_btn2">Política de seguridad</a>
             </div>
           </div>
 
@@ -798,29 +1299,29 @@
             <div class="check">
               <span class="ok">✓</span>
               <div class="body">
-                <strong>Código abierto bajo MIT</strong>
-                <span>Cliente + servidor publicados en GitHub. La criptografía es verificable por terceros.</span>
+                <strong data-i18n="c1_title">Código abierto bajo GPL-3.0 / AGPL-3.0</strong>
+                <span data-i18n="c1_body">Cliente + servidor publicados en GitHub. La criptografía es verificable por terceros.</span>
               </div>
             </div>
             <div class="check">
               <span class="ok">✓</span>
               <div class="body">
-                <strong>Push sin contenido</strong>
-                <span>FCM/APNs solo despiertan la app. El payload va siempre cifrado: tu contenido nunca pasa por Google ni Apple.</span>
+                <strong data-i18n="c2_title">Push sin contenido</strong>
+                <span data-i18n="c2_body">FCM/APNs solo despiertan la app. El payload va siempre cifrado: tu contenido nunca pasa por Google ni Apple.</span>
               </div>
             </div>
             <div class="check">
               <span class="ok">✓</span>
               <div class="body">
-                <strong>Sin registros de acceso</strong>
-                <span>access_log OFF en el servidor: no se guardan IPs, timestamps ni patrones de acceso.</span>
+                <strong data-i18n="c3_title">Sin registros de acceso</strong>
+                <span data-i18n="c3_body">access_log OFF en el servidor: no se guardan IPs, timestamps ni patrones de acceso.</span>
               </div>
             </div>
             <div class="check">
               <span class="ok">✓</span>
               <div class="body">
-                <strong>Infraestructura propia</strong>
-                <span>Relay propio (Node.js) y TURN/STUN propio (coturn). Sin Firebase ni Supabase en el camino de tus mensajes.</span>
+                <strong data-i18n="c4_title">Infraestructura propia</strong>
+                <span data-i18n="c4_body">Relay propio (Node.js) y TURN/STUN propio (coturn). Sin Firebase ni Supabase en el camino de tus mensajes.</span>
               </div>
             </div>
           </div>
@@ -833,9 +1334,9 @@
   <section class="section" id="compare" style="padding-top: 40px;">
     <div class="wrap">
       <div class="section-head reveal">
-        <div class="section-eyebrow">Comparar</div>
-        <h2 class="section-title">¿Por qué no <em style="font-style:italic; color: var(--accent);">Signal</em> o <em style="font-style:italic; color: var(--accent);">Threema</em>?</h2>
-        <p class="section-lead">
+        <div class="section-eyebrow" data-i18n="cmp_eyebrow">Comparar</div>
+        <h2 class="section-title" data-i18n="cmp_title">¿Por qué no <em style="font-style:italic; color: var(--accent);">Signal</em> o <em style="font-style:italic; color: var(--accent);">Threema</em>?</h2>
+        <p class="section-lead" data-i18n="cmp_lead">
           Ambas son excelentes. AegisLink toma sus mejores ideas y añade lo que
           a quien de verdad necesita privacidad le falta.
         </p>
@@ -846,7 +1347,7 @@
         <table>
           <thead>
             <tr>
-              <th>Capacidad</th>
+              <th data-i18n="cmp_capability">Capacidad</th>
               <th class="col-us">AegisLink</th>
               <th>Signal</th>
               <th>Threema</th>
@@ -855,80 +1356,80 @@
           </thead>
           <tbody>
             <tr>
-              <td>Sin teléfono ni email</td>
+              <td data-i18n="r1">Sin teléfono ni email</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Cifrado E2EE por defecto</td>
+              <td data-i18n="r2">Cifrado E2EE por defecto</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
             </tr>
             <tr>
-              <td>Cero metadatos retenidos</td>
+              <td data-i18n="r3">Cero metadatos retenidos</td>
               <td class="us"><span class="y">✓</span></td>
-              <td><span class="partial">parcial*</span></td>
+              <td><span class="partial" data-i18n="w_partial_star">parcial*</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Push sin contenido (solo wake-up)</td>
+              <td data-i18n="r4">Push sin contenido (solo wake-up)</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
-              <td><span class="partial">parcial</span></td>
+              <td><span class="partial" data-i18n="w_partial1">parcial</span></td>
             </tr>
             <tr>
-              <td>Múltiples identidades</td>
+              <td data-i18n="r5">Múltiples identidades</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Modo pánico + PIN señuelo</td>
+              <td data-i18n="r6">Modo pánico + PIN señuelo</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Mensajes programados</td>
+              <td data-i18n="r7">Mensajes programados</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Encuestas anónimas en grupo</td>
+              <td data-i18n="r8">Encuestas anónimas en grupo</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="n">✗</span></td>
               <td><span class="n">✗</span></td>
-              <td><span class="partial">no anon.</span></td>
+              <td><span class="partial" data-i18n="w_noanon">no anon.</span></td>
             </tr>
             <tr>
-              <td>Servidor autohospedable</td>
+              <td data-i18n="r9">Servidor autohospedable</td>
               <td class="us"><span class="y">✓</span></td>
-              <td><span class="partial">parcial</span></td>
+              <td><span class="partial" data-i18n="w_partial2">parcial</span></td>
               <td><span class="partial">OnPrem</span></td>
               <td><span class="n">✗</span></td>
             </tr>
             <tr>
-              <td>Código abierto · cliente + servidor</td>
+              <td data-i18n="r10">Código abierto · cliente + servidor</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
-              <td><span class="partial">cliente</span></td>
+              <td><span class="partial" data-i18n="w_client">cliente</span></td>
               <td><span class="n">✗</span></td>
             </tr>
           </tbody>
         </table>
         </div>
       </div>
-      <p class="compare-note reveal">* Signal aplica sealed sender, pero el registro requiere un número de teléfono.</p>
+      <p class="compare-note reveal" data-i18n="cmp_note">* Signal aplica sealed sender, pero el registro requiere un número de teléfono.</p>
     </div>
   </section>
 
@@ -937,24 +1438,24 @@
     <div class="wrap">
       <div class="work-grid">
         <div class="reveal">
-          <div class="section-eyebrow">AegisLink Work · en desarrollo</div>
-          <h2 class="section-title" style="font-size: clamp(32px, 4vw, 52px); margin-bottom: 14px;">
+          <div class="section-eyebrow" data-i18n="work_eyebrow">AegisLink Work · en desarrollo</div>
+          <h2 class="section-title" style="font-size: clamp(32px, 4vw, 52px); margin-bottom: 14px;" data-i18n="work_title">
             Privacidad <em style="font-style:italic; color: var(--accent);">para equipos</em>.
           </h2>
-          <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;">
+          <p style="font-size: 16px; color: var(--text-dim); margin: 0 0 24px;" data-i18n="work_lead">
             La versión para empresas — salas, roles y políticas por equipo,
             con la misma regla de oro: cero metadatos de conversación.
             Está en desarrollo; síguela en el repositorio.
           </p>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">Seguir el desarrollo →</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost" data-i18n="work_btn">Seguir el desarrollo →</a>
         </div>
         <div class="kpi-panel reveal">
-          <span class="kpi-tag">Vista previa · en desarrollo</span>
+          <span class="kpi-tag" data-i18n="kpi_tag">Vista previa · en desarrollo</span>
           <div class="kpi-grid">
-            <div class="kpi"><div class="l">SALAS POR EQUIPO</div><div class="v">∞</div></div>
-            <div class="kpi"><div class="l">ROLES Y PERMISOS</div><div class="v">✓</div></div>
-            <div class="kpi"><div class="l">CLAVES EN SERVIDOR</div><div class="v">0</div></div>
-            <div class="kpi"><div class="l">METADATA STORED</div><div class="v accent">0 B</div></div>
+            <div class="kpi"><div class="l" data-i18n="kpi1">SALAS POR EQUIPO</div><div class="v">∞</div></div>
+            <div class="kpi"><div class="l" data-i18n="kpi2">ROLES Y PERMISOS</div><div class="v">✓</div></div>
+            <div class="kpi"><div class="l" data-i18n="kpi3">CLAVES EN SERVIDOR</div><div class="v">0</div></div>
+            <div class="kpi"><div class="l" data-i18n="kpi4">METADATA STORED</div><div class="v accent">0 B</div></div>
           </div>
         </div>
       </div>
@@ -964,21 +1465,21 @@
   <!-- ─── CTA ──────────────────────────────────────── -->
   <section class="wrap" id="download">
     <div class="cta reveal">
-      <h2>Empieza hoy.<br/><em style="font-style:italic; color: var(--accent);">Sin dar tu número.</em></h2>
-      <p>Gratis y de código abierto. Sin cuentas, sin anuncios, sin metadatos.</p>
+      <h2 data-i18n="cta_title">Empieza hoy.<br/><em style="font-style:italic; color: var(--accent);">Sin dar tu número.</em></h2>
+      <p data-i18n="cta_sub">Gratis y de código abierto. Sin cuentas, sin anuncios, sin metadatos.</p>
       <div class="ctas">
         <span class="btn btn-ghost btn-disabled" aria-disabled="true" role="link">
-          App Store <span class="soon-tag">Próximamente</span>
+          App Store <span class="soon-tag" data-i18n="soon1">Próximamente</span>
         </span>
         <span class="btn btn-ghost btn-disabled" aria-disabled="true" role="link">
-          Google Play <span class="soon-tag">Próximamente</span>
+          Google Play <span class="soon-tag" data-i18n="soon2">Próximamente</span>
         </span>
         <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-primary">
-          Ver el código
+          <span data-i18n="cta_code">Ver el código</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
         </a>
       </div>
-      <div class="note">v1.0.0 · iOS y Android en camino</div>
+      <div class="note" data-i18n="cta_note">v1.0.0 · iOS y Android en camino</div>
     </div>
   </section>
 
@@ -996,37 +1497,445 @@
             </svg>
             <span style="font-family: var(--serif); font-size: 18px;">AegisLink</span>
           </a>
-          <p style="font-size: 12.5px; max-width: 280px; color: var(--text-dim);">
-            Mensajería cifrada anónima, sin metadatos. Proyecto de código abierto bajo licencia MIT.
+          <p style="font-size: 12.5px; max-width: 280px; color: var(--text-dim);" data-i18n="foot_tag">
+            Mensajería cifrada anónima, sin metadatos. Proyecto de código abierto bajo licencia GPL-3.0.
           </p>
         </div>
         <div class="foot-col">
-          <h6>Producto</h6>
-          <a href="#features">Features</a>
-          <a href="#how">Cómo funciona</a>
-          <a href="#download">Descargar</a>
+          <h6 data-i18n="foot_product">Producto</h6>
+          <a href="#features" data-i18n="foot_features">Features</a>
+          <a href="#how" data-i18n="foot_how">Cómo funciona</a>
+          <a href="#download" data-i18n="foot_download">Descargar</a>
           <a href="#work">AegisLink Work</a>
         </div>
         <div class="foot-col">
-          <h6>Seguridad</h6>
-          <a href="#trust">Por qué confiar</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener">Política de seguridad</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener">Repositorio (GitHub)</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/LICENSE" target="_blank" rel="noopener">Licencia MIT</a>
+          <h6 data-i18n="foot_security">Seguridad</h6>
+          <a href="#trust" data-i18n="foot_trust">Por qué confiar</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md" target="_blank" rel="noopener" data-i18n="foot_policy">Política de seguridad</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" data-i18n="foot_repo">Repositorio (GitHub)</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/LICENSE" target="_blank" rel="noopener" data-i18n="foot_license">Licencia GPL-3.0</a>
         </div>
         <div class="foot-col">
           <h6>Legal</h6>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/privacy-policy.md" target="_blank" rel="noopener">Privacidad</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/terms-of-service.md" target="_blank" rel="noopener">Términos</a>
-          <a href="https://github.com/gabinotech22-cmyk/AegisLink/issues" target="_blank" rel="noopener">Contacto (Issues)</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/privacy-policy.md" target="_blank" rel="noopener" data-i18n="foot_privacy">Privacidad</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/terms-of-service.md" target="_blank" rel="noopener" data-i18n="foot_terms">Términos</a>
+          <a href="https://github.com/gabinotech22-cmyk/AegisLink/issues" target="_blank" rel="noopener" data-i18n="foot_contact">Contacto (Issues)</a>
         </div>
       </div>
       <div class="foot-meta">
-        <span>© 2026 AegisLink · Proyecto open source (MIT)</span>
-        <span>v1.0.0 · Hecho para la privacidad</span>
+        <span data-i18n="foot_copy">© 2026 AegisLink · Proyecto open source (GPL-3.0)</span>
+        <span data-i18n="foot_built">v1.0.0 · Hecho para la privacidad</span>
       </div>
     </div>
   </footer>
+
+  <!-- ─── i18n: ES (base, capturado del DOM) · EN · IT ── -->
+  <script>
+    (function () {
+      'use strict';
+
+      /* El español es el idioma base: se captura del propio HTML al cargar,
+         así el diccionario ES nunca se desincroniza del contenido. */
+      var es = {
+        _title: document.title,
+        _desc: "Mensajería cifrada de extremo a extremo, anónima y sin metadatos. Sin teléfono, sin email, sin cuentas. Código abierto (GPL-3.0), cliente y servidor.",
+        chat: [
+          { who: "them", text: "¿Este chat es seguro de verdad?" },
+          { who: "me",   text: "E2EE con Double Ratchet. Mi clave nunca sale del teléfono." },
+          { who: "them", text: "¿Y los metadatos? ¿Quién ve con quién hablo?" },
+          { who: "me",   text: "Nadie. El relay solo enruta paquetes opacos." },
+          { who: "them", mono: true, text: "⏱ mensajes efímeros · 24 h · activado" },
+          { who: "me",   text: "Y esto se autodestruye mañana." }
+        ],
+        sent: "enviado · ✓✓ · efímero 24 h",
+        jr_msg: "Nos vemos a las 21:00 en el sitio de siempre.",
+        demo: {
+          replies: [
+            "Eso se acaba de cifrar en tu navegador con TweetNaCl — la misma librería que usa la app.",
+            "El relay solo vio los bytes de arriba. Ni tu texto, ni tu nombre, ni tu IP.",
+            "Cada mensaje lleva un nonce nuevo: el mismo texto nunca produce los mismos bytes."
+          ],
+          relay: "EL RELAY SOLO VE",
+          verified: "XSalsa20-Poly1305 · nonce 24 B · verificado ✓",
+          sim: "cifrado de demostración",
+          units: { h: "horas", h1: "hora", d: "días" },
+          panicDecoyBig: "Perfil señuelo",
+          panicDecoySub: "Vacío: sin chats, sin contactos, sin rastro del perfil real.",
+          panicRealBig: "Perfil real ✓",
+          panicRealSub: "Tus chats siguen aquí, cifrados como siempre."
+        }
+      };
+      document.querySelectorAll('[data-i18n]').forEach(function (el) {
+        es[el.getAttribute('data-i18n')] = el.innerHTML;
+      });
+      document.querySelectorAll('[data-i18n-ph]').forEach(function (el) {
+        es[el.getAttribute('data-i18n-ph')] = el.getAttribute('placeholder');
+      });
+
+      var en = {
+        _title: "AegisLink — Messaging without a trace",
+        _desc: "End-to-end encrypted messaging, anonymous and metadata-free. No phone, no email, no accounts. Open source (GPL-3.0), client and server.",
+        nav_why: "Why", nav_how: "How it works", nav_features: "Features",
+        nav_trust: "Security", nav_compare: "Compare", nav_download: "Download",
+        hero_title: "Messaging <em>without</em> a trace.",
+        hero_sub: "End-to-end encryption, anchored to a key that exists only on your device. No phone. No email. No metadata.",
+        hero_cta1: "Download AegisLink", hero_cta2: "How it works",
+        hero_meta1: "iOS · Android — coming soon",
+        hero_meta2: "· metadata stored",
+        hero_meta3: "Open source · client + server",
+        phone_compose: "Encrypted message…",
+        fc1_label: "◆ Key fingerprint", fc2_label: "⌬ Own relay", fc2_value: "opaque packets",
+        fc3_label: "◍ Metadata retained",
+        tag_1: "<b>NO</b> phone", tag_2: "<b>NO</b> email",
+        tag_3: "<b>NO</b> metadata", tag_4: "<b>YES</b> keys on your device",
+        why_eyebrow: "Why AegisLink",
+        why_title: "Technical privacy, <span style='font-style:italic; color: var(--accent);'>not marketing</span>.",
+        why_lead: "Most \"private\" apps ask for your phone number and keep metadata. AegisLink was built on four non-negotiable decisions.",
+        p1_title: "Anonymous by default",
+        p1_body: "Your identity is a Curve25519 keypair generated on your device. No phone, no email, no real name. You get an anonymous Aegis-ID and nothing linking you outside the app.",
+        p2_title: "Zero metadata",
+        p2_body: "The server has access logs disabled: it stores no IPs and no access patterns. It only routes opaque packets — it cannot see who you talk to or what you say.",
+        p3_title: "Open & verifiable",
+        p3_body: "Client under GPL-3.0 and server under AGPL-3.0, published on GitHub. The cryptography can be audited by anyone. Don't take our word for it — read the code.",
+        p4_title: "Verify the person",
+        p4_body: "Trust is established by comparing key fingerprints — via QR or visually. The human handshake protects against any man in the middle.",
+        how_eyebrow: "How it works",
+        how_title: "Three steps.<br/>Then you simply <em style='font-style:italic; color: var(--accent);'>talk</em>.",
+        s1_title: "Generate your key",
+        s1_body: "The app creates a Curve25519 keypair (TweetNaCl) on your device. The private key never leaves the phone. You get an anonymous Aegis-ID.",
+        s2_title: "Verify contacts",
+        s2_body: "Scan your contact's QR or compare your key fingerprints. The human handshake protects against any man in the middle.",
+        s3_title: "Talk freely",
+        s3_body: "X3DH + Double Ratchet with perfect forward secrecy and XSalsa20-Poly1305. Messages, files, calls, groups — servers only route opaque packets.",
+        feat_eyebrow: "What's included",
+        feat_title: "Everything you expect. <em style='font-style:italic; color: var(--accent);'>Plus</em> what only we do.",
+        f1_title: "1:1 E2EE chat",
+        f1_body: "X3DH + Double Ratchet with perfect forward secrecy. Every message, a different key.",
+        f2_title: "Burn-after-reading",
+        f2_body: "Configurable timer per chat. When it expires they vanish from the device — and the server never had them in the clear.",
+        f3_title: "Encrypted attachments",
+        f3_body: "Photos, video, audio and documents, end-to-end encrypted. With a built-in editor before sending.",
+        f4_title: "View once",
+        f4_body: "Media that deletes itself when closed. Cannot be forwarded or saved.",
+        f5_title: "Groups without spies",
+        f5_body: "Anonymous polls and invite links with admin approval. Nobody gets in without permission.",
+        f6_title: "Encrypted calls",
+        f6_body: "E2EE voice and video with WebRTC and DTLS-SRTP, through our own TURN server.",
+        f7_title: "Panic mode",
+        f7_body: "A decoy PIN that opens an empty profile, and instant wipe of all your data when you need it.",
+        f8_title: "Encrypted backup",
+        f8_body: "Backup protected with your passphrase and Argon2id. Only you hold the key — we cannot read it.",
+        f9_title: "Multiple identities",
+        f9_body: "Isolated profiles with separate keys — personal, work, whatever you need. Nobody can link them.",
+        f10_title: "Scheduled messages",
+        f10_body: "They stay encrypted on your device until they are sent at the exact time you choose.",
+        f11_title: "Animated stickers",
+        f11_body: "Because privacy is not at odds with expressiveness. Built-in animated packs.",
+        f12_title: "Your language, your theme",
+        f12_body: "Spanish, English and Italian. Light and dark theme. Privacy, made comfortable.",
+        trust_eyebrow: "Trust · verifiable",
+        trust_title: "Don't take our word for it — <em style='font-style:italic; color: var(--accent);'>read the code</em>.",
+        trust_lead: "Every security decision is verifiable: the client, the server and the cryptography are published under the GPL-3.0 and AGPL-3.0 licenses, open to any independent audit.",
+        trust_btn1: "View code (GitHub)", trust_btn2: "Security policy",
+        c1_title: "Open source under GPL-3.0 / AGPL-3.0",
+        c1_body: "Client + server published on GitHub. The cryptography is verifiable by third parties.",
+        c2_title: "Content-free push",
+        c2_body: "FCM/APNs only wake the app. The payload is always encrypted: your content never passes through Google or Apple.",
+        c3_title: "No access logs",
+        c3_body: "access_log OFF on the server: no IPs, timestamps or access patterns are stored.",
+        c4_title: "Self-hosted infrastructure",
+        c4_body: "Own relay (Node.js) and own TURN/STUN (coturn). No Firebase or Supabase in the path of your messages.",
+        cmp_eyebrow: "Compare",
+        cmp_title: "Why not <em style='font-style:italic; color: var(--accent);'>Signal</em> or <em style='font-style:italic; color: var(--accent);'>Threema</em>?",
+        cmp_lead: "Both are excellent. AegisLink takes their best ideas and adds what people who truly need privacy are missing.",
+        cmp_capability: "Capability",
+        r1: "No phone or email", r2: "E2EE by default",
+        r3: "Zero metadata retained", r4: "Content-free push (wake-up only)",
+        r5: "Multiple identities", r6: "Panic mode + decoy PIN",
+        r7: "Scheduled messages", r8: "Anonymous group polls",
+        r9: "Self-hostable server", r10: "Open source · client + server",
+        w_partial_star: "partial*", w_partial1: "partial", w_partial2: "partial",
+        w_noanon: "not anon.", w_client: "client",
+        cmp_note: "* Signal uses sealed sender, but registration requires a phone number.",
+        work_eyebrow: "AegisLink Work · in development",
+        work_title: "Privacy <em style='font-style:italic; color: var(--accent);'>for teams</em>.",
+        work_lead: "The business edition — rooms, roles and per-team policies, with the same golden rule: zero conversation metadata. It is in development; follow it in the repository.",
+        work_btn: "Follow the development →",
+        kpi_tag: "Preview · in development",
+        kpi1: "ROOMS PER TEAM", kpi2: "ROLES & PERMISSIONS",
+        kpi3: "KEYS ON SERVER", kpi4: "METADATA STORED",
+        cta_title: "Start today.<br/><em style='font-style:italic; color: var(--accent);'>Without giving your number.</em>",
+        cta_sub: "Free and open source. No accounts, no ads, no metadata.",
+        soon1: "Coming soon", soon2: "Coming soon",
+        cta_code: "View the code",
+        cta_note: "v1.0.0 · iOS and Android on the way",
+        foot_tag: "Anonymous encrypted messaging, zero metadata. Open source project under the GPL-3.0 license.",
+        foot_product: "Product", foot_features: "Features", foot_how: "How it works",
+        foot_download: "Download",
+        foot_security: "Security", foot_trust: "Why trust us",
+        foot_policy: "Security policy", foot_repo: "Repository (GitHub)",
+        foot_license: "GPL-3.0 license",
+        foot_privacy: "Privacy", foot_terms: "Terms", foot_contact: "Contact (Issues)",
+        foot_copy: "© 2026 AegisLink · Open source project (GPL-3.0)",
+        foot_built: "v1.0.0 · Built for privacy",
+        demo_ph: "Type — it gets really encrypted…",
+        scr_chats: "Chats", scr_chats_mini: "3 · encrypted",
+        cr1_prev: "And this self-destructs tomorrow.",
+        cr3_name: "Team Aurora · 4", cr3_prev: "📊 Anonymous poll active",
+        scr_eph: "Ephemeral messages",
+        eph_note: "New messages delete themselves when they expire — on both phones at once.",
+        scr_panic: "Panic mode",
+        panic_hint: "Try it: the decoy PIN <b>0000</b> opens an empty profile.<br/>The real PIN <span class='real'>7319</span> opens your chats.",
+        panic_reset: "↺ Try again",
+        tab_chats: "Chats", tab_eph: "Ephemeral", tab_panic: "Panic",
+        jr_eyebrow: "A message's journey",
+        jr_title: "What each one sees. <em style='font-style:italic; color: var(--accent);'>And what they don't.</em>",
+        jr_a_l: "YOUR DEVICE", jr_b_l: "THE RELAY", jr_c_l: "THEIR DEVICE",
+        jr_a_note: "It is encrypted here, with a key that never leaves your phone.",
+        jr_b_note: "It only routes an opaque packet. It doesn't know what it says, who it's from — and it stores nothing.",
+        jr_c_note: "Only your contact's key can open it. There, it becomes text again.",
+        jr_p1: "ENCRYPT", jr_p2: "TRANSIT", jr_p3: "DECRYPT",
+        jr_hint: "▼ keep scrolling — the message encrypts as you go",
+        jr_msg: "See you at 9 pm at the usual place.",
+        demo: {
+          replies: [
+            "That was just encrypted in your browser with TweetNaCl — the same library the app uses.",
+            "The relay only saw the bytes above. Not your text, not your name, not your IP.",
+            "Every message carries a fresh nonce: the same text never produces the same bytes."
+          ],
+          relay: "THE RELAY ONLY SEES",
+          verified: "XSalsa20-Poly1305 · 24 B nonce · verified ✓",
+          sim: "demo encryption",
+          units: { h: "hours", h1: "hour", d: "days" },
+          panicDecoyBig: "Decoy profile",
+          panicDecoySub: "Empty: no chats, no contacts, no trace of the real profile.",
+          panicRealBig: "Real profile ✓",
+          panicRealSub: "Your chats are still here, encrypted as always."
+        },
+        chat: [
+          { who: "them", text: "Is this chat really secure?" },
+          { who: "me",   text: "E2EE with Double Ratchet. My key never leaves the phone." },
+          { who: "them", text: "And metadata? Who sees who I talk to?" },
+          { who: "me",   text: "No one. The relay only routes opaque packets." },
+          { who: "them", mono: true, text: "⏱ ephemeral messages · 24 h · enabled" },
+          { who: "me",   text: "And this self-destructs tomorrow." }
+        ],
+        sent: "sent · ✓✓ · ephemeral 24 h"
+      };
+
+      var it = {
+        _title: "AegisLink — Messaggi senza tracce",
+        _desc: "Messaggistica cifrata end-to-end, anonima e senza metadati. Niente telefono, niente email, niente account. Open source (GPL-3.0), client e server.",
+        nav_why: "Perché", nav_how: "Come funziona", nav_features: "Funzionalità",
+        nav_trust: "Sicurezza", nav_compare: "Confronta", nav_download: "Scarica",
+        hero_title: "Messaggi <em>senza</em> tracce.",
+        hero_sub: "Cifratura end-to-end, ancorata a una chiave che esiste solo sul tuo dispositivo. Niente telefono. Niente email. Niente metadati.",
+        hero_cta1: "Scarica AegisLink", hero_cta2: "Come funziona",
+        hero_meta1: "iOS · Android — in arrivo",
+        hero_meta2: "· metadati salvati",
+        hero_meta3: "Open source · client + server",
+        phone_compose: "Messaggio cifrato…",
+        fc1_label: "◆ Impronta delle chiavi", fc2_label: "⌬ Relay proprio", fc2_value: "pacchetti opachi",
+        fc3_label: "◍ Metadati conservati",
+        tag_1: "<b>NO</b> telefono", tag_2: "<b>NO</b> email",
+        tag_3: "<b>NO</b> metadati", tag_4: "<b>SÌ</b> chiavi sul tuo dispositivo",
+        why_eyebrow: "Perché AegisLink",
+        why_title: "Privacy tecnica, <span style='font-style:italic; color: var(--accent);'>non marketing</span>.",
+        why_lead: "La maggior parte delle app \"private\" chiede il telefono e conserva metadati. AegisLink è costruita su quattro decisioni non negoziabili.",
+        p1_title: "Anonimo di default",
+        p1_body: "La tua identità è una keypair Curve25519 generata sul tuo dispositivo. Niente telefono, niente email, niente nome reale. Ottieni un Aegis-ID anonimo e nulla che ti colleghi fuori dall'app.",
+        p2_title: "Zero metadati",
+        p2_body: "Il server ha i log di accesso disattivati: non salva IP né pattern di accesso. Instrada solo pacchetti opachi — non può vedere con chi parli né cosa dici.",
+        p3_title: "Aperto e verificabile",
+        p3_body: "Client con licenza GPL-3.0 e server con licenza AGPL-3.0, pubblicati su GitHub. La crittografia è verificabile da chiunque. Non crederci sulla parola — leggi il codice.",
+        p4_title: "Verifica la persona",
+        p4_body: "La fiducia si stabilisce confrontando le impronte delle chiavi — via QR o visivamente. La stretta di mano umana protegge da qualsiasi intermediario.",
+        how_eyebrow: "Come funziona",
+        how_title: "Tre passi.<br/>Poi, semplicemente <em style='font-style:italic; color: var(--accent);'>parli</em>.",
+        s1_title: "Generi la tua chiave",
+        s1_body: "L'app crea una keypair Curve25519 (TweetNaCl) sul tuo dispositivo. La chiave privata non lascia mai il telefono. Ottieni un Aegis-ID anonimo.",
+        s2_title: "Verifichi i contatti",
+        s2_body: "Scansioni il QR del tuo contatto o confrontate le impronte delle vostre chiavi. La stretta di mano umana protegge da qualsiasi intermediario.",
+        s3_title: "Parli tranquillo",
+        s3_body: "X3DH + Double Ratchet con perfect forward secrecy e XSalsa20-Poly1305. Messaggi, file, chiamate, gruppi — i server instradano solo pacchetti opachi.",
+        feat_eyebrow: "Cosa include",
+        feat_title: "Tutto il previsto. <em style='font-style:italic; color: var(--accent);'>Più</em> ciò che facciamo solo noi.",
+        f1_title: "Chat 1:1 E2EE",
+        f1_body: "X3DH + Double Ratchet con perfect forward secrecy. Ogni messaggio, una chiave diversa.",
+        f2_title: "Messaggi che bruciano",
+        f2_body: "Timer configurabile per chat. Alla scadenza spariscono dal dispositivo — e il server non li ha mai avuti in chiaro.",
+        f3_title: "Allegati cifrati",
+        f3_body: "Foto, video, audio e documenti, cifrati end-to-end. Con editor integrato prima dell'invio.",
+        f4_title: "Visualizza una volta",
+        f4_body: "Media che si cancellano alla chiusura. Non si possono inoltrare né salvare.",
+        f5_title: "Gruppi senza spie",
+        f5_body: "Sondaggi anonimi e link di invito con approvazione dell'admin. Nessuno entra senza permesso.",
+        f6_title: "Chiamate cifrate",
+        f6_body: "Voce e video E2EE con WebRTC e DTLS-SRTP, attraverso il nostro server TURN.",
+        f7_title: "Modalità panico",
+        f7_body: "PIN esca che apre un profilo vuoto e cancellazione istantanea di tutti i tuoi dati quando serve.",
+        f8_title: "Backup cifrato",
+        f8_body: "Backup protetto con la tua passphrase e Argon2id. Solo tu hai la chiave — noi non possiamo leggerlo.",
+        f9_title: "Identità multiple",
+        f9_body: "Profili isolati con chiavi separate — personale, lavoro, ciò che ti serve. Nessuno può collegarli.",
+        f10_title: "Messaggi programmati",
+        f10_body: "Restano cifrati sul tuo dispositivo finché non vengono inviati all'ora esatta che scegli.",
+        f11_title: "Sticker animati",
+        f11_body: "Perché la privacy non è in conflitto con l'espressività. Pack animati integrati.",
+        f12_title: "La tua lingua, il tuo tema",
+        f12_body: "Spagnolo, inglese e italiano. Tema chiaro e scuro. La privacy, comoda.",
+        trust_eyebrow: "Fiducia · verificabile",
+        trust_title: "Non crederci sulla parola — <em style='font-style:italic; color: var(--accent);'>leggi il codice</em>.",
+        trust_lead: "Ogni decisione di sicurezza è verificabile: il client, il server e la crittografia sono pubblicati con licenze GPL-3.0 e AGPL-3.0, aperti a qualsiasi audit indipendente.",
+        trust_btn1: "Vedi il codice (GitHub)", trust_btn2: "Politica di sicurezza",
+        c1_title: "Open source con licenze GPL-3.0 / AGPL-3.0",
+        c1_body: "Client + server pubblicati su GitHub. La crittografia è verificabile da terzi.",
+        c2_title: "Push senza contenuto",
+        c2_body: "FCM/APNs svegliano solo l'app. Il payload è sempre cifrato: il tuo contenuto non passa mai da Google né da Apple.",
+        c3_title: "Nessun log di accesso",
+        c3_body: "access_log OFF sul server: non vengono salvati IP, timestamp né pattern di accesso.",
+        c4_title: "Infrastruttura propria",
+        c4_body: "Relay proprio (Node.js) e TURN/STUN proprio (coturn). Niente Firebase né Supabase sul percorso dei tuoi messaggi.",
+        cmp_eyebrow: "Confronta",
+        cmp_title: "Perché non <em style='font-style:italic; color: var(--accent);'>Signal</em> o <em style='font-style:italic; color: var(--accent);'>Threema</em>?",
+        cmp_lead: "Entrambe sono eccellenti. AegisLink prende le loro idee migliori e aggiunge ciò che manca a chi ha davvero bisogno di privacy.",
+        cmp_capability: "Capacità",
+        r1: "Senza telefono né email", r2: "E2EE di default",
+        r3: "Zero metadati conservati", r4: "Push senza contenuto (solo wake-up)",
+        r5: "Identità multiple", r6: "Modalità panico + PIN esca",
+        r7: "Messaggi programmati", r8: "Sondaggi anonimi nei gruppi",
+        r9: "Server self-hostable", r10: "Open source · client + server",
+        w_partial_star: "parziale*", w_partial1: "parziale", w_partial2: "parziale",
+        w_noanon: "non anon.", w_client: "client",
+        cmp_note: "* Signal applica il sealed sender, ma la registrazione richiede un numero di telefono.",
+        work_eyebrow: "AegisLink Work · in sviluppo",
+        work_title: "Privacy <em style='font-style:italic; color: var(--accent);'>per i team</em>.",
+        work_lead: "La versione per aziende — stanze, ruoli e politiche per team, con la stessa regola d'oro: zero metadati di conversazione. È in sviluppo; seguila nel repository.",
+        work_btn: "Segui lo sviluppo →",
+        kpi_tag: "Anteprima · in sviluppo",
+        kpi1: "STANZE PER TEAM", kpi2: "RUOLI E PERMESSI",
+        kpi3: "CHIAVI SUL SERVER", kpi4: "METADATI SALVATI",
+        cta_title: "Inizia oggi.<br/><em style='font-style:italic; color: var(--accent);'>Senza dare il tuo numero.</em>",
+        cta_sub: "Gratis e open source. Niente account, niente pubblicità, niente metadati.",
+        soon1: "In arrivo", soon2: "In arrivo",
+        cta_code: "Vedi il codice",
+        cta_note: "v1.0.0 · iOS e Android in arrivo",
+        foot_tag: "Messaggistica cifrata anonima, senza metadati. Progetto open source con licenza GPL-3.0.",
+        foot_product: "Prodotto", foot_features: "Funzionalità", foot_how: "Come funziona",
+        foot_download: "Scarica",
+        foot_security: "Sicurezza", foot_trust: "Perché fidarsi",
+        foot_policy: "Politica di sicurezza", foot_repo: "Repository (GitHub)",
+        foot_license: "Licenza GPL-3.0",
+        foot_privacy: "Privacy", foot_terms: "Termini", foot_contact: "Contatto (Issues)",
+        foot_copy: "© 2026 AegisLink · Progetto open source (GPL-3.0)",
+        foot_built: "v1.0.0 · Fatto per la privacy",
+        demo_ph: "Scrivi — viene cifrato davvero…",
+        scr_chats: "Chat", scr_chats_mini: "3 · cifrate",
+        cr1_prev: "E questo si autodistrugge domani.",
+        cr3_name: "Team Aurora · 4", cr3_prev: "📊 Sondaggio anonimo attivo",
+        scr_eph: "Messaggi effimeri",
+        eph_note: "I nuovi messaggi si cancellano da soli alla scadenza — su entrambi i telefoni.",
+        scr_panic: "Modalità panico",
+        panic_hint: "Provalo: il PIN esca <b>0000</b> apre un profilo vuoto.<br/>Il PIN reale <span class='real'>7319</span> apre le tue chat.",
+        panic_reset: "↺ Riprova",
+        tab_chats: "Chat", tab_eph: "Effimeri", tab_panic: "Panico",
+        jr_eyebrow: "Il viaggio di un messaggio",
+        jr_title: "Cosa vede ognuno. <em style='font-style:italic; color: var(--accent);'>E cosa no.</em>",
+        jr_a_l: "IL TUO DISPOSITIVO", jr_b_l: "IL RELAY", jr_c_l: "IL SUO DISPOSITIVO",
+        jr_a_note: "Viene cifrato qui, con una chiave che non lascia mai il tuo telefono.",
+        jr_b_note: "Instrada solo un pacchetto opaco. Non sa cosa dice, né di chi è — e non conserva nulla.",
+        jr_c_note: "Solo la chiave del tuo contatto può aprirlo. Lì torna a essere testo.",
+        jr_p1: "CIFRATURA", jr_p2: "TRANSITO", jr_p3: "DECIFRATURA",
+        jr_hint: "▼ continua a scorrere — il messaggio si cifra con lo scroll",
+        jr_msg: "Ci vediamo alle 21:00 nel solito posto.",
+        demo: {
+          replies: [
+            "Questo è stato appena cifrato nel tuo browser con TweetNaCl — la stessa libreria dell'app.",
+            "Il relay ha visto solo i byte qui sopra. Né il tuo testo, né il tuo nome, né il tuo IP.",
+            "Ogni messaggio porta un nonce nuovo: lo stesso testo non produce mai gli stessi byte."
+          ],
+          relay: "IL RELAY VEDE SOLO",
+          verified: "XSalsa20-Poly1305 · nonce 24 B · verificato ✓",
+          sim: "cifratura dimostrativa",
+          units: { h: "ore", h1: "ora", d: "giorni" },
+          panicDecoyBig: "Profilo esca",
+          panicDecoySub: "Vuoto: niente chat, niente contatti, nessuna traccia del profilo reale.",
+          panicRealBig: "Profilo reale ✓",
+          panicRealSub: "Le tue chat sono ancora qui, cifrate come sempre."
+        },
+        chat: [
+          { who: "them", text: "Questa chat è davvero sicura?" },
+          { who: "me",   text: "E2EE con Double Ratchet. La mia chiave non lascia mai il telefono." },
+          { who: "them", text: "E i metadati? Chi vede con chi parlo?" },
+          { who: "me",   text: "Nessuno. Il relay instrada solo pacchetti opachi." },
+          { who: "them", mono: true, text: "⏱ messaggi effimeri · 24 h · attivo" },
+          { who: "me",   text: "E questo si autodistrugge domani." }
+        ],
+        sent: "inviato · ✓✓ · effimero 24 h"
+      };
+
+      var I18N = { es: es, en: en, it: it };
+
+      /* Idioma inicial: ?lang= → localStorage → idioma del navegador → en */
+      function detectLang() {
+        try {
+          var q = new URLSearchParams(location.search).get('lang');
+          if (q && I18N[q]) return q;
+        } catch (e) { /* ignore */ }
+        try {
+          var saved = localStorage.getItem('aegis-lang');
+          if (saved && I18N[saved]) return saved;
+        } catch (e) { /* private mode */ }
+        var nav = (navigator.language || 'en').slice(0, 2).toLowerCase();
+        return I18N[nav] ? nav : 'en';
+      }
+
+      function applyLang(l) {
+        var dict = I18N[l];
+        if (!dict) return;
+        document.documentElement.lang = l;
+        document.title = dict._title;
+        var md = document.querySelector('meta[name="description"]');
+        if (md) md.setAttribute('content', dict._desc);
+        var ogt = document.querySelector('meta[property="og:title"]');
+        if (ogt) ogt.setAttribute('content', dict._title);
+        var ogd = document.querySelector('meta[property="og:description"]');
+        if (ogd) ogd.setAttribute('content', dict._desc);
+        document.querySelectorAll('[data-i18n]').forEach(function (el) {
+          var v = dict[el.getAttribute('data-i18n')];
+          if (v != null) el.innerHTML = v;
+        });
+        document.querySelectorAll('[data-i18n-ph]').forEach(function (el) {
+          var v = dict[el.getAttribute('data-i18n-ph')];
+          if (v != null) el.setAttribute('placeholder', v);
+        });
+        document.querySelectorAll('.lang-switch button').forEach(function (b) {
+          b.classList.toggle('active', b.getAttribute('data-lang') === l);
+        });
+        /* El mock del teléfono lee esto en cada iteración del bucle */
+        window.AEGIS_CHAT = { script: dict.chat, sent: dict.sent };
+        window.AEGIS_DEMO = dict.demo;
+        window.AEGIS_JR = dict.jr_msg;
+        if (window.__aegisChatStatic) window.__aegisChatStatic();
+        if (window.__aegisAfterLang) window.__aegisAfterLang(l);
+        try { localStorage.setItem('aegis-lang', l); } catch (e) { /* ignore */ }
+        try {
+          var url = new URL(location.href);
+          if (l === 'es') url.searchParams.delete('lang');
+          else url.searchParams.set('lang', l);
+          history.replaceState(null, '', url);
+        } catch (e) { /* ignore */ }
+      }
+
+      document.querySelectorAll('.lang-switch button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          applyLang(b.getAttribute('data-lang'));
+        });
+      });
+
+      applyLang(detectLang());
+    })();
+  </script>
 
   <!-- ─── UI: reveals, tilt, typing, scramble (sin dependencias) ── -->
   <script>
@@ -1077,6 +1986,76 @@
         });
       }
 
+      /* ── Spotlight de cursor en cards (borde + relleno) ── */
+      Array.prototype.slice.call(
+        document.querySelectorAll('.pillar, .step, .kpi-panel, .trust .checks')
+      ).forEach(function (el) { el.classList.add('glow'); });
+      Array.prototype.slice.call(document.querySelectorAll('.feat'))
+        .forEach(function (el) { el.classList.add('glow-fill'); });
+
+      var finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      if (finePointer) {
+        document.addEventListener('pointermove', function (e) {
+          if (!e.target || !e.target.closest) return;
+          var card = e.target.closest('.glow, .glow-fill');
+          if (!card) return;
+          var r = card.getBoundingClientRect();
+          card.style.setProperty('--mx', (e.clientX - r.left).toFixed(1) + 'px');
+          card.style.setProperty('--my', (e.clientY - r.top).toFixed(1) + 'px');
+        }, { passive: true });
+      }
+
+      /* ── Botones magnéticos (CTAs principales) ── */
+      if (canTilt) {
+        Array.prototype.slice.call(
+          document.querySelectorAll('.hero-ctas .btn, .cta .ctas .btn')
+        ).forEach(function (b) {
+          b.classList.add('magnetic');
+          b.addEventListener('pointermove', function (e) {
+            var r = b.getBoundingClientRect();
+            var dx = e.clientX - (r.left + r.width / 2);
+            var dy = e.clientY - (r.top + r.height / 2);
+            b.style.transform =
+              'translate(' + (dx * 0.18).toFixed(1) + 'px,' + (dy * 0.22).toFixed(1) + 'px)';
+          });
+          b.addEventListener('pointerleave', function () { b.style.transform = ''; });
+        });
+      }
+
+      /* ── Hero: reveal por palabras (re-aplicable tras i18n) ── */
+      function splitHero() {
+        if (reduced) return;
+        var h = document.querySelector('.hero-title');
+        if (!h || h.querySelector('.wi')) return;
+        var delay = 0;
+        function wrapWords(node) {
+          Array.prototype.slice.call(node.childNodes).forEach(function (child) {
+            if (child.nodeType === 3) {
+              var frag = document.createDocumentFragment();
+              child.textContent.split(/(\s+)/).forEach(function (part) {
+                if (!part) return;
+                if (/^\s+$/.test(part)) {
+                  frag.appendChild(document.createTextNode(part));
+                  return;
+                }
+                var w = document.createElement('span'); w.className = 'w';
+                var wi = document.createElement('span'); wi.className = 'wi';
+                wi.textContent = part;
+                wi.style.setProperty('--d', (delay * 0.085).toFixed(3) + 's');
+                delay++;
+                w.appendChild(wi);
+                frag.appendChild(w);
+              });
+              node.replaceChild(frag, child);
+            } else if (child.nodeType === 1) {
+              wrapWords(child);
+            }
+          });
+        }
+        wrapWords(h);
+      }
+      splitHero();
+
       /* ── Contadores "0 B" con efecto scramble ── */
       var GLYPHS = '0123456789abcdef';
       function scramble(el) {
@@ -1097,7 +2076,8 @@
           });
         }, 45);
       }
-      var scrambleEls = Array.prototype.slice.call(document.querySelectorAll('[data-scramble]'));
+      var scrambleEls = Array.prototype.slice.call(
+        document.querySelectorAll('[data-scramble], .section-eyebrow'));
       if (!reduced && 'IntersectionObserver' in window) {
         var sio = new IntersectionObserver(function (entries) {
           entries.forEach(function (e) {
@@ -1107,18 +2087,38 @@
         scrambleEls.forEach(function (el) { sio.observe(el); });
       }
 
-      /* ── Conversación que se escribe en bucle en el mock ── */
+      /* ── Estado compartido del tour del teléfono ── */
       var msgsHost = document.getElementById('psMsgs');
-      if (!msgsHost) return;
+      var userMode = false;        /* true tras el primer mensaje real del visitante */
+      var composerFocus = false;   /* pausa suave del guion mientras escribe */
+      var activeScreen = 'chat';
 
-      var SCRIPT = [
-        { who: 'them', text: '¿Este chat es seguro de verdad?' },
-        { who: 'me',   text: 'E2EE con Double Ratchet. Mi clave nunca sale del teléfono.' },
-        { who: 'them', text: '¿Y los metadatos? ¿Quién ve con quién hablo?' },
-        { who: 'me',   text: 'Nadie. El relay solo enruta paquetes opacos.' },
-        { who: 'them', mono: true, text: '⏱ mensajes efímeros · 24 h · activado' },
-        { who: 'me',   text: 'Y esto se autodestruye mañana.' }
-      ];
+      function sleep(ms) {
+        return new Promise(function (res) { setTimeout(res, ms); });
+      }
+      function esc(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+      }
+
+      /* ── Conversación que se escribe en bucle en el mock ── */
+      /* La conversación traducida la publica el script de i18n en
+         window.AEGIS_CHAT; este fallback solo cubre un fallo de carga. */
+      var FALLBACK_CHAT = {
+        script: [
+          { who: 'them', text: '¿Este chat es seguro de verdad?' },
+          { who: 'me',   text: 'E2EE con Double Ratchet. Mi clave nunca sale del teléfono.' },
+          { who: 'them', text: '¿Y los metadatos? ¿Quién ve con quién hablo?' },
+          { who: 'me',   text: 'Nadie. El relay solo enruta paquetes opacos.' },
+          { who: 'them', mono: true, text: '⏱ mensajes efímeros · 24 h · activado' },
+          { who: 'me',   text: 'Y esto se autodestruye mañana.' }
+        ],
+        sent: 'enviado · ✓✓ · efímero 24 h'
+      };
+      function currentChat() {
+        return (window.AEGIS_CHAT && window.AEGIS_CHAT.script) ? window.AEGIS_CHAT : FALLBACK_CHAT;
+      }
 
       function makeBubble(m) {
         var b = document.createElement('div');
@@ -1127,39 +2127,43 @@
       }
 
       function renderAllStatic() {
-        SCRIPT.forEach(function (m) {
+        if (userMode) return; /* no pisar la conversación real del visitante */
+        var chat = currentChat();
+        msgsHost.innerHTML = '';
+        chat.script.forEach(function (m) {
           var b = makeBubble(m);
           b.textContent = m.text;
           msgsHost.appendChild(b);
         });
         var meta = document.createElement('span');
         meta.className = 'bubble-meta me';
-        meta.textContent = '12:39 · ✓✓';
+        meta.textContent = chat.sent;
         msgsHost.appendChild(meta);
       }
 
-      if (reduced) { renderAllStatic(); return; }
-
-      function sleep(ms) {
-        return new Promise(function (res) { setTimeout(res, ms); });
-      }
-      async function waitVisible() {
-        while (document.hidden) { await sleep(600); }
+      async function waitTurn() {
+        while (document.hidden || composerFocus || activeScreen !== 'chat') {
+          await sleep(600);
+        }
       }
 
       async function playLoop() {
         for (;;) {
+          if (userMode) return;
+          var chat = currentChat();
           msgsHost.classList.remove('fading');
           msgsHost.innerHTML = '';
-          for (var i = 0; i < SCRIPT.length; i++) {
-            await waitVisible();
-            var m = SCRIPT[i];
+          for (var i = 0; i < chat.script.length; i++) {
+            await waitTurn();
+            if (userMode) return;
+            var m = chat.script[i];
             if (m.who === 'them') {
               var t = document.createElement('div');
               t.className = 'bubble them';
               t.innerHTML = '<span class="typing-dots"><i></i><i></i><i></i></span>';
               msgsHost.appendChild(t);
               await sleep(950);
+              if (userMode) return;
               t.classList.add(m.mono ? 'mono' : 'x');
               t.textContent = m.text;
             } else {
@@ -1168,20 +2172,407 @@
               for (var c = 1; c <= m.text.length; c++) {
                 b.textContent = m.text.slice(0, c);
                 await sleep(24);
+                if (userMode) return;
               }
             }
             await sleep(650);
+            if (userMode) return;
           }
           var meta = document.createElement('span');
           meta.className = 'bubble-meta me';
-          meta.textContent = 'enviado · ✓✓ · efímero 24 h';
+          meta.textContent = chat.sent;
           msgsHost.appendChild(meta);
           await sleep(4200);
+          if (userMode) return;
           msgsHost.classList.add('fading');
           await sleep(550);
         }
       }
-      playLoop();
+
+      if (msgsHost) {
+        if (reduced) {
+          /* Con reduced-motion el cambio de idioma re-renderiza el chat estático */
+          window.__aegisChatStatic = renderAllStatic;
+          renderAllStatic();
+        } else {
+          playLoop();
+        }
+      }
+
+      /* ── Tour de pantallas del teléfono ── */
+      var phoneScreen = document.querySelector('.phone-screen');
+      var screens = Array.prototype.slice.call(document.querySelectorAll('.app-screen'));
+      var tabs = Array.prototype.slice.call(document.querySelectorAll('.app-tab'));
+      var SWIPE_ORDER = ['chats', 'ephemeral', 'panic'];
+
+      function showScreen(name) {
+        activeScreen = name;
+        screens.forEach(function (s) {
+          s.classList.toggle('active', s.getAttribute('data-screen') === name);
+        });
+        var tabName = (name === 'chat') ? 'chats' : name;
+        tabs.forEach(function (t) {
+          var on = t.getAttribute('data-goto') === tabName;
+          t.classList.toggle('active', on);
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+      }
+
+      if (phoneScreen) {
+        phoneScreen.addEventListener('click', function (e) {
+          var g = e.target && e.target.closest ? e.target.closest('[data-goto]') : null;
+          if (!g) return;
+          showScreen(g.getAttribute('data-goto'));
+        });
+        /* Swipe horizontal entre tabs */
+        var touchX = null;
+        phoneScreen.addEventListener('touchstart', function (e) {
+          touchX = e.touches[0].clientX;
+        }, { passive: true });
+        phoneScreen.addEventListener('touchend', function (e) {
+          if (touchX == null) return;
+          var dx = e.changedTouches[0].clientX - touchX;
+          touchX = null;
+          if (Math.abs(dx) < 44) return;
+          var cur = (activeScreen === 'chat') ? 'chats' : activeScreen;
+          var i = SWIPE_ORDER.indexOf(cur);
+          if (i < 0) return;
+          var next = SWIPE_ORDER[dx < 0 ? Math.min(SWIPE_ORDER.length - 1, i + 1)
+                                        : Math.max(0, i - 1)];
+          if (next !== cur) showScreen(next);
+        }, { passive: true });
+      }
+
+      /* ── Demo: cifrado real en el composer (TweetNaCl lazy) ── */
+      var demoInput = document.getElementById('demoInput');
+      var demoSend = document.getElementById('demoSend');
+      var naclPromise = null;
+      var sessionKey = null;
+      var replyIdx = 0;
+
+      function demoDict() {
+        return window.AEGIS_DEMO || {
+          replies: ['Cifrado en tu navegador con TweetNaCl.'],
+          relay: 'EL RELAY SOLO VE', verified: 'XSalsa20-Poly1305 · verificado ✓',
+          sim: 'cifrado de demostración', units: { h: 'h', h1: 'h', d: 'd' }
+        };
+      }
+      function loadNacl() {
+        if (naclPromise) return naclPromise;
+        naclPromise = new Promise(function (res) {
+          if (window.nacl) return res(window.nacl);
+          var s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js';
+          s.async = true;
+          s.onload = function () { res(window.nacl || null); };
+          s.onerror = function () { res(null); };
+          document.head.appendChild(s);
+        });
+        return naclPromise;
+      }
+      function toHex(arr) {
+        var out = '';
+        for (var i = 0; i < arr.length; i++) out += ('0' + arr[i].toString(16)).slice(-2);
+        return out;
+      }
+      function groupHex(h) { return h.replace(/(.{4})/g, '$1 ').trim(); }
+      function scrollMsgs() { msgsHost.scrollTop = msgsHost.scrollHeight; }
+
+      var sendBusy = false;
+      async function demoSendMsg() {
+        var text = (demoInput.value || '').trim();
+        if (!text || sendBusy) return;
+        sendBusy = true;
+        demoInput.value = '';
+        var first = !userMode;
+        userMode = true;
+        if (first) {
+          await sleep(60); /* deja abortar al guion */
+          msgsHost.classList.remove('fading');
+          msgsHost.innerHTML = '';
+        }
+        var b = document.createElement('div');
+        b.className = 'bubble me';
+        b.textContent = text;
+        msgsHost.appendChild(b);
+        scrollMsgs();
+
+        var nacl = await loadNacl();
+        var d = demoDict();
+        var envHex, metaText, byteLen;
+        if (nacl) {
+          if (!sessionKey) sessionKey = nacl.randomBytes(32);
+          var nonce = nacl.randomBytes(24);
+          var ct = nacl.secretbox(new TextEncoder().encode(text), nonce, sessionKey);
+          var ok = nacl.secretbox.open(ct, nonce, sessionKey) !== null;
+          byteLen = ct.length + nonce.length;
+          envHex = groupHex(toHex(nonce).slice(0, 16)) + ' · ' +
+                   groupHex(toHex(ct).slice(0, 44)) + '…';
+          metaText = d.verified + (ok ? '' : ' ✗');
+        } else {
+          var fake = new Uint8Array(40 + text.length);
+          (window.crypto || {}).getRandomValues
+            ? crypto.getRandomValues(fake)
+            : fake.forEach(function (_, i) { fake[i] = (i * 73 + 41) % 256; });
+          byteLen = fake.length;
+          envHex = groupHex(toHex(fake).slice(0, 60)) + '…';
+          metaText = d.sim;
+        }
+        await sleep(380);
+        var env = document.createElement('div');
+        env.className = 'envelope';
+        env.innerHTML =
+          '<div class="env-label">' + esc(d.relay) + ' · ' + byteLen + ' B</div>' +
+          '<div class="env-hex">' + envHex + '</div>' +
+          '<div class="env-meta">' + esc(metaText) + '</div>';
+        msgsHost.appendChild(env);
+        scrollMsgs();
+
+        await sleep(700);
+        var t = document.createElement('div');
+        t.className = 'bubble them';
+        t.innerHTML = '<span class="typing-dots"><i></i><i></i><i></i></span>';
+        msgsHost.appendChild(t);
+        scrollMsgs();
+        await sleep(reduced ? 250 : 900);
+        t.textContent = d.replies[replyIdx % d.replies.length];
+        replyIdx++;
+        scrollMsgs();
+        sendBusy = false;
+      }
+
+      if (demoInput && demoSend) {
+        demoInput.addEventListener('focus', function () {
+          composerFocus = true;
+          loadNacl(); /* precarga al primer interés */
+        });
+        demoInput.addEventListener('blur', function () { composerFocus = false; });
+        demoSend.addEventListener('click', demoSendMsg);
+        demoInput.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') demoSendMsg();
+        });
+      }
+
+      /* ── Pantalla: mensajes efímeros ── */
+      var ephArc = document.getElementById('ephArc');
+      var ephVal = document.getElementById('ephVal');
+      var ephUnit = document.getElementById('ephUnit');
+      var EPH_C = 351.86;
+      var EPH_OPTS = {
+        '1h':  { v: '1',  u: 'h1', f: 0.22 },
+        '24h': { v: '24', u: 'h',  f: 0.60 },
+        '7d':  { v: '7',  u: 'd',  f: 0.94 }
+      };
+      var ephCurrent = '24h';
+      function ephApply() {
+        var o = EPH_OPTS[ephCurrent];
+        if (!o || !ephArc) return;
+        ephArc.style.strokeDashoffset = (EPH_C * (1 - o.f)).toFixed(2);
+        ephVal.textContent = o.v;
+        ephUnit.textContent = (demoDict().units || {})[o.u] || o.u;
+      }
+      Array.prototype.slice.call(document.querySelectorAll('.eph-chip')).forEach(function (ch) {
+        ch.addEventListener('click', function () {
+          ephCurrent = ch.getAttribute('data-eph');
+          Array.prototype.slice.call(document.querySelectorAll('.eph-chip')).forEach(function (c) {
+            c.classList.toggle('active', c === ch);
+          });
+          ephApply();
+        });
+      });
+      ephApply();
+
+      /* ── Pantalla: modo pánico (PIN señuelo interactivo) ── */
+      var pinPad = document.getElementById('pinPad');
+      var pinDots = document.getElementById('pinDots');
+      var panicResult = document.getElementById('panicResult');
+      var PIN_DECOY = '0000', PIN_REAL = '7319';
+      var pinBuf = '';
+
+      function pinPaint() {
+        var dots = pinDots.children;
+        for (var i = 0; i < dots.length; i++) {
+          dots[i].classList.toggle('on', i < pinBuf.length);
+        }
+      }
+      function panicShow(big, sub) {
+        document.getElementById('panicBig').textContent = big;
+        document.getElementById('panicSub').textContent = sub;
+        panicResult.classList.add('show');
+      }
+      if (pinPad) {
+        pinPad.addEventListener('click', function (e) {
+          var k = e.target && e.target.closest ? e.target.closest('.pin-key') : null;
+          if (!k) return;
+          if (k.getAttribute('data-k') === 'back') {
+            pinBuf = pinBuf.slice(0, -1);
+            pinPaint();
+            return;
+          }
+          if (pinBuf.length >= 4) return;
+          pinBuf += k.textContent.trim();
+          pinPaint();
+          if (pinBuf.length === 4) {
+            var d = demoDict();
+            var entered = pinBuf;
+            setTimeout(function () {
+              if (entered === PIN_DECOY) panicShow(d.panicDecoyBig, d.panicDecoySub);
+              else if (entered === PIN_REAL) panicShow(d.panicRealBig, d.panicRealSub);
+              else {
+                pinDots.classList.add('shake');
+                setTimeout(function () { pinDots.classList.remove('shake'); }, 450);
+              }
+              pinBuf = '';
+              pinPaint();
+            }, 220);
+          }
+        });
+        document.getElementById('panicReset').addEventListener('click', function (e) {
+          e.stopPropagation();
+          panicResult.classList.remove('show');
+          pinBuf = '';
+          pinPaint();
+        });
+      }
+
+      /* ── Journey: el mensaje se cifra con el scroll ── */
+      var jr = document.getElementById('journey');
+      var lastP = 0;
+      var jrRefresh = null;
+      if (jr) {
+        var jrMsgA = document.getElementById('jrMsgA');
+        var jrMsgC = document.getElementById('jrMsgC');
+        var jrRelayMeta = document.getElementById('jrRelayMeta');
+        var jrPacket = document.getElementById('jrPacket');
+        var jrStage = document.getElementById('jrStage');
+        var nA = document.getElementById('jrA');
+        var nB = document.getElementById('jrB');
+        var nC = document.getElementById('jrC');
+        var w1 = document.getElementById('jrW1');
+        var w2 = document.getElementById('jrW2');
+        var bar1 = document.getElementById('jrBar1');
+        var bar2 = document.getElementById('jrBar2');
+        var bar3 = document.getElementById('jrBar3');
+
+        function jrMsg() {
+          return window.AEGIS_JR || 'Nos vemos a las 21:00 en el sitio de siempre.';
+        }
+        function jrBytes() {
+          try { return new TextEncoder().encode(jrMsg()).length + 40; }
+          catch (e) { return jrMsg().length + 40; }
+        }
+        function cipherChar(i, ch) {
+          return GLYPHS[(i * 31 + ch.charCodeAt(0)) % GLYPHS.length];
+        }
+        function cipherSlice(msg, from, to) {
+          var out = '';
+          for (var i = from; i < to; i++) out += cipherChar(i, msg[i]);
+          return out;
+        }
+        function jrStatic() {
+          var msg = jrMsg();
+          jrMsgA.textContent = msg;
+          jrRelayMeta.textContent = jrBytes() + ' B · 0x' +
+            cipherSlice(msg, 0, Math.min(10, msg.length));
+          jrMsgC.innerHTML = esc(msg) +
+            ' <span class="ct">✓</span>';
+          nA.classList.add('lit'); nB.classList.add('lit'); nC.classList.add('lit');
+        }
+        function clamp01(v) { return Math.min(1, Math.max(0, v)); }
+
+        function jrRender(p) {
+          lastP = p;
+          var msg = jrMsg();
+          var n = msg.length;
+          var encP = clamp01(p / 0.32);
+          var transP = clamp01((p - 0.32) / 0.36);
+          var decP = clamp01((p - 0.72) / 0.28);
+
+          /* A: se cifra de izquierda a derecha */
+          var k = Math.round(encP * n);
+          jrMsgA.innerHTML =
+            '<span class="ct">' + cipherSlice(msg, 0, k) + '</span>' + esc(msg.slice(k));
+
+          /* B: el relay solo ve tamaño + bytes */
+          if (transP > 0.18) {
+            jrRelayMeta.textContent = jrBytes() + ' B · 0x' +
+              cipherSlice(msg, 0, Math.min(10, n));
+          } else {
+            jrRelayMeta.textContent = '—';
+          }
+
+          /* C: llega cifrado y se descifra */
+          if (p < 0.66) {
+            jrMsgC.innerHTML = '<span style="color: var(--text-faint);">· · ·</span>';
+          } else {
+            var dk = Math.round(decP * n);
+            jrMsgC.innerHTML =
+              esc(msg.slice(0, dk)) + '<span class="ct">' + cipherSlice(msg, dk, n) + '</span>';
+          }
+
+          /* Paquete viajando A → C */
+          if (transP > 0 && transP < 1) {
+            var rs = jrStage.getBoundingClientRect();
+            var ra = nA.getBoundingClientRect();
+            var rc = nC.getBoundingClientRect();
+            var x0 = ra.left + ra.width / 2 - rs.left;
+            var x1 = rc.left + rc.width / 2 - rs.left;
+            jrPacket.style.left = (x0 + (x1 - x0) * transP).toFixed(1) + 'px';
+            jrPacket.style.opacity = '1';
+          } else {
+            jrPacket.style.opacity = '0';
+          }
+
+          /* Barras + nodos iluminados */
+          bar1.style.width = (encP * 100).toFixed(1) + '%';
+          bar2.style.width = (transP * 100).toFixed(1) + '%';
+          bar3.style.width = (decP * 100).toFixed(1) + '%';
+          nA.classList.toggle('lit', p < 0.38);
+          nB.classList.toggle('lit', p >= 0.38 && p < 0.7);
+          nC.classList.toggle('lit', p >= 0.7);
+        }
+
+        function jrLayoutWires() {
+          var rs = jrStage.getBoundingClientRect();
+          var ra = nA.getBoundingClientRect();
+          var rb = nB.getBoundingClientRect();
+          var rc = nC.getBoundingClientRect();
+          w1.style.left = (ra.right - rs.left) + 'px';
+          w1.style.width = Math.max(0, rb.left - ra.right) + 'px';
+          w2.style.left = (rb.right - rs.left) + 'px';
+          w2.style.width = Math.max(0, rc.left - rb.right) + 'px';
+        }
+
+        function jrAnimated() {
+          return !reduced && window.matchMedia('(min-width: 901px)').matches;
+        }
+        jrRefresh = function () {
+          if (jrAnimated()) { jrLayoutWires(); jrRender(lastP); }
+          else { jrStatic(); }
+        };
+
+        var jrTick = false;
+        function jrOnScroll() {
+          if (!jrAnimated() || jrTick) return;
+          jrTick = true;
+          requestAnimationFrame(function () {
+            jrTick = false;
+            var r = jr.getBoundingClientRect();
+            var total = r.height - window.innerHeight;
+            jrRender(total > 0 ? clamp01(-r.top / total) : 1);
+          });
+        }
+        window.addEventListener('scroll', jrOnScroll, { passive: true });
+        window.addEventListener('resize', function () { jrRefresh(); }, { passive: true });
+        jrRefresh();
+      }
+
+      /* ── Hook: re-aplicar efectos al cambiar de idioma ── */
+      window.__aegisAfterLang = function () {
+        splitHero();
+        ephApply();
+        if (jrRefresh) jrRefresh();
+      };
     })();
   </script>
 
@@ -1252,6 +2643,33 @@
         const shield = edgeLines(extrude, 0.9);
         group.add(shield);
 
+        /* Cristal fresnel dentro del wireframe: brillo en los bordes rasantes */
+        const fresnelMat = new THREE.ShaderMaterial({
+          uniforms: { uColor: { value: new THREE.Color(ACCENT) }, uTime: { value: 0 } },
+          vertexShader: [
+            'varying vec3 vN; varying vec3 vV;',
+            'void main() {',
+            '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+            '  vN = normalize(normalMatrix * normal);',
+            '  vV = normalize(-mv.xyz);',
+            '  gl_Position = projectionMatrix * mv;',
+            '}'
+          ].join('\n'),
+          fragmentShader: [
+            'uniform vec3 uColor; uniform float uTime;',
+            'varying vec3 vN; varying vec3 vV;',
+            'void main() {',
+            '  float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2);',
+            '  float pulse = 0.8 + 0.2 * sin(uTime * 0.0012);',
+            '  gl_FragColor = vec4(uColor, f * 0.34 * pulse);',
+            '}'
+          ].join('\n'),
+          transparent: true, blending: THREE.AdditiveBlending,
+          depthWrite: false, side: THREE.DoubleSide
+        });
+        const shieldGlass = new THREE.Mesh(extrude, fresnelMat);
+        group.add(shieldGlass);
+
         const inner = edgeLines(extrude, 0.28);
         inner.scale.setScalar(0.78);
         group.add(inner);
@@ -1304,6 +2722,45 @@
         const sparks = particleField(narrow ? 100 : 300, 2.2, 3.4, 0.055, 0.85);
         scene.add(dust, sparks);
 
+        /* Órbitas de tráfico cifrado: anillos dashed + paquetes que viajan.
+           Círculos perfectos: rotar la línea en Z mueve los dashes sin
+           deformar la forma; la inclinación del holder da la elipse visual. */
+        const orbits = [];
+        const orbitCount = narrow ? 2 : 3;
+        for (let i = 0; i < orbitCount; i++) {
+          const radius = 2.95 + i * 0.62;
+          const seg = 140;
+          const pts3 = [];
+          for (let s = 0; s <= seg; s++) {
+            const a = (s / seg) * Math.PI * 2;
+            pts3.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0));
+          }
+          const lineGeo = new THREE.BufferGeometry().setFromPoints(pts3);
+          const lineMat = new THREE.LineDashedMaterial({
+            color: ACCENT, transparent: true, opacity: 0.28,
+            dashSize: 0.45, gapSize: 0.32,
+            blending: THREE.AdditiveBlending, depthWrite: false
+          });
+          const line = new THREE.Line(lineGeo, lineMat);
+          line.computeLineDistances();
+          const holder = new THREE.Group();
+          holder.add(line);
+          holder.rotation.set(1.18 + i * 0.26, i * 1.05, i * 0.45);
+          scene.add(holder);
+          const pk = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: glow.material.map, transparent: true,
+            blending: THREE.AdditiveBlending, depthWrite: false
+          }));
+          pk.scale.setScalar(0.5);
+          holder.add(pk);
+          orbits.push({
+            line, pk, radius,
+            speed: 0.00045 + i * 0.00012,
+            phase: i * 2.1,
+            dir: i % 2 ? -1 : 1
+          });
+        }
+
         /* Parallax sutil con el ratón */
         let targetX = 0, targetY = 0, curX = 0, curY = 0;
         const hero = document.querySelector('.hero');
@@ -1315,6 +2772,12 @@
           });
           hero.addEventListener('pointerleave', () => { targetX = 0; targetY = 0; });
         }
+
+        /* Cámara reactiva al scroll: se aleja y se eleva al bajar */
+        let scrollTarget = 0, scrollCur = 0;
+        window.addEventListener('scroll', () => {
+          scrollTarget = Math.min(1, (window.scrollY || 0) / 760);
+        }, { passive: true });
 
         /* Resize con cap de devicePixelRatio */
         function resize() {
@@ -1338,13 +2801,22 @@
         function update(t) {
           curX += (targetX - curX) * 0.05;
           curY += (targetY - curY) * 0.05;
+          scrollCur += (scrollTarget - scrollCur) * 0.06;
           group.rotation.y = t * 0.00035 + curX;
-          group.rotation.x = Math.sin(t * 0.00022) * 0.08 + curY;
+          group.rotation.x = Math.sin(t * 0.00022) * 0.08 + curY + scrollCur * 0.22;
           inner.rotation.z = t * 0.00018;
           dust.rotation.y = -t * 0.00008;
           sparks.rotation.y = t * 0.00014;
           const breathe = 1 + Math.sin(t * 0.0009) * 0.04;
           glow.scale.setScalar(6.5 * breathe);
+          fresnelMat.uniforms.uTime.value = t;
+          camera.position.z = 8.2 + scrollCur * 1.7;
+          camera.position.y = 0.2 + scrollCur * 0.55;
+          orbits.forEach((o) => {
+            o.line.rotation.z = t * 0.00008 * o.dir;
+            const a = t * o.speed * o.dir + o.phase;
+            o.pk.position.set(Math.cos(a) * o.radius, Math.sin(a) * o.radius, 0);
+          });
         }
         function loop(t) {
           if (!running) return;
