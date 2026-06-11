@@ -61,20 +61,18 @@ jobs:
           echo "::error::Socket.IO handshake failed 3 attempts — proxy or relay broken"
           exit 1
 
-      # TODO(launch blocker): re-enable once aegis-link.it has DNS A records
-      # pointing at the VM and a certificate issued (certbot via
-      # infra/deploy-web.sh). As of 2026-06-11 the landing domains do not
-      # resolve in public DNS, so this probe would be permanently red.
-      #
-      # - name: Landing aegis-link.it
-      #   run: |
-      #     for attempt in 1 2 3; do
-      #       code=$(curl -o /dev/null -sw '%{http_code}' --max-time 10 https://aegis-link.it/ || echo 000)
-      #       if [ "$code" = "200" ]; then
-      #         echo "landing OK (attempt $attempt)"
-      #         exit 0
-      #       fi
-      #       sleep 15
-      #     done
-      #     echo "::error::Landing returned HTTP $code after 3 attempts"
-      #     exit 1
+      # The landing is served from the relay domain's root while the custom
+      # domains (aegis-link.it/.art/.shop) remain unregistered — switch the URL
+      # to https://aegis-link.it/ once DNS + cert exist (infra/deploy-web.sh).
+      - name: Landing (fallback URL)
+        run: |
+          for attempt in 1 2 3; do
+            code=$(curl -o /dev/null -sw '%{http_code}' --max-time 10 https://aegislink.duckdns.org/ || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "landing OK (attempt $attempt)"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Landing returned HTTP $code after 3 attempts"
+          exit 1
