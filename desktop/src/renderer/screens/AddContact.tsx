@@ -3,18 +3,8 @@ import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { PrimaryButton } from '../components/Button';
-
-// ---------------------------------------------------------------------------
-// Stub types
-// ---------------------------------------------------------------------------
-
-interface StoredContact {
-  aegisId: string;
-  name: string;
-  publicKeyB64: string;
-  verified: boolean;
-  addedAt: number;
-}
+import { useContacts } from '../store/contacts';
+import type { StoredContact } from '../db/local';
 
 interface Props {
   onCancel: () => void;
@@ -47,15 +37,11 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      // Stub — in real impl: addByAegisId(trimmedId, name)
-      const stubContact: StoredContact = {
-        aegisId: trimmedId,
-        name: name.trim() || trimmedId,
-        publicKeyB64: btoa(trimmedId),
-        verified: false,
-        addedAt: Date.now(),
-      };
-      onAdded(stubContact);
+      // Resolve against the identity directory, persist, and hydrate the store.
+      const contact = await useContacts
+        .getState()
+        .addByAegisId(trimmedId, name.trim() || undefined);
+      onAdded(contact);
     } catch (e) {
       setErrorMsg((e as Error).message);
     } finally {
