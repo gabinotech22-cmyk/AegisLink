@@ -20,7 +20,11 @@ function assertValidKey(key: unknown): asserts key is string {
 }
 
 function assertKeyAllowed(key: string): void {
-  const pattern = /^aegis\.(?:[a-zA-Z0-9_\-]+\.)?(secretKey\.b64|signSecretKey\.b64|activeProfile|displayName|avatarColor|avatarImage|profileStatus|workDisplayName|workAvatarColor|workAvatarImage|workProfileStatus|panic\.v1|preferences\.v1|polls\.v1)$/
+  // Audited against every secureStorage key the renderer actually writes
+  // (grep for `aegis.` literals under src/renderer). Keep in sync when adding
+  // new keys — a miss here fails silently at the feature level.
+  const pattern =
+    /^aegis\.(?:[a-zA-Z0-9_\-]+\.)?(secretKey\.b64|signSecretKey\.b64|activeProfile|activeSlotId|slotsList|displayName|avatarColor|avatarImage|profileStatus|workDisplayName|workAvatarColor|workAvatarImage|workProfileStatus|panic\.v1|preferences\.v1|polls\.v1|identity\.v1|prekeys\.v1|pin\.v1|group\.v1|deviceId|scheduled\.desktop\.v1|spkSecret\.b64|spkSecret\.\d+|spk\.keyId|opkIds\.json|opkSecret\.\d+|self\.ratchet\.[0-9A-HJKMNP-TV-Z\-]+)$/
   if (!pattern.test(key)) {
     throw new Error('Access denied: key is not whitelisted for renderer access')
   }
