@@ -187,7 +187,6 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       const avatarImage = (await secureStorage().get(getPrefKey('aegis.avatarImage', activeSlotId))) || null;
       const profileStatus = (await secureStorage().get(getPrefKey('aegis.profileStatus', activeSlotId))) || '';
 
-      await publishToServer(identity);
       set({
         identity,
         activeSlotId,
@@ -199,6 +198,18 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         status: 'ready',
         hydrated: true,
       });
+
+      // Populate the UI stores from the local DB — without this the sidebar
+      // starts empty on every boot until a socket event repopulates it.
+      const { useContacts } = await import('./contacts');
+      const { useGroups } = await import('./groups');
+      await useContacts.getState().hydrate().catch(() => {});
+      await useGroups.getState().hydrate().catch(() => {});
+
+      // Publish AFTER the UI is usable — it runs PoW + network round-trips and
+      // must never block boot (it used to run before set(), so a slow or
+      // rate-limited relay froze hydration).
+      void publishToServer(identity);
     } catch (e) {
       set({ status: 'idle', hydrated: true, error: (e as Error).message });
     }

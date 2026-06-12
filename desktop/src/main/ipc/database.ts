@@ -178,7 +178,38 @@ function ensureSchema(db: Database.Database): void {
     }
   }
 
+  // Migrations for databases created before each column existed. CREATE TABLE
+  // IF NOT EXISTS never upgrades an existing table, so every column added
+  // after first release must ALSO be listed here. Cheap no-ops when current.
+  safeAddColumn('messages', 'type', 'TEXT')
+  safeAddColumn('messages', 'media_uri', 'TEXT')
+  safeAddColumn('messages', 'reply_to_id', 'TEXT')
+  safeAddColumn('messages', 'reactions', 'TEXT')
+  safeAddColumn('messages', 'starred', 'INTEGER NOT NULL DEFAULT 0')
+  safeAddColumn('messages', 'deleted', 'INTEGER NOT NULL DEFAULT 0')
   safeAddColumn('messages', 'pinned', 'INTEGER NOT NULL DEFAULT 0')
+  safeAddColumn('messages', 'delivery_status', "TEXT NOT NULL DEFAULT 'sent'")
+  safeAddColumn('messages', 'expires_at', 'INTEGER')
+
+  safeAddColumn('contacts', 'signing_public_key_b64', "TEXT NOT NULL DEFAULT ''")
+  safeAddColumn('contacts', 'color', 'TEXT')
+  safeAddColumn('contacts', 'avatar_image', 'TEXT')
+  safeAddColumn('contacts', 'muted', 'INTEGER NOT NULL DEFAULT 0')
+  safeAddColumn('contacts', 'zero_trust', 'INTEGER NOT NULL DEFAULT 0')
+  safeAddColumn('contacts', 'status', 'TEXT')
+  safeAddColumn('contacts', 'muted_until', 'INTEGER')
+  safeAddColumn('contacts', 'blocked', 'INTEGER NOT NULL DEFAULT 0')
+  safeAddColumn('contacts', 'archived', 'INTEGER NOT NULL DEFAULT 0')
+  safeAddColumn('contacts', 'profile', "TEXT NOT NULL DEFAULT 'personal'")
+
+  safeAddColumn('groups', 'avatar_color', 'TEXT')
+  safeAddColumn('groups', 'avatar_image', 'TEXT')
+  safeAddColumn('groups', 'admin_only_invite', 'INTEGER NOT NULL DEFAULT 1')
+  safeAddColumn('groups', 'moderate_new_members', 'INTEGER NOT NULL DEFAULT 0')
+  safeAddColumn('groups', 'admin_id', 'TEXT')
+  safeAddColumn('groups', 'admin_sig', 'TEXT')
+
+  safeAddColumn('call_history', 'duration_s', 'INTEGER NOT NULL DEFAULT 0')
 }
 
 // ─── Handlers Registration ────────────────────────────────────────────────────
