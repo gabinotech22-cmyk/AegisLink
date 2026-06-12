@@ -1169,6 +1169,8 @@ function amInitiatorFor(myAegisId: string, peerAegisId: string): boolean {
  * recovery window elapses.
  */
 const inRecoveryUntilMs = new Map<string, number>();
+/** Pending recovery fallback-flush timers, keyed by peer — see disconnect(). */
+const recoveryFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const RECOVERY_WINDOW_MS = 90_000;
 /**
  * After detecting a desync we send a recovery X3DH-init and a lower-aegisId peer
@@ -1336,13 +1338,20 @@ async function tryRecoverDesync(
   // STILL in recovery, treat our freshly-created init session as the converged
   // one, clear recovery, and flush. The lower peer will have adopted our init.
   const peerId = contact.aegisId;
-  setTimeout(() => {
+  // Track the fallback timer per peer: re-entering recovery for the same peer
+  // must replace (not stack) the pending timer, and disconnect() must cancel
+  // them all — a stale timer firing after disconnect would flush the outbox
+  // over a dead socket and leak timer handles (which also hangs Jest in CI).
+  const prevTimer = recoveryFallbackTimers.get(peerId);
+  if (prevTimer) clearTimeout(prevTimer);
+  recoveryFallbackTimers.set(peerId, setTimeout(() => {
+    recoveryFallbackTimers.delete(peerId);
     if (isInRecovery(peerId)) {
       inRecoveryUntilMs.delete(peerId);
       rdiag(`[RDIAG] recovery fallback flush me=${identity.aegisId} peer=${peerId}`);
       void flushOutbox(identity).catch(() => {});
     }
-  }, RECOVERY_FALLBACK_MS);
+  }, RECOVERY_FALLBACK_MS));
 
   return true;
 }
@@ -2625,6 +2634,10 @@ export function disconnect(): void {
   // ensuring freshness after identity or group avatar updates.
   profiledContacts.clear();
   profiledGroupImages.clear();
+  // Cancel pending recovery fallback flushes — they would fire over a dead
+  // socket and keep the JS runtime (and Jest workers) alive via open handles.
+  for (const t of recoveryFallbackTimers.values()) clearTimeout(t);
+  recoveryFallbackTimers.clear();
 }
 
 export async function sendMessage(opts: {
