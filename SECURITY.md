@@ -6,7 +6,7 @@ report seriously and credit you if you wish.
 
 ## Reporting a vulnerability
 
-- **Email:** starlingcrow5+security@gmail.com
+- **Email:** gabinotech22+security@gmail.com
 - Please include: affected component (`mobile/`, `server/`, protocol design),
   steps to reproduce or a proof of concept, and the impact as you understand it.
 - You will receive an acknowledgement within **72 hours**.
