@@ -273,24 +273,22 @@ export function isConnected(): boolean {
   return connected && authenticated;
 }
 
-async function uploadPreKeys(identity: Identity) {
-  if (!socket) return;
-
-  let prevSpkKeyId: number | null = null;
+/**
+ * Persist SPK + OPK secrets to secureStorage and verify the SPK secret reads
+ * back. Returns false on any failure — callers must NOT publish the matching
+ * public bundle in that case (a published SPK whose secret is unreadable makes
+ * every inbound X3DH abort with "no-spk"). Shared by the registration path
+ * (store/identity.ts) and the socket refill path below.
+ */
+export async function persistPrekeySecrets(
+  preKeys: {
+    signedPreKey: { keyId: number; secretKey: Uint8Array };
+    opkSecrets: Map<number, Uint8Array>;
+  },
+  prevSpkKeyId: number | null = null,
+): Promise<boolean> {
   try {
-    const stored = await SecureStore.getItemAsync(SECURE_SPK_KEYID_KEY());
-    if (stored) {
-      const parsed = parseInt(stored, 10);
-      if (Number.isFinite(parsed) && parsed > 0) prevSpkKeyId = parsed;
-    }
-  } catch {/* treat as first run */}
-  const nextSpkKeyId = (prevSpkKeyId ?? 0) + 1;
-
-  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId);
-  mySpkSecretCache = preKeys.signedPreKey.secretKey;
-  opkSecretsCache = preKeys.opkSecrets;
-
-  try {
+    const nextSpkKeyId = preKeys.signedPreKey.keyId;
     const newSecretB64 = encodeBase64(preKeys.signedPreKey.secretKey);
     await SecureStore.setItemAsync(spkSecretKey(nextSpkKeyId), newSecretB64);
     await SecureStore.setItemAsync(SECURE_SPK_SECRET_KEY(), newSecretB64);
@@ -322,8 +320,36 @@ async function uploadPreKeys(identity: Identity) {
       SECURE_OPK_IDS_KEY(),
       JSON.stringify(Array.from(preKeys.opkSecrets.keys())),
     );
+
+    // INVARIANT: only report success if the SPK secret reads back intact.
+    const readback = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    return readback === newSecretB64;
   } catch (err) {
     if (DEV) console.error('[socket] Failed to persist prekey secrets:', err);
+    return false;
+  }
+}
+
+async function uploadPreKeys(identity: Identity) {
+  if (!socket) return;
+
+  let prevSpkKeyId: number | null = null;
+  try {
+    const stored = await SecureStore.getItemAsync(SECURE_SPK_KEYID_KEY());
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      if (Number.isFinite(parsed) && parsed > 0) prevSpkKeyId = parsed;
+    }
+  } catch {/* treat as first run */}
+  const nextSpkKeyId = (prevSpkKeyId ?? 0) + 1;
+
+  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId);
+  mySpkSecretCache = preKeys.signedPreKey.secretKey;
+  opkSecretsCache = preKeys.opkSecrets;
+
+  const persisted = await persistPrekeySecrets(preKeys, prevSpkKeyId);
+  if (!persisted) {
+    throw new Error('failed to persist prekey secrets — refusing to publish bundle');
   }
 
   let deviceId: string | null = null;

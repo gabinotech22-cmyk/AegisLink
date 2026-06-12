@@ -9,6 +9,8 @@
  * NEVER uploads: Identity.secretKey, signingSecretKey, OPK secrets, SPK secret.
  */
 
+import nacl from 'tweetnacl';
+import { encodeBase64 } from 'tweetnacl-util';
 import { sha256 } from '@noble/hashes/sha256';
 import { utf8ToBytes } from '@noble/hashes/utils';
 import type {
@@ -38,6 +40,9 @@ interface IdentityPostBody {
 
 interface PreKeysPostBody {
   aegisId: string;
+  /** Ed25519 signature over `${aegisId}:prekeys:${floor(ts/30000)}` — auth for the upload. */
+  sig: string;
+  ts: number;
   signedPreKey: SignedPreKeyPublic;
   oneTimePreKeys: OneTimePreKeyPublic[];
 }
@@ -143,10 +148,27 @@ export async function uploadIdentityAndPrekeys(
   if (containsAnySecret(signedPreKeyPublic, oneTimePreKeysPublic)) {
     return { ok: false, error: 'prekeys: refusing to upload — secret material detected' };
   }
+  // Secrets are persisted by the caller (store/identity.ts) BEFORE this upload
+  // runs — never publish an SPK whose secret cannot be read back.
   void preKeySecrets;
+
+  // Authenticate the prekeys upload: the server requires an Ed25519 signature
+  // over `${aegisId}:prekeys:${timeBucket}` plus a fresh timestamp. Without
+  // these, POST /prekeys rejects with HTTP 400 (sig/ts Required) and a new
+  // identity stays effectively unregistered. Mirrors mobile registration.ts.
+  const ts = Date.now();
+  const timeBucket = Math.floor(ts / 30_000);
+  const sig = encodeBase64(
+    nacl.sign.detached(
+      utf8ToBytes(`${identity.aegisId}:prekeys:${timeBucket}`),
+      identity.signingSecretKey,
+    ),
+  );
 
   const prekeysBody: PreKeysPostBody = {
     aegisId: identity.aegisId,
+    sig,
+    ts,
     signedPreKey: signedPreKeyPublic,
     oneTimePreKeys: oneTimePreKeysPublic,
   };

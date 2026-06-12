@@ -64,12 +64,41 @@ async function tryBroadcastProfileUpdate(identity: Identity): Promise<void> {
   }
 }
 
-async function publishToServer(identity: Identity): Promise<void> {
+// Single-flight: createNewIdentity and load() can both request a publish in
+// the same tick. Two concurrent publishes generate two DIFFERENT prekey
+// bundles whose secureStorage writes interleave — the persist-readback check
+// then fails and neither bundle is published. Deduplicate instead.
+let publishInFlight: Promise<void> | null = null;
+
+function publishToServer(identity: Identity): Promise<void> {
+  if (publishInFlight) return publishInFlight;
+  publishInFlight = doPublishToServer(identity).finally(() => {
+    publishInFlight = null;
+  });
+  return publishInFlight;
+}
+
+async function doPublishToServer(identity: Identity): Promise<void> {
   try {
     const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
     const nonce = await solvePoW(challenge, difficulty);
 
     const preKeys = generatePreKeys(identity);
+
+    // Persist SPK/OPK secrets BEFORE publishing the public bundle: a published
+    // SPK whose secret is unreadable makes every inbound X3DH abort ("no-spk").
+    // Dynamic import keeps the store ↔ socket module cycle lazy, matching the
+    // broadcastProfileUpdate pattern above.
+    const { persistPrekeySecrets } = await import('../socket/client');
+    const persisted = await persistPrekeySecrets({
+      signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
+      opkSecrets: preKeys.opkSecrets,
+    });
+    if (!persisted) {
+      if (DEV) console.warn('[identity] publish aborted: could not persist prekey secrets');
+      return;
+    }
+
     const result = await uploadIdentityAndPrekeys(
       identity,
       {
