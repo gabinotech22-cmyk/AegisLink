@@ -582,7 +582,7 @@
       font-family: var(--mono); font-size: 13px; line-height: 1.6;
       padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03);
       border: 1px solid var(--border); min-height: 86px;
-      word-break: break-all; color: var(--text);
+      overflow-wrap: anywhere; color: var(--text);
     }
     .jr-msg .ct { color: var(--accent); opacity: 0.85; }
     .jr-relay-box {
@@ -777,8 +777,13 @@
                           margin-top: 4px; letter-spacing: 0.06em; }
 
     /* ── Mobile ─────────────────────────────────────── */
+    /* Cinturón anti-desborde: clip no rompe position:sticky (hidden sí). */
+    @supports (overflow: clip) {
+      html, body { overflow-x: clip; }
+    }
     @media (max-width: 900px) {
       .nav-links { display: none; }
+      .nav-gh { display: none; }
       .hero-inner { grid-template-columns: 1fr; gap: 48px; }
       .hero-visual { min-height: auto; }
       .hero3d { inset: -60px -32px; }
@@ -796,12 +801,35 @@
       .jr-wire, .jr-packet, .jr-hint, .jr-progress { display: none; }
     }
     @media (max-width: 560px) {
+      .wrap { padding: 0 20px; }
       .pillars { grid-template-columns: 1fr; }
       .features{ grid-template-columns: 1fr; }
       .foot-row { grid-template-columns: 1fr; }
-      .fc-1 { left: 0; top: 60px; }
-      .fc-2 { right: 0; top: 200px; }
-      .fc-3 { left: 0; bottom: 60px; }
+
+      /* Nav compacto: cabe en 360px sin desbordar */
+      .nav-row { gap: 10px; padding: 12px 0; }
+      .brand { gap: 7px; }
+      .brand svg { width: 22px; height: 22px; }
+      .brand-name { font-size: 19px; }
+      .lang-switch button { padding: 6px 8px; font-size: 10px; }
+      .nav .btn { padding: 8px 13px; font-size: 12px; }
+
+      /* Las tarjetas flotantes tapan la demo en pantallas estrechas */
+      .float-card { display: none; }
+      .phone-mock { width: min(320px, 100%); }
+
+      /* Respiración proporcionada al viewport */
+      .section { padding: 64px 0; }
+      .hero { padding: 56px 0 48px; }
+      .hero-visual { margin-top: -8px; }
+      .section-head { margin-bottom: 36px; }
+
+      /* CTA: botones apilados a lo ancho, sin partir el texto */
+      .cta { padding: 52px 22px; margin: 0 0 56px; }
+      .cta .ctas { display: flex; flex-direction: column; width: 100%; gap: 10px; }
+      .cta .ctas .btn { justify-content: center; white-space: nowrap; }
+      .trust { padding: 32px 20px; }
+      .compare th, .compare td { padding: 12px 13px; }
     }
   </style>
 </head>
@@ -834,7 +862,7 @@
           <button type="button" data-lang="en" lang="en">EN</button>
           <button type="button" data-lang="it" lang="it">IT</button>
         </div>
-        <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost">GitHub</a>
+        <a href="https://github.com/gabinotech22-cmyk/AegisLink" target="_blank" rel="noopener" class="btn btn-ghost nav-gh">GitHub</a>
         <a href="#download" class="btn btn-primary" data-i18n="nav_download">Descargar</a>
       </div>
     </div>
