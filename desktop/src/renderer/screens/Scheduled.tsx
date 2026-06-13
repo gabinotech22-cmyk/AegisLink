@@ -4,21 +4,11 @@ import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { useContacts } from '../store/contacts';
-import { useIdentity } from '../store/identity';
-import { sendMessage } from '../socket/client';
-import { decodeBase64 } from 'tweetnacl-util';
+import { loadScheduled, saveScheduled, type ScheduledItem } from '../store/scheduled';
 
 interface Props {
   onBack: () => void;
   contactId?: string;
-}
-
-interface ScheduledItem {
-  id: string;
-  toContactId: string;
-  toContactName: string;
-  text: string;
-  sendAt: number;
 }
 
 const DELAYS = [
@@ -30,12 +20,9 @@ const DELAYS = [
   { label: '1 day', sec: 86400 },
 ];
 
-const STORAGE_KEY = 'aegis.scheduled.desktop.v1';
-
 export function ScheduledScreen({ onBack, contactId }: Props) {
   const { t } = useTheme();
   const { contacts } = useContacts();
-  const { identity } = useIdentity();
   const [items, setItems] = useState<ScheduledItem[]>([]);
   const [isScheduling, setIsScheduling] = useState(false);
   const [targetId, setTargetId] = useState(contactId ?? contacts[0]?.aegisId ?? '');
@@ -44,15 +31,18 @@ export function ScheduledScreen({ onBack, contactId }: Props) {
   const [now, setNow] = useState(Date.now());
 
   const persist = useCallback((next: ScheduledItem[]) => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    saveScheduled(next);
   }, []);
 
+  // Re-read from storage on every tick: the app-wide runner (App.tsx) delivers
+  // and removes due items, so the list must reflect those removals live, not
+  // just on mount.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setItems(JSON.parse(raw) as ScheduledItem[]);
-    } catch { /* ignore */ }
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    setItems(loadScheduled());
+    const timer = setInterval(() => {
+      setNow(Date.now());
+      setItems(loadScheduled());
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
