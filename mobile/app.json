@@ -22,7 +22,7 @@
         "NSMicrophoneUsageDescription": "AegisLink uses the microphone for encrypted voice and video calls.",
         "NSPhotoLibraryUsageDescription": "AegisLink accesses your photo library to send encrypted attachments.",
         "NSFaceIDUsageDescription": "AegisLink uses Face ID to protect your messages. Your biometric data never leaves the device.",
-        "ITSAppUsesNonExemptEncryption": false,
+        "ITSAppUsesNonExemptEncryption": true,
         "UIBackgroundModes": [
           "voip",
           "audio",
