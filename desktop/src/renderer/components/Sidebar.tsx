@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -44,6 +44,15 @@ export function Sidebar({ activeSection, activeChatId, onNavigate, onSelectChat,
   const contacts = useContacts((s) => s.contacts);
   const previews = useMessages((s) => s.previews);
   const unreadCounts = useMessages((s) => s.unreadCounts);
+
+  // Seed conversation previews + unread badges at boot. Without this the sidebar
+  // shows "No messages yet" for every contact until each chat is opened.
+  useEffect(() => {
+    if (contacts.length === 0) return;
+    const ids = contacts.map((c) => c.aegisId);
+    void useMessages.getState().loadAllPreviews(ids);
+    void useMessages.getState().loadAllUnreads();
+  }, [contacts]);
 
   const sorted = useMemo(() => {
     return [...contacts]

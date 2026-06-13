@@ -32,6 +32,7 @@ interface MessagesState {
   loadChat: (chatId: string) => Promise<StoredMessage[]>;
   append: (m: StoredMessage) => Promise<void>;
   refreshPreview: (chatId: string) => Promise<void>;
+  loadAllPreviews: (chatIds: string[]) => Promise<void>;
   setEphemeralTimer: (seconds: number) => void;
   pruneExpired: () => void;
   setPendingMedia: (uri: string | null) => void;
@@ -106,6 +107,23 @@ export const useMessages = create<MessagesState>((set, get) => ({
     const last = await lastMessageByChat(chatId);
     if (!last) return;
     set((s) => ({ previews: { ...s.previews, [chatId]: last } }));
+  },
+
+  // Bulk-load the last message for every chat so the sidebar shows previews at
+  // boot — without this, previews only populate as a side effect of opening a
+  // chat or receiving a live message ("No messages yet" everywhere on launch).
+  // Mirrors loadAllUnreads(); honours duress mode like loadChat().
+  async loadAllPreviews(chatIds) {
+    const { usePreferences } = await import('./preferences');
+    if (usePreferences.getState().duressActive) return;
+    const entries = await Promise.all(
+      chatIds.map(async (id) => [id, await lastMessageByChat(id)] as const),
+    );
+    set((s) => {
+      const previews = { ...s.previews };
+      for (const [id, last] of entries) if (last) previews[id] = last;
+      return { previews };
+    });
   },
 
   async markRead(chatId) {
