@@ -193,6 +193,20 @@ function Shell() {
     return () => clearInterval(interval);
   }, []);
 
+  // App-wide scheduled-message delivery. Runs regardless of which screen is
+  // open, so a queued message fires even after the user navigates away from the
+  // Scheduled screen (which only ever counted down without transmitting).
+  useEffect(() => {
+    if (!identity || status !== 'ready') return;
+    let interval: ReturnType<typeof setInterval>;
+    void import('./store/scheduled').then(({ deliverDueScheduled }) => {
+      const tick = () => { void deliverDueScheduled(identity); };
+      tick(); // flush anything already past due at mount
+      interval = setInterval(tick, 1000);
+    });
+    return () => clearInterval(interval);
+  }, [identity, status]);
+
   useEffect(() => {
     if (!identity) return;
     if (!online) {
