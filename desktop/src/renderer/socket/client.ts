@@ -160,7 +160,9 @@ async function flushGroupOfflineQueue(identity: Identity) {
   const items = groupOfflineQueue.splice(0);
   for (const item of items) {
     try {
-      await sendGroupMessage({ identity, groupId: item.groupId, plaintext: item.plaintext });
+      // The optimistic local append already ran when this item was enqueued,
+      // so the replay must NOT append again.
+      await sendGroupMessage({ identity, groupId: item.groupId, plaintext: item.plaintext, skipLocalAppend: true });
     } catch (e) {
       if (DEV) console.warn('[socket] group offline queue flush error', e);
       groupOfflineQueue.push(item);
@@ -1803,7 +1805,28 @@ export async function sendGroupMessage(opts: {
   identity: Identity;
   groupId: string;
   plaintext: string;
+  /**
+   * Skip the optimistic local append. Set by callers that already appended the
+   * message themselves (media sends) or by the offline-queue replay, which
+   * appended at enqueue time. Mirrors the same flag on the mobile client.
+   */
+  skipLocalAppend?: boolean;
 }): Promise<void> {
+  // Optimistic local append FIRST, before the online check, so the message
+  // shows immediately whether or not we are connected. Own messages render
+  // without a name prefix — GroupBubble only strips "name: " from INCOMING
+  // bodies — so store the plain text, NOT `${displayName}: ${text}`.
+  if (!opts.skipLocalAppend) {
+    await useMessages.getState().append({
+      id: crypto.randomUUID(),
+      chatId: opts.groupId,
+      direction: 'out',
+      body: opts.plaintext,
+      createdAt: Date.now(),
+      type: 'text',
+    });
+  }
+
   if (!socket || !connected || !authenticated) {
     groupOfflineQueue.push({ groupId: opts.groupId, plaintext: opts.plaintext });
     return;
@@ -1895,21 +1918,9 @@ export async function sendGroupMessage(opts: {
   });
 
   await Promise.all(sendPromises);
-
-  const { useIdentity } = await import('../store/identity');
-  const idState = useIdentity.getState();
-  const myDisplayName =
-    idState.displayName ||
-    opts.identity.aegisId.substring(0, 8);
-
-  const id = crypto.randomUUID();
-  await useMessages.getState().append({
-    id,
-    chatId: opts.groupId,
-    direction: 'out',
-    body: `${myDisplayName}: ${opts.plaintext}`,
-    createdAt: Date.now(),
-  });
+  // Local append already happened at the top (skipLocalAppend-aware), so there
+  // is nothing to append here — doing so would double-post and bake the
+  // sender's own name into their bubble.
 }
 
 export async function sendGroupVote(opts: {
