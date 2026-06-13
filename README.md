@@ -78,6 +78,12 @@ Calls require a [coturn](https://github.com/coturn/coturn) TURN server; set
   Public License v3.0** ([server/LICENSE](server/LICENSE)) — if you run a
   modified relay as a service, you must publish your modifications.
 
+## Community
+
+- **Discord**: [discord.gg/qNEfz86yDJ](https://discord.gg/qNEfz86yDJ) — questions, bug reports, crypto review
+- **Protocol & threat model**: [docs/PROTOCOL.md](docs/PROTOCOL.md)
+- **Contact**: gabinotech22@gmail.com
+
 ## Security
 
 See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy.
