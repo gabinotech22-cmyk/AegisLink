@@ -87,4 +87,6 @@ Calls require a [coturn](https://github.com/coturn/coturn) TURN server; set
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy.
+See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy, and
+[docs/LEGAL.md](docs/LEGAL.md) for what we can — and cannot — produce in
+response to a legal order.
