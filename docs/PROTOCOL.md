@@ -1,105 +1,505 @@
-# The AegisLink Protocol
+# AegisLink Protocol Specification
 
-**Version 1.0 — June 2026**
-
-This document describes the cryptographic protocol implemented by AegisLink, an end-to-end encrypted messenger designed around one principle: **the server must learn nothing it could be forced to hand over.** Everything described here is implemented in the open-source clients (`mobile/src/crypto/`, `desktop/src/renderer/crypto/`) and is auditable by anyone.
-
-AegisLink follows the Signal protocol family — X3DH for asynchronous key agreement and the Double Ratchet for ongoing message encryption — built on well-reviewed primitives (TweetNaCl: X25519, Ed25519, XSalsa20-Poly1305; HKDF/HMAC over SHA-256 via `@noble/hashes`). Where we deviate from the Signal specification, the deviation and its rationale are stated explicitly in §7.
+> **Status: pre-release, NOT independently audited.** This document describes the
+> cryptographic protocol as implemented in this repository. It is written for
+> reviewers, auditors and grant evaluators. It deliberately discloses the
+> protocol's limitations and its deviations from the Signal specification.
+> Independent review is openly invited — see [`SECURITY.md`](../SECURITY.md).
+>
+> This spec reflects the code, not aspirations. Where the implementation is
+> partial or differs from common practice, it is marked **⚠ Disclosure**.
 
 ---
 
-## 1. Design goals and non-goals
+## 1. Goals and non-goals
+
+AegisLink is a free/open-source end-to-end encrypted messenger whose defining
+property is **metadata minimization enforced at the protocol layer, not by
+server policy**.
 
 **Goals**
 
-1. **Confidentiality and integrity** of message content against the relay server, network observers, and anyone who compromises the relay.
-2. **Forward secrecy and post-compromise security** for established conversations (Double Ratchet).
-3. **No identity collection.** Registration requires no phone number, email, or name. An identity is a keypair generated on-device.
-4. **Metadata minimization at the protocol layer**, not just by server policy: padded message sizes, stripped client timestamps, allow-listed payload fields.
-5. **Keys never leave the device.** Private keys live in the OS secure storage (Keychain / Keystore via `expo-secure-store` on mobile; `safeStorage` on desktop).
+- Confidentiality, integrity and authenticity of message content (E2EE).
+- Forward secrecy and post-compromise security via the Double Ratchet.
+- Registration with **no phone number, email or name** — an identity is a
+  keypair generated on-device.
+- A relay that **cannot log what it never receives**: payloads are
+  field-allow-listed, stripped of client timestamps, length-normalized by
+  padding, and carry no plaintext sender field on the wire.
+- Fully self-hostable relay under AGPL-3.0.
 
-**Non-goals (current version)**
+**Non-goals (honestly stated)**
 
-- Hiding *that* a given Aegis ID communicates with the relay (no built-in onion routing; users who need network-level anonymity should reach the relay over Tor/VPN).
-- Protection against a fully compromised endpoint device.
+- **Anonymity against a global passive adversary / traffic analysis.** AegisLink
+  reduces metadata; it does not defeat an adversary who can observe network
+  flows in and out of the relay (timing/volume correlation). See §8.
+- **Hiding the sender↔recipient relationship from the relay operator in real
+  time.** Sealed sender (§7.3) removes the sender from the payload and from the
+  at-rest queue, but the authenticated live socket still reveals the sender to
+  an actively-correlating relay. This is the same limitation Signal documents
+  for its sealed-sender feature.
+- **Post-quantum security.** The current handshake is classical X25519. A
+  post-quantum hybrid (PQXDH-style) is on the roadmap (§10), not implemented.
 
-## 2. Identity
+---
 
-An AegisLink identity is generated entirely on-device (`identity.ts`):
+## 2. Cryptographic primitives
 
-- An **X25519 keypair** (`nacl.box.keyPair()`) — the long-term identity key *IK*, used in Diffie-Hellman operations.
-- An **Ed25519 signing keypair**, derived deterministically from the X25519 secret via `nacl.sign.keyPair.fromSeed(secretKey)`. This means a single 32-byte seed (representable as a mnemonic word list) fully restores the identity.
-- The public, human-shareable **Aegis ID**: the first 7 bytes of the X25519 public key, Crockford-Base32 encoded as `XXX-XXXX-XXXX`. It is a fingerprint prefix, not an account name — there is nothing to "register" and no namespace the server controls.
+| Purpose | Primitive | Library |
+|---|---|---|
+| DH key agreement | X25519 (`nacl.scalarMult` / `nacl.box`) | TweetNaCl |
+| Authenticated encryption (outer envelope) | `crypto_box` = X25519 + XSalsa20-Poly1305 (`nacl.box`) | TweetNaCl |
+| Authenticated encryption (message) | `crypto_secretbox` = XSalsa20-Poly1305 (`nacl.secretbox`) | TweetNaCl |
+| Signatures | Ed25519 (`nacl.sign`) | TweetNaCl |
+| Key derivation | HKDF-SHA256 | `@noble/hashes` |
+| Chain KDF / MAC | HMAC-SHA256 | `@noble/hashes` |
+| Fingerprints | SHA-256 | `@noble/hashes` |
 
-Contact verification uses full-key fingerprints (`fingerprint.ts`), comparable out-of-band or via QR code (`qr.ts`).
+No primitive is hand-rolled; all symmetric/asymmetric operations route through
+TweetNaCl and `@noble/hashes`. The protocol layer that composes them
+(X3DH, Double Ratchet, envelope, metadata padding) is the project's own code and
+is the primary surface for which an independent audit is sought.
 
-## 3. Session establishment — X3DH
+---
 
-Asynchronous key agreement follows the X3DH pattern (`signal/x3dh.ts`). Each device publishes to the relay a prekey bundle: identity key, a **signed prekey (SPK)** signed with the Ed25519 identity signing key, and a batch of 100 **one-time prekeys (OPKs)**.
+## 3. Identity
 
-To initiate a session with Bob, Alice:
+### 3.1 Key material
 
-1. **Verifies the SPK signature first.** The Ed25519 signature over the SPK is checked against Bob's signing key *before any DH operation*. A relay that substitutes the SPK cannot man-in-the-middle the handshake.
-2. Generates an ephemeral X25519 keypair *EK*.
-3. Computes `DH1 = DH(IK_A, SPK_B)`, `DH2 = DH(EK_A, IK_B)`, `DH3 = DH(EK_A, SPK_B)`, and `DH4 = DH(EK_A, OPK_B)` when a one-time prekey is available.
-4. Derives the root key as `HKDF-SHA256(0xFF×32 ‖ DH1 ‖ DH2 ‖ DH3 [‖ DH4], salt = 0x00×32, info = "AegisLinkX3DH")`.
+A device identity (`mobile/src/crypto/identity.ts`) consists of:
 
-**Low-order point defense.** `nacl.scalarMult` silently returns an all-zero output when fed a low-order public point — which would let a malicious relay force a known shared secret. Every DH output in X3DH *and* in the ratchet is checked and the handshake aborts on an all-zero result (`assertNonZeroDH`).
+- An **X25519 key pair** (`nacl.box.keyPair`) — the long-term identity/DH key.
+- An **Ed25519 signing key pair** used to sign Signed PreKeys.
 
-**Prekey consistency.** All registration paths obtain the device prekey set through a single serialized entry point (`ensureDevicePreKeys`): secrets are durably persisted and read back *before* the public bundle may be published, and public keys are always re-derived from the stored secrets. The bundle on the relay therefore always corresponds to secrets the device can actually use — eliminating a class of "ghost session" desyncs.
+```
+identity.secretKey         // 32-byte X25519 secret
+identity.publicKey         // 32-byte X25519 public
+identity.signingSecretKey  // 64-byte Ed25519 secret (seed‖pub)
+identity.signingPublicKey  // 32-byte Ed25519 public
+```
 
-## 4. Message encryption — Double Ratchet
+The Ed25519 key is derived deterministically from the X25519 secret key so that
+a single 32-byte secret (and therefore a single mnemonic) fully restores the
+identity:
 
-Established sessions use a Double Ratchet (`signal/ratchet.ts`) per the Signal design:
+```ts
+const { publicKey, secretKey } = nacl.box.keyPair();        // X25519
+const signKeys = nacl.sign.keyPair.fromSeed(secretKey);     // Ed25519 seeded by the X25519 secret
+```
 
-- **DH ratchet** on X25519, advancing the root key (`HKDF`, info = `"AegisLinkRoot"`) whenever the peer's ratchet key changes. Ratchet public keys arrive unsigned off the wire, so the same all-zero-DH guard applies at every step.
-- **Symmetric-key ratchet**: message keys and next chain keys derived via HMAC-SHA256 with distinct constants (0x01 / 0x02).
-- **Out-of-order delivery** is handled with skipped-message keys, hard-capped at **50 retained keys** (vs. Signal's default 2000) to shrink the window of past messages decryptable if the device database were ever recovered. Evicted and consumed keys are zeroized in memory. An additional age-based trim (`trimOldSkippedKeys`) actively shrinks this window during inactivity.
-- Ratchet state updates are applied **transactionally** with message persistence, so a crash cannot leave the chain key ahead of (or behind) the stored conversation.
+> **⚠ Disclosure — shared secret scalar across X25519 and Ed25519.**
+> The same 32 bytes serve as the X25519 DH secret *and* as the Ed25519 seed.
+> This buys single-secret recovery (one mnemonic restores both keys) at the cost
+> of cross-domain key separation. The two algorithms clamp/use the scalar
+> differently and there is no known practical attack from this construction on
+> these primitives, but it is a deliberate deviation from the key-separation
+> principle and is flagged here for auditor attention. A future version may use
+> a domain-separated KDF (e.g. HKDF with distinct `info` labels) to derive
+> independent X25519 and Ed25519 secrets from one seed.
 
-The first messages of a session carry the X3DH initialization data (Alice's ephemeral key, SPK/OPK ids) so Bob can derive the same root key on first contact. A session-creation grace period prevents a stale in-flight message on a previous session from tearing down a freshly negotiated one (desync recovery).
+Private keys are stored on-device in `expo-secure-store` (hardware-backed
+keystore / Keychain where available) and **never leave the device**.
 
-## 5. Metadata protection
+### 3.2 Aegis ID
 
-The relay is designed to be *unable* to log what it never receives (`metadata.ts`):
+The human-facing address is the **Aegis ID**: the first 7 bytes of the X25519
+public key, Crockford-base32 encoded into 11 characters, grouped `XXX-XXXX-XXXX`.
 
-- **Field allow-list.** Outgoing encrypted payloads may contain only `v, from, senderPubB64, ratchet, x3dh, pad`. Anything else — including client-side timestamps and counters — is stripped before encryption.
-- **Length bucketing.** Every plaintext is padded with random bytes to a fixed bucket size (powers of two from 256 B to 64 KB, plus 256 KB / 1 MB / 4 MB tiers for attachments). On the wire, a "hi" and a paragraph are indistinguishable.
-- **Encrypted attachments** (`media.ts`) are encrypted client-side before upload; the relay stores opaque blobs.
-- The relay holds messages only until delivery, authenticates devices via an Ed25519 challenge-response (no passwords, no recoverable credentials), and keeps no message-frequency or social-graph records by design.
+```
+deriveAegisId(publicKey) → e.g.  "K3M-7QPA-9WZX"
+```
 
-## 6. Key storage, backup, and panic
+> **⚠ Disclosure — the Aegis ID is NOT a trust anchor.**
+> Eleven Crockford-base32 characters encode ~55 bits (the 56-bit, 7-byte head is
+> reduced to 55 bits by the encoder). It is a routing/display handle only.
+> ~55 bits is **not** sufficient collision/second-preimage resistance to bind a
+> conversation to a key — an attacker who can choose X25519 key pairs could
+> search for a colliding Aegis ID. **Identity verification MUST use the
+> fingerprint (§3.3), not the Aegis ID.**
 
-- Private keys are stored in platform secure storage; the message database is local (SQLite).
-- **Backups** are encrypted client-side with a key derived from a user passphrase via a memory-hard KDF (Argon2id); the backup is useless without the passphrase, which AegisLink never sees.
-- **Panic mode** performs instant local wipe with an optional decoy profile; multiple profiles are cryptographically isolated (separate identities, separate storage slots).
+### 3.3 Identity verification (fingerprints)
 
-## 7. Deviations from the Signal specification
+`mobile/src/crypto/fingerprint.ts` derives a verifiable fingerprint from
+`SHA-256(publicKey)`:
 
-Honest disclosure of where we differ, and why:
+- **Hex fingerprint** — first 16 bytes (128 bits) shown as 8 groups of 4 hex
+  chars. This is the strong comparison.
+- **Word fingerprint** — first 8 bytes (64 bits) mapped to 8 words from a
+  256-word list, for easier out-of-band reading.
 
-| Deviation | Rationale / trade-off |
+> **⚠ Disclosure — fingerprint design notes for auditors.**
+> 1. The word fingerprint encodes only **64 bits**; the 128-bit hex fingerprint
+>    is the comparison to use under a serious threat model. The UI should treat
+>    the word list as a convenience, not the authoritative check.
+> 2. Fingerprints are computed over **one party's** public key (a per-identity
+>    fingerprint), unlike Signal's "safety number" which hashes the *pair* of
+>    identity keys. Mutual verification therefore requires each side to confirm
+>    the other's fingerprint, rather than comparing a single shared number.
+
+---
+
+## 4. Session establishment — X3DH
+
+Implemented in `mobile/src/crypto/signal/x3dh.ts`, following the
+[X3DH](https://signal.org/docs/specifications/x3dh/) construction.
+
+### 4.1 PreKey bundle
+
+The recipient (Bob) publishes to the relay:
+
+- `identityKeyB64` — X25519 identity public key.
+- `signingPublicKeyB64` — Ed25519 public key (to verify the SPK signature).
+- `signedPreKey` — `{ keyId, publicKeyB64, signatureB64 }`, an X25519 prekey
+  signed by Bob's Ed25519 key.
+- `oneTimePreKey` — optional `{ keyId, publicKeyB64 }`, consumed once.
+
+A device maintains a single durably-persisted prekey set (`ensureDevicePreKeys`)
+so the public bundle published to the relay always matches the secrets stored on
+device; concurrent registration paths are serialized to prevent publishing
+divergent sets.
+
+### 4.2 Sender (Alice) computation
+
+1. **Mandatory signature check first.** Alice verifies `Ed25519.verify(SPK_pub,
+   sig, Bob_signing_pub)` **before any DH operation involving the SPK**. A
+   missing signing key, wrong key length, wrong signature length, or invalid
+   signature aborts the handshake. This closes the SPK-substitution MITM.
+2. Alice generates an ephemeral X25519 key `EK`.
+3. DH chain (Signal order):
+   ```
+   DH1 = DH(IK_A, SPK_B)
+   DH2 = DH(EK_A, IK_B)
+   DH3 = DH(EK_A, SPK_B)
+   DH4 = DH(EK_A, OPK_B)   // only if a one-time prekey is present
+   ```
+4. **Low-order point guard.** Every DH output (`DH1..DH4`) is rejected if it is
+   all-zero (`assertNonZeroDH`), aborting before any key is derived. This blocks
+   a malicious relay/peer from forcing a known shared secret by substituting a
+   low-order/identity point. Note: the Signed PreKey is signature-checked; the
+   peer identity key, ephemeral key and OPK are **not** signed, so the non-zero
+   guard is the defense for those inputs.
+5. Root key:
+   ```
+   SK = HKDF-SHA256(
+          IKM  = 0xFF×32 ‖ DH1 ‖ DH2 ‖ DH3 [‖ DH4],
+          salt = 0x00×32,
+          info = "AegisLinkX3DH",
+          L    = 32 )
+   ```
+   The `0xFF×32` prefix is the Signal-specified domain separator (`F`).
+
+### 4.3 Receiver (Bob) computation
+
+`performX3DHReceiver` mirrors the DH order exactly so both sides derive the same
+`SK`, applies the same non-zero guards, and uses the same HKDF parameters.
+
+---
+
+## 5. Double Ratchet
+
+Implemented in `mobile/src/crypto/signal/ratchet.ts`, following the
+[Double Ratchet](https://signal.org/docs/specifications/doubleratchet/) spec.
+
+### 5.1 KDFs
+
+```
+kdfRoot(RK, dhOut):
+    derived = HKDF-SHA256(IKM=dhOut, salt=RK, info="AegisLinkRoot", L=64)
+    RK'  = derived[0:32]
+    CK   = derived[32:64]          // derived buffer zeroized after split
+
+kdfChain(CK):
+    MK   = HMAC-SHA256(CK, 0x01)
+    CK'  = HMAC-SHA256(CK, 0x02)
+```
+
+Messages are encrypted with the per-message key `MK` using `nacl.secretbox`
+(XSalsa20-Poly1305) under a fresh random 24-byte nonce.
+
+### 5.2 Headers
+
+Each message carries `{ ratchetKey (DH pub), n, pn }`. A DH-ratchet step occurs
+when an inbound `ratchetKey` differs from the stored `DHr`.
+
+### 5.3 Forward secrecy bound
+
+> **⚠ Disclosure — deviation from Signal defaults (intentional).**
+> `MAX_SKIPPED_KEYS = 50` (Signal's default is 2000). Skipped message keys are
+> capped per chain and evicted lowest-`n`-first, and `trimOldSkippedKeys` can
+> shrink the window further on app background. **Rationale:** a smaller retained
+> set shrinks the post-hoc decryption window if the encrypted DB is ever
+> recovered. **Cost:** a client that misses more than 50 messages on a single
+> chain loses those messages. This is a deliberate forward-secrecy/deliverability
+> trade-off.
+
+All message keys and chain keys are **zeroized** in place after use
+(`zeroize`), including on eviction and on discarded speculative state.
+
+### 5.4 Transactional decryption (anti-desync)
+
+`ratchetDecrypt` performs the (possibly DH-ratcheting) state mutation on a
+**clone** of the ratchet state, attempts authentication, and only commits the
+advanced state back if `secretbox.open` succeeds:
+
+- **Forged/corrupt ciphertext** → clone discarded (and zeroized); live state is
+  untouched. A malicious relay therefore cannot desynchronize a session by
+  injecting a message with a valid-looking header but a bad MAC
+  (Double Ratchet spec §3.4).
+- **Skipped-key path** → a stored skipped key is only consumed/deleted if the
+  message actually authenticates, so a forgery cannot burn a real key.
+- Low-order point guard (`assertNonZeroDH`) is applied to each ratchet DH before
+  any chain key is derived.
+
+---
+
+## 6. Message envelope
+
+A sent message has **two cryptographic layers** (`mobile/src/crypto/messaging.ts`):
+
+```
+inner  = stripAndPad({ v:2, from: senderAegisId, ratchet:{…}, x3dh?:{…} })
+         └─ ratchet.ciphertext = secretbox(plaintext, nonce, MK)   ← Double Ratchet (forward-secret)
+outer  = nacl.box(inner, outerNonce, recipientPub, senderSecret)   ← X25519 box (sealed-sender wrapper)
+wire   = { id, to, ciphertext=outer, nonce=outerNonce, init? }
+```
+
+- The **inner** layer provides forward secrecy and post-compromise security via
+  the Double Ratchet message key `MK`.
+- The **outer** `nacl.box` binds the message to the sender↔recipient long-term
+  X25519 keys (authenticates the sender to the recipient) and hides the inner
+  payload — including the `from` field — from the relay.
+
+> **⚠ Disclosure — the outer layer is not forward-secret.**
+> The outer `nacl.box` uses the parties' **long-term** identity X25519 keys, so
+> that layer alone has no forward secrecy. This is acceptable because it only
+> wraps already-ratcheted ciphertext: compromise of a long-term key lets an
+> attacker strip the outer wrapper but still leaves the inner Double Ratchet
+> message key protecting the plaintext. Forward secrecy is a property of the
+> inner layer.
+
+The protocol version is `2`. `openEnvelope` rejects any payload whose `v` ≠ 2,
+whose `from` is not a string, or which lacks a `ratchet` field.
+
+---
+
+## 7. Metadata minimization and at-rest protection
+
+### 7.1 Field allow-list
+
+`mobile/src/crypto/metadata.ts` strips every top-level field not in a strict
+allow-list before encryption:
+
+```
+ALLOWED_INNER_FIELDS = { v, from, senderPubB64, ratchet, x3dh, pad }
+```
+
+Anything else a caller attaches is dropped, so accidental metadata cannot leak
+into the encrypted body. There are **no client timestamps or counters** in the
+payload.
+
+### 7.2 Length normalization (padding)
+
+Every plaintext is padded to a fixed bucket before encryption so ciphertext
+length reveals nothing about content length:
+
+```
+buckets = 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536,
+          262144, 1048576, 4194304   (bytes)
+```
+
+The smallest bucket ≥ payload size is chosen; a random `pad` field (inside the
+ciphertext) fills the remainder, with a whitespace-filler fallback to land
+exactly on the bucket boundary. Attachments use the 256 KB / 1 MB / 4 MB tiers.
+
+> **⚠ Disclosure — bucket granularity leaks a coarse size class.**
+> Padding hides exact length but not the bucket. An observer of ciphertext size
+> learns which power-of-two band a message falls in (e.g. "< 256 B" vs
+> "256 KB–1 MB"). This is a deliberate size/overhead trade-off, not perfect
+> length-hiding.
+
+### 7.3 Sealed sender
+
+The wire envelope the relay validates (`server/src/relay/handler.ts`,
+`EnvelopeIn`) contains **no `from` field**:
+
+```
+{ id, to, ciphertext, nonce, init? }
+```
+
+- The sender's Aegis ID lives **inside** the encrypted body, not on the wire.
+- The **offline queue intentionally does not store the sender** (FND-05). On a
+  queue drain the recipient receives no sender hint except on first-contact
+  (`init`) messages, where the relay attaches `senderPublicKeyB64` so the
+  recipient can decrypt a first message it otherwise could not identify.
+- On **online** delivery the relay injects `senderPublicKeyB64` (a public,
+  non-secret value also available via `GET /identity/:aegisId`) as a convenience
+  so the recipient avoids an extra HTTP round-trip. Without this hint the
+  recipient **trial-decrypts** the outer box against each known contact's public
+  key to learn the sender.
+
+> **⚠ Disclosure — what sealed sender does and does not protect.**
+> **Protects:** there is no plaintext sender field on the wire or in the at-rest
+> message queue; ciphertext size is normalized (§7.2).
+> **Does NOT protect:** the client socket is authenticated to the relay via
+> challenge-response (§9), so a malicious or compelled relay that correlates the
+> authenticated live connection with the `to` field can still observe the
+> sender→recipient relationship at send time. Sealed sender here primarily
+> protects metadata **at rest** and removes `from` from the payload; it is not a
+> defense against an actively-correlating relay or a network-level observer.
+> This matches the limitation Signal documents for its own sealed sender.
+
+### 7.4 Encrypted attachments
+
+Attachments (`mobile/src/crypto/media.ts`) never reach the relay in plaintext:
+
+- Each file is encrypted client-side under a **fresh random per-file key**
+  (32-byte key, 24-byte nonce) with `nacl.secretbox` (XSalsa20-Poly1305).
+- Only the **ciphertext blob** is uploaded to the relay's generic blob store,
+  which holds opaque bytes with a 24-hour TTL.
+- The per-file key and nonce are **not** sent to the relay. They travel inside
+  the E2EE message as a reference string `blob:<id>:<keyB64>:<nonceB64>`, which
+  is itself carried by the Double Ratchet — so the relay sees an opaque blob and
+  never the key that decrypts it.
+- Plaintext is decrypted **on demand** into a purgeable cache directory; at-rest
+  media is always the secretbox ciphertext, and the cache is purged on
+  panic/logout and after time in background (`purgeCachedDecryptedMedia`).
+- A strict MIME allow-list and a 50 MB size cap are enforced before upload.
+
+### 7.5 Encrypted backups
+
+Backups (`mobile/src/crypto/backup.ts`, `.aegisbak`) are encrypted client-side
+with a key derived from a user passphrase the relay never sees:
+
+- **Current format (v3): Argon2id**, m = 64 MiB, t = 3, p = 1, 32-byte key
+  (RFC 9106 §4 memory-constrained profile). Argon2id's memory-hardness collapses
+  GPU/ASIC parallelism — important because the backup contains the user's
+  **private identity key**.
+- Symmetric cipher: `nacl.secretbox` (XSalsa20-Poly1305), authenticated, so a
+  wrong passphrase fails with an explicit MAC error rather than garbage output.
+- Only salt, nonce and ciphertext are stored; the passphrase never touches disk.
+  Minimum passphrase length 12.
+- Legacy envelopes (v1/v2, PBKDF2-HMAC-SHA256 at 100k/600k iterations) remain
+  *decryptable* for restore, but all new backups are written as v3.
+
+> **⚠ Disclosure — KDF parameters are implied by version, not stored.**
+> The v3 Argon2id parameters are fixed by the envelope version rather than
+> embedded, so they cannot be tuned without a version bump (changing them would
+> break decryption of existing v3 backups). On Hermes (no JIT) a v3 derivation
+> takes on the order of minutes; the UI runs it async behind a progress
+> indicator. This is a deliberate cost choice, not an accident.
+
+### 7.6 Panic wipe and profile isolation
+
+- **Panic mode** performs an instant local wipe, with an optional **decoy
+  profile** for coerced-unlock scenarios.
+- **Multiple profiles** are cryptographically isolated: each has its own
+  identity and its own SecureStore slot, and a non-primary profile never reads
+  the primary's keys (`signSecretKeySlot` per-profile derivation).
+
+> These are coercion/forensic mitigations, **not** cryptographic guarantees
+> against a fully compromised, unlocked endpoint (see §8.3).
+
+---
+
+## 8. Threat model
+
+### 8.1 Adversary capabilities assumed
+
+- **Malicious relay (honest-but-curious or actively malicious).** Can read,
+  drop, reorder, replay and inject anything on the wire; can substitute prekey
+  bundles and ratchet public keys; knows the recipient `to` of every envelope
+  and the authenticated identity of every connected socket.
+
+### 8.2 What the protocol defends against
+
+| Attack | Defense |
 |---|---|
-| Ed25519 signing key derived from the X25519 identity secret (single seed) | Enables full identity recovery from one mnemonic. Trade-off: the two long-term keys are not independent; compromise of the seed compromises both (as it would in practice anyway, since both live in the same secure store). |
-| `MAX_SKIPPED_KEYS = 50` (Signal: 2000) | Smaller post-compromise decryption window. Cost: >50 missed messages on one chain are unrecoverable. |
-| One prekey-bundle fetch per contact establishment; sessions are per-identity rather than per-device-session-id | Simpler relay with less addressable metadata. |
-| JSON + Base64 wire encoding instead of protobuf | Auditability and debuggability; size overhead is absorbed by padding buckets anyway. |
+| Reading message content | E2EE: inner Double Ratchet + outer box; relay holds only opaque ciphertext |
+| SPK substitution / handshake MITM | Mandatory Ed25519 verification of the Signed PreKey before any DH |
+| Low-order / identity point injection (forced known key) | All-zero DH rejection at every X3DH and ratchet DH step |
+| Ratchet desynchronization via forged ciphertext | Transactional clone→commit/discard decryption; keys consumed only on auth |
+| Skipped-key exhaustion | `MAX_SKIPPED_KEYS = 50` cap with lowest-`n` eviction |
+| Content-length leakage | Fixed-bucket padding before encryption |
+| Plaintext sender metadata on the wire / in the queue | No `from` on the wire; sender not stored in offline queue (§7.3) |
+| Key recovery from device memory | Zeroization of message/chain/root keys and discarded clones |
+| Registration-time PII collection | No phone/email/name; identity is an on-device keypair |
 
-## 8. Threat model summary
+### 8.3 What the protocol does NOT defend against (explicit)
 
-| Adversary | Outcome |
+- **Traffic analysis / global passive adversary.** Timing and volume correlation
+  across the relay are out of scope.
+- **Real-time sender↔recipient correlation by the relay** (§7.3).
+- **Endpoint compromise.** Malware or a physically compromised, unlocked device
+  with the keystore unsealed can read plaintext. Panic-wipe and decoy modes
+  mitigate coercion scenarios but are not cryptographic defenses.
+- **Post-quantum adversaries** (store-now-decrypt-later) — see §10.
+- **Cross-domain key-separation concerns** from the shared X25519/Ed25519 secret
+  (§3.1).
+
+---
+
+## 9. Transport and authentication (summary)
+
+- Clients connect to the relay over a Socket.IO channel.
+- Sockets authenticate by **challenge-response over the identity key** (relay
+  issues a challenge, client signs; see `server/src/auth/challenge.ts`), so the
+  relay binds a live connection to an Aegis ID without the client ever
+  transmitting a secret.
+- Envelopes are validated against strict Zod schemas (length-bounded fields,
+  Aegis-ID regex routing addresses); oversize or malformed envelopes are
+  rejected.
+- The relay is AGPL-3.0 and self-hostable; it is designed to store the minimum
+  needed to route and queue ciphertext and to hold no plaintext sender or
+  content.
+
+> A full write-up of the relay's storage model, push wake-up (encrypted payload
+> only), WebRTC signaling relay and rate limiting is maintained separately; this
+> section summarizes only the parts that bear on the cryptographic threat model.
+
+---
+
+## 10. Known limitations and roadmap
+
+The following are **not implemented** and are honestly out of scope of the
+current protocol:
+
+1. **Post-quantum hybrid handshake** (PQXDH-style, X25519 + ML-KEM). Highest
+   priority for store-now-decrypt-later resistance.
+2. **Domain-separated identity keys** to remove the shared X25519/Ed25519 secret
+   scalar (§3.1).
+3. **Stronger sender anonymity** against an actively-correlating relay (e.g.
+   decoupling the authenticated transport identity from message routing).
+4. **Independent third-party cryptographic audit** of this protocol and its
+   implementation, with full public disclosure of findings. **No independent
+   audit has been performed.** This is the project's top funding priority.
+
+---
+
+## 11. Source map
+
+All cryptography is implemented in the clients and mirrored across platforms:
+the mobile client under `mobile/src/crypto/` and the desktop client under
+`desktop/src/renderer/crypto/` share the same protocol so the two interoperate.
+File references below are to the mobile client.
+
+| Component | File |
 |---|---|
-| Passive network observer | Sees TLS to the relay; padded, uniform ciphertext sizes; no plaintext metadata. |
-| Malicious / compromised relay | Cannot read content, cannot MITM (SPK signatures + zero-DH guards), cannot learn message lengths beyond bucket tier; learns delivery timing and which queue IDs talk to it. |
-| Legal compulsion of the operator | Nothing to produce beyond undelivered opaque ciphertexts: no names, emails, phone numbers, IP logs, or social graph. |
-| Seizure of an unlocked device | Out of scope (as for all messengers); panic wipe and decoy profiles mitigate coerced-unlock scenarios. |
-| Quantum adversary (future) | X25519 is not post-quantum; a PQ hybrid (à la PQXDH) is on the roadmap. |
+| Identity, Aegis ID, key derivation | `mobile/src/crypto/identity.ts` |
+| Fingerprint verification | `mobile/src/crypto/fingerprint.ts` |
+| QR contact exchange | `mobile/src/crypto/qr.ts` |
+| X3DH | `mobile/src/crypto/signal/x3dh.ts` |
+| Double Ratchet | `mobile/src/crypto/signal/ratchet.ts` |
+| KDF / HMAC wrappers | `mobile/src/crypto/signal/kdf.ts` |
+| Message envelope (two layers) | `mobile/src/crypto/messaging.ts` |
+| Metadata strip + padding | `mobile/src/crypto/metadata.ts` |
+| Encrypted attachments | `mobile/src/crypto/media.ts` |
+| Encrypted backups (Argon2id) | `mobile/src/crypto/backup.ts` |
+| Desktop client crypto (parity) | `desktop/src/renderer/crypto/` |
+| Relay envelope / sealed-sender wire format | `server/src/relay/handler.ts` |
+| Challenge-response auth | `server/src/auth/challenge.ts` |
 
-## 9. Open questions and roadmap
+---
 
-- Post-quantum hybrid key agreement (PQXDH-style) for X3DH.
-- Sealed-sender-style hiding of the `from` field from the relay.
-- Reproducible builds (in progress for F-Droid submission).
-- **Independent audit**: we are seeking funding for a third-party cryptographic audit. Findings will be published in full.
-
-*Questions, analysis, and attacks on this design are welcome — open an issue or see [SECURITY.md](../SECURITY.md) for responsible disclosure.*
+*This document is part of the AegisLink open-source project (clients GPL-3.0,
+relay AGPL-3.0). Corrections and audit findings are welcome via the channels in
+[`SECURITY.md`](../SECURITY.md).*
