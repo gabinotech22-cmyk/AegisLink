@@ -76,14 +76,14 @@ interface Props {
 
 export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props) {
   const { t } = useTheme();
-  const myAegisId = useIdentity((s) => s.identity?.aegisId);
+  const identity = useIdentity((s) => s.identity);
+  const myAegisId = identity?.aegisId;
   const online = useConnection((s) => s.online);
   const pollResultsMap = usePollsStore((s) => s.results);
 
   const byChat = useMessages((s) => s.byChat);
   const loadChat = useMessages((s) => s.loadChat);
   const markRead = useMessages((s) => s.markRead);
-  const appendMsg = useMessages((s) => s.append);
 
   const list: StoredMessage[] = (byChat[group.id] as StoredMessage[] | undefined) ?? [];
 
@@ -140,15 +140,18 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
   }
 
   async function handleSend() {
-    if (!draft.trim() || sending) return;
+    if (!draft.trim() || sending || !identity) return;
     const text = draft.trim();
     setDraft('');
     setMentionQuery(null);
     setSending(true);
     setErrorMsg(null);
     try {
-      const id = crypto.randomUUID();
-      await appendMsg({ id, chatId: group.id, direction: 'out', body: text, createdAt: Date.now(), type: 'text' });
+      // sendGroupMessage encrypts a copy to every member over the ratchet AND
+      // performs the optimistic local append itself — previously handleSend only
+      // appended locally, so group messages never left the device.
+      const { sendGroupMessage } = await import('../socket/client');
+      await sendGroupMessage({ identity, groupId: group.id, plaintext: text });
     } catch (e) {
       setErrorMsg((e as Error).message);
       setDraft(text);
