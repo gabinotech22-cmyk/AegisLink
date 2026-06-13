@@ -28,7 +28,10 @@ jest.mock('expo-crypto', () => {
 });
 
 // The a2-migration tests pay the old 46 MiB / 3-pass Argon2id cost once each.
-jest.setTimeout(120_000);
+// In pure JS (noble) a single 46 MiB derivation runs ~80-130 s on this machine
+// and slower on CI runners, so the per-test budget must clear several of those.
+// 120 s was enough locally but timed out the a2-upgrade test in CI.
+jest.setTimeout(600_000);
 
 import { argon2id } from '@noble/hashes/argon2';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
@@ -42,6 +45,14 @@ import {
   verifyPinWithSalt,
   DURESS_PIN_SALT,
 } from '../pin';
+
+// pin.ts imports nobleNextTickPatch, which swaps noble's nextTick for a
+// setTimeout(0) macrotask so async Argon2id yields to the UI on-device. There
+// is no UI in a Jest run, and paying a setTimeout round-trip every 25 ms turns
+// the 46 MiB a2 derivations into multi-minute runs that blow the test timeout.
+// Restore the cheap microtask yield: the KDF is still computed for real (so the
+// a2→a3 upgrade is genuinely exercised), only the UI-yield overhead is removed.
+(require('@noble/hashes/utils') as { nextTick: () => Promise<void> }).nextTick = () => Promise.resolve();
 
 const PIN_HASH_KEY = 'aegis.pin.hash';
 const PIN_SALT_KEY = 'aegis.pin.salt.v2';
