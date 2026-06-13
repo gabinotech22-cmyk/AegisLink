@@ -14,7 +14,8 @@
  *  10. handleCamera happy path: setPendingMedia called with processed URI
  *  11. handleCamera: permission denied → setPendingMedia NOT called
  *  12. Pressing file button calls onPick('file')
- *  13. Pressing voice button calls onPick('voice')
+ *  13. Voice/audio option is NOT rendered (voice notes now use the
+ *      composer's inline mic button — see AttachSheet.tsx comment)
  */
 
 import React from 'react';
@@ -256,12 +257,13 @@ describe('AttachSheetScreen', () => {
     expect(onPick).toHaveBeenCalledTimes(1);
   });
 
-  // ── 13. Pressing voice button calls onPick('voice') ──────────────────────
-  //        Note: the button label key is 'attachSheet.audio' (not 'attachSheet.voice')
-  it("calls onPick('voice') when the voice/audio button is pressed", () => {
-    const { getByText } = render(<AttachSheetScreen onBack={onBack} onPick={onPick} />);
-    fireEvent.press(getByText('attachSheet.audio'));
-    expect(onPick).toHaveBeenCalledWith('voice');
-    expect(onPick).toHaveBeenCalledTimes(1);
+  // ── 13. Voice/audio option is NOT rendered ────────────────────────────────
+  //        Voice notes are now sent from the inline mic button in the chat
+  //        composer (reactive, hides while typing), so the attach sheet no
+  //        longer offers a 'voice'/'audio' tile.
+  it("does NOT render a voice/audio option", () => {
+    const { queryByText } = render(<AttachSheetScreen onBack={onBack} onPick={onPick} />);
+    expect(queryByText('attachSheet.audio')).toBeNull();
+    expect(queryByText('attachSheet.voice')).toBeNull();
   });
 });
