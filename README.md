@@ -78,6 +78,13 @@ Calls require a [coturn](https://github.com/coturn/coturn) TURN server; set
   Public License v3.0** ([server/LICENSE](server/LICENSE)) — if you run a
   modified relay as a service, you must publish your modifications.
 
+## Patents
+
+AegisLink is a member of the [Open Invention Network](https://openinventionnetwork.com/),
+the community patent non-aggression pool for open-source software. We hold no
+patents and assert none against open-source technologies — this membership is a
+defensive commitment to keep the project free of patent threats.
+
 ## Community
 
 - **Matrix**: [#aegislink:matrix.org](https://matrix.to/#/#aegislink:matrix.org)
