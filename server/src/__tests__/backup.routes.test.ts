@@ -25,15 +25,11 @@ process.env['AEGIS_DB_PATH'] = ':memory:';
 
 const { encodeBase64, decodeBase64 } = tweetnaclUtil;
 
-// Import deps after setting env vars.
-const { identityRepo } = await import('../db/client.js');
-const { default: backupRoutes } = await import('../routes/backup.js');
-
-// ── Express app ───────────────────────────────────────────────────────────────
-
-const app = express();
-app.use(express.json({ limit: '10mb' }));
-app.use('/backup', backupRoutes);
+// Deps + app are built in beforeAll rather than via top-level await: ts-jest's
+// ESM emit is not reliable across the suite, and a top-level await downleveled
+// to CommonJS is a hard SyntaxError. Deferring keeps the file valid either way.
+let identityRepo: typeof import('../db/client.js')['identityRepo'];
+let app: express.Express;
 
 // ── Registered test identity ──────────────────────────────────────────────────
 
@@ -42,6 +38,12 @@ const clientKeys = nacl.box.keyPair();
 const signingKeys = nacl.sign.keyPair();
 
 beforeAll(async () => {
+  ({ identityRepo } = await import('../db/client.js'));
+  const { default: backupRoutes } = await import('../routes/backup.js');
+  app = express();
+  app.use(express.json({ limit: '10mb' }));
+  app.use('/backup', backupRoutes);
+
   await identityRepo.insert({
     aegis_id: AEGIS_ID,
     public_key_b64: encodeBase64(clientKeys.publicKey),
