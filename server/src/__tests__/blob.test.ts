@@ -27,16 +27,12 @@ process.env['AEGIS_DB_PATH'] = ':memory:';
 // Simpler approach: spin up the router with cwd pointing to TMP_UPLOADS.
 // We achieve this by temporarily overriding process.cwd().
 const _origCwd = process.cwd.bind(process);
-(process as NodeJS.Process & { cwd: () => string }).cwd = () => TMP_UPLOADS;
-
-// Issue a valid PoW so upload requests pass the challenge gate.
-const { issueChallenge, verifyPoW: _verifyPoW } = await import('../pow/challenge.js');
-
-// Import the blob router AFTER cwd override.
-const { default: blobRoutes } = await import('../routes/blob.js');
-
-// Restore cwd so the rest of the test suite is unaffected.
-(process as NodeJS.Process & { cwd: () => string }).cwd = _origCwd;
+// issueChallenge + the blob router are imported in beforeAll (not via top-level
+// await): ts-jest's ESM emit is not reliable across the suite, and a top-level
+// await downleveled to CommonJS is a hard SyntaxError. The cwd override that
+// makes the router pick up TMP_UPLOADS moves into beforeAll with the import.
+let issueChallenge: typeof import('../pow/challenge.js')['issueChallenge'];
+let app: express.Express;
 
 // ── Helper: obtain a fresh PoW solution ──────────────────────────────────────
 function solvePoW(challenge: string, difficulty: number): string {
@@ -61,9 +57,16 @@ function hasLeadingZeroBits(buf: Buffer, bits: number): boolean {
   return true;
 }
 
-// ── Express app for tests ─────────────────────────────────────────────────────
-const app = express();
-app.use('/blob', blobRoutes);
+// ── Express app for tests (built in beforeAll; see the import note above) ──────
+beforeAll(async () => {
+  (process as NodeJS.Process & { cwd: () => string }).cwd = () => TMP_UPLOADS;
+  ({ issueChallenge } = await import('../pow/challenge.js'));
+  const { default: blobRoutes } = await import('../routes/blob.js');
+  (process as NodeJS.Process & { cwd: () => string }).cwd = _origCwd;
+
+  app = express();
+  app.use('/blob', blobRoutes);
+});
 
 // ── Utility: perform a valid upload ──────────────────────────────────────────
 async function doUpload(body: Buffer): Promise<request.Response> {
@@ -144,18 +147,28 @@ describe('FIX A — global storage quota returns 507', () => {
     // Override cwd so the freshly imported blob module sees isolatedTmp/uploads.
     (process as NodeJS.Process & { cwd: () => string }).cwd = () => isolatedTmp;
 
-    // Bust module cache by appending a dummy query string — ESM import() caches
-    // by specifier, so we use a slightly different relative path with a cache-buster.
-    // In Node 22 ESM modules are cached; we use a dynamic import with timestamp.
-    const mod = await import(`../routes/blob.js?cachebust=${Date.now()}`);
-    const isolatedRouter = (mod as { default: express.Router }).default;
+    // Re-evaluate the blob router with a FRESH module registry so its startup
+    // scan runs against the overridden cwd (isolatedTmp) and sees the pre-seeded
+    // 5 GB file. A `?cachebust` query specifier does not resolve under Jest's
+    // module resolver; jest.isolateModulesAsync is the supported way to force a
+    // fresh module instance.
+    // Capture issueChallenge from the SAME isolated registry as the router, so
+    // the PoW challenge is verifiable by the isolated router's own pow module
+    // instance (a challenge from the outer instance would be rejected → 403).
+    let isolatedRouter!: express.Router;
+    let isolatedIssueChallenge!: typeof import('../pow/challenge.js')['issueChallenge'];
+    await jest.isolateModulesAsync(async () => {
+      const mod = await import('../routes/blob.js');
+      isolatedRouter = (mod as { default: express.Router }).default;
+      ({ issueChallenge: isolatedIssueChallenge } = await import('../pow/challenge.js'));
+    });
 
     (process as NodeJS.Process & { cwd: () => string }).cwd = _origCwd;
 
     const isolatedApp = express();
     isolatedApp.use('/blob', isolatedRouter);
 
-    const { challenge, difficulty } = issueChallenge();
+    const { challenge, difficulty } = isolatedIssueChallenge();
     const nonce = solvePoW(challenge, difficulty);
 
     const res = await request(isolatedApp)
