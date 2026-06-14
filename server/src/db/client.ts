@@ -650,6 +650,27 @@ export async function initDb(): Promise<void> {
   }
 }
 
+/**
+ * Close the active database backend and reset module state.
+ *
+ * Tests use a per-file in-memory SQLite via the lazy `sqlite` singleton — a
+ * native `node:sqlite` handle — and, for Postgres, a pooled connection. Left
+ * open, these outlive the Jest test file: a handle accessed after the
+ * environment is torn down surfaces as "import after teardown" / `ENOENT
+ * 'sqlite'` and cascades into unrelated suites. Registered as a global
+ * `afterAll` (see jest.setup.ts) so it runs after each file's own teardown.
+ * Idempotent and safe to call when nothing is open.
+ */
+export async function closeDb(): Promise<void> {
+  _initialized = false;
+  try { sqlite?.close(); } catch { /* already closed */ }
+  sqlite = null;
+  if (pgPool) {
+    try { await pgPool.end(); } catch { /* already ended */ }
+    pgPool = null;
+  }
+}
+
 // ── Low-level query helpers ───────────────────────────────────────────────────
 // These are used internally by repos; not exported publicly.
 

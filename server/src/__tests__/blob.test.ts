@@ -7,6 +7,7 @@
  *          and Content-Type: application/octet-stream.
  */
 
+import { jest } from '@jest/globals';
 import express from 'express';
 import request from 'supertest';
 import fs from 'node:fs';
