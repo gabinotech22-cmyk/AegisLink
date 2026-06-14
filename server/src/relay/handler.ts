@@ -2,6 +2,7 @@ import type { Server as SocketServer, Socket } from 'socket.io';
 import { z } from 'zod';
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
+import { randomUUID } from 'node:crypto';
 
 const { decodeBase64 } = naclUtil;
 import { messageRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
@@ -923,7 +924,6 @@ export function attachRelay(io: SocketServer) {
         // returned blobId here. The relay never stores file content itself.
         const insertedAttachments: Array<{ id: string; blobId: string; filename: string; mimeType: string; sizeBytes: number }> = [];
         if (attachments && attachments.length > 0) {
-          const { randomUUID } = await import('node:crypto');
           for (const att of attachments) {
             const attId = randomUUID();
             await workAttachmentRepo.insert({
