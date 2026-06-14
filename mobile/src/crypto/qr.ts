@@ -6,6 +6,8 @@
  * directly from a scanned URL on iOS/Android.
  */
 
+import { keyMatchesAegisId } from './aegisId';
+
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 const SCHEME = 'aegislink://v1/';
 const GROUP_SCHEME = 'aegislink://group/v1/';
@@ -63,6 +65,12 @@ export function parseIdentityQR(raw: string): ParsedIdentityQR | null {
   if (!AEGIS_ID_RE.test(aegisId)) return null;
   // base64-encoded 32-byte Curve25519 key is exactly 44 chars.
   if (publicKeyB64.length !== 44) return null;
+  // Cryptographically bind the ID to the key. The Aegis ID is derived from the
+  // public key, so a payload pairing an ID with a non-matching key is malformed
+  // or tampered (e.g. someone's ID shown over a different key) — reject it. A
+  // legitimate QR, generated via encodeIdentityQR from a real identity, always
+  // passes because there aegisId === deriveAegisId(publicKey) by construction.
+  if (!keyMatchesAegisId(publicKeyB64, aegisId)) return null;
   return { aegisId, publicKeyB64 };
 }
 

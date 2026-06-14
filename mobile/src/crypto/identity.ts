@@ -2,6 +2,13 @@ import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import * as SecureStore from 'expo-secure-store';
 import { signSecretKeySlot } from './types';
+import { deriveAegisId } from './aegisId';
+
+// Re-exported for backward compatibility: deriveAegisId now lives in the pure
+// crypto/aegisId module so the ID↔key binding can be enforced at every trust
+// boundary without pulling native modules in. Existing importers of
+// `deriveAegisId` from './identity' keep working unchanged.
+export { deriveAegisId };
 
 export interface KeyPair {
   publicKey: Uint8Array;
@@ -27,30 +34,6 @@ export function generateKeyPair(): KeyPair {
 
 export function generateSigningKeyPair(): KeyPair {
   return nacl.sign.keyPair();
-}
-
-const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
-function encodeBase32(bytes: Uint8Array, charsOut: number): string {
-  let bits = 0n;
-  for (const b of bytes) bits = (bits << 8n) | BigInt(b);
-  const totalBits = BigInt(bytes.length * 8);
-  const needed = BigInt(charsOut * 5);
-  if (totalBits > needed) bits = bits >> (totalBits - needed);
-  else if (totalBits < needed) bits = bits << (needed - totalBits);
-  let out = '';
-  for (let i = charsOut - 1; i >= 0; i--) {
-    const idx = Number((bits >> BigInt(i * 5)) & 0x1fn);
-    out += CROCKFORD[idx];
-  }
-  return out;
-}
-
-export function deriveAegisId(publicKey: Uint8Array): string {
-  if (publicKey.length < 7) throw new Error('public key too short');
-  const head = publicKey.slice(0, 7);
-  const raw = encodeBase32(head, 11);
-  return `${raw.slice(0, 3)}-${raw.slice(3, 7)}-${raw.slice(7, 11)}`;
 }
 
 export function createIdentity(): Identity {
