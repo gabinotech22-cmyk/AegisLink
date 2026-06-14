@@ -146,6 +146,10 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const typingIndicator = usePreferences((s) => s.typingIndicator);
   const [mismatchKey, setMismatchKey] = useState<string | null>(null);
   const [showScheduler, setShowScheduler] = useState(false);
+  // Proactive verification nudge: dismissible for the current view only (no
+  // persistence) so it keeps reappearing on each open until the contact is
+  // verified — without nagging within a single session.
+  const [verifyNudgeDismissed, setVerifyNudgeDismissed] = useState(false);
   const { scheduleMessage, scheduled } = useScheduledMessages();
   const pendingScheduledCount = scheduled.filter(
     (m) => m.status === 'pending' && m.recipientAegisId === contact.aegisId,
@@ -925,6 +929,64 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                   </Text>
                 </Pressable>
               )}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Proactive verification nudge — only when there is NO active key-mismatch
+            banner and the contact has not been verified out-of-band yet. Soft,
+            accent-tinted (not an alarm) and dismissible for the session. */}
+        {!mismatchKey && !contact.verified && !verifyNudgeDismissed ? (
+          <View
+            style={{
+              marginHorizontal: 12,
+              marginTop: 10,
+              marginBottom: 4,
+              padding: 14,
+              backgroundColor: `${t.accent}14`,
+              borderWidth: 1,
+              borderColor: `${t.accent}55`,
+              borderRadius: t.radius,
+              gap: 8,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <I.Lock size={13} color={t.accent} />
+              <Text style={{ flex: 1, fontFamily: t.font, fontWeight: '700', fontSize: 13, color: t.text }}>
+                {i18nT('chat.verifyNudgeTitle')}
+              </Text>
+            </View>
+            <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 18 }}>
+              {i18nT('chat.verifyNudgeDesc')}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+              <Pressable
+                onPress={onContactDetail}
+                style={{
+                  backgroundColor: t.accent,
+                  paddingHorizontal: 14,
+                  paddingVertical: 7,
+                  borderRadius: t.radiusS,
+                }}
+              >
+                <Text style={{ color: t.accentInk, fontFamily: t.font, fontSize: 12, fontWeight: '600' }}>
+                  {i18nT('chat.verifyNudgeAction')}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setVerifyNudgeDismissed(true)}
+                style={{
+                  borderWidth: 1,
+                  borderColor: t.borderStrong,
+                  paddingHorizontal: 14,
+                  paddingVertical: 7,
+                  borderRadius: t.radiusS,
+                }}
+              >
+                <Text style={{ color: t.text, fontFamily: t.font, fontSize: 12, fontWeight: '500' }}>
+                  {i18nT('chat.verifyNudgeDismiss')}
+                </Text>
+              </Pressable>
             </View>
           </View>
         ) : null}
