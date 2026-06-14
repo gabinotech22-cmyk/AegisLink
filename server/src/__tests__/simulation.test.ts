@@ -198,12 +198,18 @@ beforeAll(async () => {
 afterAll(async () => {
   // Disconnect all Socket.IO clients first, then close servers.
   // Errors are swallowed — the server may already be idle after test sockets disconnect.
+  // Force-drop server-side sockets first so their disconnect handlers run, then
+  // close the servers and let any relay async settle before Jest tears down the
+  // module environment (prevents 'import after teardown' under CI timing).
+  io.disconnectSockets(true);
+  await new Promise((resolve) => setImmediate(resolve));
   await new Promise<void>((resolve) => {
     io.close(() => resolve());
   });
   await new Promise<void>((resolve) => {
     httpServer.close(() => resolve());
   });
+  await new Promise((resolve) => setTimeout(resolve, 50));
 }, 10_000);
 
 // ── Helper: register one agent via HTTP ───────────────────────────────────────
