@@ -6,6 +6,7 @@
  * universal form for the remote wipe, by design).
  */
 
+import { decodeBase64 } from 'tweetnacl-util';
 import {
   encodeIdentityQR,
   encodeIdentityLink,
@@ -16,9 +17,12 @@ import {
   universalToScheme,
   UNIVERSAL_LINK_HOST,
 } from '../qr';
+import { deriveAegisId } from '../aegisId';
 
-const ID = 'CKT-30J2-M3EE';
-const KEY = 'A'.repeat(43) + '='; // 44-char base64 (32-byte key)
+// parseIdentityQR now cryptographically binds the ID to its key, so the fixture
+// MUST be a real pair: the ID is derived from the key, not an arbitrary literal.
+const KEY = 'A'.repeat(43) + '='; // 44-char base64 (deterministic 32-byte key)
+const ID = deriveAegisId(decodeBase64(KEY));
 
 describe('universal contact links', () => {
   it('encodeIdentityLink → parseIdentityQR round-trips', () => {
