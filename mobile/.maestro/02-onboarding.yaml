@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# E2E pilot — anonymous identity generation.
+#
+# Generates a real cryptographic identity (TweetNaCl keypair + X3DH prekeys)
+# and confirms the app advances past onboarding into the main UI.
+#
+# Why this works offline in CI: identity is generated ON-DEVICE first; the
+# relay registration that follows may fail (no server in CI), but Onboarding
+# deliberately calls onDone() in its catch block (Onboarding.tsx) so the user
+# still reaches Home. This exercises the real crypto + SecureStore + SQLite
+# paths — the parts that behave identically on an emulator and a physical phone.
+#
+# What this does NOT cover (needs a physical device): camera QR scanning, push
+# delivery, WebRTC calls, biometrics. See README.md.
+# ─────────────────────────────────────────────────────────────────────────────
+appId: com.aegislink.app
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Generate my identity"
+- tapOn: "Generate my identity"
+# PoW + key generation can be slow under Hermes on an emulator (pure-JS KDFs),
+# so allow a generous window. Success == the welcome CTA is gone, i.e. we left
+# onboarding and rendered the main app.
+- extendedWaitUntil:
+    notVisible: "Generate my identity"
+    timeout: 90000
+- takeScreenshot: 02-after-onboarding
