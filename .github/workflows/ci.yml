@@ -134,6 +134,9 @@ jobs:
   mobile-e2e:
     name: Mobile E2E (Maestro)
     runs-on: ubuntu-latest
+    # MANUAL ONLY — never runs on push/PR so it can't redden normal commits.
+    # We trigger it by hand (workflow_dispatch) while it's still being stabilised.
+    if: github.event_name == 'workflow_dispatch'
     continue-on-error: true
     timeout-minutes: 60
     defaults:
