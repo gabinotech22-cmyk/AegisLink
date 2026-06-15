@@ -138,22 +138,54 @@ function attachLocalNotificationHandlers(): void {
     const actionId = response.actionIdentifier;
 
     if (actionId === 'REPLY') {
-      // User replied from notification — send the text via socket without opening app
-      const replyText = (response as { userText?: string }).userText;
-      if (replyText && fromAegisId) {
-        try {
-          const { sendMessage } = require('../socket/client') as { sendMessage: (to: string, text: string) => void };
-          sendMessage(fromAegisId, replyText);
-          void Notifications.dismissNotificationAsync(response.notification.request.identifier);
-        } catch (e) {
-          if (__DEV__) console.warn('[push] inline reply failed:', e);
-        }
+      // User replied from notification — encrypt and send without opening the app.
+      // The socket may be down (background wake): sendMessage/sendGroupMessage
+      // persist to the SQLite outbox before emitting, so triggering reconnect()
+      // is enough — flushOutbox() drains the job on the next auth:ok.
+      const replyText = (response as { userText?: string }).userText?.trim();
+      const isGroup = data?.isGroup === true;
+      const groupId = data?.groupId as string | undefined;
+      if (replyText && (isGroup ? groupId : fromAegisId)) {
+        void (async () => {
+          try {
+            const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+            const identity = useIdentity.getState().identity;
+            if (!identity) return;
+            const client = require('../socket/client') as typeof import('../socket/client');
+            if (!client.isConnected()) client.connect(identity);
+            if (isGroup && groupId) {
+              await client.sendGroupMessage({ identity, groupId, plaintext: replyText });
+            } else if (fromAegisId) {
+              const { useContacts } = require('../store/contacts') as typeof import('../store/contacts');
+              let contact = useContacts.getState().get(fromAegisId);
+              if (!contact) {
+                // Background wake before the app hydrated stores — load from SQLite.
+                await useContacts.getState().hydrate();
+                contact = useContacts.getState().get(fromAegisId);
+              }
+              if (!contact) return;
+              const { decodeBase64 } = require('tweetnacl-util') as typeof import('tweetnacl-util');
+              await client.sendMessage({
+                identity,
+                recipientAegisId: fromAegisId,
+                recipientPublicKey: decodeBase64(contact.publicKeyB64),
+                plaintext: replyText,
+              });
+            }
+            // Only dismiss once the reply is sent (or safely queued in the outbox).
+            await Notifications.dismissNotificationAsync(response.notification.request.identifier);
+          } catch (e) {
+            if (__DEV__) console.warn('[push] inline reply failed:', e);
+          }
+        })();
       }
     } else if (actionId === 'MARK_READ') {
-      if (fromAegisId) {
+      // For group notifications the chat is the group, not the sender.
+      const chatId = data?.isGroup === true ? (data?.groupId as string | undefined) : fromAegisId;
+      if (chatId) {
         try {
-          const { useMessages } = require('../store/messages') as { useMessages: { getState: () => { markRead: (id: string) => Promise<void> } } };
-          void useMessages.getState().markRead(fromAegisId);
+          const { useMessages } = require('../store/messages') as typeof import('../store/messages');
+          void useMessages.getState().markRead(chatId);
           void Notifications.dismissNotificationAsync(response.notification.request.identifier);
         } catch (e) {
           if (__DEV__) console.warn('[push] mark-read action failed:', e);
@@ -163,8 +195,10 @@ function attachLocalNotificationHandlers(): void {
       // App was woken by a call push — reconnect socket so the relay can
       // re-deliver call:invite once the authenticated socket is established.
       try {
-        const { reconnect } = require('../socket/client') as { reconnect: () => void };
-        reconnect();
+        const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+        const identity = useIdentity.getState().identity;
+        const client = require('../socket/client') as typeof import('../socket/client');
+        if (identity) client.connect(identity);
       } catch { /* socket module not yet loaded — no-op */ }
       // Also surface the incoming call screen if caller info is available
       if (fromAegisId && _onOpenChat) {
@@ -187,8 +221,10 @@ function attachLocalNotificationHandlers(): void {
       if ((data?.type as string) === 'call_invite') {
         // Cold-start from a call push — reconnect socket first, then navigate
         try {
-          const { reconnect } = require('../socket/client') as { reconnect: () => void };
-          reconnect();
+          const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+          const identity = useIdentity.getState().identity;
+          const client = require('../socket/client') as typeof import('../socket/client');
+          if (identity) client.connect(identity);
         } catch { /* socket module not yet loaded — no-op */ }
         if (fromAegisId && _onOpenChat) {
           setTimeout(() => _onOpenChat?.({ aegisId: fromAegisId }), 500);
