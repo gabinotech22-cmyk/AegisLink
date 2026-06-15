@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, pinContact as dbPinContact, type StoredContact } from '../db/local';
 import { lookupIdentity, ApiError } from '../api';
+import { keyMatchesAegisId } from '../crypto/aegisId';
 
 export type AddResult =
   | { kind: 'added'; contact: StoredContact }
@@ -79,6 +80,19 @@ export const useContacts = create<ContactsState>((set, get) => ({
       throw e;
     }
 
+    // Trust boundary: the directory (relay) is untrusted. The Aegis ID is derived
+    // from the X25519 public key, so the key the directory returns MUST derive
+    // back to the ID we asked for. Reject otherwise — a malicious or buggy
+    // directory must not be able to bind an arbitrary key to this ID. Strong
+    // authentication still requires out-of-band fingerprint verification; the
+    // contact stays verified:false until the 128-bit fingerprint is confirmed.
+    if (!keyMatchesAegisId(record.publicKey, aegisId)) {
+      throw new Error(
+        `The directory returned a key that does not match ${aegisId}. Refusing to ` +
+          `add this contact — ask them to share their QR code instead.`,
+      );
+    }
+
     const contact: StoredContact = {
       aegisId: record.aegisId,
       publicKeyB64: record.publicKey,
@@ -95,6 +109,15 @@ export const useContacts = create<ContactsState>((set, get) => ({
 
   async addFromQR(aegisId, publicKeyB64, displayName) {
     set({ error: null });
+
+    // Defense in depth: parseIdentityQR already binds ID↔key, but addFromQR is a
+    // public store action that stores contacts as verified:true (the strong,
+    // out-of-band path). Never persist a contact whose ID does not derive from
+    // its key, even if a caller reaches this without going through the parser.
+    if (!keyMatchesAegisId(publicKeyB64, aegisId)) {
+      throw new Error('Invalid contact: the Aegis ID does not match its key.');
+    }
+
     const existing = await getContact(aegisId);
 
     // MITM check: if we already had this contact with a different key, surface
