@@ -41,7 +41,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # Node 24: node:sqlite is stable (Node 22 needs --experimental-sqlite)
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: server/package-lock.json
 
@@ -62,7 +63,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # Node 24: node:sqlite is stable (Node 22 needs --experimental-sqlite)
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: server/package-lock.json
 
