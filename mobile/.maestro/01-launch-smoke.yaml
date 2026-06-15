@@ -1,0 +1,18 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Smoke test — the bulletproof baseline.
+#
+# Proves the compiled app boots on a real Android system (emulator) and renders
+# the onboarding welcome screen. No network, no relay, no camera required, so
+# this flow should ALWAYS be green; if it goes red, the native build itself is
+# broken (a genuine signal worth blocking on).
+#
+# Asserts on English copy because a fresh CI emulator defaults to en_US locale.
+# ─────────────────────────────────────────────────────────────────────────────
+appId: com.aegislink.app
+---
+- launchApp:
+    # Wipe app data so we always land on onboarding, never a leftover identity.
+    clearState: true
+- assertVisible: "Generate my identity"
+- assertVisible: "Messaging without a trace."
+- takeScreenshot: 01-welcome
