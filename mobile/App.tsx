@@ -974,6 +974,10 @@ function Shell() {
               setStack([]);
               push({ name: 'chat', contact: c });
             }}
+            onGroupInvite={(groupId, groupName, adminId) => {
+              pop();
+              push({ name: 'groupJoin', groupId, groupName, adminId });
+            }}
           />
         );
       case 'verify':
