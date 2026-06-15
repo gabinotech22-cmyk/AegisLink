@@ -153,11 +153,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          # Cache ~/.gradle/caches and ~/.gradle/wrapper keyed on gradle
-          # lockfiles/wrapper props. Once warm, this avoids re-resolving
-          # dependencies (incl. org.jitsi:webrtc) from jitpack/Maven on every
-          # run — only a cold cache needs network access to those repos.
-          cache: gradle
+          # NOTE: no `cache: gradle` here — actions/setup-java looks for *.gradle
+          # files at this step, but in an Expo project android/ is generated later
+          # by `expo prebuild`, so the cache key resolution fails ("No file matched").
+          # Gradle caching, if desired, must be a manual actions/cache step AFTER prebuild.
 
       - name: Install mobile dependencies
         run: npm ci
