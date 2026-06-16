@@ -443,6 +443,7 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   try { await d.execAsync('ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE messages ADD COLUMN expires_at INTEGER;'); } catch (e) {}
+  try { await d.execAsync('ALTER TABLE messages ADD COLUMN attachments TEXT;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE chat_state ADD COLUMN ephemeral_timer INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
 }
 
@@ -955,6 +956,17 @@ export interface MessageReactions {
   [emoji: string]: string[]; // emoji -> list of aegisIds who reacted
 }
 
+export interface Attachment {
+  type: 'image' | 'video' | 'audio' | 'file';
+  uri: string;          // blob:id:key:nonce or local path during send
+  fileName?: string;    // for files
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  duration?: number;    // for video/audio in seconds
+  caption?: string;     // per-attachment caption (optional)
+}
+
 export interface StoredMessage {
   id: string;
   chatId: string;
@@ -970,6 +982,7 @@ export interface StoredMessage {
   pinned?: boolean;
   deliveryStatus?: 'sent' | 'delivered' | 'read';
   expiresAt?: number | null;
+  attachments?: Attachment[] | null;
 }
 
 interface MessageRow {
@@ -987,12 +1000,17 @@ interface MessageRow {
   pinned: number;
   delivery_status: string | null;
   expires_at: number | null;
+  attachments: string | null;
 }
 
 async function rowToMessage(r: MessageRow, body: string): Promise<StoredMessage> {
   let reactions: MessageReactions | undefined;
   if (r.reactions) {
     try { reactions = JSON.parse(r.reactions); } catch { /* ignore */ }
+  }
+  let attachments: Attachment[] | null = null;
+  if (r.attachments) {
+    try { attachments = JSON.parse(r.attachments); } catch { /* ignore */ }
   }
   const mediaUri = r.media_uri ? await decryptBody(r.media_uri) : null;
   return {
@@ -1010,6 +1028,7 @@ async function rowToMessage(r: MessageRow, body: string): Promise<StoredMessage>
     pinned: r.pinned === 1,
     deliveryStatus: (r.delivery_status as 'sent' | 'delivered' | 'read' | null) ?? 'sent',
     expiresAt: r.expires_at ?? null,
+    attachments,
   };
 }
 
@@ -1019,8 +1038,8 @@ export async function saveMessage(m: StoredMessage): Promise<void> {
     const encryptedMediaUri = m.mediaUri ? await encryptBody(m.mediaUri) : null;
     await d.runAsync(
       `INSERT OR REPLACE INTO messages
-       (id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       m.id,
       m.chatId,
       m.direction,
@@ -1034,7 +1053,8 @@ export async function saveMessage(m: StoredMessage): Promise<void> {
       m.deleted ? 1 : 0,
       m.pinned ? 1 : 0,
       m.deliveryStatus ?? 'sent',
-      m.expiresAt ?? null
+      m.expiresAt ?? null,
+      m.attachments ? JSON.stringify(m.attachments) : null
     );
   });
 }
@@ -1042,6 +1062,13 @@ export async function saveMessage(m: StoredMessage): Promise<void> {
 export async function updateMessageDelivery(id: string, status: 'sent' | 'delivered' | 'read'): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync('UPDATE messages SET delivery_status = ? WHERE id = ?', status, id);
+  });
+}
+
+/** Update a message's attachments array in place (JSON-serialized). */
+export async function updateMessageAttachments(id: string, attachments: Attachment[]): Promise<void> {
+  return withDb(async (d) => {
+    await d.runAsync('UPDATE messages SET attachments = ? WHERE id = ?', JSON.stringify(attachments), id);
   });
 }
 
@@ -1056,7 +1083,7 @@ export async function updateMessageMediaUri(id: string, mediaUri: string): Promi
 export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<MessageRow>(
-      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
+      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments
        FROM messages WHERE chat_id = ? ORDER BY created_at ASC`,
       chatId
     );
@@ -1067,7 +1094,7 @@ export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[
 export async function getMessage(id: string): Promise<StoredMessage | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<MessageRow>(
-      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
+      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments
        FROM messages WHERE id = ?`,
       id
     );
@@ -1085,7 +1112,7 @@ export async function setMessagePinned(id: string, pinned: boolean): Promise<voi
 export async function getPinnedMessage(chatId: string): Promise<StoredMessage | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<MessageRow>(
-      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status
+      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments
        FROM messages WHERE chat_id = ? AND pinned = 1 ORDER BY created_at DESC LIMIT 1`,
       chatId
     );
