@@ -53,7 +53,7 @@ export function ScanQRScreen({ onCancel, onAdded, onGroupInvite }: Props) {
         // to handle joins (e.g. opened from the identity verification flow).
         // Explain what the code is and where to use it instead of failing
         // silently or showing the generic "invalid QR" message.
-        Alert.alert(
+        themedAlert(
           i18nT('scanQR.groupInviteWrongContextTitle', 'Group invitation'),
           i18nT(
             'scanQR.groupInviteWrongContextDesc',
