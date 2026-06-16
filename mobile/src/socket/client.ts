@@ -943,7 +943,7 @@ export async function rekeyGroupAfterRemoval(
     throw new Error('rekey_offline');
   }
 
-  const { generateSenderKey, sealSenderKeyFor } =
+  const { generateSenderKey, sealSenderKeyForRecipients } =
     require('../crypto/channelKey') as typeof import('../crypto/channelKey');
   const { saveSenderKey } =
     require('../crypto/channelKeyStore') as typeof import('../crypto/channelKeyStore');
@@ -954,40 +954,41 @@ export async function rekeyGroupAfterRemoval(
   // 2. Persist locally (SecureStore only) before distributing.
   await saveSenderKey(groupId, identity.aegisId, newSenderKey);
 
-  // 3. Seal the new key for every remaining member except ourselves and the
-  //    removed member (the latter simply isn't in `remainingMembers`).
-  const contacts = useContacts.getState().contacts;
-  const distributions: Array<{
-    aegisId: string;
-    ciphertextB64: string;
-    nonceB64: string;
-    chainKeyB64: string;
-    iteration: number;
-    senderAegisId: string;
-  }> = [];
-
+  // 3. Resolve recipients = every remaining member except ourselves that we
+  //    have a contact (X25519 key) for. A Map keeps lookup O(1) so building the
+  //    list stays linear even at MAX_GROUP_MEMBERS (1024); the prior find() made
+  //    it O(N²).
+  const contactByAegisId = new Map(
+    useContacts.getState().contacts.map((c) => [c.aegisId, c]),
+  );
+  const recipients: Array<{ aegisId: string; publicKeyB64: string }> = [];
   for (const memberId of remainingMembers) {
     if (memberId === identity.aegisId) continue;
-    const contact = contacts.find((c) => c.aegisId === memberId);
+    const contact = contactByAegisId.get(memberId);
     if (!contact) continue;
-    const dist = sealSenderKeyFor(
-      newSenderKey,
-      groupId,
-      identity.aegisId,
-      contact.publicKeyB64,
-      identity.secretKeyB64,
-    );
-    distributions.push({
-      aegisId: memberId,
-      ciphertextB64: dist.ciphertextB64,
-      nonceB64: dist.nonceB64,
-      chainKeyB64: dist.chainKeyB64,
-      iteration: dist.iteration,
-      senderAegisId: dist.senderAegisId,
-    });
+    recipients.push({ aegisId: memberId, publicKeyB64: contact.publicKeyB64 });
   }
 
-  if (distributions.length === 0) return; // nobody else to re-key
+  if (recipients.length === 0) return; // nobody else to re-key
+
+  // Seal off the synchronous path: each box is a pure-JS scalarmult, so the
+  // helper yields to the event loop every SEAL_CHUNK_SIZE seals — a 1024-member
+  // re-key stays responsive instead of freezing the UI for tens of seconds.
+  const sealed = await sealSenderKeyForRecipients(
+    newSenderKey,
+    groupId,
+    identity.aegisId,
+    identity.secretKeyB64,
+    recipients,
+  );
+  const distributions = sealed.map((dist) => ({
+    aegisId: dist.aegisId,
+    ciphertextB64: dist.ciphertextB64,
+    nonceB64: dist.nonceB64,
+    chainKeyB64: dist.chainKeyB64,
+    iteration: dist.iteration,
+    senderAegisId: dist.senderAegisId,
+  }));
 
   // 4. Fan-out in batches of 512 (server-side limit per group:rekey call).
   //    Emit each batch sequentially and await its ack before the next one so
