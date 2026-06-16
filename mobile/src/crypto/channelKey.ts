@@ -126,6 +126,45 @@ export function sealSenderKeyFor(
   };
 }
 
+/**
+ * Number of SenderKey seals performed between event-loop yields. Each seal is a
+ * pure-JS X25519 scalarmult (~0.44 ms in Node, ~tens of ms under Hermes), so a
+ * large group (up to MAX_GROUP_MEMBERS = 1024) would block the JS thread for
+ * many seconds if sealed in one synchronous burst. 32 keeps each chunk well
+ * under a frame budget's worth of work between paints.
+ */
+export const SEAL_CHUNK_SIZE = 32;
+
+/** Yield a macrotask so the single JS thread can paint/respond between chunks. */
+const yieldToEventLoop = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
+ * Seal one SenderKey for many recipients, yielding to the event loop every
+ * SEAL_CHUNK_SIZE boxes so a large re-key never freezes the UI. The work is
+ * still O(N) — yielding makes it non-blocking, not faster. The returned
+ * distributions preserve `recipients` order and tag each with its aegisId so
+ * the caller can map them straight to a fan-out batch.
+ */
+export async function sealSenderKeyForRecipients(
+  sk: SenderKey,
+  channelId: string,
+  senderAegisId: string,
+  senderSecretKeyB64: string,
+  recipients: ReadonlyArray<{ aegisId: string; publicKeyB64: string }>
+): Promise<Array<SenderKeyDistributionMessage & { aegisId: string }>> {
+  const out: Array<SenderKeyDistributionMessage & { aegisId: string }> = [];
+  for (let i = 0; i < recipients.length; i++) {
+    const r = recipients[i];
+    const dist = sealSenderKeyFor(sk, channelId, senderAegisId, r.publicKeyB64, senderSecretKeyB64);
+    out.push({ ...dist, aegisId: r.aegisId });
+    if ((i + 1) % SEAL_CHUNK_SIZE === 0 && i + 1 < recipients.length) {
+      await yieldToEventLoop();
+    }
+  }
+  return out;
+}
+
 /** Open a SenderKey distribution message addressed to us. Throws on failure. */
 export function openSenderKeyDistribution(
   msg: SenderKeyDistributionMessage,
