@@ -112,7 +112,7 @@ export function ForwardModal({ visible, body, onClose }: Props) {
                   opacity: sending && sending !== item.aegisId ? 0.5 : 1,
                 })}
               >
-                <Avatar t={t} name={item.avatarImage || item.name} color={item.color ?? t.accent} size={40} />
+                <Avatar t={t} name={item.avatarImage || item.name} color={item.color ?? t.accent} size={40} seed={item.publicKeyB64 || item.aegisId} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text, fontWeight: '500' }}>{item.name}</Text>
                   <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim }}>{item.aegisId}</Text>

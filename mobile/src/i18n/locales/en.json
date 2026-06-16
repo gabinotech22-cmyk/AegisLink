@@ -51,9 +51,10 @@
     "continueBtn": "Continue",
     "almostDone": "ALMOST DONE",
     "nicknameTitle": "What should we call you?",
-    "nicknameSubtitle": "The name your contacts will see. It's end-to-end encrypted: the server never sees it. It's optional and you stay anonymous (no phone number, no email).",
+    "nicknameSubtitle": "Your avatar is generated from your key. You can tint it, or upload a photo later in your profile. The name your contacts will see is end-to-end encrypted: the server never sees it. Everything here is optional; you stay anonymous (no phone number, no email).",
     "nicknameLabel": "VISIBLE NAME (OPTIONAL)",
     "nicknameDefault": "Default: {{name}}",
+    "colorSwatchLabel": "Avatar color {{color}}",
     "skipNickname": "Skip for now"
   },
   "home": {
@@ -952,6 +953,12 @@
     "orWords": "OR — 8 SAFETY WORDS",
     "keyFingerprint": "KEY FINGERPRINT (HEX)",
     "scanPeer": "Scan a peer's QR",
+    "scanQR": "SCAN QR",
+    "shareContact": "SHARE ID",
+    "shareTitle": "My AegisLink contact",
+    "shareMessage": "Add me on AegisLink:",
+    "shareId": "Or use my ID:",
+    "shareContactLabel": "Share my contact",
     "match": "Keys match",
     "noMatch": "Keys do not match",
     "markVerified": "Mark as verified"

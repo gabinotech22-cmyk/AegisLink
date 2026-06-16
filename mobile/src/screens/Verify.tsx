@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView, Share, ActivityIndicator, Alert } from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import { BrandedQR } from '../components/BrandedQR';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { decodeBase64 } from 'tweetnacl-util';
@@ -221,21 +221,13 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
           {i18nT('verify.desc', "Show this QR to your peer in person, or read the 8 safety words aloud. Matching = no one's in the middle.")}
         </Text>
 
-        <View
-          style={{
-            padding: 20,
-            backgroundColor: t.surface,
-            borderRadius: t.radius,
-            borderWidth: 1,
-            borderColor: t.borderStrong,
-            marginTop: 6,
-          }}
-        >
-          <QRCode
+        <View style={{ marginTop: 6 }}>
+          <BrandedQR
             value={qrPayload}
             size={220}
-            color={t.dark ? t.accent : t.text}
-            backgroundColor={t.surface}
+            color={t.dark ? t.accent : '#0a0a0a'}
+            background={t.dark ? t.bg : '#ffffff'}
+            accent={t.accent}
           />
         </View>
 
@@ -323,54 +315,48 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
           ))}
         </View>
 
-        <Pressable
-          onPress={onScan}
-          style={({ pressed }) => ({
-            marginTop: 28,
-            backgroundColor: pressed ? t.surface2 : 'transparent',
-            borderWidth: 1,
-            borderColor: t.borderStrong,
-            borderRadius: t.radius,
-            paddingVertical: 14,
-            paddingHorizontal: 22,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 10,
-          })}
-          accessibilityLabel={i18nT('verify.scanPeer', "Scan a peer's QR")}
-        >
-          <I.QR size={18} color={t.text} />
-          <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text, fontWeight: '500' }}>
-            {i18nT('verify.scanPeer', "Scan a peer's QR")}
-          </Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 20, width: '100%' }}>
+          <Pressable
+            onPress={onScan}
+            style={({ pressed }) => ({
+              flex: 1,
+              backgroundColor: pressed ? t.surface2 : 'transparent',
+              borderWidth: 1,
+              borderColor: t.borderStrong,
+              borderRadius: t.radius,
+              paddingVertical: 13,
+              alignItems: 'center',
+              justifyContent: 'center',
+            })}
+            accessibilityLabel={i18nT('verify.scanPeer', "Scan a peer's QR")}
+          >
+            <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.text, letterSpacing: 0.5 }}>
+              {i18nT('verify.scanQR', 'SCAN QR')}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={async () => {
+              await Share.share({
+                title: i18nT('verify.shareTitle', 'Mi contacto AegisLink'),
+                message: `${i18nT('verify.shareMessage', 'Add me on AegisLink:')}\naegislink://v1/${identity.aegisId}/${encodeURIComponent(identity.publicKeyB64)}\n\n${i18nT('verify.shareId', 'Or use my ID:')} ${identity.aegisId}`,
+              });
+            }}
+            style={({ pressed }) => ({
+              flex: 1,
+              backgroundColor: t.accent,
+              borderRadius: t.radius,
+              paddingVertical: 13,
+              alignItems: 'center',
+              justifyContent: 'center',
+            })}
+            accessibilityLabel={i18nT('verify.shareContactLabel', 'Compartir mi contacto')}
+          >
+            <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accentInk ?? '#0a0e0d', fontWeight: '600', letterSpacing: 0.5 }}>
+              {i18nT('verify.shareContact', 'SHARE ID')}
+            </Text>
+          </Pressable>
+        </View>
 
-        <Pressable
-          onPress={async () => {
-            await Share.share({
-              title: i18nT('verify.shareTitle', 'Mi contacto AegisLink'),
-              message: `${i18nT('verify.shareMessage', 'Add me on AegisLink:')}\naegislink://v1/${identity.aegisId}/${encodeURIComponent(identity.publicKeyB64)}\n\n${i18nT('verify.shareId', 'Or use my ID:')} ${identity.aegisId}`,
-            });
-          }}
-          style={({ pressed }) => ({
-            marginTop: 12,
-            backgroundColor: pressed ? t.surface2 : 'transparent',
-            borderWidth: 1,
-            borderColor: t.borderStrong,
-            borderRadius: t.radius,
-            paddingVertical: 14,
-            paddingHorizontal: 22,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 10,
-          })}
-          accessibilityLabel={i18nT('verify.shareContactLabel', 'Compartir mi contacto')}
-        >
-          <I.Forward size={18} color={t.text} />
-          <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text, fontWeight: '500' }}>
-            {i18nT('verify.shareContact', 'Compartir mi contacto')}
-          </Text>
-        </Pressable>
       </ScrollView>
     </View>
   );

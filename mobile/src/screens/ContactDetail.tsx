@@ -189,7 +189,7 @@ export function ContactDetailScreen({
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: 22 }}>
           <View style={{ alignItems: 'center', paddingHorizontal: 22, paddingVertical: 14 }}>
-            <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.accent} size={88} />
+            <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.accent} size={88} seed={contact.publicKeyB64 || contact.aegisId} />
             <Text
               style={{
                 fontFamily: /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(contact.name) ? t.fontMono : t.fontDisplay,

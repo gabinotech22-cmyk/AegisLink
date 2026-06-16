@@ -1,6 +1,7 @@
 import { View, Text, Image } from 'react-native';
 import type { Theme } from '../theme/vault';
 import { I } from './icons';
+import { Identicon } from './Identicon';
 
 interface Props {
   t: Theme;
@@ -10,12 +11,18 @@ interface Props {
   photoUri?: string | null;
   /** When true renders a group-style avatar (I.Users icon instead of initials when no image) */
   group?: boolean;
+  /**
+   * Deterministic seed (prefer publicKeyB64, fall back to aegisId) used to render
+   * an identicon when there is no photo. If omitted, falls back to the legacy
+   * initial+color circle so existing call sites without a seed keep working.
+   */
+  seed?: string;
 }
 
 /**
  * Circular avatar with an initial or actual photo/image URI support.
  */
-export function Avatar({ t, name, color, size = 44, photoUri, group }: Props) {
+export function Avatar({ t, name, color, size = 44, photoUri, group, seed }: Props) {
   const bg = color ?? t.surface2;
   const safeName = typeof name === 'string' ? name.trim() : '';
   const uri =
@@ -54,6 +61,24 @@ export function Avatar({ t, name, color, size = 44, photoUri, group }: Props) {
         }}
       >
         <I.Users size={Math.round(size * 0.52)} color={bg === t.surface2 ? t.accent : '#fff'} />
+      </View>
+    );
+  }
+
+  if (seed) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: t.surface2,
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+        }}
+      >
+        <Identicon seed={seed} size={size} color={color} />
       </View>
     );
   }

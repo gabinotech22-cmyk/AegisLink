@@ -66,7 +66,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
           })}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <Avatar t={t} name={avatarImage || displayName} color={avatarColor} size={52} photoUri={avatarImage} />
+            <Avatar t={t} name={avatarImage || displayName} color={avatarColor} size={52} photoUri={avatarImage} seed={identity?.publicKeyB64} />
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
                 {displayName}

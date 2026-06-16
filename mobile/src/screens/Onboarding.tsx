@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { AegisMark, AegisWord } from '../components/AegisMark';
+import { Identicon } from '../components/Identicon';
 import { I } from '../components/icons';
 import { PrimaryButton, GhostButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
@@ -36,6 +37,8 @@ interface Props {
 
 type Step = 'welcome' | 'generating' | 'show' | 'nickname';
 
+const AVATAR_COLOR_SWATCHES = ['#5bf2b9', '#3ba3f0', '#8b7cf6', '#f06fb0', '#f0a93b', '#f0664b'];
+
 export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   const { t, dark, toggle } = useTheme();
   const { t: i18nT } = useTranslation();
@@ -46,6 +49,9 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   const [fingerprint, setFingerprint] = useState<string[]>([]);
   const [did, setDid] = useState<string | null>(null);
   const [nickname, setNickname] = useState('');
+  const [selectedColor, setSelectedColor] = useState<string>(
+    AVATAR_COLOR_SWATCHES.includes(avatarColor) ? avatarColor : AVATAR_COLOR_SWATCHES[0],
+  );
   // Tracks when the 'generating' step started so we can enforce a minimum
   // animation duration of 2 s even on fast devices.
   const generatingStartRef = useRef<number>(0);
@@ -156,13 +162,13 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   // (aegisId lowercased, dashes stripped) so the placeholder and helper text
   // always agree with what will actually be persisted if the user skips.
   const defaultName = identity ? identity.aegisId.toLowerCase().replace(/-/g, '') : '';
-  const avatarInitial = (nickname.trim() || defaultName).charAt(0).toUpperCase();
 
   async function handleContinueFromNickname() {
     const trimmed = nickname.trim();
-    if (trimmed) {
+    const colorChanged = selectedColor !== avatarColor;
+    if (trimmed || colorChanged) {
       try {
-        await updateProfile(trimmed, avatarColor, null);
+        await updateProfile(trimmed || defaultName, selectedColor, null);
       } catch (e) {
         Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
         return;
@@ -309,7 +315,7 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
           {i18nT('onboarding.nicknameSubtitle')}
         </Text>
 
-        <View style={{ alignItems: 'center', marginBottom: 24 }}>
+        <View style={{ alignItems: 'center', marginBottom: 16 }}>
           <View
             style={{
               width: 64,
@@ -318,12 +324,37 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
               backgroundColor: t.surface2,
               alignItems: 'center',
               justifyContent: 'center',
+              overflow: 'hidden',
             }}
           >
-            <Text style={{ fontFamily: t.fontDisplay, fontSize: 26, fontWeight: '600', color: t.accent }}>
-              {avatarInitial}
-            </Text>
+            {identity && (
+              <Identicon seed={identity.publicKeyB64} color={selectedColor} size={64} rounded />
+            )}
           </View>
+        </View>
+
+        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 12, marginBottom: 24 }}>
+          {AVATAR_COLOR_SWATCHES.map((c) => {
+            const selected = c === selectedColor;
+            return (
+              <Pressable
+                key={c}
+                onPress={() => setSelectedColor(c)}
+                accessibilityLabel={i18nT('onboarding.colorSwatchLabel', { color: c })}
+                accessibilityRole="button"
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 15,
+                  backgroundColor: c,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: selected ? 2 : 0,
+                  borderColor: t.accent,
+                }}
+              />
+            );
+          })}
         </View>
 
         <Label t={t}>{i18nT('onboarding.nicknameLabel')}</Label>
