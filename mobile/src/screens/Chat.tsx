@@ -24,6 +24,7 @@ import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 import { MediaImage } from '../components/MediaImage';
+import { AttachmentGrid } from '../components/AttachmentGrid';
 import { loadWallpaper, wallpaperBg, type WallpaperOption } from '../components/WallpaperPicker';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
@@ -80,9 +81,11 @@ interface Props {
   onAttach: () => void;
   onEphemeral: () => void;
   onViewOnce?: (mediaUri: string, messageId: string) => void;
+  /** Navigate to the Verify screen for this contact. */
+  onVerify?: () => void;
 }
 
-export function ChatScreen({ contact: initialContact, onBack, onContactDetail, onAttach, onEphemeral, onViewOnce }: Props) {
+export function ChatScreen({ contact: initialContact, onBack, onContactDetail, onAttach, onEphemeral, onViewOnce, onVerify }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -133,7 +136,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const [searchIdx, setSearchIdx] = useState(0);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ images: string[]; index: number } | null>(null);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [replyTo, setReplyTo] = useState<StoredMessage | null>(null);
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
@@ -1084,7 +1087,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 quotedMsg={item.replyToId ? msgById[item.replyToId] : undefined}
                 onLongPress={() => handleLongPress(item)}
                 onViewOnce={onViewOnce}
-                onImagePress={setViewerUri}
+                onImagePress={(images, index) => setViewer({ images, index })}
               />
             </SwipeableMessage>
             </View>
@@ -1146,7 +1149,8 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         {/* Unverified contact warning banner — full-width, ABOVE the composer
             row. Must NOT live inside the composer (flexDirection:'row') or its
             width:100% pushes the input controls off-screen. Non-blocking:
-            sending is always allowed. */}
+            sending is always allowed.
+            Bug D fix: added "Verificar" button that navigates to VerifyScreen. */}
         {!contact.blocked && !contact.verified && (
           <View
             style={{
@@ -1164,6 +1168,25 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             <Text style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.warn, lineHeight: 17 }}>
               {i18nT('chat.unverifiedContact', 'Contacto no verificado. Verifica su identidad para maxima seguridad.')}
             </Text>
+            {onVerify && (
+              <Pressable
+                onPress={onVerify}
+                hitSlop={8}
+                accessibilityLabel={i18nT('chat.verifyContactLabel', 'Verificar contacto')}
+                style={({ pressed }) => ({
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: t.radiusS,
+                  borderWidth: 1,
+                  borderColor: t.warn,
+                  backgroundColor: pressed ? `${t.warn}30` : 'transparent',
+                })}
+              >
+                <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.warn, letterSpacing: 0.6, fontWeight: '700' }}>
+                  {i18nT('chat.verifyAction', 'VERIFICAR')}
+                </Text>
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -1387,7 +1410,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         onSelectGif={handleGifSelect}
         onSelectSticker={handleStickerSelect}
       />
-      <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
+      <ImageViewerModal images={viewer?.images ?? null} initialIndex={viewer?.index ?? 0} onClose={() => setViewer(null)} t={t} />
 
       {/* Inline voice note recorder — normal (non-ephemeral) audio */}
       <Modal
@@ -1728,7 +1751,7 @@ interface BubbleProps {
   quotedMsg?: StoredMessage;
   onLongPress: () => void;
   onViewOnce?: (mediaUri: string, messageId: string) => void;
-  onImagePress?: (uri: string) => void;
+  onImagePress?: (images: string[], index: number) => void;
 }
 
 function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress }: BubbleProps) {
@@ -1829,6 +1852,32 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
               </Text>
             </View>
           </View>
+        </Pressable>
+        <ReactionPills t={t} reactions={reactions} me={me} />
+        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+      </View>
+    );
+  }
+
+  // Multi-attachment bubble
+  if (m.attachments && m.attachments.length > 0) {
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start', opacity: queued ? 0.55 : 1 }}>
+        <Pressable onLongPress={onLongPress} accessibilityLabel="Attachment message">
+          <AttachmentGrid
+            attachments={m.attachments}
+            isMe={me}
+            caption={m.body || undefined}
+            onImagePress={(uri, index) => {
+              const imageUris = (m.attachments ?? [])
+                .filter((a) => a.type === 'image' || a.type === 'video')
+                .map((a) => a.uri);
+              onImagePress?.(imageUris, index);
+            }}
+            onFilePress={(att) => {
+              if (att.uri) void Linking.openURL(att.uri).catch(() => {});
+            }}
+          />
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
@@ -1955,7 +2004,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         <Pressable
-          onPress={() => onImagePress?.(m.mediaUri!)}
+          onPress={() => onImagePress?.([m.mediaUri!], 0)}
           onLongPress={onLongPress}
           style={({ pressed }) => ({
             width: 220,
