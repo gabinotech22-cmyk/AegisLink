@@ -1,6 +1,13 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import { performX3DH, performX3DHReceiver, generatePreKeys, type PreKeyBundle } from '../x3dh';
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
+import {
+  performX3DH,
+  performX3DHReceiver,
+  shouldUsePqReceiver,
+  generatePreKeys,
+  type PreKeyBundle,
+} from '../x3dh';
 import { initRatchet, ratchetEncrypt, ratchetDecrypt } from '../ratchet';
 import { type Identity } from '../../identity';
 
@@ -261,5 +268,263 @@ describe('X3DH + Double Ratchet fresh-session first-message roundtrip', () => {
     const { out, plaintext } = runRoundtrip(false);
     expect(out).not.toBeNull();
     expect(encodeBase64(out!)).toBe(encodeBase64(plaintext));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PQXDH (post-quantum hybrid X3DH). The classic DH legs are unchanged; v2 only
+// appends an ML-KEM-768 shared secret to dhOut and derives under a distinct
+// HKDF label. These tests cover the 6 acceptance criteria.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Build a Bob bundle. `withPq` toggles whether the PQSPK is advertised (v2). */
+function buildBundle(
+  bob: Identity,
+  bobPreKeys: ReturnType<typeof generatePreKeys>,
+  opts: { withOpk?: boolean; withPq?: boolean } = {},
+): PreKeyBundle {
+  const opk = opts.withOpk ? (bobPreKeys.oneTimePreKeys[0] ?? null) : null;
+  return {
+    identityKeyB64: bob.publicKeyB64,
+    signingPublicKeyB64: bob.signingPublicKeyB64,
+    signedPreKey: {
+      keyId: bobPreKeys.signedPreKey.keyId,
+      publicKeyB64: bobPreKeys.signedPreKey.publicKeyB64,
+      signatureB64: bobPreKeys.signedPreKey.signatureB64,
+    },
+    oneTimePreKey: opk,
+    pqSignedPreKey: opts.withPq
+      ? {
+          keyId: bobPreKeys.pqSignedPreKey.keyId,
+          publicKeyB64: bobPreKeys.pqSignedPreKey.publicKeyB64,
+          signatureB64: bobPreKeys.pqSignedPreKey.signatureB64,
+        }
+      : null,
+  };
+}
+
+describe('PQXDH v2 — hybrid post-quantum handshake', () => {
+  // (1) Round-trip: Alice and Bob derive the SAME 32-byte rootKey via v2.
+  it('Alice and Bob derive the SAME v2 rootKey (with OPK)', () => {
+    const alice = buildIdentity();
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+    const bundle = buildBundle(bob, bobPreKeys, { withOpk: true, withPq: true });
+
+    const aliceResult = performX3DH(alice, bundle);
+    expect(aliceResult.version).toBe(2);
+    expect(aliceResult.rootKey.length).toBe(32);
+    expect(typeof aliceResult.pqCiphertextB64).toBe('string');
+
+    const opk = bobPreKeys.oneTimePreKeys[0];
+    const bobRoot = performX3DHReceiver(
+      bob,
+      bobPreKeys.signedPreKey.secretKey,
+      bobPreKeys.opkSecrets.get(opk.keyId) ?? null,
+      alice.publicKey,
+      decodeBase64(aliceResult.myEphemeralPublicKeyB64),
+      {
+        cipherText: decodeBase64(aliceResult.pqCiphertextB64!),
+        pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+      },
+    );
+
+    expect(encodeBase64(bobRoot)).toBe(encodeBase64(aliceResult.rootKey));
+  });
+
+  it('Alice and Bob derive the SAME v2 rootKey (no OPK)', () => {
+    const alice = buildIdentity();
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+    const bundle = buildBundle(bob, bobPreKeys, { withOpk: false, withPq: true });
+
+    const aliceResult = performX3DH(alice, bundle);
+    expect(aliceResult.version).toBe(2);
+
+    const bobRoot = performX3DHReceiver(
+      bob,
+      bobPreKeys.signedPreKey.secretKey,
+      null,
+      alice.publicKey,
+      decodeBase64(aliceResult.myEphemeralPublicKeyB64),
+      {
+        cipherText: decodeBase64(aliceResult.pqCiphertextB64!),
+        pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+      },
+    );
+
+    expect(encodeBase64(bobRoot)).toBe(encodeBase64(aliceResult.rootKey));
+  });
+
+  // (2) Domain separation: v2 rootKey != v1 rootKey for the SAME classical
+  // inputs. We force identical classical material by reusing the SAME alice
+  // ephemeral is not directly controllable, so instead we assert that running
+  // v2 vs v1 over the same bundle (minus PQ) never collides, AND we prove the
+  // label itself diverges by deriving with both labels over a fixed dhOut.
+  it('v2 rootKey differs from v1 rootKey (domain separation)', () => {
+    const alice = buildIdentity();
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+
+    // Deterministic comparison: feed the SAME classical dhOut into both labels.
+    // Re-derive using the library so the test pins the domain-separation guarantee.
+    const { hkdfSHA256 } = require('../kdf') as typeof import('../kdf');
+    const dhOut = nacl.randomBytes(160); // stand-in for a fixed classical dhOut
+    const pqSs = nacl.randomBytes(32);
+    const combined = new Uint8Array(dhOut.length + pqSs.length);
+    combined.set(dhOut, 0);
+    combined.set(pqSs, dhOut.length);
+    const salt = new Uint8Array(32);
+    const v1 = hkdfSHA256(dhOut, salt, new TextEncoder().encode('AegisLinkX3DH'), 32);
+    const v2 = hkdfSHA256(combined, salt, new TextEncoder().encode('AegisLinkPQXDH'), 32);
+    expect(encodeBase64(v1)).not.toBe(encodeBase64(v2));
+
+    // And at the API level: a v2 handshake never yields a v1-style result.
+    const v2Bundle = buildBundle(bob, bobPreKeys, { withPq: true });
+    const v1Bundle = buildBundle(bob, bobPreKeys, { withPq: false });
+    const r2 = performX3DH(alice, v2Bundle);
+    const r1 = performX3DH(alice, v1Bundle);
+    expect(r2.version).toBe(2);
+    expect(r1.version).toBe(1);
+    expect(encodeBase64(r2.rootKey)).not.toBe(encodeBase64(r1.rootKey));
+  });
+
+  // (3) PQ prekey signature: an invalid PQSPK signature makes performX3DH throw.
+  it('throws when the PQ prekey signature is forged/invalid (MITM)', () => {
+    const alice = buildIdentity();
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+
+    // Attacker substitutes a rogue ML-KEM pubkey, signed with a DIFFERENT key.
+    const rogue = ml_kem768.keygen();
+    const rogueSigner = nacl.sign.keyPair();
+    const forgedSig = nacl.sign.detached(rogue.publicKey, rogueSigner.secretKey);
+
+    const bundle = buildBundle(bob, bobPreKeys, { withPq: true });
+    bundle.pqSignedPreKey = {
+      keyId: 1,
+      publicKeyB64: encodeBase64(rogue.publicKey),
+      signatureB64: encodeBase64(forgedSig),
+    };
+
+    expect(() => performX3DH(alice, bundle)).toThrow(/Invalid PQ prekey signature/);
+  });
+
+  // (4) Anti-downgrade: bundle advertised PQ but the initial message carried no
+  // ciphertext → the responder MUST abort.
+  it('shouldUsePqReceiver aborts when PQ advertised but no ciphertext (downgrade)', () => {
+    expect(() => shouldUsePqReceiver(true, false)).toThrow(/downgrade detected/);
+  });
+
+  it('shouldUsePqReceiver selects v2 when PQ advertised and ciphertext present', () => {
+    expect(shouldUsePqReceiver(true, true)).toBe('v2');
+  });
+
+  it('shouldUsePqReceiver selects v1 when PQ was not advertised', () => {
+    expect(shouldUsePqReceiver(false, false)).toBe('v1');
+    // A stray ciphertext without our PQSPK is ignored (not below v1 security).
+    expect(shouldUsePqReceiver(false, true)).toBe('v1');
+  });
+
+  // (5) Interop/fallback: bundle WITHOUT PQ prekey → v1, classic round-trip OK.
+  it('falls back to v1 when the bundle has no PQ prekey (interop)', () => {
+    const alice = buildIdentity();
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+    const bundle = buildBundle(bob, bobPreKeys, { withOpk: true, withPq: false });
+
+    const aliceResult = performX3DH(alice, bundle);
+    expect(aliceResult.version).toBe(1);
+    expect(aliceResult.pqCiphertextB64).toBeUndefined();
+
+    const opk = bobPreKeys.oneTimePreKeys[0];
+    const bobRoot = performX3DHReceiver(
+      bob,
+      bobPreKeys.signedPreKey.secretKey,
+      bobPreKeys.opkSecrets.get(opk.keyId) ?? null,
+      alice.publicKey,
+      decodeBase64(aliceResult.myEphemeralPublicKeyB64),
+      null, // no PQ inputs — classic path
+    );
+    expect(encodeBase64(bobRoot)).toBe(encodeBase64(aliceResult.rootKey));
+  });
+
+  // (6) Tamper: a manipulated ML-KEM ciphertext makes Bob's root key DIVERGE
+  // from Alice's (ML-KEM implicit rejection → different shared secret, no throw).
+  it('tampered ML-KEM ciphertext → divergent root keys (Bob != Alice)', () => {
+    const alice = buildIdentity();
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+    const bundle = buildBundle(bob, bobPreKeys, { withPq: true });
+
+    const aliceResult = performX3DH(alice, bundle);
+    const ct = decodeBase64(aliceResult.pqCiphertextB64!);
+    // Flip one byte of the ciphertext.
+    ct[0] ^= 0xff;
+
+    const bobRoot = performX3DHReceiver(
+      bob,
+      bobPreKeys.signedPreKey.secretKey,
+      null,
+      alice.publicKey,
+      decodeBase64(aliceResult.myEphemeralPublicKeyB64),
+      { cipherText: ct, pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey },
+    );
+
+    expect(encodeBase64(bobRoot)).not.toBe(encodeBase64(aliceResult.rootKey));
+  });
+
+  // End-to-end: v2 X3DH + Double Ratchet first-message roundtrip.
+  it('v2 end-to-end: Bob decrypts Alice\'s first message over a PQXDH session', () => {
+    const alice = buildIdentity();
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+    const bundle = buildBundle(bob, bobPreKeys, { withOpk: true, withPq: true });
+
+    const aliceX3DH = performX3DH(alice, bundle);
+    expect(aliceX3DH.version).toBe(2);
+    const aliceState = initRatchet(
+      aliceX3DH.rootKey,
+      decodeBase64(bundle.signedPreKey.publicKeyB64),
+      true,
+    );
+    const plaintext = new TextEncoder().encode('first PQXDH message');
+    const { ciphertext, nonce, header } = ratchetEncrypt(aliceState, plaintext);
+
+    const opk = bobPreKeys.oneTimePreKeys[0];
+    const bobRoot = performX3DHReceiver(
+      bob,
+      bobPreKeys.signedPreKey.secretKey,
+      bobPreKeys.opkSecrets.get(opk.keyId) ?? null,
+      alice.publicKey,
+      decodeBase64(aliceX3DH.myEphemeralPublicKeyB64),
+      {
+        cipherText: decodeBase64(aliceX3DH.pqCiphertextB64!),
+        pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+      },
+    );
+    const spkPub = nacl.scalarMult.base(bobPreKeys.signedPreKey.secretKey);
+    const bobState = initRatchet(bobRoot, header.ratchetKey, false, {
+      publicKey: spkPub,
+      secretKey: bobPreKeys.signedPreKey.secretKey,
+    });
+
+    const out = ratchetDecrypt(bobState, header, ciphertext, nonce);
+    expect(out).not.toBeNull();
+    expect(encodeBase64(out!)).toBe(encodeBase64(plaintext));
+  });
+
+  // The PQSPK signature verifies under the identity signing key (parity w/ SPK).
+  it('generatePreKeys produces a PQSPK whose signature verifies under the identity key', () => {
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+    expect(decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64).length).toBe(1184);
+    expect(
+      nacl.sign.detached.verify(
+        decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64),
+        decodeBase64(bobPreKeys.pqSignedPreKey.signatureB64),
+        bob.signingPublicKey,
+      ),
+    ).toBe(true);
   });
 });

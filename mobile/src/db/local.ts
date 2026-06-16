@@ -1918,3 +1918,74 @@ export async function clearPrekeySecrets(): Promise<void> {
     await d.runAsync('DELETE FROM prekey_secrets WHERE slot = ?', activeSlot);
   });
 }
+
+// ─── PQXDH: ML-KEM-768 signed PQ prekey (PQSPK) secrets ──────────────────────
+//
+// PQXDH (post-quantum hybrid X3DH, Signal-style) adds an ML-KEM-768 "signed PQ
+// prekey" to the bundle. Its SECRET key is 2400 bytes — far larger than an
+// X25519 secret — and like every other private key it NEVER leaves the device.
+// We reuse the existing encrypted-at-rest `prekey_secrets` table with two new
+// `kind` discriminators so the storage path, slot isolation and encryptBody
+// wrapping are identical to the classic SPK/OPK secrets:
+//   kind='pqspk'      — the ML-KEM-768 secretKey (base64), keyed by its keyId.
+//   kind='pqspkmeta'  — sentinel row (key_id=0) holding the current PQSPK keyId.
+// The 2400-byte secret comfortably fits in a TEXT column; SQLite has no
+// practical per-row size limit (unlike SecureStore's ~2KB iOS item cap), which
+// is exactly why prekey secrets live here rather than in the keychain.
+
+/** Persist (or replace) the ML-KEM-768 PQSPK secret (base64) for a keyId. */
+export async function savePqSpkSecret(keyId: number, b64: string): Promise<void> {
+  return withDb(async (d) => {
+    const enc = await encryptBody(b64);
+    await d.runAsync(
+      `INSERT OR REPLACE INTO prekey_secrets (slot, kind, key_id, secret_b64) VALUES (?, 'pqspk', ?, ?)`,
+      activeSlot, keyId, enc,
+    );
+  });
+}
+
+/** Load the ML-KEM-768 PQSPK secret (base64) for a specific keyId, or null. */
+export async function loadPqSpkSecret(keyId: number): Promise<string | null> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ secret_b64: string }>(
+      `SELECT secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'pqspk' AND key_id = ?`,
+      activeSlot, keyId,
+    );
+    if (!row) return null;
+    return decryptBody(row.secret_b64);
+  });
+}
+
+/** Delete a stored PQSPK secret by keyId (forward secrecy after rotation). */
+export async function deletePqSpkSecret(keyId: number): Promise<void> {
+  return withDb(async (d) => {
+    await d.runAsync(
+      `DELETE FROM prekey_secrets WHERE slot = ? AND kind = 'pqspk' AND key_id = ?`,
+      activeSlot, keyId,
+    );
+  });
+}
+
+/** Persist the current PQSPK keyId (sentinel row, mirrors setSpkKeyId). */
+export async function setPqSpkKeyId(n: number): Promise<void> {
+  return withDb(async (d) => {
+    const enc = await encryptBody(String(n));
+    await d.runAsync(
+      `INSERT OR REPLACE INTO prekey_secrets (slot, kind, key_id, secret_b64) VALUES (?, 'pqspkmeta', 0, ?)`,
+      activeSlot, enc,
+    );
+  });
+}
+
+/** Read the current PQSPK keyId, or null if never set. */
+export async function getPqSpkKeyId(): Promise<number | null> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ secret_b64: string }>(
+      `SELECT secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'pqspkmeta' AND key_id = 0`,
+      activeSlot,
+    );
+    if (!row) return null;
+    const v = parseInt(await decryptBody(row.secret_b64), 10);
+    return Number.isFinite(v) ? v : null;
+  });
+}
