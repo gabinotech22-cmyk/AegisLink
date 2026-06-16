@@ -8,6 +8,7 @@ import {
   Pressable,
   Alert,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,7 +34,7 @@ interface Props {
   dbReady?: boolean;
 }
 
-type Step = 'welcome' | 'generating' | 'show';
+type Step = 'welcome' | 'generating' | 'show' | 'nickname';
 
 export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   const { t, dark, toggle } = useTheme();
@@ -41,9 +42,10 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   const { locale, setLocale } = useLocale();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>('welcome');
-  const { identity, generate } = useIdentity();
+  const { identity, generate, avatarColor, updateProfile } = useIdentity();
   const [fingerprint, setFingerprint] = useState<string[]>([]);
   const [did, setDid] = useState<string | null>(null);
+  const [nickname, setNickname] = useState('');
   // Tracks when the 'generating' step started so we can enforce a minimum
   // animation duration of 2 s even on fast devices.
   const generatingStartRef = useRef<number>(0);
@@ -149,6 +151,29 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   }
 
   const containerPad = { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 20 };
+
+  // Default display name mirrors the identity store's own fallback derivation
+  // (aegisId lowercased, dashes stripped) so the placeholder and helper text
+  // always agree with what will actually be persisted if the user skips.
+  const defaultName = identity ? identity.aegisId.toLowerCase().replace(/-/g, '') : '';
+  const avatarInitial = (nickname.trim() || defaultName).charAt(0).toUpperCase();
+
+  async function handleContinueFromNickname() {
+    const trimmed = nickname.trim();
+    if (trimmed) {
+      try {
+        await updateProfile(trimmed, avatarColor, null);
+      } catch (e) {
+        Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+        return;
+      }
+    }
+    await handleEnter();
+  }
+
+  async function handleSkipNickname() {
+    await handleEnter();
+  }
 
   // ── Step 0: Welcome ─────────────────────────────────────────────────────────
   if (step === 'welcome') {
@@ -266,6 +291,92 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
     );
   }
 
+  // ── Step 3: Nickname (optional) ─────────────────────────────────────────────
+  if (step === 'nickname') {
+    return (
+      <View style={[styles.frame, { backgroundColor: t.bg, paddingHorizontal: 24 }, containerPad]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+          <AegisMark t={t} size={28} />
+          <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 1.1 }}>
+            {i18nT('onboarding.almostDone')}
+          </Text>
+        </View>
+
+        <Text style={{ fontFamily: t.fontDisplay, fontSize: 28, color: t.text, fontWeight: '600', letterSpacing: -0.56, marginBottom: 10 }}>
+          {i18nT('onboarding.nicknameTitle')}
+        </Text>
+        <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: 20, marginBottom: 24 }}>
+          {i18nT('onboarding.nicknameSubtitle')}
+        </Text>
+
+        <View style={{ alignItems: 'center', marginBottom: 24 }}>
+          <View
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: 32,
+              backgroundColor: t.surface2,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ fontFamily: t.fontDisplay, fontSize: 26, fontWeight: '600', color: t.accent }}>
+              {avatarInitial}
+            </Text>
+          </View>
+        </View>
+
+        <Label t={t}>{i18nT('onboarding.nicknameLabel')}</Label>
+        <TextInput
+          value={nickname}
+          onChangeText={setNickname}
+          placeholder={defaultName}
+          placeholderTextColor={t.textFaint}
+          maxLength={20}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{
+            color: t.text,
+            backgroundColor: t.surface,
+            borderColor: t.borderStrong,
+            borderWidth: 1,
+            borderRadius: t.radiusS,
+            padding: 12,
+            fontSize: 15,
+            marginBottom: 8,
+            fontFamily: t.font,
+          }}
+        />
+        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.4, marginBottom: 'auto' as never }}>
+          {i18nT('onboarding.nicknameDefault', { name: defaultName })}
+        </Text>
+
+        {regState === 'error' && regError !== null && (
+          <View style={{ backgroundColor: '#1a0000', borderWidth: 1, borderColor: '#ff4444', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: '#ff6666', lineHeight: 16 }}>
+              {regError}
+            </Text>
+          </View>
+        )}
+
+        <View style={{ gap: 10 }}>
+          <PrimaryButton
+            t={t}
+            label={regState === 'registering' ? i18nT('onboarding.securingBtn') : regState === 'error' ? i18nT('onboarding.retryBtn') : i18nT('onboarding.continueBtn')}
+            onPress={handleContinueFromNickname}
+            disabled={regState === 'registering'}
+          />
+          <GhostButton
+            t={t}
+            label={i18nT('onboarding.skipNickname')}
+            onPress={handleSkipNickname}
+            disabled={regState === 'registering'}
+          />
+        </View>
+      </View>
+    );
+  }
+
   // ── Step 2: Show identity ───────────────────────────────────────────────────
   return (
     <View style={[styles.frame, { backgroundColor: t.bg, paddingHorizontal: 24 }, containerPad]}>
@@ -327,19 +438,10 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
         {i18nT('onboarding.identityWarning')}
       </Text>
 
-      {regState === 'error' && regError !== null && (
-        <View style={{ backgroundColor: '#1a0000', borderWidth: 1, borderColor: '#ff4444', borderRadius: 8, padding: 12, marginBottom: 12 }}>
-          <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: '#ff6666', lineHeight: 16 }}>
-            {regError}
-          </Text>
-        </View>
-      )}
-
       <PrimaryButton
         t={t}
-        label={regState === 'registering' ? i18nT('onboarding.securingBtn') : regState === 'error' ? i18nT('onboarding.retryBtn') : i18nT('onboarding.enterBtn')}
-        onPress={handleEnter}
-        disabled={regState === 'registering'}
+        label={i18nT('onboarding.continueBtn')}
+        onPress={() => setStep('nickname')}
       />
     </View>
   );
