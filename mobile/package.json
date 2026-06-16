@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "main": "index.ts",
   "private": true,
+  "expo": {
+    "autolinking": {
+      "exclude": ["expo-dev-client", "expo-dev-launcher", "expo-dev-menu"]
+    }
+  },
   "scripts": {
     "start": "cross-env AEGIS_EXPO_GO=1 expo start",
     "start:dev": "expo start",
