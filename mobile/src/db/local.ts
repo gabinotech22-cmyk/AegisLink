@@ -248,7 +248,8 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       moderate_new_members  INTEGER NOT NULL DEFAULT 0,
       admin_id              TEXT,
       admin_sig             TEXT,
-      moderators            TEXT
+      moderators            TEXT,
+      roster_version        INTEGER
     );
 
     -- Per-chat state: draft text + unread count
@@ -397,6 +398,15 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     try { await d.execAsync('ALTER TABLE scheduled_messages ADD COLUMN group_id TEXT;'); } catch {}
     try { await d.execAsync('ALTER TABLE scheduled_messages ADD COLUMN post_meta TEXT;'); } catch {}
     await d.execAsync('PRAGMA user_version = 7');
+  }
+
+  if (currentVersion < 8) {
+    // v7 → v8: add roster_version to groups (monotonic counter for the
+    // by-reference roster of large groups — aegis.group.v2). Fresh installs
+    // already have the column via CREATE TABLE above. NULL means "legacy /
+    // unset" and is treated as version 1 by readers.
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN roster_version INTEGER;'); } catch {}
+    await d.execAsync('PRAGMA user_version = 8');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.
@@ -1190,12 +1200,19 @@ export interface StoredGroup {
   moderators?: string[];
   /** additional admin aegisIds beyond the creator. */
   admins?: string[];
+  /**
+   * Monotonic roster counter for the by-reference roster of large groups
+   * (aegis.group.v2). Bumped on every membership change. Used by receivers to
+   * decide whether a v2-content message carries a fresher or staler roster than
+   * the locally-trusted one. Undefined on legacy rows → treated as 1.
+   */
+  rosterVersion?: number;
 }
 
 export async function saveGroup(g: StoredGroup): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(
-      `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       g.id,
       g.name,
       JSON.stringify(g.members),
@@ -1206,7 +1223,8 @@ export async function saveGroup(g: StoredGroup): Promise<void> {
       g.moderateNewMembers ? 1 : 0,
       g.adminId ?? null,
       g.adminSig ?? null,
-      g.moderators && g.moderators.length > 0 ? JSON.stringify(g.moderators) : null
+      g.moderators && g.moderators.length > 0 ? JSON.stringify(g.moderators) : null,
+      g.rosterVersion ?? null
     );
   });
 }
@@ -1223,6 +1241,7 @@ type GroupRow = {
   admin_id: string | null;
   admin_sig: string | null;
   moderators: string | null;
+  roster_version: number | null;
 };
 
 function rowToGroup(r: GroupRow): StoredGroup {
@@ -1238,13 +1257,14 @@ function rowToGroup(r: GroupRow): StoredGroup {
     adminId: r.admin_id ?? undefined,
     adminSig: r.admin_sig ?? undefined,
     moderators: r.moderators ? (JSON.parse(r.moderators) as string[]) : undefined,
+    rosterVersion: r.roster_version ?? undefined,
   };
 }
 
 export async function loadGroups(): Promise<StoredGroup[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<GroupRow>(
-      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators FROM groups ORDER BY created_at DESC`
+      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version FROM groups ORDER BY created_at DESC`
     );
     return rows.map(rowToGroup);
   });
@@ -1267,7 +1287,7 @@ export async function deleteGroup(id: string): Promise<void> {
 export async function getGroup(id: string): Promise<StoredGroup | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<GroupRow>(
-      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators FROM groups WHERE id = ?`,
+      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version FROM groups WHERE id = ?`,
       id
     );
     if (!row) return null;

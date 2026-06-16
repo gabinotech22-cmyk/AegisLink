@@ -18,7 +18,7 @@ import proxyLinkPreviewRoutes from './routes/proxyLinkPreview.js';
 import { createWorkRouter } from './routes/work.js';
 import { createDeviceLinkRouter } from './routes/deviceLink.js';
 import { attachRelay } from './relay/handler.js';
-import { initDb, messageRepo, pruneExpiredWorkMessages } from './db/client.js';
+import { initDb, messageRepo, senderKeyDistRepo, pruneExpiredWorkMessages } from './db/client.js';
 
 // ── Last-resort error handlers ───────────────────────────────────────────────
 // Log only the error itself (never envelope payloads or user identifiers) to
@@ -150,9 +150,10 @@ initDb().then(() => {
     console.log(`[aegislink-server] CORS origin: ${ORIGIN}`);
   });
 
-  // Purge expired queued messages every 10 minutes.
+  // Purge expired queued messages and SenderKey distributions every 10 minutes.
   setInterval(() => {
     void messageRepo.purgeExpired();
+    void senderKeyDistRepo.purgeExpired();
   }, 10 * 60 * 1000).unref();
 
   // Prune work messages that exceed channel retention policies.

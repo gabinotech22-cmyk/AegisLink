@@ -484,8 +484,19 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
         emptyText={i18nT('groupAdmin.noContactsDesc')}
         onClose={() => setShowAddMember(false)}
         onPick={(c) => {
-          void addMember(group.id, c.aegisId);
           setShowAddMember(false);
+          // addMember throws 'group_member_limit' past MAX_GROUP_MEMBERS (1024);
+          // surface it instead of leaking an unhandled rejection.
+          void (async () => {
+            try {
+              await addMember(group.id, c.aegisId);
+            } catch (e) {
+              const msg = (e as Error).message === 'group_member_limit'
+                ? i18nT('groupAdmin.memberLimitReached', 'Este grupo alcanzó el máximo de 1024 miembros.')
+                : (e as Error).message;
+              Alert.alert(i18nT('common.error', 'Error'), msg);
+            }
+          })();
         }}
       />
     </View>
