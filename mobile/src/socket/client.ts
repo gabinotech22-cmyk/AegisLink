@@ -778,6 +778,7 @@ export function connect(identity: Identity): Socket {
   socket.on(
     'group:rekey_dist',
     async (dist: {
+      distId: string;
       groupId: string;
       senderAegisId: string;
       ciphertextB64: string;
@@ -809,6 +810,9 @@ export function connect(identity: Identity): Socket {
           sender.publicKeyB64,
         );
         await saveSenderKey(dist.groupId, dist.senderAegisId, senderKey);
+        // Ack only on success — if we throw above, no ack is sent so the relay
+        // will re-deliver (queued distribution) on the next reconnect.
+        socket!.emit('group:rekey_drain_ack', { distId: dist.distId });
       } catch (e) {
         if (__DEV__) console.warn('[socket] group:rekey_dist handling failed:', (e as Error).message);
       }
@@ -920,17 +924,31 @@ export async function rekeyGroupAfterRemoval(
 
   if (distributions.length === 0) return; // nobody else to re-key
 
-  // 4. Single fan-out event — the relay validates admin and routes per recipient.
-  await new Promise<void>((resolve, reject) => {
-    socket!.emit(
-      'group:rekey',
-      { groupId, distributions },
-      (ack: { ok: boolean; error?: string } | undefined) => {
-        if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'rekey_failed'));
-        else resolve();
-      },
-    );
-  });
+  // 4. Fan-out in batches of 512 (server-side limit per group:rekey call).
+  //    Emit each batch sequentially and await its ack before the next one so
+  //    that a mid-batch server error is surfaced immediately and not silenced.
+  const REKEY_BATCH_SIZE = 512;
+
+  async function emitRekeyBatch(
+    batchGroupId: string,
+    batch: typeof distributions,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      socket!.emit(
+        'group:rekey',
+        { groupId: batchGroupId, distributions: batch },
+        (ack: { ok: boolean; error?: string } | undefined) => {
+          if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'rekey_failed'));
+          else resolve();
+        },
+      );
+    });
+  }
+
+  for (let offset = 0; offset < distributions.length; offset += REKEY_BATCH_SIZE) {
+    const batch = distributions.slice(offset, offset + REKEY_BATCH_SIZE);
+    await emitRekeyBatch(groupId, batch);
+  }
 }
 
 export function emitDeleteChannelMsg(payload: {
