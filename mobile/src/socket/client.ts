@@ -33,6 +33,7 @@ import {
   getSpkKeyId,
   type OutboxJob,
 } from '../db/local';
+import { decideV2GroupMetadata } from './groupMetadataDecision';
 
 /**
  * Ratchet/X3DH recovery diagnostics — DEV BUILDS ONLY. These trace who talks
@@ -1820,106 +1821,118 @@ async function decryptAndAppend(
 
         if (isV2) {
           // ── v2 path: roster by reference ──────────────────────────────────────
+          // The verify-before-trust decision is a PURE function
+          // (groupMetadataDecision.ts); resolve the admin key here (I/O) and then
+          // execute the same side effects the decision implies. Behaviour is
+          // identical to the inline logic this replaced.
           const rosterHash = claimedRosterHash as string;
-          const isCarrier = hasMembers; // carrier ships the full list; content does not
+          // Resolve the admin key ONLY when the original code would have — i.e.
+          // when a signature actually gets verified. getAdminSigningKey() can add
+          // the admin as a contact, so calling it on the cheap early-exit paths
+          // (drop / hash-mismatch reject) would be a behavioural change. The cheap
+          // gates below mirror exactly when metadataIsAuthenticV2 used to run.
+          const isCarrierV2 = hasMembers;
+          const hashMatchesV2 = isCarrierV2 && computeRosterHash(claimedMembers) === rosterHash;
+          const isAdminV2 =
+            !!existingGroup &&
+            !!existingGroup.adminId &&
+            senderId === existingGroup.adminId &&
+            claimedAdminId === existingGroup.adminId;
+          // Mirror the exact short-circuit order of the old metadataIsAuthenticV2
+          // call sites: unknown+carrier needs hashOk; existing+carrier needs
+          // hashOk && isAdmin; existing+content always verifies.
+          const sigCouldMatter = existingGroup
+            ? isCarrierV2
+              ? hashMatchesV2 && isAdminV2
+              : true
+            : hashMatchesV2;
+          const adminSigningKeyB64 = sigCouldMatter ? await getAdminSigningKey() : null;
+          const decision = decideV2GroupMetadata({
+            existing: existingGroup
+              ? {
+                  adminId: existingGroup.adminId,
+                  members: existingGroup.members,
+                  name: existingGroup.name,
+                  rosterVersion: existingGroup.rosterVersion,
+                }
+              : null,
+            localAegisId: identity.aegisId,
+            senderId,
+            claimed: {
+              groupId,
+              groupName: claimedName,
+              createdAt: claimedCreatedAt,
+              members: hasMembers ? claimedMembers : undefined,
+              adminId: claimedAdminId,
+              adminSig: claimedAdminSig,
+              rosterHash,
+              rosterVersion: claimedRosterVersion,
+            },
+            adminSigningKeyB64,
+          });
 
-          if (!existingGroup) {
-            // We can only materialize membership from a CARRIER (it has the
-            // roster). A v2 CONTENT message for an unknown group is dropped
-            // silently — the carrier will arrive and create the group.
-            if (!isCarrier) {
+          switch (decision.kind) {
+            case 'drop':
+              // v2 content for an unknown group — await the carrier.
               if (__DEV__) console.warn('[socket] v2 content for unknown group dropped — awaiting carrier');
               await saveSessionState(contact.aegisId, ratchetState);
               return true;
-            }
-            // Carrier: verify the roster hash matches the inlined list, THEN the
-            // admin signature over the hash. Never trust before both pass.
-            if (computeRosterHash(claimedMembers) !== rosterHash) {
-              if (__DEV__) console.warn('[socket] v2 carrier rejected — roster hash mismatch');
-              return false;
-            }
-            if (!(await metadataIsAuthenticV2(rosterHash, claimedRosterVersion))) {
-              if (__DEV__) console.warn('[socket] v2 carrier create rejected — invalid or missing adminSig');
-              return false;
-            }
-            if (!claimedMembers.includes(identity.aegisId)) {
-              if (__DEV__) console.warn('[socket] v2 carrier create rejected — local id not in members');
-              return false;
-            }
-            const localAvatarImage = claimedAvatarImage
-              ? await saveGroupAvatarToFile(groupId, claimedAvatarImage)
-              : undefined;
-            await saveGroup({
-              id: groupId,
-              name: claimedName,
-              members: claimedMembers,
-              createdAt: claimedCreatedAt as number,
-              adminId: claimedAdminId,
-              adminSig: claimedAdminSig,
-              avatarColor: claimedAvatarColor,
-              avatarImage: localAvatarImage,
-              rosterVersion: claimedRosterVersion,
-            });
-            const { useGroups } = require('../store/groups');
-            void useGroups.getState().hydrate();
-          } else {
-            const isAdmin =
-              !!existingGroup.adminId &&
-              senderId === existingGroup.adminId &&
-              claimedAdminId === existingGroup.adminId;
-            const localRosterVersion = existingGroup.rosterVersion ?? 1;
 
-            if (isCarrier) {
-              // Carrier on an existing group: authoritative roster update. Verify
-              // hash↔members, then signature, then admin identity.
-              const hashOk = computeRosterHash(claimedMembers) === rosterHash;
-              if (hashOk && isAdmin && (await metadataIsAuthenticV2(rosterHash, claimedRosterVersion))) {
-                let localAvatarImage = existingGroup.avatarImage;
-                if (claimedAvatarImage) {
-                  localAvatarImage = await saveGroupAvatarToFile(groupId, claimedAvatarImage);
-                }
-                await saveGroup({
-                  ...existingGroup,
-                  name: claimedName,
-                  members: claimedMembers,
-                  adminSig: claimedAdminSig,
-                  avatarColor: claimedAvatarColor ?? existingGroup.avatarColor,
-                  avatarImage: localAvatarImage,
-                  rosterVersion: claimedRosterVersion,
-                });
-                const { useGroups } = require('../store/groups');
-                void useGroups.getState().hydrate();
-              } else if (!hashOk) {
-                if (__DEV__) console.warn('[socket] v2 carrier ignored — roster hash mismatch');
-              } else {
-                if (__DEV__) console.warn('[socket] v2 carrier ignored — sender not admin or sig invalid');
-              }
-            } else {
-              // CONTENT message on an existing group: the roster is NOT inlined.
-              // Verify the signature against the roster reference. We must NOT
-              // mutate the local roster from a content message (no list to apply)
-              // — the carrier is the only authority for membership.
-              const authentic = await metadataIsAuthenticV2(rosterHash, claimedRosterVersion);
-              if (!authentic) {
-                if (__DEV__) console.warn('[socket] v2 content ignored metadata — sig invalid; still rendering body');
-                // Do not block the chat: fall through and render with local roster.
-              } else if (claimedRosterVersion > localRosterVersion) {
-                // We are behind — the admin changed the roster but the carrier
-                // hasn't reached us yet. Render the message (don't block the
-                // chat) but DO NOT touch the local roster; the carrier updates it.
-                if (__DEV__) console.warn('[socket] v2 content from newer rosterVersion — awaiting carrier to sync roster');
-              } else {
-                // rosterVersion <= local: this metadata is current (or stale-but-
-                // equal). If the signed roster hash matches our local roster, the
-                // signed groupName is authoritative — apply a name change if any.
-                const localHash = computeRosterHash(existingGroup.members);
-                if (localHash === rosterHash && claimedName !== existingGroup.name && isAdmin) {
-                  await saveGroup({ ...existingGroup, name: claimedName, adminSig: claimedAdminSig });
-                  const { useGroups } = require('../store/groups');
-                  void useGroups.getState().hydrate();
-                }
-              }
+            case 'reject':
+              // Carrier failed hash↔roster, signature, or membership checks.
+              if (__DEV__) console.warn('[socket] v2 carrier create rejected — hash/sig/membership check failed');
+              return false;
+
+            case 'createGroup': {
+              const localAvatarImage = claimedAvatarImage
+                ? await saveGroupAvatarToFile(groupId, claimedAvatarImage)
+                : undefined;
+              await saveGroup({
+                id: groupId,
+                name: decision.name,
+                members: decision.members,
+                createdAt: decision.createdAt,
+                adminId: decision.adminId,
+                adminSig: decision.adminSig,
+                avatarColor: claimedAvatarColor,
+                avatarImage: localAvatarImage,
+                rosterVersion: decision.rosterVersion,
+              });
+              const { useGroups } = require('../store/groups');
+              void useGroups.getState().hydrate();
+              break;
             }
+
+            case 'updateRoster': {
+              let localAvatarImage = existingGroup.avatarImage;
+              if (claimedAvatarImage) {
+                localAvatarImage = await saveGroupAvatarToFile(groupId, claimedAvatarImage);
+              }
+              await saveGroup({
+                ...existingGroup,
+                name: decision.name,
+                members: decision.members,
+                adminSig: decision.adminSig,
+                avatarColor: claimedAvatarColor ?? existingGroup.avatarColor,
+                avatarImage: localAvatarImage,
+                rosterVersion: decision.rosterVersion,
+              });
+              const { useGroups } = require('../store/groups');
+              void useGroups.getState().hydrate();
+              break;
+            }
+
+            case 'updateNameOnly': {
+              await saveGroup({ ...existingGroup, name: decision.name, adminSig: decision.adminSig });
+              const { useGroups } = require('../store/groups');
+              void useGroups.getState().hydrate();
+              break;
+            }
+
+            case 'renderOnly':
+              // No metadata change — fall through and render the body with the
+              // local roster (matches the v2 carrier/content no-op branches).
+              break;
           }
         } else if (!existingGroup) {
           // ── v1 path (unchanged): create ───────────────────────────────────────
