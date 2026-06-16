@@ -199,6 +199,7 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
               color={avatarColor}
               size={56}
               photoUri={avatarImage}
+              seed={identity?.publicKeyB64}
             />
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -453,7 +454,7 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
 
               {/* Avatar Preview */}
               <View style={{ alignItems: 'center', marginBottom: 12 }}>
-                <Avatar t={t} name={editName} color={editColor} size={72} photoUri={editImage} />
+                <Avatar t={t} name={editName} color={editColor} size={72} photoUri={editImage} seed={identity?.publicKeyB64} />
               </View>
 
               {/* Photo picking buttons */}

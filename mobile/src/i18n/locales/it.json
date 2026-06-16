@@ -51,9 +51,10 @@
     "continueBtn": "Continua",
     "almostDone": "QUASI FATTO",
     "nicknameTitle": "Come ti chiamiamo?",
-    "nicknameSubtitle": "Il nome che vedranno i tuoi contatti. È cifrato end-to-end: il server non lo vede mai. È opzionale e resti anonimo (niente numero di telefono né email).",
+    "nicknameSubtitle": "Il tuo avatar viene generato dalla tua chiave. Puoi tingerlo, oppure caricare una foto più avanti nel tuo profilo. Il nome che vedranno i tuoi contatti è cifrato end-to-end: il server non lo vede mai. Tutto è opzionale e resti anonimo (niente numero di telefono né email).",
     "nicknameLabel": "NOME VISIBILE (OPZIONALE)",
     "nicknameDefault": "Predefinito: {{name}}",
+    "colorSwatchLabel": "Colore avatar {{color}}",
     "skipNickname": "Salta per ora"
   },
   "home": {
@@ -888,6 +889,12 @@
     "orWords": "OPPURE — 8 PAROLE DI SICUREZZA",
     "keyFingerprint": "IMPRONTA DELLA CHIAVE (HEX)",
     "scanPeer": "Scansiona il QR di un contatto",
+    "scanQR": "SCANSIONA QR",
+    "shareContact": "CONDIVIDI ID",
+    "shareTitle": "Il mio contatto AegisLink",
+    "shareMessage": "Aggiungimi su AegisLink:",
+    "shareId": "Oppure usa il mio ID:",
+    "shareContactLabel": "Condividi il mio contatto",
     "match": "Le chiavi corrispondono",
     "noMatch": "Le chiavi non corrispondono",
     "markVerified": "Segna come verificato"

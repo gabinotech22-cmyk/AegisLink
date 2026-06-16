@@ -10,7 +10,7 @@ import {
   Alert,
   Share,
 } from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import { BrandedQR } from '../components/BrandedQR';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -347,11 +347,11 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
               padding: 20, backgroundColor: '#fff', borderRadius: t.radius,
               shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 },
             }}>
-              <QRCode
+              <BrandedQR
                 value={myQRData}
                 size={220}
                 color="#0a0a0a"
-                backgroundColor="#ffffff"
+                background="#ffffff"
               />
             </View>
           ) : (

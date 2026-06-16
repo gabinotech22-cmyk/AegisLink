@@ -443,7 +443,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                 onPress={onGroupDetail}
                 style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
               >
-                <Avatar t={t} name={group.avatarImage || group.name} color={group.avatarColor || t.accent} size={36} />
+                <Avatar t={t} name={group.avatarImage || group.name} color={group.avatarColor || t.accent} size={36} seed={group.id} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 16, fontWeight: '600', color: t.text }}>
                     {group.name}
@@ -567,6 +567,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                   color={contacts.find((c) => c.aegisId === id)?.color ?? colorFromId(id)}
                   size={28}
                   photoUri={contacts.find((c) => c.aegisId === id)?.avatarImage}
+                  seed={contacts.find((c) => c.aegisId === id)?.publicKeyB64 || id}
                 />
                 <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>@{name}</Text>
               </Pressable>

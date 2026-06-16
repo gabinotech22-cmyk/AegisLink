@@ -70,7 +70,7 @@ export function FirstContactScreen({ contact, onOpenChat, onAddAnother }: Props)
           marginBottom: 20,
         }}
       >
-        <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color} size={42} photoUri={contact.avatarImage} />
+        <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color} size={42} photoUri={contact.avatarImage} seed={contact.publicKeyB64 || contact.aegisId} />
         <View style={{ flex: 1 }}>
           <Text style={{ fontFamily: t.fontMono, fontSize: 14, fontWeight: '600', color: t.text }}>
             {contact.name}

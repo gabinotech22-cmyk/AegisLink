@@ -705,7 +705,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 onPress={onContactDetail}
                 style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
               >
-                <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={36} />
+                <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={36} seed={contact.publicKeyB64 || contact.aegisId} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text
                     numberOfLines={1}

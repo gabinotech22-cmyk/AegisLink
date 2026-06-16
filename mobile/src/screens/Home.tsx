@@ -588,7 +588,7 @@ function ContactRow({
             backgroundColor: pressed ? t.surface2 : t.bg,
           })}
         >
-          <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={44} photoUri={contact.avatarImage} />
+          <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={44} photoUri={contact.avatarImage} seed={contact.publicKeyB64 || contact.aegisId} />
           <View style={{ flex: 1, minWidth: 0 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text

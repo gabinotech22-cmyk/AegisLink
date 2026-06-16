@@ -390,7 +390,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                       borderRadius: t.radius,
                     }}
                   >
-                    <Avatar t={t} name={c.avatarImage || c.name} color={c.color ?? t.surface2} size={32} photoUri={c.avatarImage} />
+                    <Avatar t={t} name={c.avatarImage || c.name} color={c.color ?? t.surface2} size={32} photoUri={c.avatarImage} seed={c.publicKeyB64 || c.aegisId} />
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text }}>
                         {c.name}
@@ -566,7 +566,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                   backgroundColor: pressed ? t.surface : 'transparent',
                 })}
               >
-                <Avatar t={t} name={item.avatarImage || item.name} color={item.avatarColor || t.accent} size={44} />
+                <Avatar t={t} name={item.avatarImage || item.name} color={item.avatarColor || t.accent} size={44} seed={item.id} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>

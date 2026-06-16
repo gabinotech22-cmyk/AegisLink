@@ -59,6 +59,11 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
     return contacts.find((c) => c.aegisId === aegisId)?.avatarImage;
   }
 
+  function getMemberSeed(aegisId: string) {
+    if (aegisId === identity?.aegisId) return identity?.publicKeyB64 ?? aegisId;
+    return contacts.find((c) => c.aegisId === aegisId)?.publicKeyB64 ?? aegisId;
+  }
+
   async function handleRename() {
     const trimmed = nameInput.trim();
     if (!trimmed || trimmed === group.name) { setEditingName(false); return; }
@@ -255,7 +260,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
                   borderBottomColor: t.divider,
                 }}
               >
-                <Avatar t={t} name={avatarImg || name} color={color} size={38} photoUri={avatarImg} />
+                <Avatar t={t} name={avatarImg || name} color={color} size={38} photoUri={avatarImg} seed={getMemberSeed(aegisId)} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={{ fontFamily: me ? t.font : (/^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(name) ? t.fontMono : t.font), fontWeight: '600', fontSize: 14, color: t.text }}>
