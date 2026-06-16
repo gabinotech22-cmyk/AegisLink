@@ -14,7 +14,7 @@
  */
 
 import React from 'react';
-import { render, act } from '@testing-library/react-native';
+import { render, act, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 import {
   encodeGroupInviteLink,
@@ -145,11 +145,16 @@ describe('ScanQRScreen — group invite routing', () => {
 
     const key = 'A'.repeat(43) + '=';
     const link = encodeIdentityQR('CKT-30J2-M3EE', key);
-    await act(async () => {
+    act(() => {
       capturedOnScan!({ data: link, type: 'qr' });
     });
 
+    // handleScan is async (awaits addFromQR). Don't assume a single microtask
+    // flush settles it — under CI load the resolution can land a tick later.
+    // waitFor polls until the call lands instead of racing it.
+    await waitFor(() => {
+      expect(mockAddFromQR).toHaveBeenCalledWith('CKT-30J2-M3EE', key);
+    });
     expect(onGroupInvite).not.toHaveBeenCalled();
-    expect(mockAddFromQR).toHaveBeenCalledWith('CKT-30J2-M3EE', key);
   });
 });
