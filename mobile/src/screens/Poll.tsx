@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import type { StoredGroup } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   group?: StoredGroup;
@@ -42,11 +43,11 @@ export function PollScreen({ group, groupName, onBack, onSend }: Props) {
     const q = question.trim();
     const filled = options.map((o) => o.trim()).filter(Boolean);
     if (!q) {
-      Alert.alert(i18nT('poll.missingQuestion'), i18nT('poll.missingQuestionDesc'));
+      themedAlert(i18nT('poll.missingQuestion'), i18nT('poll.missingQuestionDesc'));
       return;
     }
     if (filled.length < 2) {
-      Alert.alert(i18nT('poll.fewOptions'), i18nT('poll.fewOptionsDesc'));
+      themedAlert(i18nT('poll.fewOptions'), i18nT('poll.fewOptionsDesc'));
       return;
     }
     if (!onSend) return;

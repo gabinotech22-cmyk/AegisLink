@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, Dimensions } from 'react-native';
+import { View, Text, Pressable, ScrollView, Dimensions } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import * as AlternateAppIcons from 'expo-alternate-app-icons';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
+import { themedAlert } from '../components/AlertHost';
 
 const ALL_VARIANTS = [
   { id: 'default', bg: '#06090a', mark: '#5bf2b9', workOnly: false },
@@ -70,7 +71,7 @@ export function AppIconScreen({ onBack }: Props) {
     if (loading || id === current) return;
     // Gracefully skip if the device doesn't support alternate icons
     if (!AlternateAppIcons.supportsAlternateIcons && id !== 'default') {
-      Alert.alert(i18nT('common.error'), i18nT('appIcon.changeError'));
+      themedAlert(i18nT('common.error'), i18nT('appIcon.changeError'));
       return;
     }
     setLoading(true);
@@ -79,7 +80,7 @@ export function AppIconScreen({ onBack }: Props) {
       await AlternateAppIcons.setAlternateAppIcon(id === 'default' ? null : id);
       setCurrent(id);
     } catch {
-      Alert.alert(i18nT('common.error'), i18nT('appIcon.changeError'));
+      themedAlert(i18nT('common.error'), i18nT('appIcon.changeError'));
     } finally {
       setLoading(false);
     }

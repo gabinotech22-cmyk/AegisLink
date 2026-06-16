@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, Alert, PanResponder } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, PanResponder } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -17,6 +17,7 @@ import { useMessages } from '../store/messages';
 import { useTyping } from '../store/typing';
 import type { StoredContact, StoredMessage } from '../db/local';
 import { previewLabel } from '../utils/messagePreview';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onOpenChat: (contact: StoredContact) => void;
@@ -99,7 +100,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
 
   function confirmClearChat(contact: StoredContact) {
     setMenuContact(null);
-    Alert.alert(
+    themedAlert(
       i18nT('home.deleteMessages'),
       i18nT('home.deleteMessagesConfirm', { name: contact.name }),
       [
@@ -114,7 +115,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   // reappears on the next message.
   function confirmDeleteChat(contact: StoredContact) {
     setMenuContact(null);
-    Alert.alert(
+    themedAlert(
       i18nT('home.deleteChat', 'Eliminar chat'),
       i18nT('home.deleteChatConfirm', {
         name: contact.name,

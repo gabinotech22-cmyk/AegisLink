@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, StatusBar as RNStatusBar, Alert, Modal } from 'react-native';
+import { View, Text, Pressable, StyleSheet, StatusBar as RNStatusBar, Modal } from 'react-native';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +16,7 @@ import { useContacts } from '../store/contacts';
 import { acceptCall, endCall, toggleMute, toggleCamera } from '../socket/calls';
 import { useProximitySensor } from '../hooks/useProximitySensor';
 import { SoundFX } from '../hooks/useSoundFX';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onClose: () => void;
@@ -248,7 +249,7 @@ export function CallScreen({ onClose, onMinimize }: Props) {
 
           {/* E2EE badge */}
           <Pressable
-            onPress={() => Alert.alert(i18nT('call.alertTitle', 'End-to-End Encrypted Call'), i18nT('call.alertDesc', 'This call uses DTLS-SRTP with ephemeral CURVE25519 key exchange. No server can decrypt or intercept the audio/video stream.'))}
+            onPress={() => themedAlert(i18nT('call.alertTitle', 'End-to-End Encrypted Call'), i18nT('call.alertDesc', 'This call uses DTLS-SRTP with ephemeral CURVE25519 key exchange. No server can decrypt or intercept the audio/video stream.'))}
             accessibilityLabel="E2EE call info"
             style={{
               flexDirection: 'row',

@@ -3,7 +3,6 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { Alert } from 'react-native';
 import { SERVER_URL, ONION_URL } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope } from '../crypto/messaging';
@@ -14,6 +13,7 @@ import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
 import { performX3DH, performX3DHReceiver, generatePreKeys, type PreKeyBundle } from '../crypto/signal/x3dh';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
+import { themedAlert } from '../components/AlertHost';
 import {
   loadRatchetSession,
   saveRatchetSession,
@@ -577,7 +577,7 @@ export function connect(identity: Identity): Socket {
       // callee never responds after waking up.
       const { endCall } = require('./calls') as typeof import('./calls');
       endCall('peer_offline');
-      Alert.alert('Contact offline', 'The contact is not currently connected to the server. Try again later.');
+      themedAlert('Contact offline', 'The contact is not currently connected to the server. Try again later.');
     }
     if (e?.code === 'unknown_identity') {
       // Server doesn't know us — re-register with PoW then reconnect.

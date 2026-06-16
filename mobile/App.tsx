@@ -112,6 +112,7 @@ import type { StoredContact, StoredGroup } from './src/db/local';
 import { useTranslation } from 'react-i18next';
 import { useContacts as useContactsStore } from './src/store/contacts';
 import { ContactPickerSheet } from './src/components/ContactPickerSheet';
+import { AlertHost } from './src/components/AlertHost';
 
 type PushRoute =
   | { name: 'chat'; contact: StoredContact }
@@ -468,8 +469,8 @@ function Shell() {
         const { ss } = require('./src/utils/secureStore') as typeof import('./src/utils/secureStore');
         const ACK = 'aegis.integrity.ack.v1';
         if (await ss.get(ACK)) return;
-        const { Alert } = require('react-native') as typeof import('react-native');
-        Alert.alert(
+        const { themedAlert } = require('./src/components/AlertHost') as typeof import('./src/components/AlertHost');
+        themedAlert(
           'Dispositivo no seguro',
           'Este dispositivo parece tener root o un hook activo. AegisLink no puede garantizar el aislamiento de tus claves aquí, así que la copia de seguridad fuera del dispositivo queda desactivada. Tus mensajes siguen cifrados de extremo a extremo.',
           [{ text: 'Entendido', onPress: () => void ss.set(ACK, '1') }],
@@ -727,8 +728,8 @@ function Shell() {
       const { parseIdentityQR } = require('./src/crypto/qr') as typeof import('./src/crypto/qr');
       const parsed = parseIdentityQR(url);
       if (!parsed) return;
-      const { Alert } = require('react-native');
-      Alert.alert(
+      const { themedAlert: _themedAlert } = require('./src/components/AlertHost') as typeof import('./src/components/AlertHost');
+      _themedAlert(
         i18nT('addContact.linkConfirmTitle', 'Agregar contacto'),
         i18nT('addContact.linkConfirmDesc', '¿Agregar a {{id}} como contacto?', { id: parsed.aegisId }),
         [
@@ -740,7 +741,7 @@ function Shell() {
                 const { useContacts } = require('./src/store/contacts') as typeof import('./src/store/contacts');
                 const res = await useContacts.getState().addFromQR(parsed.aegisId, parsed.publicKeyB64);
                 if (res.kind === 'mitm_detected') {
-                  Alert.alert(
+                  _themedAlert(
                     i18nT('addContact.keyMismatchTitle', 'Clave distinta'),
                     i18nT('addContact.keyMismatchDesc', 'Ya tienes este contacto con OTRA clave pública. No se ha modificado. Verifica con la otra persona antes de continuar.'),
                   );
@@ -1337,6 +1338,8 @@ export default function App() {
         <Shell />
         {/* FloatingCallBar is a sibling to Shell so it overlays any screen */}
         <FloatingCallBarRoot />
+        {/* AlertHost mounts once inside ThemeProvider so themedAlert() has theme access */}
+        <AlertHost />
       </ThemeProvider>
     </SafeAreaProvider>
   );

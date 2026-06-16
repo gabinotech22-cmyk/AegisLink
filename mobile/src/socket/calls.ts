@@ -1,7 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
-import { Alert } from 'react-native';
+;
 import { getSocket, isConnected } from './client';
 import { useCall } from '../store/call';
 import { displayIncomingCall, endNativeCall, reportCallConnected, setNativeMuted } from '../calls/callkeep';
@@ -16,6 +16,7 @@ import {
   type CallMedia,
 } from '../webrtc/peer';
 import { fetchTurnConfig } from '../webrtc/ice';
+import { themedAlert } from '../components/AlertHost';
 
 // ---------------------------------------------------------------------------
 // Sealed WebRTC signaling
@@ -384,7 +385,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
         const neverConnected = status !== 'in-call' && status !== 'ended';
         endCall('rtc_failure');
         if (neverConnected) {
-          Alert.alert(
+          themedAlert(
             'Call failed',
             'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
           );
@@ -401,7 +402,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   if (!sealedOffer) {
     // Cannot encrypt the offer — abort rather than leak plaintext SDP to the relay.
     endCall('encrypt_failure');
-    Alert.alert(
+    themedAlert(
       'Call failed',
       'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
     );
@@ -485,7 +486,7 @@ export async function acceptCall(): Promise<void> {
         const neverConnected = status !== 'in-call' && status !== 'ended';
         endCall('rtc_failure');
         if (neverConnected) {
-          Alert.alert(
+          themedAlert(
             'Call failed',
             'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
           );
@@ -504,7 +505,7 @@ export async function acceptCall(): Promise<void> {
   if (!sealedAnswer) {
     // Cannot encrypt the answer — abort rather than leak plaintext SDP.
     endCall('encrypt_failure');
-    Alert.alert(
+    themedAlert(
       'Call failed',
       'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
     );

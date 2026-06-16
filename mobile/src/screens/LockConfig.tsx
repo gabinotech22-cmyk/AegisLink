@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import {
-  View, Text, ScrollView, Pressable, Modal,
-  Animated, Alert,
-} from 'react-native';
+import { View, Text, ScrollView, Pressable, Modal, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -12,6 +9,7 @@ import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { usePreferences } from '../store/preferences';
 import { setPIN, hasStoredPIN, clearPIN } from '../lock/pin';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -195,7 +193,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   }
 
   function handleClearPin() {
-    Alert.alert(
+    themedAlert(
       i18nT('lockConfig.deletePinAlertTitle', 'Delete PIN'),
       i18nT('lockConfig.deletePinAlertMsg', 'App lock will be disabled and the PIN deleted. You will need to set a new one to enable it again.'),
       [

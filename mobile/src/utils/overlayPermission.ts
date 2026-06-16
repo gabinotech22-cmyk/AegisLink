@@ -22,7 +22,8 @@
  *   if (granted) { showFloatingCallIndicator(); }
  */
 
-import { Platform, Linking, Alert } from 'react-native';
+import { Platform, Linking } from 'react-native';
+import { themedAlert } from '../components/AlertHost';
 
 /**
  * Returns `true` if the app already has overlay permission OR after the user
@@ -40,7 +41,7 @@ export async function ensureOverlayPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
 
   return new Promise<boolean>((resolve) => {
-    Alert.alert(
+    themedAlert(
       'Permiso de superposición',
       'AegisLink necesita el permiso "Mostrar encima de otras apps" para que veas un indicador flotante durante una llamada. Sin este permiso la llamada sigue funcionando, sólo no verás el indicador.',
       [
@@ -57,7 +58,7 @@ export async function ensureOverlayPermission(): Promise<boolean> {
           },
         },
       ],
-      { cancelable: true, onDismiss: () => resolve(false) },
+      // onDismiss/cancelable handled by AlertHost: onRequestClose fires the cancel button
     );
   });
 }

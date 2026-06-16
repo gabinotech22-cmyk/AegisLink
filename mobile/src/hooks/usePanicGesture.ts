@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { Alert } from 'react-native';
+;
 import { ss } from '../utils/secureStore';
+import { themedAlert } from '../components/AlertHost';
 
 const PANIC_KEY = 'aegis.panic.v1';
 const SHAKE_THRESHOLD = 2.8; // g-force magnitude
@@ -97,7 +98,7 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
                 now - lastShakeRef.current > SHAKE_DEBOUNCE_MS
               ) {
                 lastShakeRef.current = now;
-                Alert.alert(
+                themedAlert(
                   '¿Borrar todo?',
                   'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.',
                   [
@@ -108,7 +109,6 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
                       onPress: () => onTriggerRef.current(),
                     },
                   ],
-                  { cancelable: true }
                 );
               }
             }
@@ -155,7 +155,7 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
         clearTimeout(tapTimerRef.current);
         tapTimerRef.current = null;
       }
-      Alert.alert(
+      themedAlert(
         '¿Borrar todo?',
         'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.',
         [
@@ -166,7 +166,6 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
             onPress: () => onTriggerRef.current(),
           },
         ],
-        { cancelable: true }
       );
     }
   }

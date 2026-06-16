@@ -21,7 +21,7 @@
 import * as Crypto from 'expo-crypto';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
-import { Alert } from 'react-native';
+;
 import { getSocket, isConnected } from './client';
 import { useGroupCall } from '../store/groupCall';
 import { fetchTurnConfig } from '../webrtc/ice';
@@ -35,6 +35,7 @@ import {
   type ActivePeer,
 } from '../webrtc/peer';
 import type { Identity } from '../crypto/identity';
+import { themedAlert } from '../components/AlertHost';
 
 // ---------------------------------------------------------------------------
 // NaCl sealed-signaling helpers (mirrors calls.ts)
@@ -321,7 +322,7 @@ export async function startGroupCall(
 ): Promise<void> {
   const socket = getSocket();
   if (!socket || !isConnected()) {
-    Alert.alert('Sin conexión', 'Necesitas estar conectado para iniciar una llamada grupal.');
+    themedAlert('Sin conexión', 'Necesitas estar conectado para iniciar una llamada grupal.');
     return;
   }
 

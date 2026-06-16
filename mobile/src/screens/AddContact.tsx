@@ -1,15 +1,5 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  Share,
-} from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, ActivityIndicator, Share } from 'react-native';
 import { BrandedQR } from '../components/BrandedQR';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
@@ -25,6 +15,7 @@ import type { StoredContact } from '../db/local';
 import type { Theme } from '../theme/vault';
 import type { Identity } from '../crypto/identity';
 import type { AddResult } from '../store/contacts';
+import { themedAlert } from '../components/AlertHost';
 
 type Method = 'menu' | 'qr' | 'link' | 'id';
 
@@ -210,7 +201,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
         const result = await addFromQR(parsed.aegisId, parsed.publicKeyB64, '');
 
         if (result.kind === 'mitm_detected') {
-          Alert.alert(
+          themedAlert(
             'Alerta de seguridad',
             `La clave pública en el QR no coincide con la registrada en el servidor.\n\nID: ${parsed.aegisId}\n\nNo añadas este contacto a menos que confirmes que es tu interlocutor real.`,
             [
@@ -244,11 +235,11 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
         return;
       }
 
-      Alert.alert('QR inválido', 'Este código QR no pertenece a AegisLink.', [
+      themedAlert('QR inválido', 'Este código QR no pertenece a AegisLink.', [
         { text: 'OK', onPress: () => { setScanned(false); setScanning(false); setMode('show'); } },
       ]);
     } catch (e) {
-      Alert.alert('Error', (e as Error).message, [
+      themedAlert('Error', (e as Error).message, [
         { text: 'OK', onPress: () => { setScanned(false); setScanning(false); setMode('show'); } },
       ]);
     }
@@ -567,7 +558,7 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
         raw.toLowerCase().includes('failed to fetch') ||
         raw.toLowerCase().includes('timeout') ||
         raw.toLowerCase().includes('econnrefused');
-      Alert.alert(
+      themedAlert(
         'No se pudo agregar',
         isNetwork
           ? 'No se puede conectar al servidor AegisLink. Verifica tu conexión.'

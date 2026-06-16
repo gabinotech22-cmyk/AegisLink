@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, Share, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, Share, ActivityIndicator } from 'react-native';
 import { BrandedQR } from '../components/BrandedQR';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -12,6 +12,7 @@ import { useContacts } from '../store/contacts';
 import { fingerprintWords, fingerprintHex } from '../crypto/fingerprint';
 import { encodeIdentityQR } from '../crypto/qr';
 import type { Theme } from '../theme/vault';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -168,7 +169,7 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
               label="Confirmar — palabras coinciden"
               onPress={async () => {
                 await markVerified(contactId, true);
-                Alert.alert(
+                themedAlert(
                   'Verificado',
                   `${contact.name} está verificado. Tus mensajes están protegidos contra ataques de intermediario.`,
                   [{ text: 'OK', onPress: onBack }]

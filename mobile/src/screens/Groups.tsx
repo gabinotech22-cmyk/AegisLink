@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, TextInput, FlatList, Modal } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, FlatList, Modal } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
@@ -22,6 +22,7 @@ import { useMessages } from '../store/messages';
 import { sendGroupMessage } from '../socket/client';
 import { parseGroupInviteLink } from '../crypto/qr';
 import type { StoredGroup } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 
 interface Props {
@@ -89,7 +90,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   async function handlePickImage() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedGallery'));
+      themedAlert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedGallery'));
       return;
     }
     // Pick WITHOUT the native crop editor — hand off to AvatarCropModal which
@@ -110,7 +111,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   async function handleTakePhoto() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedCamera'));
+      themedAlert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedCamera'));
       return;
     }
     const result = await withPickingGuard(() =>
@@ -136,18 +137,18 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
       );
       setGroupImage(compressed.uri);
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
   // Handle creating group
   async function handleConfirmCreate() {
     if (!groupName.trim()) {
-      Alert.alert(i18nT('common.error'), i18nT('groups.errorCreateName'));
+      themedAlert(i18nT('common.error'), i18nT('groups.errorCreateName'));
       return;
     }
     if (selectedContacts.length === 0) {
-      Alert.alert(i18nT('common.error'), i18nT('groups.errorCreateMembers'));
+      themedAlert(i18nT('common.error'), i18nT('groups.errorCreateMembers'));
       return;
     }
     if (!identity) return;
@@ -172,9 +173,9 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
       setSelectedContacts([]);
       setGroupColor('#05b875');
       setGroupImage(undefined);
-      Alert.alert(i18nT('groups.createdSuccess'), i18nT('groups.createdSuccessDesc', { name: groupName }));
+      themedAlert(i18nT('groups.createdSuccess'), i18nT('groups.createdSuccessDesc', { name: groupName }));
     } catch (err) {
-      Alert.alert(i18nT('common.error'), i18nT('groups.errorCreate'));
+      themedAlert(i18nT('common.error'), i18nT('groups.errorCreate'));
     }
   }
 
@@ -620,7 +621,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                   label: i18nT('groups.leaveGroup'),
                   onPress: () => {
                     const group = menuGroup;
-                    Alert.alert(group.name, i18nT('groups.deleteGroupConfirm'), [
+                    themedAlert(group.name, i18nT('groups.deleteGroupConfirm'), [
                       { text: i18nT('common.cancel'), style: 'cancel' },
                       {
                         text: i18nT('groups.leaveGroup'),
@@ -693,7 +694,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
               onPress={() => {
                 const parsed = parseGroupInviteLink(joinLinkInput.trim());
                 if (!parsed) {
-                  Alert.alert(
+                  themedAlert(
                     i18nT('groups.joinByLinkInvalidTitle'),
                     i18nT('groups.joinByLinkInvalidDesc'),
                   );

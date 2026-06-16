@@ -6,16 +6,7 @@
  *   3. Ajustar el tiempo de bloqueo automático
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  Animated,
-  Easing,
-  Alert,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, Pressable, ScrollView, Animated, Easing, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -24,6 +15,7 @@ import { I } from '../components/icons';
 import { Section, Row, Toggle } from '../components/Section';
 import { setPIN, clearPIN, hasStoredPIN, verifyPIN } from '../lock/pin';
 import { usePreferences } from '../store/preferences';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -350,7 +342,7 @@ export function LockSetupScreen({ onBack }: Props) {
         }
         setPinFlow(null);
         setPendingNewPin(null);
-        Alert.alert(
+        themedAlert(
           i18nT('lockSetup.pinCreatedAlertTitle', 'PIN created'),
           i18nT('lockSetup.pinCreatedAlertMsg', 'The lock screen is active.')
         );
@@ -360,7 +352,7 @@ export function LockSetupScreen({ onBack }: Props) {
   );
 
   const handleRemovePIN = useCallback(() => {
-    Alert.alert(
+    themedAlert(
       i18nT('lockSetup.removePinAlertTitle', 'Remove PIN'),
       i18nT('lockSetup.removePinAlertMsg', 'Without a PIN, biometrics will also be disabled. Continue?'),
       [
@@ -382,7 +374,7 @@ export function LockSetupScreen({ onBack }: Props) {
   const handleToggleBiometrics = useCallback(
     async (val: boolean) => {
       if (val && !hasPIN) {
-        Alert.alert(
+        themedAlert(
           i18nT('lockSetup.firstCreatePinAlertTitle', 'Create a PIN first'),
           i18nT('lockSetup.firstCreatePinAlertMsg', 'You need a backup PIN before enabling biometrics.')
         );
@@ -398,7 +390,7 @@ export function LockSetupScreen({ onBack }: Props) {
           });
           if (!res.success) return;
         } catch {
-          Alert.alert(
+          themedAlert(
             i18nT('lockSetup.bioUnavailableAlertTitle', 'Biometrics unavailable'),
             i18nT('lockSetup.bioUnavailableAlertMsg', 'This device does not support biometric authentication.')
           );
@@ -413,7 +405,7 @@ export function LockSetupScreen({ onBack }: Props) {
   const handleToggleLock = useCallback(
     async (val: boolean) => {
       if (val && !hasPIN) {
-        Alert.alert(
+        themedAlert(
           i18nT('lockSetup.firstCreatePinAlertTitle', 'Create a PIN first'),
           i18nT('lockSetup.enableLockAlertMsg', 'To enable lock, you need a PIN.')
         );
@@ -612,7 +604,7 @@ export function LockSetupScreen({ onBack }: Props) {
             icon={<I.Shield size={20} color={t.textDim} />}
             label={i18nT('lockSetup.panicMode', 'Panic mode')}
             sub={i18nT('lockSetup.panicModeSub', 'Decoy PIN that wipes everything')}
-            onPress={() => Alert.alert(
+            onPress={() => themedAlert(
               i18nT('lockSetup.panicMode', 'Panic mode'),
               i18nT('lockSetup.panicModeAlertMsg', 'Configurable from Privacy → Panic mode.')
             )}
