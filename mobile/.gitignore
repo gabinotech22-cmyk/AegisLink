@@ -46,3 +46,8 @@ yarn-error.*
 
 # expo-updates OTA code-signing PRIVATE key (never commit)
 keys/
+
+# Emulator test artifacts (screenshots, UI dumps, seeded test images)
+emu-*.png
+d2-home.png
+testimg/
