@@ -598,49 +598,28 @@ export function connect(identity: Identity): Socket {
       themedAlert('Contact offline', 'The contact is not currently connected to the server. Try again later.');
     }
     if (e?.code === 'unknown_identity') {
-      // Server doesn't know us — re-register with PoW then reconnect.
+      // Server doesn't know us — re-register via the single ensureRegistered path.
       if (__DEV__) console.log('[socket] unknown_identity — re-registering and reconnecting');
       try {
-        const { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } = await import('../crypto/registration');
-        const { SERVER_URL } = await import('../config');
-        const { ensureDevicePreKeys } = await import('../crypto/signal/x3dh');
-        const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
-        const nonce = await solvePoW(challenge, difficulty);
-        // Reuse the device's single durable prekey set so this re-registration
-        // republishes the SAME public bundle that matches the persisted secrets,
-        // instead of racing publishToServer with a different freshly-generated set.
-        const preKeys = await ensureDevicePreKeys(identity);
-        const result = await uploadIdentityAndPrekeys(
-          identity,
-          {
-            signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
-            opkSecrets: preKeys.opkSecrets,
-          },
-          SERVER_URL,
-          challenge,
-          nonce,
-          preKeys.oneTimePreKeys,
-          {
-            keyId: preKeys.signedPreKey.keyId,
-            publicKeyB64: preKeys.signedPreKey.publicKeyB64,
-            signatureB64: preKeys.signedPreKey.signatureB64,
-          },
-        );
+        const { ensureRegistered } = await import('../crypto/ensureRegistered');
+        const { useIdentity } = await import('../store/identity');
+        const result = await ensureRegistered(identity);
         if (result.ok) {
+          // Sync the store's publishStatus so the Home banner clears.
+          useIdentity.setState({ publishStatus: 'published', publishError: null, publishRetryAfterMs: null });
           if (__DEV__) console.log('[socket] re-registered — reconnecting');
           // The relay already closed this socket server-side (reason
           // 'io server disconnect'), and that reason does NOT trigger Socket.IO's
-          // auto-reconnect. The previous code called socket.disconnect() here, which
-          // is terminal — it left the user permanently offline after a re-register.
-          // Re-open the socket explicitly so the new identity gets a fresh auth
-          // challenge and comes back online.
+          // auto-reconnect. Re-open the socket explicitly so the new identity
+          // gets a fresh auth challenge and comes back online.
           socket?.connect();
         } else {
           if (__DEV__) console.warn('[socket] re-registration failed:', result.error);
+          useIdentity.setState({ publishStatus: 'failed', publishError: result.error ?? 'Re-registration failed', publishRetryAfterMs: result.retryAfterMs ?? null });
           useConnection.getState().setOnline(false);
         }
       } catch (err) {
-        if (__DEV__) console.warn('[socket] re-registration failed:', err);
+        if (__DEV__) console.warn('[socket] re-registration error:', err);
         useConnection.getState().setOnline(false);
       }
     }

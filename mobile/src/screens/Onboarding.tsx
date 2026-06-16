@@ -12,9 +12,6 @@ import { PrimaryButton, GhostButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { fingerprintHex } from '../crypto/fingerprint';
 import { getOrCreateDID } from '../web3/did/DIDManager';
-import { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } from '../crypto/registration';
-import { ensureDevicePreKeys } from '../crypto/signal/x3dh';
-import { RELAY_URL } from '../config';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
 import { themedAlert } from '../components/AlertHost';
@@ -36,7 +33,7 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   const { locale, setLocale } = useLocale();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>('welcome');
-  const { identity, generate, avatarColor, updateProfile } = useIdentity();
+  const { identity, generate, avatarColor, updateProfile, retryPublish } = useIdentity();
   const [fingerprint, setFingerprint] = useState<string[]>([]);
   const [did, setDid] = useState<string | null>(null);
   const [nickname, setNickname] = useState('');
@@ -46,12 +43,6 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   // Tracks when the 'generating' step started so we can enforce a minimum
   // animation duration of 2 s even on fast devices.
   const generatingStartRef = useRef<number>(0);
-
-  type RegistrationState = 'idle' | 'registering' | 'error';
-  const [regState, setRegState] = useState<RegistrationState>('idle');
-  const [regError, setRegError] = useState<string | null>(null);
-  // Track whether we already successfully registered so we don't re-attempt
-  const registeredRef = useRef(false);
 
   async function handleGenerate() {
     if (step !== 'welcome') return;
@@ -99,52 +90,12 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
 
   async function handleEnter() {
     if (!identity) return;
-    if (registeredRef.current) {
-      onDone();
-      return;
-    }
-    setRegState('registering');
-    setRegError(null);
-
-    // Registration is best-effort. If the relay is unreachable, we proceed
-    // to Home anyway — the app works offline and will retry on next launch.
-    const TIMEOUT_MS = 12_000;
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS),
-    );
-
-    try {
-      const { challenge, difficulty } = await Promise.race([fetchPowChallenge(RELAY_URL), timeout]);
-      const nonce = await solvePoW(challenge, difficulty);
-      // Single source of truth for the device's prekeys (created once, reused).
-      const preKeys = await ensureDevicePreKeys(identity);
-      const result = await uploadIdentityAndPrekeys(
-        identity,
-        {
-          signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
-          opkSecrets: preKeys.opkSecrets,
-        },
-        RELAY_URL,
-        challenge,
-        nonce,
-        preKeys.oneTimePreKeys,
-        {
-          keyId: preKeys.signedPreKey.keyId,
-          publicKeyB64: preKeys.signedPreKey.publicKeyB64,
-          signatureB64: preKeys.signedPreKey.signatureB64,
-        },
-      );
-      if (result.ok) {
-        registeredRef.current = true;
-      }
-      // Proceed to Home regardless of server response — identity is local
-      setRegState('idle');
-      onDone();
-    } catch {
-      // Network unavailable or timed out — go Home and retry on next session
-      setRegState('idle');
-      onDone();
-    }
+    // Registration is already running in the background via the identity store
+    // (triggered by generate()). We kick an extra retryPublish in case it
+    // finished with 'failed' (e.g. first attempt timed out). We then proceed
+    // to Home regardless — publishStatus drives the retry banner in Home.
+    void retryPublish();
+    onDone();
   }
 
   const containerPad = { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 20 };
@@ -373,26 +324,16 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
           {i18nT('onboarding.nicknameDefault', { name: defaultName })}
         </Text>
 
-        {regState === 'error' && regError !== null && (
-          <View style={{ backgroundColor: '#1a0000', borderWidth: 1, borderColor: '#ff4444', borderRadius: 8, padding: 12, marginBottom: 12 }}>
-            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: '#ff6666', lineHeight: 16 }}>
-              {regError}
-            </Text>
-          </View>
-        )}
-
         <View style={{ gap: 10 }}>
           <PrimaryButton
             t={t}
-            label={regState === 'registering' ? i18nT('onboarding.securingBtn') : regState === 'error' ? i18nT('onboarding.retryBtn') : i18nT('onboarding.continueBtn')}
+            label={i18nT('onboarding.continueBtn')}
             onPress={handleContinueFromNickname}
-            disabled={regState === 'registering'}
           />
           <GhostButton
             t={t}
             label={i18nT('onboarding.skipNickname')}
             onPress={handleSkipNickname}
-            disabled={regState === 'registering'}
           />
         </View>
       </View>

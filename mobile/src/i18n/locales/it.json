@@ -81,7 +81,10 @@
     "deleteMessagesConfirm": "Eliminare tutti i messaggi con {{name}}? Il contatto rimane.",
     "deleteContact": "Elimina contatto",
     "deleteContactConfirm": "Eliminare {{name}} e tutti i suoi messaggi? Questa azione non può essere annullata.",
-    "archiveAction": "ARCHIVIA"
+    "archiveAction": "ARCHIVIA",
+    "registering": "REGISTRAZIONE IDENTITÀ…",
+    "registrationFailed": "REGISTRAZIONE IDENTITÀ FALLITA",
+    "retry": "RIPROVA"
   },
   "chat": {
     "encryptedToday": "CIFRATO END-TO-END · OGGI",

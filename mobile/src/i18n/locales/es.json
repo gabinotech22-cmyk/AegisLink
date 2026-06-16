@@ -81,7 +81,10 @@
     "deleteMessagesConfirm": "¿Eliminar todos los mensajes con {{name}}? El contacto se conserva.",
     "deleteContact": "Eliminar contacto",
     "deleteContactConfirm": "¿Eliminar a {{name}} y todos sus mensajes? Esta acción no se puede deshacer.",
-    "archiveAction": "ARCHIVAR"
+    "archiveAction": "ARCHIVAR",
+    "registering": "REGISTRANDO IDENTIDAD…",
+    "registrationFailed": "FALLO AL REGISTRAR IDENTIDAD",
+    "retry": "REINTENTAR"
   },
   "chat": {
     "encryptedToday": "CIFRADO EXTREMO A EXTREMO · HOY",
