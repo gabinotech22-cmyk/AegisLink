@@ -1382,13 +1382,20 @@ async function tryRecoverDesync(
   // STILL in recovery, treat our freshly-created init session as the converged
   // one, clear recovery, and flush. The lower peer will have adopted our init.
   const peerId = contact.aegisId;
-  setTimeout(() => {
+  const fallbackTimer = setTimeout(() => {
     if (isInRecovery(peerId)) {
       inRecoveryUntilMs.delete(peerId);
       rdiag(`[RDIAG] recovery fallback flush me=${identity.aegisId} peer=${peerId}`);
       void flushOutbox(identity).catch(() => {});
     }
   }, RECOVERY_FALLBACK_MS);
+  // Node/Jest timer handles expose `.unref()` (React Native's do not — this is a
+  // no-op there, production behaviour is unchanged). Without it, this 6s
+  // real-clock timer keeps the Jest worker process alive past test completion,
+  // firing `rdiag`'s console.warn after the suite has finished ("Cannot log
+  // after tests are done") and destabilising whichever test runs next in the
+  // same worker.
+  (fallbackTimer as unknown as { unref?: () => void }).unref?.();
 
   return true;
 }
@@ -2044,8 +2051,42 @@ async function decryptAndAppend(
         let groupMsgType: string = 'text';
         let groupMsgMediaUri: string | null = null;
         let cleanMsgBody = msgBody;
+        let groupMsgAttachments: import('../db/local').Attachment[] | null = null;
 
-        if (msgBody.startsWith('[audio:') && msgBody.endsWith(']')) {
+        if (msgBody.startsWith('[multi:')) {
+          const { parseMultiPayload } = require('../utils/attachmentFormat') as typeof import('../utils/attachmentFormat');
+          const parsed = parseMultiPayload(msgBody);
+          if (parsed) {
+            const { downloadAndDecryptMedia, persistEncryptedBlob } = require('../crypto/media') as typeof import('../crypto/media');
+            const resolved = await Promise.all(
+              parsed.attachments.map(async (att: import('../db/local').Attachment) => {
+                try {
+                  if (att.type === 'image') {
+                    void persistEncryptedBlob(att.uri);
+                    return att; // lazy decrypt on view
+                  }
+                  if (att.type === 'video') {
+                    return { ...att, uri: await downloadAndDecryptMedia(att.uri, 'mp4') };
+                  }
+                  if (att.type === 'audio') {
+                    return { ...att, uri: await downloadAndDecryptMedia(att.uri, 'm4a') };
+                  }
+                  if (att.type === 'file') {
+                    const rawExt = (att.fileName ?? '').split('.').pop() ?? '';
+                    const safeExt = /^[a-zA-Z0-9]{1,8}$/.test(rawExt) ? rawExt.toLowerCase() : 'bin';
+                    return { ...att, uri: await downloadAndDecryptMedia(att.uri, safeExt) };
+                  }
+                  return att;
+                } catch {
+                  return att;
+                }
+              })
+            );
+            groupMsgAttachments = resolved;
+            groupMsgType = resolved.length === 1 ? resolved[0].type : 'image';
+            cleanMsgBody = parsed.caption;
+          }
+        } else if (msgBody.startsWith('[audio:') && msgBody.endsWith(']')) {
           const durEnd = msgBody.indexOf('s:', 7);
           if (durEnd > 7) {
             const durStr = msgBody.slice(7, durEnd);
@@ -2143,6 +2184,7 @@ async function decryptAndAppend(
           createdAt: env.createdAt ?? Date.now(),
           type: groupMsgType as 'text' | 'image' | 'audio' | 'video' | 'file' | 'poll' | 'location' | 'view_once',
           mediaUri: groupMsgMediaUri,
+          attachments: groupMsgAttachments,
         });
 
         // Trigger local notification in alignment with AegisLink notifications spec.
@@ -2188,6 +2230,7 @@ async function decryptAndAppend(
   // Use startsWith/indexOf instead of regex on potentially large (400KB+) strings.
   let detectedType: string = parsedPayload?.type ?? 'text';
   let detectedMediaUri: string | null = null;
+  let detectedAttachments: import('../db/local').Attachment[] | null = null;
   let cleanBody = finalBody;
 
   /**
@@ -2225,6 +2268,39 @@ async function decryptAndAppend(
           detectedMediaUri = dataUri;
         }
       }
+    }
+  } else if (finalBody.startsWith('[multi:')) {
+    const { parseMultiPayload } = require('../utils/attachmentFormat') as typeof import('../utils/attachmentFormat');
+    const parsed = parseMultiPayload(finalBody);
+    if (parsed) {
+      const { downloadAndDecryptMedia, persistEncryptedBlob } = require('../crypto/media') as typeof import('../crypto/media');
+      const resolved = await Promise.all(
+        parsed.attachments.map(async (att: import('../db/local').Attachment) => {
+          try {
+            if (att.type === 'image') {
+              void persistEncryptedBlob(att.uri);
+              return att;
+            }
+            if (att.type === 'video') {
+              return { ...att, uri: await downloadAndDecryptMedia(att.uri, 'mp4') };
+            }
+            if (att.type === 'audio') {
+              return { ...att, uri: await downloadAndDecryptMedia(att.uri, 'm4a') };
+            }
+            if (att.type === 'file') {
+              const rawExt = (att.fileName ?? '').split('.').pop() ?? '';
+              const safeExt = /^[a-zA-Z0-9]{1,8}$/.test(rawExt) ? rawExt.toLowerCase() : 'bin';
+              return { ...att, uri: await downloadAndDecryptMedia(att.uri, safeExt) };
+            }
+            return att;
+          } catch {
+            return att;
+          }
+        })
+      );
+      detectedAttachments = resolved;
+      detectedType = resolved.length === 1 ? resolved[0].type : 'image';
+      cleanBody = parsed.caption;
     }
   } else if (finalBody.startsWith('[image:blob:')) {
     const closeIdx = finalBody.indexOf(']');
@@ -2368,6 +2444,7 @@ async function decryptAndAppend(
     type: detectedType as 'text' | 'image' | 'audio' | 'video' | 'file' | 'poll' | 'location' | 'view_once',
     mediaUri: detectedMediaUri,
     expiresAt: parsedPayload?.expiresAt ?? null,
+    attachments: detectedAttachments,
   });
 
   // Trigger local notification in alignment with AegisLink notifications spec
