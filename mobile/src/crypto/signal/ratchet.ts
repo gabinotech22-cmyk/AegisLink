@@ -27,6 +27,18 @@ export interface RatchetState {
     aliceEKB64: string;
     spkId: number;
     opkId: number | null;
+    // PQXDH (v2) ONLY: base64 of the 1088-byte ML-KEM-768 ciphertext Alice
+    // encapsulated to Bob's PQSPK. Bob decapsulates it (with his PQSPK secret)
+    // to recover the PQ shared secret and derive the v2 root key. Absent ⇒ v1.
+    //
+    // INTEGRATION TODO (coordinated with backend-lead — NOT in this deliverable):
+    // the transport layer (socket/client.ts) must (a) copy
+    // performX3DH().pqCiphertextB64 into this field on the initiator side and
+    // include it in SealedInner.x3dh, and (b) on the responder side feed it to
+    // performX3DHReceiver({ cipherText, pqSpkSecret }) after the
+    // shouldUsePqReceiver() anti-downgrade gate. This rides INSIDE the sealed
+    // message, so the relay needs no change.
+    pqCtB64?: string;
   };
 
   // Wall-clock time (ms) at which this session was established via X3DH. Used by

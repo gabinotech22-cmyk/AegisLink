@@ -38,8 +38,12 @@ server policy**.
   at-rest queue, but the authenticated live socket still reveals the sender to
   an actively-correlating relay. This is the same limitation Signal documents
   for its sealed-sender feature.
-- **Post-quantum security.** The current handshake is classical X25519. A
-  post-quantum hybrid (PQXDH-style) is on the roadmap (§10), not implemented.
+- **Post-quantum security against a fully PQ-only fleet.** A hybrid X25519 +
+  ML-KEM-768 handshake (PQXDH-style) **is implemented** (§4.4, handshake v2) and
+  provides store-now-decrypt-later resistance for v2↔v2 sessions. It is still
+  rollout-gated: while not-yet-upgraded (v1) clients exist, sessions with them
+  fall back to classical X25519, and the desktop client is pending the same
+  wiring (§10).
 
 ---
 
@@ -48,6 +52,7 @@ server policy**.
 | Purpose | Primitive | Library |
 |---|---|---|
 | DH key agreement | X25519 (`nacl.scalarMult` / `nacl.box`) | TweetNaCl |
+| Post-quantum KEM (hybrid handshake, v2) | ML-KEM-768 (FIPS 203) | `@noble/post-quantum` |
 | Authenticated encryption (outer envelope) | `crypto_box` = X25519 + XSalsa20-Poly1305 (`nacl.box`) | TweetNaCl |
 | Authenticated encryption (message) | `crypto_secretbox` = XSalsa20-Poly1305 (`nacl.secretbox`) | TweetNaCl |
 | Signatures | Ed25519 (`nacl.sign`) | TweetNaCl |
@@ -192,6 +197,48 @@ divergent sets.
 
 `performX3DHReceiver` mirrors the DH order exactly so both sides derive the same
 `SK`, applies the same non-zero guards, and uses the same HKDF parameters.
+
+### 4.4 Hybrid post-quantum handshake (PQXDH, v2)
+
+Handshake **v2** adds an ML-KEM-768 (FIPS 203) encapsulation on top of the
+classical X3DH above — it does **not** replace it. Breaking a v2 session requires
+breaking *both* X25519 and ML-KEM-768.
+
+1. Bob additionally publishes a **signed PQ prekey (PQSPK)**: an ML-KEM-768
+   public key (1184 B) signed with his Ed25519 identity key (64-B detached sig).
+   The relay verifies this signature server-side as defence in depth.
+2. Alice runs the full classical X3DH (§4.2) to obtain `dhOut`, verifies the
+   PQSPK signature **before** using it, then encapsulates:
+   `(ct, ss) = ML-KEM-768.encapsulate(PQSPK_B)`.
+3. The 32-byte ML-KEM shared secret `ss` is concatenated to the end of `dhOut`,
+   and the root key uses a v2-specific domain-separation label:
+   ```
+   SK = HKDF-SHA256( IKM = 0xFF×32 ‖ DH1 ‖ DH2 ‖ DH3 [‖ DH4] ‖ ss,
+                     salt = 0x00×32, info = "AegisLinkPQXDH", L = 32 )
+   ```
+4. Alice sends the 1088-B ML-KEM ciphertext `ct` **inside the sealed message**
+   (`x3dh.pqCtB64`), never as a relay-visible field. Bob decapsulates
+   `ss = ML-KEM-768.decapsulate(ct, PQSPK_secret_B)` and derives the identical
+   `SK`. The downstream Double Ratchet inherits the hybrid guarantee unchanged.
+
+ML-KEM uses implicit rejection (FIPS 203): a tampered `ct` does not error, it
+yields a different pseudo-random `ss`, so the two sides derive different root keys
+and the session fails closed.
+
+> **⚠ Disclosure — version negotiation and downgrade.**
+> A v2 sender fetching a bundle **without** a PQSPK falls back to v1 (interop with
+> not-yet-upgraded clients). On the receiver side, a legitimate v1 sender is
+> indistinguishable from an attacker who stripped the ML-KEM ciphertext, because
+> there is no signed version commitment in the bundle. The current implementation
+> takes the **strict** stance: a receiver that advertised a PQSPK aborts the
+> handshake when the initial message carries no ML-KEM ciphertext. This is safe
+> only once every client is v2 — against a mixed fleet it would reject legitimate
+> v1 senders (including the still-v1 desktop client). **The planned rollout fix is
+> to relax the gate to fall back to v1 during the mixed-version window** (logging
+> the downgrade for telemetry) and reserve the strict mode for a fully-v2 fleet;
+> this is tracked as a release blocker. Until then the hybrid guarantee holds for
+> v2↔v2 sessions only. The PQSPK secret (2400 B) is persisted with the same
+> write-then-readback invariant as the SPK and is covered by the panic wipe.
 
 ---
 
@@ -432,7 +479,10 @@ with a key derived from a user passphrase the relay never sees:
 - **Endpoint compromise.** Malware or a physically compromised, unlocked device
   with the keystore unsealed can read plaintext. Panic-wipe and decoy modes
   mitigate coercion scenarios but are not cryptographic defenses.
-- **Post-quantum adversaries** (store-now-decrypt-later) — see §10.
+- **Post-quantum adversaries in mixed-version sessions.** v2↔v2 sessions are
+  hybrid-protected (§4.4); a session that falls back to v1 (peer not yet upgraded,
+  or desktop) is classical X25519 only and remains store-now-decrypt-later
+  exposed until both ends are v2 — see §10.
 - **Cross-domain key-separation concerns** from the shared X25519/Ed25519 secret
   (§3.1).
 
@@ -463,8 +513,11 @@ with a key derived from a user passphrase the relay never sees:
 The following are **not implemented** and are honestly out of scope of the
 current protocol:
 
-1. **Post-quantum hybrid handshake** (PQXDH-style, X25519 + ML-KEM). Highest
-   priority for store-now-decrypt-later resistance.
+1. **Post-quantum hybrid handshake** (PQXDH-style, X25519 + ML-KEM-768) —
+   **implemented** for the mobile client and relay (§4.4, handshake v2).
+   Remaining: (a) wire the **desktop** client to v2 (it is still v1), (b) extend
+   v2 to the multi-device self-copy path, and (c) flip the receiver gate to
+   strict "PQ-mandatory" once the whole fleet is v2.
 2. **Domain-separated identity keys** to remove the shared X25519/Ed25519 secret
    scalar (§3.1).
 3. **Stronger sender anonymity** against an actively-correlating relay (e.g.
