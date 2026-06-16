@@ -15,6 +15,7 @@ import {
   setChatEphemeralTimer,
   getAllChatEphemeralTimers,
   type StoredMessage,
+  type Attachment,
 } from '../db/local';
 
 interface MessagesState {
@@ -57,6 +58,8 @@ interface MessagesState {
   updateDelivery: (chatId: string, id: string, status: 'sent' | 'delivered' | 'read') => Promise<void>;
   /** Replace a message's media reference in place (e.g. local URI → persistent blob ref after upload). */
   setMediaUri: (chatId: string, id: string, mediaUri: string) => Promise<void>;
+  /** Replace a message's attachments array in place (local URIs → blob refs after upload). */
+  setAttachments: (chatId: string, id: string, attachments: Attachment[]) => Promise<void>;
   remoteDelete: (chatId: string, id: string) => Promise<void>;
   togglePin: (chatId: string, id: string) => Promise<void>;
   clearChat: (chatId: string) => Promise<void>;
@@ -275,6 +278,18 @@ export const useMessages = create<MessagesState>((set, get) => ({
       byChat: {
         ...s.byChat,
         [chatId]: list.map((m) => (m.id === id ? { ...m, mediaUri } : m)),
+      },
+    }));
+  },
+
+  async setAttachments(chatId, id, attachments) {
+    const { updateMessageAttachments } = require('../db/local');
+    await updateMessageAttachments(id, attachments);
+    const list = get().byChat[chatId] ?? [];
+    set((s) => ({
+      byChat: {
+        ...s.byChat,
+        [chatId]: list.map((m) => (m.id === id ? { ...m, attachments } : m)),
       },
     }));
   },

@@ -22,6 +22,7 @@ import { ForwardModal } from '../components/ForwardModal';
 import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
 import { MediaImage } from '../components/MediaImage';
+import { AttachmentGrid } from '../components/AttachmentGrid';
 import { useContacts } from '../store/contacts';
 import { useGroups } from '../store/groups';
 import { canScheduleGroupPost } from '../store/scheduledMessages';
@@ -91,7 +92,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const [searchActive, setSearchActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ images: string[]; index: number } | null>(null);
   const flatlistRef = useRef<FlatList>(null);
   const isNearBottomRef = useRef(true);
   const hasInitialScrolledRef = useRef(false);
@@ -528,7 +529,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                 onLongPress={() => setActionsMsg(item)}
                 pollResult={pollResults[item.id]}
                 onVote={(optionIndex, totalOptions) => void handleVote(item.id, optionIndex, totalOptions)}
-                onImagePress={setViewerUri}
+                onImagePress={(images, index) => setViewer({ images, index })}
               />
             </SwipeableMessage>
           )}
@@ -691,7 +692,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         onSelectGif={handleGifSelect}
         onSelectSticker={handleStickerSelect}
       />
-      <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
+      <ImageViewerModal images={viewer?.images ?? null} initialIndex={viewer?.index ?? 0} onClose={() => setViewer(null)} t={t} />
       <MediaEditorModal
         t={t}
         visible={editorUri !== null}
@@ -754,7 +755,7 @@ interface GroupBubbleProps {
   onLongPress: () => void;
   pollResult?: PollResult;
   onVote: (optionIndex: number, totalOptions: number) => void;
-  onImagePress?: (uri: string) => void;
+  onImagePress?: (images: string[], index: number) => void;
 }
 
 function GroupBubble({
@@ -1073,6 +1074,39 @@ function GroupBubble({
     );
   }
 
+  // Multi-attachment bubble
+  if (m.attachments && m.attachments.length > 0) {
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+        {sender && (
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: senderColor, marginBottom: 2 }}>
+            {sender}
+          </Text>
+        )}
+        <Pressable onLongPress={onLongPress} accessibilityLabel="Attachment message">
+          <AttachmentGrid
+            attachments={m.attachments}
+            isMe={me}
+            caption={m.body || undefined}
+            onImagePress={(uri, index) => {
+              const imageUris = (m.attachments ?? [])
+                .filter((a) => a.type === 'image' || a.type === 'video')
+                .map((a) => a.uri);
+              onImagePress?.(imageUris, index);
+            }}
+            onFilePress={(att) => {
+              if (att.uri) void Linking.openURL(att.uri).catch(() => {});
+            }}
+          />
+        </Pressable>
+        <ReactionPills t={t} reactions={reactions} me={me} />
+        <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, alignSelf: me ? 'flex-end' : 'flex-start', marginTop: 3, paddingHorizontal: 4 }}>
+          {time}
+        </Text>
+      </View>
+    );
+  }
+
   // Video bubble
   if (m.type === 'video') {
     return (
@@ -1199,7 +1233,7 @@ function GroupBubble({
           </View>
         ) : null}
         <Pressable
-          onPress={() => onImagePress?.(m.mediaUri!)}
+          onPress={() => onImagePress?.([m.mediaUri!], 0)}
           onLongPress={onLongPress}
           style={({ pressed }) => ({
             width: 200,

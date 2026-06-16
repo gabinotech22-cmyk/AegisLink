@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { PrimaryButton } from '../components/Button';
-import { parseIdentityQR } from '../crypto/qr';
+import { parseIdentityQR, parseGroupInviteLink } from '../crypto/qr';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import type { StoredContact } from '../db/local';
@@ -15,9 +15,16 @@ import { themedAlert } from '../components/AlertHost';
 interface Props {
   onCancel: () => void;
   onAdded: (contact: StoredContact) => void;
+  /**
+   * Called when the scanned code is a group invite (aegislink://group/v1/…
+   * or the universal https /g# form). The caller pushes the same
+   * `groupJoin` route used by App.tsx's Linking handler — no duplicated
+   * join logic.
+   */
+  onGroupInvite?: (groupId: string, groupName: string, adminId: string) => void;
 }
 
-export function ScanQRScreen({ onCancel, onAdded }: Props) {
+export function ScanQRScreen({ onCancel, onAdded, onGroupInvite }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -32,6 +39,34 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
   async function handleScan(result: BarcodeScanningResult) {
     if (busy) return;
     if (handledRef.current === result.data) return;
+
+    // Group invite QR — aegislink://group/v1/… or the universal https /g#
+    // form. Hand off to the SAME groupJoin route used by App.tsx's deep-link
+    // handler (admin-approval flow); no duplicated join logic here.
+    const groupInvite = parseGroupInviteLink(result.data);
+    if (groupInvite) {
+      handledRef.current = result.data;
+      if (onGroupInvite) {
+        onGroupInvite(groupInvite.groupId, groupInvite.groupName, groupInvite.adminId);
+      } else {
+        // Valid AegisLink group invite, but this scanner instance isn't wired
+        // to handle joins (e.g. opened from the identity verification flow).
+        // Explain what the code is and where to use it instead of failing
+        // silently or showing the generic "invalid QR" message.
+        Alert.alert(
+          i18nT('scanQR.groupInviteWrongContextTitle', 'Group invitation'),
+          i18nT(
+            'scanQR.groupInviteWrongContextDesc',
+            'This is a group invitation, not an identity code. Open it from your chats or groups list to join.'
+          ),
+          [
+            { text: i18nT('common.ok', 'OK'), onPress: () => (handledRef.current = null) },
+          ]
+        );
+      }
+      return;
+    }
+
     const parsed = parseIdentityQR(result.data);
     if (!parsed) {
       handledRef.current = result.data;

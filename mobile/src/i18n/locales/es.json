@@ -946,7 +946,9 @@
   "scanQR": {
     "title": "Escanear QR",
     "instruction": "Apunta la cámara a un código QR de Aegis",
-    "permissionDenied": "Permiso de cámara denegado"
+    "permissionDenied": "Permiso de cámara denegado",
+    "groupInviteWrongContextTitle": "Invitación de grupo",
+    "groupInviteWrongContextDesc": "Esto es una invitación de grupo, no un código de identidad. Ábrela desde tus chats o tu lista de grupos para unirte."
   },
   "verify": {
     "title": "Verificar",
@@ -1069,7 +1071,9 @@
     "roleMember": "MIEMBRO",
     "inviteLinkSection": "ENLACE DE INVITACIÓN",
     "shareInviteLink": "Compartir enlace de invitación",
-    "shareInviteLinkSub": "Cualquiera con el enlace puede solicitar unirse"
+    "shareInviteLinkSub": "Cualquiera con el enlace puede solicitar unirse",
+    "inviteQrLabel": "Código QR de invitación al grupo",
+    "inviteQrSub": "Escanea este código para solicitar unirte al grupo"
   },
   "groupJoin": {
     "title": "Unirse al grupo",

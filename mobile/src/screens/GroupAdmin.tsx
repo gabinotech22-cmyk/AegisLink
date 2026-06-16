@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Image, Share } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
@@ -405,6 +406,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
                 const link = encodeGroupInviteLinkUniversal(group.id, group.name, group.adminId);
                 await Share.share({ message: link });
               }}
+              accessibilityLabel={i18nT('groupAdmin.shareInviteLink')}
               style={({ pressed }) => ({
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -438,6 +440,42 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
                 </Text>
               </View>
             </Pressable>
+
+            {/* QR code — scan to join. Payload travels in the URL fragment,
+                same zero-metadata https form used by Share above. */}
+            {group.adminId && (
+              <View
+                style={{ alignItems: 'center', paddingHorizontal: 16, paddingBottom: 18, paddingTop: 2 }}
+                accessibilityLabel={i18nT('groupAdmin.inviteQrLabel')}
+              >
+                <View
+                  style={{
+                    padding: 16,
+                    backgroundColor: '#fff',
+                    borderRadius: t.radius,
+                  }}
+                >
+                  <QRCode
+                    value={encodeGroupInviteLinkUniversal(group.id, group.name, group.adminId)}
+                    size={180}
+                    color="#0a0a0a"
+                    backgroundColor="#ffffff"
+                  />
+                </View>
+                <Text
+                  style={{
+                    fontFamily: t.font,
+                    fontSize: 12,
+                    color: t.textDim,
+                    textAlign: 'center',
+                    marginTop: 10,
+                    lineHeight: 18,
+                  }}
+                >
+                  {i18nT('groupAdmin.inviteQrSub')}
+                </Text>
+              </View>
+            )}
           </Section>
         )}
 
@@ -494,7 +532,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
               const msg = (e as Error).message === 'group_member_limit'
                 ? i18nT('groupAdmin.memberLimitReached', 'Este grupo alcanzó el máximo de 1024 miembros.')
                 : (e as Error).message;
-              Alert.alert(i18nT('common.error', 'Error'), msg);
+              themedAlert(i18nT('common.error', 'Error'), msg);
             }
           })();
         }}
