@@ -47,7 +47,14 @@
     "generateError": "Could not generate identity",
     "registrationFailed": "Registration failed. Check your connection and retry.",
     "networkError": "Network error. Please retry.",
-    "langToggle": "EN | IT"
+    "langToggle": "EN | IT",
+    "continueBtn": "Continue",
+    "almostDone": "ALMOST DONE",
+    "nicknameTitle": "What should we call you?",
+    "nicknameSubtitle": "The name your contacts will see. It's end-to-end encrypted: the server never sees it. It's optional and you stay anonymous (no phone number, no email).",
+    "nicknameLabel": "VISIBLE NAME (OPTIONAL)",
+    "nicknameDefault": "Default: {{name}}",
+    "skipNickname": "Skip for now"
   },
   "home": {
     "identityCreated": "Identity created",

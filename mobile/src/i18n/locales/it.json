@@ -47,7 +47,14 @@
     "generateError": "Impossibile generare l'identità",
     "registrationFailed": "Registrazione fallita. Controlla la connessione e riprova.",
     "networkError": "Errore di rete. Per favore riprova.",
-    "langToggle": "EN | IT"
+    "langToggle": "EN | IT",
+    "continueBtn": "Continua",
+    "almostDone": "QUASI FATTO",
+    "nicknameTitle": "Come ti chiamiamo?",
+    "nicknameSubtitle": "Il nome che vedranno i tuoi contatti. È cifrato end-to-end: il server non lo vede mai. È opzionale e resti anonimo (niente numero di telefono né email).",
+    "nicknameLabel": "NOME VISIBILE (OPZIONALE)",
+    "nicknameDefault": "Predefinito: {{name}}",
+    "skipNickname": "Salta per ora"
   },
   "home": {
     "identityCreated": "Identità creata",
