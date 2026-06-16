@@ -56,6 +56,12 @@ export interface PowChallenge {
 export interface RegistrationResult {
   ok: boolean;
   error?: string;
+  /**
+   * When the relay rate-limits us (HTTP 429), the cooldown it asks us to honor,
+   * in milliseconds. Callers should not retry before this elapses — retrying
+   * inside the window is wasted work and can extend a sliding-window ban.
+   */
+  retryAfterMs?: number;
 }
 
 interface IdentityPostBody {
@@ -229,6 +235,7 @@ export async function uploadIdentityAndPrekeys(
     return {
       ok: false,
       error: `identity: HTTP ${identityRes.status}${detail ? ` — ${detail}` : ''}`,
+      retryAfterMs: parseRetryAfterMs(detail, identityRes),
     };
   }
 
@@ -300,6 +307,7 @@ export async function uploadIdentityAndPrekeys(
     return {
       ok: false,
       error: `prekeys: HTTP ${prekeysRes.status}${detail ? ` — ${detail}` : ''}`,
+      retryAfterMs: parseRetryAfterMs(detail, prekeysRes),
     };
   }
 
@@ -317,6 +325,29 @@ function trimSlash(url: string): string {
 function errMsg(e: unknown): string {
   if (e instanceof Error) return e.message;
   return 'unknown';
+}
+
+/**
+ * Extract the cooldown the relay wants us to honor after a 429.
+ * Prefers the JSON body's `retryAfterMs`; falls back to the standard
+ * `Retry-After` header (seconds → ms). Returns undefined when neither is
+ * present or parseable.
+ */
+function parseRetryAfterMs(detail: string, res: Response): number | undefined {
+  try {
+    const body = JSON.parse(detail) as { retryAfterMs?: unknown };
+    if (typeof body.retryAfterMs === 'number' && body.retryAfterMs > 0) {
+      return body.retryAfterMs;
+    }
+  } catch {
+    // detail wasn't JSON — fall through to the header
+  }
+  const header = res.headers.get('Retry-After');
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  }
+  return undefined;
 }
 
 async function safeText(res: Response): Promise<string> {

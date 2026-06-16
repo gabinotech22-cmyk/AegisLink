@@ -81,7 +81,10 @@
     "deleteMessagesConfirm": "Delete all messages with {{name}}? The contact remains.",
     "deleteContact": "Delete contact",
     "deleteContactConfirm": "Delete {{name}} and all their messages? This action cannot be undone.",
-    "archiveAction": "ARCHIVE"
+    "archiveAction": "ARCHIVE",
+    "registering": "REGISTERING IDENTITY…",
+    "registrationFailed": "IDENTITY REGISTRATION FAILED",
+    "retry": "RETRY"
   },
   "chat": {
     "encryptedToday": "END-TO-END ENCRYPTED · TODAY",
