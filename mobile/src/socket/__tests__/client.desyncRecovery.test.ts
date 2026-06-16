@@ -231,6 +231,14 @@ describe('ratchet desync auto-recovery', () => {
     connect = (require('../client') as typeof import('../client')).connect;
   });
 
+  afterEach(() => {
+    // Cancel the 90s recovery-fallback timer the initiator path arms — each
+    // test gets a fresh module instance (resetModules above), so this must run
+    // before the next reset while require() still returns THIS test's instance.
+    // Leaked timers log after teardown and hold Jest workers open in CI.
+    (require('../client') as typeof import('../client')).disconnect();
+  });
+
   /**
    * Build (me, peer) so that `me` is the canonical INITIATOR (higher aegisId).
    * Only the initiator deletes+re-keys on desync; the lower peer NUDGES (see
