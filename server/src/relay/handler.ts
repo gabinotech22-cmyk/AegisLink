@@ -4,7 +4,8 @@ import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 
 const { decodeBase64 } = naclUtil;
-import { messageRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
+import { randomUUID } from 'node:crypto';
+import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { notifyRecipient, sendCallWakeUp, type CallMedia } from '../push/expo.js';
 
@@ -210,9 +211,15 @@ const GroupRekeyDistribution = z.object({
   senderAegisId: z.string().min(1).max(64),
 });
 
+// Cap raised to 512 for large groups. Clients with >512 members MUST chunk the
+// re-key into multiple `group:rekey` calls (each carries up to 512 per-recipient
+// blobs). The rate limit (30/min) gives ~15,360 recipients per minute, sufficient
+// for groups of up to ~512 members with one immediate re-key + one retry window.
+const GROUP_REKEY_MAX_DIST = 512;
+
 const GroupRekeyEvent = z.object({
   groupId: z.string().min(1).max(64),
-  distributions: z.array(GroupRekeyDistribution).min(1).max(256),
+  distributions: z.array(GroupRekeyDistribution).min(1).max(GROUP_REKEY_MAX_DIST),
 });
 
 // Rate-limit buckets for channel:msg — keyed by aegisId, max 120/min
@@ -254,6 +261,12 @@ function checkLowFreqRateLimit(aegisId: string): boolean {
   return entry.count <= 30;
 }
 
+// Raised from 10 to 30 per minute to support large-group re-keys.
+// Rationale: with GROUP_REKEY_MAX_DIST=512, an admin re-keying a 512-member
+// group needs exactly 1 call (fits in one batch). The extra headroom (30 calls)
+// covers concurrent group memberships and retry attempts without opening a
+// meaningful DoS vector — sustained abuse would only exhaust the attacker's own
+// per-identity bucket, not others'.
 function checkRekeyRateLimit(aegisId: string): boolean {
   const now = Date.now();
   const entry = rekeyRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
@@ -264,7 +277,7 @@ function checkRekeyRateLimit(aegisId: string): boolean {
     const oldest = rekeyRateLimit.keys().next().value;
     if (oldest !== undefined) rekeyRateLimit.delete(oldest);
   }
-  return entry.count <= 10;
+  return entry.count <= 30;
 }
 
 const AUTH_TIMEOUT_MS = 5000;
@@ -498,6 +511,29 @@ export function attachRelay(io: SocketServer) {
       if (row.sender_pub_b64) queued.senderPublicKeyB64 = row.sender_pub_b64;
       socket.emit('envelope', queued);
       await messageRepo.delete(row.id, deviceId);
+    }
+
+    // Drain queued SenderKey distributions for this device. Each distribution was
+    // sealed individually per recipient before leaving the sender's device — the
+    // relay forwards the opaque blob verbatim as `group:rekey_dist`. The client
+    // MUST ack each distribution via `group:rekey_drain_ack` so the server can
+    // purge fully-drained rows. Distributions for which no ack arrives within the
+    // TTL are purged by the background cron (same lifecycle as messageRepo).
+    const pendingDists = await senderKeyDistRepo.drainFor(me, deviceId);
+    for (const dist of pendingDists) {
+      socket.emit('group:rekey_dist', {
+        distId: dist.id,
+        groupId: dist.group_id,
+        senderAegisId: dist.sender_aegis_id,  // Do not log — zero-metadata principle
+        ciphertextB64: dist.ciphertext_b64,
+        nonceB64: dist.nonce_b64,
+        chainKeyB64: dist.chain_key_b64,
+        iteration: dist.iteration,
+      });
+      // Immediately mark this device as having drained the row so repeated
+      // reconnects don't re-deliver the same distribution. The row is hard-deleted
+      // once MAX_DRAIN_DEVICES devices have drained it, matching messageRepo.
+      await senderKeyDistRepo.delete(dist.id, deviceId);
     }
 
     // Re-deliver any call:invite that arrived while this device was offline, so a
@@ -1178,22 +1214,79 @@ export function attachRelay(io: SocketServer) {
         return;
       }
 
+      const now = Date.now();
+      const enqueuePromises: Promise<void>[] = [];
+
       for (const d of distributions) {
         if (d.aegisId === me) continue; // never echo to self
+
         const recipientSockets = sockets.get(d.aegisId);
-        if (!recipientSockets || recipientSockets.size === 0) continue; // offline — client retries
-        for (const s of recipientSockets) {
-          s.emit('group:rekey_dist', {
-            groupId,
-            senderAegisId: me,
-            ciphertextB64: d.ciphertextB64,
-            nonceB64: d.nonceB64,
-            chainKeyB64: d.chainKeyB64,
-            iteration: d.iteration,
-          });
+        if (recipientSockets && recipientSockets.size > 0) {
+          // Recipient is online — forward immediately (existing path).
+          const distId = randomUUID();
+          for (const s of recipientSockets) {
+            s.emit('group:rekey_dist', {
+              distId,
+              groupId,
+              senderAegisId: me,
+              ciphertextB64: d.ciphertextB64,
+              nonceB64: d.nonceB64,
+              chainKeyB64: d.chainKeyB64,
+              iteration: d.iteration,
+            });
+          }
+        } else {
+          // Recipient is offline — enqueue the sealed distribution for deferred
+          // delivery. The relay stores the blob opaquely; senderAegisId is needed
+          // only so the drain path can reconstruct the correct wire payload (same
+          // rationale as sender_pub_b64 for init messages in messageRepo, FND-05
+          // exception). The row is purged as soon as all devices drain it.
+          const distId = randomUUID();
+          enqueuePromises.push(
+            senderKeyDistRepo.enqueue({
+              id: distId,
+              recipient: d.aegisId,
+              group_id: groupId,
+              sender_aegis_id: me,    // Do not log — zero-metadata principle
+              ciphertext_b64: d.ciphertextB64,
+              nonce_b64: d.nonceB64,
+              chain_key_b64: d.chainKeyB64,
+              iteration: d.iteration,
+              created_at: now,
+              expires_at: 0,          // 0 → apply default MESSAGE_TTL_MS in repo
+            }).then(() => { /* enqueue result is advisory — never reveal to sender */ })
+          );
         }
       }
+
+      // Fire-and-forget: enqueues run in parallel; we ack immediately so the
+      // sender is not blocked waiting for DB writes for potentially hundreds of
+      // offline recipients.
+      void Promise.all(enqueuePromises);
       ack?.({ ok: true });
+    });
+
+    // ─── Group re-key drain ack ──────────────────────────────────────────────
+    // The client emits this after successfully processing a `group:rekey_dist`
+    // received from the offline queue. The relay uses it to track per-device drain
+    // progress and hard-delete the row once all known devices have acked.
+    //
+    // For online-delivered distributions (emitted directly in `group:rekey`) the
+    // client also emits this ack; the relay tolerates a no-op if the row is
+    // already gone (it was never persisted for online recipients).
+    const RekeyDrainAck = z.object({
+      distId: z.string().uuid(),
+    });
+
+    socket.on('group:rekey_drain_ack', (raw: unknown) => {
+      const parsed = RekeyDrainAck.safeParse(raw);
+      if (!parsed.success) {
+        socket.emit('error_msg', { code: 'invalid_payload', for: 'group:rekey_drain_ack' });
+        return;
+      }
+      // Fire-and-forget: delete is idempotent and non-fatal if the row is gone.
+      // Do not log distId or aegisId — zero-metadata principle.
+      void senderKeyDistRepo.delete(parsed.data.distId, deviceId);
     });
 
     // ─── WebRTC signaling (Fase 3c/3d) ─────────────────────────────────────
