@@ -1336,13 +1336,20 @@ async function tryRecoverDesync(
   // STILL in recovery, treat our freshly-created init session as the converged
   // one, clear recovery, and flush. The lower peer will have adopted our init.
   const peerId = contact.aegisId;
-  setTimeout(() => {
+  const fallbackTimer = setTimeout(() => {
     if (isInRecovery(peerId)) {
       inRecoveryUntilMs.delete(peerId);
       rdiag(`[RDIAG] recovery fallback flush me=${identity.aegisId} peer=${peerId}`);
       void flushOutbox(identity).catch(() => {});
     }
   }, RECOVERY_FALLBACK_MS);
+  // Node/Jest timer handles expose `.unref()` (React Native's do not — this is a
+  // no-op there, production behaviour is unchanged). Without it, this 6s
+  // real-clock timer keeps the Jest worker process alive past test completion,
+  // firing `rdiag`'s console.warn after the suite has finished ("Cannot log
+  // after tests are done") and destabilising whichever test runs next in the
+  // same worker.
+  (fallbackTimer as unknown as { unref?: () => void }).unref?.();
 
   return true;
 }
