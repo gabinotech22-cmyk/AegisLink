@@ -27,8 +27,11 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 // ── In-memory mock of the db/local prekey store ──────────────────────────────
 const mockDbSpk = new Map<number, string>();
 const mockDbOpk = new Map<number, string>();
+const mockDbPqSpk = new Map<number, string>();
 let mockDbSpkKeyId: number | null = null;
+let mockDbPqSpkKeyId: number | null = null;
 let mockSpkWriteCount = 0;
+let mockPqSpkWriteCount = 0;
 
 jest.mock('../../../db/local', () => ({
   __esModule: true,
@@ -42,6 +45,14 @@ jest.mock('../../../db/local', () => ({
   saveOpkSecret: jest.fn(async (keyId: number, b64: string) => { mockDbOpk.set(keyId, b64); }),
   setSpkKeyId: jest.fn(async (n: number) => { mockDbSpkKeyId = n; }),
   getSpkKeyId: jest.fn(async () => mockDbSpkKeyId),
+  // PQXDH PQSPK store
+  savePqSpkSecret: jest.fn(async (keyId: number, b64: string) => {
+    mockPqSpkWriteCount++;
+    mockDbPqSpk.set(keyId, b64);
+  }),
+  loadPqSpkSecret: jest.fn(async (keyId: number) => mockDbPqSpk.get(keyId) ?? null),
+  setPqSpkKeyId: jest.fn(async (n: number) => { mockDbPqSpkKeyId = n; }),
+  getPqSpkKeyId: jest.fn(async () => mockDbPqSpkKeyId),
 }));
 
 import {
@@ -72,8 +83,11 @@ function buildIdentity(): Identity {
 beforeEach(() => {
   mockDbSpk.clear();
   mockDbOpk.clear();
+  mockDbPqSpk.clear();
   mockDbSpkKeyId = null;
+  mockDbPqSpkKeyId = null;
   mockSpkWriteCount = 0;
+  mockPqSpkWriteCount = 0;
 });
 
 describe('ensureDevicePreKeys — single source of truth', () => {
@@ -119,12 +133,54 @@ describe('ensureDevicePreKeys — single source of truth', () => {
     const me = buildIdentity();
     const first = await ensureDevicePreKeys(me);
     const writesAfterFirst = mockSpkWriteCount;
+    const pqWritesAfterFirst = mockPqSpkWriteCount;
 
     const second = await ensureDevicePreKeys(me);
     expect(second.signedPreKey.publicKeyB64).toBe(first.signedPreKey.publicKeyB64);
     expect(second.signedPreKey.keyId).toBe(first.signedPreKey.keyId);
     // No new SPK secret written — it was reconstructed from the DB.
     expect(mockSpkWriteCount).toBe(writesAfterFirst);
+    // Same single-source-of-truth guarantee for the PQSPK.
+    expect(second.pqSignedPreKey.publicKeyB64).toBe(first.pqSignedPreKey.publicKeyB64);
+    expect(mockPqSpkWriteCount).toBe(pqWritesAfterFirst);
+  });
+
+  it('publishes a PQSPK whose signature verifies and whose secret is persisted', async () => {
+    const me = buildIdentity();
+    const set = await ensureDevicePreKeys(me);
+
+    expect(decodeBase64(set.pqSignedPreKey.publicKeyB64).length).toBe(1184);
+    // The persisted PQSPK secret is the 2400-byte ML-KEM-768 secret key.
+    const persisted = mockDbPqSpk.get(set.pqSignedPreKey.keyId)!;
+    expect(decodeBase64(persisted).length).toBe(2400);
+    // The published PQSPK signature verifies under the identity signing key.
+    expect(
+      nacl.sign.detached.verify(
+        decodeBase64(set.pqSignedPreKey.publicKeyB64),
+        decodeBase64(set.pqSignedPreKey.signatureB64),
+        me.signingPublicKey,
+      ),
+    ).toBe(true);
+  });
+
+  it('migrates a pre-PQXDH install (SPK present, PQSPK absent) by adding a PQSPK', async () => {
+    const me = buildIdentity();
+    // Simulate a legacy install: an SPK + OPK already persisted, but NO PQSPK.
+    const { generatePreKeys } = require('../x3dh') as typeof import('../x3dh');
+    const legacy = generatePreKeys(me, 1, 2, 1, 1);
+    mockDbSpk.set(legacy.signedPreKey.keyId, encodeBase64(legacy.signedPreKey.secretKey));
+    mockDbSpkKeyId = legacy.signedPreKey.keyId;
+    for (const [keyId, secret] of legacy.opkSecrets) {
+      mockDbOpk.set(keyId, encodeBase64(secret));
+    }
+    // PQSPK store intentionally empty (pre-PQXDH).
+    expect(mockDbPqSpk.size).toBe(0);
+
+    const set = await ensureDevicePreKeys(me);
+    // A PQSPK was lazily generated + persisted; classic SPK was reused as-is.
+    expect(set.signedPreKey.keyId).toBe(legacy.signedPreKey.keyId);
+    expect(mockDbPqSpk.size).toBe(1);
+    expect(decodeBase64(set.pqSignedPreKey.publicKeyB64).length).toBe(1184);
   });
 });
 

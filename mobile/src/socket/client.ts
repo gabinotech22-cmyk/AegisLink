@@ -11,7 +11,7 @@ import { deriveAegisId } from '../crypto/identity';
 import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
-import { performX3DH, performX3DHReceiver, generatePreKeys, type PreKeyBundle } from '../crypto/signal/x3dh';
+import { performX3DH, performX3DHReceiver, generatePreKeys, shouldUsePqReceiver, type PreKeyBundle, type PqSignedPreKeyPublic } from '../crypto/signal/x3dh';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
 import { themedAlert } from '../components/AlertHost';
 import {
@@ -31,6 +31,10 @@ import {
   deleteOpkSecret,
   setSpkKeyId,
   getSpkKeyId,
+  savePqSpkSecret,
+  loadPqSpkSecret,
+  setPqSpkKeyId,
+  getPqSpkKeyId,
   type OutboxJob,
 } from '../db/local';
 
@@ -354,7 +358,18 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   }
   const nextSpkKeyId = (prevSpkKeyId ?? 0) + 1;
 
-  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId);
+  // PQXDH (v2): mirror the SPK's monotonic-keyId + never-publish-what-we-can't
+  // -read-back invariant for the PQSPK (ML-KEM-768), using the SAME durable
+  // counter (getPqSpkKeyId/setPqSpkKeyId) that ensureDevicePreKeys uses, so this
+  // legacy upload path and the single-source-of-truth path can never diverge on
+  // which PQSPK keyId is "current".
+  let prevPqSpkKeyId: number | null = null;
+  try {
+    prevPqSpkKeyId = await getPqSpkKeyId();
+  } catch {/* treat as first run */}
+  const nextPqSpkKeyId = (prevPqSpkKeyId ?? 0) + 1;
+
+  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId, nextPqSpkKeyId);
   mySpkSecretCache = preKeys.signedPreKey.secretKey;
   opkSecretsCache = preKeys.opkSecrets;
 
@@ -396,6 +411,33 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
     // upload entirely so the peer never fetches a bundle we cannot complete.
     rdiag(`[RDIAG] prekey-store ABORT spkId=${nextSpkKeyId} dbReadback=NULL — NOT emitting prekeys:upload`);
     throw new Error(`uploadPreKeys: could not persist SPK secret for keyId ${nextSpkKeyId} — refusing to publish`);
+  }
+
+  // PQXDH (v2): same write-then-readback invariant for the PQSPK secret
+  // (2400 bytes). If we cannot durably persist+readback the PQSPK, we fall
+  // back to a v1-safe upload (omit pqSignedPreKey below) rather than
+  // publishing a PQ prekey whose secret we could not recover — that would
+  // silently break every inbound v2 handshake to this device.
+  const newPqSecretB64 = encodeBase64(preKeys.pqSignedPreKey.secretKey);
+  const persistPqSpkToDb = async (): Promise<boolean> => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await savePqSpkSecret(nextPqSpkKeyId, newPqSecretB64);
+        const back = await loadPqSpkSecret(nextPqSpkKeyId);
+        if (back === newPqSecretB64) return true;
+      } catch (e) {
+        if (__DEV__) console.warn('[socket] PQSPK secret DB write attempt failed', attempt, e);
+      }
+    }
+    return false;
+  };
+  const pqSpkDbOk = await persistPqSpkToDb();
+  if (pqSpkDbOk) {
+    try { await setPqSpkKeyId(nextPqSpkKeyId); } catch (e) {
+      if (__DEV__) console.warn('[socket] could not persist PQSPK keyId to DB', e);
+    }
+  } else {
+    rdiag(`[RDIAG] prekey-store PQSPK-SKIP pqSpkId=${nextPqSpkKeyId} dbReadback=NULL — uploading v1-safe (no pqSignedPreKey)`);
   }
 
   // Persist the keyId (durable counter) and every OPK secret to the DB.
@@ -470,7 +512,19 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
         publicKeyB64: preKeys.signedPreKey.publicKeyB64,
         signatureB64: preKeys.signedPreKey.signatureB64
       },
-      oneTimePreKeys: preKeys.oneTimePreKeys
+      oneTimePreKeys: preKeys.oneTimePreKeys,
+      // PQXDH (v2): omitted entirely when the PQSPK secret could not be
+      // durably persisted+read-back above — this keeps the upload v1-safe
+      // instead of advertising a PQ prekey we cannot decapsulate with later.
+      ...(pqSpkDbOk
+        ? {
+            pqSignedPreKey: {
+              keyId: preKeys.pqSignedPreKey.keyId,
+              publicKeyB64: preKeys.pqSignedPreKey.publicKeyB64,
+              signatureB64: preKeys.pqSignedPreKey.signatureB64,
+            } satisfies PqSignedPreKeyPublic,
+          }
+        : {}),
     }, (ack: { ok: boolean, error?: string }) => {
       if (ack?.ok) resolve();
       else reject(new Error(ack?.error || 'failed to upload prekeys'));
@@ -1090,14 +1144,23 @@ async function getOrCreateSession(contactAegisId: string, contactPublicKeyB64: s
   );
 
   const ratchetState = initRatchet(x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
-  
-  // Attach Alice's Ephemeral Key and Bob's PreKey IDs for Bob's X3DH receiver calculation
+
+  // Attach Alice's Ephemeral Key and Bob's PreKey IDs for Bob's X3DH receiver calculation.
+  // PQXDH (v2): when performX3DH negotiated v2 (bundle.pqSignedPreKey was present
+  // and verified), it returns pqCiphertextB64 — the ML-KEM-768 ciphertext Bob
+  // must decapsulate with his PQSPK secret. It rides INSIDE this already-sealed
+  // init message (never as a relay-visible field). Absent ⇒ v1, omit pqCtB64.
   ratchetState.x3dhInit = {
     aliceEKB64: x3dh.myEphemeralPublicKeyB64,
     spkId: bundle.signedPreKey.keyId,
-    opkId: bundle.oneTimePreKey ? bundle.oneTimePreKey.keyId : null
+    opkId: bundle.oneTimePreKey ? bundle.oneTimePreKey.keyId : null,
+    ...(x3dh.pqCiphertextB64 ? { pqCtB64: x3dh.pqCiphertextB64 } : {}),
   };
-  
+
+  rdiag(
+    `[RDIAG] x3dh-send-version me=${identity.aegisId} peer=${contactAegisId} version=${x3dh.version} hasPqCt=${!!x3dh.pqCiphertextB64}`,
+  );
+
   await saveSessionState(contactAegisId, ratchetState);
   return ratchetState;
 }
@@ -1524,6 +1587,31 @@ async function decryptAndAppend(
       }
     }
 
+    // PQXDH (v2) anti-downgrade gate. weAdvertisedPq reflects whether THIS
+    // device currently has an active PQSPK slot published; shouldUsePqReceiver
+    // throws if we advertised PQ but the inbound init carries no ciphertext
+    // (silent-downgrade attack), and returns 'v1' when we never advertised PQ
+    // (even if a ciphertext is — implausibly — present, per x3dh.ts's note that
+    // this case is non-fatal and just ignored).
+    const pqCtB64 = (parsed.x3dh as { pqCtB64?: string }).pqCtB64;
+    let weAdvertisedPq = false;
+    try {
+      weAdvertisedPq = (await getPqSpkKeyId()) !== null;
+    } catch { /* treat as not advertised */ }
+    const pqDecision = shouldUsePqReceiver(weAdvertisedPq, !!pqCtB64);
+
+    let pqInputs: { cipherText: Uint8Array; pqSpkSecret: Uint8Array } | null = null;
+    if (pqDecision === 'v2') {
+      const pqKeyId = await getPqSpkKeyId();
+      const pqSecB64 = pqKeyId !== null ? await loadPqSpkSecret(pqKeyId) : null;
+      if (!pqSecB64) {
+        rdiag(`[RDIAG] x3dh-recv ABORT pqspk-missing me=${identity.aegisId} peer=${contact.aegisId} pqKeyId=${pqKeyId ?? 'none'}`);
+        if (__DEV__) console.warn('[socket] PQSPK secret not found for active keyId — cannot complete v2 handshake');
+        return false;
+      }
+      pqInputs = { cipherText: decodeBase64(pqCtB64!), pqSpkSecret: decodeBase64(pqSecB64) };
+    }
+
     // Calculate shared secret using performX3DHReceiver
     const senderPubKey = decodeBase64(contact.publicKeyB64);
     const rootKey = performX3DHReceiver(
@@ -1531,7 +1619,8 @@ async function decryptAndAppend(
       mySpkSecret,
       myOpkSecret,
       senderPubKey,
-      decodeBase64(parsed.x3dh.aliceEKB64)
+      decodeBase64(parsed.x3dh.aliceEKB64),
+      pqInputs,
     );
 
     // [RDIAG] Dev-only (rdiag). Bob side: log presence of each secret
@@ -1539,7 +1628,7 @@ async function decryptAndAppend(
     // `[RDIAG] x3dh-send`. Equal fp ⇒ symmetric derivation (fix working);
     // different fp ⇒ which input diverged (spkFromKeyId / opkPresent narrow it).
     rdiag(
-      `[RDIAG] x3dh-recv me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId} spkFromKeyId=${spkSecFromKeyId} opkId=${parsed.x3dh.opkId ?? 'none'} opkPresent=${opkPresent} rkFp=${rootKeyFp(rootKey)}`,
+      `[RDIAG] x3dh-recv me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId} spkFromKeyId=${spkSecFromKeyId} opkId=${parsed.x3dh.opkId ?? 'none'} opkPresent=${opkPresent} pqVersion=${pqDecision} rkFp=${rootKeyFp(rootKey)}`,
     );
 
     // Initialize Double Ratchet as Bob (Receiver).

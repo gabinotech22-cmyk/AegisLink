@@ -69,6 +69,24 @@ export interface OneTimePreKeyPublic {
   publicKeyB64: string;
 }
 
+/**
+ * PQXDH signed PQ prekey (ML-KEM-768). The public key bytes are signed by the
+ * SAME Ed25519 identity signing key that signs the classic SPK; the receiver
+ * MUST verify the signature before encapsulating.
+ *
+ * RELAY WIRE-FORMAT (for backend-lead): transport these three fields verbatim
+ * as opaque blobs alongside the existing signedPreKey. Sizes:
+ *   publicKeyB64 — base64 of 1184 bytes (ML-KEM-768 public key)
+ *   signatureB64 — base64 of 64 bytes (Ed25519 detached signature)
+ *   keyId        — integer
+ * The relay never inspects or correlates them (same blind-relay contract).
+ */
+export interface PqSignedPreKeyPublic {
+  keyId: number;
+  publicKeyB64: string;
+  signatureB64: string;
+}
+
 /** Public bundle uploaded to the relay. NO SECRETS. */
 export interface PreKeyBundle {
   identityKeyB64: string;
@@ -76,6 +94,12 @@ export interface PreKeyBundle {
   signedPreKey: SignedPreKeyPublic;
   /** Optional — relay consumes OPKs one-shot per session. */
   oneTimePreKey: OneTimePreKeyPublic | null;
+  /**
+   * Optional PQXDH signed PQ prekey. PRESENT → sender derives a v2 (post-quantum
+   * hybrid) root key; ABSENT → sender falls back to classic v1 X3DH (interop
+   * with pre-PQXDH peers / relays).
+   */
+  pqSignedPreKey?: PqSignedPreKeyPublic | null;
 }
 
 /** Local secret material backing a PreKeyBundle. Stays on device. */
@@ -90,11 +114,28 @@ export interface X3DHInitParams {
   aliceEKB64: string;
   spkId: number;
   opkId: number | null;
+  /**
+   * PQXDH (v2) only: base64 of the 1088-byte ML-KEM-768 ciphertext the sender
+   * encapsulated to the receiver's PQSPK. The receiver decapsulates this with
+   * its PQSPK secret to recover the PQ shared secret.
+   *
+   * WIRE-FORMAT: this rides INSIDE the already-sealed initial message
+   * (SealedInner.x3dh), never as a relay-visible field — so the relay needs no
+   * change to carry it. Absent ⇒ v1 handshake.
+   */
+  pqCtB64?: string;
 }
+
+/** Handshake protocol version. 1 = classic X3DH, 2 = PQXDH hybrid. */
+export type HandshakeVersion = 1 | 2;
 
 export interface X3DHResult {
   rootKey: Uint8Array;
   myEphemeralPublicKeyB64: string;
+  /** Negotiated handshake version actually used to derive `rootKey`. */
+  version: HandshakeVersion;
+  /** PQXDH (v2) only: base64 of the ML-KEM-768 ciphertext to send to the peer. */
+  pqCiphertextB64?: string;
 }
 
 // ---------------------------------------------------------------------------

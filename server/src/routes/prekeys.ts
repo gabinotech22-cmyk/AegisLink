@@ -46,6 +46,18 @@ const UploadBody = z.object({
       })
     )
     .max(100),
+  /**
+   * PQXDH (v2): optional signed PQ prekey (ML-KEM-768). Optional/nullable so
+   * legacy v1 clients keep working unchanged (interop requirement). Sizes
+   * (base64): publicKeyB64 ~1184 bytes raw, signatureB64 64 bytes raw.
+   */
+  pqSignedPreKey: z
+    .object({
+      keyId: z.number().int().nonnegative(),
+      publicKeyB64: z.string().min(1).max(2048),
+      signatureB64: z.string().min(1).max(128),
+    })
+    .optional(),
 });
 
 // ── POST /prekeys ─────────────────────────────────────────────────────────────
@@ -67,7 +79,7 @@ router.post('/', uploadLimiter, async (req, res) => {
     return;
   }
 
-  const { aegisId, deviceId, sig, ts, signedPreKey, oneTimePreKeys } = parsed.data;
+  const { aegisId, deviceId, sig, ts, signedPreKey, oneTimePreKeys, pqSignedPreKey } = parsed.data;
 
   // Validate timestamp within ±60 seconds.
   if (Math.abs(Date.now() - ts) > 60_000) {
@@ -106,6 +118,26 @@ router.post('/', uploadLimiter, async (req, res) => {
     return;
   }
 
+  // PQXDH (v2): verify the Ed25519 signature over the PQ signed prekey the SAME
+  // way as the classic SPK above — defence in depth against DB tampering. The
+  // server never inspects the ML-KEM public key itself beyond this signature
+  // check. Optional field: absent ⇒ this upload stays v1-only.
+  if (pqSignedPreKey) {
+    let pqPubKeyBytes: Uint8Array;
+    let pqSigBytes: Uint8Array;
+    try {
+      pqPubKeyBytes = decodeBase64(pqSignedPreKey.publicKeyB64);
+      pqSigBytes = decodeBase64(pqSignedPreKey.signatureB64);
+    } catch {
+      res.status(403).json({ error: 'invalid_pq_spk_signature' });
+      return;
+    }
+    if (!nacl.sign.detached.verify(pqPubKeyBytes, pqSigBytes, pubKeyBytes)) {
+      res.status(403).json({ error: 'invalid_pq_spk_signature' });
+      return;
+    }
+  }
+
   const now = Date.now();
 
   try {
@@ -118,6 +150,17 @@ router.post('/', uploadLimiter, async (req, res) => {
       created_at: now,
     };
     await prekeysRepo.upsertSigned(spkRow);
+
+    if (pqSignedPreKey) {
+      await prekeysRepo.upsertPqSigned({
+        aegis_id: aegisId,
+        device_id: deviceId ?? 'default',
+        key_id: pqSignedPreKey.keyId,
+        public_key_b64: pqSignedPreKey.publicKeyB64,
+        signature_b64: pqSignedPreKey.signatureB64,
+        created_at: now,
+      });
+    }
 
     let uploaded = 0;
     for (const opk of oneTimePreKeys) {
