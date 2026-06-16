@@ -137,6 +137,23 @@ function initSqliteSchema(db: DatabaseSync) {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS sender_key_dist_queue (
+      id              TEXT PRIMARY KEY,
+      recipient       TEXT NOT NULL,
+      group_id        TEXT NOT NULL,
+      sender_aegis_id TEXT NOT NULL,
+      ciphertext_b64  TEXT NOT NULL,
+      nonce_b64       TEXT NOT NULL,
+      chain_key_b64   TEXT NOT NULL,
+      iteration       INTEGER NOT NULL,
+      created_at      INTEGER NOT NULL,
+      expires_at      INTEGER NOT NULL,
+      drained_by      TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skdq_recipient
+      ON sender_key_dist_queue(recipient, created_at);
+
     CREATE TABLE IF NOT EXISTS work_orgs (
       org_id     TEXT PRIMARY KEY,
       name       TEXT NOT NULL,
@@ -468,6 +485,23 @@ async function initPgSchema(): Promise<void> {
       envelope   TEXT NOT NULL,
       updated_at BIGINT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS sender_key_dist_queue (
+      id              TEXT PRIMARY KEY,
+      recipient       TEXT NOT NULL,
+      group_id        TEXT NOT NULL,
+      sender_aegis_id TEXT NOT NULL,
+      ciphertext_b64  TEXT NOT NULL,
+      nonce_b64       TEXT NOT NULL,
+      chain_key_b64   TEXT NOT NULL,
+      iteration       INTEGER NOT NULL,
+      created_at      BIGINT NOT NULL,
+      expires_at      BIGINT NOT NULL,
+      drained_by      TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skdq_recipient
+      ON sender_key_dist_queue(recipient, created_at);
 
     CREATE TABLE IF NOT EXISTS work_orgs (
       org_id     TEXT PRIMARY KEY,
@@ -1008,6 +1042,117 @@ export const messageRepo = {
 
   async purgeExpired(): Promise<number> {
     const result = await dbRun(`DELETE FROM messages WHERE expires_at > 0 AND expires_at <= ?`, [Date.now()]);
+    return result.changes;
+  },
+};
+
+// ── senderKeyDistRepo ─────────────────────────────────────────────────────────
+// Queues sealed SenderKey distributions for offline group members. The relay
+// never reads the key material — ciphertextB64 / nonceB64 / chainKeyB64 are
+// opaque blobs forwarded verbatim, identical to how messageRepo works. The only
+// routing field the relay inspects is `recipient` (aegisId). `group_id` and
+// `sender_aegis_id` travel inside the blob on-wire from the client; they are
+// stored here only so the drain path can reconstruct the correct `group:rekey_dist`
+// wire payload without reading encrypted content.
+//
+// Zero-metadata note: storing `sender_aegis_id` here could theoretically reveal
+// a sender→recipient edge. We accept this under the same rationale as
+// `sender_pub_b64` on init messages in messageRepo (FND-05 exception): without it
+// the recipient cannot identify which group the distribution belongs to or verify
+// the sender, making the offline re-key useless. The field is purged together with
+// the row as soon as all devices drain it.
+
+export interface SenderKeyDistRow {
+  id: string;
+  recipient: string;
+  group_id: string;
+  sender_aegis_id: string;
+  ciphertext_b64: string;
+  nonce_b64: string;
+  chain_key_b64: string;
+  iteration: number;
+  created_at: number;
+  expires_at: number;
+  /** JSON-serialized string[]. Device IDs that have already drained this distribution. */
+  drained_by: string;
+}
+
+export const senderKeyDistRepo = {
+  async enqueue(row: Omit<SenderKeyDistRow, 'drained_by'>): Promise<{ ok: boolean; reason?: string }> {
+    const expiresAt = row.expires_at > 0 ? row.expires_at : row.created_at + MESSAGE_TTL_MS;
+    // Enforce per-recipient queue limit — reuses the same constant as messageRepo.
+    const countRow = await dbGet<{ n: number }>(
+      `SELECT COUNT(*) as n FROM sender_key_dist_queue WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)`,
+      [row.recipient, Date.now()]
+    );
+    if (countRow && countRow.n >= MAX_QUEUED_PER_RECIPIENT) {
+      return { ok: false, reason: 'queue_full' };
+    }
+    await dbRun(
+      `INSERT INTO sender_key_dist_queue
+         (id, recipient, group_id, sender_aegis_id, ciphertext_b64, nonce_b64, chain_key_b64, iteration, created_at, expires_at, drained_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
+      [row.id, row.recipient, row.group_id, row.sender_aegis_id,
+       row.ciphertext_b64, row.nonce_b64, row.chain_key_b64,
+       row.iteration, row.created_at, expiresAt]
+    );
+    return { ok: true };
+  },
+
+  /**
+   * Fetch distributions not yet drained by `deviceId`.
+   * When `deviceId` is undefined (legacy single-device path) all un-expired rows
+   * for the recipient are returned — matches the messageRepo behaviour.
+   */
+  async drainFor(recipient: string, deviceId?: string): Promise<SenderKeyDistRow[]> {
+    const now = Date.now();
+    const rows = await dbAll<SenderKeyDistRow>(
+      `SELECT id, recipient, group_id, sender_aegis_id, ciphertext_b64, nonce_b64, chain_key_b64, iteration,
+              created_at, expires_at, drained_by
+       FROM sender_key_dist_queue
+       WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)
+       ORDER BY created_at ASC`,
+      [recipient, now]
+    );
+    if (!deviceId) return rows;
+    return rows.filter((row) => {
+      const drained: string[] = (() => {
+        try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
+      })();
+      return !drained.includes(deviceId);
+    });
+  },
+
+  /**
+   * Mark a distribution as drained by `deviceId`. Deletes the row when all
+   * expected devices have drained it — mirrors messageRepo.delete exactly.
+   */
+  async delete(id: string, deviceId?: string): Promise<void> {
+    if (!deviceId) {
+      await dbRun(`DELETE FROM sender_key_dist_queue WHERE id = ?`, [id]);
+      return;
+    }
+    const row = await dbGet<Pick<SenderKeyDistRow, 'drained_by'>>(
+      `SELECT drained_by FROM sender_key_dist_queue WHERE id = ?`,
+      [id]
+    );
+    if (!row) return;
+    const drained: string[] = (() => {
+      try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
+    })();
+    if (!drained.includes(deviceId)) drained.push(deviceId);
+    if (drained.length >= MAX_DRAIN_DEVICES) {
+      await dbRun(`DELETE FROM sender_key_dist_queue WHERE id = ?`, [id]);
+    } else {
+      await dbRun(`UPDATE sender_key_dist_queue SET drained_by = ? WHERE id = ?`, [JSON.stringify(drained), id]);
+    }
+  },
+
+  async purgeExpired(): Promise<number> {
+    const result = await dbRun(
+      `DELETE FROM sender_key_dist_queue WHERE expires_at > 0 AND expires_at <= ?`,
+      [Date.now()]
+    );
     return result.changes;
   },
 };
