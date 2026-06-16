@@ -15,7 +15,7 @@ import { Avatar } from '../components/Avatar';
 import { AvatarCropModal } from '../components/AvatarCropModal';
 import { FloatingMenu } from '../components/FloatingMenu';
 import type { Theme } from '../theme/vault';
-import { useGroups } from '../store/groups';
+import { useGroups, LARGE_GROUP_THRESHOLD } from '../store/groups';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
@@ -158,6 +158,15 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
       
       // Send group initiation / welcome message to all members
       try {
+        // Large groups use the v2 roster-by-reference wire format: content
+        // messages omit the member list, so a welcome message alone can't
+        // materialize the group on recipients (they'd drop it as an unknown
+        // group). Push a metadata carrier first — it ships the full roster and
+        // creates the group on every member; the welcome bubble then renders.
+        if (allMembers.length > LARGE_GROUP_THRESHOLD) {
+          const client = require('../socket/client') as typeof import('../socket/client');
+          await client.broadcastGroupMetadata(identity, newGroup.id);
+        }
         await sendGroupMessage({
           identity,
           groupId: newGroup.id,
