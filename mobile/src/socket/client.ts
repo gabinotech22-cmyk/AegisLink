@@ -199,6 +199,71 @@ function verifyGroupMetadata(
   }
 }
 
+// ── v2: roster by reference ──────────────────────────────────────────────────
+// Large groups (> LARGE_GROUP_THRESHOLD members) sign/verify metadata against a
+// HASH of the roster instead of the inlined member list, so the per-message
+// payload (and the admin signature it carries) is constant-size regardless of
+// group size. The full roster only travels in dedicated carrier messages.
+// computeRosterHash / canonicalGroupBytesV2 here MUST produce bytes identical
+// to their twins in store/groups.ts.
+
+/**
+ * Stable hash of a member set — MUST match computeRosterHash in store/groups.ts.
+ */
+function computeRosterHash(members: string[]): string {
+  const { sha256 } = require('@noble/hashes/sha256') as typeof import('@noble/hashes/sha256');
+  const { bytesToHex } = require('@noble/hashes/utils') as typeof import('@noble/hashes/utils');
+  const sorted = [...members].sort();
+  const bytes = new TextEncoder().encode(JSON.stringify(sorted));
+  return bytesToHex(sha256(bytes));
+}
+
+/**
+ * Canonical v2 signing bytes — MUST match canonicalGroupBytesV2 in
+ * store/groups.ts. Roster is referenced by hash + monotonic version.
+ */
+function canonicalGroupBytesV2(args: {
+  groupId: string;
+  groupName: string;
+  rosterHash: string;
+  rosterVersion: number;
+  createdAt: number;
+}): Uint8Array {
+  const canonical = JSON.stringify([
+    'aegis.group.v2',
+    args.groupId,
+    args.groupName,
+    args.rosterHash,
+    args.rosterVersion,
+    args.createdAt,
+  ]);
+  return new TextEncoder().encode(canonical);
+}
+
+function signGroupMetadataV2(
+  args: { groupId: string; groupName: string; rosterHash: string; rosterVersion: number; createdAt: number },
+  signingSecretKey: Uint8Array,
+): string {
+  const sig = nacl.sign.detached(canonicalGroupBytesV2(args), signingSecretKey);
+  return encodeBase64(sig);
+}
+
+function verifyGroupMetadataV2(
+  args: { groupId: string; groupName: string; rosterHash: string; rosterVersion: number; createdAt: number },
+  sigB64: string,
+  signingPublicKeyB64: string,
+): boolean {
+  try {
+    const sig = decodeBase64(sigB64);
+    const pub = decodeBase64(signingPublicKeyB64);
+    if (sig.length !== nacl.sign.signatureLength) return false;
+    if (pub.length !== nacl.sign.publicKeyLength) return false;
+    return nacl.sign.detached.verify(canonicalGroupBytesV2(args), sig, pub);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Drain all pending outbox jobs in FIFO order.
  *
@@ -1687,6 +1752,18 @@ async function decryptAndAppend(
         const claimedAdminSig: string | undefined = parsedPayload.adminSig;
         const claimedCreatedAt: number | undefined = parsedPayload.groupCreatedAt;
 
+        // ── v1 vs v2 detection ─────────────────────────────────────────────────
+        // v2 (roster-by-reference, large groups) is identified by the presence
+        // of `rosterHash`. A v2 message is either a CARRIER (also carries the
+        // full `members` list) or CONTENT (no `members`, roster referenced only
+        // by hash). v1 messages always inline `members` and never set rosterHash.
+        const claimedRosterHash: string | undefined =
+          typeof parsedPayload.rosterHash === 'string' ? parsedPayload.rosterHash : undefined;
+        const claimedRosterVersion: number =
+          typeof parsedPayload.rosterVersion === 'number' ? parsedPayload.rosterVersion : 1;
+        const isV2 = claimedRosterHash !== undefined;
+        const hasMembers = Array.isArray(parsedPayload.members);
+
         // Resolve the admin's Ed25519 signing public key. If admin is the
         // sender we have it from the contact row; otherwise look it up in
         // the contacts store. If we can't find a key, the signature can't be
@@ -1705,12 +1782,27 @@ async function decryptAndAppend(
           return admin?.signingPublicKeyB64 ?? null;
         }
 
+        // v1 authenticity: signature over the inlined member list.
         async function metadataIsAuthentic(): Promise<boolean> {
           if (!claimedAdminId || !claimedAdminSig || typeof claimedCreatedAt !== 'number') return false;
           const pub = await getAdminSigningKey();
           if (!pub) return false;
           return verifyGroupMetadata(
             { groupId, groupName: claimedName, members: claimedMembers, createdAt: claimedCreatedAt },
+            claimedAdminSig,
+            pub,
+          );
+        }
+
+        // v2 authenticity: signature over the roster HASH + version. The members
+        // list (if present, e.g. a carrier) is checked separately against the
+        // hash before this — verify-before-trust.
+        async function metadataIsAuthenticV2(rosterHash: string, rosterVersion: number): Promise<boolean> {
+          if (!claimedAdminId || !claimedAdminSig || typeof claimedCreatedAt !== 'number') return false;
+          const pub = await getAdminSigningKey();
+          if (!pub) return false;
+          return verifyGroupMetadataV2(
+            { groupId, groupName: claimedName, rosterHash, rosterVersion, createdAt: claimedCreatedAt },
             claimedAdminSig,
             pub,
           );
@@ -1725,7 +1817,111 @@ async function decryptAndAppend(
         const { getGroup, saveGroup } = require('../db/local');
         const existingGroup = await getGroup(groupId);
 
-        if (!existingGroup) {
+        if (isV2) {
+          // ── v2 path: roster by reference ──────────────────────────────────────
+          const rosterHash = claimedRosterHash as string;
+          const isCarrier = hasMembers; // carrier ships the full list; content does not
+
+          if (!existingGroup) {
+            // We can only materialize membership from a CARRIER (it has the
+            // roster). A v2 CONTENT message for an unknown group is dropped
+            // silently — the carrier will arrive and create the group.
+            if (!isCarrier) {
+              if (__DEV__) console.warn('[socket] v2 content for unknown group dropped — awaiting carrier');
+              await saveSessionState(contact.aegisId, ratchetState);
+              return true;
+            }
+            // Carrier: verify the roster hash matches the inlined list, THEN the
+            // admin signature over the hash. Never trust before both pass.
+            if (computeRosterHash(claimedMembers) !== rosterHash) {
+              if (__DEV__) console.warn('[socket] v2 carrier rejected — roster hash mismatch');
+              return false;
+            }
+            if (!(await metadataIsAuthenticV2(rosterHash, claimedRosterVersion))) {
+              if (__DEV__) console.warn('[socket] v2 carrier create rejected — invalid or missing adminSig');
+              return false;
+            }
+            if (!claimedMembers.includes(identity.aegisId)) {
+              if (__DEV__) console.warn('[socket] v2 carrier create rejected — local id not in members');
+              return false;
+            }
+            const localAvatarImage = claimedAvatarImage
+              ? await saveGroupAvatarToFile(groupId, claimedAvatarImage)
+              : undefined;
+            await saveGroup({
+              id: groupId,
+              name: claimedName,
+              members: claimedMembers,
+              createdAt: claimedCreatedAt as number,
+              adminId: claimedAdminId,
+              adminSig: claimedAdminSig,
+              avatarColor: claimedAvatarColor,
+              avatarImage: localAvatarImage,
+              rosterVersion: claimedRosterVersion,
+            });
+            const { useGroups } = require('../store/groups');
+            void useGroups.getState().hydrate();
+          } else {
+            const isAdmin =
+              !!existingGroup.adminId &&
+              senderId === existingGroup.adminId &&
+              claimedAdminId === existingGroup.adminId;
+            const localRosterVersion = existingGroup.rosterVersion ?? 1;
+
+            if (isCarrier) {
+              // Carrier on an existing group: authoritative roster update. Verify
+              // hash↔members, then signature, then admin identity.
+              const hashOk = computeRosterHash(claimedMembers) === rosterHash;
+              if (hashOk && isAdmin && (await metadataIsAuthenticV2(rosterHash, claimedRosterVersion))) {
+                let localAvatarImage = existingGroup.avatarImage;
+                if (claimedAvatarImage) {
+                  localAvatarImage = await saveGroupAvatarToFile(groupId, claimedAvatarImage);
+                }
+                await saveGroup({
+                  ...existingGroup,
+                  name: claimedName,
+                  members: claimedMembers,
+                  adminSig: claimedAdminSig,
+                  avatarColor: claimedAvatarColor ?? existingGroup.avatarColor,
+                  avatarImage: localAvatarImage,
+                  rosterVersion: claimedRosterVersion,
+                });
+                const { useGroups } = require('../store/groups');
+                void useGroups.getState().hydrate();
+              } else if (!hashOk) {
+                if (__DEV__) console.warn('[socket] v2 carrier ignored — roster hash mismatch');
+              } else {
+                if (__DEV__) console.warn('[socket] v2 carrier ignored — sender not admin or sig invalid');
+              }
+            } else {
+              // CONTENT message on an existing group: the roster is NOT inlined.
+              // Verify the signature against the roster reference. We must NOT
+              // mutate the local roster from a content message (no list to apply)
+              // — the carrier is the only authority for membership.
+              const authentic = await metadataIsAuthenticV2(rosterHash, claimedRosterVersion);
+              if (!authentic) {
+                if (__DEV__) console.warn('[socket] v2 content ignored metadata — sig invalid; still rendering body');
+                // Do not block the chat: fall through and render with local roster.
+              } else if (claimedRosterVersion > localRosterVersion) {
+                // We are behind — the admin changed the roster but the carrier
+                // hasn't reached us yet. Render the message (don't block the
+                // chat) but DO NOT touch the local roster; the carrier updates it.
+                if (__DEV__) console.warn('[socket] v2 content from newer rosterVersion — awaiting carrier to sync roster');
+              } else {
+                // rosterVersion <= local: this metadata is current (or stale-but-
+                // equal). If the signed roster hash matches our local roster, the
+                // signed groupName is authoritative — apply a name change if any.
+                const localHash = computeRosterHash(existingGroup.members);
+                if (localHash === rosterHash && claimedName !== existingGroup.name && isAdmin) {
+                  await saveGroup({ ...existingGroup, name: claimedName, adminSig: claimedAdminSig });
+                  const { useGroups } = require('../store/groups');
+                  void useGroups.getState().hydrate();
+                }
+              }
+            }
+          }
+        } else if (!existingGroup) {
+          // ── v1 path (unchanged): create ───────────────────────────────────────
           // New group: require a valid admin signature before persisting.
           // Without this an attacker could add us to arbitrary groups by
           // crafting a group_msg with chosen groupId/members/name.
@@ -1756,6 +1952,7 @@ async function decryptAndAppend(
           const { useGroups } = require('../store/groups');
           void useGroups.getState().hydrate();
         } else {
+          // ── v1 path (unchanged): update ───────────────────────────────────────
           // Existing group: only the original admin may rotate name/members/avatar.
           // Anyone else may post messages but their metadata fields are ignored.
           const isAdmin =
@@ -2967,19 +3164,41 @@ export async function sendGroupMessage(opts: {
   const group = await getGroup(opts.groupId);
   if (!group) throw new Error('group_not_found');
 
+  // Compute the size gate ONCE, before any signing or the fan-out loop. Large
+  // groups (> threshold) use the v2 roster-by-reference wire format; small
+  // groups stay on the v1 path with the roster inlined every message.
+  const { LARGE_GROUP_THRESHOLD } = require('../store/groups') as typeof import('../store/groups');
+  const isLarge = group.members.length > LARGE_GROUP_THRESHOLD;
+
+  // Roster reference fields are computed ONCE here (not per-member) so the cost
+  // is O(1) regardless of group size — this is the whole point of v2.
+  const rosterHash = computeRosterHash(group.members);
+  const rosterVersion = group.rosterVersion ?? 1;
+
   // Ensure the group has an admin signature. If we created the group locally
   // and never signed it yet (legacy install), sign it now with our identity
   // signing key and persist. Receivers will validate before honoring metadata.
+  // The signature format must match the size gate: v2 for large, v1 for small.
   if (!group.adminId) {
     group.adminId = opts.identity.aegisId;
   }
   if (group.adminId === opts.identity.aegisId && !group.adminSig) {
-    group.adminSig = signGroupMetadata(
-      { groupId: group.id, groupName: group.name, members: group.members, createdAt: group.createdAt },
-      opts.identity.signingSecretKey,
-    );
+    group.adminSig = isLarge
+      ? signGroupMetadataV2(
+          { groupId: group.id, groupName: group.name, rosterHash, rosterVersion, createdAt: group.createdAt },
+          opts.identity.signingSecretKey,
+        )
+      : signGroupMetadata(
+          { groupId: group.id, groupName: group.name, members: group.members, createdAt: group.createdAt },
+          opts.identity.signingSecretKey,
+        );
     await saveGroup(group);
   }
+
+  // The full roster is sent ONLY in carrier messages (metadata sync). For large
+  // groups this is the single message type that transports the member list;
+  // content messages omit it and rely on the receiver's locally-trusted roster.
+  const isCarrier = opts.plaintext === GROUP_META_SYNC_BODY;
 
   const contacts = useContacts.getState().contacts;
 
@@ -3024,11 +3243,25 @@ export async function sendGroupMessage(opts: {
     if (senderImage) profiledContacts.add(contact.aegisId);
 
     const msgId = Crypto.randomUUID();
+
+    // Roster transport policy:
+    //  • Small group (v1): always inline `members` — unchanged from before.
+    //  • Large group + carrier: inline `members` + roster reference (the ONLY
+    //    message that ships the full list in a large group).
+    //  • Large group + content: OMIT `members`; ship only the roster reference.
+    //    The signed v2 metadata lets the receiver verify authenticity against
+    //    its locally-trusted roster without re-sending the list. Constant size.
+    const includeMembers = !isLarge || isCarrier;
+    const rosterFields = isLarge
+      ? { rosterHash, rosterVersion }
+      : {};
+
     const payload = JSON.stringify({
       type: 'group_msg',
       groupId: group.id,
       groupName: group.name,
-      members: group.members,
+      ...(includeMembers ? { members: group.members } : {}),
+      ...rosterFields,
       groupCreatedAt: group.createdAt,
       adminId: group.adminId,
       adminSig: group.adminSig,
