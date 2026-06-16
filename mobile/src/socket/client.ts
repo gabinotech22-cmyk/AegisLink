@@ -34,6 +34,13 @@ import {
   type OutboxJob,
 } from '../db/local';
 import { decideV2GroupMetadata } from './groupMetadataDecision';
+import {
+  computeRosterHash,
+  signGroupMetadata,
+  verifyGroupMetadata,
+  signGroupMetadataV2,
+  verifyGroupMetadataV2,
+} from '../crypto/groupSig';
 
 /**
  * Ratchet/X3DH recovery diagnostics — DEV BUILDS ONLY. These trace who talks
@@ -151,119 +158,10 @@ export function forgetGroupAvatarSent(groupId: string): void {
 // survive app close and crashes. Drained in FIFO order by flushOutbox() on
 // auth:ok and reconnect. See db/local.ts for the outbox table schema.
 
-/**
- * Canonical byte representation of group metadata for signing/verification.
- * Members are sorted lexicographically so the same set always serializes
- * identically regardless of insertion order. Any change to this format MUST
- * be versioned — old signatures will no longer verify.
- */
-function canonicalGroupBytes(args: {
-  groupId: string;
-  groupName: string;
-  members: string[];
-  createdAt: number;
-}): Uint8Array {
-  const sorted = [...args.members].sort();
-  // Explicit key order via array literal — JSON.stringify on object literals
-  // would still depend on engine insertion order; we hand-roll the JSON.
-  const canonical = JSON.stringify([
-    'aegis.group.v1',
-    args.groupId,
-    args.groupName,
-    sorted,
-    args.createdAt,
-  ]);
-  return new TextEncoder().encode(canonical);
-}
-
-function signGroupMetadata(
-  args: { groupId: string; groupName: string; members: string[]; createdAt: number },
-  signingSecretKey: Uint8Array,
-): string {
-  const sig = nacl.sign.detached(canonicalGroupBytes(args), signingSecretKey);
-  return encodeBase64(sig);
-}
-
-function verifyGroupMetadata(
-  args: { groupId: string; groupName: string; members: string[]; createdAt: number },
-  sigB64: string,
-  signingPublicKeyB64: string,
-): boolean {
-  try {
-    const sig = decodeBase64(sigB64);
-    const pub = decodeBase64(signingPublicKeyB64);
-    if (sig.length !== nacl.sign.signatureLength) return false;
-    if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupBytes(args), sig, pub);
-  } catch {
-    return false;
-  }
-}
-
-// ── v2: roster by reference ──────────────────────────────────────────────────
-// Large groups (> LARGE_GROUP_THRESHOLD members) sign/verify metadata against a
-// HASH of the roster instead of the inlined member list, so the per-message
-// payload (and the admin signature it carries) is constant-size regardless of
-// group size. The full roster only travels in dedicated carrier messages.
-// computeRosterHash / canonicalGroupBytesV2 here MUST produce bytes identical
-// to their twins in store/groups.ts.
-
-/**
- * Stable hash of a member set — MUST match computeRosterHash in store/groups.ts.
- */
-function computeRosterHash(members: string[]): string {
-  const { sha256 } = require('@noble/hashes/sha256') as typeof import('@noble/hashes/sha256');
-  const { bytesToHex } = require('@noble/hashes/utils') as typeof import('@noble/hashes/utils');
-  const sorted = [...members].sort();
-  const bytes = new TextEncoder().encode(JSON.stringify(sorted));
-  return bytesToHex(sha256(bytes));
-}
-
-/**
- * Canonical v2 signing bytes — MUST match canonicalGroupBytesV2 in
- * store/groups.ts. Roster is referenced by hash + monotonic version.
- */
-function canonicalGroupBytesV2(args: {
-  groupId: string;
-  groupName: string;
-  rosterHash: string;
-  rosterVersion: number;
-  createdAt: number;
-}): Uint8Array {
-  const canonical = JSON.stringify([
-    'aegis.group.v2',
-    args.groupId,
-    args.groupName,
-    args.rosterHash,
-    args.rosterVersion,
-    args.createdAt,
-  ]);
-  return new TextEncoder().encode(canonical);
-}
-
-function signGroupMetadataV2(
-  args: { groupId: string; groupName: string; rosterHash: string; rosterVersion: number; createdAt: number },
-  signingSecretKey: Uint8Array,
-): string {
-  const sig = nacl.sign.detached(canonicalGroupBytesV2(args), signingSecretKey);
-  return encodeBase64(sig);
-}
-
-function verifyGroupMetadataV2(
-  args: { groupId: string; groupName: string; rosterHash: string; rosterVersion: number; createdAt: number },
-  sigB64: string,
-  signingPublicKeyB64: string,
-): boolean {
-  try {
-    const sig = decodeBase64(sigB64);
-    const pub = decodeBase64(signingPublicKeyB64);
-    if (sig.length !== nacl.sign.signatureLength) return false;
-    if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupBytesV2(args), sig, pub);
-  } catch {
-    return false;
-  }
-}
+// ── Group-metadata signing ───────────────────────────────────────────────────
+// The canonical signing bytes (v1 inlined roster / v2 roster-by-reference) and
+// their sign/verify helpers live in ../crypto/groupSig — the single source of
+// truth shared with store/groups.ts and socket/groupMetadataDecision.ts.
 
 /**
  * Drain all pending outbox jobs in FIFO order.

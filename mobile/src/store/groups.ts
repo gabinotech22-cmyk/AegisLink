@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex } from '@noble/hashes/utils';
+import {
+  computeRosterHash,
+  canonicalGroupBytes,
+  canonicalGroupBytesV2,
+} from '../crypto/groupSig';
 import {
   loadGroups,
   saveGroup,
@@ -10,6 +13,10 @@ import {
   deleteContactMessages,
   type StoredGroup,
 } from '../db/local';
+
+// Re-export the canonical roster hash so existing importers (e.g. tests in
+// store/__tests__/groups.largeRoster.test.ts) keep resolving it from here.
+export { computeRosterHash } from '../crypto/groupSig';
 
 /**
  * Groups with more than LARGE_GROUP_THRESHOLD members use the v2
@@ -24,65 +31,6 @@ export const LARGE_GROUP_THRESHOLD = 64;
 
 /** Hard cap on group size. Enforced in createGroup / addMember. */
 export const MAX_GROUP_MEMBERS = 1024;
-
-/**
- * Stable hash of a member set: sha256(utf8(JSON.stringify(sorted members))).
- * Members are sorted so the same set always hashes identically regardless of
- * insertion order. This MUST match computeRosterHash in socket/client.ts byte
- * for byte — both feed the same canonical v2 signing bytes.
- */
-export function computeRosterHash(members: string[]): string {
-  const sorted = [...members].sort();
-  const bytes = new TextEncoder().encode(JSON.stringify(sorted));
-  return bytesToHex(sha256(bytes));
-}
-
-/**
- * Canonical v2 group-metadata signing payload — roster BY REFERENCE.
- * MUST stay in sync with canonicalGroupBytesV2 in socket/client.ts. The full
- * member list is replaced by its hash so the admin signature is constant-size
- * and can be re-verified against any payload that carries the matching
- * rosterHash + rosterVersion (whether or not the members are inlined).
- */
-function canonicalGroupBytesV2(args: {
-  groupId: string;
-  groupName: string;
-  rosterHash: string;
-  rosterVersion: number;
-  createdAt: number;
-}): Uint8Array {
-  const canonical = JSON.stringify([
-    'aegis.group.v2',
-    args.groupId,
-    args.groupName,
-    args.rosterHash,
-    args.rosterVersion,
-    args.createdAt,
-  ]);
-  return new TextEncoder().encode(canonical);
-}
-
-/**
- * Canonical group-metadata signing payload — MUST stay in sync with
- * canonicalGroupBytes in socket/client.ts. Any change here is a wire-format
- * break and old admin signatures will fail verification.
- */
-function canonicalGroupBytes(args: {
-  groupId: string;
-  groupName: string;
-  members: string[];
-  createdAt: number;
-}): Uint8Array {
-  const sorted = [...args.members].sort();
-  const canonical = JSON.stringify([
-    'aegis.group.v1',
-    args.groupId,
-    args.groupName,
-    sorted,
-    args.createdAt,
-  ]);
-  return new TextEncoder().encode(canonical);
-}
 
 /**
  * Sign current group metadata with the active identity's Ed25519 signing key.

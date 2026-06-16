@@ -9,66 +9,18 @@
  * then performs the corresponding side effects (saveGroup / hydrate / avatar
  * persistence). Purity is exactly what makes this unit-testable in isolation.
  *
- * The canonical v2 signing bytes and roster hash reimplemented here MUST stay
- * byte-for-byte identical to their twins in socket/client.ts and
- * store/groups.ts — see canonicalGroupBytesV2 / computeRosterHash there.
+ * The canonical v2 signing bytes and roster hash come from ../crypto/groupSig —
+ * the single source of truth shared with socket/client.ts and store/groups.ts —
+ * so the verifier here can never drift from the signer.
  */
-import nacl from 'tweetnacl';
-import { decodeBase64 } from 'tweetnacl-util';
-import { sha256 } from '@noble/hashes/sha256';
-import { bytesToHex } from '@noble/hashes/utils';
+import {
+  computeRosterHash,
+  verifyGroupMetadataV2,
+} from '../crypto/groupSig';
 
-/**
- * Stable hash of a member set: sha256(utf8(JSON.stringify(sorted members))).
- * MUST match computeRosterHash in socket/client.ts and store/groups.ts.
- */
-export function computeRosterHash(members: string[]): string {
-  const sorted = [...members].sort();
-  const bytes = new TextEncoder().encode(JSON.stringify(sorted));
-  return bytesToHex(sha256(bytes));
-}
-
-/**
- * Canonical v2 signing bytes — roster BY REFERENCE (hash + monotonic version).
- * MUST match canonicalGroupBytesV2 in socket/client.ts and store/groups.ts.
- */
-function canonicalGroupBytesV2(args: {
-  groupId: string;
-  groupName: string;
-  rosterHash: string;
-  rosterVersion: number;
-  createdAt: number;
-}): Uint8Array {
-  const canonical = JSON.stringify([
-    'aegis.group.v2',
-    args.groupId,
-    args.groupName,
-    args.rosterHash,
-    args.rosterVersion,
-    args.createdAt,
-  ]);
-  return new TextEncoder().encode(canonical);
-}
-
-/**
- * Verify the admin's Ed25519 signature over the canonical v2 bytes.
- * MUST match verifyGroupMetadataV2 in socket/client.ts.
- */
-function verifyGroupMetadataV2(
-  args: { groupId: string; groupName: string; rosterHash: string; rosterVersion: number; createdAt: number },
-  sigB64: string,
-  signingPublicKeyB64: string,
-): boolean {
-  try {
-    const sig = decodeBase64(sigB64);
-    const pub = decodeBase64(signingPublicKeyB64);
-    if (sig.length !== nacl.sign.signatureLength) return false;
-    if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupBytesV2(args), sig, pub);
-  } catch {
-    return false;
-  }
-}
+// Re-export so existing importers (e.g. the decision unit tests) keep resolving
+// computeRosterHash from this module.
+export { computeRosterHash };
 
 /** Locally-trusted view of a group already persisted on this device. */
 export interface V2ExistingGroup {
