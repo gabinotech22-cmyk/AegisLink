@@ -1276,73 +1276,90 @@ export async function getGroup(id: string): Promise<StoredGroup | null> {
 }
 
 export async function wipeDatabase(): Promise<void> {
-  return withDb(async (d) => {
-    // Wipe every table that could hold identity-linked or session data.
-    await d.runAsync('DELETE FROM messages');
-    await d.runAsync('DELETE FROM contacts');
-    await d.runAsync('DELETE FROM groups');
-    await d.runAsync('DELETE FROM ratchet_sessions');
-    await d.runAsync('DELETE FROM chat_state');
-    await d.runAsync('DELETE FROM call_history');
-    await d.runAsync('DELETE FROM polls');
-    await d.runAsync('DELETE FROM scheduled_messages');
-    // X3DH prekey secrets now live PRIMARILY in this table — wipe them so a
-    // forensic read of the database file after panic cannot recover past
-    // session key material.
-    await d.runAsync('DELETE FROM prekey_secrets');
-    // clearIdentity deletes SECRET_KEY_SLOT + SIGN_SECRET_KEY_SLOT and the identity table row.
-    await clearIdentity();
-    // SQLite DELETE only removes pages from free-list — VACUUM overwrites freed
-    // pages with zeros so a forensic read of the raw database file finds nothing.
+  // ── Phase 1: read slot-dependent info BEFORE touching the DB queue ──────────
+  // All SecureStore operations are outside withDb — they do NOT need the SQLite
+  // handle and must never be nested inside a withDb callback (that would cause a
+  // re-entrant enqueue on the FIFO dbOpQueue → permanent deadlock).
+  const slot = activeSlot;
+  const prefix = slot === 'self' ? '' : `${slot}.`;
+
+  // Read OPK id list now so we can purge individual keys below.
+  const opkIdsRaw = await SecureStore.getItemAsync(`aegis.${prefix}opkIds.json`).catch(() => null);
+
+  // Read multi-slot list now so we can wipe other slots after the main DB wipe.
+  const slotsListRaw = await SecureStore.getItemAsync('aegis.slotsList').catch(() => null);
+
+  // ── Phase 2: single withDb — ALL SQLite deletes + VACUUM in one queue slot ──
+  // Inline the DELETEs that clearIdentity() would do so we never call withDb
+  // from inside a withDb callback. clearIdentity() itself is left untouched for
+  // its other call-sites; we just don't invoke it from here.
+  await withDb(async (d) => {
+    await d.execAsync(
+      `DELETE FROM identity;
+       DELETE FROM messages;
+       DELETE FROM contacts;
+       DELETE FROM groups;
+       DELETE FROM ratchet_sessions;
+       DELETE FROM chat_state;
+       DELETE FROM call_history;
+       DELETE FROM polls;
+       DELETE FROM scheduled_messages;
+       DELETE FROM prekey_secrets;`
+    );
+    // SQLite DELETE only removes pages from the free-list — VACUUM overwrites
+    // freed pages with zeros so forensic reads of the raw db file find nothing.
     await d.execAsync('VACUUM');
-    // Also purge the at-rest DB encryption key so recovered storage cannot be decrypted.
-    cachedDbKey = null;
-    await SecureStore.deleteItemAsync(getDbEncKeySlot());
-    // Purge X3DH prekey secrets (SPK + OPKs) from SecureStore.
-    // These live outside the SQLite file; without this a forensic attacker who
-    // recovers the device storage after panic could still derive past session keys.
-    const slot = activeSlot;
-    const prefix = slot === 'self' ? '' : `${slot}.`;
-    const opkIdsRaw = await SecureStore.getItemAsync(`aegis.${prefix}opkIds.json`).catch(() => null);
-    if (opkIdsRaw) {
-      try {
-        const ids: number[] = JSON.parse(opkIdsRaw) as number[];
-        for (const id of ids) {
-          await SecureStore.deleteItemAsync(`aegis.${prefix}opkSecret.${id}`).catch(() => {});
-          await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.${id}`).catch(() => {});
-        }
-      } catch { /* non-fatal */ }
-    }
-    await SecureStore.deleteItemAsync(`aegis.${prefix}opkIds.json`).catch(() => {});
-    await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.b64`).catch(() => {});
-    await SecureStore.deleteItemAsync(`aegis.${prefix}spk.keyId`).catch(() => {});
-
-    // Purge the cold-start published flag for the active slot.
-    await SecureStore.deleteItemAsync(`aegis.published.${slot}`).catch(() => {});
-
-    // Multi-slot cleanup: wipe every additional slot's DB file and SecureStore
-    // keys. deleteIdentitySlot handles all key material + SQLite files for each
-    // non-active slot. The active slot's data was already wiped above.
-    const slotsListRaw = await SecureStore.getItemAsync('aegis.slotsList').catch(() => null);
-    if (slotsListRaw) {
-      try {
-        const slotsList: string[] = JSON.parse(slotsListRaw) as string[];
-        for (const s of slotsList) {
-          if (s !== slot) {
-            await deleteIdentitySlot(s).catch(() => {});
-          }
-        }
-      } catch { /* non-fatal */ }
-    }
-    await SecureStore.deleteItemAsync('aegis.slotsList').catch(() => {});
-    await SecureStore.deleteItemAsync('aegis.activeSlotId').catch(() => {});
-
-    // Purge forensic remnants: panic config + user preferences.
-    // Without this, a post-wipe forensic analysis could detect that a panic-enabled account existed.
-    await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
-    await SecureStore.deleteItemAsync('aegis.preferences.v1').catch(() => {});
-    await SecureStore.deleteItemAsync('aegis.polls.v1').catch(() => {});
   });
+
+  // ── Phase 3: SecureStore purges — all outside the withDb callback ────────────
+
+  // Identity secret keys (mirrors what clearIdentity does in SecureStore).
+  await SecureStore.deleteItemAsync(getSecretKeySlot()).catch(() => {});
+  await SecureStore.deleteItemAsync(getSignSecretKeySlot()).catch(() => {});
+
+  // At-rest DB encryption key — purge AFTER the withDb so the handle is gone.
+  cachedDbKey = null;
+  await SecureStore.deleteItemAsync(getDbEncKeySlot()).catch(() => {});
+
+  // X3DH prekey secrets (SPK + OPKs) for the active slot.
+  if (opkIdsRaw) {
+    try {
+      const ids: number[] = JSON.parse(opkIdsRaw) as number[];
+      for (const id of ids) {
+        await SecureStore.deleteItemAsync(`aegis.${prefix}opkSecret.${id}`).catch(() => {});
+        await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.${id}`).catch(() => {});
+      }
+    } catch { /* non-fatal */ }
+  }
+  await SecureStore.deleteItemAsync(`aegis.${prefix}opkIds.json`).catch(() => {});
+  await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.b64`).catch(() => {});
+  await SecureStore.deleteItemAsync(`aegis.${prefix}spk.keyId`).catch(() => {});
+
+  // Cold-start published flag for the active slot.
+  await SecureStore.deleteItemAsync(`aegis.published.${slot}`).catch(() => {});
+
+  // Multi-slot cleanup: wipe every additional slot's DB file and SecureStore
+  // keys. deleteIdentitySlot handles all key material + SQLite files for each
+  // non-active slot. The active slot's data was already wiped above.
+  if (slotsListRaw) {
+    try {
+      const slotsList: string[] = JSON.parse(slotsListRaw) as string[];
+      for (const s of slotsList) {
+        if (s !== slot) {
+          await deleteIdentitySlot(s).catch(() => {});
+        }
+      }
+    } catch { /* non-fatal */ }
+  }
+  await SecureStore.deleteItemAsync('aegis.slotsList').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.activeSlotId').catch(() => {});
+
+  // Forensic remnants: panic config + user preferences.
+  // Without this, a post-wipe forensic analysis could detect that a
+  // panic-enabled account existed on the device.
+  await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.preferences.v1').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.polls.v1').catch(() => {});
 }
 
 // ─── Chat state (draft + unread) ─────────────────────────────────────────────

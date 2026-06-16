@@ -330,6 +330,8 @@
     "areYouSure": "Are you sure?",
     "cannotUndo": "This action cannot be undone.",
     "wipeAllCaps": "WIPE EVERYTHING",
+    "wipeFailed": "Wipe failed",
+    "wipeFailedDesc": "The secure wipe could not complete. Please try again.",
     "duressPinModalTitle": "Duress Coercion PIN",
     "duressPinModalDesc": "Enter a 4 to 6 digit PIN. When this decoy PIN is entered on the lock screen, AegisLink will start simulating a completely clean account with no history.",
     "duressPinPlaceholder": "E.g. 123456",
