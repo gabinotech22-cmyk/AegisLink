@@ -87,6 +87,16 @@ function initSqliteSchema(db: DatabaseSync) {
       PRIMARY KEY (aegis_id, key_id)
     );
 
+    CREATE TABLE IF NOT EXISTS prekeys_pq_signed (
+      aegis_id       TEXT NOT NULL,
+      device_id      TEXT NOT NULL DEFAULT 'default',
+      key_id         INTEGER NOT NULL,
+      public_key_b64 TEXT NOT NULL,
+      signature_b64  TEXT NOT NULL,
+      created_at     INTEGER NOT NULL,
+      PRIMARY KEY (aegis_id, device_id)
+    );
+
     CREATE TABLE IF NOT EXISTS revoked_did_hashes (
       did_hash        TEXT PRIMARY KEY,
       revoked_at      INTEGER NOT NULL,
@@ -417,6 +427,16 @@ async function initPgSchema(): Promise<void> {
       public_key_b64 TEXT NOT NULL,
       created_at     BIGINT NOT NULL,
       PRIMARY KEY (aegis_id, key_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS prekeys_pq_signed (
+      aegis_id       TEXT NOT NULL,
+      device_id      TEXT NOT NULL DEFAULT 'default',
+      key_id         INTEGER NOT NULL,
+      public_key_b64 TEXT NOT NULL,
+      signature_b64  TEXT NOT NULL,
+      created_at     BIGINT NOT NULL,
+      PRIMARY KEY (aegis_id, device_id)
     );
 
     CREATE TABLE IF NOT EXISTS revoked_did_hashes (
@@ -780,6 +800,24 @@ export interface OneTimePreKeyRow {
   created_at: number;
 }
 
+/**
+ * PQXDH signed PQ prekey (ML-KEM-768). Mirrors SignedPreKeyRow's shape so it
+ * shares the same upsert/migration pattern. The relay only verifies the
+ * Ed25519 signature (defence in depth) and stores+serves the blob verbatim —
+ * it never inspects or correlates the ML-KEM public key itself.
+ */
+export interface PqSignedPreKeyRow {
+  aegis_id: string;
+  /** Device identifier for this prekey. Defaults to 'default' for legacy single-device clients. */
+  device_id: string;
+  key_id: number;
+  /** base64 of the 1184-byte ML-KEM-768 public key. */
+  public_key_b64: string;
+  /** base64 of the 64-byte Ed25519 detached signature over the raw pubkey bytes. */
+  signature_b64: string;
+  created_at: number;
+}
+
 export interface LinkedDeviceRow {
   device_id: string;
   aegis_id: string;
@@ -1060,6 +1098,28 @@ export const prekeysRepo = {
       );
     }
   },
+  /**
+   * PQXDH (v2): upsert the signed PQ prekey (ML-KEM-768). Mirrors upsertSigned's
+   * pattern exactly — one row per (aegis_id, device_id), overwritten on rotation.
+   * Optional table: absent rows simply mean the device hasn't published one yet
+   * (v1-only client), which getBundle/getBundles tolerate by returning `null`.
+   */
+  async upsertPqSigned(row: PqSignedPreKeyRow): Promise<void> {
+    const deviceId = row.device_id || 'default';
+    if (USE_PG) {
+      await dbRun(
+        `INSERT INTO prekeys_pq_signed (aegis_id, device_id, key_id, public_key_b64, signature_b64, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(aegis_id, device_id) DO UPDATE SET key_id = EXCLUDED.key_id, public_key_b64 = EXCLUDED.public_key_b64, signature_b64 = EXCLUDED.signature_b64, created_at = EXCLUDED.created_at`,
+        [row.aegis_id, deviceId, row.key_id, row.public_key_b64, row.signature_b64, row.created_at]
+      );
+    } else {
+      await dbRun(
+        `INSERT INTO prekeys_pq_signed (aegis_id, device_id, key_id, public_key_b64, signature_b64, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(aegis_id, device_id) DO UPDATE SET key_id = excluded.key_id, public_key_b64 = excluded.public_key_b64, signature_b64 = excluded.signature_b64, created_at = excluded.created_at`,
+        [row.aegis_id, deviceId, row.key_id, row.public_key_b64, row.signature_b64, row.created_at]
+      );
+    }
+  },
   async insertOneTime(row: OneTimePreKeyRow): Promise<void> {
     if (USE_PG) {
       await dbRun(
@@ -1085,6 +1145,7 @@ export const prekeysRepo = {
     signingPublicKeyB64: string;
     signedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string };
     oneTimePreKey: { keyId: number; publicKeyB64: string } | null;
+    pqSignedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string } | null;
   } | null> {
     const bundles = await this.getBundles(aegisId);
     return bundles.length > 0 ? bundles[0] : null;
@@ -1102,6 +1163,7 @@ export const prekeysRepo = {
     signingPublicKeyB64: string;
     signedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string };
     oneTimePreKey: { keyId: number; publicKeyB64: string } | null;
+    pqSignedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string } | null;
   }>> {
     const spkRows = await dbAll<{ device_id: string; key_id: number; public_key_b64: string; signature_b64: string }>(
       `SELECT device_id, key_id, public_key_b64, signature_b64 FROM prekeys_signed WHERE aegis_id = ?`,
@@ -1116,11 +1178,24 @@ export const prekeysRepo = {
     const signingPublicKeyB64 = identity?.signing_public_key_b64 ?? '';
     if (signingPublicKeyB64 === '') return [];
 
+    // PQXDH (v2): fetch per-device PQ signed prekeys in one query, keyed by
+    // device_id, so the per-device loop below can attach them (or `null` for
+    // v1-only devices) without an extra query per device.
+    const pqRows = await dbAll<{ device_id: string; key_id: number; public_key_b64: string; signature_b64: string }>(
+      `SELECT device_id, key_id, public_key_b64, signature_b64 FROM prekeys_pq_signed WHERE aegis_id = ?`,
+      [aegisId]
+    );
+    const pqByDevice = new Map<string, { keyId: number; publicKeyB64: string; signatureB64: string }>();
+    for (const pq of pqRows) {
+      pqByDevice.set(pq.device_id, { keyId: pq.key_id, publicKeyB64: pq.public_key_b64, signatureB64: pq.signature_b64 });
+    }
+
     const result: Array<{
       device_id: string;
       signingPublicKeyB64: string;
       signedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string };
       oneTimePreKey: { keyId: number; publicKeyB64: string } | null;
+      pqSignedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string } | null;
     }> = [];
 
     for (const spk of spkRows) {
@@ -1141,6 +1216,7 @@ export const prekeysRepo = {
 
       result.push({
         device_id: spk.device_id,
+        pqSignedPreKey: pqByDevice.get(spk.device_id) ?? null,
         signingPublicKeyB64,
         signedPreKey: {
           keyId: spk.key_id,

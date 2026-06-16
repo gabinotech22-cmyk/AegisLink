@@ -70,6 +70,18 @@ export interface PreKeyBundle {
     keyId: number;
     publicKeyB64: string;
   } | null;
+  /**
+   * PQXDH (v2): optional signed PQ prekey (ML-KEM-768). Present iff the device
+   * has published one — absent for legacy v1-only devices/clients. The relay
+   * never inspects this beyond the Ed25519 signature check at upload time
+   * (defence in depth); it is stored and served as an opaque blob, same as
+   * the classic signedPreKey.
+   */
+  pqSignedPreKey?: {
+    keyId: number;
+    publicKeyB64: string;
+    signatureB64: string;
+  } | null;
 }
 
 export interface SealedEnvelope {
@@ -114,7 +126,18 @@ const PreKeyUpload = z.object({
   oneTimePreKeys: z.array(z.object({
     keyId: z.number(),
     publicKeyB64: z.string().min(1)
-  })).max(100)
+  })).max(100),
+  /**
+   * PQXDH (v2): optional signed PQ prekey (ML-KEM-768). Nullable/optional so
+   * legacy v1 clients (and the legacy uploadPreKeys path that hasn't been
+   * updated yet) keep working unchanged — interop requirement.
+   * Sizes (base64): publicKeyB64 ~1184 bytes raw, signatureB64 64 bytes raw.
+   */
+  pqSignedPreKey: z.object({
+    keyId: z.number(),
+    publicKeyB64: z.string().min(1).max(2048),
+    signatureB64: z.string().min(1).max(128),
+  }).optional(),
 });
 
 const PreKeyFetch = z.object({
@@ -596,6 +619,20 @@ export function attachRelay(io: SocketServer) {
             ack?.({ ok: false, error: 'invalid_spk_signature' });
             return;
           }
+
+          // PQXDH (v2): verify the Ed25519 signature over the PQ signed prekey the
+          // SAME way as the classic SPK above — defence in depth. The relay never
+          // inspects the ML-KEM public key itself beyond this signature check; it
+          // is stored and served as an opaque blob. Optional field: absent ⇒ this
+          // upload stays v1-only, no rejection.
+          if (parsed.data.pqSignedPreKey) {
+            const pqBytes = decodeBase64(parsed.data.pqSignedPreKey.publicKeyB64);
+            const pqSigBytes = decodeBase64(parsed.data.pqSignedPreKey.signatureB64);
+            if (!nacl.sign.detached.verify(pqBytes, pqSigBytes, signingKey)) {
+              ack?.({ ok: false, error: 'invalid_pq_spk_signature' });
+              return;
+            }
+          }
         }
         const now = Date.now();
         await prekeysRepo.upsertSigned({
@@ -606,6 +643,16 @@ export function attachRelay(io: SocketServer) {
           signature_b64: parsed.data.signedPreKey.signatureB64,
           created_at: now,
         });
+        if (parsed.data.pqSignedPreKey) {
+          await prekeysRepo.upsertPqSigned({
+            aegis_id: me,
+            device_id: parsed.data.deviceId ?? deviceId ?? 'default',
+            key_id: parsed.data.pqSignedPreKey.keyId,
+            public_key_b64: parsed.data.pqSignedPreKey.publicKeyB64,
+            signature_b64: parsed.data.pqSignedPreKey.signatureB64,
+            created_at: now,
+          });
+        }
         for (const opk of parsed.data.oneTimePreKeys) {
           await prekeysRepo.insertOneTime({
             aegis_id: me,
