@@ -330,6 +330,8 @@
     "areYouSure": "¿Estás seguro?",
     "cannotUndo": "Esta acción no se puede deshacer.",
     "wipeAllCaps": "BORRAR TODO",
+    "wipeFailed": "Error al borrar",
+    "wipeFailedDesc": "El borrado seguro no pudo completarse. Inténtalo de nuevo.",
     "duressPinModalTitle": "PIN de coacción",
     "duressPinModalDesc": "Introduce un PIN de 4 a 6 dígitos. Cuando se use este PIN señuelo en la pantalla de bloqueo, AegisLink simulará una cuenta completamente limpia sin historial.",
     "duressPinPlaceholder": "Ej. 123456",
