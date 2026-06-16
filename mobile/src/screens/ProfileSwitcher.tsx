@@ -10,19 +10,13 @@
  *   - Long-press → delete confirmation (cannot delete last or primary).
  */
 import { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  Pressable,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, FlatList, Pressable, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { useProfiles, type Profile } from '../store/profiles';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -46,7 +40,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
 
   function handleSwitch(profile: Profile) {
     if (profile.slotId === activeSlotId) return;
-    Alert.alert(
+    themedAlert(
       'Cambiar de perfil',
       'Cambiar de perfil cerrará todos los chats activos y cargará la base de datos del nuevo perfil.',
       [
@@ -59,7 +53,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
               await switchProfile(profile.slotId);
               onBack();
             } catch (e) {
-              Alert.alert('Error', (e as Error).message);
+              themedAlert('Error', (e as Error).message);
             } finally {
               setSwitching(null);
             }
@@ -71,14 +65,14 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
 
   function handleDelete(profile: Profile) {
     if (profiles.length <= 1) {
-      Alert.alert('No se puede eliminar', 'Debes tener al menos un perfil.');
+      themedAlert('No se puede eliminar', 'Debes tener al menos un perfil.');
       return;
     }
     if (profile.slotId === 'self') {
-      Alert.alert('No se puede eliminar', 'El perfil primario no se puede eliminar. Usa "Eliminar identidad" en Perfil → Ajustes.');
+      themedAlert('No se puede eliminar', 'El perfil primario no se puede eliminar. Usa "Eliminar identidad" en Perfil → Ajustes.');
       return;
     }
-    Alert.alert(
+    themedAlert(
       `Eliminar "${profile.displayName}"`,
       'Se borrarán permanentemente todas las claves, mensajes y contactos de este perfil. Esta acción es irreversible.',
       [
@@ -90,7 +84,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
             try {
               await removeProfile(profile.slotId);
             } catch (e) {
-              Alert.alert('Error', (e as Error).message);
+              themedAlert('Error', (e as Error).message);
             }
           },
         },

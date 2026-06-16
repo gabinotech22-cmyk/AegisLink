@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,6 +10,7 @@ import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { useMessages } from '../store/messages';
 import { withPickingGuard } from '../utils/pickingGuard';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -52,7 +53,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert(
+        themedAlert(
           i18nT('attachSheet.permissionRequired', 'Permission required'),
           i18nT('attachSheet.galleryPermission', 'Access to gallery is required.')
         );
@@ -73,7 +74,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
         onBack();
       }
     } catch (e) {
-      Alert.alert(
+      themedAlert(
         i18nT('common.error', 'Error'),
         `${i18nT('attachSheet.errorGallery', 'Could not open gallery')}: ${(e as Error).message}`
       );
@@ -87,7 +88,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert(
+        themedAlert(
           i18nT('attachSheet.permissionRequired', 'Permission required'),
           i18nT('attachSheet.cameraPermission', 'Access to camera is required.')
         );
@@ -107,7 +108,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
         onBack();
       }
     } catch (e) {
-      Alert.alert(
+      themedAlert(
         i18nT('common.error', 'Error'),
         `${i18nT('attachSheet.errorCamera', 'Could not access camera')}: ${(e as Error).message}`
       );
@@ -123,7 +124,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert(
+        themedAlert(
           i18nT('attachSheet.permissionRequired', 'Permission required'),
           i18nT('attachSheet.galleryPermission', 'Access to gallery is required.')
         );
@@ -144,7 +145,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
         if (trimmed) setPendingVideo(trimmed);
       }
     } catch (e) {
-      Alert.alert(
+      themedAlert(
         i18nT('common.error', 'Error'),
         `${i18nT('attachSheet.errorGallery', 'Could not open gallery')}: ${(e as Error).message}`
       );

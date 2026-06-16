@@ -1,15 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  Modal,
-  ActivityIndicator,
-  Platform,
-  StyleSheet,
-  Alert,
-} from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, ActivityIndicator, Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { ss } from '../utils/secureStore';
@@ -23,6 +13,7 @@ import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { getSocket } from '../socket/client';
 import { buildRevocationPayload } from '../web3/deviceRevocation/RevokeDevice';
+import { themedAlert } from '../components/AlertHost';
 
 const DEVICES_CACHE_KEY = 'aegis.linked_devices.json';
 
@@ -237,7 +228,7 @@ export function DevicesScreen({ onBack }: Props) {
   // ── Revocation ────────────────────────────────────────────────────────────
 
   function handleRevoke(device: LinkedDevice) {
-    Alert.alert(
+    themedAlert(
       i18nT('devices.revokeDeviceTitle', 'Revoke device'),
       i18nT('devices.revokeDeviceConfirm', 'Revoke "{{name}}"? New messages will immediately become unreadable.', { name: device.name }),
       [
@@ -296,7 +287,7 @@ export function DevicesScreen({ onBack }: Props) {
       setLinkedDevices(updated);
       await ss.set(DEVICES_CACHE_KEY, JSON.stringify(updated));
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     } finally {
       setRevoking(null);
     }

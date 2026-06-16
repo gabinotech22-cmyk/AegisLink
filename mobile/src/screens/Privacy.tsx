@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
-import { View, Text, ScrollView, Pressable, Alert, Linking } from 'react-native';
+import { View, Text, ScrollView, Pressable, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -13,6 +13,7 @@ import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
 import type { Theme } from '../theme/vault';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onTab: (tab: Tab) => void;
@@ -238,7 +239,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             icon={<I.Shield size={20} color={t.textDim} />}
             label={i18nT('privacy.securityAudit')}
             sub={i18nT('privacy.securityAuditSub')}
-            onPress={() => { Alert.alert(i18nT('privacy.auditAlert'), i18nT('privacy.auditAlertDesc')); }}
+            onPress={() => { themedAlert(i18nT('privacy.auditAlert'), i18nT('privacy.auditAlertDesc')); }}
           />
           <Row
             t={t}
@@ -246,7 +247,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             label={i18nT('privacy.jurisdiction')}
             sub={i18nT('privacy.jurisdictionSub')}
             noBorder
-            onPress={() => { Alert.alert(i18nT('privacy.jurisdictionAlert'), i18nT('privacy.jurisdictionAlertDesc')); }}
+            onPress={() => { themedAlert(i18nT('privacy.jurisdictionAlert'), i18nT('privacy.jurisdictionAlertDesc')); }}
           />
         </Section>
       </ScrollView>

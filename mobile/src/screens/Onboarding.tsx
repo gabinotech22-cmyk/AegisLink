@@ -1,15 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Animated,
-  Easing,
-  Pressable,
-  Alert,
-  ActivityIndicator,
-  TextInput,
-} from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, Pressable, ActivityIndicator, TextInput } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -27,6 +17,7 @@ import { ensureDevicePreKeys } from '../crypto/signal/x3dh';
 import { RELAY_URL } from '../config';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onDone: () => void;
@@ -69,7 +60,7 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
     try {
       await generate();
     } catch (e) {
-      Alert.alert(i18nT('onboarding.generateError'), (e as Error).message);
+      themedAlert(i18nT('onboarding.generateError'), (e as Error).message);
       setStep('welcome');
     }
   }
@@ -170,7 +161,7 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
       try {
         await updateProfile(trimmed || defaultName, selectedColor, null);
       } catch (e) {
-        Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+        themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
         return;
       }
     }

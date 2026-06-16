@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, TextInput, Image, Share } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Image, Share } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
@@ -18,6 +18,7 @@ import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { encodeGroupInviteLinkUniversal } from '../crypto/qr';
 import type { StoredGroup } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   group: StoredGroup;
@@ -74,7 +75,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   async function handlePickGroupAvatar() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(i18nT('groups.permissionDeniedTitle', 'Permiso denegado'), i18nT('groups.permissionDeniedGallery', 'Se necesita acceso a la galería.'));
+      themedAlert(i18nT('groups.permissionDeniedTitle', 'Permiso denegado'), i18nT('groups.permissionDeniedGallery', 'Se necesita acceso a la galería.'));
       return;
     }
     // Pick WITHOUT the native crop editor (allowsEditing) — its confirm
@@ -105,7 +106,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
       );
       await updateGroupAvatar(group.id, compressed.uri);
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
@@ -115,7 +116,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
 
   function handleRemoveMember(aegisId: string) {
     if (aegisId === identity?.aegisId) {
-      Alert.alert(i18nT('groupAdmin.leaveGroupTitle'), i18nT('groupAdmin.leaveGroupDesc'), [
+      themedAlert(i18nT('groupAdmin.leaveGroupTitle'), i18nT('groupAdmin.leaveGroupDesc'), [
         { text: i18nT('common.cancel'), style: 'cancel' },
         {
           text: i18nT('groupAdmin.leaveAndDelete'),
@@ -129,7 +130,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
       return;
     }
     const name = getMemberName(aegisId);
-    Alert.alert(i18nT('groupAdmin.removeMemberTitle', { name }), i18nT('groupAdmin.removeMemberDesc'), [
+    themedAlert(i18nT('groupAdmin.removeMemberTitle', { name }), i18nT('groupAdmin.removeMemberDesc'), [
       { text: i18nT('common.cancel'), style: 'cancel' },
       { text: i18nT('common.delete'), style: 'destructive', onPress: () => void removeMember(group.id, aegisId) },
     ]);

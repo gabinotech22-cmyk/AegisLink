@@ -1,9 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import {
-  View, Text, TextInput, Pressable, FlatList,
-  KeyboardAvoidingView, Platform, StyleSheet, Alert,
-  Linking, Image, Animated, ActivityIndicator, Modal,
-} from 'react-native';
+import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Linking, Image, Animated, ActivityIndicator, Modal } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import { FormattedText } from '../components/FormattedText';
@@ -36,6 +32,7 @@ import { usePollsStore, type PollResult } from '../store/polls';
 import type { StoredGroup, StoredMessage } from '../db/local';
 import { parseLocationMessage } from '../utils/parseLocationMessage';
 import { VoiceRecorderScreen } from './VoiceRecorder';
+import { themedAlert } from '../components/AlertHost';
 
 const EMPTY_MSGS: StoredMessage[] = [];
 
@@ -168,7 +165,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       await useMessages.getState().setMediaUri(group.id, id, blobUri);
       await sendGroupMessage({ identity, groupId: group.id, plaintext: `[video:${blobUri}]`, skipLocalAppend: true });
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -241,7 +238,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   function handleStar() { if (!actionsMsg) return; void toggleStar(group.id, actionsMsg.id); }
   function handleDelete() {
     if (!actionsMsg) return;
-    Alert.alert(
+    themedAlert(
       i18nT('groupChat.deleteMessage', 'Delete message'),
       i18nT('groupChat.deleteMessageConfirm', 'Delete this message?'),
       [
@@ -270,7 +267,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       await appendMsg({ id, chatId: group.id, direction: 'out', body: plaintext, createdAt: Date.now(), type: 'text' });
       await sendGroupMessage({ identity, groupId: group.id, plaintext, skipLocalAppend: true });
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
@@ -291,7 +288,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       await useMessages.getState().setMediaUri(group.id, id, blobUri);
       await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]${caption.trim()}`, skipLocalAppend: true });
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -338,7 +335,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     } catch (e) {
       setDraft(text);
       if (imageUri) setStagedImageUri(imageUri);
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -372,7 +369,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         skipLocalAppend: true,
       });
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
@@ -380,11 +377,11 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     if (!identity) return;
     const otherMembers = group.members.filter((id) => id !== identity.aegisId);
     if (otherMembers.length === 0) {
-      Alert.alert(i18nT('groupCall.noMembers', 'Sin miembros'), i18nT('groupCall.noMembersDetail', 'No hay otros miembros en este grupo.'));
+      themedAlert(i18nT('groupCall.noMembers', 'Sin miembros'), i18nT('groupCall.noMembersDetail', 'No hay otros miembros en este grupo.'));
       return;
     }
     if (otherMembers.length > 7) {
-      Alert.alert(i18nT('groupCall.tooMany', 'Demasiados participantes'), i18nT('groupCall.tooManyDetail', 'Máx. 8 participantes en llamadas grupales.'));
+      themedAlert(i18nT('groupCall.tooMany', 'Demasiados participantes'), i18nT('groupCall.tooManyDetail', 'Máx. 8 participantes en llamadas grupales.'));
       return;
     }
     try {
@@ -392,7 +389,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       await startGroupCall(identity, group, otherMembers);
       onGroupCall?.();
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
@@ -510,7 +507,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
               disabled={item.deleted}
               onReply={() => setReplyTo(item)}
               onDelete={item.direction === 'out' ? () => {
-                Alert.alert(
+                themedAlert(
                   i18nT('groupChat.deleteMessage', 'Eliminar mensaje'),
                   i18nT('groupChat.deleteMessageConfirm', '¿Eliminar este mensaje?'),
                   [

@@ -1,20 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Alert,
-  Linking,
-  Image,
-  ActivityIndicator,
-  Modal,
-} from 'react-native';
+import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Linking, Image, ActivityIndicator, Modal } from 'react-native';
 import { FormattedText } from '../components/FormattedText';
 import { MediaEditorModal } from '../components/MediaEditorModal';
 import { VoiceRecorderScreen } from './VoiceRecorder';
@@ -54,6 +40,7 @@ import { WEBRTC_AVAILABLE } from '../runtime';
 import { SoundFX } from '../hooks/useSoundFX';
 import type { StoredContact, StoredMessage } from '../db/local';
 import { parseLocationMessage } from '../utils/parseLocationMessage';
+import { themedAlert } from '../components/AlertHost';
 
 const EMPTY_MSGS: StoredMessage[] = [];
 
@@ -303,15 +290,15 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
   async function handleCall(media: 'audio' | 'video') {
     if (contact.blocked) {
-      Alert.alert(i18nT('chat.callBlocked'), i18nT('chat.callBlockedDesc'));
+      themedAlert(i18nT('chat.callBlocked'), i18nT('chat.callBlockedDesc'));
       return;
     }
     if (contact.zeroTrust && mismatchKey) {
-      Alert.alert(i18nT('chat.callZeroTrustBlock'), i18nT('chat.callZeroTrustBlockDesc'));
+      themedAlert(i18nT('chat.callZeroTrustBlock'), i18nT('chat.callZeroTrustBlockDesc'));
       return;
     }
     if (!WEBRTC_AVAILABLE) {
-      Alert.alert(
+      themedAlert(
         i18nT('chat.callSimulator'),
         i18nT('chat.callSimulatorDesc'),
         [
@@ -345,7 +332,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     try {
       await startCall(contact.aegisId, media);
     } catch (e) {
-      Alert.alert(i18nT('chat.callError'), (e as Error).message);
+      themedAlert(i18nT('chat.callError'), (e as Error).message);
     }
   }
 
@@ -385,7 +372,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       });
       void SoundFX.msgSent();
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -416,7 +403,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       });
       void SoundFX.msgSent();
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -441,7 +428,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       });
       void SoundFX.msgSent();
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -470,7 +457,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       });
       void SoundFX.msgSent();
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -534,7 +521,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       void SoundFX.msgSent();
     } catch (e) {
       setDraft(text);
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -558,7 +545,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
   function handleDelete() {
     if (!actionsMsg) return;
-    Alert.alert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
+    themedAlert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
       { text: i18nT('common.cancel'), style: 'cancel' },
       {
         text: i18nT('common.delete'),
@@ -571,7 +558,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   function handleDeleteForAll() {
     if (!actionsMsg) return;
     const id = actionsMsg.id;
-    Alert.alert(
+    themedAlert(
       i18nT('chat.deleteForAll'),
       i18nT('chat.deleteForAllDesc'),
       [
@@ -626,7 +613,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       const fileSize = (info as { size?: number }).size ?? 0;
       if (fileSize > 10 * 1024 * 1024) {
         await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
-        Alert.alert(i18nT('chat.sendError'), 'GIF demasiado grande (máx. 10 MB)');
+        themedAlert(i18nT('chat.sendError'), 'GIF demasiado grande (máx. 10 MB)');
         return;
       }
 
@@ -634,7 +621,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       blobUri = await encryptAndUploadMedia(tmpPath, 'image/gif');
     } catch (e) {
       await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
       return;
     }
 
@@ -649,7 +636,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         plaintext: `[image:${blobUri}]`,
       });
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -900,7 +887,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               {!contact.zeroTrust && (
                 <Pressable
                   onPress={() =>
-                    Alert.alert(
+                    themedAlert(
                       i18nT('chat.trustAnyway'),
                       i18nT('chat.trustAnywayConfirm'),
                       [
@@ -1066,7 +1053,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             <SwipeableMessage
               disabled={item.deleted}
               onDelete={() => {
-                Alert.alert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
+                themedAlert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
                   { text: i18nT('common.cancel'), style: 'cancel' },
                   {
                     text: i18nT('common.delete'),
@@ -1436,7 +1423,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             setDraft('');
             void saveDraft(contact.aegisId, '');
           } catch (e) {
-            Alert.alert('Error al programar', (e as Error).message);
+            themedAlert('Error al programar', (e as Error).message);
           }
         }}
       />
@@ -1598,7 +1585,7 @@ function JoinRequestBubble({ t, m, me, time }: { t: Theme; m: StoredMessage; me:
       const client = require('../socket/client') as typeof import('../socket/client');
       await client.broadcastGroupMetadata(identity, group.id);
     } catch {
-      Alert.alert(
+      themedAlert(
         i18nT('chat.joinRequestErrorTitle', 'Could not add member'),
         i18nT('chat.joinRequestErrorDesc', 'Check your connection and try again.'),
       );
@@ -2103,12 +2090,12 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
               onPress={async () => {
                 try {
                   await useContacts.getState().addByAegisId(cardAegisId);
-                  Alert.alert(i18nT('chat.contactAdded', 'Contacto añadido'), cardName);
+                  themedAlert(i18nT('chat.contactAdded', 'Contacto añadido'), cardName);
                 } catch {
                   // Fallback: copy ID to clipboard
                   const Clipboard = require('expo-clipboard');
                   await Clipboard.setStringAsync(cardAegisId).catch(() => {});
-                  Alert.alert(i18nT('chat.contactAddFailed', 'No se pudo añadir'), i18nT('chat.idCopied', 'ID copiado al portapapeles'));
+                  themedAlert(i18nT('chat.contactAddFailed', 'No se pudo añadir'), i18nT('chat.idCopied', 'ID copiado al portapapeles'));
                 }
               }}
               style={({ pressed }) => ({

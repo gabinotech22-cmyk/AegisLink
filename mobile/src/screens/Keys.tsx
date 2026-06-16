@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, Alert, Pressable } from 'react-native';
+import { View, Text, ScrollView, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -8,6 +8,7 @@ import { TopBar } from '../components/TopBar';
 import { Section, Row } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import * as Clipboard from 'expo-clipboard';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -31,7 +32,7 @@ export function KeysScreen({ onBack }: Props) {
 
   const handleCopy = async (text: string, label: string) => {
     await Clipboard.setStringAsync(text);
-    Alert.alert(i18nT('keys.copied'), i18nT('keys.copiedDesc'));
+    themedAlert(i18nT('keys.copied'), i18nT('keys.copiedDesc'));
   };
 
   if (!identity) {
