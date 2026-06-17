@@ -269,12 +269,37 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   async function handleGifSelect(url: string) {
     setGifPickerVisible(false);
     if (!identity) return;
-    const plaintext = `[gif:${url}]`;
+
+    // Privacy + correctness: download the GIF, encrypt it like any image, and
+    // send [image:blob…] so members never contact the GIF servers and the
+    // sender's own bubble renders the GIF (not raw "[gif:url]" text).
+    const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+    const cacheDir = FS.cacheDirectory ?? '';
+    const gifId = url.split('/').pop()?.split('?')[0] ?? Crypto.randomUUID();
+    const localPath = `${cacheDir}gif_${gifId}.gif`;
+
     try {
+      const downloadResult = await FS.downloadAsync(url, localPath);
+      if (!downloadResult.uri) throw new Error('GIF download failed');
+
+      const info = await FS.getInfoAsync(downloadResult.uri);
+      const fileSize = (info as { size?: number }).size ?? 0;
+      if (fileSize > 10 * 1024 * 1024) {
+        await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+        themedAlert(i18nT('chat.sendError', 'Error'), 'GIF demasiado grande (máx. 10 MB)');
+        return;
+      }
+
       const id = Crypto.randomUUID();
-      await appendMsg({ id, chatId: group.id, direction: 'out', body: plaintext, createdAt: Date.now(), type: 'text' });
-      await sendGroupMessage({ identity, groupId: group.id, plaintext, skipLocalAppend: true });
+      await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: localPath });
+
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      const blobUri = await encryptAndUploadMedia(localPath, 'image/gif');
+      await useMessages.getState().setMediaUri(group.id, id, blobUri);
+
+      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]`, skipLocalAppend: true });
     } catch (e) {
+      await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
       themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }

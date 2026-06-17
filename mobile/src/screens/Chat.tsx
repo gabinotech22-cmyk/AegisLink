@@ -598,47 +598,50 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     setGifPickerVisible(false);
     if (!identity) return;
 
-    // Privacy fix: never send the raw Giphy URL.
+    // Privacy fix: never send the raw Giphy/Klipy URL.
     // Download the GIF locally, encrypt it like any other image attachment,
-    // and send [image:...] so the receiver never contacts Giphy servers.
+    // and send [image:...] so the receiver never contacts the GIF servers.
     const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
     const cacheDir = FS.cacheDirectory ?? '';
     const gifId = url.split('/').pop()?.split('?')[0] ?? Crypto.randomUUID();
-    const tmpPath = `${cacheDir}gif_tmp_${gifId}.gif`;
+    // Persistent local copy (NOT a temp we delete) so the SENDER's own bubble
+    // can render the GIF locally — same pattern as sendEditedImage. Without
+    // this the sender saw the raw "[image:blob:…]" text (Bug fix).
+    const localPath = `${cacheDir}gif_${gifId}.gif`;
 
-    let blobUri: string;
     try {
       // Enforce a 10 MB size guard by checking after download
-      const downloadResult = await FS.downloadAsync(url, tmpPath);
+      const downloadResult = await FS.downloadAsync(url, localPath);
       if (!downloadResult.uri) throw new Error('GIF download failed');
 
       const info = await FS.getInfoAsync(downloadResult.uri);
       const fileSize = (info as { size?: number }).size ?? 0;
       if (fileSize > 10 * 1024 * 1024) {
-        await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
+        await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
         themedAlert(i18nT('chat.sendError'), 'GIF demasiado grande (máx. 10 MB)');
         return;
       }
 
+      // Optimistic local echo: render the GIF on the sender's side immediately.
+      const id = Crypto.randomUUID();
+      await appendMsg({
+        id, chatId: contact.aegisId, direction: 'out', body: '',
+        createdAt: Date.now(), type: 'image', mediaUri: localPath,
+      });
+
       const { encryptAndUploadMedia } = require('../crypto/media');
-      blobUri = await encryptAndUploadMedia(tmpPath, 'image/gif');
-    } catch (e) {
-      await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
-      themedAlert(i18nT('chat.sendError'), (e as Error).message);
-      return;
-    }
+      const blobUri = await encryptAndUploadMedia(localPath, 'image/gif');
+      await setMediaUri(contact.aegisId, id, blobUri);
 
-    // Clean up the temporary file regardless of send outcome
-    await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
-
-    try {
       await sendMessage({
         identity,
         recipientAegisId: contact.aegisId,
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
         plaintext: `[image:${blobUri}]`,
+        skipLocalAppend: true,
       });
     } catch (e) {
+      await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
