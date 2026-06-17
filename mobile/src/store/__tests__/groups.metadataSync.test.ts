@@ -111,4 +111,28 @@ describe('groups store — immediate metadata propagation', () => {
 
     expect(mockBroadcastGroupMetadata).not.toHaveBeenCalled();
   });
+
+  it('addMember welcomes the new member by broadcasting the roster carrier', async () => {
+    await useGroups.getState().addMember('g-1', 'peer-2');
+
+    // Member added, rosterVersion bumped, re-signed and persisted.
+    const saved = mockSaveGroup.mock.calls[0][0];
+    expect(saved.members).toContain('peer-2');
+    expect(saved.rosterVersion).toBe((baseGroup.rosterVersion ?? 1) + 1);
+
+    // The fix: the new member's client only materializes the group from a
+    // carrier, so adding MUST push one immediately (symmetric to removeMember).
+    expect(mockBroadcastGroupMetadata).toHaveBeenCalledTimes(1);
+    expect(mockBroadcastGroupMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({ aegisId: 'admin-id' }),
+      'g-1',
+    );
+  });
+
+  it('addMember is a no-op for someone already in the group (no broadcast)', async () => {
+    await useGroups.getState().addMember('g-1', 'peer-1');
+
+    expect(mockSaveGroup).not.toHaveBeenCalled();
+    expect(mockBroadcastGroupMetadata).not.toHaveBeenCalled();
+  });
 });
