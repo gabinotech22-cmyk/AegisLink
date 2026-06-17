@@ -443,6 +443,21 @@ export function attachGroupCallHandlers(): void {
   const socket = getSocket();
   if (!socket) return;
 
+  // Idempotent (see attachCallHandlers): a reconnect builds a new socket.io
+  // instance, so clear our events before (re)registering to avoid both lost
+  // handlers after a socket recreation and stacked duplicates on re-attach.
+  for (const ev of [
+    'group_call:accept',
+    'group_call:decline',
+    'group_call:offer',
+    'group_call:answer',
+    'group_call:ice',
+    'group_call:invite',
+    'group_call:hangup',
+  ]) {
+    socket.off(ev);
+  }
+
   // ── Initiator receives accept from a member ─────────────────────────────
   socket.on(
     'group_call:accept',
