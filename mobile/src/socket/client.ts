@@ -11,6 +11,7 @@ import { deriveAegisId } from '../crypto/identity';
 import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
+import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import { performX3DH, performX3DHReceiver, generatePreKeys, shouldUsePqReceiver, type PreKeyBundle, type PqSignedPreKeyPublic } from '../crypto/signal/x3dh';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
 import { themedAlert } from '../components/AlertHost';
@@ -1577,6 +1578,14 @@ async function decryptAndAppend(
       weAdvertisedPq = (await getPqSpkKeyId()) !== null;
     } catch { /* treat as not advertised */ }
     const pqDecision = shouldUsePqReceiver(weAdvertisedPq, !!pqCtB64);
+
+    // Local-only observability: if we advertised PQ yet got no ciphertext, this
+    // handshake silently downgraded to v1. Count it on-device (never sent to the
+    // relay) so a sustained spike — attack OR a bundle-publish regression — is
+    // observable. Fire-and-forget: must never block or fail the decrypt path.
+    if (weAdvertisedPq && !pqCtB64) {
+      void useSecurityDiagnostics.getState().recordPqDowngrade();
+    }
 
     let pqInputs: { cipherText: Uint8Array; pqSpkSecret: Uint8Array } | null = null;
     if (pqDecision === 'v2') {
