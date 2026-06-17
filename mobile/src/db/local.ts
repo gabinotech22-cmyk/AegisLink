@@ -5,6 +5,7 @@ import { ss } from '../utils/secureStore';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { secretKeySlot, signSecretKeySlot, dbEncKeySlot } from '../crypto/types';
+import type { GroupPermissions } from '../crypto/groupSig';
 
 // ─── Identity (Keychain / Keystore) ──────────────────────────────────────────
 //
@@ -249,7 +250,10 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       admin_id              TEXT,
       admin_sig             TEXT,
       moderators            TEXT,
-      roster_version        INTEGER
+      roster_version        INTEGER,
+      permissions           TEXT,
+      gov_sig               TEXT,
+      gov_version           INTEGER
     );
 
     -- Per-chat state: draft text + unread count
@@ -337,7 +341,7 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 8;
+  const USER_DB_VERSION = 9;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -407,6 +411,20 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // unset" and is treated as version 1 by readers.
     try { await d.execAsync('ALTER TABLE groups ADD COLUMN roster_version INTEGER;'); } catch {}
     await d.execAsync('PRAGMA user_version = 8');
+  }
+
+  if (currentVersion < 9) {
+    // v8 → v9: add governance columns to groups (roles + permissions layer,
+    // aegis.group.gov.v1). permissions = JSON GroupPermissions, gov_sig =
+    // owner's detached signature over the governance state, gov_version =
+    // monotonic anti-rollback counter. Fresh installs already have the columns
+    // via CREATE TABLE above. All NULL on existing rows → readers fall back to
+    // DEFAULT_PERMISSIONS and treat gov_version as 1, so legacy groups keep
+    // working with creator=owner and default gates (no data migration needed).
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN permissions TEXT;'); } catch {}
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN gov_sig TEXT;'); } catch {}
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN gov_version INTEGER;'); } catch {}
+    await d.execAsync('PRAGMA user_version = 9');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.
@@ -1234,12 +1252,29 @@ export interface StoredGroup {
    * the locally-trusted one. Undefined on legacy rows → treated as 1.
    */
   rosterVersion?: number;
+  /**
+   * Configurable per-group permission gates (who can invite/send/call/edit).
+   * Undefined → treat as DEFAULT_PERMISSIONS (see crypto/groupRoles.ts). Covered
+   * by govSig so a member cannot forge them.
+   */
+  permissions?: GroupPermissions;
+  /**
+   * Detached Ed25519 signature by adminId over the governance state
+   * (roles + permissions + govVersion) — see canonicalGroupGovBytes. Additive
+   * and independent of adminSig; absent on legacy/pre-governance groups.
+   */
+  govSig?: string;
+  /**
+   * Monotonic governance counter, bumped on every role/permission change.
+   * Defeats rollback of a signed governance state. Undefined → treated as 1.
+   */
+  govVersion?: number;
 }
 
 export async function saveGroup(g: StoredGroup): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(
-      `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       g.id,
       g.name,
       JSON.stringify(g.members),
@@ -1251,7 +1286,10 @@ export async function saveGroup(g: StoredGroup): Promise<void> {
       g.adminId ?? null,
       g.adminSig ?? null,
       g.moderators && g.moderators.length > 0 ? JSON.stringify(g.moderators) : null,
-      g.rosterVersion ?? null
+      g.rosterVersion ?? null,
+      g.permissions ? JSON.stringify(g.permissions) : null,
+      g.govSig ?? null,
+      g.govVersion ?? null
     );
   });
 }
@@ -1269,6 +1307,9 @@ type GroupRow = {
   admin_sig: string | null;
   moderators: string | null;
   roster_version: number | null;
+  permissions: string | null;
+  gov_sig: string | null;
+  gov_version: number | null;
 };
 
 function rowToGroup(r: GroupRow): StoredGroup {
@@ -1285,13 +1326,16 @@ function rowToGroup(r: GroupRow): StoredGroup {
     adminSig: r.admin_sig ?? undefined,
     moderators: r.moderators ? (JSON.parse(r.moderators) as string[]) : undefined,
     rosterVersion: r.roster_version ?? undefined,
+    permissions: r.permissions ? (JSON.parse(r.permissions) as GroupPermissions) : undefined,
+    govSig: r.gov_sig ?? undefined,
+    govVersion: r.gov_version ?? undefined,
   };
 }
 
 export async function loadGroups(): Promise<StoredGroup[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<GroupRow>(
-      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version FROM groups ORDER BY created_at DESC`
+      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version FROM groups ORDER BY created_at DESC`
     );
     return rows.map(rowToGroup);
   });
@@ -1314,7 +1358,7 @@ export async function deleteGroup(id: string): Promise<void> {
 export async function getGroup(id: string): Promise<StoredGroup | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<GroupRow>(
-      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version FROM groups WHERE id = ?`,
+      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version FROM groups WHERE id = ?`,
       id
     );
     if (!row) return null;
