@@ -25,6 +25,8 @@ import { MediaImage } from '../components/MediaImage';
 import { AttachmentGrid } from '../components/AttachmentGrid';
 import { useContacts } from '../store/contacts';
 import { useGroups } from '../store/groups';
+import { useActiveCalls } from '../store/activeCalls';
+import { useGroupCall } from '../store/groupCall';
 import { canScheduleGroupPost } from '../store/scheduledMessages';
 import { parseGroupPostMarker } from '../utils/groupPost';
 import { sendGroupMessage, sendGroupVote } from '../socket/client';
@@ -65,6 +67,11 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const hydrate = useContacts((s) => s.hydrate);
   // Read group reactively from the store so member add/remove is reflected live
   const group = useGroups((s) => s.groups.find((g) => g.id === initialGroup.id) ?? initialGroup);
+  // Active voice channel for THIS group (Discord-style banner). Hidden when I'm
+  // already in that call (then the in-call UI is showing instead).
+  const activeCall = useActiveCalls((s) => s.calls[group.id]);
+  const myCallId = useGroupCall((s) => s.callId);
+  const showCallBanner = !!activeCall && activeCall.callId !== myCallId;
   const list = useMessages((s) => s.byChat[group.id] ?? EMPTY_MSGS);
   const loadChat = useMessages((s) => s.loadChat);
   const toggleStar = useMessages((s) => s.toggleStar);
@@ -494,6 +501,48 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
             </>
           )}
         </View>
+
+        {/* Active voice-channel banner — join an open call without ringing */}
+        {showCallBanner && activeCall && (
+          <Pressable
+            onPress={() => {
+              const { joinGroupCall } = require('../socket/groupCalls') as typeof import('../socket/groupCalls');
+              void joinGroupCall(group.id);
+            }}
+            accessibilityLabel={i18nT('groupCall.joinBanner', 'Unirse a la llamada de voz')}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 9,
+              marginHorizontal: 12,
+              marginTop: 10,
+              paddingVertical: 11,
+              paddingHorizontal: 12,
+              borderRadius: 14,
+              backgroundColor: `${t.accent}14`,
+              borderWidth: 1,
+              borderColor: `${t.accent}4d`,
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: `${t.accent}22`, alignItems: 'center', justifyContent: 'center' }}>
+              <I.Mic size={16} color={t.accent} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.text }}>
+                {i18nT('groupCall.channelActive', 'Canal de voz activo')}
+              </Text>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.4, marginTop: 1 }}>
+                {i18nT('groupCall.inCallCount', { count: activeCall.participants.length, defaultValue: '{{count}} en llamada' }).toUpperCase()}
+              </Text>
+            </View>
+            <View style={{ backgroundColor: t.accent, borderRadius: 99, paddingHorizontal: 14, paddingVertical: 7 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.accentInk }}>
+                {i18nT('groupCall.join', 'Unirse')}
+              </Text>
+            </View>
+          </Pressable>
+        )}
 
         {/* Message List */}
         <FlatList

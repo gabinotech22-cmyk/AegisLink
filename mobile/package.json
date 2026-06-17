@@ -5,7 +5,11 @@
   "private": true,
   "expo": {
     "autolinking": {
-      "exclude": ["expo-dev-client", "expo-dev-launcher", "expo-dev-menu"]
+      "exclude": [
+        "expo-dev-client",
+        "expo-dev-launcher",
+        "expo-dev-menu"
+      ]
     }
   },
   "scripts": {
@@ -55,6 +59,7 @@
     "react-native": "0.81.5",
     "react-native-callkeep": "^4.3.16",
     "react-native-gesture-handler": "~2.28.0",
+    "react-native-incall-manager": "^4.2.1",
     "react-native-qrcode-svg": "^6.3.21",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",

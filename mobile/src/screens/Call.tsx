@@ -14,7 +14,6 @@ import { I } from '../components/icons';
 import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
 import { acceptCall, endCall, toggleMute, toggleCamera } from '../socket/calls';
-import { useProximitySensor } from '../hooks/useProximitySensor';
 import { SoundFX } from '../hooks/useSoundFX';
 import { themedAlert } from '../components/AlertHost';
 
@@ -147,8 +146,9 @@ export function CallScreen({ onClose, onMinimize }: Props) {
   const isVideo = media === 'video';
   const peerColor = peer?.color ?? t.surface2;
 
-  const callActive = status === 'in-call' || status === 'connecting';
-  useProximitySensor(!isVideo && callActive);
+  // Proximity sensor + screen-off near the ear is handled at the audio-session
+  // level by InCallManager (see webrtc/inCall.ts), started in the call lifecycle
+  // in socket/calls.ts — so it keeps working even when this screen is backgrounded.
 
   // Remote video ready (in-call + stream)
   const showRemoteVideo = isVideo && !!remoteStream && status === 'in-call';
