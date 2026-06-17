@@ -126,6 +126,9 @@ interface GroupsState {
    * targeted (the creator's role is immutable). No-op for non-owners.
    */
   setMemberRole: (id: string, aegisId: string, role: 'admin' | 'mod' | 'member') => Promise<void>;
+  /** Accept a pending group invitation — clears the pending flag so the group
+   *  joins the active list and starts rendering messages. */
+  acceptGroupInvite: (id: string) => Promise<void>;
   leaveGroup: (id: string) => Promise<void>;
 }
 
@@ -408,6 +411,14 @@ export const useGroups = create<GroupsState>((set, get) => ({
       const client = require('../socket/client') as typeof import('../socket/client');
       await client.broadcastGroupMetadata(me, id);
     } catch { /* non-fatal — change still rides the admin's next group message */ }
+  },
+
+  async acceptGroupInvite(id) {
+    const group = get().groups.find((g) => g.id === id);
+    if (!group || !group.pending) return;
+    const updated: StoredGroup = { ...group, pending: undefined };
+    await saveGroup(updated);
+    set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
   },
 
   async leaveGroup(id) {

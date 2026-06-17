@@ -35,6 +35,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const typing = usePreferences((s) => s.typingIndicator);
   const screenshot = usePreferences((s) => s.blockScreenshots);
   const routeViaTor = usePreferences((s) => s.routeViaTor);
+  const requireGroupApproval = usePreferences((s) => s.requireGroupApproval);
   const setPref = usePreferences((s) => s.set);
 
   // Shell already hydrates on mount; this is a belt-and-suspenders guard
@@ -119,6 +120,17 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             sub={i18nT('privacy.blockScreenshotsSub')}
             value={screenshot}
             onChange={setSS}
+            noBorder
+          />
+        </Section>
+
+        <Section t={t} label={i18nT('privacy.groupsSection', 'GRUPOS')}>
+          <Toggle
+            t={t}
+            label={i18nT('privacy.requireGroupApproval', 'Aprobar antes de añadirme a grupos')}
+            sub={i18nT('privacy.requireGroupApprovalSub', 'Recibe una invitación que aceptas en vez de entrar directo')}
+            value={requireGroupApproval}
+            onChange={(v) => void setPref('requireGroupApproval', v)}
             noBorder
           />
         </Section>

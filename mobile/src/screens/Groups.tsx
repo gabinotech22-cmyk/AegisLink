@@ -60,7 +60,10 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
   const { contacts } = useContacts();
-  const { groups, hydrate, createGroup, leaveGroup } = useGroups();
+  const { groups, hydrate, createGroup, leaveGroup, acceptGroupInvite } = useGroups();
+  // Pending invitations are surfaced separately from joined groups (consent flow).
+  const pendingInvites = groups.filter((g) => g.pending);
+  const activeGroups = groups.filter((g) => !g.pending);
   const previews = useMessages((s) => s.previews);
   const unreadCounts = useMessages((s) => s.unreadCounts);
 
@@ -73,6 +76,8 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [joinLinkInput, setJoinLinkInput] = useState('');
   const [menuGroup, setMenuGroup] = useState<StoredGroup | null>(null);
+  // Pending invite whose Accept/Decline floating menu is open.
+  const [inviteMenuFor, setInviteMenuFor] = useState<StoredGroup | null>(null);
 
   useEffect(() => {
     void hydrate();
@@ -464,7 +469,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
       />
 
 
-      {groups.length === 0 ? (
+      {activeGroups.length === 0 && pendingInvites.length === 0 ? (
         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
           <View
             style={{
@@ -541,9 +546,49 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
         </ScrollView>
       ) : (
         <FlatList
-          data={groups}
+          data={activeGroups}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingBottom: 22 }}
+          ListHeaderComponent={
+            pendingInvites.length > 0 ? (
+              <View>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.1, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 6 }}>
+                  {i18nT('groups.invitesSection', 'INVITACIONES').toUpperCase()}
+                </Text>
+                {pendingInvites.map((item) => (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => setInviteMenuFor(item)}
+                    style={({ pressed }) => ({
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 12,
+                      paddingHorizontal: 18,
+                      paddingVertical: 14,
+                      backgroundColor: pressed ? t.surface : `${t.accent}0a`,
+                      borderBottomWidth: 1,
+                      borderBottomColor: t.divider,
+                    })}
+                  >
+                    <Avatar t={t} name={item.avatarImage || item.name} color={item.avatarColor || t.accent} size={44} seed={item.id} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>
+                        {item.name}
+                      </Text>
+                      <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 4 }}>
+                        {i18nT('groups.inviteSubtitle', 'Te invitaron a este grupo · toca para responder')}
+                      </Text>
+                    </View>
+                    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99, borderWidth: 1, borderColor: `${t.accent}66` }}>
+                      <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.8 }}>
+                        {i18nT('groups.inviteBadge', 'INVITACIÓN')}
+                      </Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => {
             const previewMsg = previews[item.id];
             const unread = unreadCounts[item.id] ?? 0;
@@ -640,6 +685,34 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                     ]);
                   },
                   danger: true,
+                },
+              ]
+            : []
+        }
+      />
+
+      {/* Pending invite — Accept / Decline floating menu (consent flow) */}
+      <FloatingMenu
+        t={t}
+        visible={inviteMenuFor !== null}
+        onClose={() => setInviteMenuFor(null)}
+        title={inviteMenuFor?.name}
+        subtitle={i18nT('groups.inviteBadge', 'INVITACIÓN')}
+        items={
+          inviteMenuFor
+            ? [
+                {
+                  key: 'accept',
+                  icon: <I.Check size={20} color={t.accent} />,
+                  label: i18nT('groups.acceptInvite', 'Aceptar invitación'),
+                  onPress: () => { const g = inviteMenuFor; void acceptGroupInvite(g.id); },
+                },
+                {
+                  key: 'decline',
+                  icon: <I.X size={20} color={t.danger} />,
+                  label: i18nT('groups.declineInvite', 'Rechazar'),
+                  danger: true,
+                  onPress: () => { const g = inviteMenuFor; void leaveGroup(g.id); },
                 },
               ]
             : []

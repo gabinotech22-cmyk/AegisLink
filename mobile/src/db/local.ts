@@ -253,7 +253,8 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       roster_version        INTEGER,
       permissions           TEXT,
       gov_sig               TEXT,
-      gov_version           INTEGER
+      gov_version           INTEGER,
+      pending               INTEGER
     );
 
     -- Per-chat state: draft text + unread count
@@ -341,7 +342,7 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 9;
+  const USER_DB_VERSION = 10;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -425,6 +426,14 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     try { await d.execAsync('ALTER TABLE groups ADD COLUMN gov_sig TEXT;'); } catch {}
     try { await d.execAsync('ALTER TABLE groups ADD COLUMN gov_version INTEGER;'); } catch {}
     await d.execAsync('PRAGMA user_version = 9');
+  }
+
+  if (currentVersion < 10) {
+    // v9 → v10: add pending flag to groups (unaccepted group invitations, see
+    // requireGroupApproval). Fresh installs already have the column via CREATE
+    // TABLE above. NULL on existing rows → treated as not pending (joined).
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN pending INTEGER;'); } catch {}
+    await d.execAsync('PRAGMA user_version = 10');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.
@@ -1269,12 +1278,19 @@ export interface StoredGroup {
    * Defeats rollback of a signed governance state. Undefined → treated as 1.
    */
   govVersion?: number;
+  /**
+   * True while this group is an unaccepted invitation (the local user was added
+   * but their privacy setting requires approval — see requireGroupApproval).
+   * Pending groups are hidden from the active list and render no messages until
+   * accepted. Undefined/false = a normal, joined group.
+   */
+  pending?: boolean;
 }
 
 export async function saveGroup(g: StoredGroup): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(
-      `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version, pending) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       g.id,
       g.name,
       JSON.stringify(g.members),
@@ -1289,7 +1305,8 @@ export async function saveGroup(g: StoredGroup): Promise<void> {
       g.rosterVersion ?? null,
       g.permissions ? JSON.stringify(g.permissions) : null,
       g.govSig ?? null,
-      g.govVersion ?? null
+      g.govVersion ?? null,
+      g.pending ? 1 : null
     );
   });
 }
@@ -1310,6 +1327,7 @@ type GroupRow = {
   permissions: string | null;
   gov_sig: string | null;
   gov_version: number | null;
+  pending: number | null;
 };
 
 function rowToGroup(r: GroupRow): StoredGroup {
@@ -1329,13 +1347,14 @@ function rowToGroup(r: GroupRow): StoredGroup {
     permissions: r.permissions ? (JSON.parse(r.permissions) as GroupPermissions) : undefined,
     govSig: r.gov_sig ?? undefined,
     govVersion: r.gov_version ?? undefined,
+    pending: r.pending === 1 ? true : undefined,
   };
 }
 
 export async function loadGroups(): Promise<StoredGroup[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<GroupRow>(
-      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version FROM groups ORDER BY created_at DESC`
+      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version, pending FROM groups ORDER BY created_at DESC`
     );
     return rows.map(rowToGroup);
   });
@@ -1358,7 +1377,7 @@ export async function deleteGroup(id: string): Promise<void> {
 export async function getGroup(id: string): Promise<StoredGroup | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<GroupRow>(
-      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version FROM groups WHERE id = ?`,
+      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version, pending FROM groups WHERE id = ?`,
       id
     );
     if (!row) return null;
