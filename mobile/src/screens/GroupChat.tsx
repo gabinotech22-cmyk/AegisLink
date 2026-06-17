@@ -376,6 +376,17 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
 
   async function handleGroupCall() {
     if (!identity) return;
+    // Admin-only call gate (UI side). The receiver also enforces this
+    // independently (see groupCalls.ts), so a patched client can't bypass it —
+    // here we just give honest users immediate, themed feedback.
+    const { can } = require('../crypto/groupRoles') as typeof import('../crypto/groupRoles');
+    if (!can(group, identity.aegisId, 'call')) {
+      themedAlert(
+        i18nT('groupCall.adminOnlyTitle', 'Solo admins'),
+        i18nT('groupCall.adminOnlyDetail', 'Solo los administradores pueden iniciar llamadas en este grupo.'),
+      );
+      return;
+    }
     const otherMembers = group.members.filter((id) => id !== identity.aegisId);
     if (otherMembers.length === 0) {
       themedAlert(i18nT('groupCall.noMembers', 'Sin miembros'), i18nT('groupCall.noMembersDetail', 'No hay otros miembros en este grupo.'));
