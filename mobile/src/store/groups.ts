@@ -220,6 +220,29 @@ export const useGroups = create<GroupsState>((set, get) => ({
     }
     await saveGroup(updated);
     set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
+
+    // Welcome the new member: push the full-roster metadata carrier so THEIR
+    // client materializes the group locally (the `createGroup` decision in
+    // socket/client.ts only fires on a carrier that ships the member list).
+    // Without this the admin lists the member but the group never appears for
+    // them — content messages alone are dropped ("await the carrier") in v2 and
+    // there is no guarantee the next message is a roster-bearing one. This is
+    // the missing counterpart to removeMember's re-key.
+    //
+    // Offline-safe: broadcastGroupMetadata -> sendGroupMessage enqueues per-member
+    // outbox jobs, so the welcome is retried on the next reconnect if we are
+    // offline right now.
+    const { useIdentity } = require('./identity') as typeof import('./identity');
+    const identity = useIdentity.getState().identity;
+    if (identity) {
+      try {
+        const { broadcastGroupMetadata } =
+          require('../socket/client') as typeof import('../socket/client');
+        await broadcastGroupMetadata(identity, id);
+      } catch {
+        // Best-effort: the carrier re-sends from the outbox on the next reconnect.
+      }
+    }
   },
 
   async removeMember(id, aegisId) {
