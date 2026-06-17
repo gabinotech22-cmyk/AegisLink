@@ -18,6 +18,7 @@ import { useGroups } from '../store/groups';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { encodeGroupInviteLinkUniversal } from '../crypto/qr';
+import { resolveRole, can, effectivePermissions, type GroupRole } from '../crypto/groupRoles';
 import type { StoredGroup } from '../db/local';
 import { themedAlert } from '../components/AlertHost';
 
@@ -32,7 +33,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { renameGroup, updateGroupAvatar, addMember, removeMember, updateGroupPermissions, leaveGroup } = useGroups();
+  const { renameGroup, updateGroupAvatar, addMember, removeMember, setGroupPermission, leaveGroup } = useGroups();
   const contacts = useContacts((s) => s.contacts);
   const identity = useIdentity((s) => s.identity);
   const myAvatarImage = useIdentity((s) => s.avatarImage);
@@ -138,9 +139,14 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   }
 
   const isMe = (aegisId: string) => aegisId === identity?.aegisId;
-  // Only the group creator (adminId) has admin privileges — not every member
-  // who views the screen. amIAdmin drives all permission gates below.
+  const me = identity?.aegisId;
+  // Only the group creator (adminId) signs governance, so role/permission
+  // changes are owner-only. amIAdmin == "am I the owner" (kept name to minimize
+  // churn). Action gates below derive from can() so they honor the configured
+  // permission scopes, not just ownership.
   const amIAdmin = !!identity && identity.aegisId === group.adminId;
+  const canEdit = !!me && can(group, me, 'editInfo');
+  const canInvite = !!me && can(group, me, 'invite');
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
@@ -158,8 +164,8 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
         {/* Header */}
         <View style={{ alignItems: 'center', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 18 }}>
           <Pressable
-            onPress={amIAdmin ? () => void handlePickGroupAvatar() : undefined}
-            disabled={!amIAdmin}
+            onPress={canEdit ? () => void handlePickGroupAvatar() : undefined}
+            disabled={!canEdit}
             accessibilityLabel={i18nT('groupAdmin.changeAvatar', 'Cambiar imagen del grupo')}
           >
             {group.avatarImage ? (
@@ -180,7 +186,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
                 seed={group.id}
               />
             )}
-            {amIAdmin && (
+            {canEdit && (
               <View
                 style={{
                   position: 'absolute',
@@ -201,7 +207,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
             )}
           </Pressable>
 
-          {editingName && amIAdmin ? (
+          {editingName && canEdit ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 }}>
               <TextInput
                 value={nameInput}
@@ -225,13 +231,13 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
             </View>
           ) : (
             <Pressable
-              onPress={amIAdmin ? () => { setNameInput(group.name); setEditingName(true); } : undefined}
+              onPress={canEdit ? () => { setNameInput(group.name); setEditingName(true); } : undefined}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 }}
             >
               <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.4, color: t.text }}>
                 {group.name}
               </Text>
-              {amIAdmin && <I.Settings size={14} color={t.textDim} />}
+              {canEdit && <I.Settings size={14} color={t.textDim} />}
             </Pressable>
           )}
 
@@ -267,22 +273,23 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
                       {name}
                     </Text>
                     {(() => {
-                      // isAdmin is true only for the actual admin — NOT for "me" viewing the screen
-                      const isAdmin = group.adminId === aegisId;
-                      const isMod = !isAdmin && group.moderators?.includes(aegisId);
-                      if (isAdmin) return (
-                        <View style={{ backgroundColor: t.surface2, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 }}>
-                          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent }}>{i18nT('groupAdmin.roleAdmin')}</Text>
-                        </View>
-                      );
-                      if (isMod) return (
-                        <View style={{ backgroundColor: t.surface2, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 }}>
-                          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.warn }}>{i18nT('groupAdmin.roleMod')}</Text>
-                        </View>
-                      );
+                      // Role resolved from the (signed) governance state — owner,
+                      // admin, mod or member. Pill style mirrors the prototype
+                      // RoleBadge (bordered, by-role palette).
+                      const role: GroupRole = resolveRole(group, aegisId);
+                      const palette =
+                        role === 'owner' ? t.accent
+                        : role === 'admin' ? t.accent
+                        : role === 'mod' ? t.warn
+                        : t.textDim;
+                      const label =
+                        role === 'owner' ? i18nT('groupAdmin.roleOwner', 'OWNER')
+                        : role === 'admin' ? i18nT('groupAdmin.roleAdmin')
+                        : role === 'mod' ? i18nT('groupAdmin.roleMod')
+                        : i18nT('groupAdmin.roleMember');
                       return (
-                        <View style={{ backgroundColor: t.surface2, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4 }}>
-                          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim }}>{i18nT('groupAdmin.roleMember')}</Text>
+                        <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 99, borderWidth: 1, borderColor: `${palette}66` }}>
+                          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: palette, letterSpacing: 0.8 }}>{label}</Text>
                         </View>
                       );
                     })()}
@@ -300,8 +307,8 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
             );
           })}
 
-          {/* Add member — only admin can invite when adminOnlyInvite is on */}
-          {(amIAdmin || !group.adminOnlyInvite) && (
+          {/* Add member — gated by the whoCanInvite permission scope (can()). */}
+          {canInvite && (
           <Pressable
             onPress={handleAddMember}
             style={({ pressed }) => ({
@@ -371,29 +378,47 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
           </Section>
         )}
 
-        {/* Permissions — only admin can change these */}
-        {amIAdmin && (
-        <Section t={t} label={i18nT('groupAdmin.permissionsSection').toUpperCase()}>
-          <Toggle
-            t={t}
-            label={i18nT('groupAdmin.adminOnlyInviteLabel')}
-            sub={i18nT('groupAdmin.adminOnlyInviteSub')}
-            value={group.adminOnlyInvite !== false}
-            onChange={(v) => void updateGroupPermissions(group.id, { adminOnlyInvite: v })}
-          />
-          <Toggle
-            t={t}
-            label={i18nT('groupAdmin.moderateNewMembersLabel')}
-            sub={i18nT('groupAdmin.moderateNewMembersSub')}
-            value={group.moderateNewMembers === true}
-            onChange={(v) => void updateGroupPermissions(group.id, { moderateNewMembers: v })}
-            noBorder
-          />
-        </Section>
-        )}
+        {/* Permissions — owner-only (only the owner signs governance). Each
+            toggle maps a permission gate: ON = 'admins', OFF = 'everyone'. */}
+        {amIAdmin && (() => {
+          const perms = effectivePermissions(group);
+          return (
+            <Section t={t} label={i18nT('groupAdmin.permissionsSection').toUpperCase()}>
+              <Toggle
+                t={t}
+                label={i18nT('groupAdmin.adminOnlyInviteLabel')}
+                sub={i18nT('groupAdmin.adminOnlyInviteSub')}
+                value={perms.whoCanInvite === 'admins'}
+                onChange={(v) => void setGroupPermission(group.id, { whoCanInvite: v ? 'admins' : 'everyone' })}
+              />
+              <Toggle
+                t={t}
+                label={i18nT('groupAdmin.permCallLabel')}
+                sub={i18nT('groupAdmin.permCallSub')}
+                value={perms.whoCanCall === 'admins'}
+                onChange={(v) => void setGroupPermission(group.id, { whoCanCall: v ? 'admins' : 'everyone' })}
+              />
+              <Toggle
+                t={t}
+                label={i18nT('groupAdmin.permSendLabel')}
+                sub={i18nT('groupAdmin.permSendSub')}
+                value={perms.whoCanSend === 'admins'}
+                onChange={(v) => void setGroupPermission(group.id, { whoCanSend: v ? 'admins' : 'everyone' })}
+              />
+              <Toggle
+                t={t}
+                label={i18nT('groupAdmin.permEditLabel')}
+                sub={i18nT('groupAdmin.permEditSub')}
+                value={perms.whoCanEditInfo === 'admins'}
+                onChange={(v) => void setGroupPermission(group.id, { whoCanEditInfo: v ? 'admins' : 'everyone' })}
+                noBorder
+              />
+            </Section>
+          );
+        })()}
 
-        {/* Invite link — admin only */}
-        {amIAdmin && (
+        {/* Invite link — follows the whoCanInvite permission scope. */}
+        {canInvite && (
           <Section t={t} label={i18nT('groupAdmin.inviteLinkSection').toUpperCase()}>
             <Pressable
               onPress={async () => {

@@ -5,7 +5,10 @@ import {
   computeRosterHash,
   canonicalGroupBytes,
   canonicalGroupBytesV2,
+  signGroupGovernance,
+  type GroupPermissions,
 } from '../crypto/groupSig';
+import { effectivePermissions } from '../crypto/groupRoles';
 import {
   loadGroups,
   saveGroup,
@@ -65,6 +68,38 @@ function signAsAdmin(group: StoredGroup): { adminId: string; adminSig: string } 
   return { adminId: id.aegisId, adminSig: encodeBase64(sig) };
 }
 
+/**
+ * Sign the group's governance state (roles + permissions) with the active
+ * identity's Ed25519 signing key, bumping govVersion. ONLY the owner (adminId)
+ * may produce a governance signature peers will accept; returns null for anyone
+ * else (or if no identity is loaded), leaving govSig untouched.
+ *
+ * Independent of signAsAdmin: this signs canonicalGroupGovBytes, never the
+ * roster bytes, so it can be re-issued on a permission/role change without
+ * touching the roster signature (and vice-versa).
+ */
+function signGovernance(
+  group: StoredGroup,
+): { govSig: string; govVersion: number; permissions: GroupPermissions } | null {
+  const { useIdentity } = require('./identity') as typeof import('./identity');
+  const id = useIdentity.getState().identity;
+  if (!id || !group.adminId || id.aegisId !== group.adminId) return null;
+  const permissions = effectivePermissions(group);
+  const govVersion = (group.govVersion ?? 0) + 1;
+  const govSig = signGroupGovernance(
+    {
+      groupId: group.id,
+      ownerId: group.adminId,
+      admins: group.admins ?? [],
+      moderators: group.moderators ?? [],
+      permissions,
+      govVersion,
+    },
+    id.signingSecretKey,
+  );
+  return { govSig, govVersion, permissions };
+}
+
 // Re-export decodeBase64 just to keep the import non-dead in case future
 // migrations need to inspect signatures stored in the DB.
 void decodeBase64;
@@ -78,6 +113,12 @@ interface GroupsState {
   addMember: (id: string, aegisId: string) => Promise<void>;
   removeMember: (id: string, aegisId: string) => Promise<void>;
   updateGroupPermissions: (id: string, patch: Partial<Pick<StoredGroup, 'adminOnlyInvite' | 'moderateNewMembers'>>) => Promise<void>;
+  /**
+   * Owner-only: change one or more permission gates. Re-signs the governance
+   * state (bumps govVersion) so the change is tamper-evident. No-op for
+   * non-owners (the UI hides the controls anyway).
+   */
+  setGroupPermission: (id: string, patch: Partial<GroupPermissions>) => Promise<void>;
   leaveGroup: (id: string) => Promise<void>;
 }
 
@@ -134,7 +175,14 @@ export const useGroups = create<GroupsState>((set, get) => ({
     // Sign our own metadata as admin. Receivers will reject unsigned groups
     // (see socket/client.ts group_msg handler), so this is mandatory.
     const sig = signAsAdmin(base);
-    const newGroup: StoredGroup = sig ? { ...base, ...sig } : base;
+    const signed: StoredGroup = sig ? { ...base, ...sig } : base;
+    // Sign initial governance (default permissions, govVersion 1) so the owner's
+    // group carries a verifiable roles/permissions state from creation. Requires
+    // adminId, which signAsAdmin just set.
+    const gov = signGovernance(signed);
+    const newGroup: StoredGroup = gov
+      ? { ...signed, permissions: gov.permissions, govSig: gov.govSig, govVersion: gov.govVersion }
+      : signed;
     await saveGroup(newGroup);
     set({ groups: [newGroup, ...get().groups] });
     return newGroup;
@@ -300,6 +348,21 @@ export const useGroups = create<GroupsState>((set, get) => ({
     const group = get().groups.find((g) => g.id === id);
     if (!group) return;
     const updated = { ...group, ...patch };
+    await saveGroup(updated);
+    set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
+  },
+
+  async setGroupPermission(id, patch) {
+    const group = get().groups.find((g) => g.id === id);
+    if (!group) return;
+    const permissions: GroupPermissions = { ...effectivePermissions(group), ...patch };
+    const withPerms: StoredGroup = { ...group, permissions };
+    // Re-sign governance (owner only). signGovernance reads the updated
+    // permissions off withPerms and returns the bumped version + signature.
+    const gov = signGovernance(withPerms);
+    const updated: StoredGroup = gov
+      ? { ...withPerms, govSig: gov.govSig, govVersion: gov.govVersion }
+      : withPerms;
     await saveGroup(updated);
     set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
   },
