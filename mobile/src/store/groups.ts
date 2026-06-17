@@ -119,6 +119,13 @@ interface GroupsState {
    * non-owners (the UI hides the controls anyway).
    */
   setGroupPermission: (id: string, patch: Partial<GroupPermissions>) => Promise<void>;
+  /**
+   * Owner-only: promote/demote a member to admin, moderator or plain member.
+   * Updates the admins/moderators sets, re-signs governance (bumps govVersion)
+   * and broadcasts so peers' rosters reflect the new role. The owner cannot be
+   * targeted (the creator's role is immutable). No-op for non-owners.
+   */
+  setMemberRole: (id: string, aegisId: string, role: 'admin' | 'mod' | 'member') => Promise<void>;
   leaveGroup: (id: string) => Promise<void>;
 }
 
@@ -365,6 +372,42 @@ export const useGroups = create<GroupsState>((set, get) => ({
       : withPerms;
     await saveGroup(updated);
     set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
+  },
+
+  async setMemberRole(id, aegisId, role) {
+    const group = get().groups.find((g) => g.id === id);
+    if (!group) return;
+    const { useIdentity } = require('./identity') as typeof import('./identity');
+    const me = useIdentity.getState().identity;
+    // Owner-only, and the owner's own role is immutable.
+    if (!me || me.aegisId !== group.adminId || aegisId === group.adminId) return;
+
+    const admins = new Set(group.admins ?? []);
+    const moderators = new Set(group.moderators ?? []);
+    // A member holds at most one of admin/mod — clear both, then set the target.
+    admins.delete(aegisId);
+    moderators.delete(aegisId);
+    if (role === 'admin') admins.add(aegisId);
+    else if (role === 'mod') moderators.add(aegisId);
+
+    const withRoles: StoredGroup = {
+      ...group,
+      admins: admins.size ? [...admins] : undefined,
+      moderators: moderators.size ? [...moderators] : undefined,
+    };
+    const gov = signGovernance(withRoles);
+    const updated: StoredGroup = gov
+      ? { ...withRoles, permissions: gov.permissions, govSig: gov.govSig, govVersion: gov.govVersion }
+      : withRoles;
+    await saveGroup(updated);
+    set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
+
+    // Propagate the new governance to members via the metadata carrier (which
+    // now ships govSig/govVersion). Offline-safe: re-sends from the outbox.
+    try {
+      const client = require('../socket/client') as typeof import('../socket/client');
+      await client.broadcastGroupMetadata(me, id);
+    } catch { /* non-fatal — change still rides the admin's next group message */ }
   },
 
   async leaveGroup(id) {

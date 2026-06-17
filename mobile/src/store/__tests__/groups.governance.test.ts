@@ -100,4 +100,35 @@ describe('groups store — governance signing', () => {
     );
     expect(rolledBack).toBe(false);
   });
+
+  it('setMemberRole promotes a member to admin, re-signs, and is verifiable', async () => {
+    const g = await useGroups.getState().createGroup('Squad', [mockOwnerId, 'peer-1']);
+    await useGroups.getState().setMemberRole(g.id, 'peer-1', 'admin');
+    const updated = useGroups.getState().groups.find((x) => x.id === g.id)!;
+
+    expect(updated.admins).toContain('peer-1');
+    expect(updated.govVersion).toBe(2);
+    expect(verify(updated)).toBe(true);
+  });
+
+  it('setMemberRole moves a member between roles without duplication', async () => {
+    const g = await useGroups.getState().createGroup('Squad', [mockOwnerId, 'peer-1']);
+    await useGroups.getState().setMemberRole(g.id, 'peer-1', 'mod');
+    await useGroups.getState().setMemberRole(g.id, 'peer-1', 'admin');
+    const updated = useGroups.getState().groups.find((x) => x.id === g.id)!;
+
+    expect(updated.admins).toEqual(['peer-1']);
+    expect(updated.moderators ?? []).not.toContain('peer-1');
+  });
+
+  it('setMemberRole refuses to change the owner role', async () => {
+    const g = await useGroups.getState().createGroup('Squad', [mockOwnerId, 'peer-1']);
+    await useGroups.getState().setMemberRole(g.id, mockOwnerId, 'member');
+    const updated = useGroups.getState().groups.find((x) => x.id === g.id)!;
+
+    // No-op: owner untouched, governance not re-signed.
+    expect(updated.adminId).toBe(mockOwnerId);
+    expect(updated.admins ?? []).not.toContain(mockOwnerId);
+    expect(updated.govVersion).toBe(1);
+  });
 });
