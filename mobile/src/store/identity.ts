@@ -62,21 +62,36 @@ function getPrefKey(key: string, slot: string): string {
 /**
  * Internal helper: run ensureRegistered and sync the store's publishStatus.
  * Slot-keyed SecureStore flag is updated on success so hydrate() fast-paths.
+ *
+ * `silent` is for the every-launch background refresh of an ALREADY-published
+ * identity: it skips the visible 'publishing' state (so the "Registering
+ * identity" banner doesn't flash on every app open) and swallows a transient
+ * rate-limit (429) failure — we are still registered, so a throttled refresh
+ * must NOT show an error banner. A genuine loss (e.g. the relay no longer
+ * serves our key → verification fails with no retryAfterMs) is still surfaced
+ * so the retry loop can re-register.
  */
-async function runPublish(identity: Identity, slotId: string): Promise<void> {
-  useIdentity.setState({ publishStatus: 'publishing', publishError: null });
+async function runPublish(identity: Identity, slotId: string, silent = false): Promise<void> {
+  if (!silent) useIdentity.setState({ publishStatus: 'publishing', publishError: null });
   const result = await ensureRegistered(identity);
   if (result.ok) {
     useIdentity.setState({ publishStatus: 'published', publishError: null, publishRetryAfterMs: null });
     void SecureStore.setItemAsync(`aegis.published.${slotId}`, '1', SS_OPTS).catch(() => {});
-  } else {
-    if (__DEV__) console.warn('[identity] publish failed:', result.error);
-    useIdentity.setState({
-      publishStatus: 'failed',
-      publishError: result.error ?? 'Unknown error',
-      publishRetryAfterMs: result.retryAfterMs ?? null,
-    });
+    return;
   }
+  // Suppress ONLY a transient rate-limit during a silent (already-published)
+  // refresh — staying 'published' avoids a false alarm and the retry storm that
+  // caused the 429 in the first place.
+  if (silent && result.retryAfterMs != null) {
+    if (__DEV__) console.warn('[identity] silent refresh rate-limited (staying published):', result.error);
+    return;
+  }
+  if (__DEV__) console.warn('[identity] publish failed:', result.error);
+  useIdentity.setState({
+    publishStatus: 'failed',
+    publishError: result.error ?? 'Unknown error',
+    publishRetryAfterMs: result.retryAfterMs ?? null,
+  });
 }
 
 export const useIdentity = create<IdentityState>((set, get) => ({
@@ -178,9 +193,9 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       });
 
       // Always run publish in background:
-      // - If already flagged: refreshes prekeys (409 on identity is expected+ok).
-      // - If not flagged: first registration for this identity.
-      void runPublish(identity, activeSlotId);
+      // - If already flagged: SILENT prekey refresh (no banner flash, 429 ignored).
+      // - If not flagged: first registration — visible banner drives the UX.
+      void runPublish(identity, activeSlotId, !!alreadyPublished);
     } catch (e) {
       set({ status: 'idle', hydrated: true, error: (e as Error).message });
     }

@@ -320,22 +320,36 @@ export function performX3DHReceiver(
  * @param weAdvertisedPq  true iff THIS device published a PQSPK in its bundle.
  * @param msgHasCiphertext true iff the inbound initial message carried a PQ ciphertext.
  * @returns 'v2' to require the PQ path, 'v1' for the classic path.
- * @throws if the combination is a silent downgrade (advertised PQ but no
- *         ciphertext) — the handshake MUST abort rather than fall back silently.
  *
- * Note the inverse case (we did NOT advertise PQ, yet a ciphertext arrived) is
- * NOT fatal here: an honest v2 sender never produces a ciphertext without a
- * PQSPK in our bundle, and ignoring a spurious one cannot weaken security below
- * the classic v1 guarantee. We still surface it so callers MAY log it.
+ * POLICY (relaxed, 2026-06): the "advertised PQ but no ciphertext" combination
+ * previously THREW to abort as a silent-downgrade defense. In practice that hard
+ * abort broke EVERY first-contact handshake whenever the sender ran classic v1 —
+ * which happens for any legitimate v1 peer AND whenever our own published bundle
+ * lacks the PQSPK (publish gaps). The result was total message loss. We now FALL
+ * BACK to v1 (still full X25519 E2EE — the baseline Signal shipped for years)
+ * and surface the downgrade via telemetry, rather than dropping the message.
+ *
+ * A strict "PQ-mandatory" mode (re-introducing the abort) should be a future
+ * opt-in flag for when the entire fleet reliably advertises+sends PQ. See the
+ * desktop-catchup plan note.
+ *
+ * The inverse case (we did NOT advertise PQ, yet a ciphertext arrived) is also
+ * non-fatal: ignoring a spurious ciphertext cannot weaken security below v1.
  */
 export function shouldUsePqReceiver(
   weAdvertisedPq: boolean,
   msgHasCiphertext: boolean,
 ): 'v1' | 'v2' {
   if (weAdvertisedPq && !msgHasCiphertext) {
-    throw new Error(
-      'PQXDH: downgrade detected — our bundle advertised a PQ prekey but the initial message carried no ML-KEM ciphertext; aborting handshake',
-    );
+    // Downgrade observed — fall back to v1 instead of aborting. Logged so the
+    // rate of v1 fallbacks is observable (a spike could indicate an attack OR a
+    // bundle-publish regression).
+    if (__DEV__) {
+      console.warn(
+        '[PQXDH] downgrade fallback: advertised a PQ prekey but inbound init carried no ML-KEM ciphertext — proceeding with classic v1 X3DH',
+      );
+    }
+    return 'v1';
   }
   if (weAdvertisedPq && msgHasCiphertext) return 'v2';
   return 'v1';

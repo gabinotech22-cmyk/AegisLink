@@ -951,7 +951,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             </Text>
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
               <Pressable
-                onPress={onContactDetail}
+                onPress={onVerify ?? onContactDetail}
                 style={{
                   backgroundColor: t.accent,
                   paddingHorizontal: 14,
@@ -1132,50 +1132,6 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             </Text>
           </Pressable>
         ) : null}
-
-        {/* Unverified contact warning banner — full-width, ABOVE the composer
-            row. Must NOT live inside the composer (flexDirection:'row') or its
-            width:100% pushes the input controls off-screen. Non-blocking:
-            sending is always allowed.
-            Bug D fix: added "Verificar" button that navigates to VerifyScreen. */}
-        {!contact.blocked && !contact.verified && (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              backgroundColor: `${t.warn}18`,
-              borderTopWidth: 1,
-              borderTopColor: `${t.warn}44`,
-            }}
-          >
-            <I.Lock size={13} color={t.warn} />
-            <Text style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.warn, lineHeight: 17 }}>
-              {i18nT('chat.unverifiedContact', 'Contacto no verificado. Verifica su identidad para maxima seguridad.')}
-            </Text>
-            {onVerify && (
-              <Pressable
-                onPress={onVerify}
-                hitSlop={8}
-                accessibilityLabel={i18nT('chat.verifyContactLabel', 'Verificar contacto')}
-                style={({ pressed }) => ({
-                  paddingHorizontal: 10,
-                  paddingVertical: 5,
-                  borderRadius: t.radiusS,
-                  borderWidth: 1,
-                  borderColor: t.warn,
-                  backgroundColor: pressed ? `${t.warn}30` : 'transparent',
-                })}
-              >
-                <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.warn, letterSpacing: 0.6, fontWeight: '700' }}>
-                  {i18nT('chat.verifyAction', 'VERIFICAR')}
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        )}
 
         {/* Composer */}
         <View

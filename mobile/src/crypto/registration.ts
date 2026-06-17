@@ -23,6 +23,7 @@ import type {
   OneTimePreKeyPublic,
   PreKeySecrets,
   SignedPreKeyPublic,
+  PqSignedPreKeyPublic,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,13 @@ interface PreKeysPostBody {
   ts: number;
   signedPreKey: SignedPreKeyPublic;
   oneTimePreKeys: OneTimePreKeyPublic[];
+  /**
+   * PQXDH signed PQ prekey (ML-KEM-768). MUST be published so peers fetch it in
+   * the bundle and include an ML-KEM ciphertext in their X3DH init — otherwise
+   * the receiver's anti-downgrade gate (shouldUsePqReceiver) aborts every
+   * handshake and no message/profile envelope is ever decrypted.
+   */
+  pqSignedPreKey?: PqSignedPreKeyPublic;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +211,7 @@ export async function uploadIdentityAndPrekeys(
   powNonce: string,
   oneTimePreKeysPublic: OneTimePreKeyPublic[],
   signedPreKeyPublic: SignedPreKeyPublic,
+  pqSignedPreKeyPublic?: PqSignedPreKeyPublic,
 ): Promise<RegistrationResult> {
   const base = trimSlash(relayUrl);
 
@@ -285,6 +294,7 @@ export async function uploadIdentityAndPrekeys(
     ts,
     signedPreKey: signedPreKeyPublic,
     oneTimePreKeys: oneTimePreKeysPublic,
+    ...(pqSignedPreKeyPublic ? { pqSignedPreKey: pqSignedPreKeyPublic } : {}),
   };
 
   let prekeysRes: Response;

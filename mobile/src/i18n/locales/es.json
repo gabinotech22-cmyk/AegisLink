@@ -968,7 +968,12 @@
     "shareContactLabel": "Compartir mi contacto",
     "match": "Las claves coinciden",
     "noMatch": "Las claves no coinciden",
-    "markVerified": "Marcar como verificado"
+    "markVerified": "Marcar como verificado",
+    "compareDesc": "Compara las huellas de clave en persona, escaneando el QR o leyendo las 8 palabras.",
+    "keyUnavailable": "Clave del contacto aún no disponible.",
+    "alreadyVerified": "IDENTIDAD YA VERIFICADA",
+    "markedTitle": "Verificado",
+    "markedDesc": "{{name}} está verificado. Tus mensajes están protegidos contra ataques de intermediario."
   },
   "firstContact": {
     "title": "Primer contacto",
