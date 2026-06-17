@@ -3487,7 +3487,24 @@ export async function sendGroupMessage(opts: {
   // and is retried on the next reconnect/drain.
   for (const memberId of group.members) {
     if (memberId === opts.identity.aegisId) continue;
-    const contact = contacts.find((c) => c.aegisId === memberId);
+    // Group membership is defined by the roster, NOT by the sender's personal
+    // contact list. A member we have not added manually must still receive the
+    // message, otherwise two members who never added each other can never talk
+    // in a shared group. Resolve the recipient from contacts when present, else
+    // materialize them from the directory (same auto-add the RECEIVE path does
+    // for unknown senders — keeps both directions symmetric and caches the key).
+    let contact = contacts.find((c) => c.aegisId === memberId);
+    if (!contact) {
+      try {
+        contact = await useContacts.getState().addByAegisId(memberId);
+      } catch (e) {
+        // Truly unresolvable (offline, or not in the directory yet). Skip this
+        // member for now — the outbox/retry path is per-contact, so we cannot
+        // queue without a pubkey; they will be reachable once resolvable.
+        if (__DEV__) console.warn('[socket] group fan-out: could not resolve member', memberId, e);
+        continue;
+      }
+    }
     if (!contact) continue;
 
     const senderImage = profiledContacts.has(contact.aegisId) ? null : imageDataUri;
