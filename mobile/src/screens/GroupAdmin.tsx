@@ -12,6 +12,7 @@ import { Avatar } from '../components/Avatar';
 import { BrandedQR } from '../components/BrandedQR';
 import { AvatarCropModal } from '../components/AvatarCropModal';
 import { ContactPickerSheet } from '../components/ContactPickerSheet';
+import { FloatingMenu, type FloatingMenuItem } from '../components/FloatingMenu';
 import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useGroups } from '../store/groups';
@@ -33,7 +34,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { renameGroup, updateGroupAvatar, addMember, removeMember, setGroupPermission, leaveGroup } = useGroups();
+  const { renameGroup, updateGroupAvatar, addMember, removeMember, setGroupPermission, setMemberRole, leaveGroup } = useGroups();
   const contacts = useContacts((s) => s.contacts);
   const identity = useIdentity((s) => s.identity);
   const myAvatarImage = useIdentity((s) => s.avatarImage);
@@ -42,6 +43,8 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   const [nameInput, setNameInput] = useState(groupProp.name);
   const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
   const [showAddMember, setShowAddMember] = useState(false);
+  // aegisId of the member whose role/actions floating menu is open (owner only).
+  const [roleMenuFor, setRoleMenuFor] = useState<string | null>(null);
 
   // Live group from store so edits reflect instantly
   const group = useGroups((s) => s.groups.find((g) => g.id === groupProp.id)) ?? groupProp;
@@ -299,8 +302,13 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
                   </Text>
                 </View>
                 {!me && amIAdmin && (
-                  <Pressable onPress={() => handleRemoveMember(aegisId)} hitSlop={8} style={{ padding: 6 }}>
-                    <I.X size={16} color={t.textDim} />
+                  <Pressable
+                    onPress={() => setRoleMenuFor(aegisId)}
+                    hitSlop={8}
+                    style={{ padding: 6 }}
+                    accessibilityLabel={i18nT('groupAdmin.manageMember', 'Gestionar miembro')}
+                  >
+                    <I.More size={18} color={t.textDim} />
                   </Pressable>
                 )}
               </View>
@@ -532,6 +540,32 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
         cancelLabel={i18nT('common.cancel', 'Cancelar')}
         onCancel={() => setCropSource(null)}
         onConfirm={(uri) => { void handleConfirmGroupAvatar(uri); }}
+      />
+
+      {/* Member role/actions — floating Vault menu (owner only). */}
+      <FloatingMenu
+        t={t}
+        visible={roleMenuFor !== null}
+        onClose={() => setRoleMenuFor(null)}
+        title={roleMenuFor ? getMemberName(roleMenuFor) : undefined}
+        subtitle={roleMenuFor ? i18nT(`groupAdmin.role${resolveRole(group, roleMenuFor).charAt(0).toUpperCase()}${resolveRole(group, roleMenuFor).slice(1)}`) : undefined}
+        items={((): FloatingMenuItem[] => {
+          if (!roleMenuFor) return [];
+          const target = roleMenuFor;
+          const current = resolveRole(group, target);
+          const items: FloatingMenuItem[] = [];
+          if (current !== 'admin') {
+            items.push({ key: 'admin', icon: <I.Shield size={18} color={t.accent} />, label: i18nT('groupAdmin.makeAdmin'), onPress: () => void setMemberRole(group.id, target, 'admin') });
+          }
+          if (current !== 'mod') {
+            items.push({ key: 'mod', icon: <I.Star size={18} color={t.warn} />, label: i18nT('groupAdmin.makeModerator'), onPress: () => void setMemberRole(group.id, target, 'mod') });
+          }
+          if (current !== 'member') {
+            items.push({ key: 'member', icon: <I.User size={18} color={t.textDim} />, label: i18nT('groupAdmin.makeMember'), onPress: () => void setMemberRole(group.id, target, 'member') });
+          }
+          items.push({ key: 'remove', icon: <I.X size={18} color={t.danger} />, label: i18nT('groupAdmin.removeFromGroup'), danger: true, onPress: () => handleRemoveMember(target) });
+          return items;
+        })()}
       />
 
       {/* Add member — Vault bottom sheet, NOT a native Alert. */}
