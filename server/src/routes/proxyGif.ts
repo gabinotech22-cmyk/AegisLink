@@ -1,20 +1,25 @@
 /**
  * GET /proxy/gif
  *
- * Blind proxy for Tenor GIF search and featured feeds. The relay fetches on
- * behalf of the client so no user IP ever reaches Google/Tenor. The API key
- * stays server-side and is never exposed to the client.
+ * Blind proxy for KLIPY GIF search and trending feeds. The relay fetches on
+ * behalf of the client so no user IP ever reaches the GIF provider. The API
+ * key stays server-side and is never exposed to the client.
+ *
+ * Provider note: Google shut down the Tenor public API (full shutdown
+ * 2026-06-30). KLIPY is the drop-in successor (same content, lifetime-free
+ * key). We map KLIPY's response back to the Tenor-shaped
+ * `{ results: [{ id, media_formats: { gif, tinygif, nanogif } }] }` payload the
+ * mobile client already consumes, so GifPicker.tsx needs no change.
  *
  * Privacy guarantees:
- *   - Client IP is never forwarded to Tenor (only the relay's egress IP is seen).
- *   - The query string, `next` cursor, and all upstream URLs are NEVER logged.
+ *   - Client IP is never forwarded upstream (only the relay's egress IP is seen).
+ *   - The query string and all upstream URLs are NEVER logged.
  *   - Error counters are logged without any query data.
  *   - Rate limiting uses express-rate-limit's in-memory store (ephemeral, no DB).
  *
  * Security notes:
- *   - TENOR_KEY must be set via env var — missing key → 503.
+ *   - KLIPY_KEY must be set via env var — missing key → 503.
  *   - Query is sanitized to letters/digits/spaces/hyphens before being forwarded.
- *   - `next` cursor is bounded to 64 hex chars to prevent injection.
  *   - 8-second AbortController timeout prevents slow-upstream hangs.
  */
 
@@ -39,8 +44,8 @@ const gifLimiter = rateLimit({
 const GifQuerySchema = z.object({
   // Optional free-text search; 1–100 chars
   q: z.string().min(1).max(100).optional(),
-  // Optional pagination cursor from a previous Tenor response; max 64 hex chars
-  next: z.string().max(64).regex(/^[0-9a-fA-F]+$/).optional(),
+  // Optional 1-based page for pagination (KLIPY uses `page`, not a cursor).
+  page: z.coerce.number().int().min(1).max(100).optional(),
 });
 
 // Sanitize: keep only letters, digits, spaces, hyphens.
@@ -49,10 +54,42 @@ function sanitizeQuery(raw: string): string {
   return raw.replace(/[^a-zA-Z0-9 -]/g, '').trim();
 }
 
+const PER_PAGE = 24;
+const KLIPY_BASE = 'https://api.klipy.com/api/v1';
+
+// ── KLIPY response types (only the fields we read) ──────────────────────────────
+interface KlipyMedia {
+  url?: string;
+  width?: number;
+  height?: number;
+}
+interface KlipyVariant {
+  gif?: KlipyMedia;
+}
+interface KlipyItem {
+  id?: number | string;
+  file?: {
+    hd?: KlipyVariant;
+    md?: KlipyVariant;
+    sm?: KlipyVariant;
+    xs?: KlipyVariant;
+  };
+}
+interface KlipyResponse {
+  result?: boolean;
+  data?: { data?: KlipyItem[] };
+}
+
+// Map one KLIPY format to the Tenor-shaped { url, dims } the client expects.
+function fmt(m: KlipyMedia | undefined): { url: string; dims: [number, number] } | undefined {
+  if (!m || !m.url) return undefined;
+  return { url: m.url, dims: [m.width ?? 200, m.height ?? 200] };
+}
+
 // ── GET / ─────────────────────────────────────────────────────────────────────
 router.get('/', gifLimiter, async (req, res) => {
-  const tenorKey = process.env.TENOR_KEY;
-  if (!tenorKey) {
+  const klipyKey = process.env.KLIPY_KEY;
+  if (!klipyKey) {
     res.status(503).json({ error: 'gif_provider_not_configured' });
     return;
   }
@@ -63,14 +100,13 @@ router.get('/', gifLimiter, async (req, res) => {
     return;
   }
 
-  const { q, next } = parsed.data;
+  const { q, page } = parsed.data;
+  const keyPath = encodeURIComponent(klipyKey);
 
-  // Build upstream URL — featured feed when no query is provided.
+  // Build upstream URL — trending feed when no query is provided.
   let upstreamUrl: string;
   if (q === undefined || q.length === 0) {
-    upstreamUrl =
-      `https://tenor.googleapis.com/v2/featured` +
-      `?key=${encodeURIComponent(tenorKey)}&limit=20&media_filter=gif`;
+    upstreamUrl = `${KLIPY_BASE}/${keyPath}/gifs/trending?per_page=${PER_PAGE}`;
   } else {
     const sanitized = sanitizeQuery(q);
     if (sanitized.length === 0) {
@@ -78,13 +114,12 @@ router.get('/', gifLimiter, async (req, res) => {
       return;
     }
     upstreamUrl =
-      `https://tenor.googleapis.com/v2/search` +
-      `?q=${encodeURIComponent(sanitized)}` +
-      `&key=${encodeURIComponent(tenorKey)}&limit=20&media_filter=gif`;
+      `${KLIPY_BASE}/${keyPath}/gifs/search` +
+      `?q=${encodeURIComponent(sanitized)}&per_page=${PER_PAGE}`;
   }
 
-  if (next !== undefined) {
-    upstreamUrl += `&pos=${encodeURIComponent(next)}`;
+  if (page !== undefined) {
+    upstreamUrl += `&page=${page}`;
   }
 
   const controller = new AbortController();
@@ -93,7 +128,7 @@ router.get('/', gifLimiter, async (req, res) => {
   try {
     const upstream = await fetch(upstreamUrl, {
       signal: controller.signal,
-      // Do not forward any client headers — act as a fresh client to Tenor.
+      // Do not forward any client headers — act as a fresh client upstream.
       headers: { 'User-Agent': 'AegisLinkRelay/1.0' },
     });
 
@@ -106,17 +141,31 @@ router.get('/', gifLimiter, async (req, res) => {
       return;
     }
 
-    const body: unknown = await upstream.json();
+    const body = (await upstream.json()) as KlipyResponse;
+    const items = body.data?.data ?? [];
 
-    // Forward Tenor's response as-is; set cache headers to reduce repeat traffic.
+    // Map KLIPY → Tenor-shaped payload the client already understands.
+    //   full  ← md.gif (falls back to hd/sm)
+    //   tinygif ← sm.gif (220px preview)
+    //   nanogif ← xs.gif (90px preview)
+    const results = items
+      .map((item) => ({
+        id: String(item.id ?? ''),
+        media_formats: {
+          gif: fmt(item.file?.md?.gif ?? item.file?.hd?.gif ?? item.file?.sm?.gif),
+          tinygif: fmt(item.file?.sm?.gif ?? item.file?.md?.gif),
+          nanogif: fmt(item.file?.xs?.gif ?? item.file?.sm?.gif),
+        },
+      }))
+      .filter((r) => r.id && (r.media_formats.gif || r.media_formats.tinygif));
+
     res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60');
-    res.json(body);
+    res.json({ results });
   } catch (err: unknown) {
     clearTimeout(timeout);
     // AbortError = timeout; generic error = network/parse failure.
     // In both cases we log only a count-style marker — no query, no URL.
-    const isTimeout =
-      err instanceof Error && err.name === 'AbortError';
+    const isTimeout = err instanceof Error && err.name === 'AbortError';
     console.error(`[proxy/gif] upstream_error type=${isTimeout ? 'timeout' : 'network'}`);
     res.status(502).json({ error: 'upstream_error' });
   }
