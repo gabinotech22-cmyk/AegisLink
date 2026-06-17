@@ -111,6 +111,105 @@ export function verifyGroupMetadata(
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Governance layer — roles + permissions (aegis.group.gov.v1)
+//
+// ADDITIVE and INDEPENDENT of the v1/v2 metadata signature above. The roster
+// signature (canonicalGroupBytes / canonicalGroupBytesV2) keeps signing exactly
+// what it always signed, so previously-stored admin signatures never break. The
+// governance signature is a SEPARATE detached Ed25519 signature, by the same
+// owner key, over the roles + permissions. A client that predates this layer
+// simply ignores govSig and falls back to default permissions (graceful
+// degradation); a client that understands it verifies govSig before honoring any
+// non-default role or permission.
+// ───────────────────────────────────────────────────────────────────────────
+
+/** A configurable permission is granted to one of these audiences. */
+export type PermissionScope = 'everyone' | 'admins';
+
+/**
+ * Per-group configurable permissions. Each gate answers "who may do X".
+ * 'admins' includes the owner and moderators (see can() in groupRoles.ts).
+ */
+export interface GroupPermissions {
+  whoCanInvite: PermissionScope;
+  whoCanSend: PermissionScope;
+  whoCanCall: PermissionScope;
+  whoCanEditInfo: PermissionScope;
+}
+
+/**
+ * Canonical governance signing payload — roles + permissions BY VALUE.
+ *
+ * Covers everything a non-owner must not be able to forge: who the owner is,
+ * the admin/moderator sets, the four permission gates, and a monotonic
+ * govVersion that defeats rollback (a demoted admin replaying an older signed
+ * governance state). admins/moderators are sorted so the same set always
+ * serializes identically. Permissions are emitted as a fixed-order array (not an
+ * object) so JSON key order can never drift. Any change here is a wire-format
+ * break — bump to gov.v2 instead of mutating this.
+ */
+export function canonicalGroupGovBytes(args: {
+  groupId: string;
+  ownerId: string;
+  admins: string[];
+  moderators: string[];
+  permissions: GroupPermissions;
+  govVersion: number;
+}): Uint8Array {
+  const p = args.permissions;
+  const canonical = JSON.stringify([
+    'aegis.group.gov.v1',
+    args.groupId,
+    args.ownerId,
+    [...args.admins].sort(),
+    [...args.moderators].sort(),
+    [p.whoCanInvite, p.whoCanSend, p.whoCanCall, p.whoCanEditInfo],
+    args.govVersion,
+  ]);
+  return new TextEncoder().encode(canonical);
+}
+
+/** Sign governance bytes with the owner's Ed25519 signing secret key; Base64. */
+export function signGroupGovernance(
+  args: {
+    groupId: string;
+    ownerId: string;
+    admins: string[];
+    moderators: string[];
+    permissions: GroupPermissions;
+    govVersion: number;
+  },
+  signingSecretKey: Uint8Array,
+): string {
+  const sig = nacl.sign.detached(canonicalGroupGovBytes(args), signingSecretKey);
+  return encodeBase64(sig);
+}
+
+/** Verify a governance signature (Base64) was made by the owner's signing key. */
+export function verifyGroupGovernance(
+  args: {
+    groupId: string;
+    ownerId: string;
+    admins: string[];
+    moderators: string[];
+    permissions: GroupPermissions;
+    govVersion: number;
+  },
+  sigB64: string,
+  signingPublicKeyB64: string,
+): boolean {
+  try {
+    const sig = decodeBase64(sigB64);
+    const pub = decodeBase64(signingPublicKeyB64);
+    if (sig.length !== nacl.sign.signatureLength) return false;
+    if (pub.length !== nacl.sign.publicKeyLength) return false;
+    return nacl.sign.detached.verify(canonicalGroupGovBytes(args), sig, pub);
+  } catch {
+    return false;
+  }
+}
+
 /** Sign v2 canonical bytes with an Ed25519 signing secret key; returns Base64. */
 export function signGroupMetadataV2(
   args: { groupId: string; groupName: string; rosterHash: string; rosterVersion: number; createdAt: number },
