@@ -38,13 +38,14 @@ import {
   getPqSpkKeyId,
   type OutboxJob,
 } from '../db/local';
-import { decideV2GroupMetadata } from './groupMetadataDecision';
+import { decideV2GroupMetadata, decideGovernanceUpdate } from './groupMetadataDecision';
 import {
   computeRosterHash,
   signGroupMetadata,
   verifyGroupMetadata,
   signGroupMetadataV2,
   verifyGroupMetadataV2,
+  type GroupPermissions,
 } from '../crypto/groupSig';
 
 /**
@@ -2036,6 +2037,56 @@ async function decryptAndAppend(
           }
         }
 
+        // ── Governance (roles + permissions) — Phase 2b ────────────────────────
+        // Apply owner-signed governance independently of the roster decision
+        // above. Pure verify-before-trust + anti-rollback decision lives in
+        // groupMetadataDecision.ts; we only resolve the owner key (I/O) and
+        // persist on 'apply'. Re-reads the freshly-persisted group so it layers
+        // on top of any roster create/update just applied.
+        {
+          const claimedGovSig: string | undefined =
+            typeof parsedPayload.govSig === 'string' ? parsedPayload.govSig : undefined;
+          const claimedGovVersion: number | undefined =
+            typeof parsedPayload.govVersion === 'number' ? parsedPayload.govVersion : undefined;
+          const claimedPermissions = parsedPayload.permissions as GroupPermissions | undefined;
+          if (claimedGovSig && claimedGovVersion !== undefined && claimedPermissions) {
+            const govGroup = await getGroup(groupId);
+            if (govGroup) {
+              const ownerKey =
+                govGroup.adminId && govGroup.adminId === claimedAdminId
+                  ? await getAdminSigningKey()
+                  : null;
+              const govDecision = decideGovernanceUpdate({
+                groupId,
+                trustedAdminId: govGroup.adminId,
+                localGovVersion: govGroup.govVersion ?? 0,
+                claimed: {
+                  admins: Array.isArray(parsedPayload.admins) ? parsedPayload.admins : [],
+                  moderators: Array.isArray(parsedPayload.moderators) ? parsedPayload.moderators : [],
+                  permissions: claimedPermissions,
+                  govSig: claimedGovSig,
+                  govVersion: claimedGovVersion,
+                },
+                ownerSigningKeyB64: ownerKey,
+              });
+              if (govDecision.kind === 'apply') {
+                await saveGroup({
+                  ...govGroup,
+                  admins: govDecision.admins.length ? govDecision.admins : undefined,
+                  moderators: govDecision.moderators.length ? govDecision.moderators : undefined,
+                  permissions: govDecision.permissions,
+                  govSig: govDecision.govSig,
+                  govVersion: govDecision.govVersion,
+                });
+                const { useGroups } = require('../store/groups');
+                void useGroups.getState().hydrate();
+              } else if (govDecision.kind === 'reject' && __DEV__) {
+                console.warn('[socket] group governance rejected — invalid signature');
+              }
+            }
+          }
+        }
+
         // Use the locally-trusted name for display, not the claimed one.
         const trustedGroup = existingGroup ?? (await getGroup(groupId));
         const trustedGroupName: string = trustedGroup?.name ?? claimedName;
@@ -3419,6 +3470,19 @@ export async function sendGroupMessage(opts: {
       groupCreatedAt: group.createdAt,
       adminId: group.adminId,
       adminSig: group.adminSig,
+      // Governance (roles + permissions), Phase 2b. Included only when signed —
+      // admins/moderators travel too so the receiver can reconstruct the exact
+      // canonical bytes the owner signed. Absent → receiver keeps local defaults
+      // (graceful degradation for pre-governance senders).
+      ...(group.govSig
+        ? {
+            admins: group.admins ?? [],
+            moderators: group.moderators ?? [],
+            permissions: group.permissions,
+            govSig: group.govSig,
+            govVersion: group.govVersion,
+          }
+        : {}),
       groupAvatarColor,
       groupAvatarImage,
       senderId: opts.identity.aegisId,
