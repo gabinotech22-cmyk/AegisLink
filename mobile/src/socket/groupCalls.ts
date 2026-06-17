@@ -642,15 +642,30 @@ export function attachGroupCallHandlers(): void {
         return;
       }
 
-      // Try to resolve trusted group name from local store
+      // Resolve the trusted local group — used both for the display name and,
+      // crucially, for the admin-only call gate below.
       let groupName = msg.groupName;
+      let localGroup: import('../db/local').StoredGroup | undefined;
       try {
-        const { useGroups } = require('../store/groups') as {
-          useGroups: { getState: () => { groups: Array<{ id: string; name: string }> } };
-        };
-        const localGroup = useGroups.getState().groups.find((g) => g.id === msg.groupId);
+        const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+        localGroup = useGroups.getState().groups.find((g) => g.id === msg.groupId);
         if (localGroup) groupName = localGroup.name;
       } catch { /* ignore */ }
+
+      // ── Admin-only call gate (receiver-ENFORCED, not just UI) ───────────────
+      // The initiator's own client hides the call button when whoCanCall=admins,
+      // but a patched client could emit the invite anyway. So every honest
+      // receiver independently verifies that msg.from is permitted to start a
+      // call in THIS group, per our locally-trusted (signed) governance. If we
+      // don't know the group, or the initiator isn't allowed, drop the invite
+      // silently — no ring. This is what makes the gate robust, not cosmetic.
+      try {
+        const { can } = require('../crypto/groupRoles') as typeof import('../crypto/groupRoles');
+        if (!localGroup || !can(localGroup, msg.from, 'call')) {
+          if (__DEV__) console.warn('[groupCalls] invite dropped — initiator not permitted to call', msg.from);
+          return;
+        }
+      } catch { /* on any resolution error, fail closed: drop the invite */ return; }
 
       useGroupCall.getState().startIncoming(msg.callId, msg.groupId, groupName, msg.from);
     },
