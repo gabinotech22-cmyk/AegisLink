@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Image, Share } from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
@@ -10,6 +9,7 @@ import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { BrandedQR } from '../components/BrandedQR';
 import { AvatarCropModal } from '../components/AvatarCropModal';
 import { ContactPickerSheet } from '../components/ContactPickerSheet';
 import { TopBar } from '../components/TopBar';
@@ -169,18 +169,16 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
                 resizeMode="cover"
               />
             ) : (
-              <View
-                style={{
-                  width: 76,
-                  height: 76,
-                  borderRadius: t.radiusL,
-                  backgroundColor: `${group.avatarColor ?? t.accent}22`,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <I.Users size={34} color={group.avatarColor ?? t.accent} />
-              </View>
+              // Match the generated avatar shown in the Groups list / chat header
+              // (identicon seeded by the group id), instead of a generic icon that
+              // looked "empty" compared to everywhere else the group appears.
+              <Avatar
+                t={t}
+                name={group.name}
+                color={group.avatarColor || t.accent}
+                size={76}
+                seed={group.id}
+              />
             )}
             {amIAdmin && (
               <View
@@ -455,11 +453,9 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
                     borderRadius: t.radius,
                   }}
                 >
-                  <QRCode
+                  <BrandedQR
                     value={encodeGroupInviteLinkUniversal(group.id, group.name, group.adminId)}
                     size={180}
-                    color="#0a0a0a"
-                    backgroundColor="#ffffff"
                   />
                 </View>
                 <Text
