@@ -9,7 +9,7 @@ import { AudioWaveform } from '../components/AudioWaveform';
 import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
 import { ImageViewerModal } from '../components/ImageViewerModal';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
 import { useTranslation } from 'react-i18next';
@@ -1033,22 +1033,55 @@ function GroupBubble({
         >
           <View
             style={{
-              height: 100,
-              backgroundColor: t.dark ? '#1e282d' : '#e6e3d8',
+              height: 110,
               alignItems: 'center',
               justifyContent: 'center',
               position: 'relative',
               overflow: 'hidden',
             }}
           >
-            <Svg viewBox="0 0 250 100" width="100%" height="100%" style={{ position: 'absolute' }}>
-              <Path d="M0 30 L250 50" stroke={t.borderStrong} strokeWidth={4} fill="none" opacity={0.4} />
-              <Path d="M0 70 L250 80" stroke={t.borderStrong} strokeWidth={5} fill="none" opacity={0.4} />
-              <Path d="M100 0 Q120 50 110 100" stroke={t.borderStrong} strokeWidth={6} fill="none" opacity={0.4} />
-              <Path d="M180 0 L170 100" stroke={t.borderStrong} strokeWidth={3} fill="none" opacity={0.3} />
+            {/* Map mock mirrors ScreenLocation (screens-phase2.jsx): gradient
+                base, 32px grid, faint roads and the accent pin with the Shield
+                mark — kept faithful to the original prototype. */}
+            <Svg viewBox="0 0 250 110" width="100%" height="100%" style={{ position: 'absolute' }}>
+              <Defs>
+                <LinearGradient id="grpLocMapBg" x1="0" y1="0" x2="1" y2="1">
+                  {(t.dark ? ['#1a2326', '#243033'] : ['#e8e5dc', '#d8d4c6']).map((c, i) => (
+                    <Stop key={i} offset={i} stopColor={c} />
+                  ))}
+                </LinearGradient>
+              </Defs>
+              <Rect x="0" y="0" width="250" height="110" fill="url(#grpLocMapBg)" />
+              {[28, 56, 84, 112, 140, 168, 196, 224].map((x) => (
+                <Path key={`v${x}`} d={`M${x} 0 L${x} 110`} stroke={t.borderStrong} strokeWidth={1} opacity={0.25} />
+              ))}
+              {[28, 56, 84].map((y) => (
+                <Path key={`h${y}`} d={`M0 ${y} L250 ${y}`} stroke={t.borderStrong} strokeWidth={1} opacity={0.25} />
+              ))}
+              <Path d="M0 44 Q125 33 250 55" stroke={t.borderStrong} strokeWidth={4} fill="none" opacity={0.5} />
+              <Path d="M107 0 L143 110" stroke={t.borderStrong} strokeWidth={4} fill="none" opacity={0.5} />
+              <Path d="M0 83 L250 77" stroke={t.borderStrong} strokeWidth={2} fill="none" opacity={0.4} />
             </Svg>
-            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: `${t.accent}25`, alignItems: 'center', justifyContent: 'center' }}>
-              <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: t.accent, borderWidth: 2.5, borderColor: '#fff' }} />
+            {/* accent halo behind the pin (the prototype's pulse, static here) */}
+            <View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: `${t.accent}22` }} />
+            <View
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                backgroundColor: t.accent,
+                borderWidth: 3,
+                borderColor: t.bg,
+                alignItems: 'center',
+                justifyContent: 'center',
+                shadowColor: t.accent,
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: 0.4,
+                shadowRadius: 6,
+                elevation: 3,
+              }}
+            >
+              <I.Shield size={16} color={t.accentInk} />
             </View>
           </View>
           <View style={{ padding: 10, backgroundColor: t.surface }}>
