@@ -277,8 +277,21 @@ export const useGroups = create<GroupsState>((set, get) => ({
           require('../socket/client') as typeof import('../socket/client');
         await rekeyGroupAfterRemoval(identity, id, updated.members);
       } catch {
-        // Swallow — removal already persisted locally and signed metadata
-        // propagates via the normal group_msg path; re-key will retry later.
+        // Swallow — removal already persisted locally; re-key retries later.
+      }
+      // Propagate the new roster to the REMAINING members so their member list
+      // drops the removed person immediately. Without this the admin saw the
+      // removal but everyone else kept showing the old roster until some future
+      // carrier happened to arrive (and v2 content messages omit the member
+      // list entirely). Symmetric to addMember's welcome carrier. The removed
+      // member is no longer in updated.members, so the broadcast never reaches
+      // them. Offline-safe via the outbox.
+      try {
+        const { broadcastGroupMetadata } =
+          require('../socket/client') as typeof import('../socket/client');
+        await broadcastGroupMetadata(identity, id);
+      } catch {
+        // Best-effort: the carrier re-sends from the outbox on the next reconnect.
       }
     }
   },
