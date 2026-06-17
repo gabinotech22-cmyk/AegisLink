@@ -1805,9 +1805,40 @@ async function decryptAndAppend(
         // sender we have it from the contact row; otherwise look it up in
         // the contacts store. If we can't find a key, the signature can't be
         // verified and we MUST NOT trust the metadata.
+        // Resolve a contact's Ed25519 signing key, backfilling from the directory
+        // when missing. Contacts added via a QR / invite link carry only the box
+        // (X25519) key — the signing key lives in the directory — so without this
+        // backfill an admin-signed group carrier fails verification and the group
+        // never materializes for a member who joined via link. Mirrors the X3DH
+        // signing-key backfill above.
+        async function resolveSigningKey(aegisId: string, known?: string | null): Promise<string | null> {
+          if (typeof known === 'string' && known.length > 0) return known;
+          try {
+            const { lookupIdentity } = require('../api') as typeof import('../api');
+            const record = await lookupIdentity(aegisId);
+            const fetched = typeof record.signingPublicKey === 'string' && record.signingPublicKey.length > 0
+              ? record.signingPublicKey
+              : null;
+            if (fetched) {
+              const existing = useContacts.getState().contacts.find((c) => c.aegisId === aegisId);
+              if (existing && !existing.signingPublicKeyB64) {
+                const { saveContact } = require('../db/local') as typeof import('../db/local');
+                const updated = { ...existing, signingPublicKeyB64: fetched };
+                await saveContact(updated);
+                useContacts.setState((s) => ({
+                  contacts: s.contacts.map((c) => (c.aegisId === aegisId ? updated : c)),
+                }));
+              }
+            }
+            return fetched;
+          } catch {
+            return null; // offline / not in directory — caller fails closed
+          }
+        }
+
         async function getAdminSigningKey(): Promise<string | null> {
           if (!claimedAdminId) return null;
-          if (claimedAdminId === senderId) return contact.signingPublicKeyB64 ?? null;
+          if (claimedAdminId === senderId) return resolveSigningKey(claimedAdminId, contact.signingPublicKeyB64);
           let admin = useContacts.getState().contacts.find((c) => c.aegisId === claimedAdminId);
           if (!admin) {
             try {
@@ -1816,7 +1847,7 @@ async function decryptAndAppend(
               if (__DEV__) console.warn('[socket] failed to dynamically resolve group admin:', e);
             }
           }
-          return admin?.signingPublicKeyB64 ?? null;
+          return resolveSigningKey(claimedAdminId, admin?.signingPublicKeyB64);
         }
 
         // v1 authenticity: signature over the inlined member list.
