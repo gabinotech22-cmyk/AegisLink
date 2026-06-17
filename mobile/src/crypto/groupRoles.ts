@@ -22,12 +22,14 @@ export type GroupAction = 'invite' | 'send' | 'call' | 'editInfo';
 
 /**
  * Default permissions for groups with no signed governance (legacy groups, and
- * the baseline a new group inherits). Everything is open EXCEPT starting a call:
- * in a large group, letting any member ring everyone is a UX disaster, so calls
- * default to admins-only. Owners can loosen this per-group later.
+ * the baseline a new group inherits). These match the prototype defaults and the
+ * pre-governance behavior: only sending is open to everyone. Invites, calls and
+ * info edits default to admins-only — invites/edits preserve the legacy
+ * admin-only behavior, and admin-only calls avoid the "any member rings the
+ * whole group" disaster in large groups. Owners can loosen any of these.
  */
 export const DEFAULT_PERMISSIONS: GroupPermissions = {
-  whoCanInvite: 'everyone',
+  whoCanInvite: 'admins',
   whoCanSend: 'everyone',
   whoCanCall: 'admins',
   whoCanEditInfo: 'admins',
