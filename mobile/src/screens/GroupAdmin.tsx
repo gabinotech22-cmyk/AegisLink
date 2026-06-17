@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Image, Share } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
@@ -13,6 +13,7 @@ import { BrandedQR } from '../components/BrandedQR';
 import { AvatarCropModal } from '../components/AvatarCropModal';
 import { ContactPickerSheet } from '../components/ContactPickerSheet';
 import { FloatingMenu, type FloatingMenuItem } from '../components/FloatingMenu';
+import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useGroups } from '../store/groups';
@@ -45,6 +46,8 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   const [showAddMember, setShowAddMember] = useState(false);
   // aegisId of the member whose role/actions floating menu is open (owner only).
   const [roleMenuFor, setRoleMenuFor] = useState<string | null>(null);
+  // Invite-link floating window (replaces the native OS share sheet).
+  const [showShareLink, setShowShareLink] = useState(false);
 
   // Live group from store so edits reflect instantly
   const group = useGroups((s) => s.groups.find((g) => g.id === groupProp.id)) ?? groupProp;
@@ -429,13 +432,11 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
         {canInvite && (
           <Section t={t} label={i18nT('groupAdmin.inviteLinkSection').toUpperCase()}>
             <Pressable
-              onPress={async () => {
+              onPress={() => {
                 if (!group.adminId) return;
-                // https form — clickable in WhatsApp/SMS/email and routed back
-                // into the app via Android App Links (payload in the fragment,
-                // never sent to the server).
-                const link = encodeGroupInviteLinkUniversal(group.id, group.name, group.adminId);
-                await Share.share({ message: link });
+                // Open our in-app floating window instead of the native OS
+                // share sheet; the native picker is reachable from inside it.
+                setShowShareLink(true);
               }}
               accessibilityLabel={i18nT('groupAdmin.shareInviteLink')}
               style={({ pressed }) => ({
@@ -540,6 +541,14 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
         cancelLabel={i18nT('common.cancel', 'Cancelar')}
         onCancel={() => setCropSource(null)}
         onConfirm={(uri) => { void handleConfirmGroupAvatar(uri); }}
+      />
+
+      {/* Invite link — in-app floating window (matches the long-press menu). */}
+      <ShareLinkSheet
+        visible={showShareLink}
+        onClose={() => setShowShareLink(false)}
+        title={i18nT('groupAdmin.shareInviteLink')}
+        link={group.adminId ? encodeGroupInviteLinkUniversal(group.id, group.name, group.adminId) : ''}
       />
 
       {/* Member role/actions — floating Vault menu (owner only). */}

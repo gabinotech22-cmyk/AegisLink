@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, StyleSheet, ActivityIndicator, Share } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, StyleSheet, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../theme/ThemeContext';
@@ -8,6 +8,8 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { AvatarCropModal } from '../components/AvatarCropModal';
+import { ShareLinkSheet } from '../components/ShareLinkSheet';
+import { encodeIdentityLink } from '../crypto/qr';
 import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
@@ -46,6 +48,7 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
   const { identity, displayName, avatarColor, avatarImage, profileStatus, updateProfile, updateStatus, reset } = useIdentity();
 
   const [isSwappingSlot, setIsSwappingSlot] = useState(false);
+  const [showShareLink, setShowShareLink] = useState(false);
 
   const setPreference = usePreferences((s) => s.set);
   const photoVis = usePreferences((s) => s.photoVis);
@@ -425,12 +428,9 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
             icon={<I.Forward size={18} color={t.textDim} />}
             label={i18nT('profile.shareMyId', 'Compartir mi ID')}
             sub={i18nT('profile.shareMyIdSub', 'Comparte tu contacto AegisLink')}
-            onPress={async () => {
+            onPress={() => {
               if (!identity) return;
-              await Share.share({
-                title: i18nT('profile.shareMyId', 'Compartir mi ID'),
-                message: `${i18nT('verify.shareMessage', 'Agregame en AegisLink:')}\naegislink:v1:${identity.aegisId}:${identity.publicKeyB64}\n\n${i18nT('verify.shareId', 'O usa mi ID:')} ${identity.aegisId}`,
-              });
+              setShowShareLink(true);
             }}
           />
           <Row
@@ -443,6 +443,14 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
           />
         </Section>
       </ScrollView>
+
+      {/* Share my ID — in-app floating window (not the native OS sheet). */}
+      <ShareLinkSheet
+        visible={showShareLink}
+        onClose={() => setShowShareLink(false)}
+        title={i18nT('profile.shareMyId', 'Compartir mi ID')}
+        link={identity ? encodeIdentityLink(identity.aegisId, identity.publicKeyB64) : ''}
+      />
 
       {/* Edit Profile Modal */}
       <Modal visible={isEditing} transparent animationType="slide">

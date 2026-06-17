@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, Share, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { BrandedQR } from '../components/BrandedQR';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -9,7 +9,8 @@ import { I } from '../components/icons';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { fingerprintWords, fingerprintHex } from '../crypto/fingerprint';
-import { encodeIdentityQR } from '../crypto/qr';
+import { encodeIdentityQR, encodeIdentityLink } from '../crypto/qr';
+import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import type { Theme } from '../theme/vault';
 import { themedAlert } from '../components/AlertHost';
 
@@ -38,6 +39,7 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
   const [myWords, setMyWords] = useState<string[]>([]);
   const [hex, setHex] = useState<string[]>([]);
   const [theirWords, setTheirWords] = useState<string[]>([]);
+  const [showShareLink, setShowShareLink] = useState(false);
 
   useEffect(() => {
     if (identity) {
@@ -372,12 +374,7 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
             </Text>
           </Pressable>
           <Pressable
-            onPress={async () => {
-              await Share.share({
-                title: i18nT('verify.shareTitle', 'Mi contacto AegisLink'),
-                message: `${i18nT('verify.shareMessage', 'Add me on AegisLink:')}\naegislink://v1/${identity.aegisId}/${encodeURIComponent(identity.publicKeyB64)}\n\n${i18nT('verify.shareId', 'Or use my ID:')} ${identity.aegisId}`,
-              });
-            }}
+            onPress={() => setShowShareLink(true)}
             style={({ pressed }) => ({
               flex: 1,
               backgroundColor: t.accent,
@@ -395,6 +392,14 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
         </View>
 
       </ScrollView>
+
+      {/* Share my contact — in-app floating window (not the native OS sheet). */}
+      <ShareLinkSheet
+        visible={showShareLink}
+        onClose={() => setShowShareLink(false)}
+        title={i18nT('verify.shareTitle', 'Mi contacto AegisLink')}
+        link={identity ? encodeIdentityLink(identity.aegisId, identity.publicKeyB64) : ''}
+      />
     </View>
   );
 }
