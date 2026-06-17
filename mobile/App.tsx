@@ -460,6 +460,19 @@ function Shell() {
     }
   }, [identity, status]);
 
+  // Re-attach call handlers whenever the connection comes back. A reconnect can
+  // rebuild the socket.io instance (disconnect() nulls it), which silently drops
+  // the call:invite listener — so an incoming call would never ring after any
+  // reconnect until app restart. attach*Handlers are idempotent (they off()
+  // before on()), so re-running them here is safe.
+  useEffect(() => {
+    if (online && identity && status === 'ready' && WEBRTC_AVAILABLE) {
+      if (usePreferences.getState().duressActive) return;
+      attachCallHandlers();
+      attachGroupCallHandlers();
+    }
+  }, [online, identity, status]);
+
   // Runtime integrity advisory (C1) — local-only, zero telemetry, NON-blocking.
   // Surface a one-time notice if the device looks rooted/hooked; never prevent
   // usage. The enforced consequence (refusing off-device key export) lives in

@@ -215,6 +215,15 @@ export function attachCallHandlers(): void {
   const socket = getSocket();
   if (!socket) return;
 
+  // Idempotent: a fresh connect() builds a NEW socket.io instance (disconnect()
+  // nulls the old one), so the previous listeners are gone — and re-running this
+  // on reconnect must not stack duplicate handlers that would fire startIncoming
+  // twice. Clear our four call events first, then (re)register.
+  socket.off('call:invite');
+  socket.off('call:answer');
+  socket.off('call:ice');
+  socket.off('call:hangup');
+
   socket.on('call:invite', async (msg: CallInvitePayload) => {
     // Decrypt the sealed SDP offer before doing anything else. A failed open
     // (unknown sender, tampered ciphertext, missing identity) drops the invite.
