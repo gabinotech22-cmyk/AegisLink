@@ -129,16 +129,20 @@ function withIconAliases(config) {
 
 // ─── Step 3: Android network_security_config.xml with SPKI cert pinning ──────
 //
-// SHA-256 SPKI pins extracted from the live relay on 2026-05-27:
-//   Primary: leaf cert  CN=aegislink.duckdns.org (Let's Encrypt E8, expires 2026-08-24)
-//   Backup:  Let's Encrypt E8 intermediate (issuer=ISRG Root X1) — survives leaf rotation
+// SHA-256 SPKI pins extracted from the live relay on 2026-06-18 (Hetzner Helsinki):
+//   Primary: leaf cert  CN=aegislink.duckdns.org (Let's Encrypt YE1, expires 2026-09-15)
+//   Backup:  Let's Encrypt YE1 intermediate (issuer=ISRG Root YE) — survives leaf rotation
+//
+// NOTE: the relay migrated AWS->Hetzner on 2026-06-17; certbot issued a fresh cert
+// on the new ECDSA chain (YE1 / Root YE), so BOTH the old leaf pin and the old E8
+// intermediate pin no longer match. These values are the new chain.
 //
 // To refresh the primary pin after cert renewal:
-//   echo Q | openssl s_client -connect 51.20.60.155:443 2>/dev/null \
+//   echo Q | openssl s_client -connect aegislink.duckdns.org:443 2>/dev/null \
 //     | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der \
 //     | openssl dgst -sha256 -binary | openssl enc -base64
-const SPKI_PRIMARY = 'CMcP8NMKUoqDBl0haU7v7dgEsxIFbWry8NjhhHzgX3c=';
-const SPKI_BACKUP  = 'iFvwVyJSxnQdyaUvUERIf+8qk7gRze3612JMwoO3zdU='; // LE E8 intermediate
+const SPKI_PRIMARY = 'FHU7MjGd0nNUIZbayXMzSxHlMSay5Mfj2fBRzY6OFYc=';
+const SPKI_BACKUP  = 'brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4='; // LE YE1 intermediate
 // Independently-held offline backup key (P-256). Private key is COLD-STORED
 // outside the repo (_keystore_backup/aegis-pin-backup.key). If the LE chain or
 // primary key must be abandoned, issue a cert with this key and installed
