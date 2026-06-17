@@ -58,6 +58,14 @@ export async function ensureRegistered(identity: Identity): Promise<EnsureResult
         publicKeyB64: preKeys.signedPreKey.publicKeyB64,
         signatureB64: preKeys.signedPreKey.signatureB64,
       },
+      // Publish the PQXDH PQ prekey too — without it the relay bundle has no
+      // PQSPK, senders fall back to v1, and the receiver's anti-downgrade gate
+      // aborts every handshake (no messages/profiles ever decrypt).
+      {
+        keyId: preKeys.pqSignedPreKey.keyId,
+        publicKeyB64: preKeys.pqSignedPreKey.publicKeyB64,
+        signatureB64: preKeys.pqSignedPreKey.signatureB64,
+      },
     );
 
     if (!result.ok) {

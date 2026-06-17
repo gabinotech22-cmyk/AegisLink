@@ -1566,12 +1566,11 @@ async function decryptAndAppend(
       }
     }
 
-    // PQXDH (v2) anti-downgrade gate. weAdvertisedPq reflects whether THIS
-    // device currently has an active PQSPK slot published; shouldUsePqReceiver
-    // throws if we advertised PQ but the inbound init carries no ciphertext
-    // (silent-downgrade attack), and returns 'v1' when we never advertised PQ
-    // (even if a ciphertext is — implausibly — present, per x3dh.ts's note that
-    // this case is non-fatal and just ignored).
+    // PQXDH (v2) downgrade decision. weAdvertisedPq reflects whether THIS device
+    // has an active PQSPK slot. shouldUsePqReceiver now FALLS BACK to 'v1' (no
+    // longer throws) when we advertised PQ but the inbound init carries no
+    // ciphertext — a hard abort there broke every handshake from a v1 sender or
+    // whenever our bundle lacked the PQSPK. v1 is still full X25519 E2EE.
     const pqCtB64 = (parsed.x3dh as { pqCtB64?: string }).pqCtB64;
     let weAdvertisedPq = false;
     try {
@@ -3174,17 +3173,48 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
 
 /** Send our profile (name + avatar as data URI) to one specific contact. */
 export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: string }, identity: Identity): Promise<void> {
-  if (!socket || !connected || !authenticated) return;
-  try {
-    const { useIdentity } = require('../store/identity');
-    const idState = useIdentity.getState();
-    const senderName = idState.displayName;
-    const senderColor = idState.avatarColor;
-    const senderStatus = idState.profileStatus;
-    const rawImage = idState.avatarImage;
-    const senderImage = await toDataUri(rawImage);
+  const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+  const idState = useIdentity.getState();
+  const senderImage = await toDataUri(idState.avatarImage);
+  const payload = JSON.stringify({
+    type: 'profile_update',
+    senderName: idState.displayName,
+    senderColor: idState.avatarColor,
+    senderImage,
+    senderStatus: idState.profileStatus,
+  });
 
-    const payload = JSON.stringify({ type: 'profile_update', senderName, senderColor, senderImage, senderStatus });
+  // Persist the first-contact profile/init in the outbox so it is retried on the
+  // next reconnect. Without this, adding a contact while WE are offline silently
+  // dropped the init — the peer never received it, never auto-added us, and the
+  // reconnect broadcast skips session-less contacts, so the two sides never
+  // converged (the user had to re-add manually on the other device).
+  const enqueueForRetry = async (): Promise<void> => {
+    try {
+      await enqueueOutboxJob({
+        jobId: Crypto.randomUUID(),
+        msgId: Crypto.randomUUID(),
+        recipientAegisId: contact.aegisId,
+        recipientPubkeyB64: contact.publicKeyB64,
+        payload,
+        kind: 'direct',
+        groupId: null,
+        createdAt: Date.now(),
+      });
+      rdiag(`[RDIAG] sendProfileTo ENQUEUED (offline) to=${contact.aegisId}`);
+    } catch (e) {
+      if (__DEV__) console.warn('[socket] sendProfileTo enqueue failed:', (e as Error).message);
+    }
+  };
+
+  // Offline / not yet authenticated: don't emit (and don't advance the ratchet);
+  // queue it and let flushOutbox() re-encrypt + send on the next auth:ok.
+  if (!socket || !connected || !authenticated) {
+    await enqueueForRetry();
+    return;
+  }
+
+  try {
     const recipientPub = decodeBase64(contact.publicKeyB64);
     const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
     // Mark first-contact (X3DH-initial) envelopes `init` so the relay attaches
@@ -3198,6 +3228,7 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
   } catch (e) {
     rdiag(`[RDIAG] sendProfileTo FAILED to=${contact.aegisId} err=${(e as Error).message}`);
     if (__DEV__) console.warn('[socket] sendProfileTo failed:', (e as Error).message);
+    await enqueueForRetry();
   }
 }
 

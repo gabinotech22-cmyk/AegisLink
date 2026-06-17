@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
-import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { fingerprintWords, fingerprintHex } from '../crypto/fingerprint';
@@ -114,81 +113,118 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
           <View style={{ width: 22 }} />
         </View>
 
-        <ScrollView contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 40 }}>
-          {/* Instruction banner */}
-          <View style={{
-            backgroundColor: t.surface, borderWidth: 1, borderColor: t.border,
-            borderRadius: t.radius, padding: 14, flexDirection: 'row', gap: 10,
-            alignItems: 'flex-start', marginVertical: 14,
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: 40, alignItems: 'center' }}>
+          {/* Faithful to the design prototype (screens.jsx ScreenVerify):
+              subtitle → QR → "OR — 8 safety words" → words grid → Scan QR / Mark verified. */}
+          <Text style={{
+            fontFamily: t.font, fontSize: 13, color: t.textDim,
+            textAlign: 'center', lineHeight: 21, marginVertical: 14, maxWidth: 300,
           }}>
-            <I.Shield size={16} color={t.accent} style={{ marginTop: 2 }} />
-            <Text style={{ flex: 1, fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19 }}>
-              Lean las palabras en voz alta. Si coinciden, pulsen Verificar.
-            </Text>
-          </View>
+            {i18nT('verify.compareDesc', 'Compare key fingerprints in person, by QR scan, or by reading 8 words.')}
+          </Text>
 
-          {/* Side-by-side word comparison */}
-          <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
-            {/* My words */}
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginBottom: 8, letterSpacing: 0.8 }}>
-                YO
+          {/* My QR — the contact scans it (or I scan theirs via Scan QR) for a
+              mutual out-of-band exchange. */}
+          <BrandedQR
+            value={qrPayload}
+            size={200}
+            color={t.dark ? t.accent : '#0a0a0a'}
+            background={t.dark ? t.bg : '#ffffff'}
+            accent={t.accent}
+          />
+
+          <Text style={{
+            fontFamily: t.fontMono, fontSize: 10, color: t.textDim,
+            letterSpacing: 1.2, marginTop: 24, marginBottom: 10,
+          }}>
+            {i18nT('verify.orWords', 'OR — 8 SAFETY WORDS')}
+          </Text>
+
+          {/* Contact's 8 safety words — read them aloud together; if they match
+              what the contact sees on their device, tap Mark verified. */}
+          <View style={{
+            width: '100%', borderWidth: 1, borderColor: t.borderStrong,
+            borderRadius: t.radius, padding: 14, backgroundColor: t.surface,
+          }}>
+            {theirWords.length > 0 ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {theirWords.map((w, i) => (
+                  <View
+                    key={i}
+                    style={{
+                      width: '48%', flexDirection: 'row', alignItems: 'center', gap: 8,
+                      paddingHorizontal: 8, paddingVertical: 6,
+                      backgroundColor: t.surface2, borderRadius: t.radiusS,
+                    }}
+                  >
+                    <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, width: 14 }}>
+                      {(i + 1).toString().padStart(2, '0')}
+                    </Text>
+                    <Text style={{ fontFamily: t.fontMono, fontSize: 14, color: t.text, fontWeight: '500' }}>
+                      {w}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, textAlign: 'center' }}>
+                {i18nT('verify.keyUnavailable', 'Contact key not available yet.')}
               </Text>
-              {myWords.map((w, i) => (
-                <WordChip key={i} word={w} n={i + 1} t={t} />
-              ))}
-            </View>
-
-            {/* Divider */}
-            <View style={{ width: 1, backgroundColor: t.border, marginVertical: 4 }} />
-
-            {/* Their words */}
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginBottom: 8, letterSpacing: 0.8 }}
-                numberOfLines={1}
-              >
-                {contact.name.toUpperCase()}
-              </Text>
-              {theirWords.length > 0 ? (
-                theirWords.map((w, i) => (
-                  <WordChip key={i} word={w} n={i + 1} t={t} />
-                ))
-              ) : (
-                <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 4 }}>
-                  Clave no disponible
-                </Text>
-              )}
-            </View>
+            )}
           </View>
-
-          {/* Verify action */}
-          {theirWords.length > 0 && (
-            <PrimaryButton
-              t={t}
-              label="Confirmar — palabras coinciden"
-              onPress={async () => {
-                await markVerified(contactId, true);
-                themedAlert(
-                  'Verificado',
-                  `${contact.name} está verificado. Tus mensajes están protegidos contra ataques de intermediario.`,
-                  [{ text: 'OK', onPress: onBack }]
-                );
-              }}
-            />
-          )}
 
           {contact.verified && (
             <View style={{
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-              gap: 6, marginTop: 14,
+              gap: 6, marginTop: 16,
             }}>
               <I.Shield size={14} color={t.accent} />
               <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 0.8 }}>
-                IDENTIDAD YA VERIFICADA
+                {i18nT('verify.alreadyVerified', 'IDENTITY ALREADY VERIFIED')}
               </Text>
             </View>
           )}
+
+          {/* Scan QR + Mark verified — the two design actions. */}
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 20, width: '100%' }}>
+            <Pressable
+              onPress={onScan}
+              style={({ pressed }) => ({
+                flex: 1,
+                backgroundColor: pressed ? t.surface2 : 'transparent',
+                borderWidth: 1, borderColor: t.borderStrong, borderRadius: t.radius,
+                paddingVertical: 13, alignItems: 'center', justifyContent: 'center',
+              })}
+              accessibilityLabel={i18nT('verify.scanPeer', "Scan a peer's QR")}
+            >
+              <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.text, letterSpacing: 0.5 }}>
+                {i18nT('verify.scanQR', 'SCAN QR')}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                await markVerified(contactId, true);
+                themedAlert(
+                  i18nT('verify.markedTitle', 'Verified'),
+                  i18nT('verify.markedDesc', { name: contact.name, defaultValue: `${contact.name} is verified. Your messages are protected against man-in-the-middle attacks.` }),
+                  [{ text: i18nT('common.ok', 'OK'), onPress: onBack }]
+                );
+              }}
+              disabled={theirWords.length === 0}
+              style={({ pressed }) => ({
+                flex: 1,
+                backgroundColor: theirWords.length === 0 ? t.surface2 : t.accent,
+                opacity: pressed ? 0.85 : 1,
+                borderRadius: t.radius, paddingVertical: 13,
+                alignItems: 'center', justifyContent: 'center',
+              })}
+              accessibilityLabel={i18nT('verify.markVerified', 'Mark verified')}
+            >
+              <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: theirWords.length === 0 ? t.textDim : (t.accentInk ?? '#0a0e0d'), fontWeight: '600', letterSpacing: 0.5 }}>
+                {i18nT('verify.markVerified', 'MARK VERIFIED')}
+              </Text>
+            </Pressable>
+          </View>
         </ScrollView>
       </View>
     );
@@ -359,25 +395,6 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
         </View>
 
       </ScrollView>
-    </View>
-  );
-}
-
-// ── WordChip ─────────────────────────────────────────────────────────────────
-function WordChip({ word, n, t }: { word: string; n: number; t: Theme }) {
-  return (
-    <View style={{
-      flexDirection: 'row', alignItems: 'center', gap: 6,
-      paddingHorizontal: 8, paddingVertical: 5,
-      backgroundColor: t.surface2, borderRadius: t.radiusS,
-      marginBottom: 4,
-    }}>
-      <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, width: 14 }}>
-        {n.toString().padStart(2, '0')}
-      </Text>
-      <Text style={{ fontFamily: t.fontMono, fontSize: 13, color: t.text, fontWeight: '500' }}>
-        {word}
-      </Text>
     </View>
   );
 }

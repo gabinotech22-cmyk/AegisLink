@@ -904,7 +904,12 @@
     "shareContactLabel": "Condividi il mio contatto",
     "match": "Le chiavi corrispondono",
     "noMatch": "Le chiavi non corrispondono",
-    "markVerified": "Segna come verificato"
+    "markVerified": "Segna come verificato",
+    "compareDesc": "Confronta le impronte della chiave di persona, tramite scansione QR o leggendo le 8 parole.",
+    "keyUnavailable": "Chiave del contatto non ancora disponibile.",
+    "alreadyVerified": "IDENTITÀ GIÀ VERIFICATA",
+    "markedTitle": "Verificato",
+    "markedDesc": "{{name}} è verificato. I tuoi messaggi sono protetti dagli attacchi man-in-the-middle."
   },
   "firstContact": {
     "title": "Primo contatto",

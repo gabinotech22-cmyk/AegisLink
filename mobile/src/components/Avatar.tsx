@@ -66,6 +66,13 @@ export function Avatar({ t, name, color, size = 44, photoUri, group, seed }: Pro
   }
 
   if (seed) {
+    // The identicon sits on a t.surface2 background. Never pass that same
+    // surface color as the identicon tint — the cells would collapse into the
+    // background and the avatar would look empty (this is the bug that hid all
+    // identity-generated avatars in the chat list). When no DISTINCT tint is
+    // provided, let Identicon derive a visible seed-based hue via its own
+    // `color ?? hsl(...)` fallback.
+    const tint = color && color !== t.surface2 ? color : undefined;
     return (
       <View
         style={{
@@ -78,7 +85,7 @@ export function Avatar({ t, name, color, size = 44, photoUri, group, seed }: Pro
           overflow: 'hidden',
         }}
       >
-        <Identicon seed={seed} size={size} color={color} />
+        <Identicon seed={seed} size={size} color={tint} />
       </View>
     );
   }

@@ -410,10 +410,12 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
     expect(() => performX3DH(alice, bundle)).toThrow(/Invalid PQ prekey signature/);
   });
 
-  // (4) Anti-downgrade: bundle advertised PQ but the initial message carried no
-  // ciphertext → the responder MUST abort.
-  it('shouldUsePqReceiver aborts when PQ advertised but no ciphertext (downgrade)', () => {
-    expect(() => shouldUsePqReceiver(true, false)).toThrow(/downgrade detected/);
+  // (4) Anti-downgrade (relaxed policy): bundle advertised PQ but the initial
+  // message carried no ciphertext → the responder FALLS BACK to v1 (still full
+  // X25519 E2EE) instead of aborting, so a v1 sender / bundle-publish gap never
+  // causes total message loss. The fallback is logged for telemetry.
+  it('shouldUsePqReceiver falls back to v1 when PQ advertised but no ciphertext', () => {
+    expect(shouldUsePqReceiver(true, false)).toBe('v1');
   });
 
   it('shouldUsePqReceiver selects v2 when PQ advertised and ciphertext present', () => {

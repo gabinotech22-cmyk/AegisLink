@@ -361,34 +361,11 @@ export function ContactDetailScreen({
                   </Text>
                 </Pressable>
               </View>
-              {!contact.verified && !keyChanged ? (
-                <Pressable
-                  onPress={() =>
-                    themedAlert(
-                      i18nT('contactDetail.markVerifiedTitle'),
-                      i18nT('contactDetail.markVerifiedDesc'),
-                      [
-                        { text: i18nT('common.cancel'), style: 'cancel' },
-                        {
-                          text: i18nT('contactDetail.wordsMatch'),
-                          onPress: () => void markVerified(contact.aegisId, true),
-                        },
-                      ]
-                    )
-                  }
-                  style={{
-                    marginTop: 10,
-                    backgroundColor: t.accent,
-                    paddingVertical: 10,
-                    borderRadius: t.radiusS,
-                    alignItems: 'center',
-                  }}
-                >
-                  <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: '#000', letterSpacing: 0.3 }}>
-                    {i18nT('contactDetail.verifiedCheck')}
-                  </Text>
-                </Pressable>
-              ) : contact.verified ? (
+              {/* Single verification entry: "VERIFY IDENTITY" above navigates to
+                  the dedicated Verify screen (QR / 8 safety words / Mark verified).
+                  The previous inline "words match" shortcut was a duplicate entry
+                  and has been removed. Verified contacts can still revoke here. */}
+              {contact.verified ? (
                 <Pressable
                   onPress={() =>
                     themedAlert(

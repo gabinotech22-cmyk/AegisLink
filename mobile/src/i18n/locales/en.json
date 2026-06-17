@@ -968,7 +968,12 @@
     "shareContactLabel": "Share my contact",
     "match": "Keys match",
     "noMatch": "Keys do not match",
-    "markVerified": "Mark as verified"
+    "markVerified": "Mark as verified",
+    "compareDesc": "Compare key fingerprints in person, by QR scan, or by reading 8 words.",
+    "keyUnavailable": "Contact key not available yet.",
+    "alreadyVerified": "IDENTITY ALREADY VERIFIED",
+    "markedTitle": "Verified",
+    "markedDesc": "{{name}} is verified. Your messages are protected against man-in-the-middle attacks."
   },
   "firstContact": {
     "title": "First contact",
