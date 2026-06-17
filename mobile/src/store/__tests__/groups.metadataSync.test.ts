@@ -135,4 +135,24 @@ describe('groups store — immediate metadata propagation', () => {
     expect(mockSaveGroup).not.toHaveBeenCalled();
     expect(mockBroadcastGroupMetadata).not.toHaveBeenCalled();
   });
+
+  it('removeMember re-keys AND broadcasts the new roster to remaining members', async () => {
+    await useGroups.getState().removeMember('g-1', 'peer-1');
+
+    // Roster updated (peer-1 dropped), rosterVersion bumped, persisted.
+    const saved = mockSaveGroup.mock.calls[0][0];
+    expect(saved.members).not.toContain('peer-1');
+    expect(saved.rosterVersion).toBe((baseGroup.rosterVersion ?? 1) + 1);
+
+    // Forward secrecy: rotate the SenderKey for the remaining members.
+    expect(mockRekeyGroupAfterRemoval).toHaveBeenCalledTimes(1);
+
+    // The fix: remaining members must be told the new roster NOW, otherwise they
+    // keep showing the removed member until some future carrier arrives.
+    expect(mockBroadcastGroupMetadata).toHaveBeenCalledTimes(1);
+    expect(mockBroadcastGroupMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({ aegisId: 'admin-id' }),
+      'g-1',
+    );
+  });
 });
