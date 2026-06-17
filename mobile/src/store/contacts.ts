@@ -152,12 +152,27 @@ export const useContacts = create<ContactsState>((set, get) => ({
 
     // Parallel MITM check against the directory: if the server publishes a
     // different key than what we scanned, the server (or someone with relay
-    // access) is lying. Warn the user.
+    // access) is lying. Warn the user. Also backfill the Ed25519 signing key:
+    // the QR/link carries only the box (X25519) key, but verifying admin-signed
+    // group metadata (so a link-joined group actually materializes) needs the
+    // signing key, which lives only in the directory.
     void (async () => {
       try {
         const record = await lookupIdentity(aegisId);
         if (record.publicKey !== publicKeyB64) {
           if (__DEV__) console.warn('[contacts] directory MITM warning: server publishes a different key than the one scanned');
+        }
+        const fetchedSigning =
+          typeof record.signingPublicKey === 'string' && record.signingPublicKey.length > 0
+            ? record.signingPublicKey
+            : null;
+        if (fetchedSigning) {
+          const cur = await getContact(aegisId);
+          if (cur && !cur.signingPublicKeyB64) {
+            const withSigning = { ...cur, signingPublicKeyB64: fetchedSigning };
+            await saveContact(withSigning);
+            set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? withSigning : c)) });
+          }
         }
       } catch {
         /* server unreachable is fine here */
