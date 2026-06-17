@@ -122,6 +122,10 @@ interface WireChallenge {
 let socket: Socket | null = null;
 let connected = false;
 let authenticated = false;
+// Registered exactly once (see armForegroundReconnect): forces a reconnect when
+// the app returns to the foreground, since Android routinely kills the
+// WebSocket while the app is suspended in the background.
+let foregroundReconnectArmed = false;
 let opkSecretsCache: Map<number, Uint8Array> = new Map();
 let mySpkSecretCache: Uint8Array | null = null;
 
@@ -497,12 +501,51 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   });
 }
 
+/**
+ * Reconnect the socket the moment the app returns to the foreground.
+ *
+ * Android (and iOS) suspend the JS runtime while the app is backgrounded, which
+ * kills the WebSocket; socket.io's own reconnect timer is frozen during that
+ * suspension, so on resume the client can sit disconnected — or worse, hold a
+ * half-open "ghost" the relay still counts as online, so inbound messages are
+ * routed to a dead socket instead of triggering an FCM push wake-up. Both show
+ * up to the user as "connection drops / notifications don't arrive after closing
+ * the app". Forcing a reconnect on 'active' closes that gap. Registered once.
+ */
+function armForegroundReconnect(): void {
+  if (foregroundReconnectArmed) return;
+  foregroundReconnectArmed = true;
+  const { AppState } = require('react-native') as typeof import('react-native');
+  AppState.addEventListener('change', (next: string) => {
+    if (next !== 'active') return;
+    if (socket) {
+      if (!socket.connected) socket.connect();
+      return;
+    }
+    // No socket at all (e.g. cold resume before connect ran): bring it up.
+    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+    const id = useIdentity.getState().identity;
+    if (id) connect(id);
+  });
+}
+
 export function connect(identity: Identity): Socket {
+  // Idempotent (flag-guarded): arm the foreground-reconnect listener on the
+  // first connect of the app's lifetime, regardless of which branch we take.
+  armForegroundReconnect();
+
   if (
     socket &&
     socket.auth &&
     (socket.auth as { aegisId: string }).aegisId === identity.aegisId
   ) {
+    // Same identity: reuse the socket — but make sure it's actually trying to
+    // connect before handing it back. After a background suspension the OS often
+    // kills the WebSocket while socket.io's reconnect timer is frozen, leaving a
+    // disconnected handle. Callers that re-enter connect() (push wake-up, inline
+    // reply, foreground) would otherwise receive that dead socket and never come
+    // back online. Kicking it is a no-op when already connected.
+    if (!socket.connected) socket.connect();
     return socket;
   }
   if (socket) socket.disconnect();
