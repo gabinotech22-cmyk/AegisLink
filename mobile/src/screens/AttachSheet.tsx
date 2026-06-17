@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import * as ImagePicker from 'expo-image-picker';
 import type { ImagePickerAsset } from 'expo-image-picker';
@@ -8,14 +9,12 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
-import { FloatingSheet } from '../components/FloatingSheet';
+import { TopBar } from '../components/TopBar';
 import { useMessages } from '../store/messages';
 import { withPickingGuard } from '../utils/pickingGuard';
 import { themedAlert } from '../components/AlertHost';
 
 interface Props {
-  /** Controls the floating window. Defaults to true (route-driven mount). */
-  visible?: boolean;
   onBack: () => void;
   onPick: (kind: 'scheduled' | 'location' | 'viewoncesend' | 'photo' | 'camera' | 'file' | 'voice' | 'video' | 'contact') => void;
   /** Called when user picks multiple images (2+) from gallery. */
@@ -24,9 +23,10 @@ interface Props {
   onMultipleFiles?: (assets: DocumentPickerAsset[]) => void;
 }
 
-export function AttachSheetScreen({ visible = true, onBack, onPick, onMultipleImages, onMultipleFiles }: Props) {
+export function AttachSheetScreen({ onBack, onPick, onMultipleImages, onMultipleFiles }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
+  const insets = useSafeAreaInsets();
   const setPendingMedia = useMessages((s) => s.setPendingMedia);
   const setPendingVideo = useMessages((s) => s.setPendingVideo);
   const [picking, setPicking] = useState(false);
@@ -189,66 +189,71 @@ export function AttachSheetScreen({ visible = true, onBack, onPick, onMultipleIm
     { id: 'contact', icon: <I.Users size={22} color={t.textDim} />, label: i18nT('attachSheet.contact', 'Contact'), sub: i18nT('attachSheet.shareId', 'Share ID') },
   ];
 
+  if (picking) {
+    return (
+      <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <ActivityIndicator color={t.accent} size="small" />
+        <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.8 }}>
+          {i18nT('attachSheet.loading', 'LOADING…')}
+        </Text>
+      </View>
+    );
+  }
+
   return (
-    <FloatingSheet
-      t={t}
-      visible={visible}
-      onClose={onBack}
-      title={i18nT('attachSheet.title', 'Attach')}
-      maxWidth={420}
-    >
-      {picking ? (
-        <View style={{ alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 48 }}>
-          <ActivityIndicator color={t.accent} size="small" />
-          <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.8 }}>
-            {i18nT('attachSheet.loading', 'LOADING…')}
+    <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
+      <TopBar
+        t={t}
+        title={i18nT('attachSheet.title', 'Attach')}
+        left={
+          <Pressable onPress={onBack} hitSlop={8} style={{ padding: 4 }}>
+            <I.ChevronL size={22} color={t.textDim} />
+          </Pressable>
+        }
+      />
+      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 22 + insets.bottom }}>
+        <View
+          style={{
+            padding: 14,
+            backgroundColor: t.surface,
+            borderWidth: 1,
+            borderColor: t.border,
+            borderRadius: t.radius,
+            marginBottom: 18,
+          }}
+        >
+          <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19 }}>
+            {i18nT('attachSheet.cryptoWarning', 'Everything is encrypted before leaving the device. File EXIF and metadata are automatically removed.')}
           </Text>
         </View>
-      ) : (
-        <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
-          <View
-            style={{
-              padding: 12,
-              backgroundColor: t.bg,
-              borderWidth: 1,
-              borderColor: t.border,
-              borderRadius: t.radius,
-              marginBottom: 14,
-            }}
-          >
-            <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 18 }}>
-              {i18nT('attachSheet.cryptoWarning', 'Everything is encrypted before leaving the device. File EXIF and metadata are automatically removed.')}
-            </Text>
-          </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-            {opts.map((o) => (
-              <Pressable
-                key={o.id}
-                onPress={o.handler ? o.handler : () => onPick(o.id)}
-                style={({ pressed }) => ({
-                  width: '48%',
-                  padding: 14,
-                  backgroundColor: t.bg,
-                  borderWidth: 1,
-                  borderColor: o.accent ? `${t.accent}44` : t.border,
-                  borderRadius: t.radius,
-                  gap: 10,
-                  opacity: pressed ? 0.8 : 1,
-                })}
-              >
-                {o.icon}
-                <View>
-                  <Text style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text }}>{o.label}</Text>
-                  <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, marginTop: 3 }}>
-                    {o.sub.toUpperCase()}
-                  </Text>
-                </View>
-              </Pressable>
-            ))}
-          </View>
-        </ScrollView>
-      )}
-    </FloatingSheet>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          {opts.map((o) => (
+            <Pressable
+              key={o.id}
+              onPress={o.handler ? o.handler : () => onPick(o.id)}
+              style={({ pressed }) => ({
+                width: '48%',
+                padding: 14,
+                backgroundColor: t.surface,
+                borderWidth: 1,
+                borderColor: o.accent ? `${t.accent}44` : t.border,
+                borderRadius: t.radius,
+                gap: 10,
+                opacity: pressed ? 0.8 : 1,
+              })}
+            >
+              {o.icon}
+              <View>
+                <Text style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text }}>{o.label}</Text>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, marginTop: 3 }}>
+                  {o.sub.toUpperCase()}
+                </Text>
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
