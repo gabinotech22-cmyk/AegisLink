@@ -16,6 +16,8 @@
 import {
   computeRosterHash,
   verifyGroupMetadataV2,
+  verifyGroupGovernance,
+  type GroupPermissions,
 } from '../crypto/groupSig';
 
 // Re-export so existing importers (e.g. the decision unit tests) keep resolving
@@ -188,4 +190,86 @@ export function decideV2GroupMetadata(input: V2DecisionInput): V2Decision {
     return { kind: 'updateNameOnly', name: groupName, adminSig: adminSig as string };
   }
   return { kind: 'renderOnly' };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Governance (roles + permissions) — Phase 2b
+//
+// Orthogonal to the roster decision above: a group_msg may carry an owner-signed
+// governance state (admins/moderators + permission gates + a monotonic
+// govVersion). This pure function decides whether to APPLY it, following the
+// same verify-before-trust discipline:
+//   1. ownerId in the claim must match the group's trusted adminId (only the
+//      owner governs),
+//   2. govVersion must be strictly newer than what we already trust
+//      (anti-rollback — a demoted admin cannot replay an older signed state),
+//   3. the owner's Ed25519 signature must verify over the exact canonical bytes.
+// Absent/partial fields ⇒ 'skip' (pre-governance sender → keep local defaults).
+// ───────────────────────────────────────────────────────────────────────────
+
+/** Untrusted governance claimed by an inbound group_msg. */
+export interface ClaimedGovernance {
+  admins: string[];
+  moderators: string[];
+  permissions: GroupPermissions;
+  govSig: string;
+  govVersion: number;
+}
+
+export interface GovernanceDecisionInput {
+  groupId: string;
+  /** The group's locally-trusted owner (adminId), or undefined if unknown. */
+  trustedAdminId?: string;
+  /** govVersion we already trust (0 if none). */
+  localGovVersion: number;
+  /** Untrusted governance from the wire, or null if the message carried none. */
+  claimed: ClaimedGovernance | null;
+  /** Owner signing public key (Base64) resolved by the caller, or null. */
+  ownerSigningKeyB64: string | null;
+}
+
+export type GovernanceDecision =
+  /** No governance to apply (absent fields, key unresolved, or owner mismatch). */
+  | { kind: 'skip' }
+  /** Claimed govVersion is not newer than local — ignore (possibly a rollback). */
+  | { kind: 'stale' }
+  /** Signature failed to verify — reject the claimed governance. */
+  | { kind: 'reject' }
+  /** Apply the verified governance to the local group. */
+  | {
+      kind: 'apply';
+      admins: string[];
+      moderators: string[];
+      permissions: GroupPermissions;
+      govSig: string;
+      govVersion: number;
+    };
+
+export function decideGovernanceUpdate(input: GovernanceDecisionInput): GovernanceDecision {
+  const { groupId, trustedAdminId, localGovVersion, claimed, ownerSigningKeyB64 } = input;
+  if (!claimed || !trustedAdminId) return { kind: 'skip' };
+  if (!ownerSigningKeyB64) return { kind: 'skip' };
+  // Anti-rollback: only strictly newer governance is accepted.
+  if (claimed.govVersion <= localGovVersion) return { kind: 'stale' };
+  const ok = verifyGroupGovernance(
+    {
+      groupId,
+      ownerId: trustedAdminId,
+      admins: claimed.admins,
+      moderators: claimed.moderators,
+      permissions: claimed.permissions,
+      govVersion: claimed.govVersion,
+    },
+    claimed.govSig,
+    ownerSigningKeyB64,
+  );
+  if (!ok) return { kind: 'reject' };
+  return {
+    kind: 'apply',
+    admins: claimed.admins,
+    moderators: claimed.moderators,
+    permissions: claimed.permissions,
+    govSig: claimed.govSig,
+    govVersion: claimed.govVersion,
+  };
 }
