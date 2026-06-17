@@ -20,6 +20,14 @@ interface Props {
   t: Theme;
   style?: TextStyle;
   selectable?: boolean;
+  /**
+   * True when this text is rendered on the OUTGOING (accent-colored) bubble.
+   * There, links/mentions painted with t.accent are invisible because the
+   * bubble background IS t.accent (bubbleOut === accent in the Vault theme).
+   * When set, links/mentions inherit the bubble's text color instead (still
+   * underlined/bold so they read as links), fixing the "blank own bubble" bug.
+   */
+  onAccent?: boolean;
 }
 
 type Segment =
@@ -82,8 +90,12 @@ function parse(body: string): Segment[] {
   return segments;
 }
 
-export function FormattedText({ body, t, style, selectable }: Props) {
+export function FormattedText({ body, t, style, selectable, onAccent }: Props) {
   const segments = parse(body);
+  // On the accent bubble, let links/mentions inherit the bubble text color
+  // (undefined → inherits from the parent <Text style={style}>); elsewhere use
+  // the accent color as the link/mention highlight.
+  const highlightColor = onAccent ? undefined : t.accent;
 
   return (
     <Text selectable={selectable} style={style}>
@@ -134,7 +146,7 @@ export function FormattedText({ body, t, style, selectable }: Props) {
             return (
               <Text
                 key={i}
-                style={{ color: t.accent, textDecorationLine: 'underline' }}
+                style={{ color: highlightColor, textDecorationLine: 'underline' }}
                 accessibilityRole="link"
                 accessibilityLabel={seg.href}
                 onPress={() => {
@@ -150,7 +162,7 @@ export function FormattedText({ body, t, style, selectable }: Props) {
 
           case 'mention':
             return (
-              <Text key={i} style={{ color: t.accent, fontWeight: '600' }}>
+              <Text key={i} style={{ color: highlightColor, fontWeight: '600' }}>
                 {seg.text}
               </Text>
             );
