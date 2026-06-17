@@ -971,6 +971,7 @@ function GroupBubble({
           <FormattedText
             body={body}
             t={t}
+            onAccent={me}
             style={{ color: me ? t.bubbleOutText : t.text, fontFamily: t.font, fontSize: 14.5, lineHeight: 21 }}
           />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: me ? 'rgba(255,255,255,0.15)' : t.divider }}>
@@ -1288,6 +1289,7 @@ function GroupBubble({
               <FormattedText
                 body={body}
                 t={t}
+                onAccent={me}
                 style={{
                   color: textColor,
                   fontFamily: t.font,
@@ -1407,6 +1409,7 @@ function GroupBubble({
         <FormattedText
           body={body}
           t={t}
+          onAccent={me}
           style={{ fontFamily: t.font, fontSize: 15, lineHeight: 21, color: me ? t.bubbleOutText : t.text }}
         />
         {/* Open Graph link preview card */}

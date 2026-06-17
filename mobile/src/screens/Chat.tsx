@@ -2002,6 +2002,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
               <FormattedText
                 body={m.body}
                 t={t}
+                onAccent={me}
                 style={{
                   color: textColor,
                   fontFamily: t.font,
@@ -2261,6 +2262,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
         <FormattedText
           body={m.body}
           t={t}
+          onAccent={me}
           style={{ color: me ? t.bubbleOutText : t.bubbleInText, fontFamily: t.font, fontSize: 15, lineHeight: 20 }}
         />
         {/* Open Graph link preview card */}

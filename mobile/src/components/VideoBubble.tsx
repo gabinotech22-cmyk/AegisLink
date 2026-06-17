@@ -72,6 +72,7 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: Vi
         <FormattedText
           body={caption}
           t={t}
+          onAccent={me}
           style={{
             color: textColor,
             fontFamily: t.font,
