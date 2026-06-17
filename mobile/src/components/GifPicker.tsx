@@ -39,7 +39,12 @@ interface Props {
 }
 
 const SCREEN_W = Dimensions.get('window').width;
-const TILE_SIZE = (SCREEN_W - 18 * 2 - 10) / 2; // 2 columns, 10px gap
+const SCREEN_H = Dimensions.get('window').height;
+// Keyboard-height docked panel (WhatsApp-style), not a full screen.
+const PANEL_H = Math.max(300, Math.round(SCREEN_H * 0.46));
+const GRID_PAD = 12;
+const GRID_GAP = 6;
+const TILE_SIZE = (SCREEN_W - GRID_PAD * 2 - GRID_GAP * 2) / 3; // 3 columns
 
 export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Props) {
   const { t } = useTheme();
@@ -130,144 +135,135 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
     }
   }
 
-  const colCount = 2;
+  const colCount = 3;
 
   return (
     <Modal
       visible={visible}
+      transparent
       animationType="slide"
-      presentationStyle="pageSheet"
       onShow={handleShow}
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1, backgroundColor: t.bg }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
-        {/* Header */}
-        <View
-          style={{
-            paddingTop: insets.top + 8,
-            paddingHorizontal: 18,
-            paddingBottom: 12,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 12,
-            borderBottomWidth: 1,
-            borderBottomColor: t.border,
-          }}
+        {/* Dimmed backdrop — tap to dismiss; chat stays visible behind. */}
+        <Pressable
+          onPress={onClose}
+          accessibilityLabel="Close GIF picker"
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
         >
+          {/* Bottom-docked panel (keyboard height). */}
           <Pressable
-            onPress={onClose}
-            hitSlop={8}
-            accessibilityLabel="Close GIF picker"
-            style={{ padding: 4 }}
-          >
-            <I.ChevronL size={22} color={t.textDim} />
-          </Pressable>
-          <Text
+            onPress={() => {}}
             style={{
-              fontFamily: t.fontDisplay,
-              fontSize: 17,
-              fontWeight: '600',
-              color: t.text,
-              flex: 1,
+              height: PANEL_H,
+              backgroundColor: t.bg,
+              borderTopLeftRadius: t.radiusL,
+              borderTopRightRadius: t.radiusL,
+              borderTopWidth: 1,
+              borderColor: t.border,
+              paddingBottom: insets.bottom,
+              overflow: 'hidden',
             }}
           >
-            {activeTab === 'gifs' ? 'GIFs' : 'Stickers'}
-          </Text>
-        </View>
+            {/* Grab handle */}
+            <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: 4 }}>
+              <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: t.border }} />
+            </View>
 
-        {/* Tabs */}
-        <View
-          style={{
-            flexDirection: 'row',
-            paddingHorizontal: 18,
-            paddingTop: 12,
-            paddingBottom: 10,
-            gap: 8,
-          }}
-        >
-          {(['gifs', 'stickers'] as GifTab[]).map((tab) => {
-            const active = activeTab === tab;
-            return (
-              <Pressable
-                key={tab}
-                onPress={() => handleTabPress(tab)}
-                accessibilityLabel={tab === 'gifs' ? 'GIFs tab' : 'Stickers tab'}
-                style={{
-                  paddingHorizontal: 18,
-                  paddingVertical: 7,
-                  borderRadius: t.radiusL,
-                  backgroundColor: active ? t.accent : t.surface,
-                  borderWidth: 1,
-                  borderColor: active ? t.accent : t.border,
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: t.fontMono,
-                    fontSize: 11,
-                    letterSpacing: 0.6,
-                    color: active ? t.accentInk : t.textDim,
-                    fontWeight: active ? '700' : '400',
-                  }}
-                >
-                  {tab.toUpperCase()}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {/* Search bar (only for GIFs) */}
-        {activeTab === 'gifs' && (
-          <View style={{ paddingHorizontal: 18, marginBottom: 12 }}>
+            {/* Tabs + inline search — single compact row */}
             <View
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
-                backgroundColor: t.surface,
-                borderWidth: 1,
-                borderColor: t.border,
-                borderRadius: t.radius,
-                paddingHorizontal: 12,
                 gap: 8,
+                paddingHorizontal: 12,
+                paddingTop: 4,
+                paddingBottom: 10,
               }}
             >
-              <I.Search size={16} color={t.textDim} />
-              <TextInput
-                value={query}
-                onChangeText={handleQueryChange}
-                placeholder="Search GIFs…"
-                placeholderTextColor={t.textDim}
-                style={{
-                  flex: 1,
-                  fontFamily: t.font,
-                  fontSize: 14,
-                  color: t.text,
-                  paddingVertical: 10,
-                }}
-                autoCorrect={false}
-                autoCapitalize="none"
-                returnKeyType="search"
-                onSubmitEditing={() => void fetchGifs(query)}
-                accessibilityLabel="Search GIFs"
-              />
-              {query.length > 0 && (
-                <Pressable
-                  onPress={() => { setQuery(''); void fetchGifs(''); }}
-                  hitSlop={6}
-                  accessibilityLabel="Clear search"
+              {(['gifs', 'stickers'] as GifTab[]).map((tab) => {
+                const active = activeTab === tab;
+                return (
+                  <Pressable
+                    key={tab}
+                    onPress={() => handleTabPress(tab)}
+                    accessibilityLabel={tab === 'gifs' ? 'GIFs tab' : 'Stickers tab'}
+                    style={{
+                      paddingHorizontal: 16,
+                      paddingVertical: 6,
+                      borderRadius: t.radiusL,
+                      backgroundColor: active ? t.accent : t.surface,
+                      borderWidth: 1,
+                      borderColor: active ? t.accent : t.border,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: t.fontMono,
+                        fontSize: 11,
+                        letterSpacing: 0.6,
+                        color: active ? t.accentInk : t.textDim,
+                        fontWeight: active ? '700' : '400',
+                      }}
+                    >
+                      {tab.toUpperCase()}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              {activeTab === 'gifs' && (
+                <View
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: t.surface,
+                    borderWidth: 1,
+                    borderColor: t.border,
+                    borderRadius: t.radiusL,
+                    paddingHorizontal: 10,
+                    gap: 6,
+                  }}
                 >
-                  <I.X size={16} color={t.textDim} />
-                </Pressable>
+                  <I.Search size={15} color={t.textDim} />
+                  <TextInput
+                    value={query}
+                    onChangeText={handleQueryChange}
+                    placeholder="Buscar GIFs…"
+                    placeholderTextColor={t.textDim}
+                    style={{
+                      flex: 1,
+                      fontFamily: t.font,
+                      fontSize: 13,
+                      color: t.text,
+                      paddingVertical: 6,
+                    }}
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                    returnKeyType="search"
+                    onSubmitEditing={() => void fetchGifs(query)}
+                    accessibilityLabel="Search GIFs"
+                  />
+                  {query.length > 0 && (
+                    <Pressable
+                      onPress={() => { setQuery(''); void fetchGifs(''); }}
+                      hitSlop={6}
+                      accessibilityLabel="Clear search"
+                    >
+                      <I.X size={15} color={t.textDim} />
+                    </Pressable>
+                  )}
+                </View>
               )}
             </View>
-          </View>
-        )}
 
-        {/* Content */}
+            {/* Content */}
+            <View style={{ flex: 1 }}>
         {activeTab === 'gifs' ? (
           loading ? (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
@@ -333,8 +329,8 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
               data={results}
               keyExtractor={(item) => item.id}
               numColumns={colCount}
-              contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: insets.bottom + 12, gap: 10 }}
-              columnWrapperStyle={{ gap: 10 }}
+              contentContainerStyle={{ paddingHorizontal: GRID_PAD, paddingBottom: 12, gap: GRID_GAP }}
+              columnWrapperStyle={{ gap: GRID_GAP }}
               removeClippedSubviews
               maxToRenderPerBatch={10}
               windowSize={8}
@@ -401,6 +397,9 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
             }}
           />
         )}
+            </View>
+          </Pressable>
+        </Pressable>
       </KeyboardAvoidingView>
     </Modal>
   );
