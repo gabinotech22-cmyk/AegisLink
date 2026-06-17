@@ -7,7 +7,7 @@ const { decodeBase64 } = naclUtil;
 import { randomUUID } from 'node:crypto';
 import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
-import { notifyRecipient, sendCallWakeUp, type CallMedia } from '../push/expo.js';
+import { notifyRecipient, sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
@@ -1370,6 +1370,19 @@ const GroupCallOffer   = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z
 const GroupCallAnswer  = GroupCallOffer;
 const GroupCallIce     = GroupCallOffer;
 const GroupCallHangup  = z.object({ to: AEGIS_ID_ARRAY, callId: z.string().uuid(), reason: z.string().max(64).optional() });
+// Channel heartbeat announces an open voice channel to the WHOLE group (not just
+// the ≤8 mesh), so its recipient list is wider than AEGIS_ID_ARRAY. groupName +
+// participants are surfaced only on already-trusting clients (the receiver
+// re-checks governance locally); the relay never persists them.
+const GROUP_MEMBER_ARRAY = z.array(z.string().regex(AEGIS_ID_RE)).min(1).max(512);
+const GroupCallChannel = z.object({
+  to: GROUP_MEMBER_ARRAY,
+  callId: z.string().uuid(),
+  groupId: z.string().min(1).max(128),
+  groupName: z.string().min(1).max(64),
+  participants: z.array(z.string().regex(AEGIS_ID_RE)).max(512).optional(),
+  media: z.enum(['audio', 'video']),
+});
 
 // Rate-limit buckets for call:offer — keyed by aegisId, max 5 per minute
 const callOfferRateLimit = new Map<string, { count: number; reset: number }>();
@@ -1402,6 +1415,45 @@ function checkGroupCallInviteRateLimit(aegisId: string): boolean {
     if (oldest !== undefined) groupCallInviteRateLimit.delete(oldest);
   }
   return entry.count <= 3;
+}
+
+// Rate-limit buckets for group_call:channel heartbeats — keyed by aegisId. A
+// channel re-broadcasts every ~20s and joiners emit their own, so allow more
+// headroom than the one-shot invite: 20 per minute.
+const groupCallChannelRateLimit = new Map<string, { count: number; reset: number }>();
+
+function checkGroupCallChannelRateLimit(aegisId: string): boolean {
+  const now = Date.now();
+  const entry = groupCallChannelRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
+  entry.count++;
+  groupCallChannelRateLimit.set(aegisId, entry);
+  if (groupCallChannelRateLimit.size > RATE_LIMIT_MAP_MAX) {
+    const oldest = groupCallChannelRateLimit.keys().next().value;
+    if (oldest !== undefined) groupCallChannelRateLimit.delete(oldest);
+  }
+  return entry.count <= 20;
+}
+
+// Dedupe offline wake-up pushes per (callId, member): the channel heartbeat
+// repeats every ~20s, but an offline member should be woken at most once per
+// minute per channel — otherwise a long call would push them every 20s. In
+// memory only (zero metadata at rest), TTL 60s, bounded.
+const GROUPCALL_PUSH_TTL_MS = 60_000;
+const GROUPCALL_PUSH_MAP_MAX = 10_000;
+const groupCallPushedAt = new Map<string, number>();
+
+function shouldPushGroupCallWake(callId: string, aegisId: string): boolean {
+  const key = `${callId}|${aegisId}`;
+  const now = Date.now();
+  const last = groupCallPushedAt.get(key);
+  if (last !== undefined && now - last < GROUPCALL_PUSH_TTL_MS) return false;
+  groupCallPushedAt.set(key, now);
+  if (groupCallPushedAt.size > GROUPCALL_PUSH_MAP_MAX) {
+    const oldest = groupCallPushedAt.keys().next().value;
+    if (oldest !== undefined) groupCallPushedAt.delete(oldest);
+  }
+  return true;
 }
 
 // ── Ephemeral call:invite re-delivery queue ──────────────────────────────────
@@ -1629,6 +1681,26 @@ function attachGroupCallSignaling(socket: Socket, me: string, sockets: Map<strin
       return;
     }
     fanout('group_call:invite', parsed.data);
+  });
+
+  // Voice-channel heartbeat: fan out to ONLINE members (banner awareness) and
+  // fire a deduped zero-metadata wake-up push to OFFLINE members so a backgrounded/
+  // killed app reconnects and re-receives the heartbeat (→ local "Unirse" notif).
+  socket.on('group_call:channel', (raw) => {
+    const parsed = GroupCallChannel.safeParse(raw);
+    if (!parsed.success) return;
+    if (!checkGroupCallChannelRateLimit(me)) return;
+    const { to, callId, ...rest } = parsed.data;
+    for (const id of to) {
+      if (id === me) continue;
+      const target = sockets.get(id);
+      if (target && target.size > 0) {
+        for (const s of target) s.emit('group_call:channel', { ...rest, callId, from: me });
+      } else if (shouldPushGroupCallWake(callId, id)) {
+        // Offline (no live socket): wake them. Best-effort, never blocks the loop.
+        void sendGroupCallWakeUp(id);
+      }
+    }
   });
 
   socket.on('group_call:accept',  (raw) => { const p = GroupCallAccept.safeParse(raw);  if (p.success) fwd('group_call:accept',  p.data); });

@@ -204,6 +204,34 @@ function attachLocalNotificationHandlers(): void {
       if (fromAegisId && _onOpenChat) {
         _onOpenChat({ aegisId: fromAegisId });
       }
+    } else if (actionId === 'DISMISS_GROUPCALL') {
+      // User dismissed the voice-channel banner — just clear the notification.
+      void Notifications.dismissNotificationAsync(response.notification.request.identifier);
+    } else if (
+      (data?.type as string) === 'group_call_channel' ||
+      actionId === 'JOIN_GROUPCALL'
+    ) {
+      // Tap or "Unirse" on a voice-channel notification: reconnect so the relay
+      // re-delivers the channel heartbeat, then join if the channel is already
+      // known locally, else open the group chat where the live banner appears.
+      const groupId = data?.groupId as string | undefined;
+      try {
+        const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+        const identity = useIdentity.getState().identity;
+        const client = require('../socket/client') as typeof import('../socket/client');
+        if (identity && !client.isConnected()) client.connect(identity);
+      } catch { /* socket module not yet loaded — no-op */ }
+      if (groupId) {
+        try {
+          const { useActiveCalls } = require('../store/activeCalls') as typeof import('../store/activeCalls');
+          if (useActiveCalls.getState().getFresh(groupId, Date.now())) {
+            const { joinGroupCall } = require('../socket/groupCalls') as typeof import('../socket/groupCalls');
+            void joinGroupCall(groupId);
+          } else if (_onOpenChat) {
+            _onOpenChat({ groupId });
+          }
+        } catch { /* stores not ready — best effort */ }
+      }
     } else {
       // Default tap — open the group chat (by groupId) or the 1:1 chat.
       const target = resolveNotificationOpenTarget(data);
@@ -278,6 +306,20 @@ function attachLocalNotificationHandlers(): void {
       options: { opensAppToForeground: false, isDestructive: true },
     },
   ]);
+
+  // Group voice-channel banner notification (Discord-style: join, don't ring).
+  void Notifications.setNotificationCategoryAsync('aegislink-groupcall', [
+    {
+      identifier: 'JOIN_GROUPCALL',
+      buttonTitle: 'Unirse',
+      options: { opensAppToForeground: true },
+    },
+    {
+      identifier: 'DISMISS_GROUPCALL',
+      buttonTitle: 'Descartar',
+      options: { opensAppToForeground: false, isDestructive: true },
+    },
+  ]);
 }
 
 export async function registerForPush(identity: Identity): Promise<{ token: string | null }> {
@@ -299,6 +341,14 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
       if (__DEV__) console.log('[push] notification permission denied — wake-ups disabled');
       return { token: null };
     }
+
+    // Route background wake-up pushes to the headless reconnect task so a
+    // killed/backgrounded app can rebuild its socket (and surface rich call
+    // notifications) without a tap. Independent of the token POST below.
+    try {
+      const { registerBackgroundReconnect } = require('./backgroundReconnect') as typeof import('./backgroundReconnect');
+      await registerBackgroundReconnect();
+    } catch { /* task module unavailable — fall back to tap-to-wake */ }
 
     const tokenResponse = await Notifications.getExpoPushTokenAsync();
     const expoToken = tokenResponse.data;
@@ -482,6 +532,44 @@ export async function showCriticalSecurityNotification(
     });
   } catch (err) {
     if (__DEV__) console.warn('[push] showCriticalSecurityNotification failed:', err);
+  }
+}
+
+/**
+ * Surface an open group voice channel as a local "Unirse / Descartar"
+ * notification (Discord-style banner, not a ring). Mirrors the design mockup:
+ * lock-screen card with a Join action; the payload itself carries no call
+ * content. Skipped while the user is already looking at this group's chat (the
+ * in-chat banner covers that) and honors master/mute preferences.
+ */
+export async function showGroupCallChannelNotification(
+  groupId: string,
+  groupName: string,
+  callId: string,
+): Promise<void> {
+  try {
+    // Don't double-notify the chat the user is currently viewing.
+    if (activeChatId === groupId) return;
+
+    const { usePreferences } = require('../store/preferences');
+    const prefs = usePreferences.getState();
+    if (!prefs.notifMaster) return;
+    if (prefs.mutedChats.includes(groupId)) return;
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: `AegisLink · ${groupName}`,
+        body: 'Hay un canal de voz activo · toca para unirte',
+        sound: prefs.notifSound ? 'call_incoming.mp3' : undefined,
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+        categoryIdentifier: 'aegislink-groupcall',
+        data: { type: 'group_call_channel', groupId, callId, isGroup: true },
+        ...(Platform.OS === 'android' ? { channelId: 'aegislink-calls' } : {}),
+      },
+      trigger: null,
+    });
+  } catch (err) {
+    if (__DEV__) console.warn('[push] showGroupCallChannelNotification failed:', err);
   }
 }
 

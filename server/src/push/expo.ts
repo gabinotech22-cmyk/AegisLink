@@ -102,6 +102,45 @@ export async function sendCallWakeUp(
   return true;
 }
 
+/**
+ * Wake-up push for an active group voice channel (Discord-style, no ring).
+ *
+ * Zero-metadata, exactly like sendCallWakeUp: a generic visible heads-up so the
+ * OS can wake the (possibly killed) app. No group name, no callId, no roster —
+ * those stay sealed in the `group_call:channel` heartbeat, which the app
+ * re-receives within one heartbeat interval after it reconnects, and only then
+ * surfaces the rich local "Unirse / Descartar" notification.
+ *
+ * Returns true if at least one wake-up was dispatched.
+ */
+export async function sendGroupCallWakeUp(toAegisId: string): Promise<boolean> {
+  const tokens = await pushRepo.forRecipient(toAegisId);
+  if (tokens.length === 0) return false;
+
+  const messages: ExpoPushMessage[] = [];
+  for (const row of tokens) {
+    if (!Expo.isExpoPushToken(row.expo_token)) {
+      void pushRepo.delete(row.expo_token);
+      continue;
+    }
+    messages.push({
+      to: row.expo_token,
+      sound: 'default',
+      priority: 'high',
+      _contentAvailable: true,
+      ttl: 30,
+      title: 'AegisLink',
+      body: 'Canal de voz activo · E2EE',
+      data: { kind: 'call_wakeup' },
+      channelId: 'aegislink-calls',
+    });
+  }
+
+  if (messages.length === 0) return false;
+  await sendChunked(messages);
+  return true;
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function sendChunked(messages: ExpoPushMessage[]): Promise<void> {

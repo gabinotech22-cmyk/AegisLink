@@ -16,6 +16,8 @@ import {
   type CallMedia,
 } from '../webrtc/peer';
 import { fetchTurnConfig } from '../webrtc/ice';
+import { startInCallAudio, stopInCallAudio } from '../webrtc/inCall';
+import { startCallService, stopCallService } from '../webrtc/callForegroundService';
 import { themedAlert } from '../components/AlertHost';
 
 // ---------------------------------------------------------------------------
@@ -361,6 +363,12 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     });
   } catch { /* expo-av not available in this context */ }
 
+  // Earpiece + proximity sensor for audio (screen blanks at the ear) / speaker
+  // for video, and an Android foreground service so the call survives the app
+  // being backgrounded. iOS background is covered by UIBackgroundModes.
+  startInCallAudio(media === 'video' ? 'video' : 'audio');
+  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
+
   // Reset the ICE queue for this new call
   resetIceQueue();
 
@@ -464,6 +472,12 @@ export async function acceptCall(): Promise<void> {
       playThroughEarpieceAndroid: media !== 'video',
     });
   } catch { /* expo-av not available in this context */ }
+
+  // Earpiece + proximity sensor for audio (screen blanks at the ear) / speaker
+  // for video, and an Android foreground service so the call survives the app
+  // being backgrounded. iOS background is covered by UIBackgroundModes.
+  startInCallAudio(media === 'video' ? 'video' : 'audio');
+  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
 
   const peer = await createPeer(media, {
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
@@ -594,6 +608,10 @@ function finalizeCall(reason: string, opts: { emitHangup: boolean }): void {
       playThroughEarpieceAndroid: false,
     });
   } catch { /* no-op */ }
+
+  // Release proximity/audio session and tear down the Android foreground service.
+  stopInCallAudio();
+  stopCallService();
 
   activePeer?.cleanup();
 
