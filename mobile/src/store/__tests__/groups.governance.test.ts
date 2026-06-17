@@ -131,4 +131,22 @@ describe('groups store — governance signing', () => {
     expect(updated.admins ?? []).not.toContain(mockOwnerId);
     expect(updated.govVersion).toBe(1);
   });
+
+  it('acceptGroupInvite clears the pending flag', async () => {
+    useGroups.setState({
+      groups: [
+        { id: 'inv-1', name: 'Invited', members: [mockOwnerId], createdAt: 1, pending: true },
+      ],
+    });
+    await useGroups.getState().acceptGroupInvite('inv-1');
+    expect(useGroups.getState().groups.find((g) => g.id === 'inv-1')!.pending).toBeUndefined();
+  });
+
+  it('acceptGroupInvite is a no-op on a non-pending group', async () => {
+    useGroups.setState({
+      groups: [{ id: 'g-2', name: 'Joined', members: [mockOwnerId], createdAt: 1 }],
+    });
+    await useGroups.getState().acceptGroupInvite('g-2');
+    expect(useGroups.getState().groups.find((g) => g.id === 'g-2')!.pending).toBeUndefined();
+  });
 });

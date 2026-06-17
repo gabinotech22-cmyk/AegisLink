@@ -1932,6 +1932,9 @@ async function decryptAndAppend(
                 avatarColor: claimedAvatarColor,
                 avatarImage: localAvatarImage,
                 rosterVersion: decision.rosterVersion,
+                // Consent gate: hold as a pending invite if our privacy setting
+                // requires approval before joining a group someone added us to.
+                pending: usePreferences.getState().requireGroupApproval || undefined,
               });
               const { useGroups } = require('../store/groups');
               void useGroups.getState().hydrate();
@@ -1997,6 +2000,8 @@ async function decryptAndAppend(
             adminSig: claimedAdminSig,
             avatarColor: claimedAvatarColor,
             avatarImage: localAvatarImage,
+            // Consent gate (see v2 createGroup above).
+            pending: usePreferences.getState().requireGroupApproval || undefined,
           });
           const { useGroups } = require('../store/groups');
           void useGroups.getState().hydrate();
@@ -2113,6 +2118,16 @@ async function decryptAndAppend(
         // metadata block runs for every group_msg). This body carries nothing to
         // render, so suppress the bubble — mirrors skipLocalAppend on the sender.
         if (msgBody === GROUP_META_SYNC_BODY) {
+          await saveSessionState(contact.aegisId, ratchetState);
+          return true;
+        }
+
+        // ── Pending-invite suppression ─────────────────────────────────────────
+        // While a group is an unaccepted invitation (requireGroupApproval), we
+        // keep its metadata fresh (handled above) but render NO content — no
+        // bubble, no unread bump — until the user accepts. trustedGroup was just
+        // re-read post-metadata, so this reflects the current pending state.
+        if (trustedGroup?.pending) {
           await saveSessionState(contact.aegisId, ratchetState);
           return true;
         }
