@@ -112,7 +112,6 @@ interface GroupsState {
   updateGroupAvatar: (id: string, avatarImage: string) => Promise<void>;
   addMember: (id: string, aegisId: string) => Promise<void>;
   removeMember: (id: string, aegisId: string) => Promise<void>;
-  updateGroupPermissions: (id: string, patch: Partial<Pick<StoredGroup, 'adminOnlyInvite' | 'moderateNewMembers'>>) => Promise<void>;
   /**
    * Owner-only: change one or more permission gates. Re-signs the governance
    * state (bumps govVersion) so the change is tamper-evident. No-op for
@@ -352,14 +351,6 @@ export const useGroups = create<GroupsState>((set, get) => ({
         // Best-effort: the carrier re-sends from the outbox on the next reconnect.
       }
     }
-  },
-
-  async updateGroupPermissions(id, patch) {
-    const group = get().groups.find((g) => g.id === id);
-    if (!group) return;
-    const updated = { ...group, ...patch };
-    await saveGroup(updated);
-    set({ groups: get().groups.map((g) => (g.id === id ? updated : g)) });
   },
 
   async setGroupPermission(id, patch) {
