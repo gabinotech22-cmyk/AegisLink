@@ -64,3 +64,17 @@ Al invocar un sub-agente siempre incluye:
 
 ### Agentic Workflow Rule
 When facing bugs, errors, or complex implementation tasks, the primary agent must act as the 'brain' (coordinator) and delegate the actual debugging and coding tasks to specialized subagents ('hands and feet'). Do not attempt to fix complex bugs manually.
+
+## REGLA DE ORO — Disciplina de ramas y commits (NO NEGOCIABLE)
+
+Nunca dejar trabajo suelto. El árbol de trabajo y las ramas deben estar siempre en un estado limpio y trazable. Antes de empezar algo nuevo, lo anterior debe estar **commiteado, pusheado y en camino a `main`**.
+
+1. **Una cosa a la vez, terminada.** No abrir/trabajar una rama o PR nueva mientras otra tenga commits sin pushear, cambios sin commitear o stashes pendientes. Si #20 tiene cosas sueltas, se cierran *antes* de tocar #25.
+2. **Cero stashes huérfanos.** Un `git stash` es temporal de minutos, no de días. Si existe un stash, o se aplica y commitea, o se descarta — nunca se deja olvidado.
+3. **Cero cambios sin commitear al cambiar de tarea.** `git status` debe estar limpio antes de `git checkout` a otra rama o de empezar otra cosa.
+4. **Todo termina en `main`.** Cada feature/fix vive en su rama `feat/*`/`fix/*`, se commitea, se pushea y se mergea a `main` vía PR. Una rama que no llega a `main` es deuda; no se acumulan ramas-zombi.
+5. **No fragmentar un mismo cambio en varias ramas.** Si una feature toca mobile+server+infra, va junta en una rama, no repartida.
+6. **Verificar antes de declarar hecho.** Un cambio no está "listo" hasta estar commiteado Y probado (build/test/relay según aplique).
+7. **Inventario antes de cerrar sesión.** Al terminar una tanda: `git status` limpio, `git stash list` vacío, y ninguna rama con commits sin pushear que debieran estar en `main`.
+
+Síntoma de que se rompió la regla: "no podemos trabajar en X si Y aún tiene cosas sin commitear y sin añadir a main". Si aparece, parar y consolidar primero.

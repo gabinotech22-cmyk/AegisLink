@@ -22,6 +22,14 @@ import {
   encodeIdentityQR,
 } from '../../crypto/qr';
 
+// A REAL identity pair: AEGIS_ID is deriveAegisId(decodeBase64(PUBLIC_KEY_B64)).
+// parseIdentityQR cryptographically binds the ID to the key (it rejects any QR
+// whose aegisId ≠ deriveAegisId(publicKey)), so a fabricated id/key pair would
+// be correctly rejected and never reach addFromQR. These constants are the
+// first-32-natural-bytes key and its derived id, kept in sync by construction.
+const PUBLIC_KEY_B64 = 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=';
+const AEGIS_ID = '041-0610-50R3';
+
 // ── safe-area-context ──────────────────────────────────────────────────────
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -139,12 +147,17 @@ describe('ScanQRScreen — group invite routing', () => {
 
   it('still routes identity QR codes through addFromQR and does NOT call onGroupInvite', async () => {
     const onGroupInvite = jest.fn();
-    mockAddFromQR.mockResolvedValue({ kind: 'added', contact: { aegisId: 'CKT-30J2-M3EE' } });
+
+    // Use the REAL matching pair so the scan clears parseIdentityQR's ID↔key
+    // binding check and reaches addFromQR. A fabricated id/key pair would be
+    // correctly rejected by that check and never get here.
+    const key = PUBLIC_KEY_B64;
+    const aegisId = AEGIS_ID;
+    mockAddFromQR.mockResolvedValue({ kind: 'added', contact: { aegisId } });
 
     render(<ScanQRScreen onCancel={jest.fn()} onAdded={jest.fn()} onGroupInvite={onGroupInvite} />);
 
-    const key = 'A'.repeat(43) + '=';
-    const link = encodeIdentityQR('CKT-30J2-M3EE', key);
+    const link = encodeIdentityQR(aegisId, key);
     act(() => {
       capturedOnScan!({ data: link, type: 'qr' });
     });
@@ -153,7 +166,7 @@ describe('ScanQRScreen — group invite routing', () => {
     // flush settles it — under CI load the resolution can land a tick later.
     // waitFor polls until the call lands instead of racing it.
     await waitFor(() => {
-      expect(mockAddFromQR).toHaveBeenCalledWith('CKT-30J2-M3EE', key);
+      expect(mockAddFromQR).toHaveBeenCalledWith(aegisId, key);
     });
     expect(onGroupInvite).not.toHaveBeenCalled();
   });

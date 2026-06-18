@@ -27,10 +27,12 @@ maestro test .maestro/
 ## Run in CI
 
 The `mobile-e2e` job in `.github/workflows/ci.yml` builds a debug APK, boots a
-headless Android emulator, and runs every flow in this folder. It is currently
-**manual only** (`workflow_dispatch`) while we stabilise the native build — it
-does not block pull requests yet. Trigger it from the Actions tab → "CI" → "Run
-workflow". Screenshots are uploaded as a build artifact.
+headless Android emulator, and runs every flow in this folder. It runs on
+`pull_request`, `workflow_dispatch`, and a nightly `schedule`, but is marked
+`continue-on-error: true` while we stabilise the native build — a red run is
+visible but does not block merging. You can also trigger it manually from the
+Actions tab → "CI" → "Run workflow". Screenshots are uploaded as a build
+artifact on every run (pass or fail).
 
 ## Honest scope — what E2E does and does NOT replace
 
