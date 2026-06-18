@@ -5,7 +5,6 @@ import naclUtil from 'tweetnacl-util';
 import { randomUUID } from 'node:crypto';
 
 const { decodeBase64 } = naclUtil;
-import { randomUUID } from 'node:crypto';
 import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { notifyRecipient, sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
