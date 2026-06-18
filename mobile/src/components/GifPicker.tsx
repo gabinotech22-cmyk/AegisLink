@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,7 @@ import {
   Pressable,
   FlatList,
   Image,
-  Modal,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,7 +44,7 @@ const GRID_PAD = 12;
 const GRID_GAP = 6;
 const TILE_SIZE = (SCREEN_W - GRID_PAD * 2 - GRID_GAP * 2) / 3; // 3 columns
 
-export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Props) {
+export function GifPicker({ visible, onSelectGif, onSelectSticker }: Props) {
   const { t } = useTheme();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<GifTab>('gifs');
@@ -130,52 +127,32 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
     }
   }
 
-  // Called when modal becomes visible
-  function handleShow() {
-    if (results.length === 0 && !loading && !error) {
+  // Load featured GIFs the first time the panel becomes visible.
+  useEffect(() => {
+    if (visible && results.length === 0 && !loading && !error) {
       void fetchGifs('');
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const colCount = 3;
 
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onShow={handleShow}
-      onRequestClose={onClose}
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1 }}
-      >
-        {/* Dimmed backdrop — tap to dismiss; chat stays visible behind. */}
-        <Pressable
-          onPress={onClose}
-          accessibilityLabel="Close GIF picker"
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
-        >
-          {/* Bottom-docked panel (keyboard height). */}
-          <Pressable
-            onPress={() => {}}
-            style={{
-              height: PANEL_H,
-              backgroundColor: t.bg,
-              borderTopLeftRadius: t.radiusL,
-              borderTopRightRadius: t.radiusL,
-              borderTopWidth: 1,
-              borderColor: t.border,
-              paddingBottom: insets.bottom,
-              overflow: 'hidden',
-            }}
-          >
-            {/* Grab handle */}
-            <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: 4 }}>
-              <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: t.border }} />
-            </View>
+  if (!visible) return null;
 
+  return (
+    /* WhatsApp-style inline panel: docked below the composer, taking the
+       keyboard's place. NOT a modal — the chat and input bar stay visible and
+       interactive above it, with no dimmed backdrop. */
+    <View
+      style={{
+        height: PANEL_H,
+        backgroundColor: t.bg,
+        borderTopWidth: 1,
+        borderColor: t.border,
+        paddingBottom: insets.bottom,
+        overflow: 'hidden',
+      }}
+    >
             {/* Tabs + inline search — single compact row */}
             <View
               style={{
@@ -408,9 +385,6 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
         )}
         </ErrorBoundary>
             </View>
-          </Pressable>
-        </Pressable>
-      </KeyboardAvoidingView>
-    </Modal>
+    </View>
   );
 }
