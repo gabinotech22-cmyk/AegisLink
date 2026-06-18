@@ -19,6 +19,7 @@ interface Props {
   onPanic: () => void;
   onAppIcon: () => void;
   onSubscription?: () => void;
+  onKeys: () => void;
 }
 
 const PROFILE_COLORS = ['#05b875', '#8b5cf6', '#3b82f6', '#ec4899', '#f97316', '#eab308', '#6366f1'];
@@ -35,7 +36,7 @@ const PROFILE_EMOJIS = [
   { label: 'Robot', val: '🤖' },
 ];
 
-export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscription }: Props) {
+export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscription, onKeys }: Props) {
   const { t } = useTheme();
 
   const identity = useIdentity((s) => s.identity);
@@ -169,7 +170,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
         </Section>
 
         <Section t={t} label="ACCOUNT">
-          <Row t={t} icon={<I.Key size={18} color={t.textDim} />} label="Identities & keys" onPress={() => window.alert('Coming soon')} />
+          <Row t={t} icon={<I.Key size={18} color={t.textDim} />} label="Identities & keys" sub="View your public keys & fingerprint" onPress={onKeys} />
           <Row t={t} icon={<I.Phone size={18} color={t.textDim} />} label="Linked devices" onPress={onDevices} />
           <Row t={t} icon={<I.Shield size={18} color={t.accent} />} label="Panic mode" sub="Instantly wipe all data" onPress={onPanic} />
           {onSubscription && (

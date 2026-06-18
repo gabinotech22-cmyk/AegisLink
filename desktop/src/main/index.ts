@@ -55,18 +55,41 @@ registerDatabaseHandlers()
 registerNotificationHandlers()
 
 app.whenReady().then(() => {
-  // C-2: Enforce Content-Security-Policy via response header injection
+  // Strip the Origin header on requests to the relay so the server treats the
+  // desktop app like a native client (same as React Native, which sends none).
+  // The renderer origin is http://localhost:517x in dev and file:// (-> "null")
+  // when packaged — neither belongs in the relay's production CORS allowlist.
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['https://aegislink.duckdns.org/*', 'wss://aegislink.duckdns.org/*'] },
+    (details, callback) => {
+      delete details.requestHeaders['Origin']
+      callback({ requestHeaders: details.requestHeaders })
+    }
+  )
+
+  // C-2: Enforce Content-Security-Policy via response header injection.
+  // In dev, Vite's react-refresh preamble is an inline script — allow it
+  // there only; packaged builds keep the strict script-src.
+  const scriptSrc = is.dev ? "script-src 'self' 'unsafe-inline'" : "script-src 'self'"
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-          "connect-src 'self' ws://localhost:* wss://localhost:* https://aegislink.duckdns.org wss://aegislink.duckdns.org; " +
-          "img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none';"
-        ]
-      }
-    })
+    const responseHeaders: Record<string, string[]> = {
+      ...details.responseHeaders,
+      'Content-Security-Policy': [
+        `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline'; ` +
+        "connect-src 'self' ws://localhost:* wss://localhost:* https://aegislink.duckdns.org wss://aegislink.duckdns.org; " +
+        "img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none';"
+      ]
+    }
+    // Counterpart of the Origin strip above: the relay never sees an Origin,
+    // so it sends no CORS headers back — inject them here so the renderer's
+    // fetch() can read the response. Chromium still enforces the CSP above,
+    // which limits connect targets to the relay itself.
+    if (details.url.startsWith('https://aegislink.duckdns.org')) {
+      responseHeaders['Access-Control-Allow-Origin'] = ['*']
+      responseHeaders['Access-Control-Allow-Methods'] = ['GET, POST, PUT, PATCH, DELETE, OPTIONS']
+      responseHeaders['Access-Control-Allow-Headers'] = ['Content-Type, Accept']
+    }
+    callback({ responseHeaders })
   })
 
   createWindow()

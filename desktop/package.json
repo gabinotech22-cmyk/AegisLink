@@ -1,6 +1,8 @@
 {
   "name": "aegislink-desktop",
   "version": "1.0.0",
+  "description": "AegisLink — private E2EE messenger for desktop",
+  "author": "AegisLink",
   "private": true,
   "main": "out/main/index.js",
   "scripts": {
@@ -28,6 +30,13 @@
     "appId": "com.aegislink.desktop",
     "productName": "AegisLink",
     "icon": "assets/icon",
+    "files": [
+      "out/main/**",
+      "out/preload/**",
+      "out/renderer/**",
+      "assets/**",
+      "package.json"
+    ],
     "win": {
       "icon": "assets/icon.ico",
       "target": [

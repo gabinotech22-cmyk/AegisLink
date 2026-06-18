@@ -64,12 +64,41 @@ async function tryBroadcastProfileUpdate(identity: Identity): Promise<void> {
   }
 }
 
-async function publishToServer(identity: Identity): Promise<void> {
+// Single-flight: createNewIdentity and load() can both request a publish in
+// the same tick. Two concurrent publishes generate two DIFFERENT prekey
+// bundles whose secureStorage writes interleave — the persist-readback check
+// then fails and neither bundle is published. Deduplicate instead.
+let publishInFlight: Promise<boolean> | null = null;
+
+function publishToServer(identity: Identity): Promise<boolean> {
+  if (publishInFlight) return publishInFlight;
+  publishInFlight = doPublishToServer(identity).finally(() => {
+    publishInFlight = null;
+  });
+  return publishInFlight;
+}
+
+async function doPublishToServer(identity: Identity): Promise<boolean> {
   try {
     const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
     const nonce = await solvePoW(challenge, difficulty);
 
     const preKeys = generatePreKeys(identity);
+
+    // Persist SPK/OPK secrets BEFORE publishing the public bundle: a published
+    // SPK whose secret is unreadable makes every inbound X3DH abort ("no-spk").
+    // Dynamic import keeps the store ↔ socket module cycle lazy, matching the
+    // broadcastProfileUpdate pattern above.
+    const { persistPrekeySecrets } = await import('../socket/client');
+    const persisted = await persistPrekeySecrets({
+      signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
+      opkSecrets: preKeys.opkSecrets,
+    });
+    if (!persisted) {
+      if (DEV) console.warn('[identity] publish aborted: could not persist prekey secrets');
+      return false;
+    }
+
     const result = await uploadIdentityAndPrekeys(
       identity,
       {
@@ -86,11 +115,22 @@ async function publishToServer(identity: Identity): Promise<void> {
         signatureB64: preKeys.signedPreKey.signatureB64,
       },
     );
-    if (!result.ok && DEV) {
-      console.warn('[identity] publish failed:', result.error);
+    if (!result.ok) {
+      if (DEV) console.warn('[identity] publish failed:', result.error);
+      return false;
     }
+    // Mark this slot's prekeys as published so later boots skip the republish
+    // (which re-runs PoW + re-uploads a fresh bundle, hitting the relay's 429
+    // window). The relay re-requests a fresh bundle via unknown_identity if it
+    // ever forgets us, so on-demand republishing still works.
+    try {
+      const slot = useIdentity.getState().activeSlotId || 'self';
+      await secureStorage().set(getPrefKey('aegis.prekeysPublished', slot), '1');
+    } catch { /* best-effort flag */ }
+    return true;
   } catch (e) {
     if (DEV) console.warn('[identity] publish failed (network?):', (e as Error).message);
+    return false;
   }
 }
 
@@ -158,7 +198,6 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       const avatarImage = (await secureStorage().get(getPrefKey('aegis.avatarImage', activeSlotId))) || null;
       const profileStatus = (await secureStorage().get(getPrefKey('aegis.profileStatus', activeSlotId))) || '';
 
-      await publishToServer(identity);
       set({
         identity,
         activeSlotId,
@@ -170,6 +209,23 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         status: 'ready',
         hydrated: true,
       });
+
+      // Populate the UI stores from the local DB — without this the sidebar
+      // starts empty on every boot until a socket event repopulates it.
+      const { useContacts } = await import('./contacts');
+      const { useGroups } = await import('./groups');
+      await useContacts.getState().hydrate().catch(() => {});
+      await useGroups.getState().hydrate().catch(() => {});
+
+      // Publish AFTER the UI is usable — it runs PoW + network round-trips and
+      // must never block boot (it used to run before set(), so a slow or
+      // rate-limited relay froze hydration). Only on first run for this slot:
+      // later boots skip it (the relay re-requests via unknown_identity if it
+      // has actually forgotten us), so we don't burn the relay rate-limit (429).
+      const alreadyPublished = await secureStorage()
+        .get(getPrefKey('aegis.prekeysPublished', activeSlotId))
+        .catch(() => null);
+      if (!alreadyPublished) void publishToServer(identity);
     } catch (e) {
       set({ status: 'idle', hydrated: true, error: (e as Error).message });
     }

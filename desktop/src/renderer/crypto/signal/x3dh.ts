@@ -3,6 +3,21 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { hkdfSHA256 } from './kdf';
 import { type Identity } from '../identity';
 
+/**
+ * X25519 contributory-behaviour guard (ported from mobile). nacl.scalarMult
+ * returns an all-zero shared secret for low-order/identity points; a malicious
+ * relay could swap a peer key for one and force a known root key. Abort the
+ * handshake before deriving anything from a degenerate secret.
+ */
+function assertNonZeroDH(dh: Uint8Array, label: string): Uint8Array {
+  let acc = 0;
+  for (let i = 0; i < dh.length; i++) acc |= dh[i];
+  if (acc === 0) {
+    throw new Error(`X3DH: all-zero ${label} shared secret — low-order point attack`);
+  }
+  return dh;
+}
+
 export interface PreKeyBundle {
   identityKeyB64: string;
   signedPreKey: {
@@ -51,9 +66,9 @@ export function performX3DH(
 
   const { publicKey: myEK_pub, secretKey: myEK_sec } = nacl.box.keyPair();
 
-  const dh1 = nacl.scalarMult(myIdentity.secretKey, bobSPK);
-  const dh2 = nacl.scalarMult(myEK_sec, bobIK);
-  const dh3 = nacl.scalarMult(myEK_sec, bobSPK);
+  const dh1 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, bobSPK), 'DH1');
+  const dh2 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobIK), 'DH2');
+  const dh3 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobSPK), 'DH3');
 
   const F = new Uint8Array(32).fill(0xFF);
   let dhOut = new Uint8Array(F.length + dh1.length + dh2.length + dh3.length);
@@ -64,7 +79,7 @@ export function performX3DH(
 
   if (contactBundle.oneTimePreKey) {
     const bobOPK = decodeBase64(contactBundle.oneTimePreKey.publicKeyB64);
-    const dh4 = nacl.scalarMult(myEK_sec, bobOPK);
+    const dh4 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobOPK), 'DH4');
     const newDhOut = new Uint8Array(dhOut.length + dh4.length);
     newDhOut.set(dhOut, 0);
     newDhOut.set(dh4, dhOut.length);
@@ -91,9 +106,9 @@ export function performX3DHReceiver(
   aliceIK: Uint8Array,
   aliceEK: Uint8Array
 ): Uint8Array {
-  const dh1 = nacl.scalarMult(mySpkSecret, aliceIK);
-  const dh2 = nacl.scalarMult(myIdentity.secretKey, aliceEK);
-  const dh3 = nacl.scalarMult(mySpkSecret, aliceEK);
+  const dh1 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceIK), 'DH1');
+  const dh2 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, aliceEK), 'DH2');
+  const dh3 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceEK), 'DH3');
 
   const F = new Uint8Array(32).fill(0xFF);
   let dhOut = new Uint8Array(F.length + dh1.length + dh2.length + dh3.length);
@@ -103,7 +118,7 @@ export function performX3DHReceiver(
   dhOut.set(dh3, F.length + dh1.length + dh2.length);
 
   if (myOpkSecret) {
-    const dh4 = nacl.scalarMult(myOpkSecret, aliceEK);
+    const dh4 = assertNonZeroDH(nacl.scalarMult(myOpkSecret, aliceEK), 'DH4');
     const newDhOut = new Uint8Array(dhOut.length + dh4.length);
     newDhOut.set(dhOut, 0);
     newDhOut.set(dh4, dhOut.length);
