@@ -19,12 +19,11 @@ process.env['AEGIS_DB_PATH'] = ':memory:';
 
 const { encodeBase64 } = tweetnaclUtil;
 
-const { identityRepo } = await import('../db/client.js');
-const { default: prekeysRoutes } = await import('../routes/prekeys.js');
-
-const app = express();
-app.use(express.json());
-app.use('/prekeys', prekeysRoutes);
+// Deps + app are built in beforeAll rather than via top-level await: ts-jest's
+// ESM emit is not reliable across the suite, and a top-level await downleveled
+// to CommonJS is a hard SyntaxError. Deferring keeps the file valid either way.
+let identityRepo: typeof import('../db/client.js')['identityRepo'];
+let app: express.Express;
 
 const AEGIS_ID = 'ABC-2345-6789';
 const signKeys = nacl.sign.keyPair();
@@ -87,6 +86,12 @@ function makePqBody(
 }
 
 beforeAll(async () => {
+  ({ identityRepo } = await import('../db/client.js'));
+  const { default: prekeysRoutes } = await import('../routes/prekeys.js');
+  app = express();
+  app.use(express.json());
+  app.use('/prekeys', prekeysRoutes);
+
   await identityRepo.insert({
     aegis_id: AEGIS_ID,
     public_key_b64: encodeBase64(nacl.box.keyPair().publicKey),

@@ -25,11 +25,18 @@ const DB_PATH = `:memory:`;
 process.env['AEGIS_DB_PATH'] = DB_PATH;
 
 // Import routes AFTER setting AEGIS_DB_PATH so the DB is bootstrapped correctly.
-const { default: web3Routes } = await import('../routes/web3.js');
+// Done in beforeAll rather than a top-level `await import`: ts-jest's ESM emit
+// is not reliable across the suite, and a top-level await that gets downleveled
+// to CommonJS is a hard SyntaxError ("await is only valid in async functions").
+// Deferring the import keeps the file valid under both module modes.
+let app: express.Express;
 
-const app = express();
-app.use(express.json());
-app.use('/web3', web3Routes);
+beforeAll(async () => {
+  const { default: web3Routes } = await import('../routes/web3.js');
+  app = express();
+  app.use(express.json());
+  app.use('/web3', web3Routes);
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

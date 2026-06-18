@@ -2,6 +2,7 @@ import type { Server as SocketServer, Socket } from 'socket.io';
 import { z } from 'zod';
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
+import { randomUUID } from 'node:crypto';
 
 const { decodeBase64 } = naclUtil;
 import { randomUUID } from 'node:crypto';
@@ -379,6 +380,10 @@ export function attachRelay(io: SocketServer) {
         socket.disconnect(true);
       }
     }, AUTH_TIMEOUT_MS);
+    // Never let a pending auth handshake keep the process/event loop alive
+    // (e.g. during test teardown when the HTTP/Socket.IO server is closed
+    // before this timer would otherwise fire).
+    authTimer.unref?.();
 
     // issueChallenge is async (DB lookup). We must set up the auth:response
     // listener inside the .then() so the challenge is in scope.
@@ -434,6 +439,8 @@ export function attachRelay(io: SocketServer) {
         socket.emit('error_msg', { code: 'device_link_expired' });
         socket.disconnect(true);
       }, DEVICE_LINK_TTL_MS);
+      // Never let a pending device-link request keep the process alive.
+      timer.unref?.();
       linkingSockets.set(desktopPubKey, { socket, timer });
 
       // Neutral response regardless of whether target is online — prevents
@@ -1000,7 +1007,6 @@ export function attachRelay(io: SocketServer) {
         // returned blobId here. The relay never stores file content itself.
         const insertedAttachments: Array<{ id: string; blobId: string; filename: string; mimeType: string; sizeBytes: number }> = [];
         if (attachments && attachments.length > 0) {
-          const { randomUUID } = await import('node:crypto');
           for (const att of attachments) {
             const attId = randomUUID();
             await workAttachmentRepo.insert({
