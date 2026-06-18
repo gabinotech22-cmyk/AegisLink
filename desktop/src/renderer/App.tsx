@@ -34,6 +34,9 @@ import { ViewOnceSendScreen } from './screens/ViewOnceSend';
 import { ScheduledScreen } from './screens/Scheduled';
 import { LocationScreen } from './screens/Location';
 import { GroupAdminScreen } from './screens/GroupAdmin';
+import { DistributionListsScreen } from './screens/DistributionLists';
+import { BroadcastComposeScreen } from './screens/BroadcastCompose';
+import type { DistributionList } from './store/distribution';
 import { PollScreen } from './screens/Poll';
 import { FirstContactScreen } from './screens/FirstContact';
 import { AppIconScreen } from './screens/AppIcon';
@@ -84,7 +87,9 @@ type PushRoute =
   | { name: 'appIcon' }
   | { name: 'subscription' }
   | { name: 'keys' }
-  | { name: 'lockSettings' };
+  | { name: 'lockSettings' }
+  | { name: 'distributionLists' }
+  | { name: 'broadcastCompose'; list: DistributionList };
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
 function Shell() {
@@ -473,6 +478,15 @@ function Shell() {
           return <SubscriptionScreen onBack={pop} />;
         case 'keys':
           return <KeysScreen onBack={pop} />;
+        case 'distributionLists':
+          return (
+            <DistributionListsScreen
+              onBack={pop}
+              onOpenList={(list) => push({ name: 'broadcastCompose', list })}
+            />
+          );
+        case 'broadcastCompose':
+          return <BroadcastComposeScreen list={top.list} onBack={pop} />;
       }
     }
 
@@ -485,6 +499,7 @@ function Shell() {
             onSearch={() => push({ name: 'search' })}
             onProfile={() => push({ name: 'profile' })}
             onContacts={() => push({ name: 'contacts' })}
+            onDistribution={() => push({ name: 'distributionLists' })}
             onTab={setTab}
           />
         );

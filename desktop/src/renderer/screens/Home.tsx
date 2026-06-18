@@ -17,10 +17,11 @@ interface Props {
   onSearch: () => void;
   onProfile: () => void;
   onContacts: () => void;
+  onDistribution: () => void;
   onTab: (tab: Tab) => void;
 }
 
-export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onContacts, onTab }: Props) {
+export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onContacts, onDistribution, onTab }: Props) {
   const { t } = useTheme();
 
   const identity = useIdentity((s) => s.identity);
@@ -88,6 +89,9 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
           </button>
           <button onClick={onContacts} aria-label="Contacts" style={iconBtnStyle}>
             <I.Person size={20} color={t.textDim} />
+          </button>
+          <button onClick={onDistribution} aria-label="Distribution lists" style={iconBtnStyle}>
+            <I.Broadcast size={20} color={t.textDim} />
           </button>
           <button onClick={onAddContact} aria-label="Add contact" style={iconBtnStyle}>
             <I.Plus size={22} color={t.accent} />
