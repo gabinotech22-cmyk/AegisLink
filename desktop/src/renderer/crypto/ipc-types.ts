@@ -11,6 +11,8 @@ export interface AegisIPC {
     set(key: string, value: string): Promise<void>;
     get(key: string): Promise<string | null>;
     delete(key: string): Promise<void>;
+    /** Panic-wipe: delete all prekey secrets (SPK/OPK/PQSPK) + secdiag counter. */
+    wipePrekeys(): Promise<void>;
   };
   db: {
     saveIdentity(activeSlot: string, identity: unknown): Promise<void>;
