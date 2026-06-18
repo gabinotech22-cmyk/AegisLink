@@ -36,9 +36,10 @@ RUN mkdir -p /data && chown aegis:aegis /data
 USER aegis
 
 # Environment defaults — override via docker-compose or secrets
+# AEGIS_DB_PATH is the name the app actually reads (server/src/db/client.ts).
 ENV NODE_ENV=production \
     PORT=3001 \
-    DB_PATH=/data/aegis.db \
+    AEGIS_DB_PATH=/data/aegislink.db \
     TRUST_PROXY=1
 
 EXPOSE 3001
