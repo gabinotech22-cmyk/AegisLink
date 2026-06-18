@@ -795,27 +795,27 @@ export function attachGroupCallHandlers(): void {
       // If this heartbeat is for the call I'm already in, it's not a banner.
       if (useGroupCall.getState().callId === msg.callId) return;
 
-      // ── Admin-only call gate (receiver-ENFORCED) ────────────────────────────
-      // Only honor a channel whose ORIGINATOR is permitted to start calls in this
-      // group per our locally-trusted governance. A patched client can emit the
-      // event, but honest receivers refuse to surface a banner for it. Unknown
-      // group or any resolution error → fail closed (no banner).
+      // ── Membership gate (receiver-side) ────────────────────────────────────
+      // Drop heartbeats from unknown groups or from senders not in our trusted
+      // member list. This is a UX gate, not a cryptographic boundary — the relay
+      // already authenticates every sender via Ed25519 challenge-response. We
+      // intentionally do NOT enforce admin-only here: the Discord-style channel
+      // model lets any member open a voice channel (the banner is passive, it does
+      // not ring anyone).
       let localGroup: import('../db/local').StoredGroup | undefined;
       try {
         const { useGroups } = require('../store/groups') as typeof import('../store/groups');
         localGroup = useGroups.getState().groups.find((g) => g.id === msg.groupId);
       } catch { return; }
+      if (!localGroup) return; // Unknown group — ignore
       // A heartbeat can come from any participant; gate on the channel's
       // initiator. First sighting records the initiator; later heartbeats keep it.
       const existing = useActiveCalls.getState().calls[msg.groupId];
       const initiator = existing?.callId === msg.callId ? existing.initiator : msg.from;
-      try {
-        const { can } = require('../crypto/groupRoles') as typeof import('../crypto/groupRoles');
-        if (!localGroup || !can(localGroup, initiator, 'call')) {
-          if (__DEV__) console.warn('[groupCalls] channel dropped — initiator not permitted to call', initiator);
-          return;
-        }
-      } catch { return; }
+      if (!localGroup.members.includes(initiator)) {
+        if (__DEV__) console.warn('[groupCalls] channel dropped — initiator not in group', initiator);
+        return;
+      }
 
       const isNewChannel = existing?.callId !== msg.callId;
 

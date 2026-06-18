@@ -408,9 +408,8 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
 
   async function handleGroupCall() {
     if (!identity) return;
-    // Admin-only call gate (UI side). The receiver also enforces this
-    // independently (see groupCalls.ts), so a patched client can't bypass it —
-    // here we just give honest users immediate, themed feedback.
+    // Call permission gate (UI side). Defaults to 'everyone'; groups that
+    // explicitly set whoCanCall:'admins' via governance still block members here.
     const { can } = require('../crypto/groupRoles') as typeof import('../crypto/groupRoles');
     if (!can(group, identity.aegisId, 'call')) {
       themedAlert(
