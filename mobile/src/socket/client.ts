@@ -2774,6 +2774,15 @@ async function initSelfSession(identity: Identity, sock: Socket): Promise<Ratche
   bundle.signingPublicKeyB64 = identity.signingPublicKeyB64;
   bundle.identityKeyB64 = identity.publicKeyB64;
 
+  // Multi-device self-copy stays v1-only (PQXDH gap #3): the self-receiver path
+  // (handleSelfCopy → performX3DHReceiver) does NOT pass PQ inputs, so we MUST
+  // keep the self-sender on v1 too. Otherwise performX3DH would negotiate v2
+  // (the self-bundle advertises our OWN PQSPK) and derive a root key the
+  // receiver derives as v1 — a silent mismatch that breaks self-copy decryption
+  // on any user with 2+ linked devices. Stripping the PQSPK forces classic v1 on
+  // both sides. (Desktop applies the same fix; see PR #31.)
+  bundle.pqSignedPreKey = null;
+
   const x3dh = performX3DH(identity, bundle);
   const ratchetState = initRatchet(
     x3dh.rootKey,
