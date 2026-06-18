@@ -8,6 +8,7 @@ import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
 import { useConnection } from '../store/connection';
 import { usePollsStore } from '../store/polls';
+import { parseGroupPostMarker } from '../utils/groupPost';
 
 // ---------------------------------------------------------------------------
 // Stub types
@@ -72,9 +73,10 @@ interface Props {
   onBack: () => void;
   onGroupDetail?: () => void;
   onPoll?: () => void;
+  onGroupPosts?: () => void;
 }
 
-export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props) {
+export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onGroupPosts }: Props) {
   const { t } = useTheme();
   const identity = useIdentity((s) => s.identity);
   const myAegisId = identity?.aegisId;
@@ -195,6 +197,12 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll }: Props)
         {onPoll && (
           <button onClick={onPoll} aria-label="Create poll" style={iconBtn}>
             <I.Poll size={20} color={t.textDim} />
+          </button>
+        )}
+        {/* Announcements — visible only to owner and moderators */}
+        {onGroupPosts && (group.adminId === myAegisId || group.moderators?.includes(myAegisId ?? '')) && (
+          <button onClick={onGroupPosts} aria-label="Schedule group announcement" style={iconBtn}>
+            <I.Broadcast size={20} color={t.textDim} />
           </button>
         )}
         {onGroupDetail && (
@@ -326,6 +334,62 @@ function GroupBubble({ t, m, myAegisId, memberNames, adminId, moderators, onCont
           <span style={{ color: t.textFaint, fontFamily: t.font, fontSize: 13, fontStyle: 'italic' }}>Deleted message</span>
         </div>
         <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginTop: 3, paddingLeft: 4, paddingRight: 4 }}>{time}</span>
+      </div>
+    );
+  }
+
+  // Announcement post — render BEFORE poll so [post:...] always wins. The
+  // image prefix is already stripped from `body` by client.ts (incoming) or by
+  // the sender's local append (outgoing), so we only see the [post:flags]Text
+  // portion here. The marker is parsed and the body shown without it.
+  const post = parseGroupPostMarker(body);
+  if (post.isPost) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: me ? 'flex-end' : 'flex-start' }}>
+        <SenderLabel />
+        <div
+          style={{
+            maxWidth: 320,
+            backgroundColor: t.surface,
+            border: `1px solid ${post.pinned ? t.warn : `${t.accent}55`}`,
+            borderRadius: t.radius,
+            padding: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <I.Broadcast size={12} color={t.accent} />
+            <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.6 }}>
+              ANNOUNCEMENT
+            </span>
+            {post.pinned && (
+              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.warn, letterSpacing: 0.4 }}>
+                · PINNED
+              </span>
+            )}
+            {post.repliesOff && (
+              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, letterSpacing: 0.4 }}>
+                · READ-ONLY
+              </span>
+            )}
+          </div>
+          {m.mediaUri && m.type === 'image' && (
+            <img
+              src={m.mediaUri}
+              alt="announcement"
+              style={{ maxWidth: '100%', maxHeight: 240, borderRadius: t.radiusS, objectFit: 'cover' }}
+            />
+          )}
+          {post.text && (
+            <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {post.text}
+            </span>
+          )}
+          <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginTop: 2 }}>{time}</span>
+        </div>
+        <ReactionPills t={t} reactions={reactions} me={me} />
       </div>
     );
   }
