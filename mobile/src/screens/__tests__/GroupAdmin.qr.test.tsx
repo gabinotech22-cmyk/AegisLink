@@ -115,7 +115,6 @@ jest.mock('../../store/groups', () => ({
       updateGroupAvatar: jest.fn(),
       addMember: jest.fn(),
       removeMember: jest.fn(),
-      updateGroupPermissions: jest.fn(),
       leaveGroup: jest.fn(),
     };
     return sel ? sel(state) : state;
