@@ -21,7 +21,7 @@
 import * as Crypto from 'expo-crypto';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
-;
+import type { MediaStream } from 'react-native-webrtc';
 import { getSocket, isConnected } from './client';
 import { useGroupCall } from '../store/groupCall';
 import { useActiveCalls } from '../store/activeCalls';
@@ -39,6 +39,29 @@ import type { Identity } from '../crypto/identity';
 import { themedAlert } from '../components/AlertHost';
 import { startInCallAudio, stopInCallAudio } from '../webrtc/inCall';
 import { startCallService, stopCallService } from '../webrtc/callForegroundService';
+
+// ---------------------------------------------------------------------------
+// Shared local audio stream — acquired once per call, reused across all peers.
+// This is critical for correct mute behaviour: a single track.enabled=false
+// silences all peer connections simultaneously.
+// ---------------------------------------------------------------------------
+
+let _groupLocalStream: MediaStream | null = null;
+
+async function acquireGroupStream(): Promise<MediaStream> {
+  if (_groupLocalStream) return _groupLocalStream;
+  const { mediaDevices } = require('react-native-webrtc') as typeof import('react-native-webrtc');
+  const stream = (await (mediaDevices as any).getUserMedia({ audio: true, video: false })) as unknown as MediaStream;
+  _groupLocalStream = stream;
+  useGroupCall.getState().setLocalStream(stream);
+  return stream;
+}
+
+function releaseGroupStream(): void {
+  if (!_groupLocalStream) return;
+  try { for (const t of _groupLocalStream.getTracks()) t.stop(); } catch { /* ignore */ }
+  _groupLocalStream = null;
+}
 
 // ---------------------------------------------------------------------------
 // NaCl sealed-signaling helpers (mirrors calls.ts)
@@ -238,6 +261,7 @@ function maybeFinalizeFailedCall(callId: string): void {
   stopCallService();
 
   cleanupAllPeers(callId);
+  releaseGroupStream();
   stopHeartbeat();
   useGroupCall.getState().setStatus('ended');
   setTimeout(() => {
@@ -267,7 +291,7 @@ async function createGroupPeerAsOfferer(
   const peer = await createPeer(
     'audio',
     {
-      onLocalStream: (stream) => useGroupCall.getState().setLocalStream(stream),
+      onLocalStream: () => { /* managed by acquireGroupStream */ },
       onRemoteStream: (stream) => useGroupCall.getState().setParticipantStream(remoteAegisId, stream),
       onIceCandidate: (candidate) => {
         const payload = JSON.stringify(candidate.toJSON?.() ?? candidate);
@@ -290,6 +314,7 @@ async function createGroupPeerAsOfferer(
       },
     },
     turnConfig,
+    _groupLocalStream ?? undefined,
   );
 
   const groupPeer: GroupActivePeer = { ...peer, remoteDescSet: false, pendingIce: [] };
@@ -420,6 +445,15 @@ export async function startGroupCall(
     });
   } catch { /* expo-av unavailable */ }
 
+  // Acquire the shared mic stream once for this call.
+  try {
+    await acquireGroupStream();
+  } catch {
+    themedAlert('Sin micrófono', 'No se pudo acceder al micrófono. Verifica los permisos.');
+    useGroupCall.getState().reset();
+    return;
+  }
+
   // Earpiece route + proximity sensor (real screen-off near the ear), plus an
   // Android foreground service so the call survives the app being backgrounded.
   startInCallAudio();
@@ -472,6 +506,15 @@ export async function joinGroupCall(groupId: string): Promise<void> {
       playThroughEarpieceAndroid: true,
     });
   } catch { /* expo-av unavailable */ }
+
+  // Acquire the shared mic stream once for this call.
+  try {
+    await acquireGroupStream();
+  } catch {
+    themedAlert('Sin micrófono', 'No se pudo acceder al micrófono. Verifica los permisos.');
+    useGroupCall.getState().reset();
+    return;
+  }
 
   // Earpiece route + proximity sensor (real screen-off near the ear), plus an
   // Android foreground service so the call survives the app being backgrounded.
@@ -549,6 +592,7 @@ export function hangupGroupCall(): void {
   }
 
   cleanupAllPeers(callId);
+  releaseGroupStream();
 
   try {
     const { Audio } = require('expo-av') as typeof import('expo-av');
@@ -677,7 +721,7 @@ export function attachGroupCallHandlers(): void {
         const peer = await createPeer(
           'audio',
           {
-            onLocalStream: (stream) => useGroupCall.getState().setLocalStream(stream),
+            onLocalStream: () => { /* managed by acquireGroupStream */ },
             onRemoteStream: (stream) => useGroupCall.getState().setParticipantStream(msg.from, stream),
             onIceCandidate: (candidate) => {
               const payload = JSON.stringify(candidate.toJSON?.() ?? candidate);
@@ -696,6 +740,7 @@ export function attachGroupCallHandlers(): void {
             },
           },
           turnConfig,
+          _groupLocalStream ?? undefined,
         );
 
         const groupPeer: GroupActivePeer = { ...peer, remoteDescSet: false, pendingIce: [] };

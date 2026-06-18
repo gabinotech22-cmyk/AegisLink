@@ -68,10 +68,31 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   // Read group reactively from the store so member add/remove is reflected live
   const group = useGroups((s) => s.groups.find((g) => g.id === initialGroup.id) ?? initialGroup);
   // Active voice channel for THIS group (Discord-style banner). Hidden when I'm
-  // already in that call (then the in-call UI is showing instead).
+  // already in that call (then the in-call bar is showing instead).
   const activeCall = useActiveCalls((s) => s.calls[group.id]);
   const myCallId = useGroupCall((s) => s.callId);
-  const showCallBanner = !!activeCall && activeCall.callId !== myCallId;
+  const myCallGroupId = useGroupCall((s) => s.groupId);
+  const myCallStatus = useGroupCall((s) => s.status);
+  const myCallMuted = useGroupCall((s) => s.muted);
+  const myCallParticipants = useGroupCall((s) => s.participants);
+  const myCallStartedAt = useGroupCall((s) => s.startedAt);
+
+  const isInCallHere = (myCallStatus === 'in-call' || myCallStatus === 'connecting') && myCallGroupId === group.id;
+  const showCallBanner = !!activeCall && activeCall.callId !== myCallId && !isInCallHere;
+
+  // Tell the group call store this screen is handling the call UI (un-minimizes).
+  // On unmount (navigate away) flip it back so FloatingGroupCallBar takes over.
+  useEffect(() => {
+    if (isInCallHere) {
+      useGroupCall.getState().setMinimized(false);
+    }
+    return () => {
+      if (useGroupCall.getState().groupId === group.id) {
+        useGroupCall.getState().setMinimized(true);
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInCallHere, group.id]);
   const list = useMessages((s) => s.byChat[group.id] ?? EMPTY_MSGS);
   const loadChat = useMessages((s) => s.loadChat);
   const toggleStar = useMessages((s) => s.toggleStar);
@@ -430,7 +451,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     try {
       const { startGroupCall } = require('../socket/groupCalls') as typeof import('../socket/groupCalls');
       await startGroupCall(identity, group, otherMembers);
-      onGroupCall?.();
+      // No navigation — the in-call bar appears inline below the header.
     } catch (e) {
       themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
@@ -525,6 +546,27 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
             </>
           )}
         </View>
+
+        {/* ── In-call bar (I'm in a call for this group) ─────────────────── */}
+        {isInCallHere && (
+          <InCallGroupBar
+            status={myCallStatus}
+            participants={myCallParticipants}
+            contacts={contacts}
+            muted={myCallMuted}
+            startedAt={myCallStartedAt}
+            onMute={() => {
+              const { toggleGroupCallMute } = require('../socket/groupCalls') as typeof import('../socket/groupCalls');
+              toggleGroupCallMute();
+            }}
+            onHangup={() => {
+              const { hangupGroupCall } = require('../socket/groupCalls') as typeof import('../socket/groupCalls');
+              hangupGroupCall();
+            }}
+            onExpand={() => onGroupCall?.()}
+            t={t}
+          />
+        )}
 
         {/* Active voice-channel banner — join an open call without ringing */}
         {showCallBanner && activeCall && (
@@ -1654,6 +1696,172 @@ function GroupAudioBubble({ t, m, me, body, onLongPress }: { t: Theme; m: Stored
       </Pressable>
       <I.Mic size={13} color={me ? t.bubbleOutText : t.textDim} />
     </Pressable>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// In-call bar — shown inline in GroupChatScreen while the user is in a call
+// ---------------------------------------------------------------------------
+
+interface InCallGroupBarProps {
+  status: import('../store/groupCall').GroupCallStatus;
+  participants: import('../store/groupCall').GroupCallParticipant[];
+  contacts: import('../db/local').StoredContact[];
+  muted: boolean;
+  startedAt: number | null;
+  onMute: () => void;
+  onHangup: () => void;
+  onExpand: () => void;
+  t: Theme;
+}
+
+function InCallGroupBar({ status, participants, contacts, muted, startedAt, onMute, onHangup, onExpand, t }: InCallGroupBarProps) {
+  const { t: i18nT } = useTranslation();
+  const [elapsed, setElapsed] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (status !== 'in-call' || !startedAt) return;
+    setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [status, startedAt]);
+
+  function nameForId(aegisId: string): string {
+    return contacts.find((c) => c.aegisId === aegisId)?.name ?? aegisId.substring(0, 6);
+  }
+
+  const visible = participants.filter((p) => p.connected);
+  const avatarsToShow = visible.slice(0, 4);
+  const overflow = visible.length - avatarsToShow.length;
+
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginHorizontal: 12,
+        marginTop: 8,
+        marginBottom: 4,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        borderRadius: 14,
+        backgroundColor: `${t.accent}12`,
+        borderWidth: 1,
+        borderColor: `${t.accent}40`,
+      }}
+    >
+      {/* Pulsing status dot */}
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: status === 'in-call' ? t.accent : t.warn }} />
+
+      {/* Status + timer */}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        {status === 'connecting' ? (
+          <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.warn, letterSpacing: 0.5 }}>
+            {i18nT('groupCall.connecting', 'CONECTANDO…').toUpperCase()}
+          </Text>
+        ) : (
+          <>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 0.5 }}>
+              {'E2EE · '}
+              {`${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`}
+            </Text>
+            {/* Participant mini-avatars */}
+            {avatarsToShow.length > 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: -4 }}>
+                {avatarsToShow.map((p) => {
+                  const name = nameForId(p.aegisId);
+                  const initial = name.trim()[0]?.toUpperCase() ?? '?';
+                  return (
+                    <View
+                      key={p.aegisId}
+                      style={{
+                        width: 18, height: 18, borderRadius: 9,
+                        backgroundColor: t.accent,
+                        alignItems: 'center', justifyContent: 'center',
+                        borderWidth: 1, borderColor: t.bg,
+                      }}
+                    >
+                      <Text style={{ fontFamily: t.font, fontSize: 9, color: '#fff', fontWeight: '700' }}>
+                        {initial}
+                      </Text>
+                    </View>
+                  );
+                })}
+                {overflow > 0 && (
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginLeft: 6 }}>
+                    {`+${overflow}`}
+                  </Text>
+                )}
+                {visible.length === 0 && (
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim }}>
+                    {i18nT('groupCall.alone', 'Solo en el canal')}
+                  </Text>
+                )}
+              </View>
+            )}
+            {avatarsToShow.length === 0 && (
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginTop: 2 }}>
+                {i18nT('groupCall.alone', 'Solo en el canal — esperando participantes')}
+              </Text>
+            )}
+          </>
+        )}
+      </View>
+
+      {/* Mute */}
+      <Pressable
+        onPress={onMute}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={muted ? i18nT('call.unmute', 'Reanudar mic') : i18nT('call.mute', 'Silenciar mic')}
+        style={{
+          width: 32, height: 32, borderRadius: 16,
+          backgroundColor: muted ? `${t.warn}22` : t.surface2,
+          borderWidth: 1, borderColor: muted ? t.warn : t.border,
+          alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        {muted ? <I.MicOff size={14} color={t.warn} /> : <I.Mic size={14} color={t.textDim} />}
+      </Pressable>
+
+      {/* Expand to full call screen */}
+      <Pressable
+        onPress={onExpand}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={i18nT('groupCall.expandCall', 'Ver pantalla completa')}
+        style={{
+          width: 32, height: 32, borderRadius: 16,
+          backgroundColor: t.surface2,
+          borderWidth: 1, borderColor: t.border,
+          alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <I.Users size={14} color={t.textDim} />
+      </Pressable>
+
+      {/* Hangup */}
+      <Pressable
+        onPress={onHangup}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={i18nT('call.hangup', 'Colgar')}
+        style={{
+          width: 32, height: 32, borderRadius: 16,
+          backgroundColor: t.danger,
+          alignItems: 'center', justifyContent: 'center',
+          transform: [{ rotate: '135deg' }],
+        }}
+      >
+        <I.Phone size={14} color="#fff" />
+      </Pressable>
+    </View>
   );
 }
 
