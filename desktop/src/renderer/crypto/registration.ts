@@ -19,6 +19,7 @@ import type {
   PreKeySecrets,
   SignedPreKeyPublic,
 } from './types';
+import type { PqSignedPreKeyPublic } from './signal/x3dh';
 
 export interface PowChallenge {
   challenge: string;
@@ -45,6 +46,9 @@ interface PreKeysPostBody {
   ts: number;
   signedPreKey: SignedPreKeyPublic;
   oneTimePreKeys: OneTimePreKeyPublic[];
+  /** PQXDH (v2) signed PQ prekey. Omitted ⇒ v1-only bundle. Relay verifies the
+   * Ed25519 signature server-side and stores it as an opaque blob. */
+  pqSignedPreKey?: PqSignedPreKeyPublic;
 }
 
 export async function fetchPowChallenge(
@@ -112,6 +116,7 @@ export async function uploadIdentityAndPrekeys(
   powNonce: string,
   oneTimePreKeysPublic: OneTimePreKeyPublic[],
   signedPreKeyPublic: SignedPreKeyPublic,
+  pqSignedPreKeyPublic?: PqSignedPreKeyPublic | null,
 ): Promise<RegistrationResult> {
   const base = trimSlash(relayUrl);
 
@@ -171,6 +176,7 @@ export async function uploadIdentityAndPrekeys(
     ts,
     signedPreKey: signedPreKeyPublic,
     oneTimePreKeys: oneTimePreKeysPublic,
+    ...(pqSignedPreKeyPublic ? { pqSignedPreKey: pqSignedPreKeyPublic } : {}),
   };
 
   let prekeysRes: Response;
