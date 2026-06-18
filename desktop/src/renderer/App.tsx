@@ -11,6 +11,7 @@ import { VerifyScreen } from './screens/Verify';
 import { PrivacyScreen } from './screens/Privacy';
 import { ChatScreen } from './screens/Chat';
 import { GroupChatScreen } from './screens/GroupChat';
+import { GroupPostsScreen } from './screens/GroupPosts';
 import { AddContactScreen } from './screens/AddContact';
 import { ContactsScreen } from './screens/Contacts';
 import { ContactDetailScreen } from './screens/ContactDetail';
@@ -81,6 +82,7 @@ type PushRoute =
   | { name: 'search' }
   | { name: 'groupadmin'; group: StoredGroup }
   | { name: 'groupChat'; group: StoredGroup }
+  | { name: 'groupPosts'; group: StoredGroup }
   | { name: 'poll'; group?: StoredGroup }
   | { name: 'firstContact'; contact: StoredContact }
   | { name: 'contacts' }
@@ -204,8 +206,11 @@ function Shell() {
   useEffect(() => {
     if (!identity || status !== 'ready') return;
     let interval: ReturnType<typeof setInterval>;
-    void import('./store/scheduled').then(({ deliverDueScheduled }) => {
-      const tick = () => { void deliverDueScheduled(identity); };
+    void import('./store/scheduled').then(({ deliverDueScheduled, deliverDueGroupPosts }) => {
+      const tick = () => {
+        void deliverDueScheduled(identity);
+        void deliverDueGroupPosts(identity);
+      };
       tick(); // flush anything already past due at mount
       interval = setInterval(tick, 1000);
     });
@@ -456,7 +461,16 @@ function Shell() {
         case 'groupadmin':
           return <GroupAdminScreen onBack={pop} group={top.group} />;
         case 'groupChat':
-          return <GroupChatScreen onBack={pop} group={top.group} onGroupDetail={() => push({ name: 'groupadmin', group: top.group })} />;
+          return (
+            <GroupChatScreen
+              onBack={pop}
+              group={top.group}
+              onGroupDetail={() => push({ name: 'groupadmin', group: top.group })}
+              onGroupPosts={() => push({ name: 'groupPosts', group: top.group })}
+            />
+          );
+        case 'groupPosts':
+          return <GroupPostsScreen group={top.group} onBack={pop} />;
         case 'poll':
           return <PollScreen onBack={pop} groupName={top.group?.name} memberCount={top.group?.members?.length} />;
         case 'firstContact':
