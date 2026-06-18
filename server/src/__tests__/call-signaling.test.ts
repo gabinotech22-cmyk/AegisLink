@@ -108,8 +108,16 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
+  // Force-drop server-side sockets first so their disconnect handlers (timer
+  // cleanup) run, then close the servers and let any relay async settle before
+  // Jest tears down the module environment — otherwise a late socket event can
+  // trigger 'import after teardown' under CI timing and cascade to sibling
+  // suites sharing the worker.
+  io.disconnectSockets(true);
+  await new Promise((resolve) => setImmediate(resolve));
   await new Promise<void>((resolve) => { io.close(() => resolve()); });
   await new Promise<void>((resolve) => { httpServer.close(() => resolve()); });
+  await new Promise((resolve) => setTimeout(resolve, 50));
 }, 10_000);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
