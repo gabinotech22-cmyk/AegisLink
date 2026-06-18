@@ -1215,10 +1215,24 @@ async function decryptAndAppend(
   let cleanBody = finalBody;
 
   /**
-   * Fetch a blob: URI and return a new persistent object URL.
-   * Falls back to the original URI on any error.
+   * Resolve a media URI to a renderable object URL.
+   *
+   * Two cases:
+   *  - Wire format `blob:<id>:<keyB64>:<nonceB64>` (4 colon-separated parts):
+   *    download ciphertext from relay and decrypt locally.
+   *  - Browser object URL `blob:http://...` (>4 parts) or any other URI:
+   *    fetch directly and re-wrap (e.g. same-device audio sent as objectURL).
    */
   async function resolveBlobUri(uri: string): Promise<string> {
+    const parts = uri.split(':');
+    if (parts.length === 4 && parts[0] === 'blob') {
+      try {
+        const { downloadAndDecryptMedia } = await import('../crypto/media');
+        return await downloadAndDecryptMedia(uri);
+      } catch {
+        return uri;
+      }
+    }
     try {
       const resp = await fetch(uri);
       const blob = await resp.blob();
