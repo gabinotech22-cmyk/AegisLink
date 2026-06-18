@@ -34,6 +34,11 @@ services:
       AEGIS_DB_PATH: /data/aegislink.db
       TRUST_PROXY: ${TRUST_PROXY:-1}
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      # KLIPY_KEY enables the GIF proxy (routes/proxyGif.ts). Like the other
+      # secrets it lives in /etc/aegislink.env (-> .env); the relay returns 503
+      # gif_provider_not_configured when it is unset. Must be listed here or the
+      # container never sees it (same gotcha as TURN_HOST).
+      KLIPY_KEY: ${KLIPY_KEY:-}
       # TURN_SECRET is used server-side to sign ephemeral TURN credentials (TTL 24 h).
       # It never leaves the server and is NOT logged anywhere.
       TURN_SECRET: ${TURN_SECRET:?TURN_SECRET must be set in environment or .env}
