@@ -17,6 +17,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { I } from './icons';
 import { SERVER_URL, isSecureUrl } from '../config';
 import { VAULT_PACK } from './stickers/VaultPack';
+import { ErrorBoundary } from './ErrorBoundary';
 
 // Tab type
 type GifTab = 'gifs' | 'stickers';
@@ -92,14 +93,15 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
         }>;
       };
       const mapped: TenorResult[] = (json.results ?? []).map((item) => {
-        const preview = item.media_formats.nanogif ?? item.media_formats.tinygif;
-        const full = item.media_formats.tinygif ?? item.media_formats.gif;
+        const fmts = item.media_formats ?? {};
+        const preview = fmts.nanogif ?? fmts.tinygif;
+        const full = fmts.tinygif ?? fmts.gif;
         return {
           id: item.id,
           url: full?.url ?? '',
           previewUrl: preview?.url ?? full?.url ?? '',
-          width: preview?.dims[0] ?? 200,
-          height: preview?.dims[1] ?? 200,
+          width: preview?.dims?.[0] ?? 200,
+          height: preview?.dims?.[1] ?? 200,
         };
       }).filter((r) => r.url && isSecureUrl(r.url) && isSecureUrl(r.previewUrl));
       setResults(mapped);
@@ -262,8 +264,12 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
               )}
             </View>
 
-            {/* Content */}
+            {/* Content — wrapped so a render failure (e.g. remote GIF media)
+                degrades to a local fallback instead of white-screening the whole
+                app. key={activeTab} remounts a fresh boundary on tab switch, so a
+                GIF-tab crash never blocks the stickers tab. */}
             <View style={{ flex: 1 }}>
+        <ErrorBoundary key={activeTab}>
         {activeTab === 'gifs' ? (
           loading ? (
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
@@ -331,7 +337,10 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
               numColumns={colCount}
               contentContainerStyle={{ paddingHorizontal: GRID_PAD, paddingBottom: 12, gap: GRID_GAP }}
               columnWrapperStyle={{ gap: GRID_GAP }}
-              removeClippedSubviews
+              /* removeClippedSubviews must stay FALSE here: with remote animated
+                 GIFs, Android's view recycling can crash natively (Fresco) when
+                 clipped tiles are torn down — e.g. on tab switch. */
+              removeClippedSubviews={false}
               maxToRenderPerBatch={10}
               windowSize={8}
               renderItem={({ item }) => {
@@ -397,6 +406,7 @@ export function GifPicker({ visible, onClose, onSelectGif, onSelectSticker }: Pr
             }}
           />
         )}
+        </ErrorBoundary>
             </View>
           </Pressable>
         </Pressable>
