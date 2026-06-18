@@ -14,13 +14,19 @@ import request from 'supertest';
 
 process.env['AEGIS_DB_PATH'] = ':memory:';
 
-const { default: identityRoutes } = await import('../routes/identity.js');
-const { default: pollsRoutes } = await import('../routes/polls.js');
+// Built in beforeAll rather than via top-level await: ts-jest's ESM emit is not
+// reliable across the suite, and a top-level await downleveled to CommonJS is a
+// hard SyntaxError. Deferring keeps the file valid under both module modes.
+let app: express.Express;
 
-const app = express();
-app.use(express.json());
-app.use('/identity', identityRoutes);
-app.use('/polls', pollsRoutes);
+beforeAll(async () => {
+  const { default: identityRoutes } = await import('../routes/identity.js');
+  const { default: pollsRoutes } = await import('../routes/polls.js');
+  app = express();
+  app.use(express.json());
+  app.use('/identity', identityRoutes);
+  app.use('/polls', pollsRoutes);
+});
 
 describe('rate limiting', () => {
   it('throttles GET /identity/challenge after 20 requests/min', async () => {
