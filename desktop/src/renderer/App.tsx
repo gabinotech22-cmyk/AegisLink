@@ -15,6 +15,7 @@ import { AddContactScreen } from './screens/AddContact';
 import { ContactsScreen } from './screens/Contacts';
 import { ContactDetailScreen } from './screens/ContactDetail';
 import { ProfileScreen } from './screens/Profile';
+import { KeysScreen } from './screens/Keys';
 import { NotificationsScreen } from './screens/Notifications';
 import { SearchScreen } from './screens/Search';
 import { ScanQRScreen } from './screens/ScanQR';
@@ -82,6 +83,7 @@ type PushRoute =
   | { name: 'contacts' }
   | { name: 'appIcon' }
   | { name: 'subscription' }
+  | { name: 'keys' }
   | { name: 'lockSettings' };
 
 // ─── Shell ────────────────────────────────────────────────────────────────────
@@ -190,6 +192,20 @@ function Shell() {
     });
     return () => clearInterval(interval);
   }, []);
+
+  // App-wide scheduled-message delivery. Runs regardless of which screen is
+  // open, so a queued message fires even after the user navigates away from the
+  // Scheduled screen (which only ever counted down without transmitting).
+  useEffect(() => {
+    if (!identity || status !== 'ready') return;
+    let interval: ReturnType<typeof setInterval>;
+    void import('./store/scheduled').then(({ deliverDueScheduled }) => {
+      const tick = () => { void deliverDueScheduled(identity); };
+      tick(); // flush anything already past due at mount
+      interval = setInterval(tick, 1000);
+    });
+    return () => clearInterval(interval);
+  }, [identity, status]);
 
   useEffect(() => {
     if (!identity) return;
@@ -381,6 +397,7 @@ function Shell() {
               onPanic={() => push({ name: 'panic' })}
               onAppIcon={() => push({ name: 'appIcon' })}
               onSubscription={() => push({ name: 'subscription' })}
+              onKeys={() => push({ name: 'keys' })}
             />
           );
         case 'notifs':
@@ -454,6 +471,8 @@ function Shell() {
           return <AppIconScreen onBack={pop} />;
         case 'subscription':
           return <SubscriptionScreen onBack={pop} />;
+        case 'keys':
+          return <KeysScreen onBack={pop} />;
       }
     }
 

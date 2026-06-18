@@ -15,6 +15,18 @@ export default defineConfig({
         '@renderer': resolve('src/renderer')
       }
     },
-    plugins: [react()]
+    plugins: [
+      react(),
+      {
+        // Vite dev injects an inline react-refresh preamble that the strict
+        // CSP meta tag would block (blank window). Relax script-src in dev
+        // only — `apply: 'serve'` never runs at build time.
+        name: 'dev-csp-relax',
+        apply: 'serve',
+        transformIndexHtml(html) {
+          return html.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
+        }
+      }
+    ]
   }
 })

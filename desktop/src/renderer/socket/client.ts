@@ -36,7 +36,7 @@ import {
   type RatchetState,
 } from '../crypto/signal/ratchet';
 import { stripAndPad } from '../crypto/metadata';
-import { loadRatchetSession, saveRatchetSession } from '../db/local';
+import { loadRatchetSession, saveRatchetSession, deleteContactRatchetSession } from '../db/local';
 import { showIncomingNotification } from '../notifications/push';
 import { useTyping } from '../store/typing';
 
@@ -160,7 +160,9 @@ async function flushGroupOfflineQueue(identity: Identity) {
   const items = groupOfflineQueue.splice(0);
   for (const item of items) {
     try {
-      await sendGroupMessage({ identity, groupId: item.groupId, plaintext: item.plaintext });
+      // The optimistic local append already ran when this item was enqueued,
+      // so the replay must NOT append again.
+      await sendGroupMessage({ identity, groupId: item.groupId, plaintext: item.plaintext, skipLocalAppend: true });
     } catch (e) {
       if (DEV) console.warn('[socket] group offline queue flush error', e);
       groupOfflineQueue.push(item);
@@ -273,24 +275,22 @@ export function isConnected(): boolean {
   return connected && authenticated;
 }
 
-async function uploadPreKeys(identity: Identity) {
-  if (!socket) return;
-
-  let prevSpkKeyId: number | null = null;
+/**
+ * Persist SPK + OPK secrets to secureStorage and verify the SPK secret reads
+ * back. Returns false on any failure — callers must NOT publish the matching
+ * public bundle in that case (a published SPK whose secret is unreadable makes
+ * every inbound X3DH abort with "no-spk"). Shared by the registration path
+ * (store/identity.ts) and the socket refill path below.
+ */
+export async function persistPrekeySecrets(
+  preKeys: {
+    signedPreKey: { keyId: number; secretKey: Uint8Array };
+    opkSecrets: Map<number, Uint8Array>;
+  },
+  prevSpkKeyId: number | null = null,
+): Promise<boolean> {
   try {
-    const stored = await SecureStore.getItemAsync(SECURE_SPK_KEYID_KEY());
-    if (stored) {
-      const parsed = parseInt(stored, 10);
-      if (Number.isFinite(parsed) && parsed > 0) prevSpkKeyId = parsed;
-    }
-  } catch {/* treat as first run */}
-  const nextSpkKeyId = (prevSpkKeyId ?? 0) + 1;
-
-  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId);
-  mySpkSecretCache = preKeys.signedPreKey.secretKey;
-  opkSecretsCache = preKeys.opkSecrets;
-
-  try {
+    const nextSpkKeyId = preKeys.signedPreKey.keyId;
     const newSecretB64 = encodeBase64(preKeys.signedPreKey.secretKey);
     await SecureStore.setItemAsync(spkSecretKey(nextSpkKeyId), newSecretB64);
     await SecureStore.setItemAsync(SECURE_SPK_SECRET_KEY(), newSecretB64);
@@ -322,8 +322,36 @@ async function uploadPreKeys(identity: Identity) {
       SECURE_OPK_IDS_KEY(),
       JSON.stringify(Array.from(preKeys.opkSecrets.keys())),
     );
+
+    // INVARIANT: only report success if the SPK secret reads back intact.
+    const readback = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    return readback === newSecretB64;
   } catch (err) {
     if (DEV) console.error('[socket] Failed to persist prekey secrets:', err);
+    return false;
+  }
+}
+
+async function uploadPreKeys(identity: Identity) {
+  if (!socket) return;
+
+  let prevSpkKeyId: number | null = null;
+  try {
+    const stored = await SecureStore.getItemAsync(SECURE_SPK_KEYID_KEY());
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      if (Number.isFinite(parsed) && parsed > 0) prevSpkKeyId = parsed;
+    }
+  } catch {/* treat as first run */}
+  const nextSpkKeyId = (prevSpkKeyId ?? 0) + 1;
+
+  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId);
+  mySpkSecretCache = preKeys.signedPreKey.secretKey;
+  opkSecretsCache = preKeys.opkSecrets;
+
+  const persisted = await persistPrekeySecrets(preKeys, prevSpkKeyId);
+  if (!persisted) {
+    throw new Error('failed to persist prekey secrets — refusing to publish bundle');
   }
 
   let deviceId: string | null = null;
@@ -593,6 +621,154 @@ async function saveSessionState(aegisId: string, state: RatchetState) {
   await saveRatchetSession(aegisId, JSON.stringify(s));
 }
 
+// ─── Ratchet desync auto-recovery (ported from mobile/src/socket/client.ts) ──
+//
+// Two peers whose Double Ratchet sessions have permanently desynchronised can
+// never decrypt each other's normal messages again (normal messages never
+// re-run X3DH). Detection is non-forgeable: the OUTER sealed-sender box already
+// authenticated the sender, so "outer box OK + existing session + no x3dh
+// header + ratchetDecrypt null/throw" can only mean desync.
+//
+// Glare resolution: the peer with the HIGHER aegisId is the canonical
+// initiator — on desync it deletes its session and sends a fresh X3DH init.
+// The LOWER peer keeps its session and sends a NUDGE (a normal ratchet message
+// that fails on the higher peer, provoking its initiator recovery), then
+// ADOPTS the resulting init. Both converge on the higher-id session.
+const RECOVERY_COOLDOWN_MS = 60_000;
+const SESSION_GRACE_MS = 30_000;
+const RECOVERY_WINDOW_MS = 90_000;
+const RECOVERY_FALLBACK_MS = 6_000;
+const lastRecoveryAttemptMs = new Map<string, number>();
+const inRecoveryUntilMs = new Map<string, number>();
+
+function amInitiatorFor(myAegisId: string, peerAegisId: string): boolean {
+  return myAegisId > peerAegisId;
+}
+
+function isInRecovery(aegisId: string): boolean {
+  const until = inRecoveryUntilMs.get(aegisId);
+  return typeof until === 'number' && Date.now() < until;
+}
+
+/**
+ * Non-initiator's nudge: a normal ratchet message over the EXISTING (desynced)
+ * session. It fails to decrypt on the higher peer, triggering its initiator
+ * recovery, whose fresh init we then adopt. We never delete or rebuild our own
+ * session here — that would clobber the init we are about to adopt.
+ */
+async function sendNudgeOverExistingSession(
+  contact: { aegisId: string; publicKeyB64: string },
+  identity: Identity,
+): Promise<boolean> {
+  if (!socket || !connected || !authenticated) return false;
+  const existingJson = await loadRatchetSession(contact.aegisId);
+  if (!existingJson) return false;
+  let session: RatchetState;
+  try {
+    const s = JSON.parse(existingJson);
+    s.RK = reviveBytes(s.RK);
+    s.CKs = reviveBytes(s.CKs);
+    s.CKr = reviveBytes(s.CKr);
+    s.DHr = reviveBytes(s.DHr);
+    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
+    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
+    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    session = s as RatchetState;
+  } catch {
+    return false;
+  }
+  // A nudge must be a PLAIN ratchet message — no x3dh header — so it lands on
+  // the initiator's existing session and fails there (the desync signal).
+  delete session.x3dhInit;
+  try {
+    const { useIdentity } = await import('../store/identity');
+    const idState = useIdentity.getState();
+    const payload = JSON.stringify({
+      type: 'profile_update',
+      senderName: idState.displayName,
+      senderColor: idState.avatarColor,
+      senderStatus: idState.profileStatus,
+    });
+    const recipientPub = decodeBase64(contact.publicKeyB64);
+    const { envelope, newState } = encryptMessage(
+      payload,
+      identity.aegisId,
+      recipientPub,
+      identity.secretKey,
+      session,
+    );
+    await saveSessionState(contact.aegisId, newState);
+    socket!.emit('envelope', {
+      id: crypto.randomUUID(),
+      to: contact.aegisId,
+      ciphertext: envelope.ciphertextB64,
+      nonce: envelope.nonceB64,
+    });
+    return true;
+  } catch (e) {
+    if (DEV) console.warn('[socket] desync nudge send failed:', (e as Error).message);
+    return false;
+  }
+}
+
+async function tryRecoverDesync(
+  contact: { aegisId: string; publicKeyB64: string },
+  existingState: RatchetState | null,
+  identity: Identity,
+): Promise<boolean> {
+  const now = Date.now();
+
+  // Grace: never tear down a session negotiated < grace ago — a stale,
+  // in-flight message from the previous session must not kill the new one.
+  if (
+    existingState &&
+    typeof existingState.createdAtMs === 'number' &&
+    now - existingState.createdAtMs < SESSION_GRACE_MS
+  ) {
+    return false;
+  }
+
+  // Cooldown: collapse a burst of failing stale messages into one attempt.
+  const last = lastRecoveryAttemptMs.get(contact.aegisId);
+  if (typeof last === 'number' && now - last < RECOVERY_COOLDOWN_MS) {
+    return false;
+  }
+  lastRecoveryAttemptMs.set(contact.aegisId, now);
+
+  const initiator = amInitiatorFor(identity.aegisId, contact.aegisId);
+  if (DEV)
+    console.warn(
+      `[socket] ratchet desync detected peer=${contact.aegisId} decision=${initiator ? 'INITIATE' : 'NUDGE'}`,
+    );
+
+  inRecoveryUntilMs.set(contact.aegisId, now + RECOVERY_WINDOW_MS);
+
+  if (!initiator) {
+    // Lower aegisId: keep the (desynced) session, nudge the higher peer, and
+    // wait to adopt its fresh init in decryptAndAppend.
+    await sendNudgeOverExistingSession(contact, identity);
+    return true;
+  }
+
+  // Higher aegisId: drop the dead session and emit a fresh X3DH init (the
+  // profile_update ride-along makes getOrCreateSession run a full handshake).
+  await deleteContactRatchetSession(contact.aegisId);
+  try {
+    await sendProfileTo(contact, identity);
+  } catch (e) {
+    if (DEV) console.warn('[socket] desync re-handshake send failed:', (e as Error).message);
+  }
+
+  // Fallback: if no glare init arrives to clear the marker, treat our fresh
+  // init session as converged after a short grace.
+  const peerId = contact.aegisId;
+  setTimeout(() => {
+    inRecoveryUntilMs.delete(peerId);
+  }, RECOVERY_FALLBACK_MS);
+
+  return true;
+}
+
 async function decryptAndAppend(
   env: WireSealedEnvelope,
   parsed: any,
@@ -605,7 +781,32 @@ async function decryptAndAppend(
   }
 
   let ratchetState: RatchetState;
+  // OPK to consume only AFTER a successful X3DH-init decrypt — deferring keeps
+  // the handshake retryable on transient failure/redelivery.
+  let consumeOpkIdAfterDecrypt: number | null = null;
   const existingJson = await loadRatchetSession(contact.aegisId);
+
+  // Deterministic glare resolution: if an X3DH init arrives while we hold our
+  // own session AND we are the canonical initiator (higher aegisId), never
+  // adopt the lower peer's init while ours is pending or we are mid-recovery.
+  if (parsed.x3dh && existingJson && amInitiatorFor(identity.aegisId, contact.aegisId)) {
+    let myInitPending = false;
+    try {
+      myInitPending = !!JSON.parse(existingJson).x3dhInit;
+    } catch {
+      /* treat as established */
+    }
+    if (myInitPending || isInRecovery(contact.aegisId)) {
+      if (DEV)
+        console.warn(
+          `[socket] glare: higher peer keeps own init, ignoring lower's (peer=${contact.aegisId})`,
+        );
+      return false;
+    }
+    // Established session + lower peer legitimately re-keying → fall through
+    // and adopt their fresh init.
+  }
+
   if (existingJson && !parsed.x3dh) {
     const s = JSON.parse(existingJson);
     s.RK = reviveBytes(s.RK);
@@ -622,22 +823,36 @@ async function decryptAndAppend(
       return false;
     }
 
-    const spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    // Use the EXACT SPK secret whose keyId Alice committed to in her X3DH
+    // header — the legacy single slot rotates on every prekey refill, so
+    // reading it blindly can derive a root key Alice never derived.
+    let spkSec: string | null = null;
+    if (typeof parsed.x3dh.spkId === 'number') {
+      spkSec = await SecureStore.getItemAsync(spkSecretKey(parsed.x3dh.spkId));
+    }
+    if (!spkSec) {
+      spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
+    }
     if (!spkSec) {
       if (DEV) console.warn('[socket] mySpkSecret not found — cannot decrypt');
       return false;
     }
     const mySpkSecret = decodeBase64(spkSec);
 
+    // If Alice committed to an opkId she DID include DH4 — decrypting without
+    // it derives a different root key (guaranteed desync). Hard-abort instead
+    // of silently mis-deriving, and defer consumption until after success so a
+    // redelivered init can retry with the same OPK.
     let myOpkSecret: Uint8Array | null = null;
     if (parsed.x3dh.opkId !== null) {
       const opkSecBase64 = await SecureStore.getItemAsync(opkSecretKey(parsed.x3dh.opkId));
       if (opkSecBase64) {
         myOpkSecret = decodeBase64(opkSecBase64);
-        void SecureStore.deleteItemAsync(opkSecretKey(parsed.x3dh.opkId));
+        consumeOpkIdAfterDecrypt = parsed.x3dh.opkId;
       } else {
         if (DEV)
-          console.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— continuing without DH4');
+          console.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— aborting (would desync)');
+        return false;
       }
     }
 
@@ -655,6 +870,15 @@ async function decryptAndAppend(
       publicKey: spkPublicKey,
       secretKey: mySpkSecret,
     });
+
+    // Adopting an inbound init — converged. Clear the recovery marker so stale
+    // in-flight messages on the old session don't re-trigger recovery, and
+    // reply with OUR profile under the now-converged session (the initiator
+    // ignored our init under the glare rule, so it never got our profile).
+    inRecoveryUntilMs.delete(contact.aegisId);
+    setTimeout(() => {
+      void sendProfileTo(contact, identity).catch(() => {});
+    }, 300);
   }
 
   const rHeader = {
@@ -665,10 +889,47 @@ async function decryptAndAppend(
   const rCiphertext = decodeBase64(parsed.ratchet.ciphertextB64);
   const rNonce = decodeBase64(parsed.ratchet.nonceB64);
 
-  const plaintextBytes = ratchetDecrypt(ratchetState, rHeader, rCiphertext, rNonce);
-  if (!plaintextBytes) {
-    if (DEV) console.warn('[socket] Double Ratchet decryption failed');
+  // A desync surfaces as null (MAC failure) OR a throw ("Too many skipped
+  // messages" / low-order DH). On an EXISTING non-x3dh session both are
+  // non-forgeable desync signals (outer box already authenticated the sender);
+  // ratchetDecrypt is transactional so a throw leaves the live state intact.
+  let plaintextBytes: Uint8Array | null;
+  try {
+    plaintextBytes = ratchetDecrypt(ratchetState, rHeader, rCiphertext, rNonce);
+  } catch (e) {
+    if (existingJson && !parsed.x3dh) {
+      if (DEV) console.warn('[socket] ratchetDecrypt threw on existing session:', (e as Error).message);
+      await tryRecoverDesync(contact, ratchetState, identity);
+    } else if (DEV) {
+      console.warn('[socket] Double Ratchet decryption threw:', (e as Error).message);
+    }
     return false;
+  }
+  if (!plaintextBytes) {
+    if (DEV) {
+      const fp = (b: Uint8Array | null) => (b ? encodeBase64(b).slice(0, 8) : 'null');
+      console.warn(
+        '[socket] Double Ratchet decryption failed',
+        `peer=${contact.aegisId} hadSession=${Boolean(existingJson)} hadX3dh=${Boolean(parsed.x3dh)}`,
+        `hdr(n=${rHeader.n} pn=${rHeader.pn} rk=${fp(rHeader.ratchetKey)})`,
+        `state(Ns=${ratchetState.Ns} Nr=${ratchetState.Nr} PN=${ratchetState.PN}`,
+        `DHr=${fp(ratchetState.DHr)} DHsPub=${fp(ratchetState.DHs.publicKey)}`,
+        `CKr=${ratchetState.CKr ? 'set' : 'null'} CKs=${ratchetState.CKs ? 'set' : 'null'})`,
+      );
+    }
+    if (existingJson && !parsed.x3dh) {
+      await tryRecoverDesync(contact, ratchetState, identity);
+    }
+    return false;
+  }
+
+  // Init authenticated — NOW consume the one-time prekey (single-use).
+  if (consumeOpkIdAfterDecrypt !== null) {
+    try {
+      await SecureStore.deleteItemAsync(opkSecretKey(consumeOpkIdAfterDecrypt));
+    } catch {
+      /* best-effort — may already be absent on retry */
+    }
   }
 
   const body = encodeUTF8(plaintextBytes);
@@ -1544,7 +1805,28 @@ export async function sendGroupMessage(opts: {
   identity: Identity;
   groupId: string;
   plaintext: string;
+  /**
+   * Skip the optimistic local append. Set by callers that already appended the
+   * message themselves (media sends) or by the offline-queue replay, which
+   * appended at enqueue time. Mirrors the same flag on the mobile client.
+   */
+  skipLocalAppend?: boolean;
 }): Promise<void> {
+  // Optimistic local append FIRST, before the online check, so the message
+  // shows immediately whether or not we are connected. Own messages render
+  // without a name prefix — GroupBubble only strips "name: " from INCOMING
+  // bodies — so store the plain text, NOT `${displayName}: ${text}`.
+  if (!opts.skipLocalAppend) {
+    await useMessages.getState().append({
+      id: crypto.randomUUID(),
+      chatId: opts.groupId,
+      direction: 'out',
+      body: opts.plaintext,
+      createdAt: Date.now(),
+      type: 'text',
+    });
+  }
+
   if (!socket || !connected || !authenticated) {
     groupOfflineQueue.push({ groupId: opts.groupId, plaintext: opts.plaintext });
     return;
@@ -1636,21 +1918,9 @@ export async function sendGroupMessage(opts: {
   });
 
   await Promise.all(sendPromises);
-
-  const { useIdentity } = await import('../store/identity');
-  const idState = useIdentity.getState();
-  const myDisplayName =
-    idState.displayName ||
-    opts.identity.aegisId.substring(0, 8);
-
-  const id = crypto.randomUUID();
-  await useMessages.getState().append({
-    id,
-    chatId: opts.groupId,
-    direction: 'out',
-    body: `${myDisplayName}: ${opts.plaintext}`,
-    createdAt: Date.now(),
-  });
+  // Local append already happened at the top (skipLocalAppend-aware), so there
+  // is nothing to append here — doing so would double-post and bake the
+  // sender's own name into their bubble.
 }
 
 export async function sendGroupVote(opts: {
