@@ -56,6 +56,8 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
   const saveDraft = useMessages((s) => s.saveDraft);
   const append = useMessages((s) => s.append);
   const drafts = useMessages((s) => s.drafts);
+  const pendingMediaUri = useMessages((s) => s.pendingMediaUri);
+  const setPendingMedia = useMessages((s) => s.setPendingMedia);
 
   const list: StoredMessage[] = byChat[contact.aegisId] ?? [];
   const pinnedMsg = pinnedMsgMap[contact.aegisId] ?? null;
@@ -66,26 +68,63 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
   const [mismatchKey] = useState<string | null>(null);
 
-  // staged image (desktop: from file input)
-  const [stagedImageUri, setStagedImageUri] = useState<string | null>(null);
+  // Multi-file staging — each item keeps a preview URL (for UI) and the raw Blob
+  // (for E2EE upload at send-time). previewUrlsRef mirrors the state so the
+  // unmount cleanup closure always sees the current set of URLs to revoke.
+  const [stagedItems, setStagedItems] = useState<{ previewUrl: string; blob: Blob; name: string; isImage: boolean }[]>([]);
+  const stagedItemsRef = useRef<{ previewUrl: string }[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stagedObjectUrlRef = useRef<string | null>(null);
-  // Raw File retained so handleSend can encrypt+upload rather than sending a local objectURL
-  const stagedFileRef = useRef<File | null>(null);
 
-  // Revoke object URLs when component unmounts or image is cleared
+  function addStagedItems(newItems: { previewUrl: string; blob: Blob; name: string; isImage: boolean }[]) {
+    setStagedItems((prev) => {
+      const next = [...prev, ...newItems];
+      stagedItemsRef.current = next;
+      return next;
+    });
+  }
+
+  function removeStagedItem(index: number) {
+    setStagedItems((prev) => {
+      URL.revokeObjectURL(prev[index].previewUrl);
+      const next = prev.filter((_, i) => i !== index);
+      stagedItemsRef.current = next;
+      return next;
+    });
+  }
+
+  function clearStagedItems() {
+    setStagedItems((prev) => {
+      prev.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      stagedItemsRef.current = [];
+      return [];
+    });
+  }
+
+  // Revoke all preview object URLs on unmount
   useEffect(() => {
     return () => {
-      if (stagedObjectUrlRef.current) {
-        URL.revokeObjectURL(stagedObjectUrlRef.current);
-        stagedObjectUrlRef.current = null;
-      }
+      stagedItemsRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     };
   }, []);
+
+  // Consume pendingMediaUri written by AttachSheet (EXIF-stripped canvas blob URL)
+  useEffect(() => {
+    if (!pendingMediaUri) return;
+    const uri = pendingMediaUri;
+    setPendingMedia(null);
+    fetch(uri)
+      .then((r) => r.blob())
+      .then((blob) => {
+        const previewUrl = URL.createObjectURL(blob);
+        URL.revokeObjectURL(uri);
+        addStagedItems([{ previewUrl, blob, name: 'photo.jpg', isImage: true }]);
+      })
+      .catch(() => URL.revokeObjectURL(uri));
+  }, [pendingMediaUri]);
 
   useEffect(() => {
     void loadChat(contact.aegisId);
@@ -128,48 +167,44 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
   async function handleSend() {
     if (sending) return;
     const hasText = draft.trim().length > 0;
-    const hasImage = !!stagedImageUri;
-    if (!hasText && !hasImage) return;
+    const hasFiles = stagedItems.length > 0;
+    if (!hasText && !hasFiles) return;
     if (!identity) return;
     setSending(true);
     setErrorMsg(null);
 
+    const capturedDraft = draft.trim();
+    const capturedItems = [...stagedItems];
     const capturedReplyTo = replyTo?.id ?? undefined;
 
     // Optimistic clear so UI feels fast
     setDraft('');
     void saveDraft(contact.aegisId, '');
-    if (stagedObjectUrlRef.current) {
-      URL.revokeObjectURL(stagedObjectUrlRef.current);
-      stagedObjectUrlRef.current = null;
-    }
-    setStagedImageUri(null);
+    clearStagedItems();
     setReplyTo(null);
 
     try {
-      let plaintext: string;
-      if (hasImage && stagedFileRef.current) {
-        // Encrypt and upload to relay — returns wire URI blob:<id>:<key>:<nonce>
-        const { encryptAndUploadMedia } = await import('../crypto/media');
-        const wireUri = await encryptAndUploadMedia(stagedFileRef.current);
-        stagedFileRef.current = null;
-        plaintext = `[image:${wireUri}]`;
-      } else {
-        stagedFileRef.current = null;
-        plaintext = draft.trim();
-      }
-
       const { decodeBase64 } = await import('tweetnacl-util');
       const { sendMessage } = await import('../socket/client');
-      await sendMessage({
+      const base = {
         identity,
         recipientAegisId: contact.aegisId,
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
-        plaintext,
-        replyToId: capturedReplyTo,
-        // sendMessage already handles local append via skipLocalAppend=false (default)
-        // so we must NOT call append() separately here.
-      });
+      };
+
+      if (capturedItems.length > 0) {
+        const { encryptAndUploadMedia } = await import('../crypto/media');
+        for (let i = 0; i < capturedItems.length; i++) {
+          const wireUri = await encryptAndUploadMedia(capturedItems[i].blob);
+          const isLast = i === capturedItems.length - 1;
+          // Attach caption to last attachment — mirrors mobile's send pattern
+          const caption = isLast && capturedDraft ? capturedDraft : '';
+          const plaintext = caption ? `[image:${wireUri}]${caption}` : `[image:${wireUri}]`;
+          await sendMessage({ ...base, plaintext, replyToId: i === 0 ? capturedReplyTo : undefined });
+        }
+      } else {
+        await sendMessage({ ...base, plaintext: capturedDraft, replyToId: capturedReplyTo });
+      }
     } catch (e) {
       setErrorMsg((e as Error).message);
     } finally {
@@ -178,17 +213,15 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Revoke any previous object URL before creating a new one
-    if (stagedObjectUrlRef.current) {
-      URL.revokeObjectURL(stagedObjectUrlRef.current);
-    }
-    // Keep raw File for E2EE upload at send-time; objectURL is only for the preview thumbnail
-    stagedFileRef.current = file;
-    const url = URL.createObjectURL(file);
-    stagedObjectUrlRef.current = url;
-    setStagedImageUri(url);
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const newItems = files.map((file) => ({
+      previewUrl: URL.createObjectURL(file),
+      blob: file as Blob,
+      name: file.name,
+      isImage: file.type.startsWith('image/'),
+    }));
+    addStagedItems(newItems);
     e.target.value = '';
   }
 
@@ -353,14 +386,48 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
         </div>
       )}
 
-      {/* Staged image preview */}
-      {stagedImageUri && (
-        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8, backgroundColor: t.surface2, borderTop: `1px solid ${t.divider}`, flexShrink: 0 }}>
-          <img src={stagedImageUri} alt="staged" style={{ width: 48, height: 48, borderRadius: t.radiusS, objectFit: 'cover', backgroundColor: t.surface3 }} />
-          <span style={{ flex: 1, fontFamily: t.font, fontSize: 13, color: t.textDim }}>Image ready to send</span>
-          <button onClick={() => { if (stagedObjectUrlRef.current) { URL.revokeObjectURL(stagedObjectUrlRef.current); stagedObjectUrlRef.current = null; } setStagedImageUri(null); }} aria-label="Remove image" style={iconBtn}>
-            <I.X size={18} color={t.textDim} />
-          </button>
+      {/* Staged media tray — scrollable horizontal strip of thumbnails */}
+      {stagedItems.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8, backgroundColor: t.surface2, borderTop: `1px solid ${t.divider}`, flexShrink: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+            {stagedItems.map((item, i) => (
+              <div
+                key={i}
+                style={{ position: 'relative', flexShrink: 0, width: 64, height: 64, borderRadius: t.radiusS, overflow: 'visible', backgroundColor: t.surface3 }}
+              >
+                {item.isImage ? (
+                  <img
+                    src={item.previewUrl}
+                    alt={item.name}
+                    style={{ width: 64, height: 64, borderRadius: t.radiusS, objectFit: 'cover', display: 'block' }}
+                  />
+                ) : (
+                  <div style={{ width: 64, height: 64, borderRadius: t.radiusS, backgroundColor: t.surface3, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: 4, boxSizing: 'border-box' }}>
+                    <I.Attach size={20} color={t.accent} />
+                    <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, textAlign: 'center', overflow: 'hidden', width: '100%', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                  </div>
+                )}
+                <button
+                  onClick={() => removeStagedItem(i)}
+                  aria-label={`Remove ${item.name}`}
+                  style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: 9, backgroundColor: t.danger, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, zIndex: 1 }}
+                >
+                  <I.X size={11} color="#fff" />
+                </button>
+              </div>
+            ))}
+            {/* Add more files button */}
+            <label
+              style={{ flexShrink: 0, width: 64, height: 64, borderRadius: t.radiusS, border: `1px dashed ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backgroundColor: 'transparent' }}
+              aria-label="Add more files"
+            >
+              <I.Plus size={22} color={t.textDim} />
+              <input ref={fileInputRef} type="file" accept="image/*,application/pdf,text/plain,application/zip,application/octet-stream" multiple style={{ display: 'none' }} onChange={handleFileChange} />
+            </label>
+          </div>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.5 }}>
+            {stagedItems.length} {stagedItems.length === 1 ? 'FILE' : 'FILES'} — WILL ENCRYPT BEFORE SENDING
+          </span>
         </div>
       )}
 
@@ -385,11 +452,14 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 14, borderTop: `1px solid ${t.divider}`, backgroundColor: t.surface, flexShrink: 0 }}>
-          {/* Attach */}
-          <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileChange} />
-          <button onClick={onAttach} aria-label="Attach file" style={iconBtn}>
-            <I.Attach size={22} color={t.textDim} />
-          </button>
+          {/* Attach — opens file picker directly when no tray is visible;
+              the staged tray has its own Add button once files are staged */}
+          {stagedItems.length === 0 && (
+            <label style={{ ...iconBtn, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} aria-label="Attach file">
+              <I.Attach size={22} color={t.textDim} />
+              <input type="file" accept="image/*,application/pdf,text/plain,application/zip,application/octet-stream" multiple style={{ display: 'none' }} onChange={handleFileChange} />
+            </label>
+          )}
           {/* Draft input */}
           <input
             value={draft}
@@ -418,22 +488,22 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
           {/* Send */}
           <button
             onClick={() => void handleSend()}
-            disabled={(!draft.trim() && !stagedImageUri) || sending}
+            disabled={(!draft.trim() && stagedItems.length === 0) || sending}
             aria-label="Send message"
             style={{
               width: 40,
               height: 40,
               borderRadius: 20,
-              backgroundColor: (draft.trim() || stagedImageUri) && online ? t.accent : t.surface3,
+              backgroundColor: (draft.trim() || stagedItems.length > 0) && online ? t.accent : t.surface3,
               border: 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: (!draft.trim() && !stagedImageUri) || sending ? 'not-allowed' : 'pointer',
+              cursor: (!draft.trim() && stagedItems.length === 0) || sending ? 'not-allowed' : 'pointer',
               flexShrink: 0,
             }}
           >
-            <I.Send size={18} color={(draft.trim() || stagedImageUri) && online ? t.accentInk : t.textFaint} />
+            <I.Send size={18} color={(draft.trim() || stagedItems.length > 0) && online ? t.accentInk : t.textFaint} />
           </button>
         </div>
       )}
