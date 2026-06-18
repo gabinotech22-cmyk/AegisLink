@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Linking, Image, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Keyboard, Platform, StyleSheet, Linking, Image, ActivityIndicator, Modal } from 'react-native';
 import { FormattedText } from '../components/FormattedText';
 import { MediaEditorModal } from '../components/MediaEditorModal';
 import { VoiceRecorderScreen } from './VoiceRecorder';
@@ -1143,7 +1143,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             {
               borderTopColor: t.divider,
               backgroundColor: t.surface,
-              paddingBottom: insets.bottom > 0 ? insets.bottom : 14,
+              paddingBottom: gifPickerVisible ? 0 : insets.bottom > 0 ? insets.bottom : 14,
             },
           ]}
         >
@@ -1232,7 +1232,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               {!draft.trim() && !stagedImageUri && (
                 <>
                   <Pressable
-                    onPress={() => setGifPickerVisible(true)}
+                    onPress={() => { Keyboard.dismiss(); setGifPickerVisible((v) => !v); }}
                     hitSlop={8}
                     style={{ padding: 6 }}
                     accessibilityLabel="Abrir selector de GIF"
@@ -1256,6 +1256,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               <TextInput
                 value={draft}
                 onChangeText={handleDraftChange}
+                onFocus={() => setGifPickerVisible(false)}
                 placeholder={online ? i18nT('chat.messagePlaceholder') : i18nT('chat.messageOfflinePlaceholder')}
                 placeholderTextColor={t.textFaint}
                 accessibilityLabel="Campo de mensaje"
@@ -1325,6 +1326,14 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             </>
           )}
         </View>
+
+        {/* GIF / sticker panel — inline, WhatsApp-style, docked below the composer. */}
+        <GifPicker
+          visible={gifPickerVisible}
+          onClose={() => setGifPickerVisible(false)}
+          onSelectGif={handleGifSelect}
+          onSelectSticker={handleStickerSelect}
+        />
       </View>
 
       {/* Message Actions Sheet */}
@@ -1350,12 +1359,6 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         onClose={() => setForwardBody(null)}
       />
 
-      <GifPicker
-        visible={gifPickerVisible}
-        onClose={() => setGifPickerVisible(false)}
-        onSelectGif={handleGifSelect}
-        onSelectSticker={handleStickerSelect}
-      />
       <ImageViewerModal images={viewer?.images ?? null} initialIndex={viewer?.index ?? 0} onClose={() => setViewer(null)} t={t} />
 
       {/* Inline voice note recorder — normal (non-ephemeral) audio */}
