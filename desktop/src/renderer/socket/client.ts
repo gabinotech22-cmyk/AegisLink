@@ -25,8 +25,11 @@ import {
   performX3DH,
   performX3DHReceiver,
   generatePreKeys,
+  shouldUsePqReceiver,
   type PreKeyBundle,
+  type PqSignedPreKeyPublic,
 } from '../crypto/signal/x3dh';
+import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import {
   initRatchet,
   ratchetDecrypt,
@@ -63,6 +66,44 @@ const SECURE_SPK_KEYID_KEY = () => `aegis.${getSlotPrefix()}spk.keyId`;
 const SECURE_OPK_IDS_KEY = () => `aegis.${getSlotPrefix()}opkIds.json`;
 const opkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}opkSecret.${keyId}`;
 const spkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}spkSecret.${keyId}`;
+// PQXDH (v2): ML-KEM-768 signed PQ prekey secret (2400 bytes) per keyId, plus a
+// durable counter of the current keyId. Mirrors mobile's DB-backed PQSPK store,
+// but desktop persists in the encrypted keystore (window.aegis.secureStorage).
+const pqSpkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}pqSpkSecret.${keyId}`;
+const SECURE_PQSPK_KEYID_KEY = () => `aegis.${getSlotPrefix()}pqSpk.keyId`;
+
+/** Durably persist a PQSPK secret with the SAME write-then-readback invariant
+ * as the SPK: never advertise a PQ prekey whose 2400-byte secret we cannot
+ * recover (that would silently break every inbound v2 handshake). Returns true
+ * only if the secret reads back intact and the keyId counter was advanced. */
+export async function persistPqSpkSecret(keyId: number, secret: Uint8Array): Promise<boolean> {
+  const b64 = encodeBase64(secret);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await SecureStore.setItemAsync(pqSpkSecretKey(keyId), b64);
+      const back = await SecureStore.getItemAsync(pqSpkSecretKey(keyId));
+      if (back === b64) {
+        try { await SecureStore.setItemAsync(SECURE_PQSPK_KEYID_KEY(), String(keyId)); }
+        catch {/* best-effort counter */}
+        return true;
+      }
+    } catch {/* retry once */}
+  }
+  return false;
+}
+
+/** Read the active PQSPK keyId (the one we last advertised), or null if this
+ * device has never published a PQSPK (→ v1-only, weAdvertisedPq = false). */
+async function getActivePqSpkKeyId(): Promise<number | null> {
+  try {
+    const stored = await SecureStore.getItemAsync(SECURE_PQSPK_KEYID_KEY());
+    if (!stored) return null;
+    const parsed = parseInt(stored, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 interface WireSealedEnvelope {
   id: string;
@@ -344,14 +385,24 @@ async function uploadPreKeys(identity: Identity) {
     }
   } catch {/* treat as first run */}
   const nextSpkKeyId = (prevSpkKeyId ?? 0) + 1;
+  const prevPqSpkKeyId = await getActivePqSpkKeyId();
+  const nextPqSpkKeyId = (prevPqSpkKeyId ?? 0) + 1;
 
-  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId);
+  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId, nextPqSpkKeyId);
   mySpkSecretCache = preKeys.signedPreKey.secretKey;
   opkSecretsCache = preKeys.opkSecrets;
 
   const persisted = await persistPrekeySecrets(preKeys, prevSpkKeyId);
   if (!persisted) {
     throw new Error('failed to persist prekey secrets — refusing to publish bundle');
+  }
+
+  // PQXDH (v2): persist the PQSPK secret with the same readback invariant. On
+  // failure we fall back to a v1-safe upload (omit pqSignedPreKey below) rather
+  // than advertising a PQ prekey we could not recover.
+  const pqSpkOk = await persistPqSpkSecret(nextPqSpkKeyId, preKeys.pqSignedPreKey.secretKey);
+  if (pqSpkOk && prevPqSpkKeyId !== null && prevPqSpkKeyId !== nextPqSpkKeyId) {
+    try { await SecureStore.deleteItemAsync(pqSpkSecretKey(prevPqSpkKeyId)); } catch {/* best-effort */}
   }
 
   let deviceId: string | null = null;
@@ -372,6 +423,17 @@ async function uploadPreKeys(identity: Identity) {
         },
         oneTimePreKeys: preKeys.oneTimePreKeys,
         ...(deviceId !== null ? { deviceId } : {}),
+        // PQXDH (v2): omitted when the PQSPK secret could not be durably
+        // persisted+read-back above, keeping the upload v1-safe.
+        ...(pqSpkOk
+          ? {
+              pqSignedPreKey: {
+                keyId: preKeys.pqSignedPreKey.keyId,
+                publicKeyB64: preKeys.pqSignedPreKey.publicKeyB64,
+                signatureB64: preKeys.pqSignedPreKey.signatureB64,
+              } satisfies PqSignedPreKeyPublic,
+            }
+          : {}),
       },
       (ack: { ok: boolean; error?: string }) => {
         if (ack?.ok) resolve();
@@ -598,6 +660,9 @@ async function getOrCreateSession(
     aliceEKB64: x3dh.myEphemeralPublicKeyB64,
     spkId: bundle.signedPreKey.keyId,
     opkId: bundle.oneTimePreKey ? bundle.oneTimePreKey.keyId : null,
+    // PQXDH (v2): present iff performX3DH negotiated v2 (peer published a PQSPK).
+    // Rides inside the sealed init so the recipient can decapsulate. Absent ⇒ v1.
+    ...(x3dh.pqCiphertextB64 ? { pqCtB64: x3dh.pqCiphertextB64 } : {}),
   };
 
   await saveSessionState(contactAegisId, ratchetState);
@@ -856,6 +921,28 @@ async function decryptAndAppend(
       }
     }
 
+    // PQXDH (v2) downgrade decision. weAdvertisedPq reflects whether THIS device
+    // has an active PQSPK slot. shouldUsePqReceiver FALLS BACK to 'v1' when we
+    // advertised PQ but the init carried no ciphertext (legitimate v1 peer, or a
+    // gap in our own bundle) — still full X25519 E2EE. We record the downgrade
+    // to a LOCAL-ONLY counter (never on the wire) so a spike is observable.
+    const pqCtB64 = (parsed.x3dh as { pqCtB64?: string }).pqCtB64;
+    const weAdvertisedPq = (await getActivePqSpkKeyId()) !== null;
+    const pqDecision = shouldUsePqReceiver(weAdvertisedPq, !!pqCtB64);
+    if (weAdvertisedPq && !pqCtB64) {
+      void useSecurityDiagnostics.getState().recordPqDowngrade();
+    }
+    let pqInputs: { cipherText: Uint8Array; pqSpkSecret: Uint8Array } | null = null;
+    if (pqDecision === 'v2') {
+      const pqKeyId = await getActivePqSpkKeyId();
+      const pqSecB64 = pqKeyId !== null ? await SecureStore.getItemAsync(pqSpkSecretKey(pqKeyId)) : null;
+      if (!pqSecB64) {
+        if (DEV) console.warn('[socket] PQSPK secret not found for active keyId — cannot complete v2 handshake');
+        return false;
+      }
+      pqInputs = { cipherText: decodeBase64(pqCtB64!), pqSpkSecret: decodeBase64(pqSecB64) };
+    }
+
     const senderPubKey = decodeBase64(contact.publicKeyB64);
     const rootKey = performX3DHReceiver(
       identity,
@@ -863,6 +950,7 @@ async function decryptAndAppend(
       myOpkSecret,
       senderPubKey,
       decodeBase64(parsed.x3dh.aliceEKB64),
+      pqInputs,
     );
 
     const spkPublicKey = nacl.scalarMult.base(mySpkSecret);
@@ -1352,6 +1440,13 @@ async function initSelfSession(identity: Identity, sock: Socket): Promise<Ratche
 
   bundle.signingPublicKeyB64 = identity.signingPublicKeyB64;
   bundle.identityKeyB64 = identity.publicKeyB64;
+
+  // Multi-device self-copy stays v1-only for now (matches mobile gap #3): the
+  // self-receiver path does NOT pass PQ inputs, so we MUST keep the self-sender
+  // on v1 too — otherwise performX3DH would negotiate v2 (the self-bundle
+  // advertises our own PQSPK) and derive a root key the receiver can't match.
+  // Stripping the PQSPK here forces the classic v1 handshake on both sides.
+  bundle.pqSignedPreKey = null;
 
   const x3dh = performX3DH(identity, bundle);
   const ratchetState = initRatchet(

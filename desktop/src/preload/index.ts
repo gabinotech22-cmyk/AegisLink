@@ -12,7 +12,9 @@ contextBridge.exposeInMainWorld('aegis', {
     get: (key: string): Promise<string | null> =>
       ipcRenderer.invoke('secureStorage:get', key),
     delete: (key: string): Promise<void> =>
-      ipcRenderer.invoke('secureStorage:delete', key)
+      ipcRenderer.invoke('secureStorage:delete', key),
+    wipePrekeys: (): Promise<void> =>
+      ipcRenderer.invoke('secureStorage:wipe-prekeys')
   },
   db: {
     saveIdentity: (activeSlot: string, identity: any): Promise<void> =>
