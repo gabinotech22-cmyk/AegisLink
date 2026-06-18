@@ -315,6 +315,9 @@ describe('ratchet desync recovery — no clobber for the non-initiator (lower ae
   });
 
   afterEach(() => {
+    // Drop any pending recovery-fallback timer before discarding fake timers,
+    // mirroring client.desyncRecovery.test.ts (see comment there).
+    (require('../client') as typeof import('../client')).disconnect();
     jest.useRealTimers();
   });
 

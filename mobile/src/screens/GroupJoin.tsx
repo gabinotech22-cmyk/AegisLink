@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, Alert } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -9,6 +9,7 @@ import { useGroups } from '../store/groups';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import type { StoredGroup } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   groupId: string;
@@ -55,13 +56,13 @@ export function GroupJoinScreen({
         recipientPublicKey: decodeBase64(adminContact.publicKeyB64),
         plaintext: `[join_request:${groupId}:${groupName}]`,
       });
-      Alert.alert(
+      themedAlert(
         i18nT('groupJoin.requestSentTitle'),
         i18nT('groupJoin.requestSentDesc', { admin: adminName }),
         [{ text: i18nT('common.ok'), onPress: onBack }],
       );
     } catch {
-      Alert.alert(i18nT('groupJoin.requestErrorTitle'), i18nT('groupJoin.requestErrorDesc'));
+      themedAlert(i18nT('groupJoin.requestErrorTitle'), i18nT('groupJoin.requestErrorDesc'));
     } finally {
       setRequesting(false);
     }

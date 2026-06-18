@@ -318,6 +318,8 @@ jest.mock('../../store/groups', () => ({
           members: mockGroupMembers,
           createdAt: 1_000_000,
           avatarColor: '#00FF88',
+          // Caller is owner → passes the admin-only call gate (can(call)).
+          adminId: 'self-aegis-id',
         },
       ],
     });
@@ -342,6 +344,9 @@ function makeGroup(overrides: Partial<StoredGroup> = {}): StoredGroup {
     members: ['self-aegis-id', 'peer-001', 'peer-002'],
     createdAt: 1_000_000,
     avatarColor: '#00FF88',
+    // Caller is the owner so the admin-only call gate (can(call)) permits the
+    // call in these tests. Override adminId to exercise the blocked path.
+    adminId: 'self-aegis-id',
     ...overrides,
   };
 }

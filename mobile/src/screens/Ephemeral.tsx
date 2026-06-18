@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { useMessages } from '../store/messages';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -49,12 +50,12 @@ export function EphemeralScreen({ onBack, chatId }: Props) {
     setPick(id);
     void setChatEphemeralTimerAction(chatId, sec);
     if (sec > 0) {
-      Alert.alert(
+      themedAlert(
         i18nT('ephemeral.alertTitle'),
         i18nT('ephemeral.alertEnabled', { label: i18nT(labelKey) })
       );
     } else {
-      Alert.alert(i18nT('ephemeral.alertTitle'), i18nT('ephemeral.alertDisabled'));
+      themedAlert(i18nT('ephemeral.alertTitle'), i18nT('ephemeral.alertDisabled'));
     }
   }
 

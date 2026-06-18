@@ -18,7 +18,7 @@ import proxyLinkPreviewRoutes from './routes/proxyLinkPreview.js';
 import { createWorkRouter } from './routes/work.js';
 import { createDeviceLinkRouter } from './routes/deviceLink.js';
 import { attachRelay } from './relay/handler.js';
-import { initDb, messageRepo, pruneExpiredWorkMessages } from './db/client.js';
+import { initDb, messageRepo, senderKeyDistRepo, pruneExpiredWorkMessages } from './db/client.js';
 
 // ── Last-resort error handlers ───────────────────────────────────────────────
 // Log only the error itself (never envelope payloads or user identifiers) to
@@ -124,6 +124,15 @@ const io = new SocketServer(httpServer, {
   // React Native and Electron send no Origin header, so null/undefined must be
   // allowed explicitly — Socket.IO does this automatically when origin is '*'.
   cors: { origin: ORIGIN === '*' ? '*' : ['https://aegislink.duckdns.org', ...ORIGIN.split(',').map(s => s.trim())], credentials: false },
+  // Detect dead clients faster than the defaults (25s/20s ≈ 45s window). When a
+  // phone is suspended/backgrounded the OS silently drops the WebSocket; until
+  // the server notices, the recipient still counts as "online" so messages are
+  // delivered to a dead socket instead of triggering an FCM push wake-up (the
+  // "ghost socket" — messages/notifications go missing after backgrounding).
+  // 15s ping + 10s timeout shrinks that window to ~25s while staying generous
+  // for mobile/carrier jitter (a healthy client pongs in well under a second).
+  pingInterval: 15000,
+  pingTimeout: 10000,
   // Bind to all interfaces so phones on LAN can reach the dev server.
 });
 
@@ -150,9 +159,10 @@ initDb().then(() => {
     console.log(`[aegislink-server] CORS origin: ${ORIGIN}`);
   });
 
-  // Purge expired queued messages every 10 minutes.
+  // Purge expired queued messages and SenderKey distributions every 10 minutes.
   setInterval(() => {
     void messageRepo.purgeExpired();
+    void senderKeyDistRepo.purgeExpired();
   }, 10 * 60 * 1000).unref();
 
   // Prune work messages that exceed channel retention policies.

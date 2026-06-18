@@ -197,7 +197,7 @@ function ContactRow({
         borderBottomColor: t.divider,
       })}
     >
-      <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={42} />
+      <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={42} seed={contact.publicKeyB64 || contact.aegisId} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Text

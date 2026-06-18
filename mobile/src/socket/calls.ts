@@ -1,7 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
-import { Alert } from 'react-native';
+;
 import { getSocket, isConnected } from './client';
 import { useCall } from '../store/call';
 import { displayIncomingCall, endNativeCall, reportCallConnected, setNativeMuted } from '../calls/callkeep';
@@ -16,6 +16,9 @@ import {
   type CallMedia,
 } from '../webrtc/peer';
 import { fetchTurnConfig } from '../webrtc/ice';
+import { startInCallAudio, stopInCallAudio } from '../webrtc/inCall';
+import { startCallService, stopCallService } from '../webrtc/callForegroundService';
+import { themedAlert } from '../components/AlertHost';
 
 // ---------------------------------------------------------------------------
 // Sealed WebRTC signaling
@@ -214,6 +217,15 @@ export function attachCallHandlers(): void {
   const socket = getSocket();
   if (!socket) return;
 
+  // Idempotent: a fresh connect() builds a NEW socket.io instance (disconnect()
+  // nulls the old one), so the previous listeners are gone — and re-running this
+  // on reconnect must not stack duplicate handlers that would fire startIncoming
+  // twice. Clear our four call events first, then (re)register.
+  socket.off('call:invite');
+  socket.off('call:answer');
+  socket.off('call:ice');
+  socket.off('call:hangup');
+
   socket.on('call:invite', async (msg: CallInvitePayload) => {
     // Decrypt the sealed SDP offer before doing anything else. A failed open
     // (unknown sender, tampered ciphertext, missing identity) drops the invite.
@@ -351,6 +363,12 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     });
   } catch { /* expo-av not available in this context */ }
 
+  // Earpiece + proximity sensor for audio (screen blanks at the ear) / speaker
+  // for video, and an Android foreground service so the call survives the app
+  // being backgrounded. iOS background is covered by UIBackgroundModes.
+  startInCallAudio(media === 'video' ? 'video' : 'audio');
+  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
+
   // Reset the ICE queue for this new call
   resetIceQueue();
 
@@ -384,7 +402,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
         const neverConnected = status !== 'in-call' && status !== 'ended';
         endCall('rtc_failure');
         if (neverConnected) {
-          Alert.alert(
+          themedAlert(
             'Call failed',
             'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
           );
@@ -401,7 +419,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   if (!sealedOffer) {
     // Cannot encrypt the offer — abort rather than leak plaintext SDP to the relay.
     endCall('encrypt_failure');
-    Alert.alert(
+    themedAlert(
       'Call failed',
       'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
     );
@@ -455,6 +473,12 @@ export async function acceptCall(): Promise<void> {
     });
   } catch { /* expo-av not available in this context */ }
 
+  // Earpiece + proximity sensor for audio (screen blanks at the ear) / speaker
+  // for video, and an Android foreground service so the call survives the app
+  // being backgrounded. iOS background is covered by UIBackgroundModes.
+  startInCallAudio(media === 'video' ? 'video' : 'audio');
+  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
+
   const peer = await createPeer(media, {
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
@@ -485,7 +509,7 @@ export async function acceptCall(): Promise<void> {
         const neverConnected = status !== 'in-call' && status !== 'ended';
         endCall('rtc_failure');
         if (neverConnected) {
-          Alert.alert(
+          themedAlert(
             'Call failed',
             'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
           );
@@ -504,7 +528,7 @@ export async function acceptCall(): Promise<void> {
   if (!sealedAnswer) {
     // Cannot encrypt the answer — abort rather than leak plaintext SDP.
     endCall('encrypt_failure');
-    Alert.alert(
+    themedAlert(
       'Call failed',
       'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
     );
@@ -584,6 +608,10 @@ function finalizeCall(reason: string, opts: { emitHangup: boolean }): void {
       playThroughEarpieceAndroid: false,
     });
   } catch { /* no-op */ }
+
+  // Release proximity/audio session and tear down the Android foreground service.
+  stopInCallAudio();
+  stopCallService();
 
   activePeer?.cleanup();
 

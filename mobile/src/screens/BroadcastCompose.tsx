@@ -1,15 +1,5 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  TextInput,
-  Alert,
-  ActivityIndicator,
-  ScrollView,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+import { View, Text, Pressable, TextInput, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
@@ -19,6 +9,7 @@ import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { sendMessage } from '../socket/client';
 import type { DistributionList } from '../store/distribution';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   list: DistributionList;
@@ -44,11 +35,11 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
   async function handleSend() {
     const body = text.trim();
     if (!body) {
-      Alert.alert('Empty message', 'Type a message before sending.');
+      themedAlert('Empty message', 'Type a message before sending.');
       return;
     }
     if (!identity) {
-      Alert.alert('Not ready', 'Identity not loaded. Please wait.');
+      themedAlert('Not ready', 'Identity not loaded. Please wait.');
       return;
     }
 

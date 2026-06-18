@@ -5,6 +5,7 @@ import { ss } from '../utils/secureStore';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { secretKeySlot, signSecretKeySlot, dbEncKeySlot } from '../crypto/types';
+import type { GroupPermissions } from '../crypto/groupSig';
 
 // ─── Identity (Keychain / Keystore) ──────────────────────────────────────────
 //
@@ -248,7 +249,12 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       moderate_new_members  INTEGER NOT NULL DEFAULT 0,
       admin_id              TEXT,
       admin_sig             TEXT,
-      moderators            TEXT
+      moderators            TEXT,
+      roster_version        INTEGER,
+      permissions           TEXT,
+      gov_sig               TEXT,
+      gov_version           INTEGER,
+      pending               INTEGER
     );
 
     -- Per-chat state: draft text + unread count
@@ -336,7 +342,7 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 7;
+  const USER_DB_VERSION = 10;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -399,6 +405,37 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     await d.execAsync('PRAGMA user_version = 7');
   }
 
+  if (currentVersion < 8) {
+    // v7 → v8: add roster_version to groups (monotonic counter for the
+    // by-reference roster of large groups — aegis.group.v2). Fresh installs
+    // already have the column via CREATE TABLE above. NULL means "legacy /
+    // unset" and is treated as version 1 by readers.
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN roster_version INTEGER;'); } catch {}
+    await d.execAsync('PRAGMA user_version = 8');
+  }
+
+  if (currentVersion < 9) {
+    // v8 → v9: add governance columns to groups (roles + permissions layer,
+    // aegis.group.gov.v1). permissions = JSON GroupPermissions, gov_sig =
+    // owner's detached signature over the governance state, gov_version =
+    // monotonic anti-rollback counter. Fresh installs already have the columns
+    // via CREATE TABLE above. All NULL on existing rows → readers fall back to
+    // DEFAULT_PERMISSIONS and treat gov_version as 1, so legacy groups keep
+    // working with creator=owner and default gates (no data migration needed).
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN permissions TEXT;'); } catch {}
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN gov_sig TEXT;'); } catch {}
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN gov_version INTEGER;'); } catch {}
+    await d.execAsync('PRAGMA user_version = 9');
+  }
+
+  if (currentVersion < 10) {
+    // v9 → v10: add pending flag to groups (unaccepted group invitations, see
+    // requireGroupApproval). Fresh installs already have the column via CREATE
+    // TABLE above. NULL on existing rows → treated as not pending (joined).
+    try { await d.execAsync('ALTER TABLE groups ADD COLUMN pending INTEGER;'); } catch {}
+    await d.execAsync('PRAGMA user_version = 10');
+  }
+
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.
   void USER_DB_VERSION;
 
@@ -443,6 +480,7 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   try { await d.execAsync('ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE messages ADD COLUMN expires_at INTEGER;'); } catch (e) {}
+  try { await d.execAsync('ALTER TABLE messages ADD COLUMN attachments TEXT;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE chat_state ADD COLUMN ephemeral_timer INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
 }
 
@@ -955,6 +993,17 @@ export interface MessageReactions {
   [emoji: string]: string[]; // emoji -> list of aegisIds who reacted
 }
 
+export interface Attachment {
+  type: 'image' | 'video' | 'audio' | 'file';
+  uri: string;          // blob:id:key:nonce or local path during send
+  fileName?: string;    // for files
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  duration?: number;    // for video/audio in seconds
+  caption?: string;     // per-attachment caption (optional)
+}
+
 export interface StoredMessage {
   id: string;
   chatId: string;
@@ -970,6 +1019,7 @@ export interface StoredMessage {
   pinned?: boolean;
   deliveryStatus?: 'sent' | 'delivered' | 'read';
   expiresAt?: number | null;
+  attachments?: Attachment[] | null;
 }
 
 interface MessageRow {
@@ -987,12 +1037,17 @@ interface MessageRow {
   pinned: number;
   delivery_status: string | null;
   expires_at: number | null;
+  attachments: string | null;
 }
 
 async function rowToMessage(r: MessageRow, body: string): Promise<StoredMessage> {
   let reactions: MessageReactions | undefined;
   if (r.reactions) {
     try { reactions = JSON.parse(r.reactions); } catch { /* ignore */ }
+  }
+  let attachments: Attachment[] | null = null;
+  if (r.attachments) {
+    try { attachments = JSON.parse(r.attachments); } catch { /* ignore */ }
   }
   const mediaUri = r.media_uri ? await decryptBody(r.media_uri) : null;
   return {
@@ -1010,6 +1065,7 @@ async function rowToMessage(r: MessageRow, body: string): Promise<StoredMessage>
     pinned: r.pinned === 1,
     deliveryStatus: (r.delivery_status as 'sent' | 'delivered' | 'read' | null) ?? 'sent',
     expiresAt: r.expires_at ?? null,
+    attachments,
   };
 }
 
@@ -1019,8 +1075,8 @@ export async function saveMessage(m: StoredMessage): Promise<void> {
     const encryptedMediaUri = m.mediaUri ? await encryptBody(m.mediaUri) : null;
     await d.runAsync(
       `INSERT OR REPLACE INTO messages
-       (id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       m.id,
       m.chatId,
       m.direction,
@@ -1034,7 +1090,8 @@ export async function saveMessage(m: StoredMessage): Promise<void> {
       m.deleted ? 1 : 0,
       m.pinned ? 1 : 0,
       m.deliveryStatus ?? 'sent',
-      m.expiresAt ?? null
+      m.expiresAt ?? null,
+      m.attachments ? JSON.stringify(m.attachments) : null
     );
   });
 }
@@ -1042,6 +1099,13 @@ export async function saveMessage(m: StoredMessage): Promise<void> {
 export async function updateMessageDelivery(id: string, status: 'sent' | 'delivered' | 'read'): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync('UPDATE messages SET delivery_status = ? WHERE id = ?', status, id);
+  });
+}
+
+/** Update a message's attachments array in place (JSON-serialized). */
+export async function updateMessageAttachments(id: string, attachments: Attachment[]): Promise<void> {
+  return withDb(async (d) => {
+    await d.runAsync('UPDATE messages SET attachments = ? WHERE id = ?', JSON.stringify(attachments), id);
   });
 }
 
@@ -1056,7 +1120,7 @@ export async function updateMessageMediaUri(id: string, mediaUri: string): Promi
 export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<MessageRow>(
-      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
+      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments
        FROM messages WHERE chat_id = ? ORDER BY created_at ASC`,
       chatId
     );
@@ -1067,7 +1131,7 @@ export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[
 export async function getMessage(id: string): Promise<StoredMessage | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<MessageRow>(
-      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
+      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments
        FROM messages WHERE id = ?`,
       id
     );
@@ -1085,7 +1149,7 @@ export async function setMessagePinned(id: string, pinned: boolean): Promise<voi
 export async function getPinnedMessage(chatId: string): Promise<StoredMessage | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<MessageRow>(
-      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status
+      `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments
        FROM messages WHERE chat_id = ? AND pinned = 1 ORDER BY created_at DESC LIMIT 1`,
       chatId
     );
@@ -1190,12 +1254,43 @@ export interface StoredGroup {
   moderators?: string[];
   /** additional admin aegisIds beyond the creator. */
   admins?: string[];
+  /**
+   * Monotonic roster counter for the by-reference roster of large groups
+   * (aegis.group.v2). Bumped on every membership change. Used by receivers to
+   * decide whether a v2-content message carries a fresher or staler roster than
+   * the locally-trusted one. Undefined on legacy rows → treated as 1.
+   */
+  rosterVersion?: number;
+  /**
+   * Configurable per-group permission gates (who can invite/send/call/edit).
+   * Undefined → treat as DEFAULT_PERMISSIONS (see crypto/groupRoles.ts). Covered
+   * by govSig so a member cannot forge them.
+   */
+  permissions?: GroupPermissions;
+  /**
+   * Detached Ed25519 signature by adminId over the governance state
+   * (roles + permissions + govVersion) — see canonicalGroupGovBytes. Additive
+   * and independent of adminSig; absent on legacy/pre-governance groups.
+   */
+  govSig?: string;
+  /**
+   * Monotonic governance counter, bumped on every role/permission change.
+   * Defeats rollback of a signed governance state. Undefined → treated as 1.
+   */
+  govVersion?: number;
+  /**
+   * True while this group is an unaccepted invitation (the local user was added
+   * but their privacy setting requires approval — see requireGroupApproval).
+   * Pending groups are hidden from the active list and render no messages until
+   * accepted. Undefined/false = a normal, joined group.
+   */
+  pending?: boolean;
 }
 
 export async function saveGroup(g: StoredGroup): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(
-      `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version, pending) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       g.id,
       g.name,
       JSON.stringify(g.members),
@@ -1206,7 +1301,12 @@ export async function saveGroup(g: StoredGroup): Promise<void> {
       g.moderateNewMembers ? 1 : 0,
       g.adminId ?? null,
       g.adminSig ?? null,
-      g.moderators && g.moderators.length > 0 ? JSON.stringify(g.moderators) : null
+      g.moderators && g.moderators.length > 0 ? JSON.stringify(g.moderators) : null,
+      g.rosterVersion ?? null,
+      g.permissions ? JSON.stringify(g.permissions) : null,
+      g.govSig ?? null,
+      g.govVersion ?? null,
+      g.pending ? 1 : null
     );
   });
 }
@@ -1223,6 +1323,11 @@ type GroupRow = {
   admin_id: string | null;
   admin_sig: string | null;
   moderators: string | null;
+  roster_version: number | null;
+  permissions: string | null;
+  gov_sig: string | null;
+  gov_version: number | null;
+  pending: number | null;
 };
 
 function rowToGroup(r: GroupRow): StoredGroup {
@@ -1238,13 +1343,18 @@ function rowToGroup(r: GroupRow): StoredGroup {
     adminId: r.admin_id ?? undefined,
     adminSig: r.admin_sig ?? undefined,
     moderators: r.moderators ? (JSON.parse(r.moderators) as string[]) : undefined,
+    rosterVersion: r.roster_version ?? undefined,
+    permissions: r.permissions ? (JSON.parse(r.permissions) as GroupPermissions) : undefined,
+    govSig: r.gov_sig ?? undefined,
+    govVersion: r.gov_version ?? undefined,
+    pending: r.pending === 1 ? true : undefined,
   };
 }
 
 export async function loadGroups(): Promise<StoredGroup[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<GroupRow>(
-      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators FROM groups ORDER BY created_at DESC`
+      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version, pending FROM groups ORDER BY created_at DESC`
     );
     return rows.map(rowToGroup);
   });
@@ -1267,7 +1377,7 @@ export async function deleteGroup(id: string): Promise<void> {
 export async function getGroup(id: string): Promise<StoredGroup | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<GroupRow>(
-      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators FROM groups WHERE id = ?`,
+      `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig, moderators, roster_version, permissions, gov_sig, gov_version, pending FROM groups WHERE id = ?`,
       id
     );
     if (!row) return null;
@@ -1276,73 +1386,90 @@ export async function getGroup(id: string): Promise<StoredGroup | null> {
 }
 
 export async function wipeDatabase(): Promise<void> {
-  return withDb(async (d) => {
-    // Wipe every table that could hold identity-linked or session data.
-    await d.runAsync('DELETE FROM messages');
-    await d.runAsync('DELETE FROM contacts');
-    await d.runAsync('DELETE FROM groups');
-    await d.runAsync('DELETE FROM ratchet_sessions');
-    await d.runAsync('DELETE FROM chat_state');
-    await d.runAsync('DELETE FROM call_history');
-    await d.runAsync('DELETE FROM polls');
-    await d.runAsync('DELETE FROM scheduled_messages');
-    // X3DH prekey secrets now live PRIMARILY in this table — wipe them so a
-    // forensic read of the database file after panic cannot recover past
-    // session key material.
-    await d.runAsync('DELETE FROM prekey_secrets');
-    // clearIdentity deletes SECRET_KEY_SLOT + SIGN_SECRET_KEY_SLOT and the identity table row.
-    await clearIdentity();
-    // SQLite DELETE only removes pages from free-list — VACUUM overwrites freed
-    // pages with zeros so a forensic read of the raw database file finds nothing.
+  // ── Phase 1: read slot-dependent info BEFORE touching the DB queue ──────────
+  // All SecureStore operations are outside withDb — they do NOT need the SQLite
+  // handle and must never be nested inside a withDb callback (that would cause a
+  // re-entrant enqueue on the FIFO dbOpQueue → permanent deadlock).
+  const slot = activeSlot;
+  const prefix = slot === 'self' ? '' : `${slot}.`;
+
+  // Read OPK id list now so we can purge individual keys below.
+  const opkIdsRaw = await SecureStore.getItemAsync(`aegis.${prefix}opkIds.json`).catch(() => null);
+
+  // Read multi-slot list now so we can wipe other slots after the main DB wipe.
+  const slotsListRaw = await SecureStore.getItemAsync('aegis.slotsList').catch(() => null);
+
+  // ── Phase 2: single withDb — ALL SQLite deletes + VACUUM in one queue slot ──
+  // Inline the DELETEs that clearIdentity() would do so we never call withDb
+  // from inside a withDb callback. clearIdentity() itself is left untouched for
+  // its other call-sites; we just don't invoke it from here.
+  await withDb(async (d) => {
+    await d.execAsync(
+      `DELETE FROM identity;
+       DELETE FROM messages;
+       DELETE FROM contacts;
+       DELETE FROM groups;
+       DELETE FROM ratchet_sessions;
+       DELETE FROM chat_state;
+       DELETE FROM call_history;
+       DELETE FROM polls;
+       DELETE FROM scheduled_messages;
+       DELETE FROM prekey_secrets;`
+    );
+    // SQLite DELETE only removes pages from the free-list — VACUUM overwrites
+    // freed pages with zeros so forensic reads of the raw db file find nothing.
     await d.execAsync('VACUUM');
-    // Also purge the at-rest DB encryption key so recovered storage cannot be decrypted.
-    cachedDbKey = null;
-    await SecureStore.deleteItemAsync(getDbEncKeySlot());
-    // Purge X3DH prekey secrets (SPK + OPKs) from SecureStore.
-    // These live outside the SQLite file; without this a forensic attacker who
-    // recovers the device storage after panic could still derive past session keys.
-    const slot = activeSlot;
-    const prefix = slot === 'self' ? '' : `${slot}.`;
-    const opkIdsRaw = await SecureStore.getItemAsync(`aegis.${prefix}opkIds.json`).catch(() => null);
-    if (opkIdsRaw) {
-      try {
-        const ids: number[] = JSON.parse(opkIdsRaw) as number[];
-        for (const id of ids) {
-          await SecureStore.deleteItemAsync(`aegis.${prefix}opkSecret.${id}`).catch(() => {});
-          await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.${id}`).catch(() => {});
-        }
-      } catch { /* non-fatal */ }
-    }
-    await SecureStore.deleteItemAsync(`aegis.${prefix}opkIds.json`).catch(() => {});
-    await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.b64`).catch(() => {});
-    await SecureStore.deleteItemAsync(`aegis.${prefix}spk.keyId`).catch(() => {});
-
-    // Purge the cold-start published flag for the active slot.
-    await SecureStore.deleteItemAsync(`aegis.published.${slot}`).catch(() => {});
-
-    // Multi-slot cleanup: wipe every additional slot's DB file and SecureStore
-    // keys. deleteIdentitySlot handles all key material + SQLite files for each
-    // non-active slot. The active slot's data was already wiped above.
-    const slotsListRaw = await SecureStore.getItemAsync('aegis.slotsList').catch(() => null);
-    if (slotsListRaw) {
-      try {
-        const slotsList: string[] = JSON.parse(slotsListRaw) as string[];
-        for (const s of slotsList) {
-          if (s !== slot) {
-            await deleteIdentitySlot(s).catch(() => {});
-          }
-        }
-      } catch { /* non-fatal */ }
-    }
-    await SecureStore.deleteItemAsync('aegis.slotsList').catch(() => {});
-    await SecureStore.deleteItemAsync('aegis.activeSlotId').catch(() => {});
-
-    // Purge forensic remnants: panic config + user preferences.
-    // Without this, a post-wipe forensic analysis could detect that a panic-enabled account existed.
-    await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
-    await SecureStore.deleteItemAsync('aegis.preferences.v1').catch(() => {});
-    await SecureStore.deleteItemAsync('aegis.polls.v1').catch(() => {});
   });
+
+  // ── Phase 3: SecureStore purges — all outside the withDb callback ────────────
+
+  // Identity secret keys (mirrors what clearIdentity does in SecureStore).
+  await SecureStore.deleteItemAsync(getSecretKeySlot()).catch(() => {});
+  await SecureStore.deleteItemAsync(getSignSecretKeySlot()).catch(() => {});
+
+  // At-rest DB encryption key — purge AFTER the withDb so the handle is gone.
+  cachedDbKey = null;
+  await SecureStore.deleteItemAsync(getDbEncKeySlot()).catch(() => {});
+
+  // X3DH prekey secrets (SPK + OPKs) for the active slot.
+  if (opkIdsRaw) {
+    try {
+      const ids: number[] = JSON.parse(opkIdsRaw) as number[];
+      for (const id of ids) {
+        await SecureStore.deleteItemAsync(`aegis.${prefix}opkSecret.${id}`).catch(() => {});
+        await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.${id}`).catch(() => {});
+      }
+    } catch { /* non-fatal */ }
+  }
+  await SecureStore.deleteItemAsync(`aegis.${prefix}opkIds.json`).catch(() => {});
+  await SecureStore.deleteItemAsync(`aegis.${prefix}spkSecret.b64`).catch(() => {});
+  await SecureStore.deleteItemAsync(`aegis.${prefix}spk.keyId`).catch(() => {});
+
+  // Cold-start published flag for the active slot.
+  await SecureStore.deleteItemAsync(`aegis.published.${slot}`).catch(() => {});
+
+  // Multi-slot cleanup: wipe every additional slot's DB file and SecureStore
+  // keys. deleteIdentitySlot handles all key material + SQLite files for each
+  // non-active slot. The active slot's data was already wiped above.
+  if (slotsListRaw) {
+    try {
+      const slotsList: string[] = JSON.parse(slotsListRaw) as string[];
+      for (const s of slotsList) {
+        if (s !== slot) {
+          await deleteIdentitySlot(s).catch(() => {});
+        }
+      }
+    } catch { /* non-fatal */ }
+  }
+  await SecureStore.deleteItemAsync('aegis.slotsList').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.activeSlotId').catch(() => {});
+
+  // Forensic remnants: panic config + user preferences.
+  // Without this, a post-wipe forensic analysis could detect that a
+  // panic-enabled account existed on the device.
+  await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.preferences.v1').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.polls.v1').catch(() => {});
 }
 
 // ─── Chat state (draft + unread) ─────────────────────────────────────────────
@@ -1916,5 +2043,76 @@ export async function getSpkKeyId(): Promise<number | null> {
 export async function clearPrekeySecrets(): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync('DELETE FROM prekey_secrets WHERE slot = ?', activeSlot);
+  });
+}
+
+// ─── PQXDH: ML-KEM-768 signed PQ prekey (PQSPK) secrets ──────────────────────
+//
+// PQXDH (post-quantum hybrid X3DH, Signal-style) adds an ML-KEM-768 "signed PQ
+// prekey" to the bundle. Its SECRET key is 2400 bytes — far larger than an
+// X25519 secret — and like every other private key it NEVER leaves the device.
+// We reuse the existing encrypted-at-rest `prekey_secrets` table with two new
+// `kind` discriminators so the storage path, slot isolation and encryptBody
+// wrapping are identical to the classic SPK/OPK secrets:
+//   kind='pqspk'      — the ML-KEM-768 secretKey (base64), keyed by its keyId.
+//   kind='pqspkmeta'  — sentinel row (key_id=0) holding the current PQSPK keyId.
+// The 2400-byte secret comfortably fits in a TEXT column; SQLite has no
+// practical per-row size limit (unlike SecureStore's ~2KB iOS item cap), which
+// is exactly why prekey secrets live here rather than in the keychain.
+
+/** Persist (or replace) the ML-KEM-768 PQSPK secret (base64) for a keyId. */
+export async function savePqSpkSecret(keyId: number, b64: string): Promise<void> {
+  return withDb(async (d) => {
+    const enc = await encryptBody(b64);
+    await d.runAsync(
+      `INSERT OR REPLACE INTO prekey_secrets (slot, kind, key_id, secret_b64) VALUES (?, 'pqspk', ?, ?)`,
+      activeSlot, keyId, enc,
+    );
+  });
+}
+
+/** Load the ML-KEM-768 PQSPK secret (base64) for a specific keyId, or null. */
+export async function loadPqSpkSecret(keyId: number): Promise<string | null> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ secret_b64: string }>(
+      `SELECT secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'pqspk' AND key_id = ?`,
+      activeSlot, keyId,
+    );
+    if (!row) return null;
+    return decryptBody(row.secret_b64);
+  });
+}
+
+/** Delete a stored PQSPK secret by keyId (forward secrecy after rotation). */
+export async function deletePqSpkSecret(keyId: number): Promise<void> {
+  return withDb(async (d) => {
+    await d.runAsync(
+      `DELETE FROM prekey_secrets WHERE slot = ? AND kind = 'pqspk' AND key_id = ?`,
+      activeSlot, keyId,
+    );
+  });
+}
+
+/** Persist the current PQSPK keyId (sentinel row, mirrors setSpkKeyId). */
+export async function setPqSpkKeyId(n: number): Promise<void> {
+  return withDb(async (d) => {
+    const enc = await encryptBody(String(n));
+    await d.runAsync(
+      `INSERT OR REPLACE INTO prekey_secrets (slot, kind, key_id, secret_b64) VALUES (?, 'pqspkmeta', 0, ?)`,
+      activeSlot, enc,
+    );
+  });
+}
+
+/** Read the current PQSPK keyId, or null if never set. */
+export async function getPqSpkKeyId(): Promise<number | null> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ secret_b64: string }>(
+      `SELECT secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'pqspkmeta' AND key_id = 0`,
+      activeSlot,
+    );
+    if (!row) return null;
+    const v = parseInt(await decryptBody(row.secret_b64), 10);
+    return Number.isFinite(v) ? v : null;
   });
 }

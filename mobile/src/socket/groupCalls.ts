@@ -21,9 +21,10 @@
 import * as Crypto from 'expo-crypto';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
-import { Alert } from 'react-native';
+;
 import { getSocket, isConnected } from './client';
 import { useGroupCall } from '../store/groupCall';
+import { useActiveCalls } from '../store/activeCalls';
 import { fetchTurnConfig } from '../webrtc/ice';
 import {
   createPeer,
@@ -35,6 +36,9 @@ import {
   type ActivePeer,
 } from '../webrtc/peer';
 import type { Identity } from '../crypto/identity';
+import { themedAlert } from '../components/AlertHost';
+import { startInCallAudio, stopInCallAudio } from '../webrtc/inCall';
+import { startCallService, stopCallService } from '../webrtc/callForegroundService';
 
 // ---------------------------------------------------------------------------
 // NaCl sealed-signaling helpers (mirrors calls.ts)
@@ -228,7 +232,13 @@ function maybeFinalizeFailedCall(callId: string): void {
     });
   } catch { /* no-op */ }
 
+  // Release proximity sensor, wake-lock and audio focus, and tear down the
+  // Android foreground service / its persistent notification.
+  stopInCallAudio();
+  stopCallService();
+
   cleanupAllPeers(callId);
+  stopHeartbeat();
   useGroupCall.getState().setStatus('ended');
   setTimeout(() => {
     if (useGroupCall.getState().callId === callId) {
@@ -307,12 +317,79 @@ async function createGroupPeerAsOfferer(
 }
 
 // ---------------------------------------------------------------------------
+// Voice-channel heartbeat (Discord-style awareness, no server state)
+//
+// While we are in a group call we periodically re-broadcast a `group_call:channel`
+// event to the rest of the group carrying the current participant roster. Online
+// members render a "join" banner from it (useActiveCalls); offline members get a
+// relay push wake-up. Awareness self-heals: if we stop (hangup/crash) the
+// heartbeat stops and every receiver's banner goes stale after STALE_MS.
+// ---------------------------------------------------------------------------
+
+const HEARTBEAT_MS = 20_000;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let channelMeta: { callId: string; groupId: string; groupName: string; members: string[] } | null = null;
+let _pruneTimer: ReturnType<typeof setInterval> | null = null;
+// callIds we've already raised a local "Unirse" notification for — so the 20s
+// heartbeats don't re-notify. Bounded; oldest evicted past 256 entries.
+const _notifiedChannelCallIds = new Set<string>();
+
+/** Participants we currently believe are in the call (us + known peers). */
+function currentParticipants(): string[] {
+  const me = ownKeys()?.aegisId;
+  const others = useGroupCall.getState().participants.map((p) => p.aegisId);
+  const all = me ? [me, ...others] : others;
+  return Array.from(new Set(all));
+}
+
+function emitChannelHeartbeat(): void {
+  const socket = getSocket();
+  const me = ownKeys()?.aegisId;
+  if (!socket || !channelMeta || !me) return;
+  const recipients = channelMeta.members.filter((m) => m !== me);
+  if (recipients.length === 0) return;
+  socket.emit('group_call:channel', {
+    to: recipients,
+    callId: channelMeta.callId,
+    groupId: channelMeta.groupId,
+    groupName: channelMeta.groupName,
+    participants: currentParticipants(),
+    media: 'audio',
+  });
+}
+
+function startHeartbeat(meta: { callId: string; groupId: string; groupName: string; members: string[] }): void {
+  channelMeta = meta;
+  emitChannelHeartbeat(); // announce immediately, then on an interval
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(emitChannelHeartbeat, HEARTBEAT_MS);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  channelMeta = null;
+}
+
+/** Resolve a group's trusted name + member list from the local store. */
+function localGroupInfo(groupId: string): { name: string; members: string[] } | null {
+  try {
+    const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+    const g = useGroups.getState().groups.find((x) => x.id === groupId);
+    return g ? { name: g.name, members: g.members } : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Start an outgoing group call. Emits `group_call:invite` to each member.
- * RTCPeerConnections are created per-member as they accept.
+ * Open a group voice channel. Instead of ringing everyone, we announce the
+ * channel (group_call:channel) and start heartbeating; members see a banner and
+ * join when they want. We enter the call immediately (alone) and mesh with each
+ * member as they join.
  */
 export async function startGroupCall(
   identity: Identity,
@@ -321,12 +398,16 @@ export async function startGroupCall(
 ): Promise<void> {
   const socket = getSocket();
   if (!socket || !isConnected()) {
-    Alert.alert('Sin conexión', 'Necesitas estar conectado para iniciar una llamada grupal.');
+    themedAlert('Sin conexión', 'Necesitas estar conectado para iniciar una llamada grupal.');
     return;
   }
 
+  void otherMembers; // recipients are derived from group.members in the heartbeat
   const callId = Crypto.randomUUID();
-  useGroupCall.getState().startOutgoing(callId, group.id, group.name, otherMembers);
+  // Enter the channel immediately (alone). startOutgoing with an empty roster,
+  // then mark in-call — we are "in the channel" and waiting for joiners.
+  useGroupCall.getState().startOutgoing(callId, group.id, group.name, []);
+  useGroupCall.getState().setStatus('in-call');
 
   try {
     const { Audio } = require('expo-av') as typeof import('expo-av');
@@ -339,13 +420,74 @@ export async function startGroupCall(
     });
   } catch { /* expo-av unavailable */ }
 
-  socket.emit('group_call:invite', {
-    to: otherMembers,
-    callId,
-    groupId: group.id,
-    groupName: group.name,
-    media: 'audio',
-  });
+  // Earpiece route + proximity sensor (real screen-off near the ear), plus an
+  // Android foreground service so the call survives the app being backgrounded.
+  startInCallAudio();
+  startCallService(useGroupCall.getState().groupName || 'AegisLink', 'Llamada de voz en curso');
+
+  // Announce the channel + start heartbeating. No ring — members get a banner.
+  startHeartbeat({ callId, groupId: group.id, groupName: group.name, members: group.members });
+}
+
+/**
+ * Join an already-open voice channel for `groupId`. Reads the current roster
+ * from the banner state and announces our join (`group_call:accept`) to every
+ * current participant, each of whom offers us a peer connection — reusing the
+ * exact mesh path that the initiator/accept flow already uses.
+ */
+export async function joinGroupCall(groupId: string): Promise<void> {
+  const active = useActiveCalls.getState().getFresh(groupId, Date.now());
+  if (!active) {
+    themedAlert('Llamada finalizada', 'Esta llamada ya no está activa.');
+    return;
+  }
+  const socket = getSocket();
+  const me = ownKeys();
+  if (!socket || !isConnected() || !me) {
+    themedAlert('Sin conexión', 'Necesitas estar conectado para unirte a la llamada.');
+    return;
+  }
+
+  const info = localGroupInfo(groupId);
+  const groupName = info?.name ?? groupId;
+  const others = active.participants.filter((p) => p !== me.aegisId);
+
+  // Enforce the mesh cap on the resulting size (existing peers + us).
+  if (others.length >= 8) {
+    themedAlert('Llamada llena', 'Esta llamada alcanzó el máximo de 8 participantes.');
+    return;
+  }
+
+  useGroupCall.getState().startOutgoing(active.callId, groupId, groupName, []);
+  useGroupCall.getState().setStatus('connecting');
+  for (const p of others) useGroupCall.getState().addParticipant(p);
+
+  try {
+    const { Audio } = require('expo-av') as typeof import('expo-av');
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: true,
+    });
+  } catch { /* expo-av unavailable */ }
+
+  // Earpiece route + proximity sensor (real screen-off near the ear), plus an
+  // Android foreground service so the call survives the app being backgrounded.
+  startInCallAudio();
+  startCallService(useGroupCall.getState().groupName || 'AegisLink', 'Llamada de voz en curso');
+
+  // Tell each current participant we joined — their accept handler offers to us.
+  for (const p of others) {
+    socket.emit('group_call:accept', { to: p, callId: active.callId });
+  }
+
+  // Start our own heartbeat so the rest of the group sees us in the roster, and
+  // drop our local banner for this group (we're in the call now).
+  const members = info?.members ?? [...active.participants, me.aegisId];
+  startHeartbeat({ callId: active.callId, groupId, groupName, members });
+  useActiveCalls.getState().remove(groupId);
 }
 
 /**
@@ -372,6 +514,11 @@ export async function acceptGroupCall(
     });
   } catch { /* expo-av unavailable */ }
 
+  // Earpiece route + proximity sensor (real screen-off near the ear), plus an
+  // Android foreground service so the call survives the app being backgrounded.
+  startInCallAudio();
+  startCallService(useGroupCall.getState().groupName || 'AegisLink', 'Llamada de voz en curso');
+
   socket.emit('group_call:accept', { to: initiatorAegisId, callId });
 }
 
@@ -394,6 +541,7 @@ export function hangupGroupCall(): void {
   const { callId, participants } = useGroupCall.getState();
   if (!callId) return;
 
+  stopHeartbeat();
   const socket = getSocket();
   const allAegisIds = participants.map((p) => p.aegisId);
   if (socket && allAegisIds.length > 0) {
@@ -412,6 +560,11 @@ export function hangupGroupCall(): void {
       playThroughEarpieceAndroid: false,
     });
   } catch { /* no-op */ }
+
+  // Release proximity sensor, wake-lock and audio focus, and tear down the
+  // Android foreground service / its persistent notification.
+  stopInCallAudio();
+  stopCallService();
 
   useGroupCall.getState().setStatus('ended');
   setTimeout(() => useGroupCall.getState().reset(), 800);
@@ -441,6 +594,26 @@ export function toggleGroupCallMute(): void {
 export function attachGroupCallHandlers(): void {
   const socket = getSocket();
   if (!socket) return;
+
+  // Idempotent (see attachCallHandlers): a reconnect builds a new socket.io
+  // instance, so clear our events before (re)registering to avoid both lost
+  // handlers after a socket recreation and stacked duplicates on re-attach.
+  for (const ev of [
+    'group_call:accept',
+    'group_call:decline',
+    'group_call:offer',
+    'group_call:answer',
+    'group_call:ice',
+    'group_call:channel',
+    'group_call:hangup',
+  ]) {
+    socket.off(ev);
+  }
+
+  // Periodic banner pruning so stale channels (everyone left / crashed) drop
+  // their banners after STALE_MS even without an explicit teardown signal.
+  if (_pruneTimer) clearInterval(_pruneTimer);
+  _pruneTimer = setInterval(() => useActiveCalls.getState().prune(Date.now()), 10_000);
 
   // ── Initiator receives accept from a member ─────────────────────────────
   socket.on(
@@ -608,35 +781,66 @@ export function attachGroupCallHandlers(): void {
     },
   );
 
-  // ── Incoming group call invite ─────────────────────────────────────────────
+  // ── Voice-channel heartbeat → banner awareness (no ring) ───────────────────
   socket.on(
-    'group_call:invite',
+    'group_call:channel',
     (msg: {
       from: string;
       callId: string;
       groupId: string;
       groupName: string;
+      participants?: string[];
       media: 'audio' | 'video';
     }) => {
-      const currentStatus = useGroupCall.getState().status;
-      // Auto-decline if already in a call
-      if (currentStatus !== 'idle' && currentStatus !== 'ended') {
-        const sock = getSocket();
-        sock?.emit('group_call:decline', { to: msg.from, callId: msg.callId });
-        return;
-      }
+      // If this heartbeat is for the call I'm already in, it's not a banner.
+      if (useGroupCall.getState().callId === msg.callId) return;
 
-      // Try to resolve trusted group name from local store
-      let groupName = msg.groupName;
+      // ── Admin-only call gate (receiver-ENFORCED) ────────────────────────────
+      // Only honor a channel whose ORIGINATOR is permitted to start calls in this
+      // group per our locally-trusted governance. A patched client can emit the
+      // event, but honest receivers refuse to surface a banner for it. Unknown
+      // group or any resolution error → fail closed (no banner).
+      let localGroup: import('../db/local').StoredGroup | undefined;
       try {
-        const { useGroups } = require('../store/groups') as {
-          useGroups: { getState: () => { groups: Array<{ id: string; name: string }> } };
-        };
-        const localGroup = useGroups.getState().groups.find((g) => g.id === msg.groupId);
-        if (localGroup) groupName = localGroup.name;
-      } catch { /* ignore */ }
+        const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+        localGroup = useGroups.getState().groups.find((g) => g.id === msg.groupId);
+      } catch { return; }
+      // A heartbeat can come from any participant; gate on the channel's
+      // initiator. First sighting records the initiator; later heartbeats keep it.
+      const existing = useActiveCalls.getState().calls[msg.groupId];
+      const initiator = existing?.callId === msg.callId ? existing.initiator : msg.from;
+      try {
+        const { can } = require('../crypto/groupRoles') as typeof import('../crypto/groupRoles');
+        if (!localGroup || !can(localGroup, initiator, 'call')) {
+          if (__DEV__) console.warn('[groupCalls] channel dropped — initiator not permitted to call', initiator);
+          return;
+        }
+      } catch { return; }
 
-      useGroupCall.getState().startIncoming(msg.callId, msg.groupId, groupName, msg.from);
+      const isNewChannel = existing?.callId !== msg.callId;
+
+      useActiveCalls.getState().upsert({
+        callId: msg.callId,
+        groupId: msg.groupId,
+        initiator,
+        participants: msg.participants && msg.participants.length > 0 ? msg.participants : [msg.from],
+        lastHeartbeat: Date.now(),
+      });
+
+      // First time we see THIS channel (not every 20s heartbeat): surface the
+      // local "Unirse / Descartar" notification. Skipped when this group's chat
+      // is already on screen (the in-chat banner covers that), inside push.ts.
+      if (isNewChannel && !_notifiedChannelCallIds.has(msg.callId)) {
+        _notifiedChannelCallIds.add(msg.callId);
+        if (_notifiedChannelCallIds.size > 256) {
+          _notifiedChannelCallIds.delete(_notifiedChannelCallIds.values().next().value as string);
+        }
+        try {
+          const { showGroupCallChannelNotification } =
+            require('../notifications/push') as typeof import('../notifications/push');
+          void showGroupCallChannelNotification(msg.groupId, msg.groupName, msg.callId);
+        } catch { /* push module not ready — banner still shows in-app */ }
+      }
     },
   );
 

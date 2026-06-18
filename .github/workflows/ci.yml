@@ -148,6 +148,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          # Cache ~/.gradle/caches and ~/.gradle/wrapper keyed on gradle
+          # lockfiles/wrapper props. Once warm, this avoids re-resolving
+          # dependencies (incl. org.jitsi:webrtc) from jitpack/Maven on every
+          # run — only a cold cache needs network access to those repos.
+          cache: gradle
 
       - name: Install mobile dependencies
         run: npm ci

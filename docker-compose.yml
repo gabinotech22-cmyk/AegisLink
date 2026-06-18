@@ -28,12 +28,23 @@ services:
     environment:
       NODE_ENV: production
       PORT: ${PORT:-3001}
-      DB_PATH: /data/aegis.db
+      # NOTE: the relay reads AEGIS_DB_PATH (see server/src/db/client.ts).
+      # A previous DB_PATH name was silently ignored and fell back to ./data
+      # (EACCES under the non-root container user). Keep this name in sync.
+      AEGIS_DB_PATH: /data/aegislink.db
       TRUST_PROXY: ${TRUST_PROXY:-1}
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
       # TURN_SECRET is used server-side to sign ephemeral TURN credentials (TTL 24 h).
       # It never leaves the server and is NOT logged anywhere.
       TURN_SECRET: ${TURN_SECRET:?TURN_SECRET must be set in environment or .env}
+      # TURN_HOST is the PUBLIC hostname clients must reach the coturn relay at.
+      # Without it the relay's /turn endpoint falls back to 'localhost', so the
+      # ICE config tells each phone to relay against ITSELF -> "Call failed".
+      # TURNS_PORT stays empty until coturn's TLS listener (5349) is serving a
+      # readable privkey; an empty turns: URL would break the whole RTCConfig.
+      TURN_HOST: ${TURN_HOST:-aegislink.duckdns.org}
+      TURN_PORT: ${TURN_PORT:-3478}
+      TURNS_PORT: ${TURNS_PORT:-}
       FCM_SERVER_KEY: ${FCM_SERVER_KEY:-}
       APNS_KEY_ID: ${APNS_KEY_ID:-}
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
@@ -45,7 +56,9 @@ services:
     ports:
       - "${PORT:-3001}:${PORT:-3001}"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:${PORT:-3001}/health"]
+      # Use 127.0.0.1, not localhost: in Alpine localhost resolves to ::1 first
+      # and the relay binds IPv4 only, so localhost yields a false "unhealthy".
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${PORT:-3001}/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -68,10 +81,13 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      # Config is pre-processed by deploy.sh (envsubst for TURN_SECRET)
-      - ./infra/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
-      # TLS certificates managed on the host (certbot / Caddy)
-      - /etc/ssl/aegislink:/etc/ssl/aegislink:ro
+      # Mount the RENDERED config from the host, not the repo template.
+      # deploy.sh runs envsubst into /etc/coturn/turnserver.conf so TURN_SECRET
+      # and EXTERNAL_IP are expanded; the repo file keeps literal ${...}.
+      - /etc/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # coturn's config references certs under /etc/letsencrypt/live/<domain>,
+      # so mount the certbot tree (read-only) into the container.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     command: -c /etc/coturn/turnserver.conf
     logging:
       driver: "json-file"

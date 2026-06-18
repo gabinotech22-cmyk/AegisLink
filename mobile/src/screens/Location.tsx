@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -14,6 +14,7 @@ import { sendMessage } from '../socket/client';
 import { useIdentity } from '../store/identity';
 import type { StoredContact } from '../db/local';
 import * as Location from 'expo-location';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   contact: StoredContact;
@@ -135,10 +136,10 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
         expiresAt,
       });
 
-      Alert.alert(i18nT('location.sharedSuccess'), i18nT('location.sharedSuccessDesc'));
+      themedAlert(i18nT('location.sharedSuccess'), i18nT('location.sharedSuccessDesc'));
       onShare();
     } catch (e) {
-      Alert.alert(i18nT('location.sendErrorTitle'), (e as Error).message);
+      themedAlert(i18nT('location.sendErrorTitle'), (e as Error).message);
     } finally {
       setSharing(false);
     }

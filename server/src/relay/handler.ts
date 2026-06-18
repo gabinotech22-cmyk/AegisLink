@@ -4,9 +4,10 @@ import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 
 const { decodeBase64 } = naclUtil;
-import { messageRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
+import { randomUUID } from 'node:crypto';
+import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
-import { notifyRecipient, sendCallWakeUp, type CallMedia } from '../push/expo.js';
+import { notifyRecipient, sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
@@ -70,6 +71,18 @@ export interface PreKeyBundle {
     keyId: number;
     publicKeyB64: string;
   } | null;
+  /**
+   * PQXDH (v2): optional signed PQ prekey (ML-KEM-768). Present iff the device
+   * has published one — absent for legacy v1-only devices/clients. The relay
+   * never inspects this beyond the Ed25519 signature check at upload time
+   * (defence in depth); it is stored and served as an opaque blob, same as
+   * the classic signedPreKey.
+   */
+  pqSignedPreKey?: {
+    keyId: number;
+    publicKeyB64: string;
+    signatureB64: string;
+  } | null;
 }
 
 export interface SealedEnvelope {
@@ -114,7 +127,18 @@ const PreKeyUpload = z.object({
   oneTimePreKeys: z.array(z.object({
     keyId: z.number(),
     publicKeyB64: z.string().min(1)
-  })).max(100)
+  })).max(100),
+  /**
+   * PQXDH (v2): optional signed PQ prekey (ML-KEM-768). Nullable/optional so
+   * legacy v1 clients (and the legacy uploadPreKeys path that hasn't been
+   * updated yet) keep working unchanged — interop requirement.
+   * Sizes (base64): publicKeyB64 ~1184 bytes raw, signatureB64 64 bytes raw.
+   */
+  pqSignedPreKey: z.object({
+    keyId: z.number(),
+    publicKeyB64: z.string().min(1).max(2048),
+    signatureB64: z.string().min(1).max(128),
+  }).optional(),
 });
 
 const PreKeyFetch = z.object({
@@ -187,9 +211,15 @@ const GroupRekeyDistribution = z.object({
   senderAegisId: z.string().min(1).max(64),
 });
 
+// Cap raised to 512 for large groups. Clients with >512 members MUST chunk the
+// re-key into multiple `group:rekey` calls (each carries up to 512 per-recipient
+// blobs). The rate limit (30/min) gives ~15,360 recipients per minute, sufficient
+// for groups of up to ~512 members with one immediate re-key + one retry window.
+const GROUP_REKEY_MAX_DIST = 512;
+
 const GroupRekeyEvent = z.object({
   groupId: z.string().min(1).max(64),
-  distributions: z.array(GroupRekeyDistribution).min(1).max(256),
+  distributions: z.array(GroupRekeyDistribution).min(1).max(GROUP_REKEY_MAX_DIST),
 });
 
 // Rate-limit buckets for channel:msg — keyed by aegisId, max 120/min
@@ -231,6 +261,12 @@ function checkLowFreqRateLimit(aegisId: string): boolean {
   return entry.count <= 30;
 }
 
+// Raised from 10 to 30 per minute to support large-group re-keys.
+// Rationale: with GROUP_REKEY_MAX_DIST=512, an admin re-keying a 512-member
+// group needs exactly 1 call (fits in one batch). The extra headroom (30 calls)
+// covers concurrent group memberships and retry attempts without opening a
+// meaningful DoS vector — sustained abuse would only exhaust the attacker's own
+// per-identity bucket, not others'.
 function checkRekeyRateLimit(aegisId: string): boolean {
   const now = Date.now();
   const entry = rekeyRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
@@ -241,7 +277,7 @@ function checkRekeyRateLimit(aegisId: string): boolean {
     const oldest = rekeyRateLimit.keys().next().value;
     if (oldest !== undefined) rekeyRateLimit.delete(oldest);
   }
-  return entry.count <= 10;
+  return entry.count <= 30;
 }
 
 const AUTH_TIMEOUT_MS = 5000;
@@ -477,6 +513,29 @@ export function attachRelay(io: SocketServer) {
       await messageRepo.delete(row.id, deviceId);
     }
 
+    // Drain queued SenderKey distributions for this device. Each distribution was
+    // sealed individually per recipient before leaving the sender's device — the
+    // relay forwards the opaque blob verbatim as `group:rekey_dist`. The client
+    // MUST ack each distribution via `group:rekey_drain_ack` so the server can
+    // purge fully-drained rows. Distributions for which no ack arrives within the
+    // TTL are purged by the background cron (same lifecycle as messageRepo).
+    const pendingDists = await senderKeyDistRepo.drainFor(me, deviceId);
+    for (const dist of pendingDists) {
+      socket.emit('group:rekey_dist', {
+        distId: dist.id,
+        groupId: dist.group_id,
+        senderAegisId: dist.sender_aegis_id,  // Do not log — zero-metadata principle
+        ciphertextB64: dist.ciphertext_b64,
+        nonceB64: dist.nonce_b64,
+        chainKeyB64: dist.chain_key_b64,
+        iteration: dist.iteration,
+      });
+      // Immediately mark this device as having drained the row so repeated
+      // reconnects don't re-deliver the same distribution. The row is hard-deleted
+      // once MAX_DRAIN_DEVICES devices have drained it, matching messageRepo.
+      await senderKeyDistRepo.delete(dist.id, deviceId);
+    }
+
     // Re-deliver any call:invite that arrived while this device was offline, so a
     // call accepted from the killed-state push wake-up can still connect. Held in
     // memory with a short TTL (see pendingCallInvites / queueCallInvite).
@@ -596,6 +655,20 @@ export function attachRelay(io: SocketServer) {
             ack?.({ ok: false, error: 'invalid_spk_signature' });
             return;
           }
+
+          // PQXDH (v2): verify the Ed25519 signature over the PQ signed prekey the
+          // SAME way as the classic SPK above — defence in depth. The relay never
+          // inspects the ML-KEM public key itself beyond this signature check; it
+          // is stored and served as an opaque blob. Optional field: absent ⇒ this
+          // upload stays v1-only, no rejection.
+          if (parsed.data.pqSignedPreKey) {
+            const pqBytes = decodeBase64(parsed.data.pqSignedPreKey.publicKeyB64);
+            const pqSigBytes = decodeBase64(parsed.data.pqSignedPreKey.signatureB64);
+            if (!nacl.sign.detached.verify(pqBytes, pqSigBytes, signingKey)) {
+              ack?.({ ok: false, error: 'invalid_pq_spk_signature' });
+              return;
+            }
+          }
         }
         const now = Date.now();
         await prekeysRepo.upsertSigned({
@@ -606,6 +679,16 @@ export function attachRelay(io: SocketServer) {
           signature_b64: parsed.data.signedPreKey.signatureB64,
           created_at: now,
         });
+        if (parsed.data.pqSignedPreKey) {
+          await prekeysRepo.upsertPqSigned({
+            aegis_id: me,
+            device_id: parsed.data.deviceId ?? deviceId ?? 'default',
+            key_id: parsed.data.pqSignedPreKey.keyId,
+            public_key_b64: parsed.data.pqSignedPreKey.publicKeyB64,
+            signature_b64: parsed.data.pqSignedPreKey.signatureB64,
+            created_at: now,
+          });
+        }
         for (const opk of parsed.data.oneTimePreKeys) {
           await prekeysRepo.insertOneTime({
             aegis_id: me,
@@ -1131,22 +1214,79 @@ export function attachRelay(io: SocketServer) {
         return;
       }
 
+      const now = Date.now();
+      const enqueuePromises: Promise<void>[] = [];
+
       for (const d of distributions) {
         if (d.aegisId === me) continue; // never echo to self
+
         const recipientSockets = sockets.get(d.aegisId);
-        if (!recipientSockets || recipientSockets.size === 0) continue; // offline — client retries
-        for (const s of recipientSockets) {
-          s.emit('group:rekey_dist', {
-            groupId,
-            senderAegisId: me,
-            ciphertextB64: d.ciphertextB64,
-            nonceB64: d.nonceB64,
-            chainKeyB64: d.chainKeyB64,
-            iteration: d.iteration,
-          });
+        if (recipientSockets && recipientSockets.size > 0) {
+          // Recipient is online — forward immediately (existing path).
+          const distId = randomUUID();
+          for (const s of recipientSockets) {
+            s.emit('group:rekey_dist', {
+              distId,
+              groupId,
+              senderAegisId: me,
+              ciphertextB64: d.ciphertextB64,
+              nonceB64: d.nonceB64,
+              chainKeyB64: d.chainKeyB64,
+              iteration: d.iteration,
+            });
+          }
+        } else {
+          // Recipient is offline — enqueue the sealed distribution for deferred
+          // delivery. The relay stores the blob opaquely; senderAegisId is needed
+          // only so the drain path can reconstruct the correct wire payload (same
+          // rationale as sender_pub_b64 for init messages in messageRepo, FND-05
+          // exception). The row is purged as soon as all devices drain it.
+          const distId = randomUUID();
+          enqueuePromises.push(
+            senderKeyDistRepo.enqueue({
+              id: distId,
+              recipient: d.aegisId,
+              group_id: groupId,
+              sender_aegis_id: me,    // Do not log — zero-metadata principle
+              ciphertext_b64: d.ciphertextB64,
+              nonce_b64: d.nonceB64,
+              chain_key_b64: d.chainKeyB64,
+              iteration: d.iteration,
+              created_at: now,
+              expires_at: 0,          // 0 → apply default MESSAGE_TTL_MS in repo
+            }).then(() => { /* enqueue result is advisory — never reveal to sender */ })
+          );
         }
       }
+
+      // Fire-and-forget: enqueues run in parallel; we ack immediately so the
+      // sender is not blocked waiting for DB writes for potentially hundreds of
+      // offline recipients.
+      void Promise.all(enqueuePromises);
       ack?.({ ok: true });
+    });
+
+    // ─── Group re-key drain ack ──────────────────────────────────────────────
+    // The client emits this after successfully processing a `group:rekey_dist`
+    // received from the offline queue. The relay uses it to track per-device drain
+    // progress and hard-delete the row once all known devices have acked.
+    //
+    // For online-delivered distributions (emitted directly in `group:rekey`) the
+    // client also emits this ack; the relay tolerates a no-op if the row is
+    // already gone (it was never persisted for online recipients).
+    const RekeyDrainAck = z.object({
+      distId: z.string().uuid(),
+    });
+
+    socket.on('group:rekey_drain_ack', (raw: unknown) => {
+      const parsed = RekeyDrainAck.safeParse(raw);
+      if (!parsed.success) {
+        socket.emit('error_msg', { code: 'invalid_payload', for: 'group:rekey_drain_ack' });
+        return;
+      }
+      // Fire-and-forget: delete is idempotent and non-fatal if the row is gone.
+      // Do not log distId or aegisId — zero-metadata principle.
+      void senderKeyDistRepo.delete(parsed.data.distId, deviceId);
     });
 
     // ─── WebRTC signaling (Fase 3c/3d) ─────────────────────────────────────
@@ -1230,6 +1370,19 @@ const GroupCallOffer   = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z
 const GroupCallAnswer  = GroupCallOffer;
 const GroupCallIce     = GroupCallOffer;
 const GroupCallHangup  = z.object({ to: AEGIS_ID_ARRAY, callId: z.string().uuid(), reason: z.string().max(64).optional() });
+// Channel heartbeat announces an open voice channel to the WHOLE group (not just
+// the ≤8 mesh), so its recipient list is wider than AEGIS_ID_ARRAY. groupName +
+// participants are surfaced only on already-trusting clients (the receiver
+// re-checks governance locally); the relay never persists them.
+const GROUP_MEMBER_ARRAY = z.array(z.string().regex(AEGIS_ID_RE)).min(1).max(512);
+const GroupCallChannel = z.object({
+  to: GROUP_MEMBER_ARRAY,
+  callId: z.string().uuid(),
+  groupId: z.string().min(1).max(128),
+  groupName: z.string().min(1).max(64),
+  participants: z.array(z.string().regex(AEGIS_ID_RE)).max(512).optional(),
+  media: z.enum(['audio', 'video']),
+});
 
 // Rate-limit buckets for call:offer — keyed by aegisId, max 5 per minute
 const callOfferRateLimit = new Map<string, { count: number; reset: number }>();
@@ -1262,6 +1415,45 @@ function checkGroupCallInviteRateLimit(aegisId: string): boolean {
     if (oldest !== undefined) groupCallInviteRateLimit.delete(oldest);
   }
   return entry.count <= 3;
+}
+
+// Rate-limit buckets for group_call:channel heartbeats — keyed by aegisId. A
+// channel re-broadcasts every ~20s and joiners emit their own, so allow more
+// headroom than the one-shot invite: 20 per minute.
+const groupCallChannelRateLimit = new Map<string, { count: number; reset: number }>();
+
+function checkGroupCallChannelRateLimit(aegisId: string): boolean {
+  const now = Date.now();
+  const entry = groupCallChannelRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
+  entry.count++;
+  groupCallChannelRateLimit.set(aegisId, entry);
+  if (groupCallChannelRateLimit.size > RATE_LIMIT_MAP_MAX) {
+    const oldest = groupCallChannelRateLimit.keys().next().value;
+    if (oldest !== undefined) groupCallChannelRateLimit.delete(oldest);
+  }
+  return entry.count <= 20;
+}
+
+// Dedupe offline wake-up pushes per (callId, member): the channel heartbeat
+// repeats every ~20s, but an offline member should be woken at most once per
+// minute per channel — otherwise a long call would push them every 20s. In
+// memory only (zero metadata at rest), TTL 60s, bounded.
+const GROUPCALL_PUSH_TTL_MS = 60_000;
+const GROUPCALL_PUSH_MAP_MAX = 10_000;
+const groupCallPushedAt = new Map<string, number>();
+
+function shouldPushGroupCallWake(callId: string, aegisId: string): boolean {
+  const key = `${callId}|${aegisId}`;
+  const now = Date.now();
+  const last = groupCallPushedAt.get(key);
+  if (last !== undefined && now - last < GROUPCALL_PUSH_TTL_MS) return false;
+  groupCallPushedAt.set(key, now);
+  if (groupCallPushedAt.size > GROUPCALL_PUSH_MAP_MAX) {
+    const oldest = groupCallPushedAt.keys().next().value;
+    if (oldest !== undefined) groupCallPushedAt.delete(oldest);
+  }
+  return true;
 }
 
 // ── Ephemeral call:invite re-delivery queue ──────────────────────────────────
@@ -1489,6 +1681,26 @@ function attachGroupCallSignaling(socket: Socket, me: string, sockets: Map<strin
       return;
     }
     fanout('group_call:invite', parsed.data);
+  });
+
+  // Voice-channel heartbeat: fan out to ONLINE members (banner awareness) and
+  // fire a deduped zero-metadata wake-up push to OFFLINE members so a backgrounded/
+  // killed app reconnects and re-receives the heartbeat (→ local "Unirse" notif).
+  socket.on('group_call:channel', (raw) => {
+    const parsed = GroupCallChannel.safeParse(raw);
+    if (!parsed.success) return;
+    if (!checkGroupCallChannelRateLimit(me)) return;
+    const { to, callId, ...rest } = parsed.data;
+    for (const id of to) {
+      if (id === me) continue;
+      const target = sockets.get(id);
+      if (target && target.size > 0) {
+        for (const s of target) s.emit('group_call:channel', { ...rest, callId, from: me });
+      } else if (shouldPushGroupCallWake(callId, id)) {
+        // Offline (no live socket): wake them. Best-effort, never blocks the loop.
+        void sendGroupCallWakeUp(id);
+      }
+    }
   });
 
   socket.on('group_call:accept',  (raw) => { const p = GroupCallAccept.safeParse(raw);  if (p.success) fwd('group_call:accept',  p.data); });

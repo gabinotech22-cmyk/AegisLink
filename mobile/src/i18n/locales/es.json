@@ -47,7 +47,15 @@
     "generateError": "No se pudo generar la identidad",
     "registrationFailed": "Registro fallido. Comprueba tu conexión y vuelve a intentarlo.",
     "networkError": "Error de red. Por favor, reintenta.",
-    "langToggle": "ES | EN"
+    "langToggle": "ES | EN",
+    "continueBtn": "Continuar",
+    "almostDone": "CASI LISTO",
+    "nicknameTitle": "¿Cómo te llamamos?",
+    "nicknameSubtitle": "Tu avatar se genera de tu clave. Puedes teñirlo, o subir una foto luego en tu perfil. El nombre que verán tus contactos va cifrado de extremo a extremo: el servidor nunca lo ve. Todo es opcional; sigues siendo anónimo (sin teléfono ni email).",
+    "nicknameLabel": "NOMBRE VISIBLE (OPCIONAL)",
+    "nicknameDefault": "Por defecto: {{name}}",
+    "colorSwatchLabel": "Color de avatar {{color}}",
+    "skipNickname": "Omitir por ahora"
   },
   "home": {
     "identityCreated": "Identidad creada",
@@ -73,7 +81,10 @@
     "deleteMessagesConfirm": "¿Eliminar todos los mensajes con {{name}}? El contacto se conserva.",
     "deleteContact": "Eliminar contacto",
     "deleteContactConfirm": "¿Eliminar a {{name}} y todos sus mensajes? Esta acción no se puede deshacer.",
-    "archiveAction": "ARCHIVAR"
+    "archiveAction": "ARCHIVAR",
+    "registering": "REGISTRANDO IDENTIDAD…",
+    "registrationFailed": "FALLO AL REGISTRAR IDENTIDAD",
+    "retry": "REINTENTAR"
   },
   "chat": {
     "encryptedToday": "CIFRADO EXTREMO A EXTREMO · HOY",
@@ -229,6 +240,9 @@
     "typingIndicatorSub": "Permite que otros vean cuándo escribes",
     "blockScreenshots": "Bloquear capturas de pantalla",
     "blockScreenshotsSub": "El contenido queda oculto en grabaciones de pantalla",
+    "groupsSection": "GRUPOS",
+    "requireGroupApproval": "Aprobar antes de añadirme a grupos",
+    "requireGroupApprovalSub": "Recibe una invitación que aceptas en vez de entrar directo",
     "networkSection": "RED",
     "routeViaTor": "Enrutar por Tor",
     "routeViaTorSub": "Oculta tu IP de los relays de AegisLink",
@@ -322,6 +336,8 @@
     "areYouSure": "¿Estás seguro?",
     "cannotUndo": "Esta acción no se puede deshacer.",
     "wipeAllCaps": "BORRAR TODO",
+    "wipeFailed": "Error al borrar",
+    "wipeFailedDesc": "El borrado seguro no pudo completarse. Inténtalo de nuevo.",
     "duressPinModalTitle": "PIN de coacción",
     "duressPinModalDesc": "Introduce un PIN de 4 a 6 dígitos. Cuando se use este PIN señuelo en la pantalla de bloqueo, AegisLink simulará una cuenta completamente limpia sin historial.",
     "duressPinPlaceholder": "Ej. 123456",
@@ -398,6 +414,11 @@
     "joinByLinkModalDesc": "Pega el enlace de invitación que te compartieron.",
     "joinByLinkPlaceholder": "aegislink://group/v1/…",
     "joinByLinkBtn": "Continuar",
+    "invitesSection": "Invitaciones",
+    "inviteSubtitle": "Te invitaron a este grupo · toca para responder",
+    "inviteBadge": "Invitación",
+    "acceptInvite": "Aceptar invitación",
+    "declineInvite": "Rechazar",
     "joinByLinkInvalidTitle": "Enlace no válido",
     "joinByLinkInvalidDesc": "El enlace no tiene el formato correcto. Asegúrate de copiar el enlace completo.",
     "workBanner": "MOSTRANDO CANALES DE EQUIPO · MODO TRABAJO",
@@ -936,7 +957,9 @@
   "scanQR": {
     "title": "Escanear QR",
     "instruction": "Apunta la cámara a un código QR de Aegis",
-    "permissionDenied": "Permiso de cámara denegado"
+    "permissionDenied": "Permiso de cámara denegado",
+    "groupInviteWrongContextTitle": "Invitación de grupo",
+    "groupInviteWrongContextDesc": "Esto es una invitación de grupo, no un código de identidad. Ábrela desde tus chats o tu lista de grupos para unirte."
   },
   "verify": {
     "title": "Verificar",
@@ -945,9 +968,20 @@
     "orWords": "O — 8 PALABRAS DE SEGURIDAD",
     "keyFingerprint": "HUELLA DIGITAL DE CLAVE (HEX)",
     "scanPeer": "Escanear el QR del interlocutor",
+    "scanQR": "ESCANEAR QR",
+    "shareContact": "COMPARTIR ID",
+    "shareTitle": "Mi contacto AegisLink",
+    "shareMessage": "Añádeme en AegisLink:",
+    "shareId": "O usa mi ID:",
+    "shareContactLabel": "Compartir mi contacto",
     "match": "Las claves coinciden",
     "noMatch": "Las claves no coinciden",
-    "markVerified": "Marcar como verificado"
+    "markVerified": "Marcar como verificado",
+    "compareDesc": "Compara las huellas de clave en persona, escaneando el QR o leyendo las 8 palabras.",
+    "keyUnavailable": "Clave del contacto aún no disponible.",
+    "alreadyVerified": "IDENTIDAD YA VERIFICADA",
+    "markedTitle": "Verificado",
+    "markedDesc": "{{name}} está verificado. Tus mensajes están protegidos contra ataques de intermediario."
   },
   "firstContact": {
     "title": "Primer contacto",
@@ -1035,6 +1069,12 @@
     "adminOnlyInviteSub": "Cierra el grupo a invitaciones externas",
     "moderateNewMembersLabel": "Aprobar mensajes de nuevos miembros",
     "moderateNewMembersSub": "Ventana de moderación de 48h tras unirse",
+    "permCallLabel": "Solo admins inician llamadas",
+    "permCallSub": "Evita que cualquiera llame a todo el grupo",
+    "permSendLabel": "Solo admins envían mensajes",
+    "permSendSub": "Convierte el grupo en modo anuncios",
+    "permEditLabel": "Solo admins editan la info",
+    "permEditSub": "Nombre e imagen del grupo",
     "dangerZone": "ZONA DE PELIGRO",
     "e2eeGroupBadge": "GRUPO E2EE · {{count}} MIEMBROS",
     "youLabel": "Tú",
@@ -1048,12 +1088,20 @@
     "leaveAndDelete": "Salir y eliminar",
     "removeMemberTitle": "Eliminar a {{name}}",
     "removeMemberDesc": "¿Quieres eliminar a este miembro del grupo?",
+    "roleOwner": "DUEÑO",
     "roleAdmin": "ADMIN",
     "roleMod": "MOD",
     "roleMember": "MIEMBRO",
+    "manageMember": "Gestionar miembro",
+    "makeAdmin": "Hacer admin",
+    "makeModerator": "Hacer moderador",
+    "makeMember": "Quitar rol",
+    "removeFromGroup": "Eliminar del grupo",
     "inviteLinkSection": "ENLACE DE INVITACIÓN",
     "shareInviteLink": "Compartir enlace de invitación",
-    "shareInviteLinkSub": "Cualquiera con el enlace puede solicitar unirse"
+    "shareInviteLinkSub": "Cualquiera con el enlace puede solicitar unirse",
+    "inviteQrLabel": "Código QR de invitación al grupo",
+    "inviteQrSub": "Escanea este código para solicitar unirte al grupo"
   },
   "groupJoin": {
     "title": "Unirse al grupo",

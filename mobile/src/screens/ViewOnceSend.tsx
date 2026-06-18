@@ -1,18 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  Alert,
-  Image,
-  TextInput,
-  ActivityIndicator,
-  PanResponder,
-  Dimensions,
-  Modal,
-  ScrollView,
-  Platform,
-} from 'react-native';
+import { View, Text, Pressable, Image, TextInput, ActivityIndicator, PanResponder, Dimensions, Modal, ScrollView, Platform } from 'react-native';
 import Svg, { Path as SvgPath } from 'react-native-svg';
 import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
@@ -34,6 +21,7 @@ import { acquireRecording, releaseActiveRecording, setActiveRecording } from '..
 import { useMessages } from '../store/messages';
 import { sendMessage } from '../socket/client';
 import type { StoredContact } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -141,7 +129,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
   async function handlePickImage() {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) { Alert.alert(i18nT('viewOnce.permissionTitle'), i18nT('viewOnce.permissionMessage')); return; }
+      if (!perm.granted) { themedAlert(i18nT('viewOnce.permissionTitle'), i18nT('viewOnce.permissionMessage')); return; }
       const result = await withPickingGuard(() =>
         ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'] as ImagePicker.MediaType[],
@@ -165,12 +153,12 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
         setEditUri(compressed.uri);
         setMode('edit');
       } catch {
-        Alert.alert(i18nT('common.error'), i18nT('viewOnce.processError'));
+        themedAlert(i18nT('common.error'), i18nT('viewOnce.processError'));
       } finally {
         setProcessing(false);
       }
     } catch (e) {
-      Alert.alert(i18nT('common.error'), i18nT('viewOnce.galleryError', { message: (e as Error).message }));
+      themedAlert(i18nT('common.error'), i18nT('viewOnce.galleryError', { message: (e as Error).message }));
     }
   }
 
@@ -181,7 +169,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
   async function handlePickVideo() {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) { Alert.alert(i18nT('viewOnce.permissionTitle'), i18nT('viewOnce.permissionMessage')); return; }
+      if (!perm.granted) { themedAlert(i18nT('viewOnce.permissionTitle'), i18nT('viewOnce.permissionMessage')); return; }
       const result = await withPickingGuard(() =>
         ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['videos'] as ImagePicker.MediaType[],
@@ -219,12 +207,12 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
         }
         onSent();
       } catch {
-        Alert.alert(i18nT('common.error'), i18nT('viewOnce.processError'));
+        themedAlert(i18nT('common.error'), i18nT('viewOnce.processError'));
       } finally {
         setProcessing(false);
       }
     } catch (e) {
-      Alert.alert(i18nT('common.error'), i18nT('viewOnce.galleryError', { message: (e as Error).message }));
+      themedAlert(i18nT('common.error'), i18nT('viewOnce.galleryError', { message: (e as Error).message }));
     }
   }
 
@@ -345,7 +333,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
           setMode('confirm');
           return;
         }
-        Alert.alert(i18nT('common.error'), i18nT('viewOnce.processError'));
+        themedAlert(i18nT('common.error'), i18nT('viewOnce.processError'));
         return;
       }
       try {
@@ -359,7 +347,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
           setConfirmedUri(editUri);
           setMode('confirm');
         } else {
-          Alert.alert(i18nT('common.error'), i18nT('viewOnce.processError'));
+          themedAlert(i18nT('common.error'), i18nT('viewOnce.processError'));
         }
       }
     } finally {
@@ -402,7 +390,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
       onSent();
     } catch (e) {
       setSending(false);
-      Alert.alert(i18nT('common.error'), (e as Error).message);
+      themedAlert(i18nT('common.error'), (e as Error).message);
     }
   }
 
@@ -416,7 +404,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
     recordingRef.current = null;
     try {
       const { granted } = await Audio.requestPermissionsAsync();
-      if (!granted) { Alert.alert(i18nT('voiceRecorder.permissionTitle'), i18nT('voiceRecorder.permissionMessage')); return; }
+      if (!granted) { themedAlert(i18nT('voiceRecorder.permissionTitle'), i18nT('voiceRecorder.permissionMessage')); return; }
       // acquireRecording() shares the process-wide singleton, frees any orphan,
       // and retries once after an audio-session reset if the lock is still held.
       const rec = await acquireRecording();
@@ -428,7 +416,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
       await releaseActiveRecording();
       recordingRef.current = null;
       setAudioStage('idle');
-      Alert.alert(i18nT('common.error'), (e as Error).message);
+      themedAlert(i18nT('common.error'), (e as Error).message);
     }
   }
 
@@ -449,7 +437,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
     } catch (e) {
       await releaseActiveRecording();
       recordingRef.current = null;
-      Alert.alert(i18nT('common.error'), (e as Error).message);
+      themedAlert(i18nT('common.error'), (e as Error).message);
       setAudioStage('idle');
     }
   }
@@ -469,7 +457,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
       );
       soundRef.current = sound;
       setAudioStage('playing');
-    } catch (e) { Alert.alert(i18nT('common.error'), (e as Error).message); }
+    } catch (e) { themedAlert(i18nT('common.error'), (e as Error).message); }
   }
 
   async function stopAudio() {
@@ -522,7 +510,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
       onSent();
     } catch (e) {
       setSending(false);
-      Alert.alert(i18nT('common.error'), (e as Error).message);
+      themedAlert(i18nT('common.error'), (e as Error).message);
     }
   }
 

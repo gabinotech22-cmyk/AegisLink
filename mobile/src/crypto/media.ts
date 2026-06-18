@@ -235,6 +235,36 @@ export async function downloadAndDecryptMedia(mediaUri: string, ext: string = 'j
   return local;
 }
 
+/**
+ * Encrypts and uploads multiple files in parallel.
+ * Each item's `uri` is a local file path; `type` is the MIME type (optional).
+ * Returns an array of `Attachment` objects with `uri` set to the `blob:...` reference.
+ */
+export async function encryptAndUploadAll(
+  items: Array<{ uri: string; type?: string; fileName?: string; width?: number; height?: number; duration?: number }>
+): Promise<import('../db/local').Attachment[]> {
+  const results = await Promise.all(
+    items.map(async (item) => {
+      const blobUri = await encryptAndUploadMedia(item.uri, item.type);
+      const att: import('../db/local').Attachment = {
+        type: item.type?.startsWith('video') ? 'video'
+            : item.type?.startsWith('audio') ? 'audio'
+            : item.type?.startsWith('image') ? 'image'
+            : item.fileName ? 'file'
+            : 'image',
+        uri: blobUri,
+        fileName: item.fileName,
+        mimeType: item.type,
+        width: item.width,
+        height: item.height,
+        duration: item.duration,
+      };
+      return att;
+    })
+  );
+  return results;
+}
+
 /** Delete the persistent encrypted copy for a blob URI (e.g. on message delete). */
 export async function deletePersistedMedia(mediaUri: string): Promise<void> {
   if (!mediaUri.startsWith('blob:')) return;

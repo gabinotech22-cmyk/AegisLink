@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, Alert, PanResponder } from 'react-native';
+import { AppState, View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, PanResponder, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -17,6 +17,7 @@ import { useMessages } from '../store/messages';
 import { useTyping } from '../store/typing';
 import type { StoredContact, StoredMessage } from '../db/local';
 import { previewLabel } from '../utils/messagePreview';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onOpenChat: (contact: StoredContact) => void;
@@ -38,6 +39,10 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
     displayName,
     avatarColor,
     avatarImage,
+    publishStatus,
+    publishError,
+    publishRetryAfterMs,
+    retryPublish,
   } = useIdentity();
   const contacts = useContacts((s) => s.contacts);
   const hydrate = useContacts((s) => s.hydrate);
@@ -64,6 +69,67 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   useEffect(() => {
     void hydrate();
     void loadAllUnreads();
+  }, []);
+
+  // ── Publish-status retry (AppState foreground + backoff) ───────────────────
+  const publishRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const publishRetryCountRef = useRef(0);
+
+  // Backoff schedule: 2s, 5s, 15s, 30s, 60s, then cap
+  function nextBackoffMs(attempt: number): number {
+    const schedule = [2000, 5000, 15000, 30000, 60000];
+    return schedule[Math.min(attempt, schedule.length - 1)];
+  }
+
+  function schedulePublishRetry() {
+    if (publishRetryTimerRef.current !== null) return; // already scheduled
+    // Honor the relay's explicit cooldown (429 retryAfterMs) over our own
+    // backoff — retrying inside a rate-limit window is wasted work and can
+    // extend a sliding-window ban. setTimeout clamps to a 32-bit signed delay,
+    // so cap at ~24h to avoid overflow wrapping to an immediate fire.
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const delay = publishRetryAfterMs != null && publishRetryAfterMs > 0
+      ? Math.min(publishRetryAfterMs, DAY_MS)
+      : nextBackoffMs(publishRetryCountRef.current);
+    publishRetryTimerRef.current = setTimeout(() => {
+      publishRetryTimerRef.current = null;
+      publishRetryCountRef.current += 1;
+      void retryPublish();
+    }, delay);
+  }
+
+  // Retry when publishStatus becomes failed/unknown
+  useEffect(() => {
+    if (publishStatus === 'failed' || publishStatus === 'unknown') {
+      schedulePublishRetry();
+    } else {
+      // Success or in-flight — cancel any pending retry
+      if (publishRetryTimerRef.current !== null) {
+        clearTimeout(publishRetryTimerRef.current);
+        publishRetryTimerRef.current = null;
+      }
+      if (publishStatus === 'published') {
+        publishRetryCountRef.current = 0;
+      }
+    }
+    return () => {
+      if (publishRetryTimerRef.current !== null) {
+        clearTimeout(publishRetryTimerRef.current);
+        publishRetryTimerRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publishStatus]);
+
+  // Also retry when app comes back to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void retryPublish();
+      }
+    });
+    return () => sub.remove();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -99,7 +165,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
 
   function confirmClearChat(contact: StoredContact) {
     setMenuContact(null);
-    Alert.alert(
+    themedAlert(
       i18nT('home.deleteMessages'),
       i18nT('home.deleteMessagesConfirm', { name: contact.name }),
       [
@@ -114,7 +180,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   // reappears on the next message.
   function confirmDeleteChat(contact: StoredContact) {
     setMenuContact(null);
-    Alert.alert(
+    themedAlert(
       i18nT('home.deleteChat', 'Eliminar chat'),
       i18nT('home.deleteChatConfirm', {
         name: contact.name,
@@ -260,6 +326,109 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
           >
             {`${identity?.aegisId ?? '— — —'} · ${i18nT('home.e2eeStatus')}`}
           </Text>
+        </View>
+      )}
+
+      {/* Publish-status banner — shown when registration with the relay is in
+          progress or has failed. Hidden when published. The `unknown` state is
+          treated identically to `publishing`: it means we haven't received a
+          confirmation yet (cold-start race) and the backoff logic in the effect
+          above will resolve it shortly — showing a spinner here is less alarming
+          than showing an error for a transient state. */}
+      {(publishStatus === 'publishing' || publishStatus === 'unknown') && (
+        <View
+          style={{
+            marginHorizontal: 18,
+            marginBottom: 8,
+            paddingVertical: 10,
+            paddingHorizontal: 14,
+            backgroundColor: t.surface,
+            borderWidth: 1,
+            borderColor: t.border,
+            borderRadius: t.radius,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <ActivityIndicator size="small" color={t.accent} />
+          <Text
+            style={{
+              fontFamily: t.fontMono,
+              fontSize: 11,
+              color: t.textDim,
+              letterSpacing: 0.5,
+              flex: 1,
+            }}
+          >
+            {i18nT('home.registering')}
+          </Text>
+        </View>
+      )}
+
+      {publishStatus === 'failed' && (
+        <View
+          style={{
+            marginHorizontal: 18,
+            marginBottom: 8,
+            paddingVertical: 10,
+            paddingHorizontal: 14,
+            // t.danger exists in Theme (used by FloatingMenu and swipe-archive above)
+            backgroundColor: `${t.danger}18`,
+            borderWidth: 1,
+            borderColor: `${t.danger}55`,
+            borderRadius: t.radius,
+            gap: 8,
+          }}
+        >
+          <Text
+            style={{
+              fontFamily: t.fontMono,
+              fontSize: 11,
+              color: t.danger,
+              letterSpacing: 0.4,
+            }}
+          >
+            {i18nT('home.registrationFailed')}
+          </Text>
+          {publishError ? (
+            <Text
+              style={{
+                fontFamily: t.fontMono,
+                fontSize: 10,
+                color: t.textDim,
+                letterSpacing: 0.3,
+              }}
+              numberOfLines={3}
+            >
+              {publishError}
+            </Text>
+          ) : null}
+          <Pressable
+            onPress={() => void retryPublish()}
+            accessibilityLabel={i18nT('home.retry')}
+            style={({ pressed }) => ({
+              alignSelf: 'flex-start',
+              marginTop: 2,
+              paddingVertical: 6,
+              paddingHorizontal: 14,
+              borderRadius: t.radiusS,
+              backgroundColor: t.danger,
+              opacity: pressed ? 0.75 : 1,
+            })}
+          >
+            <Text
+              style={{
+                fontFamily: t.fontMono,
+                fontSize: 11,
+                fontWeight: '700',
+                color: '#FFFFFF',
+                letterSpacing: 0.5,
+              }}
+            >
+              {i18nT('home.retry')}
+            </Text>
+          </Pressable>
         </View>
       )}
 
@@ -588,7 +757,7 @@ function ContactRow({
             backgroundColor: pressed ? t.surface2 : t.bg,
           })}
         >
-          <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={44} photoUri={contact.avatarImage} />
+          <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={44} photoUri={contact.avatarImage} seed={contact.publicKeyB64 || contact.aegisId} />
           <View style={{ flex: 1, minWidth: 0 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text

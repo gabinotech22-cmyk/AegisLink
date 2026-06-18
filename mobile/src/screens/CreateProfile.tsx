@@ -9,21 +9,13 @@
  * On confirm: keys → SecureStore, profile → ProfilesStore, then switchProfile().
  */
 import { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Easing,
-} from 'react-native';
+import { View, Text, TextInput, Pressable, ActivityIndicator, Animated, Easing } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { useProfiles, AVATAR_PALETTE } from '../store/profiles';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -86,7 +78,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
       await switchProfile(profile.slotId);
       onCreated();
     } catch (e) {
-      Alert.alert('Error', (e as Error).message);
+      themedAlert('Error', (e as Error).message);
       setBusy(false);
     }
   }

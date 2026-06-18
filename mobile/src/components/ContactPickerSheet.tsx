@@ -100,7 +100,7 @@ export function ContactPickerSheet({ t, visible, contacts, title, emptyText, tra
                   backgroundColor: pressed ? t.surface2 : 'transparent',
                 })}
               >
-                <Avatar t={t} name={item.avatarImage || item.name} color={item.color ?? t.accent} size={40} photoUri={item.avatarImage} />
+                <Avatar t={t} name={item.avatarImage || item.name} color={item.color ?? t.accent} size={40} photoUri={item.avatarImage} seed={item.publicKeyB64 || item.aegisId} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 14, color: t.text, fontWeight: '500' }}>{item.name}</Text>
                   <Text numberOfLines={1} style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim }}>{item.aegisId}</Text>

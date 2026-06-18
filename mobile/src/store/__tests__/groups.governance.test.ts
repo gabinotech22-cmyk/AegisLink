@@ -1,0 +1,152 @@
+/**
+ * groups store — governance signing (Phase 2a)
+ *
+ * Locks the owner-side contract for roles/permissions:
+ *   - createGroup signs initial governance (default permissions, govVersion 1)
+ *   - setGroupPermission re-signs with a bumped govVersion
+ *   - the produced govSig verifies against the owner's REAL public key
+ *
+ * Uses real tweetnacl (no crypto mock) so the signature round-trip is genuine.
+ */
+import nacl from 'tweetnacl';
+import { encodeBase64 } from 'tweetnacl-util';
+import { verifyGroupGovernance } from '../../crypto/groupSig';
+import { DEFAULT_PERMISSIONS, effectivePermissions } from '../../crypto/groupRoles';
+
+const mockOwnerKp = nacl.sign.keyPair();
+const mockOwnerId = 'owner-aegis-id';
+
+jest.mock('../../db/local', () => ({
+  __esModule: true,
+  loadGroups: jest.fn().mockResolvedValue([]),
+  saveGroup: jest.fn().mockResolvedValue(undefined),
+  deleteGroup: jest.fn().mockResolvedValue(undefined),
+  deleteContactMessages: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../identity', () => ({
+  __esModule: true,
+  useIdentity: {
+    getState: () => ({ identity: { aegisId: mockOwnerId, signingSecretKey: mockOwnerKp.secretKey } }),
+  },
+}));
+
+// createGroup/setGroupPermission don't broadcast in Phase 2a, but addMember etc.
+// lazily require these — stub so nothing throws if reached.
+jest.mock('../../socket/client', () => ({
+  __esModule: true,
+  broadcastGroupMetadata: jest.fn().mockResolvedValue(undefined),
+  forgetGroupAvatarSent: jest.fn(),
+  rekeyGroupAfterRemoval: jest.fn().mockResolvedValue(undefined),
+}));
+jest.mock('../messages', () => ({
+  __esModule: true,
+  useMessages: { getState: () => ({ clearChat: jest.fn() }) },
+}));
+
+import { useGroups } from '../groups';
+
+const OWNER_PUB = encodeBase64(mockOwnerKp.publicKey);
+
+function verify(g: { id: string; adminId?: string; admins?: string[]; moderators?: string[]; permissions?: ReturnType<typeof effectivePermissions>; govSig?: string; govVersion?: number }) {
+  return verifyGroupGovernance(
+    {
+      groupId: g.id,
+      ownerId: g.adminId!,
+      admins: g.admins ?? [],
+      moderators: g.moderators ?? [],
+      permissions: effectivePermissions(g),
+      govVersion: g.govVersion!,
+    },
+    g.govSig!,
+    OWNER_PUB,
+  );
+}
+
+describe('groups store — governance signing', () => {
+  beforeEach(() => {
+    useGroups.setState({ groups: [] });
+  });
+
+  it('createGroup signs initial governance (defaults, version 1)', async () => {
+    const g = await useGroups.getState().createGroup('Squad', [mockOwnerId, 'peer-1']);
+    expect(g.govVersion).toBe(1);
+    expect(g.permissions).toEqual(DEFAULT_PERMISSIONS);
+    expect(g.govSig).toBeTruthy();
+    expect(verify(g)).toBe(true);
+  });
+
+  it('setGroupPermission bumps govVersion and re-signs verifiably', async () => {
+    const g = await useGroups.getState().createGroup('Squad', [mockOwnerId, 'peer-1']);
+    await useGroups.getState().setGroupPermission(g.id, { whoCanSend: 'admins' });
+    const updated = useGroups.getState().groups.find((x) => x.id === g.id)!;
+
+    expect(updated.govVersion).toBe(2);
+    expect(updated.permissions?.whoCanSend).toBe('admins');
+    expect(verify(updated)).toBe(true);
+
+    // The OLD (v1) signature must NOT verify against the NEW state (anti-rollback).
+    const rolledBack = verifyGroupGovernance(
+      {
+        groupId: updated.id,
+        ownerId: updated.adminId!,
+        admins: [],
+        moderators: [],
+        permissions: effectivePermissions(updated),
+        govVersion: 1,
+      },
+      g.govSig!,
+      OWNER_PUB,
+    );
+    expect(rolledBack).toBe(false);
+  });
+
+  it('setMemberRole promotes a member to admin, re-signs, and is verifiable', async () => {
+    const g = await useGroups.getState().createGroup('Squad', [mockOwnerId, 'peer-1']);
+    await useGroups.getState().setMemberRole(g.id, 'peer-1', 'admin');
+    const updated = useGroups.getState().groups.find((x) => x.id === g.id)!;
+
+    expect(updated.admins).toContain('peer-1');
+    expect(updated.govVersion).toBe(2);
+    expect(verify(updated)).toBe(true);
+  });
+
+  it('setMemberRole moves a member between roles without duplication', async () => {
+    const g = await useGroups.getState().createGroup('Squad', [mockOwnerId, 'peer-1']);
+    await useGroups.getState().setMemberRole(g.id, 'peer-1', 'mod');
+    await useGroups.getState().setMemberRole(g.id, 'peer-1', 'admin');
+    const updated = useGroups.getState().groups.find((x) => x.id === g.id)!;
+
+    expect(updated.admins).toEqual(['peer-1']);
+    expect(updated.moderators ?? []).not.toContain('peer-1');
+  });
+
+  it('setMemberRole refuses to change the owner role', async () => {
+    const g = await useGroups.getState().createGroup('Squad', [mockOwnerId, 'peer-1']);
+    await useGroups.getState().setMemberRole(g.id, mockOwnerId, 'member');
+    const updated = useGroups.getState().groups.find((x) => x.id === g.id)!;
+
+    // No-op: owner untouched, governance not re-signed.
+    expect(updated.adminId).toBe(mockOwnerId);
+    expect(updated.admins ?? []).not.toContain(mockOwnerId);
+    expect(updated.govVersion).toBe(1);
+  });
+
+  it('acceptGroupInvite clears the pending flag', async () => {
+    useGroups.setState({
+      groups: [
+        { id: 'inv-1', name: 'Invited', members: [mockOwnerId], createdAt: 1, pending: true },
+      ],
+    });
+    await useGroups.getState().acceptGroupInvite('inv-1');
+    expect(useGroups.getState().groups.find((g) => g.id === 'inv-1')!.pending).toBeUndefined();
+  });
+
+  it('acceptGroupInvite is a no-op on a non-pending group', async () => {
+    useGroups.setState({
+      groups: [{ id: 'g-2', name: 'Joined', members: [mockOwnerId], createdAt: 1 }],
+    });
+    await useGroups.getState().acceptGroupInvite('g-2');
+    expect(useGroups.getState().groups.find((g) => g.id === 'g-2')!.pending).toBeUndefined();
+  });
+});

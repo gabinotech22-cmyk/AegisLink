@@ -112,6 +112,9 @@ import type { StoredContact, StoredGroup } from './src/db/local';
 import { useTranslation } from 'react-i18next';
 import { useContacts as useContactsStore } from './src/store/contacts';
 import { ContactPickerSheet } from './src/components/ContactPickerSheet';
+import { AlertHost } from './src/components/AlertHost';
+import { MultiPreviewScreen } from './src/screens/MultiPreview';
+import type { MultiPreviewAsset } from './src/screens/MultiPreview';
 
 type PushRoute =
   | { name: 'chat'; contact: StoredContact }
@@ -151,7 +154,9 @@ type PushRoute =
   | { name: 'profileSwitcher' }
   | { name: 'createProfile' }
   | { name: 'groupJoin'; groupId: string; groupName: string; adminId: string }
-  | { name: 'groupCall' };
+  | { name: 'groupCall' }
+  | { name: 'multiPreview'; contact: StoredContact; assets: import('./src/screens/MultiPreview').MultiPreviewAsset[] }
+  | { name: 'groupMultiPreview'; group: StoredGroup; assets: import('./src/screens/MultiPreview').MultiPreviewAsset[] };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -455,6 +460,19 @@ function Shell() {
     }
   }, [identity, status]);
 
+  // Re-attach call handlers whenever the connection comes back. A reconnect can
+  // rebuild the socket.io instance (disconnect() nulls it), which silently drops
+  // the call:invite listener — so an incoming call would never ring after any
+  // reconnect until app restart. attach*Handlers are idempotent (they off()
+  // before on()), so re-running them here is safe.
+  useEffect(() => {
+    if (online && identity && status === 'ready' && WEBRTC_AVAILABLE) {
+      if (usePreferences.getState().duressActive) return;
+      attachCallHandlers();
+      attachGroupCallHandlers();
+    }
+  }, [online, identity, status]);
+
   // Runtime integrity advisory (C1) — local-only, zero telemetry, NON-blocking.
   // Surface a one-time notice if the device looks rooted/hooked; never prevent
   // usage. The enforced consequence (refusing off-device key export) lives in
@@ -468,8 +486,8 @@ function Shell() {
         const { ss } = require('./src/utils/secureStore') as typeof import('./src/utils/secureStore');
         const ACK = 'aegis.integrity.ack.v1';
         if (await ss.get(ACK)) return;
-        const { Alert } = require('react-native') as typeof import('react-native');
-        Alert.alert(
+        const { themedAlert } = require('./src/components/AlertHost') as typeof import('./src/components/AlertHost');
+        themedAlert(
           'Dispositivo no seguro',
           'Este dispositivo parece tener root o un hook activo. AegisLink no puede garantizar el aislamiento de tus claves aquí, así que la copia de seguridad fuera del dispositivo queda desactivada. Tus mensajes siguen cifrados de extremo a extremo.',
           [{ text: 'Entendido', onPress: () => void ss.set(ACK, '1') }],
@@ -497,11 +515,23 @@ function Shell() {
     setShowWipeOverlay(false);
   }, []);
 
-  async function handleFilePick(contact: StoredContact) {
+  async function handleFilePick(
+    contact: StoredContact,
+    onMultiple?: (assets: import('expo-document-picker').DocumentPickerAsset[]) => void
+  ) {
     const DocumentPicker = require('expo-document-picker');
-    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: true });
     if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
+    const assets: import('expo-document-picker').DocumentPickerAsset[] = result.assets;
+    if (assets.length > 1) {
+      if (onMultiple) {
+        onMultiple(assets);
+      } else {
+        await handleMultipleFiles(contact, assets);
+      }
+      return;
+    }
+    const asset = assets[0];
     const { useMessages } = require('./src/store/messages');
     const id = (await import('expo-crypto')).randomUUID();
     await useMessages.getState().append({
@@ -528,11 +558,117 @@ function Shell() {
       } catch { /* queued */ }
     }
   }
-  async function handleGroupFilePick(group: StoredGroup) {
+
+  async function handleMultipleImages(
+    contact: StoredContact,
+    assets: import('expo-image-picker').ImagePickerAsset[],
+    caption = ''
+  ) {
+    if (!identity || assets.length === 0) return;
+    const { encryptAndUploadAll } = require('./src/crypto/media') as typeof import('./src/crypto/media');
+    const { buildMultiPayload } = require('./src/utils/attachmentFormat') as typeof import('./src/utils/attachmentFormat');
+    const { useMessages } = require('./src/store/messages') as typeof import('./src/store/messages');
+    const { sendMessage } = require('./src/socket/client');
+    const { decodeBase64 } = require('tweetnacl-util');
+    const { randomUUID } = await import('expo-crypto');
+    const msgId = randomUUID();
+    const pendingAttachments: import('./src/db/local').Attachment[] = assets.map((a) => ({
+      type: 'image' as const,
+      uri: a.uri,
+      width: a.width ?? undefined,
+      height: a.height ?? undefined,
+    }));
+    await useMessages.getState().append({
+      id: msgId,
+      chatId: contact.aegisId,
+      direction: 'out',
+      body: '',
+      createdAt: Date.now(),
+      type: 'image',
+      attachments: pendingAttachments,
+    });
+    try {
+      const items = assets.map((a) => ({
+        uri: a.uri,
+        type: 'image/jpeg',
+        width: a.width ?? undefined,
+        height: a.height ?? undefined,
+      }));
+      const uploaded = await encryptAndUploadAll(items);
+      await useMessages.getState().setAttachments(contact.aegisId, msgId, uploaded);
+      await sendMessage({
+        identity,
+        recipientAegisId: contact.aegisId,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext: buildMultiPayload(uploaded, caption),
+        skipLocalAppend: true,
+      });
+    } catch { /* queued */ }
+  }
+
+  async function handleMultipleFiles(
+    contact: StoredContact,
+    assets: import('expo-document-picker').DocumentPickerAsset[],
+    caption = ''
+  ) {
+    if (!identity || assets.length === 0) return;
+    const { encryptAndUploadAll } = require('./src/crypto/media') as typeof import('./src/crypto/media');
+    const { buildMultiPayload } = require('./src/utils/attachmentFormat') as typeof import('./src/utils/attachmentFormat');
+    const { useMessages } = require('./src/store/messages') as typeof import('./src/store/messages');
+    const { sendMessage } = require('./src/socket/client');
+    const { decodeBase64 } = require('tweetnacl-util');
+    const { randomUUID } = await import('expo-crypto');
+    const msgId = randomUUID();
+    const pendingAttachments: import('./src/db/local').Attachment[] = assets.map((a) => ({
+      type: 'file' as const,
+      uri: a.uri,
+      fileName: a.name ?? 'file',
+      mimeType: a.mimeType ?? undefined,
+    }));
+    await useMessages.getState().append({
+      id: msgId,
+      chatId: contact.aegisId,
+      direction: 'out',
+      body: assets.map((a) => a.name ?? 'file').join(', '),
+      createdAt: Date.now(),
+      type: 'file',
+      attachments: pendingAttachments,
+    });
+    try {
+      const items = assets.map((a) => ({
+        uri: a.uri,
+        type: a.mimeType ?? undefined,
+        fileName: a.name ?? 'file',
+      }));
+      const uploaded = await encryptAndUploadAll(items);
+      await useMessages.getState().setAttachments(contact.aegisId, msgId, uploaded);
+      await sendMessage({
+        identity,
+        recipientAegisId: contact.aegisId,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext: buildMultiPayload(uploaded, caption),
+        skipLocalAppend: true,
+      });
+    } catch { /* queued */ }
+  }
+
+  async function handleGroupFilePick(
+    group: StoredGroup,
+    onMultiple?: (assets: import('expo-document-picker').DocumentPickerAsset[]) => void
+  ) {
     const DocumentPicker = require('expo-document-picker');
-    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: true });
     if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
+    const assets: import('expo-document-picker').DocumentPickerAsset[] = result.assets;
+    if (assets.length > 1) {
+      if (onMultiple) {
+        onMultiple(assets);
+      } else {
+        await handleGroupMultipleFiles(group, assets);
+      }
+      return;
+    }
+    const asset = assets[0];
     const { useMessages } = require('./src/store/messages');
     const id = (await import('expo-crypto')).randomUUID();
     await useMessages.getState().append({
@@ -556,6 +692,95 @@ function Shell() {
         });
       } catch { /* queued when offline */ }
     }
+  }
+
+  async function handleGroupMultipleImages(
+    group: StoredGroup,
+    assets: import('expo-image-picker').ImagePickerAsset[],
+    caption = ''
+  ) {
+    if (!identity || assets.length === 0) return;
+    const { encryptAndUploadAll } = require('./src/crypto/media') as typeof import('./src/crypto/media');
+    const { buildMultiPayload } = require('./src/utils/attachmentFormat') as typeof import('./src/utils/attachmentFormat');
+    const { useMessages } = require('./src/store/messages') as typeof import('./src/store/messages');
+    const { sendGroupMessage: sendGrpMsg } = require('./src/socket/client');
+    const { randomUUID } = await import('expo-crypto');
+    const msgId = randomUUID();
+    const pendingAttachments: import('./src/db/local').Attachment[] = assets.map((a) => ({
+      type: 'image' as const,
+      uri: a.uri,
+      width: a.width ?? undefined,
+      height: a.height ?? undefined,
+    }));
+    await useMessages.getState().append({
+      id: msgId,
+      chatId: group.id,
+      direction: 'out',
+      body: '',
+      createdAt: Date.now(),
+      type: 'image',
+      attachments: pendingAttachments,
+    });
+    try {
+      const items = assets.map((a) => ({
+        uri: a.uri,
+        type: 'image/jpeg',
+        width: a.width ?? undefined,
+        height: a.height ?? undefined,
+      }));
+      const uploaded = await encryptAndUploadAll(items);
+      await useMessages.getState().setAttachments(group.id, msgId, uploaded);
+      await sendGrpMsg({
+        identity,
+        groupId: group.id,
+        plaintext: buildMultiPayload(uploaded, caption),
+        skipLocalAppend: true,
+      });
+    } catch { /* queued */ }
+  }
+
+  async function handleGroupMultipleFiles(
+    group: StoredGroup,
+    assets: import('expo-document-picker').DocumentPickerAsset[],
+    caption = ''
+  ) {
+    if (!identity || assets.length === 0) return;
+    const { encryptAndUploadAll } = require('./src/crypto/media') as typeof import('./src/crypto/media');
+    const { buildMultiPayload } = require('./src/utils/attachmentFormat') as typeof import('./src/utils/attachmentFormat');
+    const { useMessages } = require('./src/store/messages') as typeof import('./src/store/messages');
+    const { sendGroupMessage: sendGrpMsg } = require('./src/socket/client');
+    const { randomUUID } = await import('expo-crypto');
+    const msgId = randomUUID();
+    const pendingAttachments: import('./src/db/local').Attachment[] = assets.map((a) => ({
+      type: 'file' as const,
+      uri: a.uri,
+      fileName: a.name ?? 'file',
+      mimeType: a.mimeType ?? undefined,
+    }));
+    await useMessages.getState().append({
+      id: msgId,
+      chatId: group.id,
+      direction: 'out',
+      body: assets.map((a) => a.name ?? 'file').join(', '),
+      createdAt: Date.now(),
+      type: 'file',
+      attachments: pendingAttachments,
+    });
+    try {
+      const items = assets.map((a) => ({
+        uri: a.uri,
+        type: a.mimeType ?? undefined,
+        fileName: a.name ?? 'file',
+      }));
+      const uploaded = await encryptAndUploadAll(items);
+      await useMessages.getState().setAttachments(group.id, msgId, uploaded);
+      await sendGrpMsg({
+        identity,
+        groupId: group.id,
+        plaintext: buildMultiPayload(uploaded, caption),
+        skipLocalAppend: true,
+      });
+    } catch { /* queued */ }
   }
 
   async function handleVideoPick(contact: StoredContact) {
@@ -727,8 +952,8 @@ function Shell() {
       const { parseIdentityQR } = require('./src/crypto/qr') as typeof import('./src/crypto/qr');
       const parsed = parseIdentityQR(url);
       if (!parsed) return;
-      const { Alert } = require('react-native');
-      Alert.alert(
+      const { themedAlert: _themedAlert } = require('./src/components/AlertHost') as typeof import('./src/components/AlertHost');
+      _themedAlert(
         i18nT('addContact.linkConfirmTitle', 'Agregar contacto'),
         i18nT('addContact.linkConfirmDesc', '¿Agregar a {{id}} como contacto?', { id: parsed.aegisId }),
         [
@@ -740,7 +965,7 @@ function Shell() {
                 const { useContacts } = require('./src/store/contacts') as typeof import('./src/store/contacts');
                 const res = await useContacts.getState().addFromQR(parsed.aegisId, parsed.publicKeyB64);
                 if (res.kind === 'mitm_detected') {
-                  Alert.alert(
+                  _themedAlert(
                     i18nT('addContact.keyMismatchTitle', 'Clave distinta'),
                     i18nT('addContact.keyMismatchDesc', 'Ya tienes este contacto con OTRA clave pública. No se ha modificado. Verifica con la otra persona antes de continuar.'),
                   );
@@ -905,6 +1130,7 @@ function Shell() {
             onAttach={() => push({ name: 'attach', contact: top.contact })}
             onEphemeral={() => push({ name: 'ephemeral', chatId: top.contact.aegisId })}
             onViewOnce={(mediaUri, messageId) => push({ name: 'viewonce', contact: top.contact, mediaUri, messageId })}
+            onVerify={() => push({ name: 'verify', contactId: top.contact.aegisId })}
           />
         );
       case 'groupChat':
@@ -974,6 +1200,10 @@ function Shell() {
               setStack([]);
               push({ name: 'chat', contact: c });
             }}
+            onGroupInvite={(groupId, groupName, adminId) => {
+              pop();
+              push({ name: 'groupJoin', groupId, groupName, adminId });
+            }}
           />
         );
       case 'verify':
@@ -1036,6 +1266,21 @@ function Shell() {
         return (
           <AttachSheetScreen
             onBack={pop}
+            onMultipleImages={(assets) => {
+              // Bug B fix: AttachSheet no longer calls onBack() for multi-select
+              // (see AttachSheet.tsx). We do the single pop here, then push the
+              // preview screen. Previously there were two pops which dropped the
+              // user all the way to the home screen.
+              // Bug C fix: go to MultiPreview instead of sending silently.
+              const mapped: MultiPreviewAsset[] = assets.map((a) => ({ kind: 'image' as const, asset: a }));
+              pop();
+              push({ name: 'multiPreview', contact: top.contact, assets: mapped });
+            }}
+            onMultipleFiles={(assets) => {
+              const mapped: MultiPreviewAsset[] = assets.map((a) => ({ kind: 'file' as const, asset: a }));
+              pop();
+              push({ name: 'multiPreview', contact: top.contact, assets: mapped });
+            }}
             onPick={(kind) => {
               if (kind === 'scheduled') {
                 pop();
@@ -1050,7 +1295,11 @@ function Shell() {
                 pop();
                 push({ name: 'voice', contact: top.contact });
               } else if (kind === 'file') {
-                handleFilePick(top.contact).then(pop).catch(() => {});
+                handleFilePick(top.contact, (fileAssets) => {
+                  const mapped: MultiPreviewAsset[] = fileAssets.map((a) => ({ kind: 'file' as const, asset: a }));
+                  pop();
+                  push({ name: 'multiPreview', contact: top.contact, assets: mapped });
+                }).catch(() => { pop(); });
               } else if (kind === 'video') {
                 handleVideoPick(top.contact).then(pop).catch(() => {});
               } else if (kind === 'contact') {
@@ -1062,6 +1311,52 @@ function Shell() {
                 });
               }
               else pop();
+            }}
+          />
+        );
+      case 'multiPreview':
+        return (
+          <MultiPreviewScreen
+            assets={top.assets}
+            recipientName={top.contact.name}
+            onBack={pop}
+            onSend={(assets, caption) => {
+              pop(); // return to chat immediately; upload happens in background
+              const imageAssets = assets
+                .filter((a): a is Extract<MultiPreviewAsset, { kind: 'image' }> => a.kind === 'image')
+                .map((a) => a.asset);
+              const fileAssets = assets
+                .filter((a): a is Extract<MultiPreviewAsset, { kind: 'file' }> => a.kind === 'file')
+                .map((a) => a.asset);
+              if (imageAssets.length > 0) {
+                void handleMultipleImages(top.contact, imageAssets, caption).catch(() => {});
+              }
+              if (fileAssets.length > 0) {
+                void handleMultipleFiles(top.contact, fileAssets, caption).catch(() => {});
+              }
+            }}
+          />
+        );
+      case 'groupMultiPreview':
+        return (
+          <MultiPreviewScreen
+            assets={top.assets}
+            recipientName={top.group.name}
+            onBack={pop}
+            onSend={(assets, caption) => {
+              pop();
+              const imageAssets = assets
+                .filter((a): a is Extract<MultiPreviewAsset, { kind: 'image' }> => a.kind === 'image')
+                .map((a) => a.asset);
+              const fileAssets = assets
+                .filter((a): a is Extract<MultiPreviewAsset, { kind: 'file' }> => a.kind === 'file')
+                .map((a) => a.asset);
+              if (imageAssets.length > 0) {
+                void handleGroupMultipleImages(top.group, imageAssets, caption).catch(() => {});
+              }
+              if (fileAssets.length > 0) {
+                void handleGroupMultipleFiles(top.group, fileAssets, caption).catch(() => {});
+              }
             }}
           />
         );
@@ -1122,6 +1417,16 @@ function Shell() {
         return (
           <AttachSheetScreen
             onBack={pop}
+            onMultipleImages={(assets) => {
+              const mapped: MultiPreviewAsset[] = assets.map((a) => ({ kind: 'image' as const, asset: a }));
+              pop();
+              push({ name: 'groupMultiPreview', group: top.group, assets: mapped });
+            }}
+            onMultipleFiles={(assets) => {
+              const mapped: MultiPreviewAsset[] = assets.map((a) => ({ kind: 'file' as const, asset: a }));
+              pop();
+              push({ name: 'groupMultiPreview', group: top.group, assets: mapped });
+            }}
             onPick={(kind) => {
               // photo / camera are handled internally by AttachSheetScreen via
               // setPendingMedia — they never reach onPick. The cases below cover
@@ -1130,7 +1435,11 @@ function Shell() {
                 pop();
                 push({ name: 'groupVoice', group: top.group });
               } else if (kind === 'file') {
-                handleGroupFilePick(top.group).then(pop).catch(() => {});
+                handleGroupFilePick(top.group, (fileAssets) => {
+                  const mapped: MultiPreviewAsset[] = fileAssets.map((a) => ({ kind: 'file' as const, asset: a }));
+                  pop();
+                  push({ name: 'groupMultiPreview', group: top.group, assets: mapped });
+                }).catch(() => { pop(); });
               } else if (kind === 'video') {
                 handleGroupVideoPick(top.group).then(pop).catch(() => {});
               } else if (kind === 'contact') {
@@ -1337,6 +1646,8 @@ export default function App() {
         <Shell />
         {/* FloatingCallBar is a sibling to Shell so it overlays any screen */}
         <FloatingCallBarRoot />
+        {/* AlertHost mounts once inside ThemeProvider so themedAlert() has theme access */}
+        <AlertHost />
       </ThemeProvider>
     </SafeAreaProvider>
   );

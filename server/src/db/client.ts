@@ -87,6 +87,16 @@ function initSqliteSchema(db: DatabaseSync) {
       PRIMARY KEY (aegis_id, key_id)
     );
 
+    CREATE TABLE IF NOT EXISTS prekeys_pq_signed (
+      aegis_id       TEXT NOT NULL,
+      device_id      TEXT NOT NULL DEFAULT 'default',
+      key_id         INTEGER NOT NULL,
+      public_key_b64 TEXT NOT NULL,
+      signature_b64  TEXT NOT NULL,
+      created_at     INTEGER NOT NULL,
+      PRIMARY KEY (aegis_id, device_id)
+    );
+
     CREATE TABLE IF NOT EXISTS revoked_did_hashes (
       did_hash        TEXT PRIMARY KEY,
       revoked_at      INTEGER NOT NULL,
@@ -136,6 +146,23 @@ function initSqliteSchema(db: DatabaseSync) {
       envelope   TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS sender_key_dist_queue (
+      id              TEXT PRIMARY KEY,
+      recipient       TEXT NOT NULL,
+      group_id        TEXT NOT NULL,
+      sender_aegis_id TEXT NOT NULL,
+      ciphertext_b64  TEXT NOT NULL,
+      nonce_b64       TEXT NOT NULL,
+      chain_key_b64   TEXT NOT NULL,
+      iteration       INTEGER NOT NULL,
+      created_at      INTEGER NOT NULL,
+      expires_at      INTEGER NOT NULL,
+      drained_by      TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skdq_recipient
+      ON sender_key_dist_queue(recipient, created_at);
 
     CREATE TABLE IF NOT EXISTS work_orgs (
       org_id     TEXT PRIMARY KEY,
@@ -419,6 +446,16 @@ async function initPgSchema(): Promise<void> {
       PRIMARY KEY (aegis_id, key_id)
     );
 
+    CREATE TABLE IF NOT EXISTS prekeys_pq_signed (
+      aegis_id       TEXT NOT NULL,
+      device_id      TEXT NOT NULL DEFAULT 'default',
+      key_id         INTEGER NOT NULL,
+      public_key_b64 TEXT NOT NULL,
+      signature_b64  TEXT NOT NULL,
+      created_at     BIGINT NOT NULL,
+      PRIMARY KEY (aegis_id, device_id)
+    );
+
     CREATE TABLE IF NOT EXISTS revoked_did_hashes (
       did_hash        TEXT PRIMARY KEY,
       revoked_at      BIGINT NOT NULL,
@@ -468,6 +505,23 @@ async function initPgSchema(): Promise<void> {
       envelope   TEXT NOT NULL,
       updated_at BIGINT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS sender_key_dist_queue (
+      id              TEXT PRIMARY KEY,
+      recipient       TEXT NOT NULL,
+      group_id        TEXT NOT NULL,
+      sender_aegis_id TEXT NOT NULL,
+      ciphertext_b64  TEXT NOT NULL,
+      nonce_b64       TEXT NOT NULL,
+      chain_key_b64   TEXT NOT NULL,
+      iteration       INTEGER NOT NULL,
+      created_at      BIGINT NOT NULL,
+      expires_at      BIGINT NOT NULL,
+      drained_by      TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skdq_recipient
+      ON sender_key_dist_queue(recipient, created_at);
 
     CREATE TABLE IF NOT EXISTS work_orgs (
       org_id     TEXT PRIMARY KEY,
@@ -780,6 +834,24 @@ export interface OneTimePreKeyRow {
   created_at: number;
 }
 
+/**
+ * PQXDH signed PQ prekey (ML-KEM-768). Mirrors SignedPreKeyRow's shape so it
+ * shares the same upsert/migration pattern. The relay only verifies the
+ * Ed25519 signature (defence in depth) and stores+serves the blob verbatim —
+ * it never inspects or correlates the ML-KEM public key itself.
+ */
+export interface PqSignedPreKeyRow {
+  aegis_id: string;
+  /** Device identifier for this prekey. Defaults to 'default' for legacy single-device clients. */
+  device_id: string;
+  key_id: number;
+  /** base64 of the 1184-byte ML-KEM-768 public key. */
+  public_key_b64: string;
+  /** base64 of the 64-byte Ed25519 detached signature over the raw pubkey bytes. */
+  signature_b64: string;
+  created_at: number;
+}
+
 export interface LinkedDeviceRow {
   device_id: string;
   aegis_id: string;
@@ -1012,6 +1084,117 @@ export const messageRepo = {
   },
 };
 
+// ── senderKeyDistRepo ─────────────────────────────────────────────────────────
+// Queues sealed SenderKey distributions for offline group members. The relay
+// never reads the key material — ciphertextB64 / nonceB64 / chainKeyB64 are
+// opaque blobs forwarded verbatim, identical to how messageRepo works. The only
+// routing field the relay inspects is `recipient` (aegisId). `group_id` and
+// `sender_aegis_id` travel inside the blob on-wire from the client; they are
+// stored here only so the drain path can reconstruct the correct `group:rekey_dist`
+// wire payload without reading encrypted content.
+//
+// Zero-metadata note: storing `sender_aegis_id` here could theoretically reveal
+// a sender→recipient edge. We accept this under the same rationale as
+// `sender_pub_b64` on init messages in messageRepo (FND-05 exception): without it
+// the recipient cannot identify which group the distribution belongs to or verify
+// the sender, making the offline re-key useless. The field is purged together with
+// the row as soon as all devices drain it.
+
+export interface SenderKeyDistRow {
+  id: string;
+  recipient: string;
+  group_id: string;
+  sender_aegis_id: string;
+  ciphertext_b64: string;
+  nonce_b64: string;
+  chain_key_b64: string;
+  iteration: number;
+  created_at: number;
+  expires_at: number;
+  /** JSON-serialized string[]. Device IDs that have already drained this distribution. */
+  drained_by: string;
+}
+
+export const senderKeyDistRepo = {
+  async enqueue(row: Omit<SenderKeyDistRow, 'drained_by'>): Promise<{ ok: boolean; reason?: string }> {
+    const expiresAt = row.expires_at > 0 ? row.expires_at : row.created_at + MESSAGE_TTL_MS;
+    // Enforce per-recipient queue limit — reuses the same constant as messageRepo.
+    const countRow = await dbGet<{ n: number }>(
+      `SELECT COUNT(*) as n FROM sender_key_dist_queue WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)`,
+      [row.recipient, Date.now()]
+    );
+    if (countRow && countRow.n >= MAX_QUEUED_PER_RECIPIENT) {
+      return { ok: false, reason: 'queue_full' };
+    }
+    await dbRun(
+      `INSERT INTO sender_key_dist_queue
+         (id, recipient, group_id, sender_aegis_id, ciphertext_b64, nonce_b64, chain_key_b64, iteration, created_at, expires_at, drained_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
+      [row.id, row.recipient, row.group_id, row.sender_aegis_id,
+       row.ciphertext_b64, row.nonce_b64, row.chain_key_b64,
+       row.iteration, row.created_at, expiresAt]
+    );
+    return { ok: true };
+  },
+
+  /**
+   * Fetch distributions not yet drained by `deviceId`.
+   * When `deviceId` is undefined (legacy single-device path) all un-expired rows
+   * for the recipient are returned — matches the messageRepo behaviour.
+   */
+  async drainFor(recipient: string, deviceId?: string): Promise<SenderKeyDistRow[]> {
+    const now = Date.now();
+    const rows = await dbAll<SenderKeyDistRow>(
+      `SELECT id, recipient, group_id, sender_aegis_id, ciphertext_b64, nonce_b64, chain_key_b64, iteration,
+              created_at, expires_at, drained_by
+       FROM sender_key_dist_queue
+       WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)
+       ORDER BY created_at ASC`,
+      [recipient, now]
+    );
+    if (!deviceId) return rows;
+    return rows.filter((row) => {
+      const drained: string[] = (() => {
+        try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
+      })();
+      return !drained.includes(deviceId);
+    });
+  },
+
+  /**
+   * Mark a distribution as drained by `deviceId`. Deletes the row when all
+   * expected devices have drained it — mirrors messageRepo.delete exactly.
+   */
+  async delete(id: string, deviceId?: string): Promise<void> {
+    if (!deviceId) {
+      await dbRun(`DELETE FROM sender_key_dist_queue WHERE id = ?`, [id]);
+      return;
+    }
+    const row = await dbGet<Pick<SenderKeyDistRow, 'drained_by'>>(
+      `SELECT drained_by FROM sender_key_dist_queue WHERE id = ?`,
+      [id]
+    );
+    if (!row) return;
+    const drained: string[] = (() => {
+      try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
+    })();
+    if (!drained.includes(deviceId)) drained.push(deviceId);
+    if (drained.length >= MAX_DRAIN_DEVICES) {
+      await dbRun(`DELETE FROM sender_key_dist_queue WHERE id = ?`, [id]);
+    } else {
+      await dbRun(`UPDATE sender_key_dist_queue SET drained_by = ? WHERE id = ?`, [JSON.stringify(drained), id]);
+    }
+  },
+
+  async purgeExpired(): Promise<number> {
+    const result = await dbRun(
+      `DELETE FROM sender_key_dist_queue WHERE expires_at > 0 AND expires_at <= ?`,
+      [Date.now()]
+    );
+    return result.changes;
+  },
+};
+
 // ── pushRepo ──────────────────────────────────────────────────────────────────
 
 export const pushRepo = {
@@ -1060,6 +1243,28 @@ export const prekeysRepo = {
       );
     }
   },
+  /**
+   * PQXDH (v2): upsert the signed PQ prekey (ML-KEM-768). Mirrors upsertSigned's
+   * pattern exactly — one row per (aegis_id, device_id), overwritten on rotation.
+   * Optional table: absent rows simply mean the device hasn't published one yet
+   * (v1-only client), which getBundle/getBundles tolerate by returning `null`.
+   */
+  async upsertPqSigned(row: PqSignedPreKeyRow): Promise<void> {
+    const deviceId = row.device_id || 'default';
+    if (USE_PG) {
+      await dbRun(
+        `INSERT INTO prekeys_pq_signed (aegis_id, device_id, key_id, public_key_b64, signature_b64, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(aegis_id, device_id) DO UPDATE SET key_id = EXCLUDED.key_id, public_key_b64 = EXCLUDED.public_key_b64, signature_b64 = EXCLUDED.signature_b64, created_at = EXCLUDED.created_at`,
+        [row.aegis_id, deviceId, row.key_id, row.public_key_b64, row.signature_b64, row.created_at]
+      );
+    } else {
+      await dbRun(
+        `INSERT INTO prekeys_pq_signed (aegis_id, device_id, key_id, public_key_b64, signature_b64, created_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(aegis_id, device_id) DO UPDATE SET key_id = excluded.key_id, public_key_b64 = excluded.public_key_b64, signature_b64 = excluded.signature_b64, created_at = excluded.created_at`,
+        [row.aegis_id, deviceId, row.key_id, row.public_key_b64, row.signature_b64, row.created_at]
+      );
+    }
+  },
   async insertOneTime(row: OneTimePreKeyRow): Promise<void> {
     if (USE_PG) {
       await dbRun(
@@ -1085,6 +1290,7 @@ export const prekeysRepo = {
     signingPublicKeyB64: string;
     signedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string };
     oneTimePreKey: { keyId: number; publicKeyB64: string } | null;
+    pqSignedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string } | null;
   } | null> {
     const bundles = await this.getBundles(aegisId);
     return bundles.length > 0 ? bundles[0] : null;
@@ -1102,6 +1308,7 @@ export const prekeysRepo = {
     signingPublicKeyB64: string;
     signedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string };
     oneTimePreKey: { keyId: number; publicKeyB64: string } | null;
+    pqSignedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string } | null;
   }>> {
     const spkRows = await dbAll<{ device_id: string; key_id: number; public_key_b64: string; signature_b64: string }>(
       `SELECT device_id, key_id, public_key_b64, signature_b64 FROM prekeys_signed WHERE aegis_id = ?`,
@@ -1116,11 +1323,24 @@ export const prekeysRepo = {
     const signingPublicKeyB64 = identity?.signing_public_key_b64 ?? '';
     if (signingPublicKeyB64 === '') return [];
 
+    // PQXDH (v2): fetch per-device PQ signed prekeys in one query, keyed by
+    // device_id, so the per-device loop below can attach them (or `null` for
+    // v1-only devices) without an extra query per device.
+    const pqRows = await dbAll<{ device_id: string; key_id: number; public_key_b64: string; signature_b64: string }>(
+      `SELECT device_id, key_id, public_key_b64, signature_b64 FROM prekeys_pq_signed WHERE aegis_id = ?`,
+      [aegisId]
+    );
+    const pqByDevice = new Map<string, { keyId: number; publicKeyB64: string; signatureB64: string }>();
+    for (const pq of pqRows) {
+      pqByDevice.set(pq.device_id, { keyId: pq.key_id, publicKeyB64: pq.public_key_b64, signatureB64: pq.signature_b64 });
+    }
+
     const result: Array<{
       device_id: string;
       signingPublicKeyB64: string;
       signedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string };
       oneTimePreKey: { keyId: number; publicKeyB64: string } | null;
+      pqSignedPreKey: { keyId: number; publicKeyB64: string; signatureB64: string } | null;
     }> = [];
 
     for (const spk of spkRows) {
@@ -1141,6 +1361,7 @@ export const prekeysRepo = {
 
       result.push({
         device_id: spk.device_id,
+        pqSignedPreKey: pqByDevice.get(spk.device_id) ?? null,
         signingPublicKeyB64,
         signedPreKey: {
           keyId: spk.key_id,

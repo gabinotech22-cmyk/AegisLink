@@ -47,7 +47,15 @@
     "generateError": "Could not generate identity",
     "registrationFailed": "Registration failed. Check your connection and retry.",
     "networkError": "Network error. Please retry.",
-    "langToggle": "EN | IT"
+    "langToggle": "EN | IT",
+    "continueBtn": "Continue",
+    "almostDone": "ALMOST DONE",
+    "nicknameTitle": "What should we call you?",
+    "nicknameSubtitle": "Your avatar is generated from your key. You can tint it, or upload a photo later in your profile. The name your contacts will see is end-to-end encrypted: the server never sees it. Everything here is optional; you stay anonymous (no phone number, no email).",
+    "nicknameLabel": "VISIBLE NAME (OPTIONAL)",
+    "nicknameDefault": "Default: {{name}}",
+    "colorSwatchLabel": "Avatar color {{color}}",
+    "skipNickname": "Skip for now"
   },
   "home": {
     "identityCreated": "Identity created",
@@ -73,7 +81,10 @@
     "deleteMessagesConfirm": "Delete all messages with {{name}}? The contact remains.",
     "deleteContact": "Delete contact",
     "deleteContactConfirm": "Delete {{name}} and all their messages? This action cannot be undone.",
-    "archiveAction": "ARCHIVE"
+    "archiveAction": "ARCHIVE",
+    "registering": "REGISTERING IDENTITY…",
+    "registrationFailed": "IDENTITY REGISTRATION FAILED",
+    "retry": "RETRY"
   },
   "chat": {
     "encryptedToday": "END-TO-END ENCRYPTED · TODAY",
@@ -229,6 +240,9 @@
     "typingIndicatorSub": "Let others see when you're typing",
     "blockScreenshots": "Block screenshots",
     "blockScreenshotsSub": "App contents hidden in screen recording",
+    "groupsSection": "GROUPS",
+    "requireGroupApproval": "Approve before adding me to groups",
+    "requireGroupApprovalSub": "Get an invitation to accept instead of joining directly",
     "networkSection": "NETWORK",
     "routeViaTor": "Route via Tor",
     "routeViaTorSub": "Hide your IP from AegisLink relays",
@@ -322,6 +336,8 @@
     "areYouSure": "Are you sure?",
     "cannotUndo": "This action cannot be undone.",
     "wipeAllCaps": "WIPE EVERYTHING",
+    "wipeFailed": "Wipe failed",
+    "wipeFailedDesc": "The secure wipe could not complete. Please try again.",
     "duressPinModalTitle": "Duress Coercion PIN",
     "duressPinModalDesc": "Enter a 4 to 6 digit PIN. When this decoy PIN is entered on the lock screen, AegisLink will start simulating a completely clean account with no history.",
     "duressPinPlaceholder": "E.g. 123456",
@@ -398,6 +414,11 @@
     "joinByLinkModalDesc": "Paste the invite link that was shared with you.",
     "joinByLinkPlaceholder": "aegislink://group/v1/…",
     "joinByLinkBtn": "Continue",
+    "invitesSection": "Invitations",
+    "inviteSubtitle": "You were invited to this group · tap to respond",
+    "inviteBadge": "Invite",
+    "acceptInvite": "Accept invitation",
+    "declineInvite": "Decline",
     "joinByLinkInvalidTitle": "Invalid link",
     "joinByLinkInvalidDesc": "The link format is not valid. Make sure you copied the full link.",
     "workBanner": "SHOWING TEAM CHANNELS · WORK MODE",
@@ -936,7 +957,9 @@
   "scanQR": {
     "title": "Scan QR",
     "instruction": "Point camera at an Aegis QR code",
-    "permissionDenied": "Camera permission denied"
+    "permissionDenied": "Camera permission denied",
+    "groupInviteWrongContextTitle": "Group invitation",
+    "groupInviteWrongContextDesc": "This is a group invitation, not an identity code. Open it from your chats or groups list to join."
   },
   "verify": {
     "title": "Verify",
@@ -945,9 +968,20 @@
     "orWords": "OR — 8 SAFETY WORDS",
     "keyFingerprint": "KEY FINGERPRINT (HEX)",
     "scanPeer": "Scan a peer's QR",
+    "scanQR": "SCAN QR",
+    "shareContact": "SHARE ID",
+    "shareTitle": "My AegisLink contact",
+    "shareMessage": "Add me on AegisLink:",
+    "shareId": "Or use my ID:",
+    "shareContactLabel": "Share my contact",
     "match": "Keys match",
     "noMatch": "Keys do not match",
-    "markVerified": "Mark as verified"
+    "markVerified": "Mark as verified",
+    "compareDesc": "Compare key fingerprints in person, by QR scan, or by reading 8 words.",
+    "keyUnavailable": "Contact key not available yet.",
+    "alreadyVerified": "IDENTITY ALREADY VERIFIED",
+    "markedTitle": "Verified",
+    "markedDesc": "{{name}} is verified. Your messages are protected against man-in-the-middle attacks."
   },
   "firstContact": {
     "title": "First contact",
@@ -1035,6 +1069,12 @@
     "adminOnlyInviteSub": "Close the group to outside invitations",
     "moderateNewMembersLabel": "Approve messages from new members",
     "moderateNewMembersSub": "48h moderation window after joining",
+    "permCallLabel": "Admin-only calls",
+    "permCallSub": "Stop anyone from ringing the whole group",
+    "permSendLabel": "Admin-only messages",
+    "permSendSub": "Turn the group into announcements mode",
+    "permEditLabel": "Admin-only info edits",
+    "permEditSub": "Group name and image",
     "dangerZone": "DANGER ZONE",
     "e2eeGroupBadge": "E2EE GROUP · {{count}} MEMBERS",
     "youLabel": "You",
@@ -1048,12 +1088,20 @@
     "leaveAndDelete": "Leave and delete",
     "removeMemberTitle": "Remove {{name}}",
     "removeMemberDesc": "Do you want to remove this member from the group?",
+    "roleOwner": "OWNER",
     "roleAdmin": "ADMIN",
     "roleMod": "MOD",
     "roleMember": "MEMBER",
+    "manageMember": "Manage member",
+    "makeAdmin": "Make admin",
+    "makeModerator": "Make moderator",
+    "makeMember": "Remove role",
+    "removeFromGroup": "Remove from group",
     "inviteLinkSection": "INVITE LINK",
     "shareInviteLink": "Share invite link",
-    "shareInviteLinkSub": "Anyone with the link can request to join"
+    "shareInviteLinkSub": "Anyone with the link can request to join",
+    "inviteQrLabel": "Group invite QR code",
+    "inviteQrSub": "Scan this code to request to join the group"
   },
   "groupJoin": {
     "title": "Join group",

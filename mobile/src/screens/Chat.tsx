@@ -1,20 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Alert,
-  Linking,
-  Image,
-  ActivityIndicator,
-  Modal,
-} from 'react-native';
+import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Linking, Image, ActivityIndicator, Modal } from 'react-native';
 import { FormattedText } from '../components/FormattedText';
 import { MediaEditorModal } from '../components/MediaEditorModal';
 import { VoiceRecorderScreen } from './VoiceRecorder';
@@ -24,10 +10,11 @@ import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 import { MediaImage } from '../components/MediaImage';
+import { AttachmentGrid } from '../components/AttachmentGrid';
 import { loadWallpaper, wallpaperBg, type WallpaperOption } from '../components/WallpaperPicker';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
 import { decodeBase64 } from 'tweetnacl-util';
@@ -54,6 +41,7 @@ import { WEBRTC_AVAILABLE } from '../runtime';
 import { SoundFX } from '../hooks/useSoundFX';
 import type { StoredContact, StoredMessage } from '../db/local';
 import { parseLocationMessage } from '../utils/parseLocationMessage';
+import { themedAlert } from '../components/AlertHost';
 
 const EMPTY_MSGS: StoredMessage[] = [];
 
@@ -80,9 +68,11 @@ interface Props {
   onAttach: () => void;
   onEphemeral: () => void;
   onViewOnce?: (mediaUri: string, messageId: string) => void;
+  /** Navigate to the Verify screen for this contact. */
+  onVerify?: () => void;
 }
 
-export function ChatScreen({ contact: initialContact, onBack, onContactDetail, onAttach, onEphemeral, onViewOnce }: Props) {
+export function ChatScreen({ contact: initialContact, onBack, onContactDetail, onAttach, onEphemeral, onViewOnce, onVerify }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -133,7 +123,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const [searchIdx, setSearchIdx] = useState(0);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ images: string[]; index: number } | null>(null);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [replyTo, setReplyTo] = useState<StoredMessage | null>(null);
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
@@ -303,15 +293,15 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
   async function handleCall(media: 'audio' | 'video') {
     if (contact.blocked) {
-      Alert.alert(i18nT('chat.callBlocked'), i18nT('chat.callBlockedDesc'));
+      themedAlert(i18nT('chat.callBlocked'), i18nT('chat.callBlockedDesc'));
       return;
     }
     if (contact.zeroTrust && mismatchKey) {
-      Alert.alert(i18nT('chat.callZeroTrustBlock'), i18nT('chat.callZeroTrustBlockDesc'));
+      themedAlert(i18nT('chat.callZeroTrustBlock'), i18nT('chat.callZeroTrustBlockDesc'));
       return;
     }
     if (!WEBRTC_AVAILABLE) {
-      Alert.alert(
+      themedAlert(
         i18nT('chat.callSimulator'),
         i18nT('chat.callSimulatorDesc'),
         [
@@ -345,7 +335,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     try {
       await startCall(contact.aegisId, media);
     } catch (e) {
-      Alert.alert(i18nT('chat.callError'), (e as Error).message);
+      themedAlert(i18nT('chat.callError'), (e as Error).message);
     }
   }
 
@@ -385,7 +375,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       });
       void SoundFX.msgSent();
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -416,7 +406,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       });
       void SoundFX.msgSent();
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -441,7 +431,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       });
       void SoundFX.msgSent();
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -470,7 +460,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       });
       void SoundFX.msgSent();
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -534,7 +524,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       void SoundFX.msgSent();
     } catch (e) {
       setDraft(text);
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -558,7 +548,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
   function handleDelete() {
     if (!actionsMsg) return;
-    Alert.alert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
+    themedAlert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
       { text: i18nT('common.cancel'), style: 'cancel' },
       {
         text: i18nT('common.delete'),
@@ -571,7 +561,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   function handleDeleteForAll() {
     if (!actionsMsg) return;
     const id = actionsMsg.id;
-    Alert.alert(
+    themedAlert(
       i18nT('chat.deleteForAll'),
       i18nT('chat.deleteForAllDesc'),
       [
@@ -608,48 +598,51 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     setGifPickerVisible(false);
     if (!identity) return;
 
-    // Privacy fix: never send the raw Giphy URL.
+    // Privacy fix: never send the raw Giphy/Klipy URL.
     // Download the GIF locally, encrypt it like any other image attachment,
-    // and send [image:...] so the receiver never contacts Giphy servers.
+    // and send [image:...] so the receiver never contacts the GIF servers.
     const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
     const cacheDir = FS.cacheDirectory ?? '';
     const gifId = url.split('/').pop()?.split('?')[0] ?? Crypto.randomUUID();
-    const tmpPath = `${cacheDir}gif_tmp_${gifId}.gif`;
+    // Persistent local copy (NOT a temp we delete) so the SENDER's own bubble
+    // can render the GIF locally — same pattern as sendEditedImage. Without
+    // this the sender saw the raw "[image:blob:…]" text (Bug fix).
+    const localPath = `${cacheDir}gif_${gifId}.gif`;
 
-    let blobUri: string;
     try {
       // Enforce a 10 MB size guard by checking after download
-      const downloadResult = await FS.downloadAsync(url, tmpPath);
+      const downloadResult = await FS.downloadAsync(url, localPath);
       if (!downloadResult.uri) throw new Error('GIF download failed');
 
       const info = await FS.getInfoAsync(downloadResult.uri);
       const fileSize = (info as { size?: number }).size ?? 0;
       if (fileSize > 10 * 1024 * 1024) {
-        await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
-        Alert.alert(i18nT('chat.sendError'), 'GIF demasiado grande (máx. 10 MB)');
+        await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+        themedAlert(i18nT('chat.sendError'), 'GIF demasiado grande (máx. 10 MB)');
         return;
       }
 
+      // Optimistic local echo: render the GIF on the sender's side immediately.
+      const id = Crypto.randomUUID();
+      await appendMsg({
+        id, chatId: contact.aegisId, direction: 'out', body: '',
+        createdAt: Date.now(), type: 'image', mediaUri: localPath,
+      });
+
       const { encryptAndUploadMedia } = require('../crypto/media');
-      blobUri = await encryptAndUploadMedia(tmpPath, 'image/gif');
-    } catch (e) {
-      await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
-      return;
-    }
+      const blobUri = await encryptAndUploadMedia(localPath, 'image/gif');
+      await setMediaUri(contact.aegisId, id, blobUri);
 
-    // Clean up the temporary file regardless of send outcome
-    await FS.deleteAsync(tmpPath, { idempotent: true }).catch(() => {});
-
-    try {
       await sendMessage({
         identity,
         recipientAegisId: contact.aegisId,
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
         plaintext: `[image:${blobUri}]`,
+        skipLocalAppend: true,
       });
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -705,7 +698,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 onPress={onContactDetail}
                 style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
               >
-                <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={36} />
+                <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.surface2} size={36} seed={contact.publicKeyB64 || contact.aegisId} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text
                     numberOfLines={1}
@@ -900,7 +893,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               {!contact.zeroTrust && (
                 <Pressable
                   onPress={() =>
-                    Alert.alert(
+                    themedAlert(
                       i18nT('chat.trustAnyway'),
                       i18nT('chat.trustAnywayConfirm'),
                       [
@@ -961,7 +954,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             </Text>
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
               <Pressable
-                onPress={onContactDetail}
+                onPress={onVerify ?? onContactDetail}
                 style={{
                   backgroundColor: t.accent,
                   paddingHorizontal: 14,
@@ -1066,7 +1059,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             <SwipeableMessage
               disabled={item.deleted}
               onDelete={() => {
-                Alert.alert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
+                themedAlert(i18nT('chat.deleteMessage'), i18nT('chat.deleteMessageDesc'), [
                   { text: i18nT('common.cancel'), style: 'cancel' },
                   {
                     text: i18nT('common.delete'),
@@ -1084,7 +1077,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 quotedMsg={item.replyToId ? msgById[item.replyToId] : undefined}
                 onLongPress={() => handleLongPress(item)}
                 onViewOnce={onViewOnce}
-                onImagePress={setViewerUri}
+                onImagePress={(images, index) => setViewer({ images, index })}
               />
             </SwipeableMessage>
             </View>
@@ -1142,30 +1135,6 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             </Text>
           </Pressable>
         ) : null}
-
-        {/* Unverified contact warning banner — full-width, ABOVE the composer
-            row. Must NOT live inside the composer (flexDirection:'row') or its
-            width:100% pushes the input controls off-screen. Non-blocking:
-            sending is always allowed. */}
-        {!contact.blocked && !contact.verified && (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              backgroundColor: `${t.warn}18`,
-              borderTopWidth: 1,
-              borderTopColor: `${t.warn}44`,
-            }}
-          >
-            <I.Lock size={13} color={t.warn} />
-            <Text style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.warn, lineHeight: 17 }}>
-              {i18nT('chat.unverifiedContact', 'Contacto no verificado. Verifica su identidad para maxima seguridad.')}
-            </Text>
-          </View>
-        )}
 
         {/* Composer */}
         <View
@@ -1387,7 +1356,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         onSelectGif={handleGifSelect}
         onSelectSticker={handleStickerSelect}
       />
-      <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
+      <ImageViewerModal images={viewer?.images ?? null} initialIndex={viewer?.index ?? 0} onClose={() => setViewer(null)} t={t} />
 
       {/* Inline voice note recorder — normal (non-ephemeral) audio */}
       <Modal
@@ -1436,7 +1405,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             setDraft('');
             void saveDraft(contact.aegisId, '');
           } catch (e) {
-            Alert.alert('Error al programar', (e as Error).message);
+            themedAlert('Error al programar', (e as Error).message);
           }
         }}
       />
@@ -1598,7 +1567,7 @@ function JoinRequestBubble({ t, m, me, time }: { t: Theme; m: StoredMessage; me:
       const client = require('../socket/client') as typeof import('../socket/client');
       await client.broadcastGroupMetadata(identity, group.id);
     } catch {
-      Alert.alert(
+      themedAlert(
         i18nT('chat.joinRequestErrorTitle', 'Could not add member'),
         i18nT('chat.joinRequestErrorDesc', 'Check your connection and try again.'),
       );
@@ -1728,7 +1697,7 @@ interface BubbleProps {
   quotedMsg?: StoredMessage;
   onLongPress: () => void;
   onViewOnce?: (mediaUri: string, messageId: string) => void;
-  onImagePress?: (uri: string) => void;
+  onImagePress?: (images: string[], index: number) => void;
 }
 
 function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress }: BubbleProps) {
@@ -1797,22 +1766,55 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
         >
           <View
             style={{
-              height: 100,
-              backgroundColor: t.surface2,
+              height: 110,
               alignItems: 'center',
               justifyContent: 'center',
               position: 'relative',
               overflow: 'hidden',
             }}
           >
-            <Svg viewBox="0 0 250 100" width="100%" height="100%" style={{ position: 'absolute' }}>
-              <Path d="M0 30 L250 50" stroke={t.borderStrong} strokeWidth={4} fill="none" opacity={0.4} />
-              <Path d="M0 70 L250 80" stroke={t.borderStrong} strokeWidth={5} fill="none" opacity={0.4} />
-              <Path d="M100 0 Q120 50 110 100" stroke={t.borderStrong} strokeWidth={6} fill="none" opacity={0.4} />
-              <Path d="M180 0 L170 100" stroke={t.borderStrong} strokeWidth={3} fill="none" opacity={0.3} />
+            {/* Map mock mirrors ScreenLocation (screens-phase2.jsx): gradient
+                base, 32px grid, faint roads and the accent pin with the Shield
+                mark — kept faithful to the original prototype. */}
+            <Svg viewBox="0 0 250 110" width="100%" height="100%" style={{ position: 'absolute' }}>
+              <Defs>
+                <LinearGradient id="locMapBg" x1="0" y1="0" x2="1" y2="1">
+                  {(t.dark ? ['#1a2326', '#243033'] : ['#e8e5dc', '#d8d4c6']).map((c, i) => (
+                    <Stop key={i} offset={i} stopColor={c} />
+                  ))}
+                </LinearGradient>
+              </Defs>
+              <Rect x="0" y="0" width="250" height="110" fill="url(#locMapBg)" />
+              {[28, 56, 84, 112, 140, 168, 196, 224].map((x) => (
+                <Path key={`v${x}`} d={`M${x} 0 L${x} 110`} stroke={t.borderStrong} strokeWidth={1} opacity={0.25} />
+              ))}
+              {[28, 56, 84].map((y) => (
+                <Path key={`h${y}`} d={`M0 ${y} L250 ${y}`} stroke={t.borderStrong} strokeWidth={1} opacity={0.25} />
+              ))}
+              <Path d="M0 44 Q125 33 250 55" stroke={t.borderStrong} strokeWidth={4} fill="none" opacity={0.5} />
+              <Path d="M107 0 L143 110" stroke={t.borderStrong} strokeWidth={4} fill="none" opacity={0.5} />
+              <Path d="M0 83 L250 77" stroke={t.borderStrong} strokeWidth={2} fill="none" opacity={0.4} />
             </Svg>
-            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: `${t.accent}25`, alignItems: 'center', justifyContent: 'center' }}>
-              <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: t.accent, borderWidth: 2.5, borderColor: '#fff' }} />
+            {/* accent halo behind the pin (the prototype's pulse, static here) */}
+            <View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: `${t.accent}22` }} />
+            <View
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                backgroundColor: t.accent,
+                borderWidth: 3,
+                borderColor: t.bg,
+                alignItems: 'center',
+                justifyContent: 'center',
+                shadowColor: t.accent,
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: 0.4,
+                shadowRadius: 6,
+                elevation: 3,
+              }}
+            >
+              <I.Shield size={16} color={t.accentInk} />
             </View>
           </View>
           <View style={{ padding: 10, backgroundColor: t.surface }}>
@@ -1829,6 +1831,32 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
               </Text>
             </View>
           </View>
+        </Pressable>
+        <ReactionPills t={t} reactions={reactions} me={me} />
+        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+      </View>
+    );
+  }
+
+  // Multi-attachment bubble
+  if (m.attachments && m.attachments.length > 0) {
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start', opacity: queued ? 0.55 : 1 }}>
+        <Pressable onLongPress={onLongPress} accessibilityLabel="Attachment message">
+          <AttachmentGrid
+            attachments={m.attachments}
+            isMe={me}
+            caption={m.body || undefined}
+            onImagePress={(uri, index) => {
+              const imageUris = (m.attachments ?? [])
+                .filter((a) => a.type === 'image' || a.type === 'video')
+                .map((a) => a.uri);
+              onImagePress?.(imageUris, index);
+            }}
+            onFilePress={(att) => {
+              if (att.uri) void Linking.openURL(att.uri).catch(() => {});
+            }}
+          />
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
@@ -1955,7 +1983,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
     return (
       <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
         <Pressable
-          onPress={() => onImagePress?.(m.mediaUri!)}
+          onPress={() => onImagePress?.([m.mediaUri!], 0)}
           onLongPress={onLongPress}
           style={({ pressed }) => ({
             width: 220,
@@ -1977,6 +2005,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
               <FormattedText
                 body={m.body}
                 t={t}
+                onAccent={me}
                 style={{
                   color: textColor,
                   fontFamily: t.font,
@@ -2103,12 +2132,12 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
               onPress={async () => {
                 try {
                   await useContacts.getState().addByAegisId(cardAegisId);
-                  Alert.alert(i18nT('chat.contactAdded', 'Contacto añadido'), cardName);
+                  themedAlert(i18nT('chat.contactAdded', 'Contacto añadido'), cardName);
                 } catch {
                   // Fallback: copy ID to clipboard
                   const Clipboard = require('expo-clipboard');
                   await Clipboard.setStringAsync(cardAegisId).catch(() => {});
-                  Alert.alert(i18nT('chat.contactAddFailed', 'No se pudo añadir'), i18nT('chat.idCopied', 'ID copiado al portapapeles'));
+                  themedAlert(i18nT('chat.contactAddFailed', 'No se pudo añadir'), i18nT('chat.idCopied', 'ID copiado al portapapeles'));
                 }
               }}
               style={({ pressed }) => ({
@@ -2236,6 +2265,7 @@ function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onImagePress
         <FormattedText
           body={m.body}
           t={t}
+          onAccent={me}
           style={{ color: me ? t.bubbleOutText : t.bubbleInText, fontFamily: t.font, fontSize: 15, lineHeight: 20 }}
         />
         {/* Open Graph link preview card */}

@@ -281,6 +281,10 @@ const calleeC = makeAgentKeys(231);
 const callerD = makeAgentKeys(240);
 const calleeD = makeAgentKeys(241);
 
+// (e) group: seeds 250 / 251 — group_call:channel fanout
+const initiatorE = makeAgentKeys(250);
+const memberE = makeAgentKeys(251);
+
 beforeAll(async () => {
   // Direct DB insertion — bypasses HTTP rate limiting.
   await Promise.all([
@@ -288,6 +292,7 @@ beforeAll(async () => {
     registerAgent(callerB), registerAgent(calleeB),
     registerAgent(callerC), registerAgent(calleeC),
     registerAgent(callerD), registerAgent(calleeD),
+    registerAgent(initiatorE), registerAgent(memberE),
   ]);
 }, 30_000);
 
@@ -489,4 +494,53 @@ describe('(d) call:ice buffer cap', () => {
       cs.disconnect();
     }
   }, 20_000);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// (e) group_call:channel — heartbeat fans out to ONLINE members (banner aware)
+// ═════════════════════════════════════════════════════════════════════════════
+
+function makeChannelPayload(to: string[], callId: string): Record<string, unknown> {
+  return {
+    to,
+    callId,
+    groupId: 'grp-treasury',
+    groupName: 'DAO · Treasury',
+    participants: [to[0]],
+    media: 'audio',
+  };
+}
+
+describe('(e) group_call:channel fanout to online members', () => {
+  let initiatorSocket: ClientSocket;
+
+  beforeEach(async () => {
+    initiatorSocket = await connectAgent(initiatorE);
+  });
+
+  afterEach(() => {
+    initiatorSocket?.disconnect();
+  });
+
+  it('online member receives the channel heartbeat with from injected', async () => {
+    // A real UUID — the schema requires z.string().uuid().
+    const callId = '11111111-2222-4333-8444-555555555555';
+    const memberSocket = await connectAgent(memberE);
+    try {
+      const channels = await collectWithin<Record<string, unknown>>(
+        memberSocket,
+        'group_call:channel',
+        () => initiatorSocket.emit('group_call:channel', makeChannelPayload([memberE.aegisId], callId)),
+        500,
+      );
+      const found = channels.find((c) => c['callId'] === callId);
+      expect(found).toBeDefined();
+      expect(found!['from']).toBe(initiatorE.aegisId);
+      expect(found!['groupId']).toBe('grp-treasury');
+      // The relay strips `to` before forwarding.
+      expect(found!['to']).toBeUndefined();
+    } finally {
+      memberSocket.disconnect();
+    }
+  }, 12_000);
 });

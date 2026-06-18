@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, Animated, Easing } from 'react-native';
+import { View, Text, Pressable, ScrollView, ActivityIndicator, Modal, Animated, Easing } from 'react-native';
 import { WallpaperPicker, loadWallpaper, type WallpaperOption } from '../components/WallpaperPicker';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,6 +14,7 @@ import { fingerprintHex } from '../crypto/fingerprint';
 import { useContacts } from '../store/contacts';
 import { usePreferences } from '../store/preferences';
 import type { StoredContact } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   contact: StoredContact;
@@ -109,7 +110,7 @@ export function ContactDetailScreen({
       void muteContact(contact.aegisId, false);
       return;
     }
-    Alert.alert(i18nT('contactDetail.muteTitle'), i18nT('contactDetail.muteTimeQuestion'), [
+    themedAlert(i18nT('contactDetail.muteTitle'), i18nT('contactDetail.muteTimeQuestion'), [
       { text: i18nT('contactDetail.mute1h'), onPress: () => void muteContact(contact.aegisId, true, Date.now() + 3_600_000) },
       { text: i18nT('contactDetail.mute8h'), onPress: () => void muteContact(contact.aegisId, true, Date.now() + 28_800_000) },
       { text: i18nT('contactDetail.muteAlways'), onPress: () => void muteContact(contact.aegisId, true, 0) },
@@ -119,12 +120,12 @@ export function ContactDetailScreen({
 
   function handleBlock() {
     if (blocked) {
-      Alert.alert(i18nT('contactDetail.unblock'), i18nT('contactDetail.blockConfirm', { name: contact.name }), [
+      themedAlert(i18nT('contactDetail.unblock'), i18nT('contactDetail.blockConfirm', { name: contact.name }), [
         { text: i18nT('common.cancel'), style: 'cancel' },
         { text: i18nT('contactDetail.unblock'), onPress: () => void setBlocked(contact.aegisId, false) },
       ]);
     } else {
-      Alert.alert(i18nT('contactDetail.block'), i18nT('contactDetail.blockDesc'), [
+      themedAlert(i18nT('contactDetail.block'), i18nT('contactDetail.blockDesc'), [
         { text: i18nT('common.cancel'), style: 'cancel' },
         { text: i18nT('contactDetail.block'), style: 'destructive', onPress: () => void setBlocked(contact.aegisId, true) },
       ]);
@@ -134,7 +135,7 @@ export function ContactDetailScreen({
   async function handleZeroTrust(enabled: boolean) {
     await setZeroTrust(contact.aegisId, enabled);
     if (enabled) {
-      Alert.alert(
+      themedAlert(
         i18nT('contactDetail.zeroTrustActivated'),
         i18nT('contactDetail.zeroTrustActivatedDesc')
       );
@@ -146,7 +147,7 @@ export function ContactDetailScreen({
   }
 
   async function handleVaciarYBloquear() {
-    Alert.alert(
+    themedAlert(
       i18nT('contactDetail.clearBlockTitle'),
       i18nT('contactDetail.clearBlockDesc', { name: contact.name }),
       [
@@ -161,7 +162,7 @@ export function ContactDetailScreen({
               onBack();
             } catch (e) {
               setRemoving(false);
-              Alert.alert(i18nT('common.error'), (e as Error).message);
+              themedAlert(i18nT('common.error'), (e as Error).message);
             }
           },
         },
@@ -189,7 +190,7 @@ export function ContactDetailScreen({
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: 22 }}>
           <View style={{ alignItems: 'center', paddingHorizontal: 22, paddingVertical: 14 }}>
-            <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.accent} size={88} />
+            <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.accent} size={88} seed={contact.publicKeyB64 || contact.aegisId} />
             <Text
               style={{
                 fontFamily: /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(contact.name) ? t.fontMono : t.fontDisplay,
@@ -285,7 +286,7 @@ export function ContactDetailScreen({
                   </Pressable>
                   <Pressable
                     onPress={() =>
-                      Alert.alert(
+                      themedAlert(
                         i18nT('contactDetail.trustAnywayTitle'),
                         i18nT('contactDetail.trustAnywayDesc'),
                         [
@@ -360,37 +361,14 @@ export function ContactDetailScreen({
                   </Text>
                 </Pressable>
               </View>
-              {!contact.verified && !keyChanged ? (
+              {/* Single verification entry: "VERIFY IDENTITY" above navigates to
+                  the dedicated Verify screen (QR / 8 safety words / Mark verified).
+                  The previous inline "words match" shortcut was a duplicate entry
+                  and has been removed. Verified contacts can still revoke here. */}
+              {contact.verified ? (
                 <Pressable
                   onPress={() =>
-                    Alert.alert(
-                      i18nT('contactDetail.markVerifiedTitle'),
-                      i18nT('contactDetail.markVerifiedDesc'),
-                      [
-                        { text: i18nT('common.cancel'), style: 'cancel' },
-                        {
-                          text: i18nT('contactDetail.wordsMatch'),
-                          onPress: () => void markVerified(contact.aegisId, true),
-                        },
-                      ]
-                    )
-                  }
-                  style={{
-                    marginTop: 10,
-                    backgroundColor: t.accent,
-                    paddingVertical: 10,
-                    borderRadius: t.radiusS,
-                    alignItems: 'center',
-                  }}
-                >
-                  <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: '#000', letterSpacing: 0.3 }}>
-                    {i18nT('contactDetail.verifiedCheck')}
-                  </Text>
-                </Pressable>
-              ) : contact.verified ? (
-                <Pressable
-                  onPress={() =>
-                    Alert.alert(
+                    themedAlert(
                       i18nT('contactDetail.revokeVerifiedTitle'),
                       i18nT('contactDetail.revokeVerifiedDesc'),
                       [

@@ -1,20 +1,12 @@
 import { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  FlatList,
-  Modal,
-  TextInput,
-  Alert,
-  ScrollView,
-} from 'react-native';
+import { View, Text, Pressable, FlatList, Modal, TextInput, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
 import { useDistribution, type DistributionList } from '../store/distribution';
 import { useContacts } from '../store/contacts';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -44,11 +36,11 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
   async function handleCreate() {
     const name = newName.trim();
     if (!name) {
-      Alert.alert('Name required', 'Please enter a name for this list.');
+      themedAlert('Name required', 'Please enter a name for this list.');
       return;
     }
     if (selectedMembers.length === 0) {
-      Alert.alert('No members', 'Select at least one contact.');
+      themedAlert('No members', 'Select at least one contact.');
       return;
     }
     await create(name, selectedMembers);
@@ -58,7 +50,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
   }
 
   function handleDelete(list: DistributionList) {
-    Alert.alert(
+    themedAlert(
       `Delete "${list.name}"?`,
       'This will permanently remove this distribution list.',
       [

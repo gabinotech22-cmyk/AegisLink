@@ -3,7 +3,6 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { Alert } from 'react-native';
 import { SERVER_URL, ONION_URL } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope } from '../crypto/messaging';
@@ -12,8 +11,10 @@ import { deriveAegisId } from '../crypto/identity';
 import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
-import { performX3DH, performX3DHReceiver, generatePreKeys, type PreKeyBundle } from '../crypto/signal/x3dh';
+import { useSecurityDiagnostics } from '../store/securityDiagnostics';
+import { performX3DH, performX3DHReceiver, generatePreKeys, shouldUsePqReceiver, type PreKeyBundle, type PqSignedPreKeyPublic } from '../crypto/signal/x3dh';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
+import { themedAlert } from '../components/AlertHost';
 import {
   loadRatchetSession,
   saveRatchetSession,
@@ -31,8 +32,21 @@ import {
   deleteOpkSecret,
   setSpkKeyId,
   getSpkKeyId,
+  savePqSpkSecret,
+  loadPqSpkSecret,
+  setPqSpkKeyId,
+  getPqSpkKeyId,
   type OutboxJob,
 } from '../db/local';
+import { decideV2GroupMetadata, decideGovernanceUpdate } from './groupMetadataDecision';
+import {
+  computeRosterHash,
+  signGroupMetadata,
+  verifyGroupMetadata,
+  signGroupMetadataV2,
+  verifyGroupMetadataV2,
+  type GroupPermissions,
+} from '../crypto/groupSig';
 
 /**
  * Ratchet/X3DH recovery diagnostics — DEV BUILDS ONLY. These trace who talks
@@ -109,6 +123,10 @@ interface WireChallenge {
 let socket: Socket | null = null;
 let connected = false;
 let authenticated = false;
+// Registered exactly once (see armForegroundReconnect): forces a reconnect when
+// the app returns to the foreground, since Android routinely kills the
+// WebSocket while the app is suspended in the background.
+let foregroundReconnectArmed = false;
 let opkSecretsCache: Map<number, Uint8Array> = new Map();
 let mySpkSecretCache: Uint8Array | null = null;
 
@@ -150,54 +168,10 @@ export function forgetGroupAvatarSent(groupId: string): void {
 // survive app close and crashes. Drained in FIFO order by flushOutbox() on
 // auth:ok and reconnect. See db/local.ts for the outbox table schema.
 
-/**
- * Canonical byte representation of group metadata for signing/verification.
- * Members are sorted lexicographically so the same set always serializes
- * identically regardless of insertion order. Any change to this format MUST
- * be versioned — old signatures will no longer verify.
- */
-function canonicalGroupBytes(args: {
-  groupId: string;
-  groupName: string;
-  members: string[];
-  createdAt: number;
-}): Uint8Array {
-  const sorted = [...args.members].sort();
-  // Explicit key order via array literal — JSON.stringify on object literals
-  // would still depend on engine insertion order; we hand-roll the JSON.
-  const canonical = JSON.stringify([
-    'aegis.group.v1',
-    args.groupId,
-    args.groupName,
-    sorted,
-    args.createdAt,
-  ]);
-  return new TextEncoder().encode(canonical);
-}
-
-function signGroupMetadata(
-  args: { groupId: string; groupName: string; members: string[]; createdAt: number },
-  signingSecretKey: Uint8Array,
-): string {
-  const sig = nacl.sign.detached(canonicalGroupBytes(args), signingSecretKey);
-  return encodeBase64(sig);
-}
-
-function verifyGroupMetadata(
-  args: { groupId: string; groupName: string; members: string[]; createdAt: number },
-  sigB64: string,
-  signingPublicKeyB64: string,
-): boolean {
-  try {
-    const sig = decodeBase64(sigB64);
-    const pub = decodeBase64(signingPublicKeyB64);
-    if (sig.length !== nacl.sign.signatureLength) return false;
-    if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupBytes(args), sig, pub);
-  } catch {
-    return false;
-  }
-}
+// ── Group-metadata signing ───────────────────────────────────────────────────
+// The canonical signing bytes (v1 inlined roster / v2 roster-by-reference) and
+// their sign/verify helpers live in ../crypto/groupSig — the single source of
+// truth shared with store/groups.ts and socket/groupMetadataDecision.ts.
 
 /**
  * Drain all pending outbox jobs in FIFO order.
@@ -354,7 +328,18 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   }
   const nextSpkKeyId = (prevSpkKeyId ?? 0) + 1;
 
-  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId);
+  // PQXDH (v2): mirror the SPK's monotonic-keyId + never-publish-what-we-can't
+  // -read-back invariant for the PQSPK (ML-KEM-768), using the SAME durable
+  // counter (getPqSpkKeyId/setPqSpkKeyId) that ensureDevicePreKeys uses, so this
+  // legacy upload path and the single-source-of-truth path can never diverge on
+  // which PQSPK keyId is "current".
+  let prevPqSpkKeyId: number | null = null;
+  try {
+    prevPqSpkKeyId = await getPqSpkKeyId();
+  } catch {/* treat as first run */}
+  const nextPqSpkKeyId = (prevPqSpkKeyId ?? 0) + 1;
+
+  const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId, nextPqSpkKeyId);
   mySpkSecretCache = preKeys.signedPreKey.secretKey;
   opkSecretsCache = preKeys.opkSecrets;
 
@@ -396,6 +381,33 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
     // upload entirely so the peer never fetches a bundle we cannot complete.
     rdiag(`[RDIAG] prekey-store ABORT spkId=${nextSpkKeyId} dbReadback=NULL — NOT emitting prekeys:upload`);
     throw new Error(`uploadPreKeys: could not persist SPK secret for keyId ${nextSpkKeyId} — refusing to publish`);
+  }
+
+  // PQXDH (v2): same write-then-readback invariant for the PQSPK secret
+  // (2400 bytes). If we cannot durably persist+readback the PQSPK, we fall
+  // back to a v1-safe upload (omit pqSignedPreKey below) rather than
+  // publishing a PQ prekey whose secret we could not recover — that would
+  // silently break every inbound v2 handshake to this device.
+  const newPqSecretB64 = encodeBase64(preKeys.pqSignedPreKey.secretKey);
+  const persistPqSpkToDb = async (): Promise<boolean> => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await savePqSpkSecret(nextPqSpkKeyId, newPqSecretB64);
+        const back = await loadPqSpkSecret(nextPqSpkKeyId);
+        if (back === newPqSecretB64) return true;
+      } catch (e) {
+        if (__DEV__) console.warn('[socket] PQSPK secret DB write attempt failed', attempt, e);
+      }
+    }
+    return false;
+  };
+  const pqSpkDbOk = await persistPqSpkToDb();
+  if (pqSpkDbOk) {
+    try { await setPqSpkKeyId(nextPqSpkKeyId); } catch (e) {
+      if (__DEV__) console.warn('[socket] could not persist PQSPK keyId to DB', e);
+    }
+  } else {
+    rdiag(`[RDIAG] prekey-store PQSPK-SKIP pqSpkId=${nextPqSpkKeyId} dbReadback=NULL — uploading v1-safe (no pqSignedPreKey)`);
   }
 
   // Persist the keyId (durable counter) and every OPK secret to the DB.
@@ -470,7 +482,19 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
         publicKeyB64: preKeys.signedPreKey.publicKeyB64,
         signatureB64: preKeys.signedPreKey.signatureB64
       },
-      oneTimePreKeys: preKeys.oneTimePreKeys
+      oneTimePreKeys: preKeys.oneTimePreKeys,
+      // PQXDH (v2): omitted entirely when the PQSPK secret could not be
+      // durably persisted+read-back above — this keeps the upload v1-safe
+      // instead of advertising a PQ prekey we cannot decapsulate with later.
+      ...(pqSpkDbOk
+        ? {
+            pqSignedPreKey: {
+              keyId: preKeys.pqSignedPreKey.keyId,
+              publicKeyB64: preKeys.pqSignedPreKey.publicKeyB64,
+              signatureB64: preKeys.pqSignedPreKey.signatureB64,
+            } satisfies PqSignedPreKeyPublic,
+          }
+        : {}),
     }, (ack: { ok: boolean, error?: string }) => {
       if (ack?.ok) resolve();
       else reject(new Error(ack?.error || 'failed to upload prekeys'));
@@ -478,12 +502,51 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   });
 }
 
+/**
+ * Reconnect the socket the moment the app returns to the foreground.
+ *
+ * Android (and iOS) suspend the JS runtime while the app is backgrounded, which
+ * kills the WebSocket; socket.io's own reconnect timer is frozen during that
+ * suspension, so on resume the client can sit disconnected — or worse, hold a
+ * half-open "ghost" the relay still counts as online, so inbound messages are
+ * routed to a dead socket instead of triggering an FCM push wake-up. Both show
+ * up to the user as "connection drops / notifications don't arrive after closing
+ * the app". Forcing a reconnect on 'active' closes that gap. Registered once.
+ */
+function armForegroundReconnect(): void {
+  if (foregroundReconnectArmed) return;
+  foregroundReconnectArmed = true;
+  const { AppState } = require('react-native') as typeof import('react-native');
+  AppState.addEventListener('change', (next: string) => {
+    if (next !== 'active') return;
+    if (socket) {
+      if (!socket.connected) socket.connect();
+      return;
+    }
+    // No socket at all (e.g. cold resume before connect ran): bring it up.
+    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+    const id = useIdentity.getState().identity;
+    if (id) connect(id);
+  });
+}
+
 export function connect(identity: Identity): Socket {
+  // Idempotent (flag-guarded): arm the foreground-reconnect listener on the
+  // first connect of the app's lifetime, regardless of which branch we take.
+  armForegroundReconnect();
+
   if (
     socket &&
     socket.auth &&
     (socket.auth as { aegisId: string }).aegisId === identity.aegisId
   ) {
+    // Same identity: reuse the socket — but make sure it's actually trying to
+    // connect before handing it back. After a background suspension the OS often
+    // kills the WebSocket while socket.io's reconnect timer is frozen, leaving a
+    // disconnected handle. Callers that re-enter connect() (push wake-up, inline
+    // reply, foreground) would otherwise receive that dead socket and never come
+    // back online. Kicking it is a no-op when already connected.
+    if (!socket.connected) socket.connect();
     return socket;
   }
   if (socket) socket.disconnect();
@@ -577,52 +640,31 @@ export function connect(identity: Identity): Socket {
       // callee never responds after waking up.
       const { endCall } = require('./calls') as typeof import('./calls');
       endCall('peer_offline');
-      Alert.alert('Contact offline', 'The contact is not currently connected to the server. Try again later.');
+      themedAlert('Contact offline', 'The contact is not currently connected to the server. Try again later.');
     }
     if (e?.code === 'unknown_identity') {
-      // Server doesn't know us — re-register with PoW then reconnect.
+      // Server doesn't know us — re-register via the single ensureRegistered path.
       if (__DEV__) console.log('[socket] unknown_identity — re-registering and reconnecting');
       try {
-        const { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } = await import('../crypto/registration');
-        const { SERVER_URL } = await import('../config');
-        const { ensureDevicePreKeys } = await import('../crypto/signal/x3dh');
-        const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
-        const nonce = await solvePoW(challenge, difficulty);
-        // Reuse the device's single durable prekey set so this re-registration
-        // republishes the SAME public bundle that matches the persisted secrets,
-        // instead of racing publishToServer with a different freshly-generated set.
-        const preKeys = await ensureDevicePreKeys(identity);
-        const result = await uploadIdentityAndPrekeys(
-          identity,
-          {
-            signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
-            opkSecrets: preKeys.opkSecrets,
-          },
-          SERVER_URL,
-          challenge,
-          nonce,
-          preKeys.oneTimePreKeys,
-          {
-            keyId: preKeys.signedPreKey.keyId,
-            publicKeyB64: preKeys.signedPreKey.publicKeyB64,
-            signatureB64: preKeys.signedPreKey.signatureB64,
-          },
-        );
+        const { ensureRegistered } = await import('../crypto/ensureRegistered');
+        const { useIdentity } = await import('../store/identity');
+        const result = await ensureRegistered(identity);
         if (result.ok) {
+          // Sync the store's publishStatus so the Home banner clears.
+          useIdentity.setState({ publishStatus: 'published', publishError: null, publishRetryAfterMs: null });
           if (__DEV__) console.log('[socket] re-registered — reconnecting');
           // The relay already closed this socket server-side (reason
           // 'io server disconnect'), and that reason does NOT trigger Socket.IO's
-          // auto-reconnect. The previous code called socket.disconnect() here, which
-          // is terminal — it left the user permanently offline after a re-register.
-          // Re-open the socket explicitly so the new identity gets a fresh auth
-          // challenge and comes back online.
+          // auto-reconnect. Re-open the socket explicitly so the new identity
+          // gets a fresh auth challenge and comes back online.
           socket?.connect();
         } else {
           if (__DEV__) console.warn('[socket] re-registration failed:', result.error);
+          useIdentity.setState({ publishStatus: 'failed', publishError: result.error ?? 'Re-registration failed', publishRetryAfterMs: result.retryAfterMs ?? null });
           useConnection.getState().setOnline(false);
         }
       } catch (err) {
-        if (__DEV__) console.warn('[socket] re-registration failed:', err);
+        if (__DEV__) console.warn('[socket] re-registration error:', err);
         useConnection.getState().setOnline(false);
       }
     }
@@ -778,6 +820,7 @@ export function connect(identity: Identity): Socket {
   socket.on(
     'group:rekey_dist',
     async (dist: {
+      distId: string;
       groupId: string;
       senderAegisId: string;
       ciphertextB64: string;
@@ -809,6 +852,9 @@ export function connect(identity: Identity): Socket {
           sender.publicKeyB64,
         );
         await saveSenderKey(dist.groupId, dist.senderAegisId, senderKey);
+        // Ack only on success — if we throw above, no ack is sent so the relay
+        // will re-deliver (queued distribution) on the next reconnect.
+        socket!.emit('group:rekey_drain_ack', { distId: dist.distId });
       } catch (e) {
         if (__DEV__) console.warn('[socket] group:rekey_dist handling failed:', (e as Error).message);
       }
@@ -874,7 +920,7 @@ export async function rekeyGroupAfterRemoval(
     throw new Error('rekey_offline');
   }
 
-  const { generateSenderKey, sealSenderKeyFor } =
+  const { generateSenderKey, sealSenderKeyForRecipients } =
     require('../crypto/channelKey') as typeof import('../crypto/channelKey');
   const { saveSenderKey } =
     require('../crypto/channelKeyStore') as typeof import('../crypto/channelKeyStore');
@@ -885,52 +931,67 @@ export async function rekeyGroupAfterRemoval(
   // 2. Persist locally (SecureStore only) before distributing.
   await saveSenderKey(groupId, identity.aegisId, newSenderKey);
 
-  // 3. Seal the new key for every remaining member except ourselves and the
-  //    removed member (the latter simply isn't in `remainingMembers`).
-  const contacts = useContacts.getState().contacts;
-  const distributions: Array<{
-    aegisId: string;
-    ciphertextB64: string;
-    nonceB64: string;
-    chainKeyB64: string;
-    iteration: number;
-    senderAegisId: string;
-  }> = [];
-
+  // 3. Resolve recipients = every remaining member except ourselves that we
+  //    have a contact (X25519 key) for. A Map keeps lookup O(1) so building the
+  //    list stays linear even at MAX_GROUP_MEMBERS (1024); the prior find() made
+  //    it O(N²).
+  const contactByAegisId = new Map(
+    useContacts.getState().contacts.map((c) => [c.aegisId, c]),
+  );
+  const recipients: Array<{ aegisId: string; publicKeyB64: string }> = [];
   for (const memberId of remainingMembers) {
     if (memberId === identity.aegisId) continue;
-    const contact = contacts.find((c) => c.aegisId === memberId);
+    const contact = contactByAegisId.get(memberId);
     if (!contact) continue;
-    const dist = sealSenderKeyFor(
-      newSenderKey,
-      groupId,
-      identity.aegisId,
-      contact.publicKeyB64,
-      identity.secretKeyB64,
-    );
-    distributions.push({
-      aegisId: memberId,
-      ciphertextB64: dist.ciphertextB64,
-      nonceB64: dist.nonceB64,
-      chainKeyB64: dist.chainKeyB64,
-      iteration: dist.iteration,
-      senderAegisId: dist.senderAegisId,
+    recipients.push({ aegisId: memberId, publicKeyB64: contact.publicKeyB64 });
+  }
+
+  if (recipients.length === 0) return; // nobody else to re-key
+
+  // Seal off the synchronous path: each box is a pure-JS scalarmult, so the
+  // helper yields to the event loop every SEAL_CHUNK_SIZE seals — a 1024-member
+  // re-key stays responsive instead of freezing the UI for tens of seconds.
+  const sealed = await sealSenderKeyForRecipients(
+    newSenderKey,
+    groupId,
+    identity.aegisId,
+    identity.secretKeyB64,
+    recipients,
+  );
+  const distributions = sealed.map((dist) => ({
+    aegisId: dist.aegisId,
+    ciphertextB64: dist.ciphertextB64,
+    nonceB64: dist.nonceB64,
+    chainKeyB64: dist.chainKeyB64,
+    iteration: dist.iteration,
+    senderAegisId: dist.senderAegisId,
+  }));
+
+  // 4. Fan-out in batches of 512 (server-side limit per group:rekey call).
+  //    Emit each batch sequentially and await its ack before the next one so
+  //    that a mid-batch server error is surfaced immediately and not silenced.
+  const REKEY_BATCH_SIZE = 512;
+
+  async function emitRekeyBatch(
+    batchGroupId: string,
+    batch: typeof distributions,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      socket!.emit(
+        'group:rekey',
+        { groupId: batchGroupId, distributions: batch },
+        (ack: { ok: boolean; error?: string } | undefined) => {
+          if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'rekey_failed'));
+          else resolve();
+        },
+      );
     });
   }
 
-  if (distributions.length === 0) return; // nobody else to re-key
-
-  // 4. Single fan-out event — the relay validates admin and routes per recipient.
-  await new Promise<void>((resolve, reject) => {
-    socket!.emit(
-      'group:rekey',
-      { groupId, distributions },
-      (ack: { ok: boolean; error?: string } | undefined) => {
-        if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'rekey_failed'));
-        else resolve();
-      },
-    );
-  });
+  for (let offset = 0; offset < distributions.length; offset += REKEY_BATCH_SIZE) {
+    const batch = distributions.slice(offset, offset + REKEY_BATCH_SIZE);
+    await emitRekeyBatch(groupId, batch);
+  }
 }
 
 export function emitDeleteChannelMsg(payload: {
@@ -1090,14 +1151,23 @@ async function getOrCreateSession(contactAegisId: string, contactPublicKeyB64: s
   );
 
   const ratchetState = initRatchet(x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
-  
-  // Attach Alice's Ephemeral Key and Bob's PreKey IDs for Bob's X3DH receiver calculation
+
+  // Attach Alice's Ephemeral Key and Bob's PreKey IDs for Bob's X3DH receiver calculation.
+  // PQXDH (v2): when performX3DH negotiated v2 (bundle.pqSignedPreKey was present
+  // and verified), it returns pqCiphertextB64 — the ML-KEM-768 ciphertext Bob
+  // must decapsulate with his PQSPK secret. It rides INSIDE this already-sealed
+  // init message (never as a relay-visible field). Absent ⇒ v1, omit pqCtB64.
   ratchetState.x3dhInit = {
     aliceEKB64: x3dh.myEphemeralPublicKeyB64,
     spkId: bundle.signedPreKey.keyId,
-    opkId: bundle.oneTimePreKey ? bundle.oneTimePreKey.keyId : null
+    opkId: bundle.oneTimePreKey ? bundle.oneTimePreKey.keyId : null,
+    ...(x3dh.pqCiphertextB64 ? { pqCtB64: x3dh.pqCiphertextB64 } : {}),
   };
-  
+
+  rdiag(
+    `[RDIAG] x3dh-send-version me=${identity.aegisId} peer=${contactAegisId} version=${x3dh.version} hasPqCt=${!!x3dh.pqCiphertextB64}`,
+  );
+
   await saveSessionState(contactAegisId, ratchetState);
   return ratchetState;
 }
@@ -1169,6 +1239,8 @@ function amInitiatorFor(myAegisId: string, peerAegisId: string): boolean {
  * recovery window elapses.
  */
 const inRecoveryUntilMs = new Map<string, number>();
+/** Pending recovery fallback-flush timers, keyed by peer — see disconnect(). */
+const recoveryFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const RECOVERY_WINDOW_MS = 90_000;
 /**
  * After detecting a desync we send a recovery X3DH-init and a lower-aegisId peer
@@ -1336,13 +1408,28 @@ async function tryRecoverDesync(
   // STILL in recovery, treat our freshly-created init session as the converged
   // one, clear recovery, and flush. The lower peer will have adopted our init.
   const peerId = contact.aegisId;
-  setTimeout(() => {
+  // Track the fallback timer per peer: re-entering recovery for the same peer
+  // must replace (not stack) the pending timer, and disconnect() must cancel
+  // them all — a stale timer firing after disconnect would flush the outbox
+  // over a dead socket and leak timer handles (which also hangs Jest in CI).
+  const prevTimer = recoveryFallbackTimers.get(peerId);
+  if (prevTimer) clearTimeout(prevTimer);
+  const fallbackTimer = setTimeout(() => {
+    recoveryFallbackTimers.delete(peerId);
     if (isInRecovery(peerId)) {
       inRecoveryUntilMs.delete(peerId);
       rdiag(`[RDIAG] recovery fallback flush me=${identity.aegisId} peer=${peerId}`);
       void flushOutbox(identity).catch(() => {});
     }
   }, RECOVERY_FALLBACK_MS);
+  recoveryFallbackTimers.set(peerId, fallbackTimer);
+  // Node/Jest timer handles expose `.unref()` (React Native's do not — this is a
+  // no-op there, production behaviour is unchanged). Without it, this 6s
+  // real-clock timer keeps the Jest worker process alive past test completion,
+  // firing `rdiag`'s console.warn after the suite has finished ("Cannot log
+  // after tests are done") and destabilising whichever test runs next in the
+  // same worker.
+  (fallbackTimer as unknown as { unref?: () => void }).unref?.();
 
   return true;
 }
@@ -1524,6 +1611,38 @@ async function decryptAndAppend(
       }
     }
 
+    // PQXDH (v2) downgrade decision. weAdvertisedPq reflects whether THIS device
+    // has an active PQSPK slot. shouldUsePqReceiver now FALLS BACK to 'v1' (no
+    // longer throws) when we advertised PQ but the inbound init carries no
+    // ciphertext — a hard abort there broke every handshake from a v1 sender or
+    // whenever our bundle lacked the PQSPK. v1 is still full X25519 E2EE.
+    const pqCtB64 = (parsed.x3dh as { pqCtB64?: string }).pqCtB64;
+    let weAdvertisedPq = false;
+    try {
+      weAdvertisedPq = (await getPqSpkKeyId()) !== null;
+    } catch { /* treat as not advertised */ }
+    const pqDecision = shouldUsePqReceiver(weAdvertisedPq, !!pqCtB64);
+
+    // Local-only observability: if we advertised PQ yet got no ciphertext, this
+    // handshake silently downgraded to v1. Count it on-device (never sent to the
+    // relay) so a sustained spike — attack OR a bundle-publish regression — is
+    // observable. Fire-and-forget: must never block or fail the decrypt path.
+    if (weAdvertisedPq && !pqCtB64) {
+      void useSecurityDiagnostics.getState().recordPqDowngrade();
+    }
+
+    let pqInputs: { cipherText: Uint8Array; pqSpkSecret: Uint8Array } | null = null;
+    if (pqDecision === 'v2') {
+      const pqKeyId = await getPqSpkKeyId();
+      const pqSecB64 = pqKeyId !== null ? await loadPqSpkSecret(pqKeyId) : null;
+      if (!pqSecB64) {
+        rdiag(`[RDIAG] x3dh-recv ABORT pqspk-missing me=${identity.aegisId} peer=${contact.aegisId} pqKeyId=${pqKeyId ?? 'none'}`);
+        if (__DEV__) console.warn('[socket] PQSPK secret not found for active keyId — cannot complete v2 handshake');
+        return false;
+      }
+      pqInputs = { cipherText: decodeBase64(pqCtB64!), pqSpkSecret: decodeBase64(pqSecB64) };
+    }
+
     // Calculate shared secret using performX3DHReceiver
     const senderPubKey = decodeBase64(contact.publicKeyB64);
     const rootKey = performX3DHReceiver(
@@ -1531,7 +1650,8 @@ async function decryptAndAppend(
       mySpkSecret,
       myOpkSecret,
       senderPubKey,
-      decodeBase64(parsed.x3dh.aliceEKB64)
+      decodeBase64(parsed.x3dh.aliceEKB64),
+      pqInputs,
     );
 
     // [RDIAG] Dev-only (rdiag). Bob side: log presence of each secret
@@ -1539,7 +1659,7 @@ async function decryptAndAppend(
     // `[RDIAG] x3dh-send`. Equal fp ⇒ symmetric derivation (fix working);
     // different fp ⇒ which input diverged (spkFromKeyId / opkPresent narrow it).
     rdiag(
-      `[RDIAG] x3dh-recv me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId} spkFromKeyId=${spkSecFromKeyId} opkId=${parsed.x3dh.opkId ?? 'none'} opkPresent=${opkPresent} rkFp=${rootKeyFp(rootKey)}`,
+      `[RDIAG] x3dh-recv me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId} spkFromKeyId=${spkSecFromKeyId} opkId=${parsed.x3dh.opkId ?? 'none'} opkPresent=${opkPresent} pqVersion=${pqDecision} rkFp=${rootKeyFp(rootKey)}`,
     );
 
     // Initialize Double Ratchet as Bob (Receiver).
@@ -1669,13 +1789,56 @@ async function decryptAndAppend(
         const claimedAdminSig: string | undefined = parsedPayload.adminSig;
         const claimedCreatedAt: number | undefined = parsedPayload.groupCreatedAt;
 
+        // ── v1 vs v2 detection ─────────────────────────────────────────────────
+        // v2 (roster-by-reference, large groups) is identified by the presence
+        // of `rosterHash`. A v2 message is either a CARRIER (also carries the
+        // full `members` list) or CONTENT (no `members`, roster referenced only
+        // by hash). v1 messages always inline `members` and never set rosterHash.
+        const claimedRosterHash: string | undefined =
+          typeof parsedPayload.rosterHash === 'string' ? parsedPayload.rosterHash : undefined;
+        const claimedRosterVersion: number =
+          typeof parsedPayload.rosterVersion === 'number' ? parsedPayload.rosterVersion : 1;
+        const isV2 = claimedRosterHash !== undefined;
+        const hasMembers = Array.isArray(parsedPayload.members);
+
         // Resolve the admin's Ed25519 signing public key. If admin is the
         // sender we have it from the contact row; otherwise look it up in
         // the contacts store. If we can't find a key, the signature can't be
         // verified and we MUST NOT trust the metadata.
+        // Resolve a contact's Ed25519 signing key, backfilling from the directory
+        // when missing. Contacts added via a QR / invite link carry only the box
+        // (X25519) key — the signing key lives in the directory — so without this
+        // backfill an admin-signed group carrier fails verification and the group
+        // never materializes for a member who joined via link. Mirrors the X3DH
+        // signing-key backfill above.
+        async function resolveSigningKey(aegisId: string, known?: string | null): Promise<string | null> {
+          if (typeof known === 'string' && known.length > 0) return known;
+          try {
+            const { lookupIdentity } = require('../api') as typeof import('../api');
+            const record = await lookupIdentity(aegisId);
+            const fetched = typeof record.signingPublicKey === 'string' && record.signingPublicKey.length > 0
+              ? record.signingPublicKey
+              : null;
+            if (fetched) {
+              const existing = useContacts.getState().contacts.find((c) => c.aegisId === aegisId);
+              if (existing && !existing.signingPublicKeyB64) {
+                const { saveContact } = require('../db/local') as typeof import('../db/local');
+                const updated = { ...existing, signingPublicKeyB64: fetched };
+                await saveContact(updated);
+                useContacts.setState((s) => ({
+                  contacts: s.contacts.map((c) => (c.aegisId === aegisId ? updated : c)),
+                }));
+              }
+            }
+            return fetched;
+          } catch {
+            return null; // offline / not in directory — caller fails closed
+          }
+        }
+
         async function getAdminSigningKey(): Promise<string | null> {
           if (!claimedAdminId) return null;
-          if (claimedAdminId === senderId) return contact.signingPublicKeyB64 ?? null;
+          if (claimedAdminId === senderId) return resolveSigningKey(claimedAdminId, contact.signingPublicKeyB64);
           let admin = useContacts.getState().contacts.find((c) => c.aegisId === claimedAdminId);
           if (!admin) {
             try {
@@ -1684,15 +1847,30 @@ async function decryptAndAppend(
               if (__DEV__) console.warn('[socket] failed to dynamically resolve group admin:', e);
             }
           }
-          return admin?.signingPublicKeyB64 ?? null;
+          return resolveSigningKey(claimedAdminId, admin?.signingPublicKeyB64);
         }
 
+        // v1 authenticity: signature over the inlined member list.
         async function metadataIsAuthentic(): Promise<boolean> {
           if (!claimedAdminId || !claimedAdminSig || typeof claimedCreatedAt !== 'number') return false;
           const pub = await getAdminSigningKey();
           if (!pub) return false;
           return verifyGroupMetadata(
             { groupId, groupName: claimedName, members: claimedMembers, createdAt: claimedCreatedAt },
+            claimedAdminSig,
+            pub,
+          );
+        }
+
+        // v2 authenticity: signature over the roster HASH + version. The members
+        // list (if present, e.g. a carrier) is checked separately against the
+        // hash before this — verify-before-trust.
+        async function metadataIsAuthenticV2(rosterHash: string, rosterVersion: number): Promise<boolean> {
+          if (!claimedAdminId || !claimedAdminSig || typeof claimedCreatedAt !== 'number') return false;
+          const pub = await getAdminSigningKey();
+          if (!pub) return false;
+          return verifyGroupMetadataV2(
+            { groupId, groupName: claimedName, rosterHash, rosterVersion, createdAt: claimedCreatedAt },
             claimedAdminSig,
             pub,
           );
@@ -1707,7 +1885,126 @@ async function decryptAndAppend(
         const { getGroup, saveGroup } = require('../db/local');
         const existingGroup = await getGroup(groupId);
 
-        if (!existingGroup) {
+        if (isV2) {
+          // ── v2 path: roster by reference ──────────────────────────────────────
+          // The verify-before-trust decision is a PURE function
+          // (groupMetadataDecision.ts); resolve the admin key here (I/O) and then
+          // execute the same side effects the decision implies. Behaviour is
+          // identical to the inline logic this replaced.
+          const rosterHash = claimedRosterHash as string;
+          // Resolve the admin key ONLY when the original code would have — i.e.
+          // when a signature actually gets verified. getAdminSigningKey() can add
+          // the admin as a contact, so calling it on the cheap early-exit paths
+          // (drop / hash-mismatch reject) would be a behavioural change. The cheap
+          // gates below mirror exactly when metadataIsAuthenticV2 used to run.
+          const isCarrierV2 = hasMembers;
+          const hashMatchesV2 = isCarrierV2 && computeRosterHash(claimedMembers) === rosterHash;
+          const isAdminV2 =
+            !!existingGroup &&
+            !!existingGroup.adminId &&
+            senderId === existingGroup.adminId &&
+            claimedAdminId === existingGroup.adminId;
+          // Mirror the exact short-circuit order of the old metadataIsAuthenticV2
+          // call sites: unknown+carrier needs hashOk; existing+carrier needs
+          // hashOk && isAdmin; existing+content always verifies.
+          const sigCouldMatter = existingGroup
+            ? isCarrierV2
+              ? hashMatchesV2 && isAdminV2
+              : true
+            : hashMatchesV2;
+          const adminSigningKeyB64 = sigCouldMatter ? await getAdminSigningKey() : null;
+          const decision = decideV2GroupMetadata({
+            existing: existingGroup
+              ? {
+                  adminId: existingGroup.adminId,
+                  members: existingGroup.members,
+                  name: existingGroup.name,
+                  rosterVersion: existingGroup.rosterVersion,
+                }
+              : null,
+            localAegisId: identity.aegisId,
+            senderId,
+            claimed: {
+              groupId,
+              groupName: claimedName,
+              createdAt: claimedCreatedAt,
+              members: hasMembers ? claimedMembers : undefined,
+              adminId: claimedAdminId,
+              adminSig: claimedAdminSig,
+              rosterHash,
+              rosterVersion: claimedRosterVersion,
+            },
+            adminSigningKeyB64,
+          });
+
+          switch (decision.kind) {
+            case 'drop':
+              // v2 content for an unknown group — await the carrier.
+              if (__DEV__) console.warn('[socket] v2 content for unknown group dropped — awaiting carrier');
+              await saveSessionState(contact.aegisId, ratchetState);
+              return true;
+
+            case 'reject':
+              // Carrier failed hash↔roster, signature, or membership checks.
+              if (__DEV__) console.warn('[socket] v2 carrier create rejected — hash/sig/membership check failed');
+              return false;
+
+            case 'createGroup': {
+              const localAvatarImage = claimedAvatarImage
+                ? await saveGroupAvatarToFile(groupId, claimedAvatarImage)
+                : undefined;
+              await saveGroup({
+                id: groupId,
+                name: decision.name,
+                members: decision.members,
+                createdAt: decision.createdAt,
+                adminId: decision.adminId,
+                adminSig: decision.adminSig,
+                avatarColor: claimedAvatarColor,
+                avatarImage: localAvatarImage,
+                rosterVersion: decision.rosterVersion,
+                // Consent gate: hold as a pending invite if our privacy setting
+                // requires approval before joining a group someone added us to.
+                pending: usePreferences.getState().requireGroupApproval || undefined,
+              });
+              const { useGroups } = require('../store/groups');
+              void useGroups.getState().hydrate();
+              break;
+            }
+
+            case 'updateRoster': {
+              let localAvatarImage = existingGroup.avatarImage;
+              if (claimedAvatarImage) {
+                localAvatarImage = await saveGroupAvatarToFile(groupId, claimedAvatarImage);
+              }
+              await saveGroup({
+                ...existingGroup,
+                name: decision.name,
+                members: decision.members,
+                adminSig: decision.adminSig,
+                avatarColor: claimedAvatarColor ?? existingGroup.avatarColor,
+                avatarImage: localAvatarImage,
+                rosterVersion: decision.rosterVersion,
+              });
+              const { useGroups } = require('../store/groups');
+              void useGroups.getState().hydrate();
+              break;
+            }
+
+            case 'updateNameOnly': {
+              await saveGroup({ ...existingGroup, name: decision.name, adminSig: decision.adminSig });
+              const { useGroups } = require('../store/groups');
+              void useGroups.getState().hydrate();
+              break;
+            }
+
+            case 'renderOnly':
+              // No metadata change — fall through and render the body with the
+              // local roster (matches the v2 carrier/content no-op branches).
+              break;
+          }
+        } else if (!existingGroup) {
+          // ── v1 path (unchanged): create ───────────────────────────────────────
           // New group: require a valid admin signature before persisting.
           // Without this an attacker could add us to arbitrary groups by
           // crafting a group_msg with chosen groupId/members/name.
@@ -1734,10 +2031,13 @@ async function decryptAndAppend(
             adminSig: claimedAdminSig,
             avatarColor: claimedAvatarColor,
             avatarImage: localAvatarImage,
+            // Consent gate (see v2 createGroup above).
+            pending: usePreferences.getState().requireGroupApproval || undefined,
           });
           const { useGroups } = require('../store/groups');
           void useGroups.getState().hydrate();
         } else {
+          // ── v1 path (unchanged): update ───────────────────────────────────────
           // Existing group: only the original admin may rotate name/members/avatar.
           // Anyone else may post messages but their metadata fields are ignored.
           const isAdmin =
@@ -1773,6 +2073,56 @@ async function decryptAndAppend(
           }
         }
 
+        // ── Governance (roles + permissions) — Phase 2b ────────────────────────
+        // Apply owner-signed governance independently of the roster decision
+        // above. Pure verify-before-trust + anti-rollback decision lives in
+        // groupMetadataDecision.ts; we only resolve the owner key (I/O) and
+        // persist on 'apply'. Re-reads the freshly-persisted group so it layers
+        // on top of any roster create/update just applied.
+        {
+          const claimedGovSig: string | undefined =
+            typeof parsedPayload.govSig === 'string' ? parsedPayload.govSig : undefined;
+          const claimedGovVersion: number | undefined =
+            typeof parsedPayload.govVersion === 'number' ? parsedPayload.govVersion : undefined;
+          const claimedPermissions = parsedPayload.permissions as GroupPermissions | undefined;
+          if (claimedGovSig && claimedGovVersion !== undefined && claimedPermissions) {
+            const govGroup = await getGroup(groupId);
+            if (govGroup) {
+              const ownerKey =
+                govGroup.adminId && govGroup.adminId === claimedAdminId
+                  ? await getAdminSigningKey()
+                  : null;
+              const govDecision = decideGovernanceUpdate({
+                groupId,
+                trustedAdminId: govGroup.adminId,
+                localGovVersion: govGroup.govVersion ?? 0,
+                claimed: {
+                  admins: Array.isArray(parsedPayload.admins) ? parsedPayload.admins : [],
+                  moderators: Array.isArray(parsedPayload.moderators) ? parsedPayload.moderators : [],
+                  permissions: claimedPermissions,
+                  govSig: claimedGovSig,
+                  govVersion: claimedGovVersion,
+                },
+                ownerSigningKeyB64: ownerKey,
+              });
+              if (govDecision.kind === 'apply') {
+                await saveGroup({
+                  ...govGroup,
+                  admins: govDecision.admins.length ? govDecision.admins : undefined,
+                  moderators: govDecision.moderators.length ? govDecision.moderators : undefined,
+                  permissions: govDecision.permissions,
+                  govSig: govDecision.govSig,
+                  govVersion: govDecision.govVersion,
+                });
+                const { useGroups } = require('../store/groups');
+                void useGroups.getState().hydrate();
+              } else if (govDecision.kind === 'reject' && __DEV__) {
+                console.warn('[socket] group governance rejected — invalid signature');
+              }
+            }
+          }
+        }
+
         // Use the locally-trusted name for display, not the claimed one.
         const trustedGroup = existingGroup ?? (await getGroup(groupId));
         const trustedGroupName: string = trustedGroup?.name ?? claimedName;
@@ -1803,6 +2153,16 @@ async function decryptAndAppend(
           return true;
         }
 
+        // ── Pending-invite suppression ─────────────────────────────────────────
+        // While a group is an unaccepted invitation (requireGroupApproval), we
+        // keep its metadata fresh (handled above) but render NO content — no
+        // bubble, no unread bump — until the user accepts. trustedGroup was just
+        // re-read post-metadata, so this reflects the current pending state.
+        if (trustedGroup?.pending) {
+          await saveSessionState(contact.aegisId, ratchetState);
+          return true;
+        }
+
         if (msgBody.startsWith('[vote:') && msgBody.endsWith(']')) {
           const inner = msgBody.slice(6, -1); // strip '[vote:' and ']'
           const parts = inner.split(':');
@@ -1828,8 +2188,42 @@ async function decryptAndAppend(
         let groupMsgType: string = 'text';
         let groupMsgMediaUri: string | null = null;
         let cleanMsgBody = msgBody;
+        let groupMsgAttachments: import('../db/local').Attachment[] | null = null;
 
-        if (msgBody.startsWith('[audio:') && msgBody.endsWith(']')) {
+        if (msgBody.startsWith('[multi:')) {
+          const { parseMultiPayload } = require('../utils/attachmentFormat') as typeof import('../utils/attachmentFormat');
+          const parsed = parseMultiPayload(msgBody);
+          if (parsed) {
+            const { downloadAndDecryptMedia, persistEncryptedBlob } = require('../crypto/media') as typeof import('../crypto/media');
+            const resolved = await Promise.all(
+              parsed.attachments.map(async (att: import('../db/local').Attachment) => {
+                try {
+                  if (att.type === 'image') {
+                    void persistEncryptedBlob(att.uri);
+                    return att; // lazy decrypt on view
+                  }
+                  if (att.type === 'video') {
+                    return { ...att, uri: await downloadAndDecryptMedia(att.uri, 'mp4') };
+                  }
+                  if (att.type === 'audio') {
+                    return { ...att, uri: await downloadAndDecryptMedia(att.uri, 'm4a') };
+                  }
+                  if (att.type === 'file') {
+                    const rawExt = (att.fileName ?? '').split('.').pop() ?? '';
+                    const safeExt = /^[a-zA-Z0-9]{1,8}$/.test(rawExt) ? rawExt.toLowerCase() : 'bin';
+                    return { ...att, uri: await downloadAndDecryptMedia(att.uri, safeExt) };
+                  }
+                  return att;
+                } catch {
+                  return att;
+                }
+              })
+            );
+            groupMsgAttachments = resolved;
+            groupMsgType = resolved.length === 1 ? resolved[0].type : 'image';
+            cleanMsgBody = parsed.caption;
+          }
+        } else if (msgBody.startsWith('[audio:') && msgBody.endsWith(']')) {
           const durEnd = msgBody.indexOf('s:', 7);
           if (durEnd > 7) {
             const durStr = msgBody.slice(7, durEnd);
@@ -1927,6 +2321,7 @@ async function decryptAndAppend(
           createdAt: env.createdAt ?? Date.now(),
           type: groupMsgType as 'text' | 'image' | 'audio' | 'video' | 'file' | 'poll' | 'location' | 'view_once',
           mediaUri: groupMsgMediaUri,
+          attachments: groupMsgAttachments,
         });
 
         // Trigger local notification in alignment with AegisLink notifications spec.
@@ -1972,6 +2367,7 @@ async function decryptAndAppend(
   // Use startsWith/indexOf instead of regex on potentially large (400KB+) strings.
   let detectedType: string = parsedPayload?.type ?? 'text';
   let detectedMediaUri: string | null = null;
+  let detectedAttachments: import('../db/local').Attachment[] | null = null;
   let cleanBody = finalBody;
 
   /**
@@ -2009,6 +2405,39 @@ async function decryptAndAppend(
           detectedMediaUri = dataUri;
         }
       }
+    }
+  } else if (finalBody.startsWith('[multi:')) {
+    const { parseMultiPayload } = require('../utils/attachmentFormat') as typeof import('../utils/attachmentFormat');
+    const parsed = parseMultiPayload(finalBody);
+    if (parsed) {
+      const { downloadAndDecryptMedia, persistEncryptedBlob } = require('../crypto/media') as typeof import('../crypto/media');
+      const resolved = await Promise.all(
+        parsed.attachments.map(async (att: import('../db/local').Attachment) => {
+          try {
+            if (att.type === 'image') {
+              void persistEncryptedBlob(att.uri);
+              return att;
+            }
+            if (att.type === 'video') {
+              return { ...att, uri: await downloadAndDecryptMedia(att.uri, 'mp4') };
+            }
+            if (att.type === 'audio') {
+              return { ...att, uri: await downloadAndDecryptMedia(att.uri, 'm4a') };
+            }
+            if (att.type === 'file') {
+              const rawExt = (att.fileName ?? '').split('.').pop() ?? '';
+              const safeExt = /^[a-zA-Z0-9]{1,8}$/.test(rawExt) ? rawExt.toLowerCase() : 'bin';
+              return { ...att, uri: await downloadAndDecryptMedia(att.uri, safeExt) };
+            }
+            return att;
+          } catch {
+            return att;
+          }
+        })
+      );
+      detectedAttachments = resolved;
+      detectedType = resolved.length === 1 ? resolved[0].type : 'image';
+      cleanBody = parsed.caption;
     }
   } else if (finalBody.startsWith('[image:blob:')) {
     const closeIdx = finalBody.indexOf(']');
@@ -2152,6 +2581,7 @@ async function decryptAndAppend(
     type: detectedType as 'text' | 'image' | 'audio' | 'video' | 'file' | 'poll' | 'location' | 'view_once',
     mediaUri: detectedMediaUri,
     expiresAt: parsedPayload?.expiresAt ?? null,
+    attachments: detectedAttachments,
   });
 
   // Trigger local notification in alignment with AegisLink notifications spec
@@ -2625,6 +3055,10 @@ export function disconnect(): void {
   // ensuring freshness after identity or group avatar updates.
   profiledContacts.clear();
   profiledGroupImages.clear();
+  // Cancel pending recovery fallback flushes — they would fire over a dead
+  // socket and keep the JS runtime (and Jest workers) alive via open handles.
+  for (const t of recoveryFallbackTimers.values()) clearTimeout(t);
+  recoveryFallbackTimers.clear();
 }
 
 export async function sendMessage(opts: {
@@ -2888,17 +3322,48 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
 
 /** Send our profile (name + avatar as data URI) to one specific contact. */
 export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: string }, identity: Identity): Promise<void> {
-  if (!socket || !connected || !authenticated) return;
-  try {
-    const { useIdentity } = require('../store/identity');
-    const idState = useIdentity.getState();
-    const senderName = idState.displayName;
-    const senderColor = idState.avatarColor;
-    const senderStatus = idState.profileStatus;
-    const rawImage = idState.avatarImage;
-    const senderImage = await toDataUri(rawImage);
+  const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+  const idState = useIdentity.getState();
+  const senderImage = await toDataUri(idState.avatarImage);
+  const payload = JSON.stringify({
+    type: 'profile_update',
+    senderName: idState.displayName,
+    senderColor: idState.avatarColor,
+    senderImage,
+    senderStatus: idState.profileStatus,
+  });
 
-    const payload = JSON.stringify({ type: 'profile_update', senderName, senderColor, senderImage, senderStatus });
+  // Persist the first-contact profile/init in the outbox so it is retried on the
+  // next reconnect. Without this, adding a contact while WE are offline silently
+  // dropped the init — the peer never received it, never auto-added us, and the
+  // reconnect broadcast skips session-less contacts, so the two sides never
+  // converged (the user had to re-add manually on the other device).
+  const enqueueForRetry = async (): Promise<void> => {
+    try {
+      await enqueueOutboxJob({
+        jobId: Crypto.randomUUID(),
+        msgId: Crypto.randomUUID(),
+        recipientAegisId: contact.aegisId,
+        recipientPubkeyB64: contact.publicKeyB64,
+        payload,
+        kind: 'direct',
+        groupId: null,
+        createdAt: Date.now(),
+      });
+      rdiag(`[RDIAG] sendProfileTo ENQUEUED (offline) to=${contact.aegisId}`);
+    } catch (e) {
+      if (__DEV__) console.warn('[socket] sendProfileTo enqueue failed:', (e as Error).message);
+    }
+  };
+
+  // Offline / not yet authenticated: don't emit (and don't advance the ratchet);
+  // queue it and let flushOutbox() re-encrypt + send on the next auth:ok.
+  if (!socket || !connected || !authenticated) {
+    await enqueueForRetry();
+    return;
+  }
+
+  try {
     const recipientPub = decodeBase64(contact.publicKeyB64);
     const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
     // Mark first-contact (X3DH-initial) envelopes `init` so the relay attaches
@@ -2912,6 +3377,7 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
   } catch (e) {
     rdiag(`[RDIAG] sendProfileTo FAILED to=${contact.aegisId} err=${(e as Error).message}`);
     if (__DEV__) console.warn('[socket] sendProfileTo failed:', (e as Error).message);
+    await enqueueForRetry();
   }
 }
 
@@ -2949,19 +3415,41 @@ export async function sendGroupMessage(opts: {
   const group = await getGroup(opts.groupId);
   if (!group) throw new Error('group_not_found');
 
+  // Compute the size gate ONCE, before any signing or the fan-out loop. Large
+  // groups (> threshold) use the v2 roster-by-reference wire format; small
+  // groups stay on the v1 path with the roster inlined every message.
+  const { LARGE_GROUP_THRESHOLD } = require('../store/groups') as typeof import('../store/groups');
+  const isLarge = group.members.length > LARGE_GROUP_THRESHOLD;
+
+  // Roster reference fields are computed ONCE here (not per-member) so the cost
+  // is O(1) regardless of group size — this is the whole point of v2.
+  const rosterHash = computeRosterHash(group.members);
+  const rosterVersion = group.rosterVersion ?? 1;
+
   // Ensure the group has an admin signature. If we created the group locally
   // and never signed it yet (legacy install), sign it now with our identity
   // signing key and persist. Receivers will validate before honoring metadata.
+  // The signature format must match the size gate: v2 for large, v1 for small.
   if (!group.adminId) {
     group.adminId = opts.identity.aegisId;
   }
   if (group.adminId === opts.identity.aegisId && !group.adminSig) {
-    group.adminSig = signGroupMetadata(
-      { groupId: group.id, groupName: group.name, members: group.members, createdAt: group.createdAt },
-      opts.identity.signingSecretKey,
-    );
+    group.adminSig = isLarge
+      ? signGroupMetadataV2(
+          { groupId: group.id, groupName: group.name, rosterHash, rosterVersion, createdAt: group.createdAt },
+          opts.identity.signingSecretKey,
+        )
+      : signGroupMetadata(
+          { groupId: group.id, groupName: group.name, members: group.members, createdAt: group.createdAt },
+          opts.identity.signingSecretKey,
+        );
     await saveGroup(group);
   }
+
+  // The full roster is sent ONLY in carrier messages (metadata sync). For large
+  // groups this is the single message type that transports the member list;
+  // content messages omit it and rely on the receiver's locally-trusted roster.
+  const isCarrier = opts.plaintext === GROUP_META_SYNC_BODY;
 
   const contacts = useContacts.getState().contacts;
 
@@ -2999,21 +3487,65 @@ export async function sendGroupMessage(opts: {
   // and is retried on the next reconnect/drain.
   for (const memberId of group.members) {
     if (memberId === opts.identity.aegisId) continue;
-    const contact = contacts.find((c) => c.aegisId === memberId);
+    // Group membership is defined by the roster, NOT by the sender's personal
+    // contact list. A member we have not added manually must still receive the
+    // message, otherwise two members who never added each other can never talk
+    // in a shared group. Resolve the recipient from contacts when present, else
+    // materialize them from the directory (same auto-add the RECEIVE path does
+    // for unknown senders — keeps both directions symmetric and caches the key).
+    let contact = contacts.find((c) => c.aegisId === memberId);
+    if (!contact) {
+      try {
+        contact = await useContacts.getState().addByAegisId(memberId);
+      } catch (e) {
+        // Truly unresolvable (offline, or not in the directory yet). Skip this
+        // member for now — the outbox/retry path is per-contact, so we cannot
+        // queue without a pubkey; they will be reachable once resolvable.
+        if (__DEV__) console.warn('[socket] group fan-out: could not resolve member', memberId, e);
+        continue;
+      }
+    }
     if (!contact) continue;
 
     const senderImage = profiledContacts.has(contact.aegisId) ? null : imageDataUri;
     if (senderImage) profiledContacts.add(contact.aegisId);
 
     const msgId = Crypto.randomUUID();
+
+    // Roster transport policy:
+    //  • Small group (v1): always inline `members` — unchanged from before.
+    //  • Large group + carrier: inline `members` + roster reference (the ONLY
+    //    message that ships the full list in a large group).
+    //  • Large group + content: OMIT `members`; ship only the roster reference.
+    //    The signed v2 metadata lets the receiver verify authenticity against
+    //    its locally-trusted roster without re-sending the list. Constant size.
+    const includeMembers = !isLarge || isCarrier;
+    const rosterFields = isLarge
+      ? { rosterHash, rosterVersion }
+      : {};
+
     const payload = JSON.stringify({
       type: 'group_msg',
       groupId: group.id,
       groupName: group.name,
-      members: group.members,
+      ...(includeMembers ? { members: group.members } : {}),
+      ...rosterFields,
       groupCreatedAt: group.createdAt,
       adminId: group.adminId,
       adminSig: group.adminSig,
+      // Governance (roles + permissions), Phase 2b. Included only when signed —
+      // admins/moderators travel too so the receiver can reconstruct the exact
+      // canonical bytes the owner signed. Absent → receiver keeps local defaults
+      // (graceful degradation for pre-governance senders).
+      ...(group.govSig
+        ? {
+            admins: group.admins ?? [],
+            moderators: group.moderators ?? [],
+            permissions: group.permissions,
+            govSig: group.govSig,
+            govVersion: group.govVersion,
+          }
+        : {}),
       groupAvatarColor,
       groupAvatarImage,
       senderId: opts.identity.aegisId,
