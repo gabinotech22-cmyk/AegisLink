@@ -19,8 +19,12 @@ process.env['AEGIS_DB_PATH'] = ':memory:';
 
 const { encodeBase64 } = tweetnaclUtil;
 
-const { identityRepo } = await import('../db/client.js');
-const { issueChallenge, verifyResponse } = await import('../auth/challenge.js');
+// Imported in beforeAll rather than via top-level await: ts-jest's ESM emit is
+// not reliable across the suite, and a top-level await downleveled to CommonJS
+// is a hard SyntaxError. Deferring keeps the file valid under both module modes.
+let identityRepo: typeof import('../db/client.js')['identityRepo'];
+let issueChallenge: typeof import('../auth/challenge.js')['issueChallenge'];
+let verifyResponse: typeof import('../auth/challenge.js')['verifyResponse'];
 
 const AEGIS_ID = 'ABC-2345-6789';
 
@@ -28,6 +32,8 @@ const AEGIS_ID = 'ABC-2345-6789';
 const clientKeys = nacl.box.keyPair();
 
 beforeAll(async () => {
+  ({ identityRepo } = await import('../db/client.js'));
+  ({ issueChallenge, verifyResponse } = await import('../auth/challenge.js'));
   await identityRepo.insert({
     aegis_id: AEGIS_ID,
     public_key_b64: encodeBase64(clientKeys.publicKey),
