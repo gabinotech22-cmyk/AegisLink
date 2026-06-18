@@ -12,12 +12,19 @@
 #
 # What this does NOT cover (needs a physical device): camera QR scanning, push
 # delivery, WebRTC calls, biometrics. See README.md.
+#
+# Cold-start note: see 01-launch-smoke.yaml — the welcome CTA can take well
+# over Maestro's default timeout to appear on a fresh debug-build emulator
+# while App.tsx hydrates SecureStore/SQLite, so wait for it generously before
+# tapping.
 # ─────────────────────────────────────────────────────────────────────────────
 appId: com.aegislink.app
 ---
 - launchApp:
     clearState: true
-- assertVisible: "Generate my identity"
+- extendedWaitUntil:
+    visible: "Generate my identity"
+    timeout: 60000
 - tapOn: "Generate my identity"
 # PoW + key generation can be slow under Hermes on an emulator (pure-JS KDFs),
 # so allow a generous window. Success == the welcome CTA is gone, i.e. we left

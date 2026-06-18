@@ -7,12 +7,21 @@
 # broken (a genuine signal worth blocking on).
 #
 # Asserts on English copy because a fresh CI emulator defaults to en_US locale.
+#
+# Cold-start note: App.tsx shows a bare ActivityIndicator splash while it
+# hydrates the identity store from SecureStore and warms up SQLite
+# (warmUpDb/dbReadyPromise) BEFORE the Onboarding welcome screen renders.
+# On a debug build on a fresh emulator this hydration can take well over the
+# default Maestro timeout, so the first assertion must use a generous
+# extendedWaitUntil instead of an immediate assertVisible.
 # ─────────────────────────────────────────────────────────────────────────────
 appId: com.aegislink.app
 ---
 - launchApp:
     # Wipe app data so we always land on onboarding, never a leftover identity.
     clearState: true
-- assertVisible: "Generate my identity"
+- extendedWaitUntil:
+    visible: "Generate my identity"
+    timeout: 60000
 - assertVisible: "Messaging without a trace."
 - takeScreenshot: 01-welcome

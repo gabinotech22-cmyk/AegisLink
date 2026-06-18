@@ -23,6 +23,9 @@ on:
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
+  schedule:
+    # Nightly run gives an automatic signal on main without blocking PRs.
+    - cron: '0 4 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -118,18 +121,20 @@ jobs:
         run: npm test -- --passWithNoTests
 
   # ─── Mobile — E2E (Maestro on a real Android emulator) ───────────────────
-  # MANUAL ONLY for now (workflow_dispatch): builds a debug APK, boots a
-  # headless Android emulator, installs the app and runs the Maestro flows in
-  # mobile/.maestro/. It does NOT gate PRs yet — we stabilise the native build
-  # first, then flip it to run on pull_request. Screenshots + a JUnit report are
-  # uploaded as an artifact on every run (pass or fail).
+  # Builds a debug APK, boots a headless Android emulator, installs the app
+  # and runs the Maestro flows in mobile/.maestro/. Runs on pull_request,
+  # workflow_dispatch and a nightly schedule for automatic signal, but is
+  # marked `continue-on-error` so flakiness while we stabilise the native
+  # build does NOT block merges — it is informational, not a hard gate.
+  # Screenshots + a JUnit report are uploaded as an artifact on every run
+  # (pass or fail).
   #
   # Why a local Gradle build and not EAS: the repo is public, so GitHub Actions
   # minutes are free, and a local build consumes zero EAS credits.
   mobile-e2e:
     name: Mobile E2E (Maestro)
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    continue-on-error: true
     timeout-minutes: 60
     defaults:
       run:
