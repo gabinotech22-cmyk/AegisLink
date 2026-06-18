@@ -53,6 +53,7 @@ import { IncomingCallScreen } from './src/screens/IncomingCall';
 import { GroupCallScreen } from './src/screens/GroupCall';
 import { IncomingGroupCallScreen } from './src/screens/IncomingGroupCall';
 import { FloatingCallBar } from './src/components/FloatingCallBar';
+import { FloatingGroupCallBar } from './src/components/FloatingGroupCallBar';
 import { NetworkErrorScreen } from './src/screens/NetworkError';
 import { LockSettingsScreen } from './src/screens/LockSettings';
 import { KeysScreen } from './src/screens/Keys';
@@ -1005,11 +1006,9 @@ function Shell() {
   const groupCallId = useGroupCall((s) => s.callId);
   const groupCallInitiator = useGroupCall((s) => s.initiator);
   const incomingGroupCall = groupCallStatus === 'ringing-in';
-  const groupCallOverlay =
-    groupCallStatus === 'ringing-out' ||
-    groupCallStatus === 'connecting' ||
-    groupCallStatus === 'in-call' ||
-    groupCallStatus === 'ended';
+  // 'in-call' and 'connecting' are handled inline by GroupChatScreen's InCallGroupBar.
+  // We only show a full-screen overlay for legacy ringing-out (transitional) state.
+  const groupCallOverlay = groupCallStatus === 'ringing-out';
 
   if (showWipeOverlay) {
     return (
@@ -1638,14 +1637,41 @@ function FloatingCallBarRoot() {
   );
 }
 
+/**
+ * Shows a floating group-call bar when the user is in a group call but has
+ * navigated away from the GroupChatScreen (minimized=true in the store).
+ */
+function FloatingGroupCallBarRoot() {
+  const status = useGroupCall((s) => s.status);
+  const minimized = useGroupCall((s) => s.minimized);
+  const groupId = useGroupCall((s) => s.groupId);
+
+  if (status !== 'in-call' || !minimized) return null;
+
+  return (
+    <FloatingGroupCallBar
+      onExpand={() => {
+        useGroupCall.getState().setMinimized(false);
+        // Navigate to the group chat — find it in the nav stack or push groupCall
+        // We can't directly access push() here; the expand is handled by tapping
+        // the bar which calls onExpand. For now we just un-minimize and the
+        // GroupChatScreen's useEffect will pick it up once the user navigates back.
+        void groupId; // keep reference in case we add direct navigation later
+      }}
+    />
+  );
+}
+
 export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
         <StatusBar style="auto" />
         <Shell />
-        {/* FloatingCallBar is a sibling to Shell so it overlays any screen */}
+        {/* FloatingCallBar overlays any screen for minimized 1:1 calls */}
         <FloatingCallBarRoot />
+        {/* FloatingGroupCallBar overlays any screen for minimized group calls */}
+        <FloatingGroupCallBarRoot />
         {/* AlertHost mounts once inside ThemeProvider so themedAlert() has theme access */}
         <AlertHost />
       </ThemeProvider>

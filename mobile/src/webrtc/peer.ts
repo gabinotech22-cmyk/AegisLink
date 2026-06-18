@@ -33,6 +33,12 @@ export async function createPeer(
   media: CallMedia,
   handlers: PeerHandlers,
   config?: RTCConfigShape,
+  /**
+   * If provided, this stream is added to the peer connection instead of
+   * calling getUserMedia again. Callers are responsible for stopping its
+   * tracks; cleanup() will NOT stop them.
+   */
+  sharedStream?: MediaStream,
 ): Promise<ActivePeer> {
   const { RTCPeerConnection, mediaDevices } = wrtc();
   const pc = new RTCPeerConnection((config ?? rtcConfig()) as never);
@@ -41,7 +47,11 @@ export async function createPeer(
     media === 'video'
       ? { audio: true, video: { facingMode: 'user' } }
       : { audio: true, video: false };
-  const localStream = (await mediaDevices.getUserMedia(constraints)) as unknown as MediaStream;
+  const localStream = sharedStream
+    ? sharedStream
+    : ((await mediaDevices.getUserMedia(constraints)) as unknown as MediaStream);
+
+  if (!sharedStream) handlers.onLocalStream(localStream);
 
   // react-native-webrtc supports addTrack in recent versions; fall back to
   // addStream for older native builds that only expose the legacy API.
@@ -102,7 +112,10 @@ export async function createPeer(
   pcAny.addEventListener?.('iceconnectionstatechange', onIceConnState);
 
   const cleanup = () => {
-    try { for (const t of localStream.getTracks()) t.stop(); } catch { /* ignore */ }
+    // Don't stop tracks when the stream is shared — the group call manager owns them.
+    if (!sharedStream) {
+      try { for (const t of localStream.getTracks()) t.stop(); } catch { /* ignore */ }
+    }
     try { pcAny.close(); } catch { /* ignore */ }
   };
 
