@@ -74,6 +74,8 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
   const msgRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stagedObjectUrlRef = useRef<string | null>(null);
+  // Raw File retained so handleSend can encrypt+upload rather than sending a local objectURL
+  const stagedFileRef = useRef<File | null>(null);
 
   // Revoke object URLs when component unmounts or image is cleared
   useEffect(() => {
@@ -132,9 +134,6 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
     setSending(true);
     setErrorMsg(null);
 
-    const plaintext = hasImage
-      ? `[image:${stagedImageUri}]`
-      : draft.trim();
     const capturedReplyTo = replyTo?.id ?? undefined;
 
     // Optimistic clear so UI feels fast
@@ -148,6 +147,18 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
     setReplyTo(null);
 
     try {
+      let plaintext: string;
+      if (hasImage && stagedFileRef.current) {
+        // Encrypt and upload to relay — returns wire URI blob:<id>:<key>:<nonce>
+        const { encryptAndUploadMedia } = await import('../crypto/media');
+        const wireUri = await encryptAndUploadMedia(stagedFileRef.current);
+        stagedFileRef.current = null;
+        plaintext = `[image:${wireUri}]`;
+      } else {
+        stagedFileRef.current = null;
+        plaintext = draft.trim();
+      }
+
       const { decodeBase64 } = await import('tweetnacl-util');
       const { sendMessage } = await import('../socket/client');
       await sendMessage({
@@ -173,6 +184,8 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
     if (stagedObjectUrlRef.current) {
       URL.revokeObjectURL(stagedObjectUrlRef.current);
     }
+    // Keep raw File for E2EE upload at send-time; objectURL is only for the preview thumbnail
+    stagedFileRef.current = file;
     const url = URL.createObjectURL(file);
     stagedObjectUrlRef.current = url;
     setStagedImageUri(url);

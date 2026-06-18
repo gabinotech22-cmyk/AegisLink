@@ -13,6 +13,32 @@ import { SERVER_URL } from '../config';
  *     live in memory as a Blob URL until the consumer drops the reference.
  */
 
+// ── PoW helpers (mirrors server/src/__tests__/blob.test.ts solvePoW) ─────────
+
+function hasLeadingZeroBits(buf: Uint8Array, bits: number): boolean {
+  let remaining = bits;
+  for (const byte of buf) {
+    if (remaining <= 0) break;
+    const check = remaining >= 8 ? 8 : remaining;
+    const mask = 0xff & (0xff << (8 - check));
+    if ((byte & mask) !== 0) return false;
+    remaining -= 8;
+  }
+  return true;
+}
+
+async function solvePoW(challenge: string, difficulty: number): Promise<string> {
+  const enc = new TextEncoder();
+  let nonce = 0;
+  while (true) {
+    const nonceHex = nonce.toString(16);
+    const data = enc.encode(nonceHex + challenge);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+    if (hasLeadingZeroBits(digest, difficulty)) return nonceHex;
+    nonce++;
+  }
+}
+
 /**
  * Encrypts a File/Blob locally and uploads the ciphertext to the relay.
  * Returns a `blob:<id>:<keyB64>:<nonceB64>` URI — same wire format as mobile.
@@ -30,8 +56,16 @@ export async function encryptAndUploadMedia(file: Blob): Promise<string> {
   // 3. Encrypt via XSalsa20-Poly1305
   const ciphertext = nacl.secretbox(fileBytes, nonce, key);
 
-  // 4. Upload as binary
-  const uploadUrl = `${SERVER_URL}/blob/upload`;
+  // 4. Fetch PoW challenge from relay
+  const challengeRes = await fetch(`${SERVER_URL}/blob/challenge`);
+  if (!challengeRes.ok) throw new Error('Failed to fetch upload challenge');
+  const { challenge, difficulty } = (await challengeRes.json()) as { challenge: string; difficulty: number };
+
+  // 5. Solve proof-of-work (SHA-256 hashcash, same algo as server verifyPoW)
+  const powNonce = await solvePoW(challenge, difficulty);
+
+  // 6. Upload ciphertext with solved PoW as query params
+  const uploadUrl = `${SERVER_URL}/blob/upload?powChallenge=${challenge}&powNonce=${powNonce}`;
   const res = await fetch(uploadUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
@@ -40,7 +74,7 @@ export async function encryptAndUploadMedia(file: Blob): Promise<string> {
   if (!res.ok) throw new Error('Failed to upload media');
   const { id } = (await res.json()) as { id: string };
 
-  // 5. Wipe the key from local scope — it now lives only inside the E2EE message.
+  // 7. Wipe the key from local scope — it now lives only inside the E2EE message.
   const keyB64 = encodeBase64(key);
   const nonceB64 = encodeBase64(nonce);
   key.fill(0);
