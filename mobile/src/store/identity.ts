@@ -7,11 +7,11 @@ const SS_OPTS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
 };
 import { createIdentity, identityFromStored, type Identity } from '../crypto/identity';
-import { loadIdentity, saveIdentity, clearIdentity } from '../db/local';
-import { ApiError } from '../api';
-import { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } from '../crypto/registration';
-import { ensureDevicePreKeys } from '../crypto/signal/x3dh';
-import { SERVER_URL } from '../config';
+import { loadIdentity, saveIdentity } from '../db/local';
+import { ensureRegistered } from '../crypto/ensureRegistered';
+
+/** Publication status of this identity on the relay. */
+export type PublishStatus = 'unknown' | 'publishing' | 'published' | 'failed';
 
 interface IdentityState {
   identity: Identity | null;
@@ -23,6 +23,17 @@ interface IdentityState {
   avatarImage: string | null;
   profileStatus: string;
 
+  /** Whether this identity is confirmed published on the relay. */
+  publishStatus: PublishStatus;
+  /** Human-readable reason for the last publish failure (null when ok). */
+  publishError: string | null;
+  /**
+   * Relay-requested cooldown (ms) after a 429 rate-limit. The Home retry loop
+   * honors this instead of its default backoff so we don't hammer a relay that
+   * already told us how long to wait. null when not rate-limited.
+   */
+  publishRetryAfterMs: number | null;
+
   // Multi-E2EE Slots State
   activeSlotId: string;
   slotsList: string[];
@@ -32,6 +43,9 @@ interface IdentityState {
   reset: () => Promise<void>;
   updateProfile: (displayName: string, avatarColor: string, avatarImage: string | null) => Promise<void>;
   updateStatus: (text: string) => Promise<void>;
+
+  /** Trigger ensureRegistered; updates publishStatus/publishError accordingly. */
+  retryPublish: () => Promise<void>;
 
   // Multi-E2EE Slots Actions
   createSlot: () => Promise<string>;
@@ -46,45 +60,38 @@ function getPrefKey(key: string, slot: string): string {
 }
 
 /**
- * Registers identity on the relay using PoW-gated endpoint.
- * Fails silently so a temporary network outage doesn't block onboarding;
- * the socket reconnect path will re-register via the unknown_identity handler.
+ * Internal helper: run ensureRegistered and sync the store's publishStatus.
+ * Slot-keyed SecureStore flag is updated on success so hydrate() fast-paths.
+ *
+ * `silent` is for the every-launch background refresh of an ALREADY-published
+ * identity: it skips the visible 'publishing' state (so the "Registering
+ * identity" banner doesn't flash on every app open) and swallows a transient
+ * rate-limit (429) failure — we are still registered, so a throttled refresh
+ * must NOT show an error banner. A genuine loss (e.g. the relay no longer
+ * serves our key → verification fails with no retryAfterMs) is still surfaced
+ * so the retry loop can re-register.
  */
-async function publishToServer(identity: Identity): Promise<void> {
-  try {
-    const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
-    const nonce = await solvePoW(challenge, difficulty);
-
-    // Reuse the device's single durable prekey set (creates it once). Using a
-    // single source of truth prevents concurrent registration routes from
-    // publishing different SPK/OPK sets than the secrets persisted on device.
-    const preKeys = await ensureDevicePreKeys(identity);
-    const result = await uploadIdentityAndPrekeys(
-      identity,
-      {
-        signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
-        opkSecrets: preKeys.opkSecrets,
-      },
-      SERVER_URL,
-      challenge,
-      nonce,
-      preKeys.oneTimePreKeys,
-      {
-        keyId: preKeys.signedPreKey.keyId,
-        publicKeyB64: preKeys.signedPreKey.publicKeyB64,
-        signatureB64: preKeys.signedPreKey.signatureB64,
-      },
-    );
-    if (!result.ok && __DEV__) {
-      console.warn('[identity] publish failed:', result.error);
-    }
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 409) {
-      if (__DEV__) console.warn('[identity] aegis_id taken on server — local identity kept');
-    } else {
-      if (__DEV__) console.warn('[identity] publish failed (network?):', (e as Error).message);
-    }
+async function runPublish(identity: Identity, slotId: string, silent = false): Promise<void> {
+  if (!silent) useIdentity.setState({ publishStatus: 'publishing', publishError: null });
+  const result = await ensureRegistered(identity);
+  if (result.ok) {
+    useIdentity.setState({ publishStatus: 'published', publishError: null, publishRetryAfterMs: null });
+    void SecureStore.setItemAsync(`aegis.published.${slotId}`, '1', SS_OPTS).catch(() => {});
+    return;
   }
+  // Suppress ONLY a transient rate-limit during a silent (already-published)
+  // refresh — staying 'published' avoids a false alarm and the retry storm that
+  // caused the 429 in the first place.
+  if (silent && result.retryAfterMs != null) {
+    if (__DEV__) console.warn('[identity] silent refresh rate-limited (staying published):', result.error);
+    return;
+  }
+  if (__DEV__) console.warn('[identity] publish failed:', result.error);
+  useIdentity.setState({
+    publishStatus: 'failed',
+    publishError: result.error ?? 'Unknown error',
+    publishRetryAfterMs: result.retryAfterMs ?? null,
+  });
 }
 
 export const useIdentity = create<IdentityState>((set, get) => ({
@@ -96,6 +103,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
   avatarColor: '#05b875',
   avatarImage: null,
   profileStatus: '',
+
+  publishStatus: 'unknown',
+  publishError: null,
+  publishRetryAfterMs: null,
 
   activeSlotId: 'self',
   slotsList: ['self'],
@@ -164,40 +175,27 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       const avatarImage = avatarImageRaw ?? null;
       const profileStatus = profileStatusRaw ?? '';
 
-      if (alreadyPublished) {
-        // Identity is already registered on the relay — expose the UI immediately.
-        // Re-publish in background to refresh prekeys; the server will 409 the
-        // identity part which is expected and handled silently.
-        set({
-          identity,
-          activeSlotId,
-          slotsList,
-          displayName,
-          avatarColor,
-          avatarImage,
-          profileStatus,
-          status: 'ready',
-          hydrated: true,
-        });
-        void publishToServer(identity).catch(() => {});
-      } else {
-        // First boot for this identity — must await registration so the socket
-        // doesn't race ahead of it (causing `unknown_identity` + disconnect).
-        await publishToServer(identity);
-        // Persist the flag so future hydrations skip the blocking await.
-        void SecureStore.setItemAsync(`aegis.published.${activeSlotId}`, '1', SS_OPTS).catch(() => {});
-        set({
-          identity,
-          activeSlotId,
-          slotsList,
-          displayName,
-          avatarColor,
-          avatarImage,
-          profileStatus,
-          status: 'ready',
-          hydrated: true,
-        });
-      }
+      // Expose identity to UI immediately regardless of server state.
+      set({
+        identity,
+        activeSlotId,
+        slotsList,
+        displayName,
+        avatarColor,
+        avatarImage,
+        profileStatus,
+        // If we have the stored flag, assume published until we verify otherwise.
+        publishStatus: alreadyPublished ? 'published' : 'unknown',
+        publishError: null,
+        publishRetryAfterMs: null,
+        status: 'ready',
+        hydrated: true,
+      });
+
+      // Always run publish in background:
+      // - If already flagged: SILENT prekey refresh (no banner flash, 429 ignored).
+      // - If not flagged: first registration — visible banner drives the UX.
+      void runPublish(identity, activeSlotId, !!alreadyPublished);
     } catch (e) {
       set({ status: 'idle', hydrated: true, error: (e as Error).message });
     }
@@ -225,21 +223,20 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
       // Mark ready immediately — identity is already saved locally.
       // Server registration is best-effort and must never block onboarding.
+      const _slotId = get().activeSlotId || 'self';
       set({
         identity,
         displayName: defaultName,
         avatarColor: defaultColor,
         avatarImage: null,
         profileStatus: '',
-        status: 'ready'
+        publishStatus: 'unknown',
+        publishError: null,
+        publishRetryAfterMs: null,
+        status: 'ready',
       });
-      // Fire-and-forget: register with server in background after UI has moved on.
-      // Persist the published flag (keyed by slot, not aegisId) once registration
-      // succeeds so that subsequent hydrate() calls skip the blocking await.
-      const _slotId = get().activeSlotId || 'self';
-      void publishToServer(identity)
-        .then(() => SecureStore.setItemAsync(`aegis.published.${_slotId}`, '1', SS_OPTS))
-        .catch(() => {});
+      // Registration runs in background; publishStatus will update via runPublish.
+      void runPublish(identity, _slotId);
       return identity;
     } catch (e) {
       // Reset status to idle so the user can retry without restarting the app.
@@ -279,7 +276,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       avatarColor: '#05b875',
       avatarImage: null,
       profileStatus: '',
-      status: 'idle'
+      publishStatus: 'unknown',
+      publishError: null,
+      publishRetryAfterMs: null,
+      status: 'idle',
     });
   },
 
@@ -344,6 +344,14 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     }
   },
 
+  async retryPublish() {
+    const { identity, publishStatus, activeSlotId } = get();
+    if (!identity) return;
+    if (publishStatus === 'published') return; // already confirmed
+    if (publishStatus === 'publishing') return; // in-flight
+    await runPublish(identity, activeSlotId || 'self');
+  },
+
   // Multi-E2EE Slots Actions
   async createSlot() {
     set({ status: 'generating', error: null });
@@ -380,9 +388,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       await SecureStore.setItemAsync(getPrefKey('aegis.displayName', newSlotId), defaultName, SS_OPTS);
       await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', newSlotId), defaultColor, SS_OPTS);
 
-      // Publish to server, then persist the flag (keyed by slot) so hydrate() fast-paths.
-      await publishToServer(identity);
-      void SecureStore.setItemAsync(`aegis.published.${newSlotId}`, '1', SS_OPTS).catch(() => {});
+      // Publish to server in background; publishStatus is updated by runPublish.
+      void runPublish(identity, newSlotId);
 
       // Reset (don't close) the temp slot's DB reference before switching back.
       // closeAsync() here races against any in-flight DB call and causes

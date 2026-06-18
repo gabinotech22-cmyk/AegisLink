@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, View, Text, Pressable, FlatList, TextInput, Alert } from 'react-native';
+import { Modal, View, Text, Pressable, FlatList, TextInput } from 'react-native';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +9,7 @@ import { useIdentity } from '../store/identity';
 import { sendMessage } from '../socket/client';
 import { Avatar } from './Avatar';
 import { I } from './icons';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   visible: boolean;
@@ -42,7 +43,7 @@ export function ForwardModal({ visible, body, onClose }: Props) {
       onClose();
       setQuery('');
     } catch (e) {
-      Alert.alert(i18nT('common.error'), (e as Error).message);
+      themedAlert(i18nT('common.error'), (e as Error).message);
     } finally {
       setSending(null);
     }
@@ -112,7 +113,7 @@ export function ForwardModal({ visible, body, onClose }: Props) {
                   opacity: sending && sending !== item.aegisId ? 0.5 : 1,
                 })}
               >
-                <Avatar t={t} name={item.avatarImage || item.name} color={item.color ?? t.accent} size={40} />
+                <Avatar t={t} name={item.avatarImage || item.name} color={item.color ?? t.accent} size={40} seed={item.publicKeyB64 || item.aegisId} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text, fontWeight: '500' }}>{item.name}</Text>
                   <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim }}>{item.aegisId}</Text>

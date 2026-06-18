@@ -14,6 +14,13 @@ export interface Preferences {
   readReceipts: boolean;
   typingIndicator: boolean;
   blockScreenshots: boolean;
+  /**
+   * When true, being added to a group by someone else creates a PENDING
+   * invitation you must accept rather than joining immediately. Enforced
+   * entirely on this device (the adder never learns this preference), so it
+   * leaks no metadata. Default false = direct add (legacy behavior).
+   */
+  requireGroupApproval: boolean;
 
   // Network
   routeViaTor: boolean;
@@ -47,6 +54,7 @@ const DEFAULTS: Preferences = {
   readReceipts: false,
   typingIndicator: false,
   blockScreenshots: true,
+  requireGroupApproval: false,
   routeViaTor: false,
   notifMaster: true,
   notifPreview: false,
@@ -86,6 +94,7 @@ function snapshot(get: () => PrefsState): Preferences {
     readReceipts: s.readReceipts,
     typingIndicator: s.typingIndicator,
     blockScreenshots: s.blockScreenshots,
+    requireGroupApproval: s.requireGroupApproval,
     routeViaTor: s.routeViaTor,
     notifMaster: s.notifMaster,
     notifPreview: s.notifPreview,

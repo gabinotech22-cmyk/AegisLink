@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, TextInput, Modal } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -31,6 +31,7 @@ import {
   type BackupPayload,
   type PassphraseStrength,
 } from '../crypto/backup';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -141,7 +142,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   // ─── Encrypted backup flow ────────────────────────────────────────────────
   function openBackupModal(): void {
     if (!identity) {
-      Alert.alert(i18nT('backup.noIdentity'), i18nT('backup.generateFirst'));
+      themedAlert(i18nT('backup.noIdentity'), i18nT('backup.generateFirst'));
       return;
     }
     setPassphraseMode('backup');
@@ -149,11 +150,11 @@ export function BackupScreen({ onBack, onRestored }: Props) {
 
   async function confirmBackup(): Promise<void> {
     if (passphrase.length < BACKUP_MIN_PASSPHRASE_LEN) {
-      Alert.alert(i18nT('backup.passphraseTooShort'), i18nT('backup.useAtLeast', { count: BACKUP_MIN_PASSPHRASE_LEN }));
+      themedAlert(i18nT('backup.passphraseTooShort'), i18nT('backup.useAtLeast', { count: BACKUP_MIN_PASSPHRASE_LEN }));
       return;
     }
     if (passphrase !== passphraseConfirm) {
-      Alert.alert(i18nT('backup.passphraseMismatch'), i18nT('backup.reEnterMismatch'));
+      themedAlert(i18nT('backup.passphraseMismatch'), i18nT('backup.reEnterMismatch'));
       return;
     }
     setBusy(true);
@@ -176,11 +177,11 @@ export function BackupScreen({ onBack, onRestored }: Props) {
           dialogTitle: 'Save your encrypted AegisLink backup',
         });
       } else {
-        Alert.alert(i18nT('backup.backupReady'), i18nT('backup.savedTo', { uri: file.uri }));
+        themedAlert(i18nT('backup.backupReady'), i18nT('backup.savedTo', { uri: file.uri }));
       }
     } catch (e) {
       setBusy(false);
-      Alert.alert(i18nT('backup.error'), (e as Error).message);
+      themedAlert(i18nT('backup.error'), (e as Error).message);
     }
   }
 
@@ -200,24 +201,24 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       try {
         parsed = JSON.parse(raw);
       } catch {
-        Alert.alert(i18nT('backup.invalidFile'), i18nT('backup.notValidBackup'));
+        themedAlert(i18nT('backup.invalidFile'), i18nT('backup.notValidBackup'));
         return;
       }
       if (!isBackupEnvelope(parsed)) {
-        Alert.alert(i18nT('backup.invalidFile'), i18nT('backup.notValidEnvelope'));
+        themedAlert(i18nT('backup.invalidFile'), i18nT('backup.notValidEnvelope'));
         return;
       }
       setPendingEnvelope(raw);
       setPassphraseMode('restore');
     } catch (e) {
-      Alert.alert(i18nT('backup.restoreFailed'), (e as Error).message);
+      themedAlert(i18nT('backup.restoreFailed'), (e as Error).message);
     }
   }
 
   async function confirmRestore(): Promise<void> {
     if (!pendingEnvelope) return;
     if (passphrase.length < BACKUP_MIN_PASSPHRASE_LEN) {
-      Alert.alert(i18nT('backup.passphraseTooShort'), i18nT('backup.useAtLeast', { count: BACKUP_MIN_PASSPHRASE_LEN }));
+      themedAlert(i18nT('backup.passphraseTooShort'), i18nT('backup.useAtLeast', { count: BACKUP_MIN_PASSPHRASE_LEN }));
       return;
     }
     setBusy(true);
@@ -271,17 +272,17 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       await hydrateContacts();
 
       if (onRestored) {
-        Alert.alert(
+        themedAlert(
           i18nT('backup.accountRestored'),
           i18nT('backup.recoveredMsg', { aegisId: payload.identity.aegisId, count: payload.contacts.length }),
           [{ text: i18nT('backup.enter'), onPress: onRestored }],
         );
       } else {
-        Alert.alert(i18nT('backup.restoreComplete'), i18nT('backup.recoveredCompleteMsg', { aegisId: payload.identity.aegisId, count: payload.contacts.length }));
+        themedAlert(i18nT('backup.restoreComplete'), i18nT('backup.recoveredCompleteMsg', { aegisId: payload.identity.aegisId, count: payload.contacts.length }));
       }
     } catch (e) {
       setBusy(false);
-      Alert.alert(i18nT('backup.restoreFailed'), (e as Error).message);
+      themedAlert(i18nT('backup.restoreFailed'), (e as Error).message);
     }
   }
 
@@ -289,7 +290,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   async function handleMnemonicRestore(): Promise<void> {
     const words = mnemonicInput.trim().toLowerCase().split(/\s+/);
     if (words.length !== 32) {
-      Alert.alert(i18nT('backup.invalidMnemonic'), i18nT('backup.mnemonicExactly32'));
+      themedAlert(i18nT('backup.invalidMnemonic'), i18nT('backup.mnemonicExactly32'));
       return;
     }
     try {
@@ -323,14 +324,14 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       setRestoring(false);
       setMnemonicInput('');
       if (onRestored) {
-        Alert.alert(i18nT('backup.accountRecovered'), i18nT('backup.identityRestoredSuccess', { aegisId: restored.aegisId }), [
+        themedAlert(i18nT('backup.accountRecovered'), i18nT('backup.identityRestoredSuccess', { aegisId: restored.aegisId }), [
           { text: i18nT('backup.enter'), onPress: onRestored },
         ]);
       } else {
-        Alert.alert(i18nT('backup.successLabel'), i18nT('backup.successfullyRecovered', { aegisId: restored.aegisId }));
+        themedAlert(i18nT('backup.successLabel'), i18nT('backup.successfullyRecovered', { aegisId: restored.aegisId }));
       }
     } catch (e) {
-      Alert.alert(i18nT('backup.restoreFailed'), (e as Error).message);
+      themedAlert(i18nT('backup.restoreFailed'), (e as Error).message);
     }
   }
 

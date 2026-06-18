@@ -1,9 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import {
-  View, Text, TextInput, Pressable, FlatList,
-  KeyboardAvoidingView, Platform, StyleSheet, Alert,
-  Linking, Image, Animated, ActivityIndicator, Modal,
-} from 'react-native';
+import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Linking, Image, Animated, ActivityIndicator, Modal } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import { FormattedText } from '../components/FormattedText';
@@ -13,7 +9,7 @@ import { AudioWaveform } from '../components/AudioWaveform';
 import { LinkPreview } from '../components/LinkPreview';
 import { GifPicker } from '../components/GifPicker';
 import { ImageViewerModal } from '../components/ImageViewerModal';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Crypto from 'expo-crypto';
 import { useTranslation } from 'react-i18next';
@@ -26,8 +22,11 @@ import { ForwardModal } from '../components/ForwardModal';
 import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
 import { MediaImage } from '../components/MediaImage';
+import { AttachmentGrid } from '../components/AttachmentGrid';
 import { useContacts } from '../store/contacts';
 import { useGroups } from '../store/groups';
+import { useActiveCalls } from '../store/activeCalls';
+import { useGroupCall } from '../store/groupCall';
 import { canScheduleGroupPost } from '../store/scheduledMessages';
 import { parseGroupPostMarker } from '../utils/groupPost';
 import { sendGroupMessage, sendGroupVote } from '../socket/client';
@@ -36,6 +35,7 @@ import { usePollsStore, type PollResult } from '../store/polls';
 import type { StoredGroup, StoredMessage } from '../db/local';
 import { parseLocationMessage } from '../utils/parseLocationMessage';
 import { VoiceRecorderScreen } from './VoiceRecorder';
+import { themedAlert } from '../components/AlertHost';
 
 const EMPTY_MSGS: StoredMessage[] = [];
 
@@ -67,6 +67,11 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const hydrate = useContacts((s) => s.hydrate);
   // Read group reactively from the store so member add/remove is reflected live
   const group = useGroups((s) => s.groups.find((g) => g.id === initialGroup.id) ?? initialGroup);
+  // Active voice channel for THIS group (Discord-style banner). Hidden when I'm
+  // already in that call (then the in-call UI is showing instead).
+  const activeCall = useActiveCalls((s) => s.calls[group.id]);
+  const myCallId = useGroupCall((s) => s.callId);
+  const showCallBanner = !!activeCall && activeCall.callId !== myCallId;
   const list = useMessages((s) => s.byChat[group.id] ?? EMPTY_MSGS);
   const loadChat = useMessages((s) => s.loadChat);
   const toggleStar = useMessages((s) => s.toggleStar);
@@ -94,7 +99,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const [searchActive, setSearchActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ images: string[]; index: number } | null>(null);
   const flatlistRef = useRef<FlatList>(null);
   const isNearBottomRef = useRef(true);
   const hasInitialScrolledRef = useRef(false);
@@ -168,7 +173,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       await useMessages.getState().setMediaUri(group.id, id, blobUri);
       await sendGroupMessage({ identity, groupId: group.id, plaintext: `[video:${blobUri}]`, skipLocalAppend: true });
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -241,7 +246,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   function handleStar() { if (!actionsMsg) return; void toggleStar(group.id, actionsMsg.id); }
   function handleDelete() {
     if (!actionsMsg) return;
-    Alert.alert(
+    themedAlert(
       i18nT('groupChat.deleteMessage', 'Delete message'),
       i18nT('groupChat.deleteMessageConfirm', 'Delete this message?'),
       [
@@ -264,13 +269,38 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   async function handleGifSelect(url: string) {
     setGifPickerVisible(false);
     if (!identity) return;
-    const plaintext = `[gif:${url}]`;
+
+    // Privacy + correctness: download the GIF, encrypt it like any image, and
+    // send [image:blob…] so members never contact the GIF servers and the
+    // sender's own bubble renders the GIF (not raw "[gif:url]" text).
+    const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+    const cacheDir = FS.cacheDirectory ?? '';
+    const gifId = url.split('/').pop()?.split('?')[0] ?? Crypto.randomUUID();
+    const localPath = `${cacheDir}gif_${gifId}.gif`;
+
     try {
+      const downloadResult = await FS.downloadAsync(url, localPath);
+      if (!downloadResult.uri) throw new Error('GIF download failed');
+
+      const info = await FS.getInfoAsync(downloadResult.uri);
+      const fileSize = (info as { size?: number }).size ?? 0;
+      if (fileSize > 10 * 1024 * 1024) {
+        await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+        themedAlert(i18nT('chat.sendError', 'Error'), 'GIF demasiado grande (máx. 10 MB)');
+        return;
+      }
+
       const id = Crypto.randomUUID();
-      await appendMsg({ id, chatId: group.id, direction: 'out', body: plaintext, createdAt: Date.now(), type: 'text' });
-      await sendGroupMessage({ identity, groupId: group.id, plaintext, skipLocalAppend: true });
+      await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: localPath });
+
+      const { encryptAndUploadMedia } = require('../crypto/media');
+      const blobUri = await encryptAndUploadMedia(localPath, 'image/gif');
+      await useMessages.getState().setMediaUri(group.id, id, blobUri);
+
+      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]`, skipLocalAppend: true });
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
@@ -291,7 +321,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       await useMessages.getState().setMediaUri(group.id, id, blobUri);
       await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]${caption.trim()}`, skipLocalAppend: true });
     } catch (e) {
-      Alert.alert(i18nT('chat.sendError'), (e as Error).message);
+      themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
 
@@ -338,7 +368,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     } catch (e) {
       setDraft(text);
       if (imageUri) setStagedImageUri(imageUri);
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -372,19 +402,30 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         skipLocalAppend: true,
       });
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
   async function handleGroupCall() {
     if (!identity) return;
+    // Admin-only call gate (UI side). The receiver also enforces this
+    // independently (see groupCalls.ts), so a patched client can't bypass it —
+    // here we just give honest users immediate, themed feedback.
+    const { can } = require('../crypto/groupRoles') as typeof import('../crypto/groupRoles');
+    if (!can(group, identity.aegisId, 'call')) {
+      themedAlert(
+        i18nT('groupCall.adminOnlyTitle', 'Solo admins'),
+        i18nT('groupCall.adminOnlyDetail', 'Solo los administradores pueden iniciar llamadas en este grupo.'),
+      );
+      return;
+    }
     const otherMembers = group.members.filter((id) => id !== identity.aegisId);
     if (otherMembers.length === 0) {
-      Alert.alert(i18nT('groupCall.noMembers', 'Sin miembros'), i18nT('groupCall.noMembersDetail', 'No hay otros miembros en este grupo.'));
+      themedAlert(i18nT('groupCall.noMembers', 'Sin miembros'), i18nT('groupCall.noMembersDetail', 'No hay otros miembros en este grupo.'));
       return;
     }
     if (otherMembers.length > 7) {
-      Alert.alert(i18nT('groupCall.tooMany', 'Demasiados participantes'), i18nT('groupCall.tooManyDetail', 'Máx. 8 participantes en llamadas grupales.'));
+      themedAlert(i18nT('groupCall.tooMany', 'Demasiados participantes'), i18nT('groupCall.tooManyDetail', 'Máx. 8 participantes en llamadas grupales.'));
       return;
     }
     try {
@@ -392,7 +433,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       await startGroupCall(identity, group, otherMembers);
       onGroupCall?.();
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
@@ -443,7 +484,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                 onPress={onGroupDetail}
                 style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 }}
               >
-                <Avatar t={t} name={group.avatarImage || group.name} color={group.avatarColor || t.accent} size={36} />
+                <Avatar t={t} name={group.avatarImage || group.name} color={group.avatarColor || t.accent} size={36} seed={group.id} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 16, fontWeight: '600', color: t.text }}>
                     {group.name}
@@ -486,6 +527,48 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
           )}
         </View>
 
+        {/* Active voice-channel banner — join an open call without ringing */}
+        {showCallBanner && activeCall && (
+          <Pressable
+            onPress={() => {
+              const { joinGroupCall } = require('../socket/groupCalls') as typeof import('../socket/groupCalls');
+              void joinGroupCall(group.id);
+            }}
+            accessibilityLabel={i18nT('groupCall.joinBanner', 'Unirse a la llamada de voz')}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 9,
+              marginHorizontal: 12,
+              marginTop: 10,
+              paddingVertical: 11,
+              paddingHorizontal: 12,
+              borderRadius: 14,
+              backgroundColor: `${t.accent}14`,
+              borderWidth: 1,
+              borderColor: `${t.accent}4d`,
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: `${t.accent}22`, alignItems: 'center', justifyContent: 'center' }}>
+              <I.Mic size={16} color={t.accent} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.text }}>
+                {i18nT('groupCall.channelActive', 'Canal de voz activo')}
+              </Text>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.4, marginTop: 1 }}>
+                {i18nT('groupCall.inCallCount', { count: activeCall.participants.length, defaultValue: '{{count}} en llamada' }).toUpperCase()}
+              </Text>
+            </View>
+            <View style={{ backgroundColor: t.accent, borderRadius: 99, paddingHorizontal: 14, paddingVertical: 7 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.accentInk }}>
+                {i18nT('groupCall.join', 'Unirse')}
+              </Text>
+            </View>
+          </Pressable>
+        )}
+
         {/* Message List */}
         <FlatList
           ref={flatlistRef}
@@ -510,7 +593,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
               disabled={item.deleted}
               onReply={() => setReplyTo(item)}
               onDelete={item.direction === 'out' ? () => {
-                Alert.alert(
+                themedAlert(
                   i18nT('groupChat.deleteMessage', 'Eliminar mensaje'),
                   i18nT('groupChat.deleteMessageConfirm', '¿Eliminar este mensaje?'),
                   [
@@ -531,7 +614,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                 onLongPress={() => setActionsMsg(item)}
                 pollResult={pollResults[item.id]}
                 onVote={(optionIndex, totalOptions) => void handleVote(item.id, optionIndex, totalOptions)}
-                onImagePress={setViewerUri}
+                onImagePress={(images, index) => setViewer({ images, index })}
               />
             </SwipeableMessage>
           )}
@@ -567,6 +650,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
                   color={contacts.find((c) => c.aegisId === id)?.color ?? colorFromId(id)}
                   size={28}
                   photoUri={contacts.find((c) => c.aegisId === id)?.avatarImage}
+                  seed={contacts.find((c) => c.aegisId === id)?.publicKeyB64 || id}
                 />
                 <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>@{name}</Text>
               </Pressable>
@@ -693,7 +777,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         onSelectGif={handleGifSelect}
         onSelectSticker={handleStickerSelect}
       />
-      <ImageViewerModal uri={viewerUri} onClose={() => setViewerUri(null)} t={t} />
+      <ImageViewerModal images={viewer?.images ?? null} initialIndex={viewer?.index ?? 0} onClose={() => setViewer(null)} t={t} />
       <MediaEditorModal
         t={t}
         visible={editorUri !== null}
@@ -756,7 +840,7 @@ interface GroupBubbleProps {
   onLongPress: () => void;
   pollResult?: PollResult;
   onVote: (optionIndex: number, totalOptions: number) => void;
-  onImagePress?: (uri: string) => void;
+  onImagePress?: (images: string[], index: number) => void;
 }
 
 function GroupBubble({
@@ -972,6 +1056,7 @@ function GroupBubble({
           <FormattedText
             body={body}
             t={t}
+            onAccent={me}
             style={{ color: me ? t.bubbleOutText : t.text, fontFamily: t.font, fontSize: 14.5, lineHeight: 21 }}
           />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 7, borderTopWidth: 1, borderTopColor: me ? 'rgba(255,255,255,0.15)' : t.divider }}>
@@ -1034,22 +1119,55 @@ function GroupBubble({
         >
           <View
             style={{
-              height: 100,
-              backgroundColor: t.dark ? '#1e282d' : '#e6e3d8',
+              height: 110,
               alignItems: 'center',
               justifyContent: 'center',
               position: 'relative',
               overflow: 'hidden',
             }}
           >
-            <Svg viewBox="0 0 250 100" width="100%" height="100%" style={{ position: 'absolute' }}>
-              <Path d="M0 30 L250 50" stroke={t.borderStrong} strokeWidth={4} fill="none" opacity={0.4} />
-              <Path d="M0 70 L250 80" stroke={t.borderStrong} strokeWidth={5} fill="none" opacity={0.4} />
-              <Path d="M100 0 Q120 50 110 100" stroke={t.borderStrong} strokeWidth={6} fill="none" opacity={0.4} />
-              <Path d="M180 0 L170 100" stroke={t.borderStrong} strokeWidth={3} fill="none" opacity={0.3} />
+            {/* Map mock mirrors ScreenLocation (screens-phase2.jsx): gradient
+                base, 32px grid, faint roads and the accent pin with the Shield
+                mark — kept faithful to the original prototype. */}
+            <Svg viewBox="0 0 250 110" width="100%" height="100%" style={{ position: 'absolute' }}>
+              <Defs>
+                <LinearGradient id="grpLocMapBg" x1="0" y1="0" x2="1" y2="1">
+                  {(t.dark ? ['#1a2326', '#243033'] : ['#e8e5dc', '#d8d4c6']).map((c, i) => (
+                    <Stop key={i} offset={i} stopColor={c} />
+                  ))}
+                </LinearGradient>
+              </Defs>
+              <Rect x="0" y="0" width="250" height="110" fill="url(#grpLocMapBg)" />
+              {[28, 56, 84, 112, 140, 168, 196, 224].map((x) => (
+                <Path key={`v${x}`} d={`M${x} 0 L${x} 110`} stroke={t.borderStrong} strokeWidth={1} opacity={0.25} />
+              ))}
+              {[28, 56, 84].map((y) => (
+                <Path key={`h${y}`} d={`M0 ${y} L250 ${y}`} stroke={t.borderStrong} strokeWidth={1} opacity={0.25} />
+              ))}
+              <Path d="M0 44 Q125 33 250 55" stroke={t.borderStrong} strokeWidth={4} fill="none" opacity={0.5} />
+              <Path d="M107 0 L143 110" stroke={t.borderStrong} strokeWidth={4} fill="none" opacity={0.5} />
+              <Path d="M0 83 L250 77" stroke={t.borderStrong} strokeWidth={2} fill="none" opacity={0.4} />
             </Svg>
-            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: `${t.accent}25`, alignItems: 'center', justifyContent: 'center' }}>
-              <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: t.accent, borderWidth: 2.5, borderColor: '#fff' }} />
+            {/* accent halo behind the pin (the prototype's pulse, static here) */}
+            <View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: `${t.accent}22` }} />
+            <View
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                backgroundColor: t.accent,
+                borderWidth: 3,
+                borderColor: t.bg,
+                alignItems: 'center',
+                justifyContent: 'center',
+                shadowColor: t.accent,
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: 0.4,
+                shadowRadius: 6,
+                elevation: 3,
+              }}
+            >
+              <I.Shield size={16} color={t.accentInk} />
             </View>
           </View>
           <View style={{ padding: 10, backgroundColor: t.surface }}>
@@ -1066,6 +1184,39 @@ function GroupBubble({
               </Text>
             </View>
           </View>
+        </Pressable>
+        <ReactionPills t={t} reactions={reactions} me={me} />
+        <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, alignSelf: me ? 'flex-end' : 'flex-start', marginTop: 3, paddingHorizontal: 4 }}>
+          {time}
+        </Text>
+      </View>
+    );
+  }
+
+  // Multi-attachment bubble
+  if (m.attachments && m.attachments.length > 0) {
+    return (
+      <View style={{ alignItems: me ? 'flex-end' : 'flex-start' }}>
+        {sender && (
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: senderColor, marginBottom: 2 }}>
+            {sender}
+          </Text>
+        )}
+        <Pressable onLongPress={onLongPress} accessibilityLabel="Attachment message">
+          <AttachmentGrid
+            attachments={m.attachments}
+            isMe={me}
+            caption={m.body || undefined}
+            onImagePress={(uri, index) => {
+              const imageUris = (m.attachments ?? [])
+                .filter((a) => a.type === 'image' || a.type === 'video')
+                .map((a) => a.uri);
+              onImagePress?.(imageUris, index);
+            }}
+            onFilePress={(att) => {
+              if (att.uri) void Linking.openURL(att.uri).catch(() => {});
+            }}
+          />
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, alignSelf: me ? 'flex-end' : 'flex-start', marginTop: 3, paddingHorizontal: 4 }}>
@@ -1201,7 +1352,7 @@ function GroupBubble({
           </View>
         ) : null}
         <Pressable
-          onPress={() => onImagePress?.(m.mediaUri!)}
+          onPress={() => onImagePress?.([m.mediaUri!], 0)}
           onLongPress={onLongPress}
           style={({ pressed }) => ({
             width: 200,
@@ -1223,6 +1374,7 @@ function GroupBubble({
               <FormattedText
                 body={body}
                 t={t}
+                onAccent={me}
                 style={{
                   color: textColor,
                   fontFamily: t.font,
@@ -1342,6 +1494,7 @@ function GroupBubble({
         <FormattedText
           body={body}
           t={t}
+          onAccent={me}
           style={{ fontFamily: t.font, fontSize: 15, lineHeight: 21, color: me ? t.bubbleOutText : t.text }}
         />
         {/* Open Graph link preview card */}

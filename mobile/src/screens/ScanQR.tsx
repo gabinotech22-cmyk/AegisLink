@@ -1,22 +1,30 @@
 import { useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { PrimaryButton } from '../components/Button';
-import { parseIdentityQR } from '../crypto/qr';
+import { parseIdentityQR, parseGroupInviteLink } from '../crypto/qr';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import type { StoredContact } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onCancel: () => void;
   onAdded: (contact: StoredContact) => void;
+  /**
+   * Called when the scanned code is a group invite (aegislink://group/v1/…
+   * or the universal https /g# form). The caller pushes the same
+   * `groupJoin` route used by App.tsx's Linking handler — no duplicated
+   * join logic.
+   */
+  onGroupInvite?: (groupId: string, groupName: string, adminId: string) => void;
 }
 
-export function ScanQRScreen({ onCancel, onAdded }: Props) {
+export function ScanQRScreen({ onCancel, onAdded, onGroupInvite }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -31,10 +39,38 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
   async function handleScan(result: BarcodeScanningResult) {
     if (busy) return;
     if (handledRef.current === result.data) return;
+
+    // Group invite QR — aegislink://group/v1/… or the universal https /g#
+    // form. Hand off to the SAME groupJoin route used by App.tsx's deep-link
+    // handler (admin-approval flow); no duplicated join logic here.
+    const groupInvite = parseGroupInviteLink(result.data);
+    if (groupInvite) {
+      handledRef.current = result.data;
+      if (onGroupInvite) {
+        onGroupInvite(groupInvite.groupId, groupInvite.groupName, groupInvite.adminId);
+      } else {
+        // Valid AegisLink group invite, but this scanner instance isn't wired
+        // to handle joins (e.g. opened from the identity verification flow).
+        // Explain what the code is and where to use it instead of failing
+        // silently or showing the generic "invalid QR" message.
+        themedAlert(
+          i18nT('scanQR.groupInviteWrongContextTitle', 'Group invitation'),
+          i18nT(
+            'scanQR.groupInviteWrongContextDesc',
+            'This is a group invitation, not an identity code. Open it from your chats or groups list to join.'
+          ),
+          [
+            { text: i18nT('common.ok', 'OK'), onPress: () => (handledRef.current = null) },
+          ]
+        );
+      }
+      return;
+    }
+
     const parsed = parseIdentityQR(result.data);
     if (!parsed) {
       handledRef.current = result.data;
-      Alert.alert(
+      themedAlert(
         i18nT('scanQR.invalidTitle', 'Not an AegisLink QR'),
         i18nT('scanQR.invalidDesc', 'Try again with a code generated inside AegisLink.'),
         [
@@ -48,7 +84,7 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
     try {
       const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64);
       if (outcome.kind === 'mitm_detected') {
-        Alert.alert(
+        themedAlert(
           i18nT('scanQR.mitmTitle', '⚠️ Key Changed'),
           i18nT('scanQR.mitmDesc', 'This contact had a different saved key. If you recognize them and they simply changed devices, accept. Otherwise, cancel to protect your privacy.\n\nOld key: ...{{oldKey}}\nNew key: ...{{newKey}}', {
             oldKey: outcome.oldKey.slice(-8),
@@ -90,7 +126,7 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
               'Could not connect to the server. Check your internet connection and try again.',
             )
           : raw;
-      Alert.alert(
+      themedAlert(
         i18nT('scanQR.addError', 'Could not add contact'),
         message,
         [

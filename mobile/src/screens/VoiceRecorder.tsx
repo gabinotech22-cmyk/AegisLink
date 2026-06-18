@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, Alert } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import { Audio } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +10,7 @@ import { withPickingGuard } from '../utils/pickingGuard';
 // Shared process-wide recorder singleton — also used by ViewOnceSend so either
 // screen can release a recorder orphaned by the other (see audioRecorder.ts).
 import { setActiveRecording, releaseActiveRecording } from '../utils/audioRecorder';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -72,7 +73,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
       // permission has not been granted yet.
       const { granted } = await withPickingGuard(() => Audio.requestPermissionsAsync());
       if (!granted) {
-        Alert.alert(i18nT('voiceRecorder.permissionTitle'), i18nT('voiceRecorder.permissionMessage'));
+        themedAlert(i18nT('voiceRecorder.permissionTitle'), i18nT('voiceRecorder.permissionMessage'));
         return;
       }
       // Release any recorder orphaned by a previous mount/attempt before
@@ -130,7 +131,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
       await releaseActiveRecording();
       recordingRef.current = null;
       setStage('idle');
-      Alert.alert(i18nT('common.error'), (e as Error).message);
+      themedAlert(i18nT('common.error'), (e as Error).message);
     } finally {
       busyRef.current = false;
     }
@@ -155,7 +156,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
     } catch (e) {
       await releaseActiveRecording();
       recordingRef.current = null;
-      Alert.alert(i18nT('common.error'), (e as Error).message);
+      themedAlert(i18nT('common.error'), (e as Error).message);
       setStage('idle');
     } finally {
       busyRef.current = false;
@@ -182,7 +183,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
       soundRef.current = sound;
       setStage('playing');
     } catch (e) {
-      Alert.alert(i18nT('common.error'), (e as Error).message);
+      themedAlert(i18nT('common.error'), (e as Error).message);
     }
   }
 

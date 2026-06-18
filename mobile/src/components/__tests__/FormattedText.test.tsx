@@ -93,6 +93,22 @@ describe('FormattedText', () => {
     expect(urlTexts.length).toBeGreaterThan(0);
   });
 
+  it('on the accent bubble, links drop the accent color so they stay visible', () => {
+    // Regression: outgoing bubble background === t.accent, so an accent-colored
+    // link was invisible on the sender's own bubble. With onAccent the link must
+    // NOT be painted t.accent (it inherits the bubble text color) but stays
+    // underlined so it still reads as a link.
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText body="visit https://aegislink.io today" t={t} onAccent />,
+    );
+    const { Text } = require('react-native');
+    const underlined = UNSAFE_getAllByType(Text).filter(
+      (node: any) => node.props.style?.textDecorationLine === 'underline',
+    );
+    expect(underlined.length).toBeGreaterThan(0);
+    expect(underlined.every((node: any) => node.props.style?.color !== t.accent)).toBe(true);
+  });
+
   it('linkifies group invite deep links (tappable to join)', () => {
     const { UNSAFE_getAllByType } = render(
       <FormattedText

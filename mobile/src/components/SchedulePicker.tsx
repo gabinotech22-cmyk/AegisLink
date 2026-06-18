@@ -7,16 +7,9 @@
  */
 
 import { useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Modal,
-  Pressable,
-  TextInput,
-  StyleSheet,
-  Alert,
-} from 'react-native';
+import { View, Text, Modal, Pressable, TextInput, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
+import { themedAlert } from './AlertHost';
 
 interface Props {
   visible: boolean;
@@ -80,12 +73,12 @@ export function SchedulePicker({ visible, onClose, onConfirm }: Props) {
   function handleConfirm() {
     const d = parseDateTime(dateStr, timeStr);
     if (!d) {
-      Alert.alert('Fecha inválida', 'Usa el formato YYYY-MM-DD y HH:MM.');
+      themedAlert('Fecha inválida', 'Usa el formato YYYY-MM-DD y HH:MM.');
       return;
     }
     const minMs = Date.now() + 60_000;
     if (d.getTime() < minMs) {
-      Alert.alert('Fecha demasiado cercana', 'El mensaje debe programarse al menos 1 minuto en el futuro.');
+      themedAlert('Fecha demasiado cercana', 'El mensaje debe programarse al menos 1 minuto en el futuro.');
       return;
     }
     onConfirm(d.getTime());

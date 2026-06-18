@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -12,6 +12,7 @@ import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { usePreferences } from '../store/preferences';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -78,20 +79,20 @@ export function DataExportScreen({ onBack }: Props) {
           dialogTitle: i18nT('dataExport.dialogTitle', 'Export AegisLink data'),
         });
       } else {
-        Alert.alert(
+        themedAlert(
           i18nT('dataExport.fileSaved', 'File saved'),
           i18nT('dataExport.savedTo', 'Saved to: {{uri}}', { uri: fileUri })
         );
       }
     } catch (e) {
-      Alert.alert(i18nT('dataExport.exportError', 'Export error'), (e as Error).message);
+      themedAlert(i18nT('dataExport.exportError', 'Export error'), (e as Error).message);
     } finally {
       setExporting(false);
     }
   }
 
   function handleDeleteAccount() {
-    Alert.alert(
+    themedAlert(
       i18nT('dataExport.deleteAccountCaps', 'DELETE ACCOUNT'),
       i18nT('dataExport.deleteConfirmMsg', 'This will delete all your local keys and messages from this device permanently. It cannot be undone. Continue?'),
       [

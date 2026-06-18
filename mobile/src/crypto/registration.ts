@@ -23,6 +23,7 @@ import type {
   OneTimePreKeyPublic,
   PreKeySecrets,
   SignedPreKeyPublic,
+  PqSignedPreKeyPublic,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,12 @@ export interface PowChallenge {
 export interface RegistrationResult {
   ok: boolean;
   error?: string;
+  /**
+   * When the relay rate-limits us (HTTP 429), the cooldown it asks us to honor,
+   * in milliseconds. Callers should not retry before this elapses — retrying
+   * inside the window is wasted work and can extend a sliding-window ban.
+   */
+  retryAfterMs?: number;
 }
 
 interface IdentityPostBody {
@@ -74,6 +81,13 @@ interface PreKeysPostBody {
   ts: number;
   signedPreKey: SignedPreKeyPublic;
   oneTimePreKeys: OneTimePreKeyPublic[];
+  /**
+   * PQXDH signed PQ prekey (ML-KEM-768). MUST be published so peers fetch it in
+   * the bundle and include an ML-KEM ciphertext in their X3DH init — otherwise
+   * the receiver's anti-downgrade gate (shouldUsePqReceiver) aborts every
+   * handshake and no message/profile envelope is ever decrypted.
+   */
+  pqSignedPreKey?: PqSignedPreKeyPublic;
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +211,7 @@ export async function uploadIdentityAndPrekeys(
   powNonce: string,
   oneTimePreKeysPublic: OneTimePreKeyPublic[],
   signedPreKeyPublic: SignedPreKeyPublic,
+  pqSignedPreKeyPublic?: PqSignedPreKeyPublic,
 ): Promise<RegistrationResult> {
   const base = trimSlash(relayUrl);
 
@@ -229,6 +244,7 @@ export async function uploadIdentityAndPrekeys(
     return {
       ok: false,
       error: `identity: HTTP ${identityRes.status}${detail ? ` — ${detail}` : ''}`,
+      retryAfterMs: parseRetryAfterMs(detail, identityRes),
     };
   }
 
@@ -278,6 +294,7 @@ export async function uploadIdentityAndPrekeys(
     ts,
     signedPreKey: signedPreKeyPublic,
     oneTimePreKeys: oneTimePreKeysPublic,
+    ...(pqSignedPreKeyPublic ? { pqSignedPreKey: pqSignedPreKeyPublic } : {}),
   };
 
   let prekeysRes: Response;
@@ -300,6 +317,7 @@ export async function uploadIdentityAndPrekeys(
     return {
       ok: false,
       error: `prekeys: HTTP ${prekeysRes.status}${detail ? ` — ${detail}` : ''}`,
+      retryAfterMs: parseRetryAfterMs(detail, prekeysRes),
     };
   }
 
@@ -317,6 +335,29 @@ function trimSlash(url: string): string {
 function errMsg(e: unknown): string {
   if (e instanceof Error) return e.message;
   return 'unknown';
+}
+
+/**
+ * Extract the cooldown the relay wants us to honor after a 429.
+ * Prefers the JSON body's `retryAfterMs`; falls back to the standard
+ * `Retry-After` header (seconds → ms). Returns undefined when neither is
+ * present or parseable.
+ */
+function parseRetryAfterMs(detail: string, res: Response): number | undefined {
+  try {
+    const body = JSON.parse(detail) as { retryAfterMs?: unknown };
+    if (typeof body.retryAfterMs === 'number' && body.retryAfterMs > 0) {
+      return body.retryAfterMs;
+    }
+  } catch {
+    // detail wasn't JSON — fall through to the header
+  }
+  const header = res.headers.get('Retry-After');
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  }
+  return undefined;
 }
 
 async function safeText(res: Response): Promise<string> {

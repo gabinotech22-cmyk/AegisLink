@@ -34,6 +34,10 @@ export function GroupCallScreen({ onClose }: Props) {
   const [elapsed, setElapsed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Proximity sensor + screen-off near the ear is handled at the audio-session
+  // level by InCallManager (see webrtc/inCall.ts), started in the group-call
+  // lifecycle — so it keeps working even when this screen is unmounted/backgrounded.
+
   // Auto-close when call ends (reset to idle)
   useEffect(() => {
     if (status === 'idle') onClose();

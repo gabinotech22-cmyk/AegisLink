@@ -7,14 +7,7 @@
  */
 
 import { useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  FlatList,
-  Alert,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, Pressable, FlatList, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -24,6 +17,7 @@ import { useContacts } from '../store/contacts';
 import { useGroups } from '../store/groups';
 import type { ScheduledMessage } from '../store/scheduledMessages';
 import type { StoredContact } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
@@ -68,7 +62,7 @@ export function ScheduledScreen({ onBack }: Props) {
   );
 
   function handleCancel(msg: ScheduledMessage) {
-    Alert.alert(
+    themedAlert(
       'Cancelar mensaje',
       '¿Cancelar este mensaje programado? No se podrá deshacer.',
       [

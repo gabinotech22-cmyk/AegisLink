@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ss } from '../utils/secureStore';
 import { Switch } from 'react-native';
@@ -8,6 +8,7 @@ import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { Section } from '../components/Section';
+import { themedAlert } from '../components/AlertHost';
 
 const LOCK_SETTINGS_KEY = 'aegis.lockSettings';
 
@@ -64,7 +65,7 @@ export function LockSettingsScreen({ onBack }: Props) {
     setBiometrics(v);
     void save({ biometrics: v });
     if (v) {
-      Alert.alert(
+      themedAlert(
         i18nT('lockSettings.biometricsAlertTitle', 'Biometrics'),
         i18nT('lockSettings.biometricsAlertMsg', 'Face ID / fingerprint will be used to unlock the app. Make sure you have biometrics configured in your device settings.')
       );

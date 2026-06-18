@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, Alert } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import Svg, { Circle, Path, Line } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +7,7 @@ import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { PrimaryButton } from '../components/Button';
 import { SERVER_URL } from '../config';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onRetry: () => void;
@@ -106,7 +107,7 @@ export function NetworkErrorScreen({ onRetry }: Props) {
       <PrimaryButton t={t} label={i18nT('networkError.retryBtn')} onPress={onRetry} />
       <Pressable
         onPress={() =>
-          Alert.alert(
+          themedAlert(
             i18nT('networkError.emergencyRelayTitle'),
             i18nT('networkError.emergencyRelayDesc'),
             [{ text: i18nT('networkError.understood') }]

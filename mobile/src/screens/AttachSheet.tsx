@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import * as ImagePicker from 'expo-image-picker';
+import type { ImagePickerAsset } from 'expo-image-picker';
+import type { DocumentPickerAsset } from 'expo-document-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -10,13 +12,18 @@ import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { useMessages } from '../store/messages';
 import { withPickingGuard } from '../utils/pickingGuard';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onBack: () => void;
   onPick: (kind: 'scheduled' | 'location' | 'viewoncesend' | 'photo' | 'camera' | 'file' | 'voice' | 'video' | 'contact') => void;
+  /** Called when user picks multiple images (2+) from gallery. */
+  onMultipleImages?: (assets: ImagePickerAsset[]) => void;
+  /** Called when user picks multiple files (2+) via DocumentPicker. */
+  onMultipleFiles?: (assets: DocumentPickerAsset[]) => void;
 }
 
-export function AttachSheetScreen({ onBack, onPick }: Props) {
+export function AttachSheetScreen({ onBack, onPick, onMultipleImages, onMultipleFiles }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -52,7 +59,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert(
+        themedAlert(
           i18nT('attachSheet.permissionRequired', 'Permission required'),
           i18nT('attachSheet.galleryPermission', 'Access to gallery is required.')
         );
@@ -64,16 +71,34 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
           quality: 0.85,
           allowsEditing: false,
           exif: false,
+          allowsMultipleSelection: true,
+          selectionLimit: 10,
         })
       );
-      if (!result.canceled && result.assets[0]) {
+      if (!result.canceled && result.assets.length > 0) {
         setPicking(true);
-        const safeUri = await stripExif(result.assets[0].uri);
-        setPendingMedia(safeUri);
-        onBack();
+        if (result.assets.length > 1 && onMultipleImages) {
+          // Multi-select: EXIF-strip each asset then hand off to caller.
+          // We do NOT call onBack() here — the caller (App.tsx) is responsible
+          // for popping AttachSheet and pushing the preview screen. Calling
+          // onBack() here AND having App.tsx call pop() would be a double-pop
+          // that sends the user to the home screen (Bug B fix).
+          const stripped: ImagePickerAsset[] = await Promise.all(
+            result.assets.map(async (asset) => {
+              const safeUri = await stripExif(asset.uri);
+              return { ...asset, uri: safeUri };
+            })
+          );
+          onMultipleImages(stripped);
+        } else {
+          // Single: use existing pending-media path
+          const safeUri = await stripExif(result.assets[0].uri);
+          setPendingMedia(safeUri);
+          onBack();
+        }
       }
     } catch (e) {
-      Alert.alert(
+      themedAlert(
         i18nT('common.error', 'Error'),
         `${i18nT('attachSheet.errorGallery', 'Could not open gallery')}: ${(e as Error).message}`
       );
@@ -87,7 +112,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert(
+        themedAlert(
           i18nT('attachSheet.permissionRequired', 'Permission required'),
           i18nT('attachSheet.cameraPermission', 'Access to camera is required.')
         );
@@ -107,7 +132,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
         onBack();
       }
     } catch (e) {
-      Alert.alert(
+      themedAlert(
         i18nT('common.error', 'Error'),
         `${i18nT('attachSheet.errorCamera', 'Could not access camera')}: ${(e as Error).message}`
       );
@@ -123,7 +148,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert(
+        themedAlert(
           i18nT('attachSheet.permissionRequired', 'Permission required'),
           i18nT('attachSheet.galleryPermission', 'Access to gallery is required.')
         );
@@ -144,7 +169,7 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
         if (trimmed) setPendingVideo(trimmed);
       }
     } catch (e) {
-      Alert.alert(
+      themedAlert(
         i18nT('common.error', 'Error'),
         `${i18nT('attachSheet.errorGallery', 'Could not open gallery')}: ${(e as Error).message}`
       );

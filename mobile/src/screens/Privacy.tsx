@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
-import { View, Text, ScrollView, Pressable, Alert, Linking } from 'react-native';
+import { View, Text, ScrollView, Pressable, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -13,6 +13,7 @@ import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
 import type { Theme } from '../theme/vault';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   onTab: (tab: Tab) => void;
@@ -34,6 +35,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const typing = usePreferences((s) => s.typingIndicator);
   const screenshot = usePreferences((s) => s.blockScreenshots);
   const routeViaTor = usePreferences((s) => s.routeViaTor);
+  const requireGroupApproval = usePreferences((s) => s.requireGroupApproval);
   const setPref = usePreferences((s) => s.set);
 
   // Shell already hydrates on mount; this is a belt-and-suspenders guard
@@ -66,7 +68,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
           })}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <Avatar t={t} name={avatarImage || displayName} color={avatarColor} size={52} photoUri={avatarImage} />
+            <Avatar t={t} name={avatarImage || displayName} color={avatarColor} size={52} photoUri={avatarImage} seed={identity?.publicKeyB64} />
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
                 {displayName}
@@ -118,6 +120,17 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             sub={i18nT('privacy.blockScreenshotsSub')}
             value={screenshot}
             onChange={setSS}
+            noBorder
+          />
+        </Section>
+
+        <Section t={t} label={i18nT('privacy.groupsSection', 'GRUPOS')}>
+          <Toggle
+            t={t}
+            label={i18nT('privacy.requireGroupApproval', 'Aprobar antes de añadirme a grupos')}
+            sub={i18nT('privacy.requireGroupApprovalSub', 'Recibe una invitación que aceptas en vez de entrar directo')}
+            value={requireGroupApproval}
+            onChange={(v) => void setPref('requireGroupApproval', v)}
             noBorder
           />
         </Section>
@@ -238,7 +251,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             icon={<I.Shield size={20} color={t.textDim} />}
             label={i18nT('privacy.securityAudit')}
             sub={i18nT('privacy.securityAuditSub')}
-            onPress={() => { Alert.alert(i18nT('privacy.auditAlert'), i18nT('privacy.auditAlertDesc')); }}
+            onPress={() => { themedAlert(i18nT('privacy.auditAlert'), i18nT('privacy.auditAlertDesc')); }}
           />
           <Row
             t={t}
@@ -246,7 +259,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             label={i18nT('privacy.jurisdiction')}
             sub={i18nT('privacy.jurisdictionSub')}
             noBorder
-            onPress={() => { Alert.alert(i18nT('privacy.jurisdictionAlert'), i18nT('privacy.jurisdictionAlertDesc')); }}
+            onPress={() => { themedAlert(i18nT('privacy.jurisdictionAlert'), i18nT('privacy.jurisdictionAlertDesc')); }}
           />
         </Section>
       </ScrollView>

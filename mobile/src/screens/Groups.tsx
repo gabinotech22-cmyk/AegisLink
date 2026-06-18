@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, TextInput, FlatList, Modal } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, FlatList, Modal } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
@@ -15,13 +15,14 @@ import { Avatar } from '../components/Avatar';
 import { AvatarCropModal } from '../components/AvatarCropModal';
 import { FloatingMenu } from '../components/FloatingMenu';
 import type { Theme } from '../theme/vault';
-import { useGroups } from '../store/groups';
+import { useGroups, LARGE_GROUP_THRESHOLD } from '../store/groups';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
 import { sendGroupMessage } from '../socket/client';
 import { parseGroupInviteLink } from '../crypto/qr';
 import type { StoredGroup } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 
 interface Props {
@@ -59,7 +60,10 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
   const { contacts } = useContacts();
-  const { groups, hydrate, createGroup, leaveGroup } = useGroups();
+  const { groups, hydrate, createGroup, leaveGroup, acceptGroupInvite } = useGroups();
+  // Pending invitations are surfaced separately from joined groups (consent flow).
+  const pendingInvites = groups.filter((g) => g.pending);
+  const activeGroups = groups.filter((g) => !g.pending);
   const previews = useMessages((s) => s.previews);
   const unreadCounts = useMessages((s) => s.unreadCounts);
 
@@ -72,6 +76,8 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [joinLinkInput, setJoinLinkInput] = useState('');
   const [menuGroup, setMenuGroup] = useState<StoredGroup | null>(null);
+  // Pending invite whose Accept/Decline floating menu is open.
+  const [inviteMenuFor, setInviteMenuFor] = useState<StoredGroup | null>(null);
 
   useEffect(() => {
     void hydrate();
@@ -89,7 +95,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   async function handlePickImage() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedGallery'));
+      themedAlert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedGallery'));
       return;
     }
     // Pick WITHOUT the native crop editor — hand off to AvatarCropModal which
@@ -110,7 +116,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
   async function handleTakePhoto() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedCamera'));
+      themedAlert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedCamera'));
       return;
     }
     const result = await withPickingGuard(() =>
@@ -136,18 +142,18 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
       );
       setGroupImage(compressed.uri);
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }
 
   // Handle creating group
   async function handleConfirmCreate() {
     if (!groupName.trim()) {
-      Alert.alert(i18nT('common.error'), i18nT('groups.errorCreateName'));
+      themedAlert(i18nT('common.error'), i18nT('groups.errorCreateName'));
       return;
     }
     if (selectedContacts.length === 0) {
-      Alert.alert(i18nT('common.error'), i18nT('groups.errorCreateMembers'));
+      themedAlert(i18nT('common.error'), i18nT('groups.errorCreateMembers'));
       return;
     }
     if (!identity) return;
@@ -158,6 +164,15 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
       
       // Send group initiation / welcome message to all members
       try {
+        // Large groups use the v2 roster-by-reference wire format: content
+        // messages omit the member list, so a welcome message alone can't
+        // materialize the group on recipients (they'd drop it as an unknown
+        // group). Push a metadata carrier first — it ships the full roster and
+        // creates the group on every member; the welcome bubble then renders.
+        if (allMembers.length > LARGE_GROUP_THRESHOLD) {
+          const client = require('../socket/client') as typeof import('../socket/client');
+          await client.broadcastGroupMetadata(identity, newGroup.id);
+        }
         await sendGroupMessage({
           identity,
           groupId: newGroup.id,
@@ -172,9 +187,9 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
       setSelectedContacts([]);
       setGroupColor('#05b875');
       setGroupImage(undefined);
-      Alert.alert(i18nT('groups.createdSuccess'), i18nT('groups.createdSuccessDesc', { name: groupName }));
+      themedAlert(i18nT('groups.createdSuccess'), i18nT('groups.createdSuccessDesc', { name: groupName }));
     } catch (err) {
-      Alert.alert(i18nT('common.error'), i18nT('groups.errorCreate'));
+      themedAlert(i18nT('common.error'), i18nT('groups.errorCreate'));
     }
   }
 
@@ -390,7 +405,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                       borderRadius: t.radius,
                     }}
                   >
-                    <Avatar t={t} name={c.avatarImage || c.name} color={c.color ?? t.surface2} size={32} photoUri={c.avatarImage} />
+                    <Avatar t={t} name={c.avatarImage || c.name} color={c.color ?? t.surface2} size={32} photoUri={c.avatarImage} seed={c.publicKeyB64 || c.aegisId} />
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text }}>
                         {c.name}
@@ -454,7 +469,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
       />
 
 
-      {groups.length === 0 ? (
+      {activeGroups.length === 0 && pendingInvites.length === 0 ? (
         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
           <View
             style={{
@@ -531,9 +546,49 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
         </ScrollView>
       ) : (
         <FlatList
-          data={groups}
+          data={activeGroups}
           keyExtractor={(item) => item.id}
           contentContainerStyle={{ paddingBottom: 22 }}
+          ListHeaderComponent={
+            pendingInvites.length > 0 ? (
+              <View>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.1, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 6 }}>
+                  {i18nT('groups.invitesSection', 'INVITACIONES').toUpperCase()}
+                </Text>
+                {pendingInvites.map((item) => (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => setInviteMenuFor(item)}
+                    style={({ pressed }) => ({
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 12,
+                      paddingHorizontal: 18,
+                      paddingVertical: 14,
+                      backgroundColor: pressed ? t.surface : `${t.accent}0a`,
+                      borderBottomWidth: 1,
+                      borderBottomColor: t.divider,
+                    })}
+                  >
+                    <Avatar t={t} name={item.avatarImage || item.name} color={item.avatarColor || t.accent} size={44} seed={item.id} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>
+                        {item.name}
+                      </Text>
+                      <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 4 }}>
+                        {i18nT('groups.inviteSubtitle', 'Te invitaron a este grupo · toca para responder')}
+                      </Text>
+                    </View>
+                    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99, borderWidth: 1, borderColor: `${t.accent}66` }}>
+                      <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.8 }}>
+                        {i18nT('groups.inviteBadge', 'INVITACIÓN')}
+                      </Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => {
             const previewMsg = previews[item.id];
             const unread = unreadCounts[item.id] ?? 0;
@@ -566,7 +621,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                   backgroundColor: pressed ? t.surface : 'transparent',
                 })}
               >
-                <Avatar t={t} name={item.avatarImage || item.name} color={item.avatarColor || t.accent} size={44} />
+                <Avatar t={t} name={item.avatarImage || item.name} color={item.avatarColor || t.accent} size={44} seed={item.id} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>
@@ -620,7 +675,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                   label: i18nT('groups.leaveGroup'),
                   onPress: () => {
                     const group = menuGroup;
-                    Alert.alert(group.name, i18nT('groups.deleteGroupConfirm'), [
+                    themedAlert(group.name, i18nT('groups.deleteGroupConfirm'), [
                       { text: i18nT('common.cancel'), style: 'cancel' },
                       {
                         text: i18nT('groups.leaveGroup'),
@@ -630,6 +685,34 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
                     ]);
                   },
                   danger: true,
+                },
+              ]
+            : []
+        }
+      />
+
+      {/* Pending invite — Accept / Decline floating menu (consent flow) */}
+      <FloatingMenu
+        t={t}
+        visible={inviteMenuFor !== null}
+        onClose={() => setInviteMenuFor(null)}
+        title={inviteMenuFor?.name}
+        subtitle={i18nT('groups.inviteBadge', 'INVITACIÓN')}
+        items={
+          inviteMenuFor
+            ? [
+                {
+                  key: 'accept',
+                  icon: <I.Check size={20} color={t.accent} />,
+                  label: i18nT('groups.acceptInvite', 'Aceptar invitación'),
+                  onPress: () => { const g = inviteMenuFor; void acceptGroupInvite(g.id); },
+                },
+                {
+                  key: 'decline',
+                  icon: <I.X size={20} color={t.danger} />,
+                  label: i18nT('groups.declineInvite', 'Rechazar'),
+                  danger: true,
+                  onPress: () => { const g = inviteMenuFor; void leaveGroup(g.id); },
                 },
               ]
             : []
@@ -693,7 +776,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
               onPress={() => {
                 const parsed = parseGroupInviteLink(joinLinkInput.trim());
                 if (!parsed) {
-                  Alert.alert(
+                  themedAlert(
                     i18nT('groups.joinByLinkInvalidTitle'),
                     i18nT('groups.joinByLinkInvalidDesc'),
                   );

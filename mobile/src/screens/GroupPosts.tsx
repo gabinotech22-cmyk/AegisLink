@@ -16,9 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  View, Text, TextInput, Pressable, ScrollView, Image, Alert, StyleSheet, Modal,
-} from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Image, StyleSheet, Modal } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Crypto from 'expo-crypto';
@@ -44,6 +42,7 @@ import {
   type ScheduledMessage,
 } from '../store/scheduledMessages';
 import type { StoredGroup } from '../db/local';
+import { themedAlert } from '../components/AlertHost';
 
 interface Props {
   group: StoredGroup;
@@ -218,7 +217,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
   const handlePickImage = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(i18nT('groups.permissionDeniedTitle', 'Permiso denegado'), i18nT('groups.permissionDeniedGallery', 'Se necesita acceso a la galería.'));
+      themedAlert(i18nT('groups.permissionDeniedTitle', 'Permiso denegado'), i18nT('groups.permissionDeniedGallery', 'Se necesita acceso a la galería.'));
       return;
     }
     const result = await withPickingGuard(() =>
@@ -249,7 +248,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
         return { path: dest, name: shortName(rawName) };
       });
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }, [i18nT]);
 
@@ -268,7 +267,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
     if (!result || result.canceled || !result.assets?.[0]) return;
     const asset = result.assets[0];
     if (asset.size != null && asset.size > MAX_FILE_BYTES) {
-      Alert.alert(
+      themedAlert(
         i18nT('groupPosts.fileTooBigTitle', 'Archivo demasiado grande'),
         i18nT('groupPosts.fileTooBigDesc', 'El máximo es 50 MB.'),
       );
@@ -285,7 +284,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
         return { path: dest, name: rawName };
       });
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }, [i18nT]);
 
@@ -330,7 +329,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
       setWhen('tomorrow'); setCustomTs(null);
       setTab('queue');
     } catch (e) {
-      Alert.alert(i18nT('common.error', 'Error'), (e as Error).message);
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
   }, [text, image, file, poll, linkUrl, canPost, scheduleGroupPost, group.id, sendAt, editingId, asGroup, pin, notify, replies, repeat, i18nT]);
 
@@ -354,7 +353,7 @@ export function GroupPostsScreen({ group: groupProp, onBack, initialText }: Prop
   }, [decrypted]);
 
   const handleDelete = useCallback((m: ScheduledMessage) => {
-    Alert.alert(
+    themedAlert(
       i18nT('groupPosts.deleteTitle', 'Eliminar publicación'),
       i18nT('groupPosts.deleteDesc', '¿Eliminar esta publicación programada? No se podrá deshacer.'),
       [
@@ -899,11 +898,11 @@ function PollComposerModal({ t, visible, initial, onClose, onSave }: {
     const q = sanitizePollText(question);
     const opts = options.map(sanitizePollText).filter((o) => o.length > 0);
     if (!q) {
-      Alert.alert(i18nT('poll.missingQuestion', 'Falta la pregunta'), i18nT('poll.missingQuestionDesc', 'Escribe la pregunta de la encuesta.'));
+      themedAlert(i18nT('poll.missingQuestion', 'Falta la pregunta'), i18nT('poll.missingQuestionDesc', 'Escribe la pregunta de la encuesta.'));
       return;
     }
     if (opts.length < 2) {
-      Alert.alert(i18nT('poll.fewOptions', 'Faltan opciones'), i18nT('poll.fewOptionsDesc', 'Añade al menos 2 opciones.'));
+      themedAlert(i18nT('poll.fewOptions', 'Faltan opciones'), i18nT('poll.fewOptionsDesc', 'Añade al menos 2 opciones.'));
       return;
     }
     onSave({ question: q, options: opts });
@@ -985,7 +984,7 @@ function LinkComposerModal({ t, visible, initial, onClose, onSave }: {
     if (u && !/^https?:\/\//i.test(u)) u = `https://${u}`;
     // Minimal sanity: scheme + host with a dot, no spaces.
     if (!/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(u)) {
-      Alert.alert(
+      themedAlert(
         i18nT('groupPosts.badLinkTitle', 'Enlace no válido'),
         i18nT('groupPosts.badLinkDesc', 'Escribe una URL válida (https://…).'),
       );

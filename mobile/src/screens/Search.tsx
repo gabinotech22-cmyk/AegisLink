@@ -356,13 +356,13 @@ function ResultRow({ t, r, onPress, query }: { t: Theme; r: Result; onPress: () 
       style={({ pressed }) => ({ ...row, backgroundColor: pressed ? t.surface : 'transparent' })}
     >
       {r.type === 'message' ? (
-        <Avatar t={t} name={r.chatAvatar || r.chatName} color={r.chatColor ?? t.surface2} size={36} />
+        <Avatar t={t} name={r.chatAvatar || r.chatName} color={r.chatColor ?? t.surface2} size={36} seed={r.chatId} />
       ) : r.type === 'file' ? (
         <View style={tile}>
           <I.Attach size={16} color={t.warn} />
         </View>
       ) : r.type === 'person' ? (
-        <Avatar t={t} name={r.contact.avatarImage || r.contact.name} color={r.contact.color ?? t.surface2} size={36} />
+        <Avatar t={t} name={r.contact.avatarImage || r.contact.name} color={r.contact.color ?? t.surface2} size={36} seed={r.contact.publicKeyB64 || r.contact.aegisId} />
       ) : (
         <View style={tile}>
           <I.Users size={16} color={t.accent} />

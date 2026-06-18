@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ss } from '../utils/secureStore';
 import * as Clipboard from 'expo-clipboard';
@@ -40,6 +40,17 @@ export function PanicScreen({ onBack }: Props) {
   const [remoteToken, setRemoteToken] = useState('');
   const [remoteTokenSig, setRemoteTokenSig] = useState('');
   const [copied, setCopied] = useState(false);
+
+  // Panic confirm modal state
+  // step 0 = closed, step 1 = first confirm, step 2 = final confirm, step 3 = error
+  const [panicStep, setPanicStep] = useState<0 | 1 | 2 | 3>(0);
+  const [wiping, setWiping] = useState(false);
+
+  // PIN modal inline feedback: null = no msg, 'invalid' | 'saved' | 'error'
+  const [pinFeedback, setPinFeedback] = useState<null | 'invalid' | 'saved' | 'error'>(null);
+
+  // Regenerate-token confirm: null = idle, 'confirm' = showing confirm
+  const [regenConfirm, setRegenConfirm] = useState(false);
 
   const resetIdentity = useIdentity((s) => s.reset);
   const identity = useIdentity((s) => s.identity);
@@ -246,16 +257,7 @@ export function PanicScreen({ onBack }: Props) {
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                onPress={() =>
-                  Alert.alert(
-                    i18nT('panic.regenerateConfirmTitle'),
-                    i18nT('panic.regenerateConfirmDesc'),
-                    [
-                      { text: i18nT('common.cancel'), style: 'cancel' },
-                      { text: i18nT('panic.regenerate'), style: 'destructive', onPress: () => void generateAndSaveToken() },
-                    ]
-                  )
-                }
+                onPress={() => setRegenConfirm(true)}
                 style={({ pressed }) => ({
                   borderWidth: 1,
                   borderColor: t.borderStrong,
@@ -352,39 +354,7 @@ export function PanicScreen({ onBack }: Props) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={i18nT('panic.activatePanic')}
-            onPress={() => {
-              Alert.alert(
-                i18nT('panic.activatePanicTitle'),
-                i18nT('panic.activatePanicDesc'),
-                [
-                  { text: i18nT('common.cancel'), style: 'cancel' },
-                  {
-                    text: i18nT('panic.wipeAll'),
-                    style: 'destructive',
-                    onPress: () =>
-                      Alert.alert(
-                        i18nT('panic.areYouSure'),
-                        i18nT('panic.cannotUndo'),
-                        [
-                          { text: i18nT('common.cancel'), style: 'cancel' },
-                          {
-                            text: i18nT('panic.wipeAllCaps'),
-                            style: 'destructive',
-                            onPress: async () => {
-                              try {
-                                await wipeDatabase();
-                                await resetIdentity();
-                              } catch (e) {
-                                if (__DEV__) console.error('[panic] wipe failed', e);
-                              }
-                            },
-                          },
-                        ]
-                      ),
-                  },
-                ]
-              );
-            }}
+            onPress={() => setPanicStep(1)}
             style={({ pressed }) => ({
               backgroundColor: t.danger,
               paddingVertical: 14,
@@ -399,6 +369,172 @@ export function PanicScreen({ onBack }: Props) {
           </Pressable>
         </View>
       </ScrollView>
+
+      {/* Panic Confirm Modal — two-step destructive confirmation, fully themed */}
+      <Modal visible={panicStep !== 0} transparent animationType="fade">
+        <View style={styles.modalBg}>
+          <View style={[styles.modalContent, { backgroundColor: t.surface, borderColor: t.danger }]}>
+            {/* Step 1: First confirmation */}
+            {panicStep === 1 && (
+              <>
+                <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                  <View style={{
+                    width: 52, height: 52, borderRadius: 26,
+                    backgroundColor: `${t.danger}22`,
+                    borderWidth: 1, borderColor: `${t.danger}66`,
+                    alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+                  }}>
+                    <I.Shield size={26} stroke={1.8} color={t.danger} />
+                  </View>
+                  <Text style={[styles.modalTitle, { color: t.danger, fontFamily: t.fontDisplay }]}>
+                    {i18nT('panic.activatePanicTitle')}
+                  </Text>
+                </View>
+                <Text style={{ color: t.textDim, fontFamily: t.font, fontSize: 13, marginBottom: 20, lineHeight: 18, textAlign: 'center' }}>
+                  {i18nT('panic.activatePanicDesc')}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={i18nT('common.cancel')}
+                    onPress={() => setPanicStep(0)}
+                    style={{
+                      flex: 1, borderWidth: 1, borderColor: t.borderStrong,
+                      paddingVertical: 12, borderRadius: t.radiusS, alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ color: t.text, fontFamily: t.font, fontWeight: '500' }}>
+                      {i18nT('common.cancel')}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={i18nT('panic.wipeAll')}
+                    onPress={() => setPanicStep(2)}
+                    style={{
+                      flex: 1, backgroundColor: t.danger,
+                      paddingVertical: 12, borderRadius: t.radiusS, alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontFamily: t.font, fontWeight: '600' }}>
+                      {i18nT('panic.wipeAll')}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+
+            {/* Step 2: Final confirmation */}
+            {panicStep === 2 && (
+              <>
+                <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                  <View style={{
+                    width: 52, height: 52, borderRadius: 26,
+                    backgroundColor: t.danger,
+                    alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+                  }}>
+                    <I.Shield size={26} stroke={2} color="#fff" />
+                  </View>
+                  <Text style={[styles.modalTitle, { color: t.danger, fontFamily: t.fontDisplay }]}>
+                    {i18nT('panic.areYouSure')}
+                  </Text>
+                </View>
+                <Text style={{ color: t.text, fontFamily: t.fontMono, fontSize: 12, letterSpacing: 0.3, marginBottom: 6, textAlign: 'center' }}>
+                  {i18nT('panic.cannotUndo')}
+                </Text>
+                <Text style={{ color: t.textDim, fontFamily: t.font, fontSize: 12, marginBottom: 20, lineHeight: 17, textAlign: 'center' }}>
+                  {i18nT('panic.activatePanicDesc')}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={i18nT('common.cancel')}
+                    onPress={() => setPanicStep(0)}
+                    disabled={wiping}
+                    style={{
+                      flex: 1, borderWidth: 1, borderColor: t.borderStrong,
+                      paddingVertical: 12, borderRadius: t.radiusS, alignItems: 'center',
+                      opacity: wiping ? 0.4 : 1,
+                    }}
+                  >
+                    <Text style={{ color: t.text, fontFamily: t.font, fontWeight: '500' }}>
+                      {i18nT('common.cancel')}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={i18nT('panic.wipeAllCaps')}
+                    disabled={wiping}
+                    onPress={async () => {
+                      setWiping(true);
+                      try {
+                        await wipeDatabase();
+                        await resetIdentity();
+                        // resetIdentity sets identity → null → App.tsx navigates to onboarding.
+                        // Modal will unmount with the screen; no need to reset panicStep.
+                      } catch {
+                        setWiping(false);
+                        setPanicStep(3);
+                      }
+                    }}
+                    style={({ pressed }) => ({
+                      flex: 1, backgroundColor: t.danger,
+                      paddingVertical: 12, borderRadius: t.radiusS, alignItems: 'center',
+                      opacity: wiping || pressed ? 0.7 : 1,
+                    })}
+                  >
+                    <Text style={{ color: '#fff', fontFamily: t.fontMono, fontWeight: '700', fontSize: 13, letterSpacing: 0.8 }}>
+                      {wiping ? '...' : i18nT('panic.wipeAllCaps')}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+
+            {/* Step 3: Error state — wipe failed */}
+            {panicStep === 3 && (
+              <>
+                <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                  <Text style={[styles.modalTitle, { color: t.danger, fontFamily: t.fontDisplay }]}>
+                    {i18nT('panic.wipeFailed')}
+                  </Text>
+                </View>
+                <Text style={{ color: t.textDim, fontFamily: t.font, fontSize: 13, marginBottom: 20, lineHeight: 18, textAlign: 'center' }}>
+                  {i18nT('panic.wipeFailedDesc')}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={i18nT('common.cancel')}
+                    onPress={() => setPanicStep(0)}
+                    style={{
+                      flex: 1, borderWidth: 1, borderColor: t.borderStrong,
+                      paddingVertical: 12, borderRadius: t.radiusS, alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ color: t.text, fontFamily: t.font, fontWeight: '500' }}>
+                      {i18nT('common.cancel')}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={i18nT('common.retry')}
+                    onPress={() => setPanicStep(2)}
+                    style={{
+                      flex: 1, backgroundColor: t.danger,
+                      paddingVertical: 12, borderRadius: t.radiusS, alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontFamily: t.font, fontWeight: '600' }}>
+                      {i18nT('common.retry')}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Change Duress PIN Modal */}
       <Modal visible={isEditingPin} transparent animationType="fade">
@@ -433,13 +569,39 @@ export function PanicScreen({ onBack }: Props) {
                 letterSpacing: 8,
               }}
             />
+            {/* Inline feedback row — replaces Alert.alert for invalid/saved/error */}
+            {pinFeedback !== null && (
+              <View style={{
+                backgroundColor: pinFeedback === 'saved' ? `${t.accent}22` : `${t.danger}22`,
+                borderWidth: 1,
+                borderColor: pinFeedback === 'saved' ? t.accent : t.danger,
+                borderRadius: t.radiusS,
+                padding: 10,
+                marginBottom: 12,
+              }}>
+                <Text style={{
+                  fontFamily: t.font, fontSize: 12, lineHeight: 16,
+                  color: pinFeedback === 'saved' ? t.accent : t.danger,
+                  textAlign: 'center',
+                }}>
+                  {pinFeedback === 'invalid'
+                    ? i18nT('panic.invalidPinDesc')
+                    : pinFeedback === 'saved'
+                      ? i18nT('panic.pinSavedDesc')
+                      : i18nT('panic.pinSaveErrorDesc')}
+                </Text>
+              </View>
+            )}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={i18nT('panic.savePinBtn')}
                 onPress={() => {
                   if (tempPin.length < 4 || tempPin.length > 6) {
-                    Alert.alert(i18nT('panic.invalidPin'), i18nT('panic.invalidPinDesc'));
+                    setPinFeedback('invalid');
                     return;
                   }
+                  setPinFeedback(null);
                   const len = tempPin.length;
                   void (async () => {
                     try {
@@ -447,10 +609,14 @@ export function PanicScreen({ onBack }: Props) {
                       setPinLength(len);
                       await persist({ pinHash, pinLength: len, pinValue: undefined });
                       setTempPin('');
-                      setIsEditingPin(false);
-                      Alert.alert(i18nT('panic.pinSaved'), i18nT('panic.pinSavedDesc'));
+                      setPinFeedback('saved');
+                      // Close after a brief moment so the user sees the confirmation.
+                      setTimeout(() => {
+                        setIsEditingPin(false);
+                        setPinFeedback(null);
+                      }, 1200);
                     } catch {
-                      Alert.alert(i18nT('panic.pinSaveError'), i18nT('panic.pinSaveErrorDesc'));
+                      setPinFeedback('error');
                     }
                   })();
                 }}
@@ -467,7 +633,9 @@ export function PanicScreen({ onBack }: Props) {
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => setIsEditingPin(false)}
+                accessibilityRole="button"
+                accessibilityLabel={i18nT('common.cancel')}
+                onPress={() => { setIsEditingPin(false); setPinFeedback(null); }}
                 style={{
                   flex: 1,
                   borderWidth: 1,
@@ -479,6 +647,47 @@ export function PanicScreen({ onBack }: Props) {
               >
                 <Text style={{ color: t.text, fontFamily: t.font, fontWeight: '500' }}>
                   {i18nT('common.cancel')}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {/* Regenerate token confirm modal */}
+      <Modal visible={regenConfirm} transparent animationType="fade">
+        <View style={styles.modalBg}>
+          <View style={[styles.modalContent, { backgroundColor: t.surface, borderColor: t.border }]}>
+            <Text style={[styles.modalTitle, { color: t.text, fontFamily: t.fontDisplay }]}>
+              {i18nT('panic.regenerateConfirmTitle')}
+            </Text>
+            <Text style={{ color: t.textDim, fontFamily: t.font, fontSize: 13, marginBottom: 20, lineHeight: 18 }}>
+              {i18nT('panic.regenerateConfirmDesc')}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={i18nT('common.cancel')}
+                onPress={() => setRegenConfirm(false)}
+                style={{
+                  flex: 1, borderWidth: 1, borderColor: t.borderStrong,
+                  paddingVertical: 12, borderRadius: t.radiusS, alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: t.text, fontFamily: t.font, fontWeight: '500' }}>
+                  {i18nT('common.cancel')}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={i18nT('panic.regenerate')}
+                onPress={() => { setRegenConfirm(false); void generateAndSaveToken(); }}
+                style={{
+                  flex: 1, backgroundColor: t.danger,
+                  paddingVertical: 12, borderRadius: t.radiusS, alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: '#fff', fontFamily: t.font, fontWeight: '600' }}>
+                  {i18nT('panic.regenerate')}
                 </Text>
               </Pressable>
             </View>
