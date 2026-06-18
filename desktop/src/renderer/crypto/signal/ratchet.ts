@@ -27,6 +27,13 @@ export interface RatchetState {
     aliceEKB64: string;
     spkId: number;
     opkId: number | null;
+    /**
+     * PQXDH (v2): base64 ML-KEM-768 ciphertext (1088 bytes) produced by the
+     * sender encapsulating to the recipient's PQSPK. Present iff the handshake
+     * negotiated v2; rides inside the sealed init so the recipient can
+     * decapsulate. Absent ⇒ classic v1 handshake.
+     */
+    pqCtB64?: string;
   };
 
   // Wall-clock time (ms) at which this session was established via X3DH. Used by

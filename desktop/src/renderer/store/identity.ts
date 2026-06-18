@@ -89,7 +89,7 @@ async function doPublishToServer(identity: Identity): Promise<boolean> {
     // SPK whose secret is unreadable makes every inbound X3DH abort ("no-spk").
     // Dynamic import keeps the store ↔ socket module cycle lazy, matching the
     // broadcastProfileUpdate pattern above.
-    const { persistPrekeySecrets } = await import('../socket/client');
+    const { persistPrekeySecrets, persistPqSpkSecret } = await import('../socket/client');
     const persisted = await persistPrekeySecrets({
       signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
       opkSecrets: preKeys.opkSecrets,
@@ -98,6 +98,14 @@ async function doPublishToServer(identity: Identity): Promise<boolean> {
       if (DEV) console.warn('[identity] publish aborted: could not persist prekey secrets');
       return false;
     }
+
+    // PQXDH (v2): persist the PQSPK secret with the same readback invariant. If
+    // it fails we publish a v1-safe bundle (omit pqSignedPreKey) rather than
+    // advertising a PQ prekey we cannot decapsulate later.
+    const pqSpkOk = await persistPqSpkSecret(
+      preKeys.pqSignedPreKey.keyId,
+      preKeys.pqSignedPreKey.secretKey,
+    );
 
     const result = await uploadIdentityAndPrekeys(
       identity,
@@ -114,6 +122,13 @@ async function doPublishToServer(identity: Identity): Promise<boolean> {
         publicKeyB64: preKeys.signedPreKey.publicKeyB64,
         signatureB64: preKeys.signedPreKey.signatureB64,
       },
+      pqSpkOk
+        ? {
+            keyId: preKeys.pqSignedPreKey.keyId,
+            publicKeyB64: preKeys.pqSignedPreKey.publicKeyB64,
+            signatureB64: preKeys.pqSignedPreKey.signatureB64,
+          }
+        : null,
     );
     if (!result.ok) {
       if (DEV) console.warn('[identity] publish failed:', result.error);

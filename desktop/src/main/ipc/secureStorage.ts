@@ -24,7 +24,7 @@ function assertKeyAllowed(key: string): void {
   // (grep for `aegis.` literals under src/renderer). Keep in sync when adding
   // new keys — a miss here fails silently at the feature level.
   const pattern =
-    /^aegis\.(?:[a-zA-Z0-9_\-]+\.)?(secretKey\.b64|signSecretKey\.b64|activeProfile|activeSlotId|slotsList|displayName|avatarColor|avatarImage|profileStatus|workDisplayName|workAvatarColor|workAvatarImage|workProfileStatus|panic\.v1|preferences\.v1|polls\.v1|identity\.v1|prekeys\.v1|prekeysPublished|pin\.v1|group\.v1|deviceId|scheduled\.desktop\.v1|spkSecret\.b64|spkSecret\.\d+|spk\.keyId|opkIds\.json|opkSecret\.\d+|self\.ratchet\.[0-9A-HJKMNP-TV-Z\-]+)$/
+    /^aegis\.(?:[a-zA-Z0-9_\-]+\.)?(secretKey\.b64|signSecretKey\.b64|activeProfile|activeSlotId|slotsList|displayName|avatarColor|avatarImage|profileStatus|workDisplayName|workAvatarColor|workAvatarImage|workProfileStatus|panic\.v1|preferences\.v1|polls\.v1|identity\.v1|prekeys\.v1|prekeysPublished|pin\.v1|group\.v1|deviceId|scheduled\.desktop\.v1|spkSecret\.b64|spkSecret\.\d+|spk\.keyId|pqSpkSecret\.\d+|pqSpk\.keyId|secdiag\.v1|opkIds\.json|opkSecret\.\d+|self\.ratchet\.[0-9A-HJKMNP-TV-Z\-]+)$/
   if (!pattern.test(key)) {
     throw new Error('Access denied: key is not whitelisted for renderer access')
   }
@@ -113,5 +113,26 @@ export function registerSecureStorageHandlers(): void {
     const keystore = readKeystore()
     delete keystore[key]
     writeKeystore(keystore)
+  })
+
+  // Panic-wipe support: remove every PREKEY SECRET from the keystore. The SQL
+  // wipe (db:wipe-database) only clears tables; prekey secrets (SPK/OPK/PQSPK,
+  // including the 2400-byte ML-KEM-768 PQSPK) live here and would otherwise
+  // survive a panic. We also clear the local-only security diagnostics counter.
+  // Keys are matched by pattern so unknown keyIds are covered without the
+  // renderer having to enumerate them.
+  ipcMain.handle('secureStorage:wipe-prekeys', (event): void => {
+    assertTrustedSender(event)
+    const pattern =
+      /^aegis\.(?:[a-zA-Z0-9_\-]+\.)?(spkSecret\.b64|spkSecret\.\d+|spk\.keyId|pqSpkSecret\.\d+|pqSpk\.keyId|opkIds\.json|opkSecret\.\d+|secdiag\.v1)$/
+    const keystore = readKeystore()
+    let changed = false
+    for (const key of Object.keys(keystore)) {
+      if (pattern.test(key)) {
+        delete keystore[key]
+        changed = true
+      }
+    }
+    if (changed) writeKeystore(keystore)
   })
 }

@@ -259,6 +259,10 @@ export async function getGroup(id: string): Promise<StoredGroup | null> {
 export async function wipeDatabase(): Promise<void> {
   await secureStorage().delete(getSecretKeySlot());
   await secureStorage().delete(getSignSecretKeySlot());
+  // Prekey secrets (SPK/OPK/PQSPK incl. the 2400-byte ML-KEM-768 PQSPK) live in
+  // the keystore, NOT the SQL DB — the table wipe below would leave them intact.
+  // Panic must leave nothing recoverable.
+  await secureStorage().wipePrekeys().catch(() => {});
   await db().wipeDatabase(activeSlot);
   await secureStorage().delete('aegis.panic.v1').catch(() => {});
   await secureStorage().delete('aegis.preferences.v1').catch(() => {});
