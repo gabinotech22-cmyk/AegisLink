@@ -27,6 +27,9 @@ export interface GroupCallState {
   muted: boolean;
   startedAt: number | null;
 
+  /** When true, GroupChatScreen is NOT handling the call UI → FloatingGroupCallBar shows. */
+  minimized: boolean;
+
   // actions
   startOutgoing: (callId: string, groupId: string, groupName: string, members: string[]) => void;
   startIncoming: (callId: string, groupId: string, groupName: string, initiator: string) => void;
@@ -36,6 +39,7 @@ export interface GroupCallState {
   setLocalStream: (stream: MediaStream | null) => void;
   setStatus: (status: GroupCallStatus) => void;
   setMuted: (muted: boolean) => void;
+  setMinimized: (minimized: boolean) => void;
   reset: () => void;
 }
 
@@ -49,6 +53,7 @@ const initial = {
   localStream: null,
   muted: false,
   startedAt: null,
+  minimized: false,
 };
 
 export const useGroupCall = create<GroupCallState>((set) => ({
@@ -115,6 +120,8 @@ export const useGroupCall = create<GroupCallState>((set) => ({
     })),
 
   setMuted: (muted) => set({ muted }),
+
+  setMinimized: (minimized) => set({ minimized }),
 
   reset: () => set({ ...initial }),
 }));
