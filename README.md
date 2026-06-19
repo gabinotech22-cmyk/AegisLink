@@ -27,8 +27,12 @@ keeps no logs of who talks to whom.
 
 - **Identity**: generated on-device (Ed25519 + X25519 via TweetNaCl). Your
   address is a random Aegis ID — nothing personal.
-- **1:1 chat**: Double Ratchet with X3DH key agreement, sealed-sender
-  envelopes. The relay routes opaque ciphertext only.
+- **1:1 chat**: Double Ratchet with X3DH key agreement (hybrid post-quantum
+  PQXDH). The relay routes opaque ciphertext and keeps no logs of who talks to
+  whom. Sender identity is never persisted (sealed-sender at rest); full
+  transport-level sealed-sender — hiding the sender from the relay process
+  itself — is in active development (see
+  [docs/SEALED-SENDER-ARCHITECTURE.md](docs/SEALED-SENDER-ARCHITECTURE.md)).
 - **Calls (1:1 and group)**: WebRTC with DTLS-SRTP media encryption. SDP
   offers/answers and ICE candidates are sealed with NaCl `box` before they
   reach the relay, so the server never sees IPs, DTLS fingerprints or codecs
@@ -97,3 +101,7 @@ defensive commitment to keep the project free of patent threats.
 See [SECURITY.md](SECURITY.md) for the vulnerability disclosure policy, and
 [docs/LEGAL.md](docs/LEGAL.md) for what we can — and cannot — produce in
 response to a legal order.
+
+Internal hardening is tracked openly in
+[docs/SECURITY-ROADMAP-2026-06.md](docs/SECURITY-ROADMAP-2026-06.md). An
+independent third-party audit is still pending (see the status note above).
