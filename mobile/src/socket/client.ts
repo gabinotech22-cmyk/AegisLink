@@ -3,9 +3,11 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { SERVER_URL, ONION_URL } from '../config';
+import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION } from '../config';
 import { usePreferences } from '../store/preferences';
-import { encryptMessage, openEnvelope } from '../crypto/messaging';
+import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2 } from '../crypto/messaging';
+import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
+import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { deriveAegisId } from '../crypto/identity';
 import { useContacts } from '../store/contacts';
@@ -108,6 +110,20 @@ interface WireSealedEnvelope {
    * a malicious relay cannot strip it without invalidating the MAC.
    */
   selfCopy?: boolean;
+}
+
+/**
+ * Sealed-sender v2 wire (Phase 1). NO `from` and NO senderPublicKeyB64 — the
+ * sender identity is sealed inside `ciphertext` and authenticated by the inner
+ * Ed25519 signature. `epk` is the per-message ephemeral key needed to open it.
+ */
+interface WireSealedEnvelopeV2 {
+  id: string;
+  to: string;
+  ciphertext: string;
+  nonce: string;
+  epk: string;
+  createdAt?: number;
 }
 
 /** SecureStore slot for the long-term self-ratchet session (per identity). */
@@ -735,6 +751,20 @@ export function connect(identity: Identity): Socket {
       }
     })();
 
+    // Sealed-sender v2: register the HASH of our delivery token so contacts can
+    // submit sealed envelopes to us. Only the hash leaves the device; the raw
+    // token reaches contacts inside our E2EE profile_update (see below).
+    if (SEALED_TRANSPORT_VERSION === 'v2') {
+      void (async () => {
+        try {
+          const raw = await getOwnDeliveryToken();
+          socket!.emit('deliveryToken:register', { tokenHashB64: hashDeliveryToken(raw) });
+        } catch (e) {
+          if (__DEV__) console.warn('[socket] deliveryToken register failed:', e);
+        }
+      })();
+    }
+
     const count = res?.opkCount ?? 0;
     if (count < 20) {
       try {
@@ -809,6 +839,14 @@ export function connect(identity: Identity): Socket {
   socket.on('envelope', async (env: WireSealedEnvelope) => {
     rdiag(`[RDIAG] envelope RECV from=${env.from ?? '(none)'} hasSenderPub=${!!env.senderPublicKeyB64} self=${!!env.selfCopy}`);
     await handleIncoming(env, identity);
+  });
+
+  // Sealed-sender v2: no `from` on the wire. The ephemeral box opens with our
+  // secret + epk alone; the inner signature authenticates the sender. Reuses the
+  // exact same downstream as v1 via decryptAndAppend.
+  socket.on('envelope:v2', async (env: WireSealedEnvelopeV2) => {
+    rdiag(`[RDIAG] envelope:v2 RECV id=${env.id}`);
+    await handleIncomingV2(env, identity);
   });
 
   // ── Group re-key fan-out (forward secrecy on member removal) ─────────────────
@@ -1772,6 +1810,11 @@ async function decryptAndAppend(
             parsedPayload.senderStatus ?? undefined
           );
         }
+        // Sealed-sender v2: store the contact's delivery token (shared inside
+        // this E2EE profile) so we can present it when sending them v2 envelopes.
+        if (typeof parsedPayload.deliveryToken === 'string' && parsedPayload.deliveryToken) {
+          try { await setContactDeliveryToken(contact.aegisId, parsedPayload.deliveryToken); } catch { /* non-fatal */ }
+        }
         await saveSessionState(contact.aegisId, ratchetState);
         return true;
       }
@@ -2588,6 +2631,53 @@ async function decryptAndAppend(
   return true;
 }
 
+/**
+ * Returns `{ deliveryToken }` (our own raw token) when v2 is enabled, else `{}`.
+ * Spread into profile_update payloads so contacts learn our token over E2EE and
+ * can later send us sealed v2 envelopes. No-op (and no token generated) under v1.
+ */
+async function ownDeliveryTokenField(): Promise<Record<string, string>> {
+  if (SEALED_TRANSPORT_VERSION !== 'v2') return {};
+  try { return { deliveryToken: await getOwnDeliveryToken() }; } catch { return {}; }
+}
+
+async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
+  const contacts = useContacts.getState().contacts;
+  // Resolve the sender's Ed25519 signing key by the `from` recovered from inside
+  // the sealed box. Unknown sender (or no signing key on file) → reject: v2 is
+  // restricted to established contacts (first contact bootstraps over v1).
+  const resolveSigningKey = (from: string): Uint8Array | null => {
+    const c = contacts.find((x) => x.aegisId === from);
+    if (!c?.signingPublicKeyB64) return null;
+    try { return decodeBase64(c.signingPublicKeyB64); } catch { return null; }
+  };
+
+  const inner = openEnvelopeV2(
+    { ciphertext: env.ciphertext, nonce: env.nonce, epk: env.epk },
+    identity.secretKey,
+    resolveSigningKey,
+    Date.now(),
+  );
+  if (!inner) {
+    if (__DEV__) console.warn('[socket] envelope:v2 failed to open/authenticate — dropping');
+    return;
+  }
+
+  const contact = contacts.find((c) => c.aegisId === inner.from);
+  if (!contact || contact.blocked) return;
+
+  // Reuse the v1 downstream (ratchet decrypt + glare/desync recovery + dispatch).
+  const synthEnv: WireSealedEnvelope = {
+    id: env.id,
+    to: env.to,
+    from: inner.from,
+    ciphertext: env.ciphertext,
+    nonce: env.nonce,
+    createdAt: env.createdAt,
+  };
+  await decryptAndAppend(synthEnv, inner, contact, identity);
+}
+
 async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
   // Multi-device self-copy fast path — routed BEFORE contact matching so a
   // self-copy never falls through to the regular incoming-message handler
@@ -3174,20 +3264,45 @@ export async function sendMessage(opts: {
   }
 
   const session = await getOrCreateSession(opts.recipientAegisId, recipientPublicKeyB64, opts.identity);
-  const { envelope, newState } = encryptMessage(
-    payload,
-    opts.identity.aegisId,
-    opts.recipientPublicKey,
-    opts.identity.secretKey,
-    session,
-  );
+
+  // ── Sealed-sender transport selector (v1 vs v2) ─────────────────────────────
+  // Use v2 only when: the flag is on, the session is ESTABLISHED (no pending
+  // x3dhInit — first contact must bootstrap over v1), and we already hold the
+  // recipient's delivery token (shared earlier over E2EE). Otherwise fall back
+  // to v1 — the recipient handles both wires.
+  const v2Token =
+    SEALED_TRANSPORT_VERSION === 'v2' && !session.x3dhInit
+      ? await getContactDeliveryToken(opts.recipientAegisId)
+      : null;
+
+  let emitEvent: 'envelope' | 'envelope:v2';
+  let emitPayload: Record<string, unknown>;
+  let newState: RatchetState;
+  if (v2Token) {
+    const r = encryptMessageV2(
+      payload,
+      opts.identity.aegisId,
+      opts.recipientPublicKey,
+      opts.identity.signingSecretKey,
+      session,
+      Date.now(),
+    );
+    newState = r.newState;
+    emitEvent = 'envelope:v2';
+    emitPayload = { id, to: opts.recipientAegisId, ciphertext: r.wire.ciphertext, nonce: r.wire.nonce, epk: r.wire.epk, deliveryToken: v2Token };
+  } else {
+    const r = encryptMessage(payload, opts.identity.aegisId, opts.recipientPublicKey, opts.identity.secretKey, session);
+    newState = r.newState;
+    emitEvent = 'envelope';
+    emitPayload = { id, to: opts.recipientAegisId, ciphertext: r.envelope.ciphertextB64, nonce: r.envelope.nonceB64 };
+  }
   await saveSessionState(opts.recipientAegisId, newState);
 
   try {
     await new Promise<void>((resolve, reject) => {
       socket!.emit(
-        'envelope',
-        { id, to: opts.recipientAegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 },
+        emitEvent,
+        emitPayload,
         (ack: { ok: boolean; queued?: boolean; error?: string } | undefined) => {
           if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
           else resolve();
@@ -3300,6 +3415,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
         senderColor,
         senderImage,
         senderStatus,
+        ...(await ownDeliveryTokenField()),
       });
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
       const isInit = !!session.x3dhInit;
@@ -3337,6 +3453,7 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
     senderColor: idState.avatarColor,
     senderImage,
     senderStatus: idState.profileStatus,
+    ...(await ownDeliveryTokenField()),
   });
 
   // Persist the first-contact profile/init in the outbox so it is retried on the
