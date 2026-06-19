@@ -35,10 +35,19 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const PORT = Number(process.env.PORT ?? 3001);
-// Default '*' so React Native / Expo Go (which doesn't send a stable Origin)
-// can connect from physical phones on LAN. Lock down to specific hosts in prod
-// by setting CORS_ORIGIN=https://yourdomain.com,...
-const ORIGIN = process.env.CORS_ORIGIN ?? '*';
+const IS_PROD = process.env.NODE_ENV === 'production';
+// Dev defaults to '*' so React Native / Expo Go (which doesn't send a stable
+// Origin) can connect from physical phones on LAN. In PRODUCTION we refuse to
+// default to '*' (fail closed, golden rule #6): browser origins must match the
+// explicit CORS_ORIGIN allowlist (plus the known own-domain below). Origin-less
+// clients (native mobile, Electron file://, curl) are unaffected either way.
+const ORIGIN = process.env.CORS_ORIGIN ?? (IS_PROD ? '' : '*');
+if (IS_PROD && !process.env.CORS_ORIGIN) {
+  console.warn(
+    '[aegislink-server] CORS_ORIGIN not set in production — browser CORS is ' +
+      'restricted to the known own-domain. Set CORS_ORIGIN to allow other origins.'
+  );
+}
 
 const app = express();
 

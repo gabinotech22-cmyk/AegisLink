@@ -30,44 +30,62 @@ function getDbKey(slot = 'self'): Uint8Array {
   const keystore = readKeystore()
   const encoded = keystore[slotKey]
   if (!encoded) {
+    // First run for this slot: generate and persist a fresh DB key.
+    if (!safeStorage.isEncryptionAvailable() && app.isPackaged) {
+      // Production: never store the DB key in plaintext. Fail closed so the
+      // caller surfaces a real error instead of silently downgrading at-rest
+      // encryption. (Golden rule #1/#6: encryption never degrades silently;
+      // production fails closed.)
+      throw new Error(
+        'AegisLink: OS secure storage unavailable — cannot create DB key securely.'
+      )
+    }
     const keyBytes = nacl.randomBytes(32)
     const rawVal = encodeBase64(keyBytes)
     if (safeStorage.isEncryptionAvailable()) {
       keystore[slotKey] = 'enc:' + safeStorage.encryptString(rawVal).toString('base64')
     } else {
+      // Dev-only fallback (NOT encrypted) for local development.
       keystore[slotKey] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
     }
     writeKeystore(keystore)
     cachedDbKey = keyBytes
-  } else {
-    try {
-      let decrypted = ''
-      if (encoded.startsWith('plain:')) {
-        decrypted = Buffer.from(encoded.slice(6), 'base64').toString('utf-8')
-      } else {
-        const raw = encoded.startsWith('enc:') ? encoded.slice(4) : encoded
-        decrypted = safeStorage.decryptString(Buffer.from(raw, 'base64'))
-      }
-      cachedDbKey = decodeBase64(decrypted)
-    } catch {
-      const keyBytes = nacl.randomBytes(32)
-      cachedDbKey = keyBytes
-    }
+    return cachedDbKey
   }
-  return cachedDbKey
+  // Existing key: decrypt it. If this fails we MUST NOT silently mint a new
+  // key — that would orphan every previously-encrypted row (silent total
+  // history loss). Surface the error so the caller can offer recovery.
+  try {
+    let decrypted = ''
+    if (encoded.startsWith('plain:')) {
+      decrypted = Buffer.from(encoded.slice(6), 'base64').toString('utf-8')
+    } else {
+      const raw = encoded.startsWith('enc:') ? encoded.slice(4) : encoded
+      decrypted = safeStorage.decryptString(Buffer.from(raw, 'base64'))
+    }
+    const key = decodeBase64(decrypted)
+    if (key.length !== 32) throw new Error('decrypted DB key has invalid length')
+    cachedDbKey = key
+    return cachedDbKey
+  } catch (e) {
+    throw new Error(
+      'AegisLink: failed to decrypt the local DB key — refusing to regenerate ' +
+        '(would orphan existing encrypted data). ' +
+        (e instanceof Error ? e.message : String(e))
+    )
+  }
 }
 
 function encryptBody(body: string, slot = 'self'): string {
-  try {
-    const key = getDbKey(slot)
-    const nonce = nacl.randomBytes(nacl.secretbox.nonceLength)
-    const bodyBytes = new TextEncoder().encode(body)
-    const encrypted = nacl.secretbox(bodyBytes, nonce, key)
-    const result = { ct: encodeBase64(encrypted), n: encodeBase64(nonce) }
-    return 'encv1:' + JSON.stringify(result)
-  } catch {
-    return body
-  }
+  // No try/catch: a cipher failure MUST propagate. Returning the plaintext
+  // body here would silently persist cleartext (incl. ratchet state) to disk.
+  // (Golden rule #1: encryption never degrades silently.)
+  const key = getDbKey(slot)
+  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength)
+  const bodyBytes = new TextEncoder().encode(body)
+  const encrypted = nacl.secretbox(bodyBytes, nonce, key)
+  const result = { ct: encodeBase64(encrypted), n: encodeBase64(nonce) }
+  return 'encv1:' + JSON.stringify(result)
 }
 
 function decryptBody(encryptedBody: string, slot = 'self'): string {
