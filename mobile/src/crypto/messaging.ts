@@ -202,20 +202,24 @@ export function encryptMessageV2(
  * signing pubkey) and binds it to the inner `from` claim before ratcheting.
  * Returns null on ANY failure (caller falls back / drops).
  */
-export function decryptMessageV2(
+/**
+ * Open ONLY the sealed-sender v2 OUTER envelope, returning the inner ratchet
+ * payload (NOT yet ratchet-decrypted) — the analogue of v1 `openEnvelope`. Lets
+ * the live receive path reuse the exact same downstream (`decryptAndAppend`:
+ * session load, ratchet decrypt, glare/desync recovery, dispatch). Authenticates
+ * the sender's signature and binds it to the inner `from` claim.
+ */
+export function openEnvelopeV2(
   wire: SealedWire,
   myBoxSecretKey: Uint8Array,
   resolveSigningKey: (from: string) => Uint8Array | null,
-  ratchetState: RatchetState,
   nowMs: number,
-): DecryptedInner | null {
+): InnerPayload | null {
   const opened = openSealedEnvelope(wire, myBoxSecretKey, resolveSigningKey, nowMs);
   if (!opened) return null;
-
   let parsed: InnerPayload | null;
   try {
-    const innerBytes = decodeBase64(opened.payload);
-    parsed = unpad(innerBytes) as InnerPayload | null;
+    parsed = unpad(decodeBase64(opened.payload)) as InnerPayload | null;
   } catch {
     return null;
   }
@@ -223,6 +227,18 @@ export function decryptMessageV2(
   if (typeof parsed.from !== 'string' || !parsed.ratchet) return null;
   // The authenticated sealed `from` MUST match the inner claim.
   if (parsed.from !== opened.from) return null;
+  return parsed;
+}
+
+export function decryptMessageV2(
+  wire: SealedWire,
+  myBoxSecretKey: Uint8Array,
+  resolveSigningKey: (from: string) => Uint8Array | null,
+  ratchetState: RatchetState,
+  nowMs: number,
+): DecryptedInner | null {
+  const parsed = openEnvelopeV2(wire, myBoxSecretKey, resolveSigningKey, nowMs);
+  if (!parsed) return null;
 
   const working = cloneRatchetState(ratchetState);
   try {
@@ -238,7 +254,7 @@ export function decryptMessageV2(
       decodeBase64(parsed.ratchet.nonceB64),
     );
     if (!plaintextBytes) return null;
-    return { from: opened.from, body: encodeUTF8(plaintextBytes), newState: working };
+    return { from: parsed.from, body: encodeUTF8(plaintextBytes), newState: working };
   } catch {
     return null;
   }

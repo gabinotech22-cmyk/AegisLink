@@ -176,6 +176,26 @@ export function encryptMessageV2(
   return { wire, newState };
 }
 
+export function openEnvelopeV2(
+  wire: SealedWire,
+  myBoxSecretKey: Uint8Array,
+  resolveSigningKey: (from: string) => Uint8Array | null,
+  nowMs: number,
+): InnerPayload | null {
+  const opened = openSealedEnvelope(wire, myBoxSecretKey, resolveSigningKey, nowMs);
+  if (!opened) return null;
+  let parsed: InnerPayload | null;
+  try {
+    parsed = unpad(decodeBase64(opened.payload)) as InnerPayload | null;
+  } catch {
+    return null;
+  }
+  if (!parsed || parsed.v !== PROTOCOL_VERSION) return null;
+  if (typeof parsed.from !== 'string' || !parsed.ratchet) return null;
+  if (parsed.from !== opened.from) return null;
+  return parsed;
+}
+
 export function decryptMessageV2(
   wire: SealedWire,
   myBoxSecretKey: Uint8Array,
@@ -183,19 +203,8 @@ export function decryptMessageV2(
   ratchetState: RatchetState,
   nowMs: number,
 ): DecryptedInner | null {
-  const opened = openSealedEnvelope(wire, myBoxSecretKey, resolveSigningKey, nowMs);
-  if (!opened) return null;
-
-  let parsed: InnerPayload | null;
-  try {
-    const innerBytes = decodeBase64(opened.payload);
-    parsed = unpad(innerBytes) as InnerPayload | null;
-  } catch {
-    return null;
-  }
-  if (!parsed || parsed.v !== PROTOCOL_VERSION) return null;
-  if (typeof parsed.from !== 'string' || !parsed.ratchet) return null;
-  if (parsed.from !== opened.from) return null;
+  const parsed = openEnvelopeV2(wire, myBoxSecretKey, resolveSigningKey, nowMs);
+  if (!parsed) return null;
 
   try {
     const rHeader = {
@@ -210,7 +219,7 @@ export function decryptMessageV2(
       decodeBase64(parsed.ratchet.nonceB64),
     );
     if (!plaintextBytes) return null;
-    return { from: opened.from, body: encodeUTF8(plaintextBytes), newState: ratchetState };
+    return { from: parsed.from, body: encodeUTF8(plaintextBytes), newState: ratchetState };
   } catch {
     return null;
   }
