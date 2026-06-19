@@ -154,7 +154,6 @@ function initSqliteSchema(db: DatabaseSync) {
       sender_aegis_id TEXT NOT NULL,
       ciphertext_b64  TEXT NOT NULL,
       nonce_b64       TEXT NOT NULL,
-      chain_key_b64   TEXT NOT NULL,
       iteration       INTEGER NOT NULL,
       created_at      INTEGER NOT NULL,
       expires_at      INTEGER NOT NULL,
@@ -341,6 +340,9 @@ function initSqliteSchema(db: DatabaseSync) {
   try { db.exec(`ALTER TABLE identities ADD COLUMN signing_public_key_b64 TEXT NOT NULL DEFAULT '';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages DROP COLUMN sender;`); } catch { /* absent */ }
+  // C-3 (security roadmap Ola 2): the SenderKey chain key must never be persisted
+  // by the relay. Drop the legacy plaintext column from existing deployments.
+  try { db.exec(`ALTER TABLE sender_key_dist_queue DROP COLUMN chain_key_b64;`); } catch { /* absent */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN drained_by TEXT NOT NULL DEFAULT '[]';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN sender_pub_b64 TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default';`); } catch { /* exists */ }
@@ -513,7 +515,6 @@ async function initPgSchema(): Promise<void> {
       sender_aegis_id TEXT NOT NULL,
       ciphertext_b64  TEXT NOT NULL,
       nonce_b64       TEXT NOT NULL,
-      chain_key_b64   TEXT NOT NULL,
       iteration       INTEGER NOT NULL,
       created_at      BIGINT NOT NULL,
       expires_at      BIGINT NOT NULL,
@@ -675,6 +676,8 @@ async function initPgSchema(): Promise<void> {
     `ALTER TABLE work_orgs ADD COLUMN display_name TEXT`,
     `ALTER TABLE work_orgs ADD COLUMN invite_policy TEXT NOT NULL DEFAULT 'invite_only'`,
     `ALTER TABLE work_channels ADD COLUMN retention_days INTEGER`,
+    // C-3 (security roadmap Ola 2): drop the legacy plaintext SenderKey chain key.
+    `ALTER TABLE sender_key_dist_queue DROP COLUMN IF EXISTS chain_key_b64`,
   ];
   for (const ddl of pgMigrations) {
     try { await pool.query(ddl); } catch { /* column already exists — expected */ }
@@ -1107,8 +1110,10 @@ export const messageRepo = {
 
 // ── senderKeyDistRepo ─────────────────────────────────────────────────────────
 // Queues sealed SenderKey distributions for offline group members. The relay
-// never reads the key material — ciphertextB64 / nonceB64 / chainKeyB64 are
-// opaque blobs forwarded verbatim, identical to how messageRepo works. The only
+// never reads the key material — ciphertextB64 / nonceB64 are opaque blobs
+// forwarded verbatim, identical to how messageRepo works. The actual SenderKey
+// travels only inside the sealed ciphertextB64; no raw key material is ever
+// stored or transited in cleartext (C-3 fix). The only
 // routing field the relay inspects is `recipient` (aegisId). `group_id` and
 // `sender_aegis_id` travel inside the blob on-wire from the client; they are
 // stored here only so the drain path can reconstruct the correct `group:rekey_dist`
@@ -1128,7 +1133,6 @@ export interface SenderKeyDistRow {
   sender_aegis_id: string;
   ciphertext_b64: string;
   nonce_b64: string;
-  chain_key_b64: string;
   iteration: number;
   created_at: number;
   expires_at: number;
@@ -1149,10 +1153,10 @@ export const senderKeyDistRepo = {
     }
     await dbRun(
       `INSERT INTO sender_key_dist_queue
-         (id, recipient, group_id, sender_aegis_id, ciphertext_b64, nonce_b64, chain_key_b64, iteration, created_at, expires_at, drained_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
+         (id, recipient, group_id, sender_aegis_id, ciphertext_b64, nonce_b64, iteration, created_at, expires_at, drained_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')`,
       [row.id, row.recipient, row.group_id, row.sender_aegis_id,
-       row.ciphertext_b64, row.nonce_b64, row.chain_key_b64,
+       row.ciphertext_b64, row.nonce_b64,
        row.iteration, row.created_at, expiresAt]
     );
     return { ok: true };
@@ -1166,7 +1170,7 @@ export const senderKeyDistRepo = {
   async drainFor(recipient: string, deviceId?: string): Promise<SenderKeyDistRow[]> {
     const now = Date.now();
     const rows = await dbAll<SenderKeyDistRow>(
-      `SELECT id, recipient, group_id, sender_aegis_id, ciphertext_b64, nonce_b64, chain_key_b64, iteration,
+      `SELECT id, recipient, group_id, sender_aegis_id, ciphertext_b64, nonce_b64, iteration,
               created_at, expires_at, drained_by
        FROM sender_key_dist_queue
        WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)
