@@ -7,7 +7,11 @@ function toHex(bytes: Uint8Array): string {
   return out;
 }
 
-/** 8 hex groups of 4 chars each. */
+/**
+ * 8 hex groups of 4 chars each = 32 hex chars = 128 bits of the SHA-256
+ * digest. This is the AUTHORITATIVE fingerprint — use it (not the words
+ * below) for any decision that actually depends on collision resistance.
+ */
 export function fingerprintHex(publicKey: Uint8Array): string[] {
   const digest = sha256(publicKey);
   const hex = toHex(digest.slice(0, 16));
@@ -16,7 +20,15 @@ export function fingerprintHex(publicKey: Uint8Array): string[] {
   return groups;
 }
 
-/** 8 evocative words derived from SHA-256 of the public key. */
+/**
+ * 8 evocative words derived from SHA-256 of the public key — a human-memorable
+ * MNEMONIC, not a second independent fingerprint. Each word encodes one byte
+ * (8 bits) from a 256-word list, so this carries only 64 bits of the digest —
+ * half of `fingerprintHex`'s 128 bits. A targeted collision against 64 bits is
+ * far cheaper than against the 128-bit hex (see roadmap Ola 4, LOW). Treat the
+ * hex string as authoritative for verification; the words are a convenience
+ * for reading it aloud, not an equally-strong alternative.
+ */
 export function fingerprintWords(publicKey: Uint8Array): string[] {
   const digest = sha256(publicKey);
   const words: string[] = [];
