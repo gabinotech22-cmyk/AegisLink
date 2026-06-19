@@ -16,7 +16,6 @@ import turnRoutes from './routes/turn.js';
 import proxyGifRoutes from './routes/proxyGif.js';
 import proxyLinkPreviewRoutes from './routes/proxyLinkPreview.js';
 import { createWorkRouter } from './routes/work.js';
-import { createDeviceLinkRouter } from './routes/deviceLink.js';
 import { attachRelay } from './relay/handler.js';
 import { initDb, messageRepo, senderKeyDistRepo, pruneExpiredWorkMessages } from './db/client.js';
 
@@ -149,7 +148,11 @@ attachRelay(io);
 
 // Routes that require access to the Socket.IO server for real-time events.
 app.use('/work', createWorkRouter(io));
-app.use('/devices', createDeviceLinkRouter(io));
+// NOTE: the legacy HTTP /devices router was removed (security roadmap Ola 3,
+// C-6 + A-7). It was unauthenticated dead code — device linking and revocation
+// run exclusively over the authenticated socket events `device:link`,
+// `device:link:approve`, and `device:revoke`, which scope every action to the
+// challenge-response-verified aegisId. See server/src/relay/handler.ts.
 
 // CORS rejections from the origin callback above would otherwise surface as a
 // generic 500 — turn them into a clean 403 with no stack/detail leakage.
