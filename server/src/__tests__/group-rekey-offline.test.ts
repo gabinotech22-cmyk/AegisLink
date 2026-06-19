@@ -215,13 +215,13 @@ function connectAgent(keys: AgentKeys): Promise<ClientSocket> {
 // ── Fake SenderKey distribution payload ───────────────────────────────────────
 
 function makeDist(senderAegisId: string, recipientAegisId: string) {
-  // Zod schema requires nonceB64 and chainKeyB64 to be exactly 44 chars (32 bytes base64).
-  // nacl box nonce is 24 bytes (32 chars), but the relay schema targets 32-byte field blobs.
+  // Zod schema requires nonceB64 to be exactly 44 chars (32 bytes base64).
+  // The chain key is sealed INSIDE ciphertextB64 — it must never travel as a
+  // sibling cleartext field on the wire (C-3 fix).
   return {
     aegisId: recipientAegisId,
     ciphertextB64: encodeBase64(nacl.randomBytes(48)),
     nonceB64: encodeBase64(nacl.randomBytes(32)),   // 32 bytes → 44 base64 chars
-    chainKeyB64: encodeBase64(nacl.randomBytes(32)), // 32 bytes → 44 base64 chars
     iteration: 1,
     senderAegisId,
   };
@@ -366,7 +366,8 @@ describe('group:rekey — offline queue and drain', () => {
     expect(typeof drained['distId']).toBe('string');
     expect(drained['ciphertextB64']).toBeTruthy();
     expect(drained['nonceB64']).toBeTruthy();
-    expect(drained['chainKeyB64']).toBeTruthy();
+    // C-3 regression: the relay must NEVER emit a cleartext chain key on the wire.
+    expect(drained['chainKeyB64']).toBeUndefined();
   }, 20_000);
 
   test('group:rekey_drain_ack deletes the queued row', async () => {
