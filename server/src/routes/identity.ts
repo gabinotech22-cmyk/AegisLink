@@ -13,7 +13,10 @@ const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-T
 // or any application log. The store is in-memory and ephemeral.
 const registrationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5,
+  // Ops-tunable ceiling (default 5). Raise via AEGIS_REG_RATELIMIT_MAX for
+  // local E2E testing where one machine re-registers many times; production
+  // leaves it at the strict default.
+  max: Number(process.env.AEGIS_REG_RATELIMIT_MAX ?? 5),
   standardHeaders: true,
   legacyHeaders: false,
   // Return JSON instead of HTML on limit breach.
