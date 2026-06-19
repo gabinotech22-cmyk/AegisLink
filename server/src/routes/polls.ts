@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { pollsRepo } from '../db/client.js';
+import { emitPollUpdate } from '../relay/pollBus.js';
 
 const router = Router();
 
@@ -47,7 +48,7 @@ router.post('/vote', voteLimiter, async (req, res) => {
     await pollsRepo.vote(pollId, voterHash, optionIndex);
     const counts = await pollsRepo.getTally(pollId);
 
-    (globalThis as Record<string, unknown> & { aegisEmitPollUpdate?: (id: string, c: number[]) => void }).aegisEmitPollUpdate?.(pollId, counts);
+    emitPollUpdate(pollId, counts);
 
     res.json({ ok: true, counts });
   } catch (err) {

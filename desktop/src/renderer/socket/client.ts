@@ -15,6 +15,7 @@
 import { io, type Socket } from 'socket.io-client';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
+import { sha256 } from '@noble/hashes/sha256';
 import { RELAY_URL } from '../config';
 import { encryptMessage, openEnvelope } from '../crypto/messaging';
 import type { Identity } from '../crypto/identity';
@@ -44,6 +45,19 @@ import { showIncomingNotification } from '../notifications/push';
 import { useTyping } from '../store/typing';
 
 const DEV = import.meta.env.DEV;
+
+// Verbose ratchet-state diagnostics are gated behind a DEDICATED opt-in flag,
+// never the general DEV flag — DEV can be true in staging/test Electron builds
+// where we still don't want ratchet counters/key fingerprints in the console.
+// (Golden rule #6.) Fingerprints below are hashed, not raw key prefixes.
+const RATCHET_DEBUG =
+  DEV &&
+  typeof localStorage !== 'undefined' &&
+  localStorage.getItem('AEGIS_RATCHET_DEBUG') === '1';
+
+/** Non-reversible 6-hex fingerprint for diagnostics (SHA-256 prefix). */
+const ratchetFp = (b: Uint8Array | null): string =>
+  b ? encodeBase64(sha256(b)).slice(0, 6) : 'null';
 
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
@@ -994,14 +1008,13 @@ async function decryptAndAppend(
     return false;
   }
   if (!plaintextBytes) {
-    if (DEV) {
-      const fp = (b: Uint8Array | null) => (b ? encodeBase64(b).slice(0, 8) : 'null');
+    if (RATCHET_DEBUG) {
       console.warn(
         '[socket] Double Ratchet decryption failed',
         `peer=${contact.aegisId} hadSession=${Boolean(existingJson)} hadX3dh=${Boolean(parsed.x3dh)}`,
-        `hdr(n=${rHeader.n} pn=${rHeader.pn} rk=${fp(rHeader.ratchetKey)})`,
+        `hdr(n=${rHeader.n} pn=${rHeader.pn} rk=${ratchetFp(rHeader.ratchetKey)})`,
         `state(Ns=${ratchetState.Ns} Nr=${ratchetState.Nr} PN=${ratchetState.PN}`,
-        `DHr=${fp(ratchetState.DHr)} DHsPub=${fp(ratchetState.DHs.publicKey)}`,
+        `DHr=${ratchetFp(ratchetState.DHr)} DHsPub=${ratchetFp(ratchetState.DHs.publicKey)}`,
         `CKr=${ratchetState.CKr ? 'set' : 'null'} CKs=${ratchetState.CKs ? 'set' : 'null'})`,
       );
     }
