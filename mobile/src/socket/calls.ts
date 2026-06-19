@@ -531,15 +531,15 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     });
   } catch { /* expo-av not available in this context */ }
 
-  // Earpiece + proximity sensor for audio (screen blanks at the ear) / speaker
-  // for video, and an Android foreground service so the call survives the app
-  // being backgrounded. iOS background is covered by UIBackgroundModes.
-  startInCallAudio(media === 'video' ? 'video' : 'audio');
-  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
-
   // Reset the ICE queue for this new call
   resetIceQueue();
 
+  // createPeer triggers getUserMedia, which is what actually requests/grants the
+  // RECORD_AUDIO (and CAMERA) runtime permission on Android. The foreground
+  // service notification (below) MUST start after that — starting a
+  // foregroundServiceType=microphone service before RECORD_AUDIO is granted
+  // throws a SecurityException and crashes the app on Android 14+ (matches the
+  // already-correct ordering in groupCalls.ts).
   const peer = await createPeer(media, {
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
@@ -578,6 +578,12 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   // setActivePeer BEFORE createOffer so toggleMute/toggleCamera always see a
   // valid peer reference from this point forward.
   useCall.getState().setActivePeer(peer);
+
+  // Earpiece + proximity sensor for audio (screen blanks at the ear) / speaker
+  // for video, and an Android foreground service so the call survives the app
+  // being backgrounded. iOS background is covered by UIBackgroundModes.
+  startInCallAudio(media === 'video' ? 'video' : 'audio');
+  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
 
   const offer = await createOffer(peer.pc);
   if (useV2Call) {
@@ -653,12 +659,12 @@ export async function acceptCall(): Promise<void> {
     });
   } catch { /* expo-av not available in this context */ }
 
-  // Earpiece + proximity sensor for audio (screen blanks at the ear) / speaker
-  // for video, and an Android foreground service so the call survives the app
-  // being backgrounded. iOS background is covered by UIBackgroundModes.
-  startInCallAudio(media === 'video' ? 'video' : 'audio');
-  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
-
+  // createPeer triggers getUserMedia, which is what actually requests/grants the
+  // RECORD_AUDIO (and CAMERA) runtime permission on Android. The foreground
+  // service notification (below) MUST start after that — starting a
+  // foregroundServiceType=microphone service before RECORD_AUDIO is granted
+  // throws a SecurityException and crashes the app on Android 14+ (matches the
+  // already-correct ordering in groupCalls.ts).
   const peer = await createPeer(media, {
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
@@ -696,6 +702,12 @@ export async function acceptCall(): Promise<void> {
   }, turnConfig);
   // setActivePeer BEFORE setRemoteOffer so toggleMute/toggleCamera never see null
   useCall.getState().setActivePeer(peer);
+
+  // Earpiece + proximity sensor for audio (screen blanks at the ear) / speaker
+  // for video, and an Android foreground service so the call survives the app
+  // being backgrounded. iOS background is covered by UIBackgroundModes.
+  startInCallAudio(media === 'video' ? 'video' : 'audio');
+  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
 
   await setRemoteOffer(peer.pc, pendingOffer);
   // Flush ICE candidates that arrived while we were still ringing
