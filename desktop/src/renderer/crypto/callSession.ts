@@ -63,8 +63,17 @@ export function sealCallInvite(
   callerSigningSecretKey: Uint8Array,
   offer: string,
   nowMs: number,
+  /**
+   * Optional pre-generated 32-byte session key. The live caller generates the
+   * key BEFORE createOffer (so ICE candidates trickling out immediately are
+   * already sealed under it) and passes it here. Defaults to a fresh random key.
+   */
+  providedCallKey?: Uint8Array,
 ): SealedCallInvite {
-  const callKey = nacl.randomBytes(nacl.secretbox.keyLength);
+  const callKey =
+    providedCallKey && providedCallKey.length === nacl.secretbox.keyLength
+      ? providedCallKey
+      : nacl.randomBytes(nacl.secretbox.keyLength);
   const inner: CallHandshakeInner = {
     v: CALL_SESSION_VERSION,
     offer,
