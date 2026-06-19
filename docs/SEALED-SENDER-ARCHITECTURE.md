@@ -94,6 +94,40 @@ abuso con un **delivery token** del destinatario (análogo Signal):
 > diseño. La correlación temporal socket-activo↔envío se mitiga con cover/jitter
 > en fases posteriores; el grafo explícito desaparece ya en la Fase 1.
 
+### 3.4 Ocultar también al destinatario (`to`) — mailbox IDs ciegos
+El §3.1–3.3 oculta el `from`. Pero el relay aún ve `to` (necesita una dirección
+para entregar) y `notifyRecipient(to)` lo expone al push. Para ocultar también
+el destinatario **sin reemplazar el aegisId** (a diferencia de SimpleX), se
+añade una capa de direccionamiento opaca **encima** de la identidad:
+
+- El `aegisId` sigue siendo la identidad/marca (verificación, onboarding, lo que
+  el usuario comparte). **No se toca.**
+- Por debajo, el cliente registra en el relay uno o varios **mailbox IDs**
+  aleatorios (128-bit) con una clave propia por mailbox. El relay rutea por
+  mailbox y **nunca recibe el aegisId** — en ningún evento, ni en el auth.
+- El mapeo `aegisId ↔ mailbox(es)` se comparte con cada contacto **cifrado E2EE**
+  en el handshake X3DH (mismo canal que el delivery token). El emisor direcciona
+  al `mailbox`, no al `aegisId`.
+- Los mailbox IDs **rotan por época** (p.ej. diario); los nuevos se reparten por
+  el canal E2EE existente. El relay no puede construir un grafo estable.
+
+Resultado: el relay solo ve `{ mailboxTo, ciphertext, nonce, epk }` — **ni
+`from` ni `to` reales**. Grafo social = cero.
+
+**Lo que esto cambia (plumbing, NO marca):**
+1. **Auth del socket receptor**: hoy es "soy aegisId X" (challenge Ed25519). Pasa
+   a "poseo el mailbox X" (prueba de la clave del mailbox). El `aegisId` deja de
+   enviarse al relay en cualquier punto. La identidad de cara al usuario no
+   cambia; cambia cómo el socket prueba a quién entregar.
+2. **Push**: el relay mapea `mailbox → push token` sin aegisId. Pero FCM/APNs
+   siguen viendo el dispositivo físico → para ocultarlo del proveedor hace falta
+   push self-hosted (UnifiedPush/ntfy) opcional o un notifier separado (SimpleX).
+
+**Límite irreducible:** el relay sabe "el mailbox X está conectado en esta
+conexión ahora mismo". Con rotación + un socket por mailbox no puede relinkear
+entre épocas, pero la correlación temporal y el proveedor de push son los
+últimos reductos (mismo límite que SimpleX/Signal).
+
 ## 4. Qué cambia (alcance — mucho menor que el rewrite SimpleX)
 
 Lo que **NO** cambia: `aegisId`, onboarding, generación de identidad,
@@ -111,6 +145,12 @@ Lo que cambia:
 5. **Push wake-up**: `notifyRecipient(to)` sigue funcionando — se direcciona al
    destinatario, que no es secreto. Sin cambio de arquitectura de notifier.
 6. **Rate-limit**: pasa de por-emisor a **por delivery-token + PoW** en envío.
+7. **(Para ocultar `to`, §3.4)** Registro de **mailbox IDs** + clave por mailbox;
+   **auth del socket por mailbox** en vez de aegisId; reparto del mapeo
+   `aegisId↔mailbox` por X3DH; rotación por época. Esto es el cambio de plumbing
+   más profundo — la identidad de usuario no cambia, pero el relay deja de ver
+   el aegisId en cualquier punto. **Opcional/posterior**: ocultar `from` (§3.1–3.3)
+   ya es una mejora enorme por sí solo; ocultar `to` es la segunda mitad.
 
 ## 5. Fases (cada una = rama, mergeable, detrás de flag `sealed: v1|v2`)
 
@@ -122,10 +162,14 @@ Lo que cambia:
 - **Fase 2 — llamadas sealed.** Migrar `call:*`; retirar `from: me` de
   `forward()`. Vigilar latencia de ring/ICE.
 - **Fase 3 — grupos.** Fan-out de SenderKey con sobres sealed por miembro.
-- **Fase 4 — anti-correlación.** Cover traffic / jitter / batching opcional para
-  cortar la correlación temporal socket-recibe↔token-envía.
-- **Fase 5 — retirar v1.** Cuando todos los clientes estén en v2, eliminar el
-  estampado de `from` y el envío autenticado-por-emisor del código.
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4).** Registro de mailboxes, auth de
+  socket por mailbox, reparto del mapeo por X3DH, rotación por época. Es la
+  segunda mitad y el cambio de plumbing más profundo; va después de que ocultar
+  `from` esté estable.
+- **Fase 5 — anti-correlación + push.** Cover traffic / jitter; notifier
+  separado o push self-hosted (UnifiedPush/ntfy) para cortar el último reducto.
+- **Fase 6 — retirar v1.** Cuando todos los clientes estén en v2, eliminar el
+  estampado de `from`/`to` y el envío autenticado-por-emisor del código.
 
 ## 6. Límite honesto
 
