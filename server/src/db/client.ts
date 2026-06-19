@@ -55,7 +55,8 @@ function initSqliteSchema(db: DatabaseSync) {
       created_at     INTEGER NOT NULL,
       expires_at     INTEGER NOT NULL DEFAULT 0,
       drained_by     TEXT NOT NULL DEFAULT '[]',
-      sender_pub_b64 TEXT
+      sender_pub_b64 TEXT,
+      epk_b64        TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_recipient
@@ -67,6 +68,16 @@ function initSqliteSchema(db: DatabaseSync) {
       platform    TEXT NOT NULL,
       updated_at  INTEGER NOT NULL,
       PRIMARY KEY (aegis_id, expo_token)
+    );
+
+    -- Sealed-sender (Phase 1): the recipient registers ONLY the hash of their
+    -- delivery token; senders present the raw token to submit a sealed envelope
+    -- without authenticating as a sender. The relay never stores the raw token
+    -- and never learns the sender. See docs/SEALED-SENDER-ARCHITECTURE.md §3.3.
+    CREATE TABLE IF NOT EXISTS delivery_tokens (
+      aegis_id       TEXT PRIMARY KEY,
+      token_hash_b64 TEXT NOT NULL,
+      updated_at     INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS prekeys_signed (
@@ -345,6 +356,7 @@ function initSqliteSchema(db: DatabaseSync) {
   try { db.exec(`ALTER TABLE sender_key_dist_queue DROP COLUMN chain_key_b64;`); } catch { /* absent */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN drained_by TEXT NOT NULL DEFAULT '[]';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN sender_pub_b64 TEXT;`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE messages ADD COLUMN epk_b64 TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN pinned_by TEXT;`); } catch { /* exists */ }
@@ -416,7 +428,8 @@ async function initPgSchema(): Promise<void> {
       created_at     BIGINT NOT NULL,
       expires_at     BIGINT NOT NULL DEFAULT 0,
       drained_by     TEXT NOT NULL DEFAULT '[]',
-      sender_pub_b64 TEXT
+      sender_pub_b64 TEXT,
+      epk_b64        TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_recipient
@@ -428,6 +441,13 @@ async function initPgSchema(): Promise<void> {
       platform    TEXT NOT NULL,
       updated_at  BIGINT NOT NULL,
       PRIMARY KEY (aegis_id, expo_token)
+    );
+
+    -- Sealed-sender (Phase 1) — see SQLite schema above for rationale.
+    CREATE TABLE IF NOT EXISTS delivery_tokens (
+      aegis_id       TEXT PRIMARY KEY,
+      token_hash_b64 TEXT NOT NULL,
+      updated_at     BIGINT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS prekeys_signed (
@@ -667,6 +687,7 @@ async function initPgSchema(): Promise<void> {
     `ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`,
     `ALTER TABLE messages ADD COLUMN drained_by TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE messages ADD COLUMN sender_pub_b64 TEXT`,
+    `ALTER TABLE messages ADD COLUMN epk_b64 TEXT`,
     `ALTER TABLE work_messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE work_messages ADD COLUMN pinned_by TEXT`,
     `ALTER TABLE work_messages ADD COLUMN pinned_at TEXT`,
@@ -832,6 +853,12 @@ export interface MessageRow {
    * never persists the social graph for those (FND-05).
    */
   sender_pub_b64?: string | null;
+  /**
+   * Sealed-sender v2 ephemeral X25519 public key (base64). Present ONLY on v2
+   * sealed envelopes — required to open the box on drain. null for v1 messages.
+   * Its presence is what distinguishes a queued v2 envelope from a v1 one.
+   */
+  epk_b64?: string | null;
 }
 
 export interface PushTokenRow {
@@ -1025,6 +1052,43 @@ export const identityRepo = {
   },
 };
 
+// ── deliveryTokenRepo ─────────────────────────────────────────────────────────
+
+/**
+ * Sealed-sender delivery-token store (Phase 1). The relay persists ONLY the
+ * hash of a recipient's delivery token; the raw token is shared sender↔recipient
+ * over the E2EE X3DH channel and never reaches the relay at rest. A sender
+ * presents the raw token to submit a sealed envelope; the relay verifies it
+ * against this hash without learning who the sender is.
+ * See docs/SEALED-SENDER-ARCHITECTURE.md §3.3.
+ */
+export const deliveryTokenRepo = {
+  /** Register or rotate the recipient's token hash. Upsert keyed by aegisId. */
+  async set(aegisId: string, tokenHashB64: string, updatedAt: number): Promise<void> {
+    if (USE_PG) {
+      await dbRun(
+        `INSERT INTO delivery_tokens (aegis_id, token_hash_b64, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(aegis_id) DO UPDATE SET token_hash_b64 = EXCLUDED.token_hash_b64, updated_at = EXCLUDED.updated_at`,
+        [aegisId, tokenHashB64, updatedAt]
+      );
+    } else {
+      await dbRun(
+        `INSERT INTO delivery_tokens (aegis_id, token_hash_b64, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(aegis_id) DO UPDATE SET token_hash_b64 = excluded.token_hash_b64, updated_at = excluded.updated_at`,
+        [aegisId, tokenHashB64, updatedAt]
+      );
+    }
+  },
+  /** Fetch the stored token hash for a recipient, or undefined if none registered. */
+  async getHash(aegisId: string): Promise<string | undefined> {
+    const row = await dbGet<{ token_hash_b64: string }>(
+      `SELECT token_hash_b64 FROM delivery_tokens WHERE aegis_id = ?`,
+      [aegisId]
+    );
+    return row?.token_hash_b64;
+  },
+};
+
 // ── messageRepo ───────────────────────────────────────────────────────────────
 
 /**
@@ -1050,8 +1114,8 @@ export const messageRepo = {
       return { ok: false, reason: 'queue_full' };
     }
     await dbRun(
-      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64) VALUES (?, ?, ?, ?, ?, ?, '[]', ?)`,
-      [row.id, row.recipient, row.ciphertext_b64, row.nonce_b64, row.created_at, expiresAt, row.sender_pub_b64 ?? null]
+      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64, epk_b64) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?)`,
+      [row.id, row.recipient, row.ciphertext_b64, row.nonce_b64, row.created_at, expiresAt, row.sender_pub_b64 ?? null, row.epk_b64 ?? null]
     );
     return { ok: true };
   },
@@ -1063,7 +1127,7 @@ export const messageRepo = {
   async drainFor(recipient: string, deviceId?: string): Promise<MessageRow[]> {
     const now = Date.now();
     const rows = await dbAll<MessageRow>(
-      `SELECT id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64
+      `SELECT id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64, epk_b64
        FROM messages WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)
        ORDER BY created_at ASC`,
       [recipient, now]

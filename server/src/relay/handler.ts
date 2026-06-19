@@ -5,8 +5,9 @@ import naclUtil from 'tweetnacl-util';
 import { randomUUID } from 'node:crypto';
 
 const { decodeBase64 } = naclUtil;
-import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
+import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, deliveryTokenRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
+import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { setPollUpdateEmitter } from './pollBus.js';
 import { notifyRecipient, sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 
@@ -33,6 +34,32 @@ const EnvelopeIn = z.object({
    * otherwise be unable to (no sender info on sealed-sender queue drains).
    */
   init: z.boolean().optional(),
+});
+
+/**
+ * Sealed-sender v2 submission (docs/SEALED-SENDER-ARCHITECTURE.md §3, Phase 1).
+ * Unlike v1, there is NO `from` anywhere on the wire and the relay never stamps
+ * one. The sender's identity is sealed inside `ciphertext` (recovered+verified
+ * by the recipient). `epk` is the per-message ephemeral X25519 public key needed
+ * to open the box. `deliveryToken` is the raw anti-abuse token the recipient
+ * shared over E2EE — the relay checks its hash without learning the sender.
+ *
+ * v2 is for ESTABLISHED contacts only: the recipient authenticates the sealed
+ * `from` against a signing key it already holds. First-contact bootstrap (X3DH
+ * `init`) stays on the v1 `envelope` path, which can attach the sender pubkey.
+ */
+const EnvelopeV2In = z.object({
+  id: z.string().min(1).max(64),
+  to: z.string().regex(AEGIS_ID_RE),
+  ciphertext: z.string().min(1).max(2097152),
+  nonce: z.string().min(1).max(64),
+  epk: z.string().min(1).max(64),
+  deliveryToken: z.string().min(1).max(256),
+});
+
+/** Owner registers/rotates the hash of their own delivery token (authenticated). */
+const DeliveryTokenRegister = z.object({
+  tokenHashB64: z.string().min(1).max(128),
 });
 
 // UUID regex reused before the Work-section constants are declared
@@ -115,6 +142,20 @@ export interface QueuedEnvelope {
   createdAt: number;
   /** Present ONLY on first-contact (`init`) messages — lets the recipient decrypt a queued first message. */
   senderPublicKeyB64?: string;
+}
+
+/**
+ * Sealed-sender v2 envelope as delivered to the recipient (online or drained).
+ * Carries NO sender identity — not even injected by the relay. `epk` is required
+ * to open the per-message box. Same shape for online delivery and queue drain.
+ */
+export interface SealedEnvelopeV2 {
+  id: string;
+  to: string;
+  ciphertext: string;
+  nonce: string;
+  epk: string;
+  createdAt: number;
 }
 
 const PreKeyUpload = z.object({
@@ -503,18 +544,32 @@ export function attachRelay(io: SocketServer) {
     // from the ciphertext itself.
     const pending = await messageRepo.drainFor(me, deviceId);
     for (const row of pending) {
-      const queued: QueuedEnvelope = {
-        id: row.id,
-        to: row.recipient,
-        ciphertext: row.ciphertext_b64,
-        nonce: row.nonce_b64,
-        createdAt: row.created_at,
-      };
-      // Attach the sender's public key for first-contact (`init`) messages so the
-      // recipient can identify+decrypt them even though sealed-sender queue
-      // drains otherwise carry no sender info. Only set for init messages.
-      if (row.sender_pub_b64) queued.senderPublicKeyB64 = row.sender_pub_b64;
-      socket.emit('envelope', queued);
+      if (row.epk_b64) {
+        // Sealed-sender v2 queued envelope — carries an ephemeral key and no
+        // sender identity at all. Emitted on the v2 channel.
+        const queuedV2: SealedEnvelopeV2 = {
+          id: row.id,
+          to: row.recipient,
+          ciphertext: row.ciphertext_b64,
+          nonce: row.nonce_b64,
+          epk: row.epk_b64,
+          createdAt: row.created_at,
+        };
+        socket.emit('envelope:v2', queuedV2);
+      } else {
+        const queued: QueuedEnvelope = {
+          id: row.id,
+          to: row.recipient,
+          ciphertext: row.ciphertext_b64,
+          nonce: row.nonce_b64,
+          createdAt: row.created_at,
+        };
+        // Attach the sender's public key for first-contact (`init`) messages so the
+        // recipient can identify+decrypt them even though sealed-sender queue
+        // drains otherwise carry no sender info. Only set for init messages.
+        if (row.sender_pub_b64) queued.senderPublicKeyB64 = row.sender_pub_b64;
+        socket.emit('envelope', queued);
+      }
       await messageRepo.delete(row.id, deviceId);
     }
 
@@ -637,6 +692,108 @@ export function attachRelay(io: SocketServer) {
             }
           }
         }
+      }
+    );
+
+    // ─── Sealed-sender v2: delivery token registration ───────────────────
+    // The authenticated owner registers/rotates the hash of their own delivery
+    // token. Only the hash is stored; the raw token is shared with contacts over
+    // E2EE (X3DH) and never reaches the relay. See SEALED-SENDER-ARCHITECTURE §3.3.
+    socket.on(
+      'deliveryToken:register',
+      (raw, ack?: (res: { ok: boolean; error?: string }) => void) => {
+        const parsed = DeliveryTokenRegister.safeParse(raw);
+        if (!parsed.success) {
+          ack?.({ ok: false, error: 'invalid_payload' });
+          return;
+        }
+        void deliveryTokenRepo
+          .set(me, parsed.data.tokenHashB64, Date.now())
+          .then(() => ack?.({ ok: true }))
+          .catch(() => ack?.({ ok: false, error: 'store_failed' }));
+      }
+    );
+
+    // ─── Sealed-sender v2: envelope submission ───────────────────────────
+    // The relay NEVER stamps or stores a `from` here — the sender's identity is
+    // sealed inside `ciphertext` and recovered only by the recipient. The socket
+    // is still authenticated (temporal-correlation limit, §6), but no explicit
+    // social-graph edge is ever processed or persisted. Anti-abuse is the
+    // recipient's delivery token (validated by hash), not sender authentication.
+    socket.on(
+      'envelope:v2',
+      (raw, ack?: (response: { ok: boolean; queued?: boolean; error?: string }) => void) => {
+        if (!envelopeLimiter.consume()) {
+          ack?.({ ok: false, error: 'rate_limited' });
+          return;
+        }
+        const parsed = EnvelopeV2In.safeParse(raw);
+        if (!parsed.success) {
+          ack?.({ ok: false, error: 'invalid_envelope' });
+          return;
+        }
+        const data = parsed.data;
+        void (async () => {
+          // Anti-abuse gate: the sender must present the recipient's raw delivery
+          // token. The relay verifies it against the stored hash in constant time
+          // (golden rule #8) without learning who is sending.
+          const storedHash = await deliveryTokenRepo.getHash(data.to);
+          if (!storedHash || !verifyDeliveryToken(data.deliveryToken, storedHash)) {
+            ack?.({ ok: false, error: 'bad_delivery_token' });
+            return;
+          }
+          const env: SealedEnvelopeV2 = {
+            id: data.id,
+            to: data.to,
+            ciphertext: data.ciphertext,
+            nonce: data.nonce,
+            epk: data.epk,
+            createdAt: Date.now(),
+          };
+
+          const isSelfSend = env.to === me;
+          const recipientSockets = sockets.get(env.to);
+
+          if (isSelfSend) {
+            if (recipientSockets && recipientSockets.size > 1) {
+              for (const s of recipientSockets) {
+                if (s === socket) continue;
+                s.emit('envelope:v2', env);
+              }
+            }
+            ack?.({ ok: true, queued: false });
+            return;
+          }
+
+          const delivered = recipientSockets && recipientSockets.size > 0;
+          if (delivered) {
+            for (const s of recipientSockets) s.emit('envelope:v2', env);
+            // Confirm delivery to the sender's own (authenticated) socket — this
+            // is the sender's own device, not a social-graph leak.
+            socket.emit('msg:delivered', { msgId: env.id, to: env.to });
+            ack?.({ ok: true, queued: false });
+            return;
+          }
+
+          // Offline: queue with epk so the recipient can open it on drain. No
+          // sender identity is stored (FND-05); epk is non-secret ephemeral key.
+          const result = await messageRepo.enqueue({
+            id: env.id,
+            recipient: env.to,
+            ciphertext_b64: env.ciphertext,
+            nonce_b64: env.nonce,
+            created_at: env.createdAt,
+            expires_at: 0,
+            sender_pub_b64: null,
+            epk_b64: env.epk,
+          });
+          if (!result.ok) {
+            ack?.({ ok: false, error: result.reason ?? 'queue_full' });
+            return;
+          }
+          void notifyRecipient(env.to);
+          ack?.({ ok: true, queued: true });
+        })();
       }
     );
 

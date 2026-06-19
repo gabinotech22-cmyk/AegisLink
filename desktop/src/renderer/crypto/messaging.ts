@@ -2,6 +2,7 @@ import nacl from 'tweetnacl';
 import { decodeUTF8, encodeUTF8, decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { ratchetEncrypt, ratchetDecrypt, type RatchetState } from './signal/ratchet';
 import { stripAndPad, unpad } from './metadata';
+import { sealEnvelope, openEnvelope as openSealedEnvelope, type SealedWire } from './sealedSender';
 
 interface InnerRatchet {
   ratchetKeyB64: string;
@@ -126,6 +127,99 @@ export function tryDecryptMessage(
       body: encodeUTF8(plaintextBytes),
       newState: ratchetState,
     };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Sealed-sender v2 (Phase 1) ──────────────────────────────────────────────
+// Byte-for-byte parity with mobile/src/crypto/messaging.ts. Same Double Ratchet
+// inner; OUTER envelope is the per-message ephemeral sealed-sender box
+// (crypto/sealedSender.ts) instead of the legacy static-key nacl.box. v2 is for
+// ESTABLISHED sessions only (never carries x3dhInit). See
+// docs/SEALED-SENDER-ARCHITECTURE.md §3.
+
+export function encryptMessageV2(
+  plaintext: string,
+  senderAegisId: string,
+  recipientPublicKey: Uint8Array,
+  senderSigningSecretKey: Uint8Array,
+  ratchetState: RatchetState,
+  nowMs: number,
+): { wire: SealedWire; newState: RatchetState } {
+  const payloadBytes = decodeUTF8(plaintext);
+  const ratchetOut = ratchetEncrypt(ratchetState, payloadBytes);
+
+  const innerPayload: Record<string, unknown> = {
+    v: PROTOCOL_VERSION,
+    from: senderAegisId,
+    ratchet: {
+      ratchetKeyB64: encodeBase64(ratchetOut.header.ratchetKey),
+      n: ratchetOut.header.n,
+      pn: ratchetOut.header.pn,
+      ciphertextB64: encodeBase64(ratchetOut.ciphertext),
+      nonceB64: encodeBase64(ratchetOut.nonce),
+    },
+  };
+
+  const innerBytes = stripAndPad(innerPayload);
+  const wire = sealEnvelope(
+    recipientPublicKey,
+    senderAegisId,
+    senderSigningSecretKey,
+    encodeBase64(innerBytes),
+    nowMs,
+  );
+
+  const newState = { ...ratchetState };
+  delete newState.x3dhInit;
+  return { wire, newState };
+}
+
+export function openEnvelopeV2(
+  wire: SealedWire,
+  myBoxSecretKey: Uint8Array,
+  resolveSigningKey: (from: string) => Uint8Array | null,
+  nowMs: number,
+): InnerPayload | null {
+  const opened = openSealedEnvelope(wire, myBoxSecretKey, resolveSigningKey, nowMs);
+  if (!opened) return null;
+  let parsed: InnerPayload | null;
+  try {
+    parsed = unpad(decodeBase64(opened.payload)) as InnerPayload | null;
+  } catch {
+    return null;
+  }
+  if (!parsed || parsed.v !== PROTOCOL_VERSION) return null;
+  if (typeof parsed.from !== 'string' || !parsed.ratchet) return null;
+  if (parsed.from !== opened.from) return null;
+  return parsed;
+}
+
+export function decryptMessageV2(
+  wire: SealedWire,
+  myBoxSecretKey: Uint8Array,
+  resolveSigningKey: (from: string) => Uint8Array | null,
+  ratchetState: RatchetState,
+  nowMs: number,
+): DecryptedInner | null {
+  const parsed = openEnvelopeV2(wire, myBoxSecretKey, resolveSigningKey, nowMs);
+  if (!parsed) return null;
+
+  try {
+    const rHeader = {
+      ratchetKey: decodeBase64(parsed.ratchet.ratchetKeyB64),
+      n: parsed.ratchet.n,
+      pn: parsed.ratchet.pn,
+    };
+    const plaintextBytes = ratchetDecrypt(
+      ratchetState,
+      rHeader,
+      decodeBase64(parsed.ratchet.ciphertextB64),
+      decodeBase64(parsed.ratchet.nonceB64),
+    );
+    if (!plaintextBytes) return null;
+    return { from: parsed.from, body: encodeUTF8(plaintextBytes), newState: ratchetState };
   } catch {
     return null;
   }

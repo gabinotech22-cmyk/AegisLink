@@ -64,19 +64,37 @@ export const ONION_URL: string | null =
   (process.env.EXPO_PUBLIC_ONION_URL as string | undefined) ?? null;
 
 /**
+ * SEALED_TRANSPORT_VERSION — sealed-sender transport for 1:1 chat.
+ *   'v1' (default): legacy envelope; the relay stamps `from` on online delivery.
+ *   'v2': sealed-sender — the sender's identity never reaches the relay (sealed
+ *         inside the box), submission gated by the recipient's delivery token.
+ * Opt-in via EXPO_PUBLIC_SEALED_VERSION=v2. v2 degrades to v1 per-contact when
+ * the contact's signing key or delivery token isn't available yet (first
+ * contact / pre-upgrade peers). See docs/SEALED-SENDER-ARCHITECTURE.md.
+ */
+export const SEALED_TRANSPORT_VERSION: 'v1' | 'v2' =
+  (process.env.EXPO_PUBLIC_SEALED_VERSION as string | undefined) === 'v2' ? 'v2' : 'v1';
+
+/**
  * Fail-fast transport guard. In a production build every backend base URL MUST
  * be https — a misconfigured build that fell back to cleartext would defeat
  * cert pinning and leak identity keys / push tokens / blob ciphertext over the
  * wire. Refuse to run instead of silently downgrading. (`.onion` is exempt: Tor
  * provides its own transport encryption.)
  */
+// Developer loopback hosts (emulator host 10.0.2.2 + localhost) are exempt:
+// they mirror android/.../network_security_config.xml, which already whitelists
+// exactly these for cleartext, and the app never contacts them in production.
+// This lets a release APK reach a relay on the developer's machine for E2E tests.
+const isLoopbackUrl = (url: string): boolean =>
+  /^(https?|wss?):\/\/(10\.0\.2\.2|localhost|127\.0\.0\.1)(:|\/|$)/i.test(url);
 // eslint-disable-next-line no-undef
 if (!__DEV__) {
   for (const [name, url] of [
     ['SERVER_URL', SERVER_URL],
     ['RELAY_URL', RELAY_URL],
   ] as const) {
-    if (!/^https:\/\//i.test(url)) {
+    if (!/^https:\/\//i.test(url) && !isLoopbackUrl(url)) {
       throw new Error(`[config] insecure ${name} in a production build: ${url}`);
     }
   }
