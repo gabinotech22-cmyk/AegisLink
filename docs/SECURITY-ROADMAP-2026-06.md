@@ -95,7 +95,13 @@ Esf **M**. El desktop quedó atrás en mecanismos anti-desync. Portar de mobile.
 ---
 
 ## OLA 6 — Metadatos de llamadas (sealed-sender) · rama `fix/sec-call-sealed-sender`
-🟠 ALTO · Esf **M-L**. El gap de metadatos más grande: las llamadas exponen `from` al relay.
+🟠 ALTO · Esf **M-L** (puente) / **XL** (épica). El gap de metadatos más grande: las llamadas exponen `from` al relay.
+
+> **ACTUALIZADO 2026-06-19:** al investigar A-6 se confirmó que el leak está **a la par
+> de los envelopes** (handler.ts:572 estampa `from: me` igual). No es un fix de llamadas
+> sino del **transporte completo**. Decisión del usuario: épica completa estilo SimpleX
+> (colas sin identidad). **Diseño detallado en [docs/SEALED-SENDER-ARCHITECTURE.md].**
+> Siguiente entregable = Fase 0 (spike + medición de latencia de llamada sobre cola).
 
 - `handler.ts:1525` — `forward()` añade `from: me` a todo evento de señalización.
 - Fix: cifrar el payload de señalización (SDP/ICE) contra la pubkey del callee; el relay reenvía blob opaco a `to` sin aprender `from` (identidad embebida en el payload cifrado), igual que envelopes.
