@@ -43,6 +43,10 @@ const EnvelopeIn = z.object({
  * by the recipient). `epk` is the per-message ephemeral X25519 public key needed
  * to open the box. `deliveryToken` is the raw anti-abuse token the recipient
  * shared over E2EE — the relay checks its hash without learning the sender.
+ *
+ * v2 is for ESTABLISHED contacts only: the recipient authenticates the sealed
+ * `from` against a signing key it already holds. First-contact bootstrap (X3DH
+ * `init`) stays on the v1 `envelope` path, which can attach the sender pubkey.
  */
 const EnvelopeV2In = z.object({
   id: z.string().min(1).max(64),
@@ -51,8 +55,6 @@ const EnvelopeV2In = z.object({
   nonce: z.string().min(1).max(64),
   epk: z.string().min(1).max(64),
   deliveryToken: z.string().min(1).max(256),
-  /** First-contact marker — same semantics as EnvelopeIn.init. */
-  init: z.boolean().optional(),
 });
 
 /** Owner registers/rotates the hash of their own delivery token (authenticated). */
