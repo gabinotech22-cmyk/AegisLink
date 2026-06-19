@@ -64,6 +64,18 @@ export const ONION_URL: string | null =
   (process.env.EXPO_PUBLIC_ONION_URL as string | undefined) ?? null;
 
 /**
+ * SEALED_TRANSPORT_VERSION — sealed-sender transport for 1:1 chat.
+ *   'v1' (default): legacy envelope; the relay stamps `from` on online delivery.
+ *   'v2': sealed-sender — the sender's identity never reaches the relay (sealed
+ *         inside the box), submission gated by the recipient's delivery token.
+ * Opt-in via EXPO_PUBLIC_SEALED_VERSION=v2. v2 degrades to v1 per-contact when
+ * the contact's signing key or delivery token isn't available yet (first
+ * contact / pre-upgrade peers). See docs/SEALED-SENDER-ARCHITECTURE.md.
+ */
+export const SEALED_TRANSPORT_VERSION: 'v1' | 'v2' =
+  (process.env.EXPO_PUBLIC_SEALED_VERSION as string | undefined) === 'v2' ? 'v2' : 'v1';
+
+/**
  * Fail-fast transport guard. In a production build every backend base URL MUST
  * be https — a misconfigured build that fell back to cleartext would defeat
  * cert pinning and leak identity keys / push tokens / blob ciphertext over the
