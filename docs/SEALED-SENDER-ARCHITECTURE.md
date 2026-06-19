@@ -154,9 +154,19 @@ Lo que cambia:
 
 ## 5. Fases (cada una = rama, mergeable, detrás de flag `sealed: v1|v2`)
 
-- **Fase 0 — spike.** Implementar el sobre sealed (epk + firma interna) y el
-  evento de envío con delivery-token en el relay, detrás de flag, sin tocar el
-  path vivo. Validar round-trip 1:1 y medir latencia (incl. llamada).
+- **Fase 0 — spike. ✅ HECHO (2026-06-19, PR #50).** Sobre sealed (epk + firma
+  interna) + delivery-token en `server/src/crypto/`, aislado del path vivo, con
+  11 tests (correctitud, autenticación, anti-forja, anti-replay, benchmark).
+  **Resultados / go-no-go = GO con amortización:**
+  - Seal asimétrico fresco **por mensaje** = ~4.3× un `nacl.box` plano (clave
+    efímera + firma Ed25519 + verify). En Hermes (~60× más lento que Node) eso
+    es demasiado caro para el trickle de ICE (muchos mensajes pequeños/llamada).
+  - **Mitigación validada:** un handshake sealed-sender **por llamada** lleva una
+    clave de sesión aleatoria; cada candidato ICE se sella con `nacl.secretbox`
+    simétrico bajo esa clave → ~0.021 ms/candidato (vs 144 ms naïve). Negligible.
+  - **Regla para Fases siguientes:** envelopes de chat (poco frecuentes) → seal
+    por mensaje directo. Señalización de llamada (alta frecuencia) → seal por
+    sesión + secretbox por candidato.
 - **Fase 1 — envelopes 1:1 sealed.** Activar v2 para chat 1:1; `from` fuera del
   wire. Reparto de delivery-token en el handshake X3DH.
 - **Fase 2 — llamadas sealed.** Migrar `call:*`; retirar `from: me` de
