@@ -125,9 +125,11 @@ export function trimOldSkippedKeys(state: RatchetState, maxAge: number): void {
 
 /** Byte-wise equality — React Native has no Buffer global to call Buffer.compare. */
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  // Constant-time: no early return on first mismatch. (Golden rule #8.)
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
 }
 
 function kdfRoot(rk: Uint8Array, dhOut: Uint8Array): { newRK: Uint8Array; newCK: Uint8Array } {

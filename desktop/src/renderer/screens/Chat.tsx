@@ -195,12 +195,36 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
       if (capturedItems.length > 0) {
         const { encryptAndUploadMedia } = await import('../crypto/media');
         for (let i = 0; i < capturedItems.length; i++) {
-          const wireUri = await encryptAndUploadMedia(capturedItems[i].blob);
+          const item = capturedItems[i];
+          const wireUri = await encryptAndUploadMedia(item.blob);
           const isLast = i === capturedItems.length - 1;
           // Attach caption to last attachment — mirrors mobile's send pattern
           const caption = isLast && capturedDraft ? capturedDraft : '';
           const plaintext = caption ? `[image:${wireUri}]${caption}` : `[image:${wireUri}]`;
-          await sendMessage({ ...base, plaintext, replyToId: i === 0 ? capturedReplyTo : undefined });
+
+          // Local append BEFORE sendMessage so the sender sees the rendered
+          // image bubble (with caption) instead of the raw wire URI as text.
+          // A fresh objectURL is created here because the staging previewUrl
+          // was revoked by clearStagedItems() above.
+          const localMediaUrl = URL.createObjectURL(item.blob);
+          await append({
+            id: crypto.randomUUID(),
+            chatId: contact.aegisId,
+            direction: 'out',
+            body: caption,
+            createdAt: Date.now(),
+            type: 'image',
+            mediaUri: localMediaUrl,
+          });
+
+          // skipLocalAppend so socket/client doesn't re-append with the raw
+          // [image:blob:…]caption plaintext on top of our optimistic bubble.
+          await sendMessage({
+            ...base,
+            plaintext,
+            replyToId: i === 0 ? capturedReplyTo : undefined,
+            skipLocalAppend: true,
+          });
         }
       } else {
         await sendMessage({ ...base, plaintext: capturedDraft, replyToId: capturedReplyTo });
