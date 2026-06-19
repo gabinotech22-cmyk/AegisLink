@@ -50,6 +50,26 @@ function assertNonZeroDH(dh: Uint8Array, label: string): Uint8Array {
   return dh;
 }
 
+/** Zero a key-material buffer in place so it doesn't linger in memory. */
+function zeroize(buf: Uint8Array): void {
+  for (let i = 0; i < buf.length; i++) buf[i] = 0;
+}
+
+/**
+ * ML-KEM has no low-order-point analogue, but a buggy/malicious implementation
+ * (or memory corruption) returning an all-zero shared secret would still be
+ * catastrophic — it would make the PQ contribution to the hybrid root key
+ * fully predictable. Cheap to check, so we do, mirroring `assertNonZeroDH`.
+ */
+function assertNonZeroSharedSecret(secret: Uint8Array, label: string): Uint8Array {
+  let acc = 0;
+  for (let i = 0; i < secret.length; i++) acc |= secret[i];
+  if (acc === 0) {
+    throw new Error(`PQXDH: all-zero ${label} shared secret`);
+  }
+  return secret;
+}
+
 /**
  * Signed PQ prekey (PQSPK): an ML-KEM-768 public key whose bytes are signed
  * with the OWNER's Ed25519 identity signing key (the same key that signs the
@@ -146,86 +166,113 @@ export function performX3DH(
   // 2. Generate our Ephemeral Key
   const { publicKey: myEK_pub, secretKey: myEK_sec } = nacl.box.keyPair();
 
-  // 3. Perform DH operations (Signal X3DH spec):
-  //    DH1 = DH(IK_sender, SPK_receiver)
-  //    DH2 = DH(EK_sender, IK_receiver)
-  //    DH3 = DH(EK_sender, SPK_receiver)
-  const dh1 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, bobSPK), 'DH1');
-  const dh2 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobIK), 'DH2');
-  const dh3 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobSPK), 'DH3');
+  // Intermediates zeroized in `finally` below — none of these leave this
+  // function (only myEphemeralPublicKeyB64 and the derived rootKey do), so
+  // there is no reason for the raw DH/KEM outputs to linger in memory after
+  // the root key has been derived (requirement: zeroize key intermediates).
+  let dh1: Uint8Array | undefined;
+  let dh2: Uint8Array | undefined;
+  let dh3: Uint8Array | undefined;
+  let dh4: Uint8Array | undefined;
+  let dhOut: Uint8Array | undefined;
+  let combined: Uint8Array | undefined;
+  let sharedSecret: Uint8Array | undefined;
 
-  // Signal spec: prepend 32 bytes of 0xFF before concatenating DH outputs
-  const F = new Uint8Array(32).fill(0xFF);
-  let dhOut = new Uint8Array(F.length + dh1.length + dh2.length + dh3.length);
-  dhOut.set(F, 0);
-  dhOut.set(dh1, F.length);
-  dhOut.set(dh2, F.length + dh1.length);
-  dhOut.set(dh3, F.length + dh1.length + dh2.length);
+  try {
+    // 3. Perform DH operations (Signal X3DH spec):
+    //    DH1 = DH(IK_sender, SPK_receiver)
+    //    DH2 = DH(EK_sender, IK_receiver)
+    //    DH3 = DH(EK_sender, SPK_receiver)
+    dh1 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, bobSPK), 'DH1');
+    dh2 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobIK), 'DH2');
+    dh3 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobSPK), 'DH3');
 
-  if (contactBundle.oneTimePreKey) {
-    const bobOPK = decodeBase64(contactBundle.oneTimePreKey.publicKeyB64);
-    const dh4 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobOPK), 'DH4');
-    const newDhOut = new Uint8Array(dhOut.length + dh4.length);
-    newDhOut.set(dhOut, 0);
-    newDhOut.set(dh4, dhOut.length);
-    dhOut = newDhOut;
-  }
+    // Signal spec: prepend 32 bytes of 0xFF before concatenating DH outputs
+    const F = new Uint8Array(32).fill(0xFF);
+    dhOut = new Uint8Array(F.length + dh1.length + dh2.length + dh3.length);
+    dhOut.set(F, 0);
+    dhOut.set(dh1, F.length);
+    dhOut.set(dh2, F.length + dh1.length);
+    dhOut.set(dh3, F.length + dh1.length + dh2.length);
 
-  // 4. PQXDH (v2) layer — only when the peer published a PQ signed prekey.
-  //    Falls back to v1 otherwise (requirement #5: interop with v1 peers).
-  if (contactBundle.pqSignedPreKey) {
-    // 4a. MANDATORY: verify the Ed25519 signature over the PQSPK BEFORE
-    //     encapsulating — identical trust model to the classic SPK check above.
-    //     A malicious relay that swaps the PQSPK must not be able to learn the
-    //     encapsulated secret. bobSignK is already validated (length + present)
-    //     by the classic SPK block, so we reuse it.
-    const bobPQPK = decodeBase64(contactBundle.pqSignedPreKey.publicKeyB64);
-    const pqSig = decodeBase64(contactBundle.pqSignedPreKey.signatureB64);
-    if (bobPQPK.length !== MLKEM768_PUBLICKEY_BYTES) {
-      throw new Error('PQXDH: Invalid ML-KEM-768 public key length');
-    }
-    if (pqSig.length !== nacl.sign.signatureLength) {
-      throw new Error('PQXDH: Invalid PQ prekey signature length');
-    }
-    const validPqSig = nacl.sign.detached.verify(bobPQPK, pqSig, bobSignK);
-    if (!validPqSig) {
-      throw new Error('PQXDH: Invalid PQ prekey signature — possible key compromise or MITM');
+    if (contactBundle.oneTimePreKey) {
+      const bobOPK = decodeBase64(contactBundle.oneTimePreKey.publicKeyB64);
+      dh4 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobOPK), 'DH4');
+      const newDhOut = new Uint8Array(dhOut.length + dh4.length);
+      newDhOut.set(dhOut, 0);
+      newDhOut.set(dh4, dhOut.length);
+      zeroize(dhOut);
+      dhOut = newDhOut;
     }
 
-    // 4b. Encapsulate to the peer's PQSPK → {cipherText, sharedSecret}.
-    const { cipherText, sharedSecret } = ml_kem768.encapsulate(bobPQPK);
-    if (sharedSecret.length !== MLKEM768_SHAREDSECRET_BYTES) {
-      throw new Error('PQXDH: unexpected ML-KEM shared-secret length');
+    // 4. PQXDH (v2) layer — only when the peer published a PQ signed prekey.
+    //    Falls back to v1 otherwise (requirement #5: interop with v1 peers).
+    if (contactBundle.pqSignedPreKey) {
+      // 4a. MANDATORY: verify the Ed25519 signature over the PQSPK BEFORE
+      //     encapsulating — identical trust model to the classic SPK check above.
+      //     A malicious relay that swaps the PQSPK must not be able to learn the
+      //     encapsulated secret. bobSignK is already validated (length + present)
+      //     by the classic SPK block, so we reuse it.
+      const bobPQPK = decodeBase64(contactBundle.pqSignedPreKey.publicKeyB64);
+      const pqSig = decodeBase64(contactBundle.pqSignedPreKey.signatureB64);
+      if (bobPQPK.length !== MLKEM768_PUBLICKEY_BYTES) {
+        throw new Error('PQXDH: Invalid ML-KEM-768 public key length');
+      }
+      if (pqSig.length !== nacl.sign.signatureLength) {
+        throw new Error('PQXDH: Invalid PQ prekey signature length');
+      }
+      const validPqSig = nacl.sign.detached.verify(bobPQPK, pqSig, bobSignK);
+      if (!validPqSig) {
+        throw new Error('PQXDH: Invalid PQ prekey signature — possible key compromise or MITM');
+      }
+
+      // 4b. Encapsulate to the peer's PQSPK → {cipherText, sharedSecret}.
+      const encapsulated = ml_kem768.encapsulate(bobPQPK);
+      const cipherText = encapsulated.cipherText;
+      sharedSecret = encapsulated.sharedSecret;
+      if (sharedSecret.length !== MLKEM768_SHAREDSECRET_BYTES) {
+        throw new Error('PQXDH: unexpected ML-KEM shared-secret length');
+      }
+      assertNonZeroSharedSecret(sharedSecret, 'PQXDH encapsulate');
+
+      // 4c. Append the PQ shared secret to the END of dhOut (after DH4 if present),
+      //     then derive with the v2 domain-separation label.
+      combined = new Uint8Array(dhOut.length + sharedSecret.length);
+      combined.set(dhOut, 0);
+      combined.set(sharedSecret, dhOut.length);
+
+      const salt = new Uint8Array(32);
+      const info = new TextEncoder().encode(HKDF_INFO_V2);
+      const rootKey = hkdfSHA256(combined, salt, info, 32);
+
+      return {
+        rootKey,
+        myEphemeralPublicKeyB64: encodeBase64(myEK_pub),
+        version: 2,
+        pqCiphertextB64: encodeBase64(cipherText),
+      };
     }
 
-    // 4c. Append the PQ shared secret to the END of dhOut (after DH4 if present),
-    //     then derive with the v2 domain-separation label.
-    const combined = new Uint8Array(dhOut.length + sharedSecret.length);
-    combined.set(dhOut, 0);
-    combined.set(sharedSecret, dhOut.length);
-
-    const salt = new Uint8Array(32);
-    const info = new TextEncoder().encode(HKDF_INFO_V2);
-    const rootKey = hkdfSHA256(combined, salt, info, 32);
+    // 4 (v1). Derive Root Key via HKDF (Signal X3DH spec: salt = 0x00…, info = app-specific)
+    const salt = new Uint8Array(32); // 32 zero bytes per spec
+    const info = new TextEncoder().encode(HKDF_INFO_V1);
+    const rootKey = hkdfSHA256(dhOut, salt, info, 32);
 
     return {
       rootKey,
       myEphemeralPublicKeyB64: encodeBase64(myEK_pub),
-      version: 2,
-      pqCiphertextB64: encodeBase64(cipherText),
+      version: 1,
     };
+  } finally {
+    zeroize(myEK_sec);
+    if (dh1) zeroize(dh1);
+    if (dh2) zeroize(dh2);
+    if (dh3) zeroize(dh3);
+    if (dh4) zeroize(dh4);
+    if (dhOut) zeroize(dhOut);
+    if (combined) zeroize(combined);
+    if (sharedSecret) zeroize(sharedSecret);
   }
-
-  // 4 (v1). Derive Root Key via HKDF (Signal X3DH spec: salt = 0x00…, info = app-specific)
-  const salt = new Uint8Array(32); // 32 zero bytes per spec
-  const info = new TextEncoder().encode(HKDF_INFO_V1);
-  const rootKey = hkdfSHA256(dhOut, salt, info, 32);
-
-  return {
-    rootKey,
-    myEphemeralPublicKeyB64: encodeBase64(myEK_pub),
-    version: 1,
-  };
 }
 
 /**
@@ -267,51 +314,74 @@ export function performX3DHReceiver(
   aliceEK: Uint8Array,
   pq?: X3DHReceiverPqInputs | null,
 ): Uint8Array {
-  // Mirror sender's DH order: DH1=DH(SPK,IK_alice), DH2=DH(IK,EK_alice), DH3=DH(SPK,EK_alice)
-  const dh1 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceIK), 'DH1');
-  const dh2 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, aliceEK), 'DH2');
-  const dh3 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceEK), 'DH3');
+  // Intermediates zeroized in `finally` below. NOTE: mySpkSecret/myOpkSecret/
+  // myIdentity.secretKey are caller-owned (the SPK in particular is reused
+  // across many incoming handshakes) and must NOT be zeroized here.
+  let dh1: Uint8Array | undefined;
+  let dh2: Uint8Array | undefined;
+  let dh3: Uint8Array | undefined;
+  let dh4: Uint8Array | undefined;
+  let dhOut: Uint8Array | undefined;
+  let combined: Uint8Array | undefined;
+  let sharedSecret: Uint8Array | undefined;
 
-  // Signal spec: prepend 32 bytes of 0xFF
-  const F = new Uint8Array(32).fill(0xFF);
-  let dhOut = new Uint8Array(F.length + dh1.length + dh2.length + dh3.length);
-  dhOut.set(F, 0);
-  dhOut.set(dh1, F.length);
-  dhOut.set(dh2, F.length + dh1.length);
-  dhOut.set(dh3, F.length + dh1.length + dh2.length);
+  try {
+    // Mirror sender's DH order: DH1=DH(SPK,IK_alice), DH2=DH(IK,EK_alice), DH3=DH(SPK,EK_alice)
+    dh1 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceIK), 'DH1');
+    dh2 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, aliceEK), 'DH2');
+    dh3 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceEK), 'DH3');
 
-  if (myOpkSecret) {
-    const dh4 = assertNonZeroDH(nacl.scalarMult(myOpkSecret, aliceEK), 'DH4');
-    const newDhOut = new Uint8Array(dhOut.length + dh4.length);
-    newDhOut.set(dhOut, 0);
-    newDhOut.set(dh4, dhOut.length);
-    dhOut = newDhOut;
-  }
+    // Signal spec: prepend 32 bytes of 0xFF
+    const F = new Uint8Array(32).fill(0xFF);
+    dhOut = new Uint8Array(F.length + dh1.length + dh2.length + dh3.length);
+    dhOut.set(F, 0);
+    dhOut.set(dh1, F.length);
+    dhOut.set(dh2, F.length + dh1.length);
+    dhOut.set(dh3, F.length + dh1.length + dh2.length);
 
-  if (pq) {
-    if (pq.cipherText.length !== MLKEM768_CIPHERTEXT_BYTES) {
-      throw new Error('PQXDH: Invalid ML-KEM-768 ciphertext length');
+    if (myOpkSecret) {
+      dh4 = assertNonZeroDH(nacl.scalarMult(myOpkSecret, aliceEK), 'DH4');
+      const newDhOut = new Uint8Array(dhOut.length + dh4.length);
+      newDhOut.set(dhOut, 0);
+      newDhOut.set(dh4, dhOut.length);
+      zeroize(dhOut);
+      dhOut = newDhOut;
     }
-    if (pq.pqSpkSecret.length !== MLKEM768_SECRETKEY_BYTES) {
-      throw new Error('PQXDH: Invalid ML-KEM-768 secret key length');
+
+    if (pq) {
+      if (pq.cipherText.length !== MLKEM768_CIPHERTEXT_BYTES) {
+        throw new Error('PQXDH: Invalid ML-KEM-768 ciphertext length');
+      }
+      if (pq.pqSpkSecret.length !== MLKEM768_SECRETKEY_BYTES) {
+        throw new Error('PQXDH: Invalid ML-KEM-768 secret key length');
+      }
+      // ML-KEM decapsulation is implicit-rejection: a tampered ciphertext does NOT
+      // throw, it yields a DIFFERENT (pseudo-random) shared secret. That is exactly
+      // what makes the tamper test work — Bob's root key diverges from Alice's.
+      sharedSecret = ml_kem768.decapsulate(pq.cipherText, pq.pqSpkSecret);
+      assertNonZeroSharedSecret(sharedSecret, 'PQXDH decapsulate');
+      combined = new Uint8Array(dhOut.length + sharedSecret.length);
+      combined.set(dhOut, 0);
+      combined.set(sharedSecret, dhOut.length);
+
+      const salt = new Uint8Array(32);
+      const info = new TextEncoder().encode(HKDF_INFO_V2);
+      return hkdfSHA256(combined, salt, info, 32);
     }
-    // ML-KEM decapsulation is implicit-rejection: a tampered ciphertext does NOT
-    // throw, it yields a DIFFERENT (pseudo-random) shared secret. That is exactly
-    // what makes the tamper test work — Bob's root key diverges from Alice's.
-    const sharedSecret = ml_kem768.decapsulate(pq.cipherText, pq.pqSpkSecret);
-    const combined = new Uint8Array(dhOut.length + sharedSecret.length);
-    combined.set(dhOut, 0);
-    combined.set(sharedSecret, dhOut.length);
 
     const salt = new Uint8Array(32);
-    const info = new TextEncoder().encode(HKDF_INFO_V2);
-    return hkdfSHA256(combined, salt, info, 32);
+    const info = new TextEncoder().encode(HKDF_INFO_V1);
+
+    return hkdfSHA256(dhOut, salt, info, 32);
+  } finally {
+    if (dh1) zeroize(dh1);
+    if (dh2) zeroize(dh2);
+    if (dh3) zeroize(dh3);
+    if (dh4) zeroize(dh4);
+    if (dhOut) zeroize(dhOut);
+    if (combined) zeroize(combined);
+    if (sharedSecret) zeroize(sharedSecret);
   }
-
-  const salt = new Uint8Array(32);
-  const info = new TextEncoder().encode(HKDF_INFO_V1);
-
-  return hkdfSHA256(dhOut, salt, info, 32);
 }
 
 /**

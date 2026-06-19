@@ -12,6 +12,7 @@ import { Section, Row, Toggle } from '../components/Section';
 import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
+import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import type { Theme } from '../theme/vault';
 import { themedAlert } from '../components/AlertHost';
 
@@ -37,10 +38,15 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const routeViaTor = usePreferences((s) => s.routeViaTor);
   const requireGroupApproval = usePreferences((s) => s.requireGroupApproval);
   const setPref = usePreferences((s) => s.set);
+  const pqDowngradeFallbacks = useSecurityDiagnostics((s) => s.pqDowngradeFallbacks);
+  const lastPqDowngradeAt = useSecurityDiagnostics((s) => s.lastPqDowngradeAt);
+  const secDiagHydrate = useSecurityDiagnostics((s) => s.hydrate);
+  const secDiagHydrated = useSecurityDiagnostics((s) => s.hydrated);
 
   // Shell already hydrates on mount; this is a belt-and-suspenders guard
   useEffect(() => {
     if (!hydrated) void hydrate();
+    if (!secDiagHydrated) void secDiagHydrate();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -252,6 +258,27 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             label={i18nT('privacy.securityAudit')}
             sub={i18nT('privacy.securityAuditSub')}
             onPress={() => { themedAlert(i18nT('privacy.auditAlert'), i18nT('privacy.auditAlertDesc')); }}
+          />
+          <Row
+            t={t}
+            icon={<I.Shield size={20} color={pqDowngradeFallbacks > 0 ? t.accent : t.textDim} />}
+            label={i18nT('privacy.pqStatus')}
+            sub={
+              pqDowngradeFallbacks > 0
+                ? i18nT('privacy.pqStatusSubFallback', { count: pqDowngradeFallbacks })
+                : i18nT('privacy.pqStatusSubOk')
+            }
+            onPress={() => {
+              themedAlert(
+                i18nT('privacy.pqStatusAlert'),
+                pqDowngradeFallbacks > 0
+                  ? i18nT('privacy.pqStatusAlertFallback', {
+                      count: pqDowngradeFallbacks,
+                      when: lastPqDowngradeAt ? new Date(lastPqDowngradeAt).toLocaleString() : '—',
+                    })
+                  : i18nT('privacy.pqStatusAlertOk'),
+              );
+            }}
           />
           <Row
             t={t}
