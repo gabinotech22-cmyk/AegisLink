@@ -2,6 +2,7 @@ import nacl from 'tweetnacl';
 import { decodeUTF8, encodeUTF8, decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { ratchetEncrypt, ratchetDecrypt, type RatchetState } from './signal/ratchet';
 import { stripAndPad, unpad } from './metadata';
+import { sealEnvelope, openEnvelope as openSealedEnvelope, type SealedWire } from './sealedSender';
 
 interface InnerRatchet {
   ratchetKeyB64: string;
@@ -136,6 +137,108 @@ export function tryDecryptMessage(
       body: encodeUTF8(plaintextBytes),
       newState: working
     };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Sealed-sender v2 (Phase 1) ──────────────────────────────────────────────
+//
+// Same Double Ratchet inner as v1, but the OUTER envelope is the per-message
+// ephemeral sealed-sender box (crypto/sealedSender.ts) instead of the legacy
+// static-key nacl.box. The wire carries no `from` and is unlinkable to the
+// sender's static X25519 key. v2 is for ESTABLISHED sessions only — it never
+// carries an x3dhInit (first contact bootstraps over v1), so the recipient must
+// already hold the sender's signing key to authenticate.
+
+/**
+ * Encrypt for an established contact using the sealed-sender v2 outer envelope.
+ * @param senderSigningSecretKey the sender's 64-byte Ed25519 secret (signs the
+ *        sealed inner so the recipient can authenticate `from`).
+ * @param nowMs current time (ms) stamped inside the sealed envelope.
+ */
+export function encryptMessageV2(
+  plaintext: string,
+  senderAegisId: string,
+  recipientPublicKey: Uint8Array,
+  senderSigningSecretKey: Uint8Array,
+  ratchetState: RatchetState,
+  nowMs: number,
+): { wire: SealedWire; newState: RatchetState } {
+  const payloadBytes = decodeUTF8(plaintext);
+  const ratchetOut = ratchetEncrypt(ratchetState, payloadBytes);
+
+  // Inner is identical to v1 minus x3dh (v2 never bootstraps a handshake).
+  const innerPayload: Record<string, unknown> = {
+    v: PROTOCOL_VERSION,
+    from: senderAegisId,
+    ratchet: {
+      ratchetKeyB64: encodeBase64(ratchetOut.header.ratchetKey),
+      n: ratchetOut.header.n,
+      pn: ratchetOut.header.pn,
+      ciphertextB64: encodeBase64(ratchetOut.ciphertext),
+      nonceB64: encodeBase64(ratchetOut.nonce),
+    },
+  };
+
+  // Pad to a fixed bucket BEFORE sealing — wire length must not leak size.
+  const innerBytes = stripAndPad(innerPayload);
+  const wire = sealEnvelope(
+    recipientPublicKey,
+    senderAegisId,
+    senderSigningSecretKey,
+    encodeBase64(innerBytes),
+    nowMs,
+  );
+
+  const newState = { ...ratchetState };
+  delete newState.x3dhInit;
+  return { wire, newState };
+}
+
+/**
+ * Open + decrypt a sealed-sender v2 envelope. Authenticates the sender via the
+ * sealed signature (resolveSigningKey maps `from` → that contact's Ed25519
+ * signing pubkey) and binds it to the inner `from` claim before ratcheting.
+ * Returns null on ANY failure (caller falls back / drops).
+ */
+export function decryptMessageV2(
+  wire: SealedWire,
+  myBoxSecretKey: Uint8Array,
+  resolveSigningKey: (from: string) => Uint8Array | null,
+  ratchetState: RatchetState,
+  nowMs: number,
+): DecryptedInner | null {
+  const opened = openSealedEnvelope(wire, myBoxSecretKey, resolveSigningKey, nowMs);
+  if (!opened) return null;
+
+  let parsed: InnerPayload | null;
+  try {
+    const innerBytes = decodeBase64(opened.payload);
+    parsed = unpad(innerBytes) as InnerPayload | null;
+  } catch {
+    return null;
+  }
+  if (!parsed || parsed.v !== PROTOCOL_VERSION) return null;
+  if (typeof parsed.from !== 'string' || !parsed.ratchet) return null;
+  // The authenticated sealed `from` MUST match the inner claim.
+  if (parsed.from !== opened.from) return null;
+
+  const working = cloneRatchetState(ratchetState);
+  try {
+    const rHeader = {
+      ratchetKey: decodeBase64(parsed.ratchet.ratchetKeyB64),
+      n: parsed.ratchet.n,
+      pn: parsed.ratchet.pn,
+    };
+    const plaintextBytes = ratchetDecrypt(
+      working,
+      rHeader,
+      decodeBase64(parsed.ratchet.ciphertextB64),
+      decodeBase64(parsed.ratchet.nonceB64),
+    );
+    if (!plaintextBytes) return null;
+    return { from: opened.from, body: encodeUTF8(plaintextBytes), newState: working };
   } catch {
     return null;
   }
