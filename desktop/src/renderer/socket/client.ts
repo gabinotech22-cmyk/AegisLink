@@ -761,6 +761,7 @@ async function saveSessionState(aegisId: string, state: RatchetState) {
     PN: state.PN,
     MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
     x3dhInit: state.x3dhInit,
+    createdAtMs: state.createdAtMs,
   };
   await saveRatchetSession(aegisId, JSON.stringify(s));
 }
