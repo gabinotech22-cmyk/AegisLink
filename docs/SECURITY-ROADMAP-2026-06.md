@@ -99,9 +99,11 @@ Esf **M**. El desktop quedó atrás en mecanismos anti-desync. Portar de mobile.
 
 > **ACTUALIZADO 2026-06-19:** al investigar A-6 se confirmó que el leak está **a la par
 > de los envelopes** (handler.ts:572 estampa `from: me` igual). No es un fix de llamadas
-> sino del **transporte completo**. Decisión del usuario: épica completa estilo SimpleX
-> (colas sin identidad). **Diseño detallado en [docs/SEALED-SENDER-ARCHITECTURE.md].**
-> Siguiente entregable = Fase 0 (spike + medición de latencia de llamada sobre cola).
+> sino del **transporte completo**. Modelo elegido = **Signal sealed-sender** (submission
+> sin auth + delivery token + identidad del emisor sellada dentro del sobre), que **conserva
+> `aegisId` y el onboarding** (marca, NO negociable). SimpleX (colas sin identidad) se
+> estudió y **descartó por marca**. **Diseño en [docs/SEALED-SENDER-ARCHITECTURE.md].**
+> Siguiente entregable = Fase 0 (spike del sobre sealed + delivery token + medir latencia).
 
 - `handler.ts:1525` — `forward()` añade `from: me` a todo evento de señalización.
 - Fix: cifrar el payload de señalización (SDP/ICE) contra la pubkey del callee; el relay reenvía blob opaco a `to` sin aprender `from` (identidad embebida en el payload cifrado), igual que envelopes.
