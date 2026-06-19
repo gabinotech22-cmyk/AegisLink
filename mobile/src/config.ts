@@ -82,13 +82,19 @@ export const SEALED_TRANSPORT_VERSION: 'v1' | 'v2' =
  * wire. Refuse to run instead of silently downgrading. (`.onion` is exempt: Tor
  * provides its own transport encryption.)
  */
+// Developer loopback hosts (emulator host 10.0.2.2 + localhost) are exempt:
+// they mirror android/.../network_security_config.xml, which already whitelists
+// exactly these for cleartext, and the app never contacts them in production.
+// This lets a release APK reach a relay on the developer's machine for E2E tests.
+const isLoopbackUrl = (url: string): boolean =>
+  /^(https?|wss?):\/\/(10\.0\.2\.2|localhost|127\.0\.0\.1)(:|\/|$)/i.test(url);
 // eslint-disable-next-line no-undef
 if (!__DEV__) {
   for (const [name, url] of [
     ['SERVER_URL', SERVER_URL],
     ['RELAY_URL', RELAY_URL],
   ] as const) {
-    if (!/^https:\/\//i.test(url)) {
+    if (!/^https:\/\//i.test(url) && !isLoopbackUrl(url)) {
       throw new Error(`[config] insecure ${name} in a production build: ${url}`);
     }
   }
