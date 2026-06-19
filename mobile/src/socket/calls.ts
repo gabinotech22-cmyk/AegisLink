@@ -19,6 +19,14 @@ import { fetchTurnConfig } from '../webrtc/ice';
 import { startInCallAudio, stopInCallAudio } from '../webrtc/inCall';
 import { startCallService, stopCallService } from '../webrtc/callForegroundService';
 import { themedAlert } from '../components/AlertHost';
+import { SEALED_TRANSPORT_VERSION } from '../config';
+import {
+  sealCallInvite,
+  openCallInvite,
+  sealWithCallKey,
+  openWithCallKey,
+  type CallKeyWire,
+} from '../crypto/callSession';
 
 // ---------------------------------------------------------------------------
 // Sealed WebRTC signaling
@@ -133,6 +141,80 @@ function openSignal(senderAegisId: string, wire: SealedSignalWire): string | nul
 }
 
 // ---------------------------------------------------------------------------
+// Sealed-sender v2 call signaling (Phase 2)
+// ---------------------------------------------------------------------------
+// v2 hides the caller's identity from the relay: the call:invite carries a
+// sealed-sender handshake (ephemeral box + signature) embedding a random
+// `callKey`; answer/ICE are then sealed symmetrically under callKey (cheap, for
+// the ICE trickle). The relay never stamps `from`. We hold the callKey for the
+// lifetime of the call, keyed by callId. v2 SEND is flag-gated; v2 RECEIVE is
+// always wired so a v2 caller reaches a v1-flagged callee.
+const callKeys = new Map<string, Uint8Array>();
+
+function rememberCallKey(callId: string, key: Uint8Array): void {
+  callKeys.set(callId, key);
+}
+function forgetCallKey(callId: string): void {
+  const k = callKeys.get(callId);
+  if (k) { k.fill(0); callKeys.delete(callId); } // zeroize (golden rule #9)
+}
+
+/** Our Ed25519 signing secret + box secret + aegisId from the in-memory identity. */
+function ownSealedKeys(): { secretKey: Uint8Array; signingSecretKey: Uint8Array; aegisId: string } | null {
+  try {
+    const { useIdentity } = require('../store/identity') as {
+      useIdentity: { getState: () => { identity: { secretKey: Uint8Array; signingSecretKey: Uint8Array; aegisId: string } | null } };
+    };
+    const id = useIdentity.getState().identity;
+    if (!id?.signingSecretKey) return null;
+    return { secretKey: id.secretKey, signingSecretKey: id.signingSecretKey, aegisId: id.aegisId };
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve a contact's Ed25519 signing public key (to authenticate a v2 invite). */
+function peerSigningKey(aegisId: string): Uint8Array | null {
+  try {
+    const { useContacts } = require('../store/contacts') as {
+      useContacts: { getState: () => { get: (id: string) => { signingPublicKeyB64?: string } | undefined } };
+    };
+    const b64 = useContacts.getState().get(aegisId)?.signingPublicKeyB64;
+    if (!b64) return null;
+    const key = decodeBase64(b64);
+    return key.length === nacl.sign.publicKeyLength ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Emit a post-handshake signaling message (ICE candidate or SDP answer). Uses
+ * the v2 symmetric channel when we hold a callKey for this call, else the v1
+ * sealed channel. Returns false if sealing failed (caller must abort, never
+ * fall back to plaintext).
+ */
+function emitSealedSignal(
+  socket: ReturnType<typeof getSocket>,
+  kind: 'answer' | 'ice',
+  callId: string,
+  toAegisId: string,
+  payload: string,
+): boolean {
+  if (!socket) return false;
+  const key = callKeys.get(callId);
+  if (key) {
+    const wire: CallKeyWire = sealWithCallKey(key, payload);
+    socket.emit(`call:${kind}:v2`, { callId, to: toAegisId, ...wire });
+    return true;
+  }
+  const sealed = sealSignal(toAegisId, payload);
+  if (!sealed) return false;
+  socket.emit(`call:${kind}`, { callId, to: toAegisId, ...sealed });
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Ring timeout — cleared whenever the call advances past outgoing-ringing
 // ---------------------------------------------------------------------------
 let _ringTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -225,6 +307,11 @@ export function attachCallHandlers(): void {
   socket.off('call:answer');
   socket.off('call:ice');
   socket.off('call:hangup');
+  // v2 (sealed-sender) channels — always wired so a v2 caller reaches us.
+  socket.off('call:invite:v2');
+  socket.off('call:answer:v2');
+  socket.off('call:ice:v2');
+  socket.off('call:hangup:v2');
 
   socket.on('call:invite', async (msg: CallInvitePayload) => {
     // Decrypt the sealed SDP offer before doing anything else. A failed open
@@ -234,102 +321,176 @@ export function attachCallHandlers(): void {
       if (__DEV__) console.warn('[calls] call:invite signal decrypt failed — dropping');
       return;
     }
-    const state = useCall.getState();
-    if (state.status !== 'idle' && state.status !== 'ended') {
-      // Busy — auto-reject; log as declined
-      socket.emit('call:hangup', { callId: msg.callId, to: msg.from, reason: 'busy' });
-      saveCall({ id: msg.callId, contactId: msg.from, direction: 'in', media: msg.media, status: 'declined', startedAt: Date.now(), durationS: 0 }).catch(() => {});
-      const { useMessages } = require('../store/messages');
-      const { useIdentity } = require('../store/identity');
-      if (useIdentity.getState().identity) {
-        void useMessages.getState().append({
-          id: Crypto.randomUUID(),
-          chatId: msg.from,
-          direction: 'in',
-          body: `[call:declined:${msg.media}:0s]`,
-          createdAt: Date.now(),
-          type: 'text',
-        });
-      }
+    await processIncomingInvite(socket, msg.from, msg.callId, msg.media, offer);
+  });
+
+  // Sealed-sender v2 invite: no `from` on the wire; openCallInvite recovers and
+  // authenticates the caller and yields the per-call symmetric key.
+  socket.on('call:invite:v2', async (msg: SealedInviteWire) => {
+    const me = ownSealedKeys();
+    if (!me) return;
+    const opened = openCallInvite(
+      { ciphertext: msg.ciphertext, nonce: msg.nonce, epk: msg.epk },
+      me.secretKey,
+      peerSigningKey,
+      Date.now(),
+    );
+    if (!opened) {
+      if (__DEV__) console.warn('[calls] call:invite:v2 open/auth failed — dropping');
       return;
     }
-    // Fresh incoming call: clear any leftover ICE buffer from a previous call and
-    // arm the buffer so the caller's candidates that arrive WHILE WE RING are kept
-    // (and later flushed in acceptCall), instead of being dropped.
-    resetIceQueue();
-    _finalizedCallId = null; // re-arm the finalize-once guard for this new call
-    state.startIncoming(msg.from, msg.callId, msg.media, offer);
-
-    // Show native incoming call UI (CallKit on iOS, ConnectionService on Android)
-    const callerName = (() => {
-      try {
-        const { useContacts } = require('../store/contacts') as { useContacts: { getState: () => { get: (id: string) => { name: string } | undefined } } };
-        return useContacts.getState().get(msg.from)?.name ?? msg.from;
-      } catch { return msg.from; }
-    })();
-    displayIncomingCall(msg.callId, msg.from, callerName, msg.media === 'video');
-
-    // Show a local push notification when the app is in the background so the
-    // user sees a heads-up banner. CallKit / ConnectionService handles the
-    // full-screen UI on iOS / Android 10+; the push is a fallback for cases
-    // where native call UI is not available or not rendered (e.g. kill state).
-    const { AppState } = require('react-native') as typeof import('react-native');
-    if (AppState.currentState !== 'active') {
-      const { showIncomingCallNotification } = require('../notifications/push') as {
-        showIncomingCallNotification: (callerAegisId: string, callerName: string, isVideo: boolean) => Promise<void>;
-      };
-      void showIncomingCallNotification(msg.from, callerName, msg.media === 'video').catch(() => {});
-    }
+    rememberCallKey(msg.callId, opened.callKey);
+    await processIncomingInvite(socket, opened.from, msg.callId, msg.media, opened.offer);
   });
 
   socket.on('call:answer', async (msg: CallAnswerPayload) => {
-    clearRingTimeout(); // callee answered — cancel the no-answer timeout
-    const { activePeer, callId } = useCall.getState();
-    if (!activePeer || callId !== msg.callId) return;
     const answer = openSignal(msg.from, msg);
     if (!answer) {
       if (__DEV__) console.warn('[calls] call:answer signal decrypt failed — dropping');
       return;
     }
-    await setRemoteAnswer(activePeer.pc, answer);
-    // Flush any ICE candidates that arrived before the remote description was set
-    await flushPendingIce(activePeer.pc);
-    useCall.getState().setStatus('connecting');
+    await processIncomingAnswer(msg.callId, answer);
+  });
+
+  socket.on('call:answer:v2', async (msg: SealedKeyWire) => {
+    const key = callKeys.get(msg.callId);
+    if (!key) return;
+    const answer = openWithCallKey(key, { ciphertext: msg.ciphertext, nonce: msg.nonce });
+    if (!answer) {
+      if (__DEV__) console.warn('[calls] call:answer:v2 decrypt failed — dropping');
+      return;
+    }
+    await processIncomingAnswer(msg.callId, answer);
   });
 
   socket.on('call:ice', async (msg: CallIcePayload) => {
-    // Gate on callId only — NOT on activePeer. While the callee is still ringing,
-    // activePeer is null (acceptCall hasn't run yet), but the caller has already
-    // finished trickling its ICE candidates. The old `if (!activePeer) return`
-    // dropped every one of them, leaving the callee with no route back to the
-    // caller, so the call never connected. Buffer them instead and flush once the
-    // peer exists and the remote offer is applied (in acceptCall).
-    const { callId } = useCall.getState();
-    if (callId !== msg.callId) return;
     const candidate = openSignal(msg.from, msg);
     if (!candidate) {
       if (__DEV__) console.warn('[calls] call:ice signal decrypt failed — dropping');
       return;
     }
-    const { activePeer } = useCall.getState();
-    if (activePeer && _remoteDescriptionSet) {
-      void addRemoteIce(activePeer.pc, candidate);
-    } else {
-      _pendingIceCandidates.push(candidate);
+    processIncomingIce(msg.callId, candidate);
+  });
+
+  socket.on('call:ice:v2', async (msg: SealedKeyWire) => {
+    const key = callKeys.get(msg.callId);
+    if (!key) return;
+    const candidate = openWithCallKey(key, { ciphertext: msg.ciphertext, nonce: msg.nonce });
+    if (!candidate) {
+      if (__DEV__) console.warn('[calls] call:ice:v2 decrypt failed — dropping');
+      return;
     }
+    processIncomingIce(msg.callId, candidate);
   });
 
   socket.on('call:hangup', (msg: CallHangupPayload) => {
     const { callId } = useCall.getState();
     if (callId !== msg.callId) return;
-    // Persist history + tear down through the shared finalizer (emitHangup:false
-    // — the peer initiated this, no need to echo a hangup back). This replaces
-    // the old path that let activePeer.cleanup() drive the connection to 'closed'
-    // and reach the rtc_failure branch, which logged answered calls as 'missed'
-    // on the receiver and popped a spurious "Call failed" alert. The status is
-    // captured BEFORE we move to 'ended', so a connected call is logged 'answered'.
     finalizeCall(msg.reason ?? 'remote_hangup', { emitHangup: false });
   });
+
+  socket.on('call:hangup:v2', (msg: { callId: string; reason?: string }) => {
+    const { callId } = useCall.getState();
+    if (callId !== msg.callId) return;
+    finalizeCall(msg.reason ?? 'remote_hangup', { emitHangup: false });
+  });
+}
+
+/** Wire shape for an incoming v2 call:invite (no `from`). */
+interface SealedInviteWire {
+  callId: string;
+  media: CallMedia;
+  ciphertext: string;
+  nonce: string;
+  epk: string;
+}
+/** Wire shape for an incoming v2 answer / ICE (symmetric, no `from`). */
+interface SealedKeyWire {
+  callId: string;
+  ciphertext: string;
+  nonce: string;
+}
+
+/**
+ * Shared incoming-invite handling (busy check, ring UI, notification). Used by
+ * both the v1 (`from` from the relay) and v2 (`from` recovered from the sealed
+ * box) invite handlers — the only difference is how the offer + sender were
+ * obtained and authenticated upstream.
+ */
+async function processIncomingInvite(
+  socket: NonNullable<ReturnType<typeof getSocket>>,
+  from: string,
+  callId: string,
+  media: CallMedia,
+  offer: string,
+): Promise<void> {
+  const state = useCall.getState();
+  if (state.status !== 'idle' && state.status !== 'ended') {
+    // Busy — auto-reject; log as declined. Mirror the inbound transport: if this
+    // call arrived sealed (we hold a callKey), reject on the v2 channel too.
+    if (callKeys.has(callId)) {
+      socket.emit('call:hangup:v2', { callId, to: from, reason: 'busy' });
+    } else {
+      socket.emit('call:hangup', { callId, to: from, reason: 'busy' });
+    }
+    saveCall({ id: callId, contactId: from, direction: 'in', media, status: 'declined', startedAt: Date.now(), durationS: 0 }).catch(() => {});
+    const { useMessages } = require('../store/messages');
+    const { useIdentity } = require('../store/identity');
+    if (useIdentity.getState().identity) {
+      void useMessages.getState().append({
+        id: Crypto.randomUUID(),
+        chatId: from,
+        direction: 'in',
+        body: `[call:declined:${media}:0s]`,
+        createdAt: Date.now(),
+        type: 'text',
+      });
+    }
+    return;
+  }
+  resetIceQueue();
+  _finalizedCallId = null;
+  state.startIncoming(from, callId, media, offer);
+
+  const callerName = (() => {
+    try {
+      const { useContacts } = require('../store/contacts') as { useContacts: { getState: () => { get: (id: string) => { name: string } | undefined } } };
+      return useContacts.getState().get(from)?.name ?? from;
+    } catch { return from; }
+  })();
+  displayIncomingCall(callId, from, callerName, media === 'video');
+
+  const { AppState } = require('react-native') as typeof import('react-native');
+  if (AppState.currentState !== 'active') {
+    const { showIncomingCallNotification } = require('../notifications/push') as {
+      showIncomingCallNotification: (callerAegisId: string, callerName: string, isVideo: boolean) => Promise<void>;
+    };
+    void showIncomingCallNotification(from, callerName, media === 'video').catch(() => {});
+  }
+}
+
+/** Shared answer handling — used by both v1 and v2 answer handlers. */
+async function processIncomingAnswer(msgCallId: string, answer: string): Promise<void> {
+  clearRingTimeout(); // callee answered — cancel the no-answer timeout
+  const { activePeer, callId } = useCall.getState();
+  if (!activePeer || callId !== msgCallId) return;
+  await setRemoteAnswer(activePeer.pc, answer);
+  await flushPendingIce(activePeer.pc);
+  useCall.getState().setStatus('connecting');
+}
+
+/** Shared ICE handling — used by both v1 and v2 ICE handlers. */
+function processIncomingIce(msgCallId: string, candidate: string): void {
+  // Gate on callId only — NOT on activePeer (the callee is still ringing while
+  // the caller trickles). Buffer until the peer exists + remote offer is applied.
+  const { callId } = useCall.getState();
+  if (callId !== msgCallId) return;
+  const { activePeer } = useCall.getState();
+  if (activePeer && _remoteDescriptionSet) {
+    void addRemoteIce(activePeer.pc, candidate);
+  } else {
+    _pendingIceCandidates.push(candidate);
+  }
 }
 
 /** Start an outgoing call. */
@@ -341,6 +502,13 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   const callId = Crypto.randomUUID();
   _finalizedCallId = null; // re-arm the finalize-once guard for this new call
   useCall.getState().startOutgoing(toAegisId, callId, media);
+
+  // Decide sealed-sender v2 for this call: flag on, and we can resolve the peer's
+  // box key + our own signing identity. Generate the callKey UP FRONT so ICE
+  // candidates trickling out during createOffer are already sealed under it
+  // (emitSealedSignal picks v2 whenever callKeys holds this callId).
+  const useV2Call = SEALED_TRANSPORT_VERSION === 'v2' && !!peerPublicKey(toAegisId) && !!ownSealedKeys();
+  if (useV2Call) rememberCallKey(callId, nacl.randomBytes(nacl.secretbox.keyLength));
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
@@ -376,12 +544,9 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
     onIceCandidate: (candidate) => {
-      const sealed = sealSignal(toAegisId, JSON.stringify(candidate.toJSON?.() ?? candidate));
-      if (!sealed) {
+      if (!emitSealedSignal(socket, 'ice', callId, toAegisId, JSON.stringify(candidate.toJSON?.() ?? candidate))) {
         if (__DEV__) console.warn('[calls] cannot seal outgoing ICE — peer key missing');
-        return;
       }
-      socket.emit('call:ice', { callId, to: toAegisId, ...sealed });
     },
     onConnectionStateChange: (state) => {
       if (__DEV__) console.log('[calls] connectionState:', state);
@@ -415,17 +580,32 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   useCall.getState().setActivePeer(peer);
 
   const offer = await createOffer(peer.pc);
-  const sealedOffer = sealSignal(toAegisId, offer);
-  if (!sealedOffer) {
-    // Cannot encrypt the offer — abort rather than leak plaintext SDP to the relay.
-    endCall('encrypt_failure');
-    themedAlert(
-      'Call failed',
-      'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
-    );
-    return; // don't throw — call is already ended cleanly
+  if (useV2Call) {
+    // Sealed-sender v2: the invite carries the handshake (no `from`); reuse the
+    // callKey generated up front so it matches the one already securing ICE.
+    const me = ownSealedKeys();
+    const recipientPub = peerPublicKey(toAegisId);
+    const callKey = callKeys.get(callId);
+    if (!me || !recipientPub || !callKey) {
+      endCall('encrypt_failure');
+      themedAlert('Call failed', 'Could not encrypt the call setup. Make sure the contact is in your contacts list.');
+      return;
+    }
+    const sealed = sealCallInvite(recipientPub, me.aegisId, me.signingSecretKey, offer, Date.now(), callKey);
+    socket.emit('call:invite:v2', { callId, to: toAegisId, media, ...sealed.wire });
+  } else {
+    const sealedOffer = sealSignal(toAegisId, offer);
+    if (!sealedOffer) {
+      // Cannot encrypt the offer — abort rather than leak plaintext SDP to the relay.
+      endCall('encrypt_failure');
+      themedAlert(
+        'Call failed',
+        'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
+      );
+      return; // don't throw — call is already ended cleanly
+    }
+    socket.emit('call:invite', { callId, to: toAegisId, media, ...sealedOffer });
   }
-  socket.emit('call:invite', { callId, to: toAegisId, media, ...sealedOffer });
 
   // Auto-end if callee does not answer within 45 seconds
   _ringTimeout = setTimeout(() => {
@@ -483,12 +663,9 @@ export async function acceptCall(): Promise<void> {
     onLocalStream: (s) => useCall.getState().setStreams(s, useCall.getState().remoteStream),
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
     onIceCandidate: (candidate) => {
-      const sealed = sealSignal(peerId, JSON.stringify(candidate.toJSON?.() ?? candidate));
-      if (!sealed) {
+      if (!emitSealedSignal(socket, 'ice', callId, peerId, JSON.stringify(candidate.toJSON?.() ?? candidate))) {
         if (__DEV__) console.warn('[calls] cannot seal outgoing ICE — peer key missing');
-        return;
       }
-      socket.emit('call:ice', { callId, to: peerId, ...sealed });
     },
     onConnectionStateChange: (state) => {
       if (__DEV__) console.log('[calls] connectionState:', state);
@@ -524,9 +701,9 @@ export async function acceptCall(): Promise<void> {
   // Flush ICE candidates that arrived while we were still ringing
   await flushPendingIce(peer.pc);
   const answer = await createAnswer(peer.pc);
-  const sealedAnswer = sealSignal(peerId, answer);
-  if (!sealedAnswer) {
-    // Cannot encrypt the answer — abort rather than leak plaintext SDP.
+  // Uses the v2 symmetric channel if this call arrived sealed (we hold a
+  // callKey), else the v1 sealed channel. Abort on seal failure (never plaintext).
+  if (!emitSealedSignal(socket, 'answer', callId, peerId, answer)) {
     endCall('encrypt_failure');
     themedAlert(
       'Call failed',
@@ -534,7 +711,6 @@ export async function acceptCall(): Promise<void> {
     );
     return; // don't throw — call is already ended cleanly
   }
-  socket.emit('call:answer', { callId, to: peerId, ...sealedAnswer });
   // Clear pendingOffer — direction is already stored in the call store.
   useCall.getState().setPendingOffer(null);
 }
@@ -563,8 +739,16 @@ function finalizeCall(reason: string, opts: { emitHangup: boolean }): void {
 
   const socket = getSocket();
   if (opts.emitHangup && socket && peerId && callId) {
-    socket.emit('call:hangup', { callId, to: peerId, reason });
+    // Mirror the call's transport: a sealed (v2) call hangs up on the v2 channel
+    // so the relay still never sees `from`.
+    if (callId && callKeys.has(callId)) {
+      socket.emit('call:hangup:v2', { callId, to: peerId, reason });
+    } else {
+      socket.emit('call:hangup', { callId, to: peerId, reason });
+    }
   }
+  // Drop the per-call session key (zeroized) now the call is over.
+  if (callId) forgetCallKey(callId);
 
   // Persist call history
   if (callId && peerId) {
