@@ -825,7 +825,6 @@ export function connect(identity: Identity): Socket {
       senderAegisId: string;
       ciphertextB64: string;
       nonceB64: string;
-      chainKeyB64: string;
       iteration: number;
     }) => {
       try {
@@ -843,7 +842,6 @@ export function connect(identity: Identity): Socket {
           {
             senderAegisId: dist.senderAegisId,
             channelId: dist.groupId,
-            chainKeyB64: dist.chainKeyB64,
             iteration: dist.iteration,
             ciphertextB64: dist.ciphertextB64,
             nonceB64: dist.nonceB64,
@@ -962,7 +960,6 @@ export async function rekeyGroupAfterRemoval(
     aegisId: dist.aegisId,
     ciphertextB64: dist.ciphertextB64,
     nonceB64: dist.nonceB64,
-    chainKeyB64: dist.chainKeyB64,
     iteration: dist.iteration,
     senderAegisId: dist.senderAegisId,
   }));

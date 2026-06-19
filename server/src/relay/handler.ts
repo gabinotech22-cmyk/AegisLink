@@ -180,7 +180,6 @@ const SenderKeyRecipient = z.object({
   aegisId: z.string().min(1).max(64),
   ciphertextB64: z.string().max(1024),
   nonceB64: z.string().length(44),
-  chainKeyB64: z.string().length(44),
   iteration: z.number().int().min(0),
   senderAegisId: z.string().min(1).max(64),
 });
@@ -206,7 +205,6 @@ const GroupRekeyDistribution = z.object({
   aegisId: z.string().min(1).max(64),
   ciphertextB64: z.string().max(1024),
   nonceB64: z.string().length(44),
-  chainKeyB64: z.string().length(44),
   iteration: z.number().int().min(0),
   senderAegisId: z.string().min(1).max(64),
 });
@@ -533,7 +531,6 @@ export function attachRelay(io: SocketServer) {
         senderAegisId: dist.sender_aegis_id,  // Do not log — zero-metadata principle
         ciphertextB64: dist.ciphertext_b64,
         nonceB64: dist.nonce_b64,
-        chainKeyB64: dist.chain_key_b64,
         iteration: dist.iteration,
       });
       // Immediately mark this device as having drained the row so repeated
@@ -1134,7 +1131,7 @@ export function attachRelay(io: SocketServer) {
 
         // Route each per-recipient sealed envelope to the recipient's sockets.
         // The relay only touches the `aegisId` routing field — ciphertextB64,
-        // nonceB64, chainKeyB64, and iteration are never read or stored.
+        // nonceB64, and iteration are never read or stored.
         for (const recipient of recipients) {
           const recipientSockets = sockets.get(recipient.aegisId);
           if (!recipientSockets || recipientSockets.size === 0) {
@@ -1147,7 +1144,6 @@ export function attachRelay(io: SocketServer) {
               orgId,
               ciphertextB64: recipient.ciphertextB64,
               nonceB64: recipient.nonceB64,
-              chainKeyB64: recipient.chainKeyB64,
               iteration: recipient.iteration,
               senderAegisId: recipient.senderAegisId,
             });
@@ -1236,7 +1232,6 @@ export function attachRelay(io: SocketServer) {
               senderAegisId: me,
               ciphertextB64: d.ciphertextB64,
               nonceB64: d.nonceB64,
-              chainKeyB64: d.chainKeyB64,
               iteration: d.iteration,
             });
           }
@@ -1255,7 +1250,6 @@ export function attachRelay(io: SocketServer) {
               sender_aegis_id: me,    // Do not log — zero-metadata principle
               ciphertext_b64: d.ciphertextB64,
               nonce_b64: d.nonceB64,
-              chain_key_b64: d.chainKeyB64,
               iteration: d.iteration,
               created_at: now,
               expires_at: 0,          // 0 → apply default MESSAGE_TTL_MS in repo
