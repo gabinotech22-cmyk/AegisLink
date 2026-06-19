@@ -20,7 +20,6 @@ export interface SenderKey {
 export interface SenderKeyDistributionMessage {
   senderAegisId: string;
   channelId: string;
-  chainKeyB64: string; // diagnostic / metadata only — the real key is sealed below
   iteration: number;
   // Encrypted for a specific recipient:
   // NaCl box(SenderKey JSON, recipientPublicKey, senderSecretKey, nonce)
@@ -119,7 +118,6 @@ export function sealSenderKeyFor(
   return {
     senderAegisId,
     channelId,
-    chainKeyB64: encodeBase64(sk.chainKey),
     iteration: sk.iteration,
     ciphertextB64: encodeBase64(ciphertext),
     nonceB64: encodeBase64(nonce),
