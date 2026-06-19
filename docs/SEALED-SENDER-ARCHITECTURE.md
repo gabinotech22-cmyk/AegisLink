@@ -1,125 +1,144 @@
-# AegisLink — Sealed-Sender / Metadata-Minimal Transport (épica A-6+)
+# AegisLink — Sealed-Sender en el transporte (épica A-6+)
 
 > Estado: **PROPUESTA DE DISEÑO** — requiere aprobación antes de implementar.
 > Origen: auditoría profunda 2026-06, hallazgo A-6 (el relay ve `from→to` en
 > signaling de llamadas). Al investigarlo se confirmó que el leak está **a la
-> par de los envelopes de chat** (handler.ts:572 estampa `from: me` igual), así
-> que el problema no es de llamadas — es del **modelo de transporte completo**.
+> par de los envelopes de chat** (handler.ts:572), así que el problema no es de
+> llamadas — es del **transporte completo**.
+
+## 0. Restricción de marca (NO NEGOCIABLE)
+
+**`aegisId` y el onboarding se mantienen.** Son la marca de AegisLink: registro
+anónimo en 3 pasos, identidad criptográfica generada en dispositivo, un `aegisId`
+legible (`XXX-XXXX-XXXX`) que el usuario comparte y verifica. Cualquier diseño
+que reemplace el `aegisId` por invite-links por-contacto (modelo SimpleX) queda
+**descartado**. El objetivo es ocultar el grafo social del relay **sin** tocar
+la identidad ni el flujo de alta.
 
 ## 1. El problema real
 
 El relay autentica **cada socket** como un `aegisId` (challenge-response Ed25519)
-y luego rutea por ese `aegisId`. Tanto los envelopes de chat como el signaling
-de llamadas viajan por ese socket autenticado. Consecuencia:
+y rutea por él. Tanto los envelopes de chat como el signaling de llamadas viajan
+por ese socket autenticado. Consecuencia:
 
 - El proceso vivo del relay conoce la arista `emisor→receptor` de **cada**
   mensaje y llamada, porque sabe qué socket (=`aegisId`) la emitió.
 - Hoy NO se persiste esa arista en disco (FND-05) ni se loguea → "sealed-sender
-  **at rest**". Pero un relay comprometido en caliente, un `tcpdump` en el host,
-  o un parche malicioso, reconstruyen el grafo social en tiempo real.
+  **at rest**". Pero un relay comprometido en caliente, un `tcpdump`, o un parche
+  malicioso, reconstruyen el grafo social en tiempo real.
 
-El contenido (SDP, ICE, cuerpo de mensaje) ya está sellado E2EE y **eso está
-bien**. Lo que falta es ocultar **quién habla con quién** del propio relay.
+El contenido (SDP, ICE, cuerpo) ya está sellado E2EE — eso está bien. Falta
+ocultar **quién habla con quién** del propio relay.
 
-## 2. Cómo lo resuelven los referentes
+## 2. Modelos de referencia (regla de oro #12)
 
-### Session — onion routing sobre red de nodos
-Tres Service Nodes aleatorios; ningún nodo conoce origen y destino a la vez.
-Requiere una **red descentralizada** de nodos con incentivo cripto-económico
-(Oxen). **No adoptable** por un relay único self-hosted sin construir esa red.
-Lo único portable barato: poner el relay tras Tor (oculta IP, no la arista).
-Ref: <https://getsession.org/blog/onion-requests-session-new-message-routing-solution>
+| Modelo | Cómo oculta al emisor | ¿Encaja con aegisId + relay único? |
+|---|---|---|
+| **Session** | Onion routing sobre red de Service Nodes; ningún nodo ve ambos extremos | ❌ Necesita una red descentralizada de nodos. No para un relay único. |
+| **SimpleX** | Sin identidad de transporte: colas por-contacto, IDs separados emisor/receptor | ❌ Descarta el identificador global → **choca con la marca aegisId** |
+| **Signal sealed-sender** | Submission **sin autenticar** + delivery token (anti-abuso) + sender certificate sellado dentro del sobre | ✅ **Conserva la identidad (aegisId) y el onboarding** |
 
-### SimpleX — cero identidad en el transporte (RECOMENDADO)
-No existe "cuenta" a nivel de servidor. Cada par de contactos usa **colas
-unidireccionales**; el servidor genera por cola **dos IDs aleatorios distintos**
-(recipient ID y sender ID) y autentica **por cola** con claves efímeras, no por
-usuario. El servidor no puede correlacionar colas de un mismo usuario ni
-construir el grafo social, ni siquiera con la DB comprometida.
-Ref: <https://github.com/simplex-chat/simplexmq/blob/master/protocol/simplex-messaging.md>
+**Decisión: adoptar el modelo Signal sealed-sender**, adaptado a que AegisLink
+ya tiene claves de identidad Ed25519 por contacto (no hace falta una CA externa).
+Refs: [Signal sealed sender](https://signal.org/blog/sealed-sender/) ·
+[SimpleX SMP](https://github.com/simplex-chat/simplexmq/blob/master/protocol/simplex-messaging.md)
+(estudiado y descartado por marca).
 
-**SimpleX es el modelo correcto a copiar** porque encaja en un relay único: es un
-rediseño de *direccionamiento*, no de *red*.
+## 3. Modelo objetivo (Signal-style, conservando aegisId)
 
-## 3. Modelo objetivo (SimpleX-style) aplicado a AegisLink
+Idea central: **el `aegisId` del emisor nunca se presenta al relay**. El relay
+solo necesita el `to` para rutear; el `from` viaja **cifrado dentro del sobre**
+y se autentica contra el destinatario, no contra el relay.
 
-| Hoy (aegisId-addressed) | Objetivo (queue-addressed) |
-|---|---|
-| Socket autenticado como `aegisId` global | Sockets **sin identidad**; se autentica por-cola con la SK de esa cola |
-| Envelope `{ to: aegisId, ... }`, relay estampa `from: me` | Envelope `{ queueId, ... }`; **no hay `from`** — el relay no lo conoce |
-| `aegisId` es el identificador a compartir | Cada contacto se establece con un **invite link out-of-band** (queueId + claves), no un ID global reusable |
-| Cola offline keyed por `recipient aegisId` | Cola offline = la propia cola (recipientId), sin dato de emisor |
-| Prekeys X3DH por `aegisId+deviceId` | El bootstrap de cola transporta las claves iniciales (sigue siendo X3DH/PQXDH dentro) |
-| Push FCM por `aegisId` | **Notifier separado** con token por-cola; el SMP server avisa al notifier sin saber el usuario |
-| Grupos: fan-out por `aegisId` de cada miembro | Fan-out por **cola de cada miembro** (SenderKey sigue igual dentro) |
-| Llamadas: signaling por `aegisId` | Signaling por la cola del callee (misma infra; latencia a vigilar) |
+### 3.1 Identidad del emisor sellada (sender assertion)
+AegisLink ya intercambia claves de firma Ed25519 entre contactos (X3DH /
+verificación de seguridad). El emisor mete dentro del sobre sellado:
+```
+inner = { from: aegisId, payload, ts }
+sig   = Ed25519_sign(inner, mi_signing_secret)
+```
+El destinatario abre el sobre, lee `from`, y **verifica `sig` con la signing
+pubkey que ya tiene de ese contacto**. Si no es contacto conocido → se descarta.
+No se necesita certificado emitido por el relay: la confianza ya existe entre
+contactos. (Signal usa un cert del servidor porque allí los desconocidos pueden
+escribirte; en AegisLink el sealed-sender se restringe a contactos.)
 
-Propiedad ganada: **el relay no puede construir el grafo social ni en caliente
-ni en disco**. Iguala a SimpleX; supera a Signal sealed-sender (que aún ata la
-subida a un delivery token derivado del perfil del destinatario).
+### 3.2 Sellado opaco al relay (clave efímera)
+Para que el relay no pueda atar el sobre a la clave estática del emisor, el
+sobre se sella con una **clave efímera por-mensaje**:
+```
+epk        = nacl.box.keyPair()              // efímera, descartable
+ciphertext = nacl.box(inner+sig, nonce, recipientPub, epk.secret)
+wire       = { to, ciphertext, nonce, epk: epk.public }   // SIN from
+```
+El destinatario abre con `nacl.box.open(ciphertext, nonce, epk, mi_secret)`.
+El relay solo ve `{ to, ciphertext, nonce, epk }` — `epk` es basura aleatoria
+no vinculable a nadie.
 
-## 4. Lo que rompe / hay que rehacer (honestidad de alcance)
+### 3.3 Submission sin autenticar + delivery token (anti-abuso)
+Hoy el socket está atado a `me` y por eso el relay sabe quién envía. El cambio
+de fondo: permitir **enviar sin que el socket revele identidad**, controlando
+abuso con un **delivery token** del destinatario (análogo Signal):
 
-1. **Identidad y onboarding** — `aegisId` deja de ser la dirección de ruteo.
-   Sigue existiendo como *fingerprint de identidad E2EE* (para verificación de
-   seguridad), pero el contacto se inicia con invite link. Cambio de UX grande.
-2. **Multi-device** — hoy un `aegisId` hace fan-out a todos los sockets. Con
-   colas, cada device necesita su suscripción; el self-send y el drain multi-
-   device (handler.ts) se rehacen. Relaciona con el gap de `devicesRepo.upsert`
-   ya detectado en Ola 3.
-3. **Push wake-up** — `notifyRecipient(aegisId)` / `sendCallWakeUp(aegisId)` se
-   reemplazan por un **servicio notifier** con tokens por-cola. Es el punto más
-   delicado: FCM/APNs necesitan *algún* token destino; SimpleX lo aísla en un
-   ntf server separado para que el SMP server no vea (cola↔token-de-push).
-4. **Rate-limiting** — hoy por `aegisId`/socket (`checkCallOfferRateLimit(me)`,
-   `makeEnvelopeLimiter`). Pasa a ser **por-cola** + PoW en creación de cola.
-5. **Llamadas en tiempo real** — el signaling por cola añade latencia frente al
-   `socket.emit` directo actual. Hay que medir; SimpleX añadió llamadas sobre
-   la misma infra, es viable, pero el ring/ICE trickle es sensible.
-6. **Grupos** — el roster-por-referencia y SenderKey siguen, pero el transporte
-   de cada copia sellada pasa por la cola del miembro.
+- Cada usuario registra en el relay un `deliveryToken` (96+ bits aleatorios) y
+  lo entrega a sus contactos durante el handshake X3DH (dentro del canal E2EE).
+- Para enviar sealed a `B`, el emisor presenta el `deliveryToken(B)` — prueba
+  que es un contacto autorizado **sin** revelar quién es.
+- El relay valida token→`to` y rutea. No aprende `from`.
+- Tokens rotables; revocar un contacto = rotar token y re-repartir a los demás.
 
-## 5. Fases propuestas (cada una = rama `feat/*`, mergeable, sin romper lo vivo)
+> Nota multi-device/conexión: el emisor puede mantener su socket autenticado
+> para **recibir** (el relay necesita saber a quién entregar), pero **enviar**
+> por un canal sealed que no ata el envío a esa identidad. Separar los dos roles
+> (recibir=autenticado por aegisId · enviar=sealed con token) es el corazón del
+> diseño. La correlación temporal socket-activo↔envío se mitiga con cover/jitter
+> en fases posteriores; el grafo explícito desaparece ya en la Fase 1.
 
-El objetivo es migrar **sin** un big-bang. Las colas conviven con el ruteo por
-`aegisId` detrás de un flag de protocolo (`transport: 'v1-aegis' | 'v2-queue'`),
-igual que se hizo con PQXDH v1/v2.
+## 4. Qué cambia (alcance — mucho menor que el rewrite SimpleX)
 
-- **Fase 0 — spike/medición.** Prototipo de cola SMP-style (crear cola, SEND
-  autorizado por SK, recibir) en el relay + cliente, detrás de flag, sin tocar
-  el path vivo. Medir latencia de llamada sobre cola. Criterio de go/no-go.
-- **Fase 1 — colas para envelopes 1:1.** Direccionamiento por queueId,
-  invite-link bootstrap, drain offline por cola. `from` desaparece del wire.
-- **Fase 2 — notifier server.** Servicio de push por-cola; retirar
-  `notifyRecipient(aegisId)`.
-- **Fase 3 — multi-device sobre colas.** Suscripción por device; rehacer
-  self-send/drain.
-- **Fase 4 — llamadas sobre colas.** Migrar `call:*` al transporte v2; retirar
-  el `from: me` de `forward()` (handler.ts:1520).
-- **Fase 5 — grupos sobre colas.** Fan-out de SenderKey por cola.
-- **Fase 6 — retirar v1.** Una vez todos los clientes en v2, eliminar el ruteo
-  por `aegisId` y el campo `from` del código.
+Lo que **NO** cambia: `aegisId`, onboarding, generación de identidad,
+verificación de seguridad, X3DH/PQXDH, SenderKey de grupos, UI. ✅
 
-## 6. Mitigación puente (mientras llega la Fase 4)
+Lo que cambia:
+1. **Endpoint/evento de envío sealed** en el relay: acepta `{to, ciphertext,
+   nonce, epk, deliveryToken}` sin auth de emisor; valida token; rutea por `to`.
+2. **`forward()` y el handler de `envelope`** dejan de estampar `from: me`
+   (handler.ts:572, 1520). El `from` pasa a vivir dentro del sobre.
+3. **Cliente**: sellar con clave efímera + firma interna; abrir leyendo `from`
+   del interior; registrar/rotar `deliveryToken`; repartir token a contactos en
+   el handshake.
+4. **Cola offline**: ya hoy no guarda `from` (FND-05); encaja sin cambio mayor.
+5. **Push wake-up**: `notifyRecipient(to)` sigue funcionando — se direcciona al
+   destinatario, que no es secreto. Sin cambio de arquitectura de notifier.
+6. **Rate-limit**: pasa de por-emisor a **por delivery-token + PoW** en envío.
 
-Sin esperar la épica completa, las llamadas pueden igualar a los envelopes y
-cerrar el leak **a nivel payload** con bajo riesgo (esto era el "fix contenido"
-descartado a favor de la épica, pero sigue siendo válido como puente):
+## 5. Fases (cada una = rama, mergeable, detrás de flag `sealed: v1|v2`)
 
-- Cliente sella el signaling con una **clave efímera por mensaje** y mete
-  `from` + firma Ed25519 **dentro** del box (autenticidad al receptor, opacidad
-  al relay).
-- Relay deja de estampar `from: me` en `forward()`; rutea solo por `to`.
-- No oculta el emisor del proceso vivo (sigue llegando por el socket de `me`),
-  pero quita la arista del payload entregado y de la cola en memoria.
+- **Fase 0 — spike.** Implementar el sobre sealed (epk + firma interna) y el
+  evento de envío con delivery-token en el relay, detrás de flag, sin tocar el
+  path vivo. Validar round-trip 1:1 y medir latencia (incl. llamada).
+- **Fase 1 — envelopes 1:1 sealed.** Activar v2 para chat 1:1; `from` fuera del
+  wire. Reparto de delivery-token en el handshake X3DH.
+- **Fase 2 — llamadas sealed.** Migrar `call:*`; retirar `from: me` de
+  `forward()`. Vigilar latencia de ring/ICE.
+- **Fase 3 — grupos.** Fan-out de SenderKey con sobres sealed por miembro.
+- **Fase 4 — anti-correlación.** Cover traffic / jitter / batching opcional para
+  cortar la correlación temporal socket-recibe↔token-envía.
+- **Fase 5 — retirar v1.** Cuando todos los clientes estén en v2, eliminar el
+  estampado de `from` y el envío autenticado-por-emisor del código.
 
-> Decisión 2026-06-19: el usuario eligió la **épica completa estilo SimpleX**
-> (Fase 0→6), no el puente. Este doc es el punto de partida; la Fase 0 (spike +
-> medición de latencia de llamada sobre cola) es el siguiente entregable y su
-> resultado decide si se continúa o se cae al puente de §6.
+## 6. Límite honesto
+
+Este modelo elimina el **grafo social explícito** del relay (no hay `from` en
+ningún punto que el relay procese o almacene). Lo que NO elimina por sí solo es
+la **correlación temporal**: si el socket de A está activo y justo después
+aparece un envío a B, un observador del proceso podría inferir A→B. Signal vive
+con ese mismo límite; cerrarlo del todo requiere cover traffic (Fase 4) u onion
+routing (Session, fuera de alcance). Es una mejora enorme sobre el estado actual
+(arista explícita en cada mensaje) sin sacrificar la marca.
 
 ## 7. Referencias
-- SimpleX SMP protocol: <https://github.com/simplex-chat/simplexmq/blob/master/protocol/simplex-messaging.md>
-- SimpleX overview: <https://github.com/simplex-chat/simplexmq/blob/master/protocol/overview-tjr.md>
-- Session onion requests: <https://getsession.org/blog/onion-requests-session-new-message-routing-solution>
-- Signal sealed sender (comparación): <https://signal.org/blog/sealed-sender/>
+- Signal sealed sender: <https://signal.org/blog/sealed-sender/>
+- Mejoras al sealed sender (delivery tokens, NDSS'21): <https://www.cs.umd.edu/~kaptchuk/publications/ndss21.pdf>
+- SimpleX SMP (estudiado, descartado por marca): <https://github.com/simplex-chat/simplexmq/blob/master/protocol/simplex-messaging.md>
+- Session onion routing (fuera de alcance): <https://getsession.org/blog/onion-requests-session-new-message-routing-solution>
