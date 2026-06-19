@@ -27,9 +27,19 @@ function createWindow(): void {
     win.show()
   })
 
-  // Open external links in the OS browser, not inside Electron
+  // Open external links in the OS browser, not inside Electron.
+  // Only http(s) is handed to the OS — never file://, ms-msdt:, smb:, etc.,
+  // which would let a crafted link in a message trigger OS protocol handlers
+  // (Follina-class abuse). (Golden rule #6: production fails closed.)
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    try {
+      const { protocol } = new URL(url)
+      if (protocol === 'https:' || protocol === 'http:') {
+        void shell.openExternal(url)
+      }
+    } catch {
+      // malformed URL — ignore
+    }
     return { action: 'deny' }
   })
 

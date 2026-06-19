@@ -78,3 +78,21 @@ Nunca dejar trabajo suelto. El árbol de trabajo y las ramas deben estar siempre
 7. **Inventario antes de cerrar sesión.** Al terminar una tanda: `git status` limpio, `git stash list` vacío, y ninguna rama con commits sin pushear que debieran estar en `main`.
 
 Síntoma de que se rompió la regla: "no podemos trabajar en X si Y aún tiene cosas sin commitear y sin añadir a main". Si aparece, parar y consolidar primero.
+
+## REGLA DE ORO — Seguridad y cero metadatos (NO NEGOCIABLE)
+
+Derivadas de la auditoría 2026-06 (ver `docs/SECURITY-ROADMAP-2026-06.md`). Cada una existe
+porque YA se inyectó ese fallo una vez. Toda PR debe poder responder "sí" a las que apliquen.
+
+1. **El cifrado nunca degrada en silencio.** Un fallo de cifrado/descifrado **lanza error**; jamás se hace `catch { return plaintext }` ni se persiste el body sin cifrar. Si la clave at-rest no está disponible en build empaquetado, la app **falla cerrado** (no escribe `plain:`).
+2. **Cero material de clave en el wire.** Solo viaja lo sellado/cifrado. Prohibido cualquier campo "diagnóstico"/"metadata" que contenga chain keys, message keys, root keys o secretos — ni siquiera "temporalmente". El relay reenvía blobs opacos.
+3. **Autenticación criptográfica en todo endpoint sensible.** Mutar o leer datos de un usuario exige **prueba de posesión de clave** (firma Ed25519 o socket autenticado por challenge-response), nunca solo conocer un `aegisId`, `deviceId` o token. Conocer un ID ≠ ser el dueño del ID.
+4. **Sealed-sender en TODO, incluidas las llamadas.** Nunca se añade un campo `from` visible para el relay. La señalización (SDP/ICE) se cifra contra la pubkey del destinatario; la identidad del emisor va dentro del payload cifrado.
+5. **Paridad mobile↔desktop obligatoria.** Todo cambio en crypto/sesión/ratchet se porta a **ambas plataformas** en la misma rama, con los mismos locks (`withSessionLock`), guards (`createdAtMs`, fail-closed) y fallbacks durables. El desktop no es ciudadano de segunda.
+6. **Producción falla cerrado.** Sin CORS `*` por defecto, sin claves en `plain:`, sin fugas de material de clave por `__DEV__`/`import.meta.env.DEV`. Los logs de diagnóstico de ratchet van tras un flag dedicado y hashean los prefijos de clave.
+7. **Confianza derivada por el server, no suministrada por el cliente.** Identificadores de deduplicación/voto (`voterHash`, etc.) se **derivan server-side** de una identidad autenticada, nunca se aceptan tal cual del cliente.
+8. **Comparaciones constant-time** para todo material secreto/clave (XOR-acumulado, no early-return).
+9. **Zeroizar intermedios de clave** (DH outputs, ephemeral secrets, shared secrets) en `try/finally`, como ya hace `ratchet.ts`.
+10. **Minimizar metadatos at-rest.** Las columnas que no necesitan estar en claro se cifran; el objetivo es SQLCipher de DB completa. Ningún dato nuevo (timestamps de acceso, tamaños, frecuencias) se persiste sin justificar contra "cero metadatos".
+11. **Un test por fix.** Todo arreglo de seguridad incluye un test de regresión. El desktop **debe** tener suite de tests para IPC, serialización de ratchet y cifrado de DB.
+12. **Ante la duda, mirar a los expertos.** Para decisiones arquitectónicas de privacidad/cripto, revisar el código/diseño de **Session** y **SimpleX** (ambos open source y battle-tested) antes de inventar. Copiar lo bueno; documentar la referencia en el commit.
