@@ -573,8 +573,16 @@ export function connect(identity: Identity): Socket {
   const { routeViaTor } = usePreferences.getState();
   let relayUrl = routeViaTor && ONION_URL ? ONION_URL : SERVER_URL;
 
-  // Hardened Transport: Enforce HTTPS/WSS in production
-  if (!__DEV__) {
+  // Hardened Transport: Enforce HTTPS/WSS in production. Exception: developer
+  // loopback hosts (emulator host 10.0.2.2 + localhost) are permitted over
+  // cleartext, mirroring android/.../network_security_config.xml which already
+  // whitelists exactly these hosts. The app never contacts them in production,
+  // so this does not weaken the shipped transport — it only lets a release APK
+  // talk to a relay running on the developer's machine for E2E verification.
+  const isLoopbackRelay = /^(https?|wss?):\/\/(10\.0\.2\.2|localhost|127\.0\.0\.1)(:|\/|$)/.test(
+    relayUrl
+  );
+  if (!__DEV__ && !isLoopbackRelay) {
     if (relayUrl.startsWith('http://')) {
       relayUrl = relayUrl.replace('http://', 'https://');
     } else if (relayUrl.startsWith('ws://')) {
