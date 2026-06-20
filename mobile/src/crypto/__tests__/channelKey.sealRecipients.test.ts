@@ -52,19 +52,25 @@ describe('sealSenderKeyForRecipients', () => {
     expect(sealed).toHaveLength(count);
 
     sealed.forEach((dist, i) => {
-      // Order + identity mapping preserved.
+      // Order + recipient mapping preserved.
       expect(dist.aegisId).toBe(recipients[i].aegisId);
-      expect(dist.senderAegisId).toBe('sender-aegis');
       expect(dist.channelId).toBe('group-xyz');
 
-      // The matching recipient — and only it — recovers the SenderKey.
-      const opened = openSenderKeyDistribution(dist, recipients[i].secretKeyB64, senderPublicKeyB64);
-      expect(Array.from(opened.chainKey)).toEqual(Array.from(sk.chainKey));
-      expect(opened.iteration).toBe(sk.iteration);
+      // Sealed sender (Phase 3b): the distributor's aegisId is NOT on the wire —
+      // it is sealed inside the box, recovered only on a successful open.
+      expect((dist as unknown as Record<string, unknown>).senderAegisId).toBeUndefined();
 
-      // A different recipient's secret key cannot open this box.
+      // The matching recipient — and only it — recovers the SenderKey AND the
+      // authenticated senderAegisId from inside the box.
+      const opened = openSenderKeyDistribution(dist, recipients[i].secretKeyB64, senderPublicKeyB64);
+      expect(opened).not.toBeNull();
+      expect(Array.from(opened!.senderKey.chainKey)).toEqual(Array.from(sk.chainKey));
+      expect(opened!.senderKey.iteration).toBe(sk.iteration);
+      expect(opened!.senderAegisId).toBe('sender-aegis');
+
+      // A different recipient's secret key cannot open this box → null (no throw).
       const wrong = recipients[(i + 1) % count].secretKeyB64;
-      expect(() => openSenderKeyDistribution(dist, wrong, senderPublicKeyB64)).toThrow();
+      expect(openSenderKeyDistribution(dist, wrong, senderPublicKeyB64)).toBeNull();
     });
   });
 
