@@ -169,8 +169,8 @@ Esf **M-L**.
 |----|-----|----------|-----|
 | M-1 | 🟡 | Sin certificate pinning en mobile (`config.ts:32`) | Pinning por hash de pubkey del server. |
 | C-2 | 🟡 | Desktop keystore sin segundo factor (DPAPI = usuario de sesión) | PIN/passphrase del usuario como segunda capa (igual que mobile + biometría). |
-| B-3 | 🟠 | Sin rotación automática de SPK | Rotación ~semanal (Signal). |
-| GROUP | 🟡 | SenderKey sin rotación al remover miembro | Verificar/forzar re-key + redistribución al cambiar membresía (si no existe → ALTO). |
+| B-3 | ✅ | Sin rotación automática de SPK | **HECHO** (`feat/b3-spk-rotation`): trigger por edad ~semanal en `auth:ok` (mobile+desktop), stamp `createdAt` durable, grace window ampliado a K=5 SPK (≥28 días, cubre cola relay 30d). Tests mobile (harness auth:ok) + desktop (helpers puros). |
+| GROUP | ✅ | SenderKey sin rotación al remover miembro | **YA EXISTÍA** (auditado): `rekeyGroupAfterRemoval` genera clave fresca, sellada solo a los que quedan, sealed-sender, con test de regresión. |
 | M-2 | 🟡 | OPK no per-device | Pool de OPK per-device o consumo coordinado. |
 | M-4 | 🟡 | Sin CSP en landing/web servida por relay | Header CSP en `linksRoutes`. |
 
