@@ -145,13 +145,6 @@ function initSqliteSchema(db: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_linked_devices_aegis
       ON linked_devices(aegis_id, revoked);
 
-    CREATE TABLE IF NOT EXISTS poll_votes (
-      poll_id      TEXT NOT NULL,
-      voter_hash   TEXT NOT NULL,
-      option_index INTEGER NOT NULL,
-      PRIMARY KEY (poll_id, voter_hash)
-    );
-
     CREATE TABLE IF NOT EXISTS backups (
       id_hash    TEXT PRIMARY KEY,
       envelope   TEXT NOT NULL,
@@ -514,13 +507,6 @@ async function initPgSchema(): Promise<void> {
 
     CREATE INDEX IF NOT EXISTS idx_linked_devices_aegis
       ON linked_devices(aegis_id, revoked);
-
-    CREATE TABLE IF NOT EXISTS poll_votes (
-      poll_id      TEXT NOT NULL,
-      voter_hash   TEXT NOT NULL,
-      option_index INTEGER NOT NULL,
-      PRIMARY KEY (poll_id, voter_hash)
-    );
 
     CREATE TABLE IF NOT EXISTS backups (
       id_hash    TEXT PRIMARY KEY,
@@ -1577,40 +1563,13 @@ export const web3Repo = {
   },
 };
 
-// ── pollsRepo ─────────────────────────────────────────────────────────────────
-
-export const pollsRepo = {
-  async vote(pollId: string, voterHash: string, optionIndex: number): Promise<void> {
-    if (USE_PG) {
-      await dbRun(
-        `INSERT INTO poll_votes (poll_id, voter_hash, option_index) VALUES (?, ?, ?)
-         ON CONFLICT(poll_id, voter_hash) DO UPDATE SET option_index = EXCLUDED.option_index`,
-        [pollId, voterHash, optionIndex]
-      );
-    } else {
-      await dbRun(
-        `INSERT INTO poll_votes (poll_id, voter_hash, option_index) VALUES (?, ?, ?)
-         ON CONFLICT(poll_id, voter_hash) DO UPDATE SET option_index = excluded.option_index`,
-        [pollId, voterHash, optionIndex]
-      );
-    }
-  },
-  async getTally(pollId: string): Promise<number[]> {
-    const rows = await dbAll<{ option_index: number; count: string | number }>(
-      `SELECT option_index, COUNT(*) as count FROM poll_votes WHERE poll_id = ? GROUP BY option_index`,
-      [pollId]
-    );
-    let maxIdx = 0;
-    for (const r of rows) {
-      if (r.option_index > maxIdx) maxIdx = r.option_index;
-    }
-    const counts = Array<number>(maxIdx + 1).fill(0);
-    for (const r of rows) {
-      counts[r.option_index] = Number(r.count);
-    }
-    return counts;
-  },
-};
+// NOTE: the server-side poll repo (`pollsRepo`) and the `/polls` HTTP endpoint
+// were REMOVED in the 2026-06 audit (A-8). Poll votes travel exclusively inside
+// E2EE group messages (`[vote:...]`) and are tallied client-side, so the relay
+// never sees a vote. The old HTTP path was unused by every client, was
+// ballot-stuffable (client-supplied voterHash) and leaked vote metadata to the
+// server — removing it is the zero-metadata-correct fix. The `poll_votes` table
+// DDL is likewise gone; any pre-existing empty table is harmless.
 
 // ── workRepo ──────────────────────────────────────────────────────────────────
 
