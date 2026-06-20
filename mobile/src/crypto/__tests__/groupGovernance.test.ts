@@ -59,11 +59,16 @@ describe('governance signature (aegis.group.gov.v1)', () => {
     expect(verified).toBe(true);
   });
 
-  it('rejects a tampered permission (member promotes whoCanCall to everyone)', () => {
+  it('rejects a tampered permission (member promotes whoCanEditInfo to everyone)', () => {
     const kp = nacl.sign.keyPair();
     const sig = signGroupGovernance(govArgs(), kp.secretKey);
+    // whoCanCall defaults to 'everyone' already (Discord-style channel model —
+    // see groupRoles.ts DEFAULT_PERMISSIONS), so tampering it to 'everyone'
+    // would be a no-op signature mismatch on an unchanged value. Use
+    // whoCanEditInfo instead, which is still 'admins' by default and so is a
+    // genuine tamper of the signed permission set.
     const tampered = govArgs({
-      permissions: { ...DEFAULT_PERMISSIONS, whoCanCall: 'everyone' },
+      permissions: { ...DEFAULT_PERMISSIONS, whoCanEditInfo: 'everyone' },
     });
     expect(verifyGroupGovernance(tampered, sig, encodeBase64(kp.publicKey))).toBe(false);
   });
@@ -126,11 +131,16 @@ describe('can — permission gates', () => {
     expect(effectivePermissions(group)).toEqual(DEFAULT_PERMISSIONS);
   });
 
-  it('default: calls are admins-only, sending is everyone', () => {
-    expect(can(group, MEMBER, 'call')).toBe(false);
+  it('default: calls and sending are everyone, editing info is admins-only', () => {
+    // whoCanCall defaults to 'everyone' — the Discord-style voice channel posts
+    // a join banner rather than ringing everyone, so any member opening it is
+    // harmless (see groupRoles.ts DEFAULT_PERMISSIONS).
+    expect(can(group, MEMBER, 'call')).toBe(true);
     expect(can(group, MOD, 'call')).toBe(true);
     expect(can(group, ADMIN, 'call')).toBe(true);
     expect(can(group, MEMBER, 'send')).toBe(true);
+    expect(can(group, MEMBER, 'editInfo')).toBe(false);
+    expect(can(group, MOD, 'editInfo')).toBe(true);
   });
 
   it('owner can always do everything regardless of scope', () => {
