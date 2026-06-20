@@ -166,6 +166,7 @@ router.post('/', uploadLimiter, async (req, res) => {
     for (const opk of oneTimePreKeys) {
       await prekeysRepo.insertOneTime({
         aegis_id: aegisId,
+        device_id: deviceId ?? 'default', // M-2: OPKs are per-device, like the SPK above
         key_id: opk.keyId,
         public_key_b64: opk.publicKeyB64,
         created_at: now,

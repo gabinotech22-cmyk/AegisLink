@@ -92,10 +92,11 @@ function initSqliteSchema(db: DatabaseSync) {
 
     CREATE TABLE IF NOT EXISTS prekeys_onetime (
       aegis_id       TEXT NOT NULL,
+      device_id      TEXT NOT NULL DEFAULT 'default',
       key_id         INTEGER NOT NULL,
       public_key_b64 TEXT NOT NULL,
       created_at     INTEGER NOT NULL,
-      PRIMARY KEY (aegis_id, key_id)
+      PRIMARY KEY (aegis_id, device_id, key_id)
     );
 
     CREATE TABLE IF NOT EXISTS prekeys_pq_signed (
@@ -357,6 +358,26 @@ function initSqliteSchema(db: DatabaseSync) {
   try { db.exec(`ALTER TABLE messages ADD COLUMN sender_pub_b64 TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN epk_b64 TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default';`); } catch { /* exists */ }
+  // M-2: prekeys_onetime per-device. Old PK was (aegis_id, key_id); SQLite can't
+  // change a PK in place, and OPKs are ephemeral (clients re-upload on reconnect),
+  // so when device_id is absent we drop+recreate with PK (aegis_id, device_id,
+  // key_id). Guarded by PRAGMA so it runs at most once.
+  try {
+    const cols = db.prepare(`PRAGMA table_info(prekeys_onetime)`).all() as Array<{ name: string }>;
+    if (cols.length > 0 && !cols.some((c) => c.name === 'device_id')) {
+      db.exec(`DROP TABLE prekeys_onetime;`);
+      db.exec(`
+        CREATE TABLE prekeys_onetime (
+          aegis_id       TEXT NOT NULL,
+          device_id      TEXT NOT NULL DEFAULT 'default',
+          key_id         INTEGER NOT NULL,
+          public_key_b64 TEXT NOT NULL,
+          created_at     INTEGER NOT NULL,
+          PRIMARY KEY (aegis_id, device_id, key_id)
+        );
+      `);
+    }
+  } catch { /* table absent or already migrated */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN pinned_by TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN pinned_at TEXT;`); } catch { /* exists */ }
@@ -490,10 +511,11 @@ async function initPgSchema(): Promise<void> {
 
     CREATE TABLE IF NOT EXISTS prekeys_onetime (
       aegis_id       TEXT NOT NULL,
+      device_id      TEXT NOT NULL DEFAULT 'default',
       key_id         INTEGER NOT NULL,
       public_key_b64 TEXT NOT NULL,
       created_at     BIGINT NOT NULL,
-      PRIMARY KEY (aegis_id, key_id)
+      PRIMARY KEY (aegis_id, device_id, key_id)
     );
 
     CREATE TABLE IF NOT EXISTS prekeys_pq_signed (
@@ -706,6 +728,8 @@ async function initPgSchema(): Promise<void> {
   // is wrapped in a DO block so it's a no-op when the column already exists.
   const pgMigrations = [
     `ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`,
+    `ALTER TABLE prekeys_onetime ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`, // M-2
+
     `ALTER TABLE messages ADD COLUMN drained_by TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE messages ADD COLUMN sender_pub_b64 TEXT`,
     `ALTER TABLE messages ADD COLUMN epk_b64 TEXT`,
@@ -732,6 +756,14 @@ async function initPgSchema(): Promise<void> {
   try {
     await pool.query(`ALTER TABLE prekeys_signed DROP CONSTRAINT IF EXISTS prekeys_signed_pkey`);
     await pool.query(`ALTER TABLE prekeys_signed ADD PRIMARY KEY (aegis_id, device_id)`);
+  } catch { /* already correct or concurrent migration — safe to ignore */ }
+
+  // M-2: same PK fix for prekeys_onetime. Old PK was (aegis_id, key_id); the new
+  // PK is (aegis_id, device_id, key_id). Existing rows keep device_id='default'
+  // (self-consistent with the 'default' SPK uploaded at onboarding).
+  try {
+    await pool.query(`ALTER TABLE prekeys_onetime DROP CONSTRAINT IF EXISTS prekeys_onetime_pkey`);
+    await pool.query(`ALTER TABLE prekeys_onetime ADD PRIMARY KEY (aegis_id, device_id, key_id)`);
   } catch { /* already correct or concurrent migration — safe to ignore */ }
 }
 
@@ -822,13 +854,13 @@ async function dbGet<T>(sql: string, params: unknown[] = []): Promise<T | undefi
 }
 
 // PG-specific: run multiple statements in a transaction, consuming an OPK atomically.
-async function pgPopOpk(aegisId: string): Promise<{ key_id: number; public_key_b64: string } | undefined> {
+async function pgPopOpk(aegisId: string, deviceId = 'default'): Promise<{ key_id: number; public_key_b64: string } | undefined> {
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
     const sel = await client.query(
-      `SELECT key_id, public_key_b64 FROM prekeys_onetime WHERE aegis_id = $1 ORDER BY key_id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
-      [aegisId]
+      `SELECT key_id, public_key_b64 FROM prekeys_onetime WHERE aegis_id = $1 AND device_id = $2 ORDER BY key_id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
+      [aegisId, deviceId]
     );
     if (sel.rows.length === 0) {
       await client.query('COMMIT');
@@ -836,8 +868,8 @@ async function pgPopOpk(aegisId: string): Promise<{ key_id: number; public_key_b
     }
     const opk = sel.rows[0] as { key_id: number; public_key_b64: string };
     await client.query(
-      `DELETE FROM prekeys_onetime WHERE aegis_id = $1 AND key_id = $2`,
-      [aegisId, opk.key_id]
+      `DELETE FROM prekeys_onetime WHERE aegis_id = $1 AND device_id = $2 AND key_id = $3`,
+      [aegisId, deviceId, opk.key_id]
     );
     await client.query('COMMIT');
     return opk;
@@ -901,6 +933,8 @@ export interface SignedPreKeyRow {
 
 export interface OneTimePreKeyRow {
   aegis_id: string;
+  /** Device identifier for this OPK. Defaults to 'default' for legacy single-device clients. */
+  device_id: string;
   key_id: number;
   public_key_b64: string;
   created_at: number;
@@ -1376,23 +1410,25 @@ export const prekeysRepo = {
     }
   },
   async insertOneTime(row: OneTimePreKeyRow): Promise<void> {
+    const deviceId = row.device_id || 'default';
     if (USE_PG) {
       await dbRun(
-        `INSERT INTO prekeys_onetime (aegis_id, key_id, public_key_b64, created_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(aegis_id, key_id) DO NOTHING`,
-        [row.aegis_id, row.key_id, row.public_key_b64, row.created_at]
+        `INSERT INTO prekeys_onetime (aegis_id, device_id, key_id, public_key_b64, created_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(aegis_id, device_id, key_id) DO NOTHING`,
+        [row.aegis_id, deviceId, row.key_id, row.public_key_b64, row.created_at]
       );
     } else {
       await dbRun(
-        `INSERT OR IGNORE INTO prekeys_onetime (aegis_id, key_id, public_key_b64, created_at) VALUES (?, ?, ?, ?)`,
-        [row.aegis_id, row.key_id, row.public_key_b64, row.created_at]
+        `INSERT OR IGNORE INTO prekeys_onetime (aegis_id, device_id, key_id, public_key_b64, created_at) VALUES (?, ?, ?, ?, ?)`,
+        [row.aegis_id, deviceId, row.key_id, row.public_key_b64, row.created_at]
       );
     }
   },
-  async countOneTime(aegisId: string): Promise<number> {
+  /** Count remaining OPKs for a specific device (per-device pool, M-2). */
+  async countOneTime(aegisId: string, deviceId = 'default'): Promise<number> {
     const row = await dbGet<{ count: string | number }>(
-      `SELECT COUNT(*) as count FROM prekeys_onetime WHERE aegis_id = ?`,
-      [aegisId]
+      `SELECT COUNT(*) as count FROM prekeys_onetime WHERE aegis_id = ? AND device_id = ?`,
+      [aegisId, deviceId]
     );
     return row ? Number(row.count) : 0;
   },
@@ -1454,17 +1490,18 @@ export const prekeysRepo = {
     }> = [];
 
     for (const spk of spkRows) {
-      // Pop one OPK for this device atomically
+      // Pop one OPK for THIS device atomically (M-2: per-device pool — an OPK
+      // from another device would carry a secret this device doesn't hold).
       let opk: { key_id: number; public_key_b64: string } | undefined;
       if (USE_PG) {
-        opk = await pgPopOpk(aegisId);
+        opk = await pgPopOpk(aegisId, spk.device_id);
       } else {
         const db = getSqlite()!;
         const found = db.prepare(
-          `SELECT key_id, public_key_b64 FROM prekeys_onetime WHERE aegis_id = ? ORDER BY key_id ASC LIMIT 1`
-        ).get(aegisId) as { key_id: number; public_key_b64: string } | undefined;
+          `SELECT key_id, public_key_b64 FROM prekeys_onetime WHERE aegis_id = ? AND device_id = ? ORDER BY key_id ASC LIMIT 1`
+        ).get(aegisId, spk.device_id) as { key_id: number; public_key_b64: string } | undefined;
         if (found) {
-          db.prepare(`DELETE FROM prekeys_onetime WHERE aegis_id = ? AND key_id = ?`).run(aegisId, found.key_id);
+          db.prepare(`DELETE FROM prekeys_onetime WHERE aegis_id = ? AND device_id = ? AND key_id = ?`).run(aegisId, spk.device_id, found.key_id);
           opk = found;
         }
       }

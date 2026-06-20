@@ -467,7 +467,7 @@ export function attachRelay(io: SocketServer) {
         authenticated = true;
         clearTimeout(authTimer);
         onAuthenticated(socket, me, deviceId, challenge).then(async () => {
-          const opkCount = await prekeysRepo.countOneTime(me);
+          const opkCount = await prekeysRepo.countOneTime(me, deviceId); // M-2: per-device count
           socket.emit('auth:ok', { opkCount });
         }).catch(() => {
           socket.emit('error_msg', { code: 'internal_error' });
@@ -877,6 +877,7 @@ export function attachRelay(io: SocketServer) {
         for (const opk of parsed.data.oneTimePreKeys) {
           await prekeysRepo.insertOneTime({
             aegis_id: me,
+            device_id: parsed.data.deviceId ?? deviceId ?? 'default', // M-2: per-device OPK
             key_id: opk.keyId,
             public_key_b64: opk.publicKeyB64,
             created_at: now,
