@@ -227,6 +227,49 @@ async function flushGroupOfflineQueue(identity: Identity) {
   }
 }
 
+/**
+ * Sealed-sender transport selector for an outgoing envelope (parity with
+ * mobile/src/socket/client.ts buildOutgoingEnvelope). Shared by the group
+ * fan-out (sendGroupMessage) and the offline retry (flushOfflineQueue): use v2
+ * (sealed-sender, no `from` on the wire) ONLY when the flag is on, the session
+ * is ESTABLISHED (no pending x3dhInit), and we hold the recipient's delivery
+ * token; otherwise v1. Returns the event name, the wire fields to spread into
+ * the emit payload, and the advanced ratchet state the caller must persist.
+ */
+async function buildOutgoingEnvelope(
+  payload: string,
+  recipientAegisId: string,
+  recipientPubKey: Uint8Array,
+  identity: Identity,
+  session: RatchetState,
+): Promise<{ event: 'envelope' | 'envelope:v2'; wire: Record<string, unknown>; newState: RatchetState }> {
+  const v2Token =
+    SEALED_TRANSPORT_VERSION === 'v2' && !session.x3dhInit
+      ? await getContactDeliveryToken(recipientAegisId)
+      : null;
+  if (v2Token) {
+    const r = encryptMessageV2(
+      payload,
+      identity.aegisId,
+      recipientPubKey,
+      identity.signingSecretKey,
+      session,
+      Date.now(),
+    );
+    return {
+      event: 'envelope:v2',
+      wire: { ciphertext: r.wire.ciphertext, nonce: r.wire.nonce, epk: r.wire.epk, deliveryToken: v2Token },
+      newState: r.newState,
+    };
+  }
+  const r = encryptMessage(payload, identity.aegisId, recipientPubKey, identity.secretKey, session);
+  return {
+    event: 'envelope',
+    wire: { ciphertext: r.envelope.ciphertextB64, nonce: r.envelope.nonceB64 },
+    newState: r.newState,
+  };
+}
+
 async function flushOfflineQueue(identity: Identity) {
   if (offlineQueue.length === 0) return;
   const items = offlineQueue.splice(0);
@@ -238,23 +281,18 @@ async function flushOfflineQueue(identity: Identity) {
         item.recipientPublicKeyB64,
         identity,
       );
-      const { envelope, newState } = encryptMessage(
+      const { event, wire, newState } = await buildOutgoingEnvelope(
         item.plaintext,
-        identity.aegisId,
+        item.recipientAegisId,
         recipientPublicKey,
-        identity.secretKey,
+        identity,
         session,
       );
       await saveSessionState(item.recipientAegisId, newState);
       await new Promise<void>((resolve, reject) => {
         socket!.emit(
-          'envelope',
-          {
-            id: item.msgId,
-            to: item.recipientAegisId,
-            ciphertext: envelope.ciphertextB64,
-            nonce: envelope.nonceB64,
-          },
+          event,
+          { id: item.msgId, to: item.recipientAegisId, ...wire },
           (ack: { ok: boolean; error?: string } | undefined) => {
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
             else resolve();
@@ -2224,11 +2262,14 @@ export async function sendGroupMessage(opts: {
         contact.publicKeyB64,
         opts.identity,
       );
-      const { envelope, newState } = encryptMessage(
+      // Sealed-sender selector (parity with mobile): group content is per-member
+      // envelopes, so v2 hides the sender's aegisId from the relay for group
+      // chat exactly as for 1:1.
+      const { event, wire, newState } = await buildOutgoingEnvelope(
         payload,
-        opts.identity.aegisId,
+        contact.aegisId,
         decodeBase64(contact.publicKeyB64),
-        opts.identity.secretKey,
+        opts.identity,
         session,
       );
 
@@ -2237,13 +2278,8 @@ export async function sendGroupMessage(opts: {
       const id = crypto.randomUUID();
       await new Promise<void>((resolve, reject) => {
         socket!.emit(
-          'envelope',
-          {
-            id,
-            to: contact.aegisId,
-            ciphertext: envelope.ciphertextB64,
-            nonce: envelope.nonceB64,
-          },
+          event,
+          { id, to: contact.aegisId, ...wire },
           (ack: any) => {
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
             else resolve();
