@@ -18,11 +18,18 @@ export interface SenderKey {
 }
 
 export interface SenderKeyDistributionMessage {
-  senderAegisId: string;
   channelId: string;
   iteration: number;
   // Encrypted for a specific recipient:
-  // NaCl box(SenderKey JSON, recipientPublicKey, senderSecretKey, nonce)
+  // NaCl box({chainKey, iteration, senderAegisId} JSON, recipientPublicKey, senderSecretKey, nonce)
+  //
+  // SEALED-SENDER (Phase 3b): the distributor's `senderAegisId` is NOT a wire
+  // field — it lives INSIDE the box. The relay therefore never learns who
+  // re-keyed a group (it only routes by the recipient aegisId). The box itself
+  // is authenticated (Poly1305): a successful open against a candidate sender's
+  // X25519 key proves the blob was sealed by that sender's static secret, so the
+  // recipient recovers + verifies `senderAegisId` by trial-opening against its
+  // group roster. See openSenderKeyDistribution.
   ciphertextB64: string;
   nonceB64: string;
 }
@@ -85,22 +92,33 @@ export function decryptChannelMessage(
   return encodeUTF8(plaintext);
 }
 
-function serializeSenderKey(sk: SenderKey): Uint8Array {
+/**
+ * Serialize the SEALED inner — the chain key, iteration AND the distributor's
+ * `senderAegisId`. The sender identity rides inside the box (Phase 3b sealed
+ * sender) so it never reaches the relay.
+ */
+function serializeSealedSenderKey(sk: SenderKey, senderAegisId: string): Uint8Array {
   return decodeUTF8(
-    JSON.stringify({ chainKeyB64: encodeBase64(sk.chainKey), iteration: sk.iteration })
+    JSON.stringify({ chainKeyB64: encodeBase64(sk.chainKey), iteration: sk.iteration, senderAegisId })
   );
 }
 
-function deserializeSenderKey(bytes: Uint8Array): SenderKey {
-  const parsed = JSON.parse(encodeUTF8(bytes)) as { chainKeyB64: string; iteration: number };
+function deserializeSealedSenderKey(bytes: Uint8Array): { senderKey: SenderKey; senderAegisId: string } {
+  const parsed = JSON.parse(encodeUTF8(bytes)) as {
+    chainKeyB64: string; iteration: number; senderAegisId: string;
+  };
   const chainKey = decodeBase64(parsed.chainKeyB64);
   if (chainKey.length !== 32) {
-    throw new Error('deserializeSenderKey: invalid chainKey length');
+    throw new Error('deserializeSealedSenderKey: invalid chainKey length');
   }
-  return { chainKey, iteration: parsed.iteration };
+  if (typeof parsed.senderAegisId !== 'string' || parsed.senderAegisId.length === 0) {
+    throw new Error('deserializeSealedSenderKey: missing senderAegisId');
+  }
+  return { senderKey: { chainKey, iteration: parsed.iteration }, senderAegisId: parsed.senderAegisId };
 }
 
-/** Seal a SenderKey for delivery to a specific recipient (NaCl box). */
+/** Seal a SenderKey for delivery to a specific recipient (NaCl box). The
+ *  distributor's `senderAegisId` is sealed INSIDE the box — never on the wire. */
 export function sealSenderKeyFor(
   sk: SenderKey,
   channelId: string,
@@ -110,13 +128,12 @@ export function sealSenderKeyFor(
 ): SenderKeyDistributionMessage {
   const nonce = nacl.randomBytes(24);
   const ciphertext = nacl.box(
-    serializeSenderKey(sk),
+    serializeSealedSenderKey(sk, senderAegisId),
     nonce,
     decodeBase64(recipientPublicKeyB64),
     decodeBase64(senderSecretKeyB64)
   );
   return {
-    senderAegisId,
     channelId,
     iteration: sk.iteration,
     ciphertextB64: encodeBase64(ciphertext),
@@ -163,20 +180,35 @@ export async function sealSenderKeyForRecipients(
   return out;
 }
 
-/** Open a SenderKey distribution message addressed to us. Throws on failure. */
+/**
+ * Try to open a SenderKey distribution addressed to us, against ONE candidate
+ * sender X25519 key. Returns `{ senderKey, senderAegisId }` on success or `null`
+ * on any failure — null (not throw) so the caller can trial-decrypt across a
+ * group roster without knowing the sender up front (the sender is not on the
+ * wire; Phase 3b sealed sender). A successful NaCl box open authenticates the
+ * blob as sealed by `candidateSenderPublicKeyB64`'s owner (Poly1305), and we
+ * additionally assert the recovered `senderAegisId` is non-empty.
+ */
 export function openSenderKeyDistribution(
-  msg: SenderKeyDistributionMessage,
+  msg: Pick<SenderKeyDistributionMessage, 'ciphertextB64' | 'nonceB64'>,
   mySecretKeyB64: string,
-  senderPublicKeyB64: string
-): SenderKey {
-  const opened = nacl.box.open(
-    decodeBase64(msg.ciphertextB64),
-    decodeBase64(msg.nonceB64),
-    decodeBase64(senderPublicKeyB64),
-    decodeBase64(mySecretKeyB64)
-  );
-  if (!opened) {
-    throw new Error('openSenderKeyDistribution: failed to decrypt sealed SenderKey');
+  candidateSenderPublicKeyB64: string
+): { senderKey: SenderKey; senderAegisId: string } | null {
+  let opened: Uint8Array | null;
+  try {
+    opened = nacl.box.open(
+      decodeBase64(msg.ciphertextB64),
+      decodeBase64(msg.nonceB64),
+      decodeBase64(candidateSenderPublicKeyB64),
+      decodeBase64(mySecretKeyB64)
+    );
+  } catch {
+    return null;
   }
-  return deserializeSenderKey(opened);
+  if (!opened) return null;
+  try {
+    return deserializeSealedSenderKey(opened);
+  } catch {
+    return null;
+  }
 }
