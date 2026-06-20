@@ -2,7 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { identityRepo } from '../db/client.js';
-import { issueChallenge, verifyPoW } from '../pow/challenge.js';
+import { issueChallenge, verifyPoW, REGISTRATION_POW_DIFFICULTY } from '../pow/challenge.js';
 
 const router = Router();
 
@@ -50,7 +50,8 @@ const RegisterBody = z.object({
 // ── GET /identity/challenge ───────────────────────────────────────────────────
 /** Issues a one-time PoW challenge. The client must solve it before registering. */
 router.get('/challenge', challengeLimiter, (_req, res) => {
-  const payload = issueChallenge();
+  // A-2: registration uses a harder PoW than the shared default (anti-squatting).
+  const payload = issueChallenge(REGISTRATION_POW_DIFFICULTY);
   res.json(payload);
 });
 
