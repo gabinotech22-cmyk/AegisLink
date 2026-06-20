@@ -11,6 +11,8 @@
  * to `rtcConfig()` (static env creds or STUN-only) on any fetch failure.
  */
 
+import nacl from 'tweetnacl';
+import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { RELAY_URL as SERVER_URL, TURN_SERVER_URL } from '../config';
 
 export interface RTCConfigShape {
@@ -85,9 +87,34 @@ export async function fetchTurnConfig(aegisId: string, forceRelay: boolean = tru
   const cached = _cache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) return cached.config;
 
+  // A-7 auth: minting TURN credentials requires proof of a registered identity.
+  // We sign `${aegisId}:turn:${timeBucket}` with the ACTIVE identity's Ed25519
+  // signing key (the same key the relay holds), exactly like POST /prekeys. The
+  // active identity is the authoritative signer, so we read aegisId + signing
+  // key from the store (lazy require avoids a static import cycle) rather than
+  // trusting the passed-in id. No identity → no creds (STUN-only fallback).
+  let signed: { aegisId: string; sig: string; ts: number } | null = null;
   try {
+    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+    const id = useIdentity.getState().identity;
+    if (id?.signingSecretKey) {
+      const ts = Date.now();
+      const bucket = Math.floor(ts / 30_000);
+      const sig = encodeBase64(
+        nacl.sign.detached(decodeUTF8(`${id.aegisId}:turn:${bucket}`), id.signingSecretKey),
+      );
+      signed = { aegisId: id.aegisId, sig, ts };
+    }
+  } catch { /* store unavailable (tests) → STUN fallback below */ }
+  if (!signed) return rtcConfig(forceRelay);
+
+  try {
+    const query =
+      `aegisId=${encodeURIComponent(signed.aegisId)}` +
+      `&sig=${encodeURIComponent(signed.sig)}` +
+      `&ts=${signed.ts}`;
     const res = await fetch(
-      `${SERVER_URL}/turn/credentials?aegisId=${encodeURIComponent(aegisId)}`,
+      `${SERVER_URL}/turn/credentials?${query}`,
       { signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 3000); return c.signal; })() },
     );
     if (!res.ok) return rtcConfig(forceRelay);
