@@ -183,7 +183,7 @@ Esf **S-M**. Mayormente robustez y privacidad de borde.
 
 | ID | Sev | Hallazgo | Fix |
 |----|-----|----------|-----|
-| B-2 | 🔵 | Sin endpoint de account deletion | `DELETE` de identidad autenticado por firma. |
+| B-2 | ✅ | Sin endpoint de account deletion | `fix/sec-b2-account-deletion`: `DELETE /identity/:id` autenticado por firma Ed25519 sobre `${aegisId}:delete:${bucket}` (±60s, mismo PoK que prekeys — regla #3). `identityRepo.deleteAccount` borra en cascada todo el rastro server-side: identidad, prekeys (SPK/OPK/PQ), mensajes y dist. de SenderKey en cola (por recipient), push + delivery tokens, linked_devices. Sealed-sender ⇒ no hay copias salientes que borrar. Test: `identity.delete.test.ts` (borra+cascada, firma forjada→403, ts viejo→400, id desconocido→404). UI cliente (botón "borrar cuenta" + wipe local) = follow-up. |
 | B-1 | 🔵 | `MAX_DRAIN_DEVICES=2` insuficiente | Escalar dinámicamente al `linked_devices` count. |
 | B-7 | 🔵 | Uploads TTL 24h sin aviso | Cliente maneja 404 graceful: "adjunto expirado". |
 | M-3 | 🟡 | `drained_by` JSON en TEXT sin validar | Validar shape parseado o tabla de join. |
