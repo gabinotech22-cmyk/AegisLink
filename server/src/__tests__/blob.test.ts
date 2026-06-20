@@ -91,14 +91,58 @@ describe('FIX E — blob download anti-render headers', () => {
     const data = Buffer.from('hello-aegislink');
     const uploadRes = await doUpload(data);
     expect(uploadRes.status).toBe(200);
-    const { id } = uploadRes.body as { id: string };
+    const { id, token } = uploadRes.body as { id: string; token: string };
     expect(typeof id).toBe('string');
+    expect(typeof token).toBe('string');
 
-    const dlRes = await request(app).get(`/blob/download/${id}`);
+    const dlRes = await request(app).get(`/blob/download/${id}`).query({ t: token });
     expect(dlRes.status).toBe(200);
     expect(dlRes.headers['content-disposition']).toMatch(/attachment/i);
     expect(dlRes.headers['content-type']).toMatch(/application\/octet-stream/i);
     expect(dlRes.headers['x-content-type-options']).toBe('nosniff');
+  });
+});
+
+// ── C-1: download requires the HMAC token bound to the blob id ────────────────
+describe('C-1 — blob download authorization token', () => {
+  it('upload returns a token and download with the correct token succeeds', async () => {
+    const uploadRes = await doUpload(Buffer.from('c1-authorized'));
+    expect(uploadRes.status).toBe(200);
+    const { id, token } = uploadRes.body as { id: string; token: string };
+    expect(token.length).toBeGreaterThan(0);
+
+    const ok = await request(app).get(`/blob/download/${id}`).query({ t: token });
+    expect(ok.status).toBe(200);
+  });
+
+  it('download WITHOUT a token is rejected with 403 (knowing the UUID is not enough)', async () => {
+    const uploadRes = await doUpload(Buffer.from('c1-no-token'));
+    const { id } = uploadRes.body as { id: string };
+
+    const res = await request(app).get(`/blob/download/${id}`);
+    expect(res.status).toBe(403);
+    expect((res.body as { error: string }).error).toBe('forbidden');
+  });
+
+  it('download with a WRONG token is rejected with 403', async () => {
+    const uploadRes = await doUpload(Buffer.from('c1-bad-token'));
+    const { id, token } = uploadRes.body as { id: string; token: string };
+
+    // Flip one char of a same-length token so the constant-time compare runs.
+    const wrong = (token[0] === 'A' ? 'B' : 'A') + token.slice(1);
+    const res = await request(app).get(`/blob/download/${id}`).query({ t: wrong });
+    expect(res.status).toBe(403);
+    expect((res.body as { error: string }).error).toBe('forbidden');
+  });
+
+  it('a valid token for one blob does not authorize a different blob id', async () => {
+    const a = await doUpload(Buffer.from('blob-A'));
+    const b = await doUpload(Buffer.from('blob-B'));
+    const { token: tokenA } = a.body as { token: string };
+    const { id: idB } = b.body as { id: string };
+
+    const res = await request(app).get(`/blob/download/${idB}`).query({ t: tokenA });
+    expect(res.status).toBe(403);
   });
 });
 

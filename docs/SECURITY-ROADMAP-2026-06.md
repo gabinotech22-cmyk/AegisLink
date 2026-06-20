@@ -122,7 +122,7 @@ Esf **S-M**. Varios endpoints confían en conocimiento de un ID, no en prueba cr
 | A-8 | 🟠 | `voterHash` client-supplied → ballot stuffing (`polls.ts:33`) | Derivar server-side: firmar voto con Ed25519, `voterHash = SHA256(pollId\|signerPubKey)`. |
 | MED | 🟡 | Work GET sin firma (`work.ts:692,791`) | Aplicar `verifySig()` como en los endpoints de mutación. |
 | MED | 🟡 | TURN credentials sin auth (`turn.ts:39`) | Mover tras socket autenticado o exigir PoW. |
-| C-1 | 🟡 | Blob download sin auth (`blob.ts:125`) — recalibrado MEDIO | Token HMAC corto vinculado al mensaje: `HMAC(blobId, sharedSecret)` dentro del sobre. |
+| C-1 | ✅ | Blob download sin auth (`blob.ts:125`) — recalibrado MEDIO | **HECHO** (`fix/sec-blob-download-auth`): `download/:id` exige `?t=HMAC(BLOB_SECRET,id)` (constant-time, fail-closed en prod). Token minteado en upload, viaja como 5º componente de la URI `blob:` dentro del sobre E2EE. Paridad mobile+desktop; legacy v1 (4 partes) aceptado. Tests server+mobile. |
 
 ---
 
