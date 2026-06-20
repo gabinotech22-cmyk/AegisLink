@@ -2130,6 +2130,39 @@ export async function getSpkKeyId(): Promise<number | null> {
   });
 }
 
+/**
+ * Persist the wall-clock ms at which the CURRENT SPK was created. Powers the
+ * age-based SPK rotation (B-3 / Signal ~weekly): the trigger compares this
+ * against `SPK_ROTATION_INTERVAL_MS`. Stored as a `kind='spkcreated'`, key_id=0
+ * sentinel row (same encryptBody-wrapped pattern as setSpkKeyId).
+ *
+ * Privacy (regla #10): this is the device's OWN SPK age, encrypted at rest — not
+ * communication metadata. It is the minimum needed to rotate the SPK on a fixed
+ * cadence and never leaves the device.
+ */
+export async function setSpkCreatedAt(ms: number): Promise<void> {
+  return withDb(async (d) => {
+    const enc = await encryptBody(String(ms));
+    await d.runAsync(
+      `INSERT OR REPLACE INTO prekey_secrets (slot, kind, key_id, secret_b64) VALUES (?, 'spkcreated', 0, ?)`,
+      activeSlot, enc,
+    );
+  });
+}
+
+/** Read the current SPK's creation ms, or null if never stamped (pre-B-3 install). */
+export async function getSpkCreatedAt(): Promise<number | null> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ secret_b64: string }>(
+      `SELECT secret_b64 FROM prekey_secrets WHERE slot = ? AND kind = 'spkcreated' AND key_id = 0`,
+      activeSlot,
+    );
+    if (!row) return null;
+    const v = parseInt(await decryptBody(row.secret_b64), 10);
+    return Number.isFinite(v) ? v : null;
+  });
+}
+
 /** Delete every prekey secret for the active slot (panic wipe / slot delete). */
 export async function clearPrekeySecrets(): Promise<void> {
   return withDb(async (d) => {

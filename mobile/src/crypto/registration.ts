@@ -444,6 +444,12 @@ async function persistPrekeySecretsDurably(
   } catch (e) {
     if (__DEV__) console.warn('[registration] could not persist SPK keyId to DB', e);
   }
+  // Start the SPK age clock for the age-based rotation trigger (B-3).
+  try {
+    await db.setSpkCreatedAt(Date.now());
+  } catch (e) {
+    if (__DEV__) console.warn('[registration] could not persist SPK createdAt to DB', e);
+  }
   for (const [keyId, secret] of preKeySecrets.opkSecrets.entries()) {
     try {
       await db.saveOpkSecret(keyId, encodeBase64(secret));

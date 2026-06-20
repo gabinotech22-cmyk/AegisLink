@@ -21,6 +21,7 @@ import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2 } from '
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
+import { spkRotationDecision, spkPruneTargetKeyId } from './spkRotation';
 import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
@@ -79,6 +80,9 @@ const getSlotPrefix = (): string => {
 
 const SECURE_SPK_SECRET_KEY = () => `aegis.${getSlotPrefix()}spkSecret.b64`;
 const SECURE_SPK_KEYID_KEY = () => `aegis.${getSlotPrefix()}spk.keyId`;
+// B-3: wall-clock ms at which the current SPK was created — powers age-based
+// rotation. Desktop mirrors mobile's DB sentinel using the encrypted keystore.
+const SECURE_SPK_CREATED_KEY = () => `aegis.${getSlotPrefix()}spk.createdAt`;
 const SECURE_OPK_IDS_KEY = () => `aegis.${getSlotPrefix()}opkIds.json`;
 const opkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}opkSecret.${keyId}`;
 const spkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}spkSecret.${keyId}`;
@@ -119,6 +123,40 @@ async function getActivePqSpkKeyId(): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+// ── B-3: age-based Signed PreKey rotation (Signal ~weekly) ───────────────────
+// Rotate the SPK once it exceeds the interval regardless of OPK consumption, so
+// a low-volume device that never depletes its OPK pool still gets medium-term
+// forward secrecy. The pure decision/prune helpers live in ./spkRotation so the
+// node-env vitest suite can test them without the window.aegis import graph.
+
+/** Read the current SPK's creation ms, or null if never stamped (pre-B-3). */
+async function getSpkCreatedAt(): Promise<number | null> {
+  try {
+    const stored = await SecureStore.getItemAsync(SECURE_SPK_CREATED_KEY());
+    if (!stored) return null;
+    const parsed = parseInt(stored, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True iff the current SPK is older than the rotation interval. Lazy backfill:
+ * a pre-B-3 install has an SPK but no stamp — we stamp `now` and return false so
+ * the upgrade does not force-rotate every device at once (which would needlessly
+ * invalidate in-flight first-contact handshakes). Same policy as mobile.
+ */
+async function isSignedPreKeyStale(now: number): Promise<boolean> {
+  const created = await getSpkCreatedAt();
+  const { rotate, backfill } = spkRotationDecision(created, now);
+  if (backfill) {
+    try { await SecureStore.setItemAsync(SECURE_SPK_CREATED_KEY(), String(now)); }
+    catch {/* best-effort backfill */}
+  }
+  return rotate;
 }
 
 interface WireSealedEnvelope {
@@ -390,10 +428,21 @@ export async function persistPrekeySecrets(
     await SecureStore.setItemAsync(spkSecretKey(nextSpkKeyId), newSecretB64);
     await SecureStore.setItemAsync(SECURE_SPK_SECRET_KEY(), newSecretB64);
     await SecureStore.setItemAsync(SECURE_SPK_KEYID_KEY(), String(nextSpkKeyId));
+    // B-3: start this SPK's age clock for the rotation trigger (isSignedPreKeyStale).
+    try {
+      await SecureStore.setItemAsync(SECURE_SPK_CREATED_KEY(), String(Date.now()));
+    } catch {/* best-effort stamp */}
 
-    if (prevSpkKeyId !== null && prevSpkKeyId !== nextSpkKeyId) {
+    // Forward secrecy vs deliverability: retain the last K=5 SPK secrets and drop
+    // the one that falls out of the window. With ~weekly age-based rotation (B-3)
+    // that keeps ≥28 days of decryptability, so an initial message that slept in
+    // the relay queue (TTL 30 days) against an older SPK still decrypts. Deleting
+    // only the immediately-previous SPK would break those queued inits once
+    // rotation became time-driven. `prevSpkKeyId` is retained intentionally.
+    const staleSpkKeyId = spkPruneTargetKeyId(nextSpkKeyId);
+    if (staleSpkKeyId !== null) {
       try {
-        await SecureStore.deleteItemAsync(spkSecretKey(prevSpkKeyId));
+        await SecureStore.deleteItemAsync(spkSecretKey(staleSpkKeyId));
       } catch {/* best-effort */}
     }
 
@@ -634,15 +683,26 @@ export function connect(identity: Identity): Socket {
     }
 
     const count = res?.opkCount ?? 0;
-    if (count < 20) {
+    // Two independent reasons to (re)publish prekeys: the OPK pool is low
+    // (depletion refill) OR the SPK has aged past the rotation interval (B-3,
+    // Signal ~weekly). A single uploadPreKeys refreshes both.
+    const needRefill = count < 20;
+    const needRotate = await isSignedPreKeyStale(Date.now());
+    if (needRefill || needRotate) {
       try {
         await uploadPreKeys(identity);
-        if (DEV) console.log('[socket] prekeys uploaded (refilled count from', count, ')');
+        if (DEV) {
+          console.log(
+            '[socket] prekeys uploaded —',
+            needRotate ? 'SPK rotation (age)' : 'OPK refill',
+            '(count was', count, ')',
+          );
+        }
       } catch (err) {
         if (DEV) console.error('[socket] prekey upload error:', err);
       }
     } else {
-      if (DEV) console.log('[socket] prekeys count healthy:', count, '— no refill needed');
+      if (DEV) console.log('[socket] prekeys count healthy:', count, '— no refill/rotation needed');
     }
 
     void broadcastProfileUpdate(identity);
