@@ -107,7 +107,12 @@
       "./app.plugin.js",
       "./plugins/withCallForegroundService.js",
       "expo-secure-store",
-      "expo-sqlite",
+      [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true
+        }
+      ],
       [
         "expo-build-properties",
         {
