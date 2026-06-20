@@ -172,7 +172,7 @@ Esf **M-L**.
 | B-3 | ✅ | Sin rotación automática de SPK | **HECHO** (`feat/b3-spk-rotation`): trigger por edad ~semanal en `auth:ok` (mobile+desktop), stamp `createdAt` durable, grace window ampliado a K=5 SPK (≥28 días, cubre cola relay 30d). Tests mobile (harness auth:ok) + desktop (helpers puros). |
 | GROUP | ✅ | SenderKey sin rotación al remover miembro | **YA EXISTÍA** (auditado): `rekeyGroupAfterRemoval` genera clave fresca, sellada solo a los que quedan, sealed-sender, con test de regresión. |
 | M-2 | 🟡 | OPK no per-device | Pool de OPK per-device o consumo coordinado. |
-| M-4 | 🟡 | Sin CSP en landing/web servida por relay | Header CSP en `linksRoutes`. |
+| M-4 | ✅ | Sin CSP en landing/web servida por relay | **HECHO** (`fix/sec-csp-landing`): CSP global `default-src 'none'` para la API JSON/blob + CSP por-página en `/g` `/a` con `script-src 'sha256-…'` (script inline pineado por hash, sin `'unsafe-inline'`). Test `links.csp.test.ts` verifica que el hash casa con el script servido. |
 
 **Ref.** Signal: rotación de SPK y re-key de grupo en cambio de membresía. libsignal `SenderKey`.
 
