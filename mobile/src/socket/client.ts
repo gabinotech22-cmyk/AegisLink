@@ -190,6 +190,53 @@ export function forgetGroupAvatarSent(groupId: string): void {
 // truth shared with store/groups.ts and socket/groupMetadataDecision.ts.
 
 /**
+ * Sealed-sender transport selector for an outgoing envelope — the single source
+ * of truth shared by the online group fan-out (sendGroupMessage) and the
+ * offline retry path (flushOutbox). Mirrors the inline selector in sendMessage:
+ * use v2 (sealed-sender, no `from` on the wire) ONLY when the flag is on, the
+ * session is ESTABLISHED (no pending x3dhInit — first contact bootstraps over
+ * v1), and we already hold the recipient's delivery token. Otherwise v1.
+ *
+ * Returns the socket event name, the wire fields to spread into the emit
+ * payload (ciphertext/nonce[/epk/deliveryToken]) and the advanced ratchet
+ * state the caller MUST persist. The caller adds id/to (and, for v1 offline
+ * bootstrap, the `init` hint).
+ */
+export async function buildOutgoingEnvelope(
+  payload: string,
+  recipientAegisId: string,
+  recipientPubKey: Uint8Array,
+  identity: Identity,
+  session: RatchetState,
+): Promise<{ event: 'envelope' | 'envelope:v2'; wire: Record<string, unknown>; newState: RatchetState }> {
+  const v2Token =
+    SEALED_TRANSPORT_VERSION === 'v2' && !session.x3dhInit
+      ? await getContactDeliveryToken(recipientAegisId)
+      : null;
+  if (v2Token) {
+    const r = encryptMessageV2(
+      payload,
+      identity.aegisId,
+      recipientPubKey,
+      identity.signingSecretKey,
+      session,
+      Date.now(),
+    );
+    return {
+      event: 'envelope:v2',
+      wire: { ciphertext: r.wire.ciphertext, nonce: r.wire.nonce, epk: r.wire.epk, deliveryToken: v2Token },
+      newState: r.newState,
+    };
+  }
+  const r = encryptMessage(payload, identity.aegisId, recipientPubKey, identity.secretKey, session);
+  return {
+    event: 'envelope',
+    wire: { ciphertext: r.envelope.ciphertextB64, nonce: r.envelope.nonceB64 },
+    newState: r.newState,
+  };
+}
+
+/**
  * Drain all pending outbox jobs in FIFO order.
  *
  * Each job is re-encrypted with the CURRENT ratchet state at drain time —
@@ -220,19 +267,22 @@ async function flushOutbox(identity: Identity): Promise<void> {
       // recipient is offline — the relay attaches our public key to the queued
       // copy. Without this, the first message to a new contact delivered from
       // the offline queue is undecryptable (no sender info) and lost forever.
+      // Captured BEFORE encryption (which advances the ratchet). The `init` hint
+      // only applies to the v1 path: the v2 selector never fires while a session
+      // still has a pending x3dhInit, so v2 envelopes are always established.
       const isInit = !!session.x3dhInit;
-      const { envelope, newState } = encryptMessage(
+      const { event, wire, newState } = await buildOutgoingEnvelope(
         job.payload,
-        identity.aegisId,
+        job.recipientAegisId,
         recipientPublicKey,
-        identity.secretKey,
+        identity,
         session,
       );
       await saveSessionState(job.recipientAegisId, newState);
       await new Promise<void>((resolve, reject) => {
         socket!.emit(
-          'envelope',
-          { id: job.msgId, to: job.recipientAegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64, ...(isInit ? { init: true } : {}) },
+          event,
+          { id: job.msgId, to: job.recipientAegisId, ...wire, ...(isInit && event === 'envelope' ? { init: true } : {}) },
           (ack: { ok: boolean; error?: string } | undefined) => {
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
             else resolve();
@@ -3791,19 +3841,22 @@ export async function sendGroupMessage(opts: {
 
     try {
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, opts.identity);
-      const { envelope, newState } = encryptMessage(
+      // Sealed-sender selector (shared with flushOutbox / sendMessage): group
+      // message content is per-member envelopes, so v2 hides the sender's
+      // aegisId from the relay for group chat exactly as it does for 1:1.
+      const { event, wire, newState } = await buildOutgoingEnvelope(
         payload,
-        opts.identity.aegisId,
+        contact.aegisId,
         decodeBase64(contact.publicKeyB64),
-        opts.identity.secretKey,
+        opts.identity,
         session,
       );
       await saveSessionState(contact.aegisId, newState);
 
       await new Promise<void>((resolve, reject) => {
         socket!.emit(
-          'envelope',
-          { id: msgId, to: contact.aegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 },
+          event,
+          { id: msgId, to: contact.aegisId, ...wire },
           (ack: { ok: boolean; error?: string } | undefined) => {
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
             else resolve();
