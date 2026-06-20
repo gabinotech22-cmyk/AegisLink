@@ -25,6 +25,7 @@
 import React from 'react';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 import { Alert, TextInput, Pressable, Text } from 'react-native';
+import { themedAlert } from '../../components/AlertHost';
 import type { StoredContact, StoredMessage } from '../../db/local';
 
 // ── Nativos ──────────────────────────────────────────────────────────────────
@@ -126,6 +127,10 @@ jest.mock('../../socket/client', () => ({
 }));
 
 jest.mock('../../socket/calls', () => ({ startCall: jest.fn() }));
+
+// Chat confirms destructive actions via themedAlert() (in-app themed dialog),
+// not RN's Alert.alert. Mock it so tests can drive the confirm button.
+jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
 
 jest.mock('../../hooks/usePanicGesture', () => ({
   usePanicGesture: jest.fn(),
@@ -528,8 +533,9 @@ describe('handleSend — texto', () => {
     const errorMsg = 'network error';
     mockSendMessage.mockRejectedValueOnce(new Error(errorMsg));
 
-    // Spy Alert to prevent unhandled warnings
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    // Send failure surfaces the error via themedAlert (not RN Alert.alert).
+    const alertSpy = (themedAlert as jest.Mock);
+    alertSpy.mockClear();
 
     const { UNSAFE_getByType, getByTestId } = render(
       <ChatScreen {...DEFAULT_PROPS} />
@@ -545,8 +551,6 @@ describe('handleSend — texto', () => {
 
     // Draft is restored after failure
     expect(input.props.value).toBe('mensaje fallido');
-
-    alertSpy.mockRestore();
   });
 });
 
@@ -560,19 +564,17 @@ describe('handleDelete — borrado local', () => {
     const msg = makeMsg({ id: 'msg-1', direction: 'out' });
     mockStoreMessages['alice-id'] = [msg];
 
-    // Alert confirm: immediately invoke the destructive button's onPress
-    const alertSpy = jest
-      .spyOn(Alert, 'alert')
-      .mockImplementation(
-        (
-          _title: string,
-          _alertMsg?: string,
-          buttons?: Array<{ text?: string; onPress?: () => void }>
-        ) => {
-          const destructive = buttons?.find((b) => b.text === 'common.delete');
-          destructive?.onPress?.();
-        }
-      );
+    // themedAlert confirm: immediately invoke the destructive button's onPress
+    const alertSpy = (themedAlert as jest.Mock).mockImplementation(
+      (
+        _title: string,
+        _alertMsg?: string,
+        buttons?: Array<{ text?: string; onPress?: () => void }>
+      ) => {
+        const destructive = buttons?.find((b) => b.text === 'common.delete');
+        destructive?.onPress?.();
+      }
+    );
 
     const { getByText, getByTestId } = render(
       <ChatScreen {...DEFAULT_PROPS} />
@@ -612,19 +614,17 @@ describe('handleDeleteForAll', () => {
     const msg = makeMsg({ id: 'msg-1', direction: 'out' });
     mockStoreMessages['alice-id'] = [msg];
 
-    // Alert confirm: invoke the destructive button
-    const alertSpy = jest
-      .spyOn(Alert, 'alert')
-      .mockImplementation(
-        (
-          _title: string,
-          _alertMsg?: string,
-          buttons?: Array<{ text?: string; onPress?: () => void }>
-        ) => {
-          const destructive = buttons?.find((b) => b.text === 'chat.deleteForAllBtn');
-          destructive?.onPress?.();
-        }
-      );
+    // themedAlert confirm: invoke the destructive button
+    const alertSpy = (themedAlert as jest.Mock).mockImplementation(
+      (
+        _title: string,
+        _alertMsg?: string,
+        buttons?: Array<{ text?: string; onPress?: () => void }>
+      ) => {
+        const destructive = buttons?.find((b) => b.text === 'chat.deleteForAllBtn');
+        destructive?.onPress?.();
+      }
+    );
 
     const { getByText, getByTestId } = render(
       <ChatScreen {...DEFAULT_PROPS} />

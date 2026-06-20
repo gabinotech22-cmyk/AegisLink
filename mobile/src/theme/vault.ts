@@ -33,17 +33,21 @@ export interface Theme {
   fontDisplay: string;
 }
 
-const fontMono = Platform.select({
+// Optional-chain Platform.select: in a real RN runtime Platform is always
+// present, but this module loads at import time deep in many import graphs, so
+// a unit test that mocks 'react-native' without Platform would otherwise crash
+// the whole suite here. Fall back to the cross-platform default in that case.
+const fontMono = (Platform?.select?.({
   ios: 'Menlo',
   android: 'monospace',
   default: 'monospace',
-}) as string;
+}) ?? 'monospace') as string;
 
-const fontDisplay = Platform.select({
+const fontDisplay = (Platform?.select?.({
   ios: 'System',
   android: 'sans-serif',
   default: 'System',
-}) as string;
+}) ?? 'System') as string;
 
 const baseShape = {
   name: 'Vault' as const,
