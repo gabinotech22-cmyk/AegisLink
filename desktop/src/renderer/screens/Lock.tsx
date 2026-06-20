@@ -3,12 +3,20 @@ import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { verifyPIN } from '../lock/pin';
+import { getDbKEK } from '../lock/dbKeyWrap';
 
 const MAX_ATTEMPTS = 5;
 
 interface Props {
   onUnlock: () => void;
   onPanic: () => void;
+  /**
+   * 'overlay' (default): runtime re-lock — the DB is already open, the PIN only
+   * gates the UI (biometrics allowed). 'cold': cold-start unlock of a PIN-wrapped
+   * DB (C-2 Fase 2) — the entered PIN derives the KEK that opens the DB, so the
+   * crypto unlock IS the PIN check and biometrics cannot substitute for it.
+   */
+  variant?: 'cold' | 'overlay';
 }
 
 function PinDots({ count, error, t }: { count: number; error: boolean; t: Theme }) {
@@ -76,7 +84,7 @@ function Numpad({ onDigit, onDelete, t }: { onDigit: (d: string) => void; onDele
   );
 }
 
-export function LockScreen({ onUnlock, onPanic }: Props) {
+export function LockScreen({ onUnlock, onPanic, variant = 'overlay' }: Props) {
   const { t } = useTheme();
   const [mode, setMode] = useState<'biometric' | 'pin'>('pin');
   const [pinCode, setPinCode] = useState('');
@@ -84,8 +92,10 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   const [attempts, setAttempts] = useState(0);
   const [shakeClass, setShakeClass] = useState(false);
 
-  // On desktop: try Electron biometric auth, fall back to PIN
+  // On desktop: try Electron biometric auth, fall back to PIN. SKIPPED at cold
+  // start — biometrics cannot derive the PIN-KEK that opens the DB (Fase 2).
   useEffect(() => {
+    if (variant === 'cold') { setMode('pin'); return; }
     const tryBio = async () => {
       try {
         const electronAny = (window as unknown as Record<string, unknown>)['electronAPI'] as { authenticate?: () => Promise<boolean> } | undefined;
@@ -118,13 +128,19 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   }
 
   async function validatePin(pin: string) {
-    // Verify against the stored Argon2id hash (constant-time). No bypass: if no
-    // PIN is set the lock screen should never be shown (App.tsx gates on
-    // hasStoredPIN), and verifyPIN returns false for an empty store — so an
-    // attacker can never unlock with an arbitrary PIN.
+    // 'cold': derive the KEK from the PIN and try to OPEN the DB — the crypto
+    // unlock (secretbox.open) is itself the PIN check (wrong PIN ⇒ db.unlock
+    // throws). 'overlay': verify against the stored Argon2id hash (constant-time).
+    // No bypass either way: an empty store / wrong PIN never unlocks.
     let ok = false;
     try {
-      ok = await verifyPIN(pin);
+      if (variant === 'cold') {
+        const kek = await getDbKEK(pin);
+        await window.aegis.db.unlock(kek); // throws on wrong PIN
+        ok = true;
+      } else {
+        ok = await verifyPIN(pin);
+      }
     } catch {
       ok = false;
     }
@@ -197,7 +213,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
         <Numpad onDigit={handleDigit} onDelete={handleDelete} t={t} />
 
-        {mode === 'pin' && (
+        {mode === 'pin' && variant !== 'cold' && (
           <button
             onClick={async () => {
               try {

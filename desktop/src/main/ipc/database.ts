@@ -37,11 +37,88 @@ function getDbEncKeySlot(slot = 'self'): string {
   return slot === 'self' ? 'aegis.dbEncKey.b64' : `aegis.${slot}.dbEncKey.b64`
 }
 
+// ─── C-2 Fase 2: PIN-wrapped DB key (second factor at-rest) ──────────────────
+//
+// When the user enables the app lock, the 32-byte DB key is wrapped under a KEK
+// derived from the PIN (Argon2id, derived in the renderer) *inside* the DPAPI
+// layer. Opening the DB then requires BOTH the OS session (DPAPI) AND the PIN.
+// Format of the keystore value (slot 'self' → `aegis.dbEncKey.b64`):
+//   `pinv1:<nonceB64>.<dpapiB64>`   — secretbox(dbKey,nonce,KEK) then DPAPI
+//   `pinv1plain:<nonceB64>.<ctB64>` — dev-only fallback when safeStorage absent
+// (base64 alphabet has no '.', so it is an unambiguous separator). The KEK salt
+// lives separately in `aegis.dbkek.salt.v1` (renderer-owned); only the 32-byte
+// KEK crosses IPC — the raw DB key never leaves main.
+const PIN_WRAP_PREFIX = 'pinv1:'
+const PIN_WRAP_PLAIN_PREFIX = 'pinv1plain:'
+const DBKEK_SALT_KEY = 'aegis.dbkek.salt.v1'
+
+export function isPinWrapped(encoded: string | undefined): boolean {
+  return (
+    !!encoded &&
+    (encoded.startsWith(PIN_WRAP_PREFIX) || encoded.startsWith(PIN_WRAP_PLAIN_PREFIX))
+  )
+}
+
+/** Validate a base64 KEK from the renderer decodes to exactly 32 bytes. */
+function assertValidB64Key(b64: unknown): asserts b64 is string {
+  if (typeof b64 !== 'string' || b64.length === 0 || b64.length > 64) {
+    throw new Error('invalid KEK')
+  }
+  if (decodeBase64(b64).length !== 32) throw new Error('KEK must be 32 bytes')
+}
+
+/** Wrap `dbKey` under the PIN-derived `kek` (+ DPAPI outer layer). */
+export function wrapDbKeyUnderPin(dbKey: Uint8Array, kek: Uint8Array): string {
+  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength)
+  const ct = nacl.secretbox(dbKey, nonce, kek)
+  const nonceB64 = encodeBase64(nonce)
+  const ctB64 = encodeBase64(ct)
+  if (safeStorage.isEncryptionAvailable()) {
+    const dpapi = safeStorage.encryptString(ctB64).toString('base64')
+    return `${PIN_WRAP_PREFIX}${nonceB64}.${dpapi}`
+  }
+  // No try/catch fallback to plaintext in production (golden rule #1/#6).
+  if (app.isPackaged) {
+    throw new Error('AegisLink: OS secure storage unavailable — cannot PIN-wrap DB key.')
+  }
+  return `${PIN_WRAP_PLAIN_PREFIX}${nonceB64}.${ctB64}`
+}
+
+/** Unwrap a `pinv1:`/`pinv1plain:` value with `kek`; throws on a wrong PIN. */
+export function unwrapDbKeyUnderPin(encoded: string, kek: Uint8Array): Uint8Array {
+  let nonceB64: string
+  let ctB64: string
+  if (encoded.startsWith(PIN_WRAP_PREFIX)) {
+    const [n, dpapi] = encoded.slice(PIN_WRAP_PREFIX.length).split('.')
+    nonceB64 = n
+    ctB64 = safeStorage.decryptString(Buffer.from(dpapi, 'base64'))
+  } else if (encoded.startsWith(PIN_WRAP_PLAIN_PREFIX)) {
+    const [n, c] = encoded.slice(PIN_WRAP_PLAIN_PREFIX.length).split('.')
+    nonceB64 = n
+    ctB64 = c
+  } else {
+    throw new Error('not a PIN-wrapped DB key')
+  }
+  const opened = nacl.secretbox.open(decodeBase64(ctB64), decodeBase64(nonceB64), kek)
+  if (!opened) {
+    // Wrong PIN (or tampered blob): the unwrap is itself the PIN check. Never
+    // fall through to a fresh key — that would orphan all encrypted rows.
+    throw new Error('AegisLink: incorrect PIN — DB key unwrap failed.')
+  }
+  if (opened.length !== 32) throw new Error('decrypted DB key has invalid length')
+  return opened
+}
+
 function getDbKey(slot = 'self'): Uint8Array {
   if (cachedDbKey) return cachedDbKey
   const slotKey = getDbEncKeySlot(slot)
   const keystore = readKeystore()
   const encoded = keystore[slotKey]
+  if (isPinWrapped(encoded)) {
+    // PIN-wrapped (Fase 2): recoverable only via db:unlock(kek), which populates
+    // cachedDbKey above. Reaching here means the DB is locked — fail closed.
+    throw new Error('AegisLink: database is PIN-locked — unlock required before access.')
+  }
   if (!encoded) {
     // First run for this slot: generate and persist a fresh DB key.
     if (!safeStorage.isEncryptionAvailable() && app.isPackaged) {
@@ -296,20 +373,87 @@ export function openEncrypted(dbPath: string, slot = 'self'): Database.Database 
 
 // ─── Handlers Registration ────────────────────────────────────────────────────
 
-export function registerDatabaseHandlers(): void {
-  const dbPath = path.join(app.getPath('userData'), 'aegislink.db')
-  // Ola 10: whole-DB SQLCipher encryption (key from getDbKey, migrates legacy
-  // plaintext DBs). MUST precede journal_mode/foreign_keys — the key PRAGMA has
-  // to be the first statement on the handle.
-  db = openEncrypted(dbPath)
+let mainDbPath = ''
 
-  // Enable WAL mode for better concurrent read performance
+/**
+ * Open the main DB handle (idempotent). Ola 10: whole-DB SQLCipher encryption
+ * (key from getDbKey, migrates legacy plaintext DBs). The key PRAGMA must be the
+ * first statement on the handle, so it precedes journal_mode/foreign_keys.
+ *
+ * For PIN-wrapped installs (Fase 2) this is deferred until db:unlock has set
+ * cachedDbKey; getDbKey() then returns the unlocked key.
+ */
+function openMainDb(): void {
+  if (db) return
+  db = openEncrypted(mainDbPath)
   db.pragma('journal_mode = WAL')
-  // Enforce foreign key constraints
   db.pragma('foreign_keys = ON')
-
-  // Run database schema and migrations
   ensureSchema(db)
+}
+
+export function registerDatabaseHandlers(): void {
+  mainDbPath = path.join(app.getPath('userData'), 'aegislink.db')
+
+  // C-2 Fase 2: if the DB key is PIN-wrapped, DEFER opening until db:unlock
+  // supplies the PIN-derived KEK. Legacy / no-PIN installs open eagerly as before
+  // (fully backward compatible).
+  const encoded = readKeystore()[getDbEncKeySlot('self')]
+  if (!isPinWrapped(encoded)) {
+    openMainDb()
+  }
+
+  // ─── Lock / unlock (C-2 Fase 2) ───
+  ipcMain.handle('db:lock-state', (event): { pinWrapped: boolean; opened: boolean } => {
+    assertTrustedSender(event)
+    const enc = readKeystore()[getDbEncKeySlot('self')]
+    return { pinWrapped: isPinWrapped(enc), opened: !!db }
+  })
+
+  ipcMain.handle('db:unlock', (event, kekB64: string): void => {
+    assertTrustedSender(event)
+    if (db) return // already unlocked/open
+    const enc = readKeystore()[getDbEncKeySlot('self')]
+    if (isPinWrapped(enc)) {
+      assertValidB64Key(kekB64)
+      const kek = decodeBase64(kekB64)
+      try {
+        cachedDbKey = unwrapDbKeyUnderPin(enc as string, kek) // throws on wrong PIN
+      } finally {
+        kek.fill(0)
+      }
+    }
+    // Legacy/no-PIN: open without a KEK. PIN-wrapped: cachedDbKey now set.
+    openMainDb()
+  })
+
+  ipcMain.handle('db:enable-pin-wrap', (event, kekB64: string): void => {
+    assertTrustedSender(event)
+    assertValidB64Key(kekB64)
+    const dbKey = getDbKey('self') // DB must be open/unlocked
+    const kek = decodeBase64(kekB64)
+    try {
+      const keystore = readKeystore()
+      keystore[getDbEncKeySlot('self')] = wrapDbKeyUnderPin(dbKey, kek)
+      writeKeystore(keystore)
+    } finally {
+      kek.fill(0)
+    }
+  })
+
+  ipcMain.handle('db:disable-pin-wrap', (event): void => {
+    assertTrustedSender(event)
+    const dbKey = getDbKey('self') // DB must be open/unlocked
+    const keystore = readKeystore()
+    const rawVal = encodeBase64(dbKey)
+    if (safeStorage.isEncryptionAvailable()) {
+      keystore[getDbEncKeySlot('self')] = 'enc:' + safeStorage.encryptString(rawVal).toString('base64')
+    } else if (app.isPackaged) {
+      throw new Error('AegisLink: OS secure storage unavailable — cannot rewrap DB key.')
+    } else {
+      keystore[getDbEncKeySlot('self')] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
+    }
+    writeKeystore(keystore)
+  })
 
   // ─── Identity ───
   ipcMain.handle('db:save-identity', (event, activeSlot: string, identity: any): void => {
@@ -745,16 +889,32 @@ export function registerDatabaseHandlers(): void {
   // ─── Panic wipe ───
   ipcMain.handle('db:wipe-database', (event, activeSlot: string): void => {
     assertTrustedSender(event)
-    db.prepare('DELETE FROM messages').run()
-    db.prepare('DELETE FROM contacts').run()
-    db.prepare('DELETE FROM groups').run()
-    db.prepare('DELETE FROM ratchet_sessions').run()
-    db.prepare('DELETE FROM chat_state').run()
-    db.prepare('DELETE FROM call_history').run()
-    db.prepare('DELETE FROM identity').run()
+    // Tolerate a LOCKED DB (Fase 2 cold-start panic, before db:unlock): the SQL
+    // deletes are skipped, but the keystore wipe below removes the DB key blob —
+    // the encrypted DB file is then unrecoverable, so panic still leaves nothing.
+    if (db) {
+      db.prepare('DELETE FROM messages').run()
+      db.prepare('DELETE FROM contacts').run()
+      db.prepare('DELETE FROM groups').run()
+      db.prepare('DELETE FROM ratchet_sessions').run()
+      db.prepare('DELETE FROM chat_state').run()
+      db.prepare('DELETE FROM call_history').run()
+      db.prepare('DELETE FROM identity').run()
+    } else {
+      // Locked cold-start panic (Fase 2): no open handle, so remove the encrypted
+      // file outright. The DB key blob is deleted below anyway (file unrecoverable),
+      // and a clean file lets a fresh DB mint cleanly on the next open.
+      for (const suffix of ['', '-wal', '-shm']) {
+        try {
+          if (mainDbPath && fs.existsSync(mainDbPath + suffix)) fs.rmSync(mainDbPath + suffix)
+        } catch { /* best-effort */ }
+      }
+    }
+    if (cachedDbKey) cachedDbKey.fill(0) // zeroize the in-memory DB key (rule #9)
     cachedDbKey = null
     const keystore = readKeystore()
     delete keystore[getDbEncKeySlot(activeSlot)]
+    delete keystore[DBKEK_SALT_KEY] // Fase 2: drop the PIN-KEK salt too (hygiene)
     delete keystore['aegis.panic.v1']
     delete keystore['aegis.preferences.v1']
     delete keystore['aegis.polls.v1']

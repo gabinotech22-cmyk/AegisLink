@@ -6,6 +6,7 @@ import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { usePreferences } from '../store/preferences';
 import { setPIN, clearPIN, hasStoredPIN } from '../lock/pin';
+import { getDbKEK } from '../lock/dbKeyWrap';
 
 interface Props {
   onBack: () => void;
@@ -138,6 +139,11 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
           try {
             await setPIN(pin);
             setPinStored(true);
+            // Fase 2: (re)wrap the DB key under the PIN-derived KEK so the PIN
+            // becomes a real at-rest second factor (cold-start unlock derives the
+            // same KEK to open the DB). Same call covers first-set and change-PIN.
+            const kek = await getDbKEK(pin);
+            await window.aegis.db.enablePinWrap(kek);
             if (pendingEnable.current) {
               await setPref('appLockEnabled', true);
               pendingEnable.current = false;
@@ -160,12 +166,26 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
       openPinModal(true);
       return;
     }
+    if (!val) {
+      // Disabling the lock must also UNWRAP the DB key (revert to DPAPI-only) and
+      // clear the PIN, so the cold-start gate — keyed on the crypto wrap state,
+      // not this preference — never contradicts the toggle.
+      void (async () => {
+        await window.aegis.db.disablePinWrap().catch(() => {});
+        await clearPIN().catch(() => {});
+        setPinStored(false);
+        await setPref('appLockEnabled', false);
+      })();
+      return;
+    }
     void setPref('appLockEnabled', val);
   }
 
   function handleClearPin() {
     if (window.confirm('Delete PIN? App lock will be disabled.')) {
       void (async () => {
+        // Unwrap the DB key first (revert to DPAPI-only) so no cold lock remains.
+        await window.aegis.db.disablePinWrap().catch(() => {});
         await clearPIN();
         setPinStored(false);
         await setPref('appLockEnabled', false);
