@@ -10,6 +10,40 @@ import { z } from 'zod';
 const router = Router();
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 
+// ── Download authorization secret (C-1) ─────────────────────────────────────
+// A download must prove it holds a token bound to the blob id, not merely know
+// the (122-bit random) UUID. The token is HMAC(BLOB_SECRET, id), minted at
+// upload and carried INSIDE the E2EE envelope alongside the key/nonce — so the
+// relay can neither enumerate blobs from leaked ids nor serve ciphertext to a
+// party who only learned the id (logs, relay DB, etc.).
+//
+// Fail-closed in production: a missing secret must not silently downgrade to an
+// unauthenticated download. In dev/test we synthesize an ephemeral secret so
+// the suite and local runs work without configuration (blobs expire in 24h, so
+// an ephemeral per-process secret is harmless).
+const BLOB_SECRET: Buffer = (() => {
+  const fromEnv = process.env['BLOB_SECRET'];
+  if (fromEnv && fromEnv.length > 0) return Buffer.from(fromEnv, 'utf8');
+  if (process.env['NODE_ENV'] === 'production') {
+    throw new Error('BLOB_SECRET is required in production (download authorization)');
+  }
+  // dev/test: ephemeral, per-process. Tokens stay valid for this process only.
+  return crypto.randomBytes(32);
+})();
+
+/** Mint the download token bound to a blob id: base64url(HMAC-SHA256)[:22] (~16 bytes). */
+function mintDownloadToken(id: string): string {
+  return crypto.createHmac('sha256', BLOB_SECRET).update(id).digest('base64url').slice(0, 22);
+}
+
+/** Constant-time check that `token` is the valid download token for `id`. */
+function isValidDownloadToken(id: string, token: string): boolean {
+  const expected = Buffer.from(mintDownloadToken(id), 'utf8');
+  const provided = Buffer.from(token, 'utf8');
+  if (expected.length !== provided.length) return false;
+  return crypto.timingSafeEqual(expected, provided);
+}
+
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -114,7 +148,9 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
       return;
     }
     currentTotalBytes += req.body.length;
-    res.json({ id });
+    // Return the download token bound to this id. It travels inside the E2EE
+    // envelope; the relay never needs to persist it (it is recomputed on GET).
+    res.json({ id, token: mintDownloadToken(id) });
   });
 });
 
@@ -126,6 +162,14 @@ router.get('/download/:id', (req, res) => {
   const id = req.params.id;
   if (!UUID_V4_RE.test(id)) {
     res.status(400).json({ error: 'INVALID_PAYLOAD' });
+    return;
+  }
+
+  // C-1 — require the HMAC token bound to this blob id. Knowing the UUID is not
+  // enough; the token only exists inside the E2EE envelope the recipient holds.
+  const token = typeof req.query.t === 'string' ? req.query.t : '';
+  if (!token || !isValidDownloadToken(id, token)) {
+    res.status(403).json({ error: 'forbidden' });
     return;
   }
 

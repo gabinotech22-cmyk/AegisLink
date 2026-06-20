@@ -25,6 +25,33 @@ async function ensureMediaDir(): Promise<void> {
 const encPathFor = (id: string): string => `${MEDIA_DIR}${id}.enc`;
 const decPathFor = (id: string, ext: string): string => `${FileSystem.cacheDirectory}dec_${id}.${ext}`;
 
+/**
+ * Parse a `blob:` URI. Two on-wire shapes are accepted:
+ *   - v2 (current): `blob:<id>:<key>:<nonce>:<token>` — token authorizes download
+ *   - v1 (legacy):  `blob:<id>:<key>:<nonce>` — pre-C-1, no download token
+ * base64 never contains ':', so positional splitting is unambiguous. Returns
+ * null for non-blob or malformed URIs.
+ */
+function parseBlobUri(
+  mediaUri: string
+): { id: string; keyB64: string; nonceB64: string; token: string } | null {
+  if (!mediaUri.startsWith('blob:')) return null;
+  const parts = mediaUri.split(':');
+  if (parts.length === 5) {
+    return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: parts[4] };
+  }
+  if (parts.length === 4) {
+    return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: '' };
+  }
+  return null;
+}
+
+/** Build the download URL, appending the authorization token when present (v2). */
+function downloadUrlFor(id: string, token: string): string {
+  const base = `${SERVER_URL}/blob/download/${id}`;
+  return token ? `${base}?t=${encodeURIComponent(token)}` : base;
+}
+
 async function fileExists(uri: string): Promise<boolean> {
   try { return (await FileSystem.getInfoAsync(uri)).exists; } catch { return false; }
 }
@@ -140,7 +167,7 @@ export async function encryptAndUploadMedia(fileUri: string, mimeType?: string):
     throw new Error(`Failed to upload media: ${lastUploadError.message}`);
   }
 
-  const { id } = JSON.parse(uploadResult.body);
+  const { id, token } = JSON.parse(uploadResult.body) as { id: string; token?: string };
 
   // 6. Persist the ciphertext locally (encrypted-at-rest) so the sender can
   // re-render the image after the cache is purged, without depending on the
@@ -155,10 +182,12 @@ export async function encryptAndUploadMedia(fileUri: string, mimeType?: string):
     await FileSystem.deleteAsync(tempUri, { idempotent: true });
   }
 
-  // 7. Return formatted E2EE uri
+  // 7. Return formatted E2EE uri. The download token (C-1) is appended as a 5th
+  // component so it travels inside the E2EE envelope and never reaches the relay
+  // out-of-band. Older relays that don't return a token degrade to the v1 shape.
   const keyB64 = encodeBase64(key);
   const nonceB64 = encodeBase64(nonce);
-  return `blob:${id}:${keyB64}:${nonceB64}`;
+  return token ? `blob:${id}:${keyB64}:${nonceB64}:${token}` : `blob:${id}:${keyB64}:${nonceB64}`;
 }
 
 /**
@@ -167,13 +196,12 @@ export async function encryptAndUploadMedia(fileUri: string, mimeType?: string):
  * media survives the server's 24h blob TTL and the device going offline.
  */
 export async function persistEncryptedBlob(mediaUri: string): Promise<void> {
-  if (!mediaUri.startsWith('blob:')) return;
-  const parts = mediaUri.split(':');
-  if (parts.length !== 4) return;
-  const id = parts[1];
+  const parsed = parseBlobUri(mediaUri);
+  if (!parsed) return;
+  const { id, token } = parsed;
   await ensureMediaDir();
   if (await fileExists(encPathFor(id))) return; // already persisted
-  const downloadUrl = `${SERVER_URL}/blob/download/${id}`;
+  const downloadUrl = downloadUrlFor(id, token);
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt]);
     try {
@@ -196,9 +224,9 @@ export async function resolveMedia(mediaUri: string, ext: string = 'jpg'): Promi
   if (!mediaUri.startsWith('blob:')) {
     return (await fileExists(mediaUri)) ? mediaUri : null;
   }
-  const parts = mediaUri.split(':');
-  if (parts.length !== 4) return null;
-  const [, id, keyB64, nonceB64] = parts;
+  const parsed = parseBlobUri(mediaUri);
+  if (!parsed) return null;
+  const { id, keyB64, nonceB64 } = parsed;
 
   const decPath = decPathFor(id, ext);
   if (await fileExists(decPath)) return decPath; // already decrypted in cache
@@ -267,8 +295,7 @@ export async function encryptAndUploadAll(
 
 /** Delete the persistent encrypted copy for a blob URI (e.g. on message delete). */
 export async function deletePersistedMedia(mediaUri: string): Promise<void> {
-  if (!mediaUri.startsWith('blob:')) return;
-  const parts = mediaUri.split(':');
-  if (parts.length !== 4) return;
-  await FileSystem.deleteAsync(encPathFor(parts[1]), { idempotent: true }).catch(() => {});
+  const parsed = parseBlobUri(mediaUri);
+  if (!parsed) return;
+  await FileSystem.deleteAsync(encPathFor(parsed.id), { idempotent: true }).catch(() => {});
 }
