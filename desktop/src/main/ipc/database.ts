@@ -18,6 +18,18 @@ function assertTrustedSender(e: IpcMainInvokeEvent): void {
   if (!trusted) throw new Error('untrusted IPC sender')
 }
 
+// IPC payload size guard (defence-in-depth): a compromised or buggy renderer
+// must not be able to push an unbounded string into the main process / SQLite
+// (memory-exhaustion / disk-fill). Bounds are generous — far above any legitimate
+// value — so they never reject real data, only pathological payloads.
+const MAX_RATCHET_STATE_BYTES = 1024 * 1024;   // 1 MB — a session state is a few KB
+const MAX_MESSAGE_BODY_BYTES = 8 * 1024 * 1024; // 8 MB — covers large base64 media refs
+function assertMaxLen(value: unknown, maxBytes: number, label: string): void {
+  if (typeof value === 'string' && value.length > maxBytes) {
+    throw new Error(`IPC payload too large: ${label} (${value.length} > ${maxBytes})`)
+  }
+}
+
 // ─── DB encryption at-rest ───────────────────────────────────────────────────
 
 function getDbEncKeySlot(slot = 'self'): string {
@@ -396,6 +408,8 @@ export function registerDatabaseHandlers(): void {
   // ─── Messages ───
   ipcMain.handle('db:save-message', (event, activeSlot: string, m: any): void => {
     assertTrustedSender(event)
+    assertMaxLen(m?.body, MAX_MESSAGE_BODY_BYTES, 'message.body')
+    assertMaxLen(m?.mediaUri, MAX_MESSAGE_BODY_BYTES, 'message.mediaUri')
     const encrypted = encryptBody(m.body, activeSlot)
     const encryptedMediaUri = m.mediaUri ? encryptBody(m.mediaUri, activeSlot) : null
     const sql = `INSERT OR REPLACE INTO messages
@@ -584,6 +598,7 @@ export function registerDatabaseHandlers(): void {
     'db:save-ratchet-session',
     (event, activeSlot: string, aegisId: string, stateJson: string): void => {
       assertTrustedSender(event)
+      assertMaxLen(stateJson, MAX_RATCHET_STATE_BYTES, 'ratchet stateJson')
       const encrypted = encryptBody(stateJson, activeSlot)
       db.prepare('INSERT OR REPLACE INTO ratchet_sessions (aegis_id, state_json) VALUES (?, ?)').run(
         aegisId,

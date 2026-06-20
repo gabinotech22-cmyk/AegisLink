@@ -142,12 +142,12 @@ Esf **M**.
 
 | ID | Sev | Hallazgo | Fix |
 |----|-----|----------|-----|
-| A-1 | 🟠 | Rate limits in-memory no compartidos entre instancias | Migrar a Redis (sliding window) — TODO ya marcado. |
-| MED | 🟡 | Mapas de rate-limit con eviction FIFO → reset por desbordar cap | LRU o sliding-window en store persistente. |
-| A-2 | 🟠 | PoW registro 14 bits → ID squatting | Subir a 18-20 bits en prod; vincular a IP rate-limit. |
-| MED | 🟡 | Sin validación de clock skew en timestamps | Clamp `createdAt` a ±5min de server time al encolar. |
-| MED | 🟡 | IPC desktop sin validación de longitud | Asserts de tamaño en handlers (`stateJson < 1MB`, etc.). |
-| B-8 | 🔵 | DNS rebinding en `proxyLinkPreview` | Resolver DNS y validar IP contra blocklist antes de fetch. |
+| A-1 | ⏸️ | Rate limits in-memory no compartidos entre instancias | **DIFERIDO** (follow-up de infra): despliegue mono-instancia → no es vuln activa. Migrar a Redis solo al escalar horizontalmente; añade dependencia dura + riesgo en la VM ([[incident_n8n_oom_vm]]). No bundlear en hardening. |
+| MED | ✅ | Mapas de rate-limit con eviction FIFO → reset por desbordar cap | **HECHO** (`fix/sec-ratelimit-hardening`): `evictExpired()` solo expulsa entradas con ventana ya vencida, nunca contadores activos de víctimas. Los 3 buckets (channelMsg/lowFreq/rekey) lo usan. |
+| A-2 | ✅ | PoW registro 14 bits → ID squatting | **HECHO**: dificultad parametrizada por challenge y atada a la emisión (anti-downgrade). `REGISTRATION_POW_DIFFICULTY=18` en prod (vs 14 base de blobs); el cliente ya lee `difficulty` del challenge. Test de regresión. |
+| MED | ✅ | Sin validación de clock skew en timestamps | **RESUELTO POR DISEÑO**: el relay sella `createdAt`/`created_at` server-side (`Date.now()`) en todo path persistido; `EnvelopeIn` ni acepta `createdAt` del cliente; `verifyAdminSig`/TURN ya validan `ts` ±60s. Sin código nuevo (evita dead code). |
+| MED | ✅ | IPC desktop sin validación de longitud | **HECHO**: `assertMaxLen()` en handlers IPC del main (ratchet `stateJson` ≤1MB, message `body`/`mediaUri` ≤8MB) — defensa contra renderer comprometido. |
+| B-8 | ✅ | DNS rebinding en `proxyLinkPreview` | **HECHO**: `assertPublicHost()` resuelve A/AAAA y rechaza si CUALQUIER IP cae en rango bloqueado (`isBlockedIp`, +CGNAT +IPv4-mapped), antes del fetch inicial y tras redirects. Ventana TOCTOU residual → firewall de egress (ops). Test de regresión. |
 
 ---
 
