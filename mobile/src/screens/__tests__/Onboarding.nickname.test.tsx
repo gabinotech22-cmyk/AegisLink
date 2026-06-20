@@ -131,8 +131,9 @@ jest.mock('../../store/identity', () => ({
   useIdentity: jest.fn(() => ({
     identity: mockIdentity,
     generate: mockGenerate,
-    avatarColor: '#05b875',
+    avatarColor: '#5bf2b9',
     updateProfile: mockUpdateProfile,
+    retryPublish: jest.fn().mockResolvedValue(undefined),
   })),
 }));
 
@@ -179,7 +180,7 @@ describe('OnboardingScreen — nickname step', () => {
     fireEvent.press(getByText('onboarding.continueBtn'));
 
     await waitFor(() => {
-      expect(mockUpdateProfile).toHaveBeenCalledWith('Nova', '#05b875', null);
+      expect(mockUpdateProfile).toHaveBeenCalledWith('Nova', '#5bf2b9', null);
     });
     await waitFor(() => {
       expect(onDone).toHaveBeenCalled();

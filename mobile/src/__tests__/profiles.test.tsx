@@ -4,9 +4,13 @@
  */
 import React from 'react';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
-import { Alert } from 'react-native';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
+
+// ProfileSwitcher surfaces user prompts via themedAlert() (the in-app themed
+// dialog), not RN's Alert.alert. Mock it so the assertions observe the real path.
+jest.mock('../components/AlertHost', () => ({ themedAlert: jest.fn() }));
+import { themedAlert } from '../components/AlertHost';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -201,7 +205,8 @@ describe('ProfileSwitcherScreen', () => {
   });
 
   it('muestra alerta de confirmación al pulsar un perfil inactivo', () => {
-    const alertSpy = jest.spyOn(Alert, 'alert');
+    const alertSpy = themedAlert as jest.Mock;
+    alertSpy.mockClear();
     const { getByText } = render(
       <ProfileSwitcherScreen onBack={jest.fn()} onCreateProfile={jest.fn()} />
     );
@@ -211,11 +216,11 @@ describe('ProfileSwitcherScreen', () => {
       expect.any(String),
       expect.any(Array)
     );
-    alertSpy.mockRestore();
   });
 
   it('muestra alerta de eliminación en long-press de perfil no primario', () => {
-    const alertSpy = jest.spyOn(Alert, 'alert');
+    const alertSpy = themedAlert as jest.Mock;
+    alertSpy.mockClear();
     const { getByText } = render(
       <ProfileSwitcherScreen onBack={jest.fn()} onCreateProfile={jest.fn()} />
     );
@@ -225,11 +230,11 @@ describe('ProfileSwitcherScreen', () => {
       expect.any(String),
       expect.any(Array)
     );
-    alertSpy.mockRestore();
   });
 
   it('impide eliminar el perfil primario', () => {
-    const alertSpy = jest.spyOn(Alert, 'alert');
+    const alertSpy = themedAlert as jest.Mock;
+    alertSpy.mockClear();
     const { getByText } = render(
       <ProfileSwitcherScreen onBack={jest.fn()} onCreateProfile={jest.fn()} />
     );
@@ -239,7 +244,6 @@ describe('ProfileSwitcherScreen', () => {
       'No se puede eliminar',
       expect.any(String)
     );
-    alertSpy.mockRestore();
   });
 });
 
