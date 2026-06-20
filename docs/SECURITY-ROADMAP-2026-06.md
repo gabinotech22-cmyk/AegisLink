@@ -189,7 +189,7 @@ Esf **S-M**. Mayormente robustez y privacidad de borde.
 | M-3 | ✅ | `drained_by` JSON en TEXT sin validar | `fix/sec-ola12-drain-cors-hardening`: helper `parseDrainedBy()` compartido valida `Array.isArray` + filtra a strings; payload corrupto/no-array degrada a `[]` en vez de lanzar en el `.includes()`/`.push()` downstream. Reemplaza los 4 IIFE con cast inseguro (`as string[]`) en ambos repos. Test directo del helper (`42`, `{}`, `null`, no-json, elementos no-string). |
 | M-5 | 🟡 | 130 `console.log` en mobile | Logger con levels stripeado en build. |
 | MED | ✅ | Desktop CORS wildcard inyectado para renderer | `fix/sec-ola12-drain-cors-hardening`: `Access-Control-Allow-Origin` pasa de `*` al origen exacto del renderer (`new URL(ELECTRON_RENDERER_URL).origin` en dev; `'null'` empaquetado vía `file://`). El CSP `connect-src` ya limita destinos al relay; sin auto-test (gap de infra de tests desktop, A-9). |
-| MED | 🟡 | Padding de metadata puede fallar bucket en UTF-8 | Test que asegure output == bucket exacto; padding simplificado. |
+| MED | ✅ | Padding de metadata puede fallar bucket en UTF-8 | `fix/sec-ola12-metadata-padding`: `stripAndPad` reescrito determinista — bucket elegido sobre la longitud en **bytes** UTF-8 + filler de espacios ASCII (1 byte) hasta el bucket exacto, en una pasada. Elimina el campo `pad` random, el loop de 4 iteraciones y los 3 fallbacks. Paridad mobile↔desktop byte-idéntica; `unpad` retrocompatible (sigue stripeando whitespace). Test `metadata.test.ts`: fuzz ASCII + UTF-8 multibyte (😀/€/中) asegura `output.length ∈ BUCKETS` siempre y bucket mínimo; round-trip intacto. |
 | B-4 | 🔵 | Pantallas críticas sin tests | Profile, Privacy, Lock, Backup, Devices, GroupPosts, etc. |
 
 ---
