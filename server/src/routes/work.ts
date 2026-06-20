@@ -666,8 +666,12 @@ const InviteWorkspaceMemberSchema = z.object({
   role: z.enum(['admin', 'member']).default('member'),
 });
 
-const CallerQuerySchema = z.object({
+// Reads must prove possession of the caller's signing key (golden rule #3:
+// knowing an aegisId ≠ owning it). Mirrors the mutation endpoints' sig+ts.
+const WorkspaceReadQuerySchema = z.object({
   aegisId: z.string().regex(AEGIS_ID_WS_RE),
+  sig: z.string().min(1),
+  ts: z.coerce.number().int().positive(),
 });
 
 // POST /work/workspace — create a new workspace
@@ -688,22 +692,23 @@ router.post('/workspace', async (req, res) => {
   }
 });
 
-// GET /work/workspace/:id?aegisId= — get workspace (members only)
+// GET /work/workspace/:id?aegisId=&sig=&ts= — get workspace (members only, signed)
 router.get('/workspace/:id', async (req, res) => {
-  const query = CallerQuerySchema.safeParse(req.query);
+  const query = WorkspaceReadQuerySchema.safeParse(req.query);
   if (!query.success) { res.status(400).json({ error: 'INVALID_PAYLOAD' }); return; }
 
   const workspaceId = req.params.id;
-  const callerAegisId = query.data.aegisId;
+  const { aegisId: callerAegisId, sig, ts } = query.data;
 
   try {
-    const [ws, member] = await Promise.all([
+    const [ws, member, sigOk] = await Promise.all([
       workspaceRepo.get(workspaceId),
       workspaceRepo.isMember(workspaceId, callerAegisId),
+      verifyAdminSig(workspaceId, callerAegisId, 'read_workspace', sig, ts),
     ]);
 
     if (!ws) { res.status(404).json({ error: 'NOT_FOUND' }); return; }
-    if (!member) { res.status(403).json({ error: 'FORBIDDEN' }); return; }
+    if (!member || !sigOk) { res.status(403).json({ error: 'FORBIDDEN' }); return; }
 
     res.json({ id: ws.id, nameEnc: ws.name_enc, adminId: ws.admin_id, createdAt: ws.created_at });
   } catch {
@@ -787,22 +792,23 @@ router.delete('/workspace/:id/member/:memberId', async (req, res) => {
   }
 });
 
-// GET /work/workspace/:id/members?aegisId= — list members (members only)
+// GET /work/workspace/:id/members?aegisId=&sig=&ts= — list members (members only, signed)
 router.get('/workspace/:id/members', async (req, res) => {
-  const query = CallerQuerySchema.safeParse(req.query);
+  const query = WorkspaceReadQuerySchema.safeParse(req.query);
   if (!query.success) { res.status(400).json({ error: 'INVALID_PAYLOAD' }); return; }
 
   const workspaceId = req.params.id;
-  const callerAegisId = query.data.aegisId;
+  const { aegisId: callerAegisId, sig, ts } = query.data;
 
   try {
-    const [ws, member] = await Promise.all([
+    const [ws, member, sigOk] = await Promise.all([
       workspaceRepo.get(workspaceId),
       workspaceRepo.isMember(workspaceId, callerAegisId),
+      verifyAdminSig(workspaceId, callerAegisId, 'list_workspace_members', sig, ts),
     ]);
 
     if (!ws) { res.status(404).json({ error: 'NOT_FOUND' }); return; }
-    if (!member) { res.status(403).json({ error: 'FORBIDDEN' }); return; }
+    if (!member || !sigOk) { res.status(403).json({ error: 'FORBIDDEN' }); return; }
 
     const members = await workspaceRepo.listMembers(workspaceId);
     res.json({
