@@ -3337,6 +3337,12 @@ export async function sendMessage(opts: {
     }
   }
 
+  // A-3: tell the relay the disappearing-message TTL so a queued (offline)
+  // ephemeral message is purged at its intended expiry instead of lingering for
+  // the 30-day default. Only the coarse TTL is exposed (accepted in roadmap).
+  const ephemeralTtlMs =
+    expiresAt && expiresAt > createdAt ? expiresAt - createdAt : undefined;
+
   // Optimistic local append — skip when caller already pre-appended (e.g. media messages)
   if (!opts.skipLocalAppend) {
     await useMessages.getState().append({
@@ -3441,12 +3447,12 @@ export async function sendMessage(opts: {
     );
     newState = r.newState;
     emitEvent = 'envelope:v2';
-    emitPayload = { id, to: opts.recipientAegisId, ciphertext: r.wire.ciphertext, nonce: r.wire.nonce, epk: r.wire.epk, deliveryToken: v2Token };
+    emitPayload = { id, to: opts.recipientAegisId, ciphertext: r.wire.ciphertext, nonce: r.wire.nonce, epk: r.wire.epk, deliveryToken: v2Token, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}) };
   } else {
     const r = encryptMessage(payload, opts.identity.aegisId, opts.recipientPublicKey, opts.identity.secretKey, session);
     newState = r.newState;
     emitEvent = 'envelope';
-    emitPayload = { id, to: opts.recipientAegisId, ciphertext: r.envelope.ciphertextB64, nonce: r.envelope.nonceB64 };
+    emitPayload = { id, to: opts.recipientAegisId, ciphertext: r.envelope.ciphertextB64, nonce: r.envelope.nonceB64, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}) };
   }
   await saveSessionState(opts.recipientAegisId, newState);
 

@@ -5,7 +5,7 @@ import naclUtil from 'tweetnacl-util';
 import { randomUUID } from 'node:crypto';
 
 const { decodeBase64 } = naclUtil;
-import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, deliveryTokenRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
+import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, deliveryTokenRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, MESSAGE_TTL_MS, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { notifyRecipient, sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
@@ -33,6 +33,15 @@ const EnvelopeIn = z.object({
    * otherwise be unable to (no sender info on sealed-sender queue drains).
    */
   init: z.boolean().optional(),
+  /**
+   * A-3: ephemeral (disappearing) message TTL in ms. When the recipient is
+   * offline and the message is queued, the relay clamps the queue lifetime to
+   * this value instead of the 30-day default, so a disappearing message cannot
+   * linger in the offline queue far beyond its intended life. The only metadata
+   * this leaks to the relay is the coarse TTL bucket — accepted in the roadmap.
+   * Bounded to (0, MESSAGE_TTL_MS]; a value over the default is meaningless.
+   */
+  ephemeralTtl: z.number().int().positive().max(MESSAGE_TTL_MS).optional(),
 });
 
 /**
@@ -54,6 +63,8 @@ const EnvelopeV2In = z.object({
   nonce: z.string().min(1).max(64),
   epk: z.string().min(1).max(64),
   deliveryToken: z.string().min(1).max(256),
+  /** A-3: ephemeral TTL in ms — see EnvelopeIn.ephemeralTtl. Clamps queue life. */
+  ephemeralTtl: z.number().int().positive().max(MESSAGE_TTL_MS).optional(),
 });
 
 /** Owner registers/rotates the hash of their own delivery token (authenticated). */
@@ -659,8 +670,9 @@ export function attachRelay(io: SocketServer) {
               ciphertext_b64: env.ciphertext,
               nonce_b64: env.nonce,
               created_at: env.createdAt,
-              // 0 signals "use default TTL" — messageRepo.enqueue applies MESSAGE_TTL_MS
-              expires_at: 0,
+              // A-3: ephemeral messages expire from the queue at createdAt+ttl;
+              // 0 signals "use default TTL" — messageRepo.enqueue applies MESSAGE_TTL_MS.
+              expires_at: parsed.data.ephemeralTtl ? env.createdAt + parsed.data.ephemeralTtl : 0,
               sender_pub_b64: parsed.data.init ? (mySenderPublicKeyB64 ?? null) : null,
             }).then((result) => {
               if (!result.ok) {
@@ -783,7 +795,8 @@ export function attachRelay(io: SocketServer) {
             ciphertext_b64: env.ciphertext,
             nonce_b64: env.nonce,
             created_at: env.createdAt,
-            expires_at: 0,
+            // A-3: clamp queue lifetime for ephemeral messages (see EnvelopeIn).
+            expires_at: data.ephemeralTtl ? env.createdAt + data.ephemeralTtl : 0,
             sender_pub_b64: null,
             epk_b64: env.epk,
           });
@@ -1105,6 +1118,14 @@ export function attachRelay(io: SocketServer) {
         return;
       }
       const { id, channelId, orgId, body, type, parent_id, attachments, encrypted, nonce: msgNonce } = parsed.data;
+      // M-6: Work channel bodies must be E2EE. The relay refuses to persist a
+      // cleartext body — it never stores readable channel content. A message
+      // must declare `encrypted: true` and carry its `nonce`; anything else is
+      // rejected (fail-closed, golden rule #1: encryption never degrades).
+      if (encrypted !== true || !msgNonce) {
+        ack?.({ ok: false, error: 'encryption_required' });
+        return;
+      }
       // Validate membership and channel in parallel
       Promise.all([
         workRepo.getMember(orgId, me),
