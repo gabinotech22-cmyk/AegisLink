@@ -81,6 +81,15 @@ app.whenReady().then(() => {
   // In dev, Vite's react-refresh preamble is an inline script — allow it
   // there only; packaged builds keep the strict script-src.
   const scriptSrc = is.dev ? "script-src 'self' 'unsafe-inline'" : "script-src 'self'"
+
+  // Specific renderer origin to echo back in CORS (no wildcard). The renderer
+  // is the only context that fetches the relay: in dev it loads from the Vite
+  // URL (http://localhost:517x); packaged it loads via file://, whose Origin
+  // serializes to the string "null". Chromium validates Access-Control-Allow-
+  // Origin against this exact origin, so `*` is unnecessarily broad.
+  const rendererOrigin = is.dev && process.env['ELECTRON_RENDERER_URL']
+    ? new URL(process.env['ELECTRON_RENDERER_URL']).origin
+    : 'null'
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders: Record<string, string[]> = {
       ...details.responseHeaders,
@@ -95,7 +104,7 @@ app.whenReady().then(() => {
     // fetch() can read the response. Chromium still enforces the CSP above,
     // which limits connect targets to the relay itself.
     if (details.url.startsWith('https://aegislink.duckdns.org')) {
-      responseHeaders['Access-Control-Allow-Origin'] = ['*']
+      responseHeaders['Access-Control-Allow-Origin'] = [rendererOrigin]
       responseHeaders['Access-Control-Allow-Methods'] = ['GET, POST, PUT, PATCH, DELETE, OPTIONS']
       responseHeaders['Access-Control-Allow-Headers'] = ['Content-Type, Accept']
     }

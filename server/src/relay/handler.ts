@@ -424,7 +424,7 @@ export function attachRelay(io: SocketServer) {
     // When absent, we leave it undefined so the drain path falls back to
     // hard-delete (legacy behaviour) instead of per-device tracking.
     // We intentionally do NOT fall back to socket.id — that changes on every
-    // reconnection and would corrupt drained_by / MAX_DRAIN_DEVICES accounting.
+    // reconnection and would corrupt drained_by / drain-cap accounting.
     const rawDeviceId = auth?.deviceId;
     const deviceId: string | undefined = typeof rawDeviceId === 'string' && rawDeviceId.length > 0
       ? rawDeviceId
@@ -611,7 +611,7 @@ export function attachRelay(io: SocketServer) {
       });
       // Immediately mark this device as having drained the row so repeated
       // reconnects don't re-deliver the same distribution. The row is hard-deleted
-      // once MAX_DRAIN_DEVICES devices have drained it, matching messageRepo.
+      // once the recipient's full set of devices has drained it, matching messageRepo.
       await senderKeyDistRepo.delete(dist.id, deviceId);
     }
 
