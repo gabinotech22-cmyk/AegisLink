@@ -501,6 +501,91 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
  * Non-NPE errors (disk full, file corruption, …) are propagated immediately on
  * the first occurrence — they are not transient and retrying would not help.
  */
+// ─── SQLCipher at-rest encryption (Ola 10) ────────────────────────────────────
+//
+// The whole DB file is encrypted with SQLCipher (config plugin useSQLCipher:true
+// in app.json). The 256-bit key is the SAME random per-slot key already minted
+// and stored in expo-secure-store by getDbKey() — reused here as a raw SQLCipher
+// key. NaCl field encryption (encryptBody) stays as defence-in-depth.
+
+/** Lowercase hex of the 32-byte per-slot DB key (for `PRAGMA key = "x'…'"`). */
+async function getDbKeyHex(): Promise<string> {
+  const key = await getDbKey();
+  let hex = '';
+  for (let i = 0; i < key.length; i++) hex += key[i].toString(16).padStart(2, '0');
+  return hex;
+}
+
+/**
+ * One-time, idempotent re-encryption of a pre-existing PLAINTEXT database into
+ * SQLCipher, preserving all rows (standard `sqlcipher_export` migration).
+ *
+ * No-op when: the file does not exist (a fresh DB is created already-encrypted
+ * on first open), the file is already encrypted with our key, or the host
+ * FileSystem lacks getInfoAsync/moveAsync (e.g. unit-test mocks) — so existing
+ * open-path tests keep their exact openDatabaseAsync call counts.
+ */
+async function migratePlaintextIfNeeded(dbName: string, keyHex: string): Promise<void> {
+  // Degrade to a no-op when the filesystem API isn't fully available (test mocks).
+  const fs = FileSystem as unknown as {
+    getInfoAsync?: (uri: string) => Promise<{ exists: boolean; size?: number }>;
+    moveAsync?: (opts: { from: string; to: string }) => Promise<void>;
+  };
+  if (typeof fs.getInfoAsync !== 'function' || typeof fs.moveAsync !== 'function') return;
+
+  const dir = `${FileSystem.documentDirectory}SQLite/`;
+  const dbUri = `${dir}${dbName}`;
+  // Migration is a best-effort upgrade — it must NEVER crash app startup. In a
+  // plain node/jest env the real getInfoAsync resolves to undefined (no native
+  // module), so treat any non-object/throw as "cannot stat → skip migration".
+  let info: { exists: boolean; size?: number } | undefined;
+  try {
+    info = await fs.getInfoAsync(dbUri);
+  } catch {
+    return;
+  }
+  if (!info || !info.exists || !info.size) return; // fresh DB → opened/created encrypted
+
+  // ── Detect ────────────────────────────────────────────────────────────────
+  // Open a throwaway handle, apply the key, and probe. If the file is already
+  // encrypted with our key the probe succeeds → nothing to migrate.
+  let probe: SQLite.SQLiteDatabase | null = null;
+  try {
+    probe = await SQLite.openDatabaseAsync(dbName);
+    await probe.execAsync(`PRAGMA key = "x'${keyHex}'"`);
+    await probe.getFirstAsync('SELECT count(*) FROM sqlite_master');
+    return; // already encrypted — done
+  } catch {
+    // Probe failed → the file is plaintext (or a foreign key). Re-encrypt below.
+  } finally {
+    try { await probe?.closeAsync(); } catch { /* ignore */ }
+  }
+
+  // ── Re-encrypt via sqlcipher_export ─────────────────────────────────────────
+  const encName = `${dbName}.sqlcipher-enc`;
+  // ATTACH needs a filesystem path, not a file:// URI.
+  const encPath = `${dir}${encName}`.replace(/^file:\/\//, '');
+  await FileSystem.deleteAsync(`${dir}${encName}`, { idempotent: true }).catch(() => {});
+
+  let plain: SQLite.SQLiteDatabase | null = null;
+  try {
+    plain = await SQLite.openDatabaseAsync(dbName); // opened plaintext (no key)
+    await plain.execAsync(
+      `ATTACH DATABASE '${encPath}' AS encrypted KEY "x'${keyHex}'";` +
+      `SELECT sqlcipher_export('encrypted');` +
+      `DETACH DATABASE encrypted;`,
+    );
+  } finally {
+    try { await plain?.closeAsync(); } catch { /* ignore */ }
+  }
+
+  // ── Swap: replace the plaintext file (and its journals) with the encrypted copy.
+  await FileSystem.deleteAsync(dbUri, { idempotent: true }).catch(() => {});
+  await FileSystem.deleteAsync(`${dbUri}-wal`, { idempotent: true }).catch(() => {});
+  await FileSystem.deleteAsync(`${dbUri}-shm`, { idempotent: true }).catch(() => {});
+  await fs.moveAsync({ from: `${dir}${encName}`, to: dbUri });
+}
+
 async function openAndInit(dbName: string): Promise<SQLite.SQLiteDatabase> {
   // x86 Android emulators (and New Architecture Bridgeless) cold-start the
   // expo-sqlite JSI bridge slowly: the native DB pointer can come back null for
@@ -514,7 +599,13 @@ async function openAndInit(dbName: string): Promise<SQLite.SQLiteDatabase> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let d: SQLite.SQLiteDatabase | null = null;
     try {
+      // Ola 10: re-encrypt a legacy plaintext DB before opening (idempotent),
+      // then open and apply the SQLCipher key as the VERY FIRST statement on the
+      // handle — any PRAGMA/DDL before `PRAGMA key` would bypass the cipher.
+      const keyHex = await getDbKeyHex();
+      await migratePlaintextIfNeeded(dbName, keyHex);
       d = await SQLite.openDatabaseAsync(dbName);
+      await d.execAsync(`PRAGMA key = "x'${keyHex}'"`);
       await initSchema(d);
       return d;
     } catch (e) {

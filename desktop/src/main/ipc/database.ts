@@ -1,7 +1,8 @@
 import { ipcMain, app, safeStorage } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
-import Database from 'better-sqlite3'
+import Database from 'better-sqlite3-multiple-ciphers'
 import path from 'path'
+import fs from 'fs'
 import { is } from '@electron-toolkit/utils'
 import { readKeystore, writeKeystore } from './secureStorage'
 import nacl from 'tweetnacl'
@@ -86,6 +87,11 @@ function getDbKey(slot = 'self'): Uint8Array {
         (e instanceof Error ? e.message : String(e))
     )
   }
+}
+
+/** Drop the cached DB key (test helper / slot switch). */
+export function resetDbKeyCache(): void {
+  cachedDbKey = null
 }
 
 function encryptBody(body: string, slot = 'self'): string {
@@ -242,11 +248,60 @@ function ensureSchema(db: Database.Database): void {
   safeAddColumn('call_history', 'duration_s', 'INTEGER NOT NULL DEFAULT 0')
 }
 
+// ─── SQLCipher at-rest encryption (Ola 10) ────────────────────────────────────
+
+/** Lowercase hex of the 32-byte DB key for `PRAGMA key = "x'…'"`. */
+function dbKeyHex(slot = 'self'): string {
+  return Buffer.from(getDbKey(slot)).toString('hex')
+}
+
+/**
+ * Open `dbPath` encrypted at-rest, migrating a legacy plaintext file in place.
+ *
+ * Detection probes whether the file is readable with NO key (⇒ plaintext); if so
+ * it is encrypted in place via `PRAGMA rekey` (SQLite3MultipleCiphers supports
+ * plaintext→encrypted rekey, preserving all rows). The key PRAGMA is applied as
+ * the first statement on the returned handle. Fails closed: getDbKey() throws
+ * when OS secure storage is unavailable in a packaged build.
+ */
+export function openEncrypted(dbPath: string, slot = 'self'): Database.Database {
+  const keyHex = dbKeyHex(slot)
+
+  // ── Migrate a pre-existing PLAINTEXT database (readable without a key) ──────
+  if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
+    let plaintext = false
+    const probe = new Database(dbPath)
+    try {
+      probe.exec('SELECT count(*) FROM sqlite_master') // no key → succeeds iff plaintext
+      plaintext = true
+    } catch {
+      plaintext = false // unreadable without a key → already encrypted
+    } finally {
+      probe.close()
+    }
+    if (plaintext) {
+      const plain = new Database(dbPath)
+      try {
+        plain.pragma(`rekey="x'${keyHex}'"`) // encrypt in place, rows preserved
+      } finally {
+        plain.close()
+      }
+    }
+  }
+
+  const handle = new Database(dbPath)
+  handle.pragma(`key="x'${keyHex}'"`)
+  return handle
+}
+
 // ─── Handlers Registration ────────────────────────────────────────────────────
 
 export function registerDatabaseHandlers(): void {
   const dbPath = path.join(app.getPath('userData'), 'aegislink.db')
-  db = new Database(dbPath)
+  // Ola 10: whole-DB SQLCipher encryption (key from getDbKey, migrates legacy
+  // plaintext DBs). MUST precede journal_mode/foreign_keys — the key PRAGMA has
+  // to be the first statement on the handle.
+  db = openEncrypted(dbPath)
 
   // Enable WAL mode for better concurrent read performance
   db.pragma('journal_mode = WAL')
