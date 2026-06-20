@@ -96,3 +96,21 @@ porque YA se inyectó ese fallo una vez. Toda PR debe poder responder "sí" a la
 10. **Minimizar metadatos at-rest.** Las columnas que no necesitan estar en claro se cifran; el objetivo es SQLCipher de DB completa. Ningún dato nuevo (timestamps de acceso, tamaños, frecuencias) se persiste sin justificar contra "cero metadatos".
 11. **Un test por fix.** Todo arreglo de seguridad incluye un test de regresión. El desktop **debe** tener suite de tests para IPC, serialización de ratchet y cifrado de DB.
 12. **Ante la duda, mirar a los expertos.** Para decisiones arquitectónicas de privacidad/cripto, revisar el código/diseño de **Session** y **SimpleX** (ambos open source y battle-tested) antes de inventar. Copiar lo bueno; documentar la referencia en el commit.
+
+## REGLA DE ORO — Estructura y ubicación de archivos (NO NEGOCIABLE)
+
+Para no desviarnos: cada archivo tiene un único sitio correcto. El detalle y el mapa
+completo están en `docs/PROJECT-STRUCTURE.md`; lo obligatorio es esto:
+
+1. **La raíz es sagrada.** Solo viven en raíz: `README.md`, `LICENSE`, `SECURITY.md`,
+   `CLAUDE.md`, `.gitignore`, `.env.example`, `docker-compose.yml`, `skills-lock.json`
+   y los dotfiles de tooling. Nada más nuevo sin justificación explícita.
+2. **Cada cosa a su carpeta.** Código de producto → `mobile/`/`desktop/`/`server/`/`web/`.
+   Documentación → `docs/`. Scripts operativos → `scripts/`. Prototipos de diseño → `prototype/`.
+3. **Lo transitorio NUNCA se commitea.** Capturas, dumps UI, logs, APKs de test, experimentos
+   de un solo uso → `_scratch/` (gitignored). Si ensucia `git status`, está en el sitio equivocado.
+4. **Binarios pesados fuera de git.** APK, mp4, zip, bugreports no se versionan (ver `.gitignore`).
+5. **Antes de crear un archivo**, clasifícalo: ¿producto, doc, script, prototipo o scratch?
+   La respuesta es la carpeta. Si no encaja en ninguna, probablemente no debería existir.
+6. **Una feature no se reparte entre carpetas en ramas distintas** (refuerza la regla de ramas):
+   mobile+server+infra de un mismo cambio van juntos en una sola rama.
