@@ -72,13 +72,17 @@ export async function encryptAndUploadMedia(file: Blob): Promise<string> {
     body: ciphertext as unknown as BodyInit,
   });
   if (!res.ok) throw new Error('Failed to upload media');
-  const { id } = (await res.json()) as { id: string };
+  const { id, token } = (await res.json()) as { id: string; token?: string };
 
   // 7. Wipe the key from local scope — it now lives only inside the E2EE message.
+  // The download token (C-1) is appended as a 5th component so it rides inside
+  // the E2EE envelope. Older relays without a token degrade to the v1 shape.
   const keyB64 = encodeBase64(key);
   const nonceB64 = encodeBase64(nonce);
   key.fill(0);
-  return `blob:${id}:${keyB64}:${nonceB64}`;
+  return token
+    ? `blob:${id}:${keyB64}:${nonceB64}:${token}`
+    : `blob:${id}:${keyB64}:${nonceB64}`;
 }
 
 /**
@@ -95,14 +99,18 @@ export async function downloadAndDecryptMedia(
 ): Promise<string> {
   if (!mediaUri.startsWith('blob:')) return mediaUri;
 
+  // Accept v2 (`blob:id:key:nonce:token`) and legacy v1 (`blob:id:key:nonce`).
+  // base64 never contains ':', so positional splitting is unambiguous.
   const parts = mediaUri.split(':');
-  if (parts.length !== 4) throw new Error('Invalid blob URI format');
-  const [, id, keyB64, nonceB64] = parts;
+  if (parts.length !== 5 && parts.length !== 4) throw new Error('Invalid blob URI format');
+  const [, id, keyB64, nonceB64, token = ''] = parts;
 
   const key = decodeBase64(keyB64);
   const nonce = decodeBase64(nonceB64);
 
-  const downloadUrl = `${SERVER_URL}/blob/download/${id}`;
+  const downloadUrl = token
+    ? `${SERVER_URL}/blob/download/${id}?t=${encodeURIComponent(token)}`
+    : `${SERVER_URL}/blob/download/${id}`;
   const res = await fetch(downloadUrl);
   if (!res.ok) {
     key.fill(0);
