@@ -72,7 +72,7 @@ function setupHappyPath(): void {
   mockSolvePoW.mockResolvedValue('nonce-xyz');
   mockUploadAsync.mockResolvedValue({
     status: 200,
-    body: JSON.stringify({ id: 'blob-id-001' }),
+    body: JSON.stringify({ id: 'blob-id-001', token: 'tok-123' }),
   });
 }
 
@@ -129,9 +129,24 @@ describe('encryptAndUploadMedia', () => {
     expect(mockFetchPowChallenge).not.toHaveBeenCalled();
   });
 
-  // ── 4. returned URI format ───────────────────────────────────────────────────
-  it('returns a blob URI in the format blob:<id>:<keyB64>:<nonceB64>', async () => {
+  // ── 4. returned URI format (v2: includes the C-1 download token) ─────────────
+  it('returns a v2 blob URI blob:<id>:<key>:<nonce>:<token> when the relay returns a token', async () => {
     setupHappyPath();
+
+    const result = await encryptAndUploadMedia('file:///img.jpg', 'image/jpeg');
+
+    expect(result).toMatch(/^blob:[^:]+:[^:]+:[^:]+:[^:]+$/);
+    expect(result.startsWith('blob:blob-id-001:')).toBe(true);
+    expect(result.endsWith(':tok-123')).toBe(true);
+  });
+
+  // ── 4b. legacy fallback: relay without a token yields the v1 4-part URI ──────
+  it('falls back to the v1 4-part URI when the relay returns no token', async () => {
+    setupHappyPath();
+    mockUploadAsync.mockResolvedValue({
+      status: 200,
+      body: JSON.stringify({ id: 'blob-id-001' }), // no token
+    });
 
     const result = await encryptAndUploadMedia('file:///img.jpg', 'image/jpeg');
 
