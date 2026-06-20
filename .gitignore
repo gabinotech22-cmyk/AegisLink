@@ -27,7 +27,9 @@ desktop/node_modules/
 server/node_modules/
 promo-video/node_modules/
 
-# Debug artifacts from emulator sessions (screenshots, UI dumps, logs)
+# Scratch / debug artifacts (screenshots, UI dumps, logs, ad-hoc scripts).
+# Rule: anything transient lives under _scratch/ and is never committed.
+/_scratch/
 /_*.png
 /_*.xml
 /.log_*
