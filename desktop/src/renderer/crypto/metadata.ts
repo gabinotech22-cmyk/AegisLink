@@ -1,5 +1,4 @@
-import nacl from 'tweetnacl';
-import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import { decodeBase64 } from 'tweetnacl-util';
 
 /**
  * Metadata stripping & length normalization. See mobile counterpart for the
@@ -27,40 +26,14 @@ export function stripAndPad(payload: Record<string, unknown>): Uint8Array {
   for (const k of Object.keys(payload)) {
     if (ALLOWED_INNER_FIELDS.has(k)) clean[k] = payload[k];
   }
-  const probe = new TextEncoder().encode(JSON.stringify(clean));
-  const bucket = pickBucket(probe.length + 32);
-
-  let padLen = Math.max(0, bucket - probe.length - 16);
-  for (let i = 0; i < 4; i++) {
-    const padBytes = nacl.randomBytes(padLen);
-    clean.pad = encodeBase64(padBytes);
-    const out = new TextEncoder().encode(JSON.stringify(clean));
-    if (out.length === bucket) return out;
-    if (out.length < bucket) {
-      padLen += bucket - out.length;
-    } else {
-      padLen -= out.length - bucket;
-      if (padLen < 0) padLen = 0;
-    }
-  }
-  const padBytes = nacl.randomBytes(Math.max(0, padLen));
-  clean.pad = encodeBase64(padBytes);
   const json = JSON.stringify(clean);
-  const out = new TextEncoder().encode(json);
-  if (out.length === bucket) return out;
-  if (out.length < bucket) {
-    const filler = ' '.repeat(bucket - out.length);
-    return new TextEncoder().encode(json + filler);
-  }
-  delete clean.pad;
-  const minimal = new TextEncoder().encode(JSON.stringify(clean));
-  if (minimal.length > bucket) {
-    const nextBucket = pickBucket(minimal.length + 32);
-    const filler = ' '.repeat(nextBucket - minimal.length);
-    return new TextEncoder().encode(JSON.stringify(clean) + filler);
-  }
-  const filler = ' '.repeat(bucket - minimal.length);
-  return new TextEncoder().encode(JSON.stringify(clean) + filler);
+  const baseLen = new TextEncoder().encode(json).length;
+  const bucket = pickBucket(baseLen);
+  // pickBucket guarantees bucket >= baseLen + 2, so fillerLen is always >= 2.
+  // Trailing ASCII spaces (1 byte each) land the output on the bucket exactly;
+  // `unpad` strips them before parsing.
+  const filler = ' '.repeat(bucket - baseLen);
+  return new TextEncoder().encode(json + filler);
 }
 
 export function unpad(bytes: Uint8Array): Record<string, unknown> | null {

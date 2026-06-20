@@ -1,5 +1,4 @@
-import nacl from 'tweetnacl';
-import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import { decodeBase64 } from 'tweetnacl-util';
 
 /**
  * Metadata stripping & length normalization.
@@ -10,10 +9,11 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
  *   - Pad every plaintext to a fixed bucket size so wire-length leaks
  *     no information about message content.
  *
- * Padding scheme: PKCS-style. Pick the smallest bucket >= input length
- * plus 2 framing bytes. Buckets are powers-of-two from 256B to 64KB,
- * with 256KB / 1MB / 4MB tiers for attachments. The pad bytes are random
- * (cosmetic — they live INSIDE the ciphertext anyway).
+ * Padding scheme: pick the smallest bucket >= input length plus 2 framing
+ * bytes, then append single-byte ASCII spaces until the output is EXACTLY the
+ * bucket size. Buckets are powers-of-two from 256B to 64KB, with 256KB / 1MB /
+ * 4MB tiers for attachments. The filler lives INSIDE the ciphertext, so it
+ * leaks nothing on the wire — only the constant bucket length is observable.
  */
 
 const BUCKETS: readonly number[] = [
@@ -36,53 +36,26 @@ export function pickBucket(length: number): number {
  * Strip non-allow-listed top-level fields from an object, then JSON-encode
  * and pad to a constant bucket size. Returns the padded UTF-8 bytes ready
  * for encryption.
+ *
+ * Deterministic and UTF-8-safe: the bucket is chosen from the JSON's UTF-8
+ * *byte* length (not its character count) and the filler is single-byte ASCII
+ * spaces, so the output is ALWAYS exactly `bucket` bytes regardless of any
+ * multi-byte characters in the payload. No random pad field, no iterative
+ * convergence — one pass, one allocation.
  */
 export function stripAndPad(payload: Record<string, unknown>): Uint8Array {
   const clean: Record<string, unknown> = {};
   for (const k of Object.keys(payload)) {
     if (ALLOWED_INNER_FIELDS.has(k)) clean[k] = payload[k];
   }
-  // Reserve space for the pad field. Serialise WITHOUT pad first to measure.
-  const probe = new TextEncoder().encode(JSON.stringify(clean));
-  const bucket = pickBucket(probe.length + 32 /* pad key overhead */);
-
-  // How many random bytes go into the pad field to hit the bucket.
-  // We aim for: |JSON.stringify({...clean, pad: base64(padBytes)})| === bucket.
-  // Iterative shrink: start with an estimate and adjust.
-  let padLen = Math.max(0, bucket - probe.length - 16);
-  for (let i = 0; i < 4; i++) {
-    const padBytes = nacl.randomBytes(padLen);
-    clean.pad = encodeBase64(padBytes);
-    const out = new TextEncoder().encode(JSON.stringify(clean));
-    if (out.length === bucket) return out;
-    if (out.length < bucket) {
-      padLen += bucket - out.length;
-    } else {
-      padLen -= out.length - bucket;
-      if (padLen < 0) padLen = 0;
-    }
-  }
-  // Final attempt — pad with spaces (still inside the ciphertext) to land exactly.
-  const padBytes = nacl.randomBytes(Math.max(0, padLen));
-  clean.pad = encodeBase64(padBytes);
   const json = JSON.stringify(clean);
-  const out = new TextEncoder().encode(json);
-  if (out.length === bucket) return out;
-  if (out.length < bucket) {
-    const filler = ' '.repeat(bucket - out.length);
-    return new TextEncoder().encode(json + filler);
-  }
-  // If we overshot, drop the pad field entirely and re-bucket up.
-  delete clean.pad;
-  const minimal = new TextEncoder().encode(JSON.stringify(clean));
-  if (minimal.length > bucket) {
-    // Move to next bucket
-    const nextBucket = pickBucket(minimal.length + 32);
-    const filler = ' '.repeat(nextBucket - minimal.length);
-    return new TextEncoder().encode(JSON.stringify(clean) + filler);
-  }
-  const filler = ' '.repeat(bucket - minimal.length);
-  return new TextEncoder().encode(JSON.stringify(clean) + filler);
+  const baseLen = new TextEncoder().encode(json).length;
+  const bucket = pickBucket(baseLen);
+  // pickBucket guarantees bucket >= baseLen + 2, so fillerLen is always >= 2.
+  // Trailing ASCII spaces (1 byte each) land the output on the bucket exactly;
+  // `unpad` strips them before parsing.
+  const filler = ' '.repeat(bucket - baseLen);
+  return new TextEncoder().encode(json + filler);
 }
 
 /**
