@@ -34,6 +34,8 @@ import {
   deleteOpkSecret,
   setSpkKeyId,
   getSpkKeyId,
+  setSpkCreatedAt,
+  getSpkCreatedAt,
   savePqSpkSecret,
   loadPqSpkSecret,
   setPqSpkKeyId,
@@ -365,6 +367,36 @@ export function isConnected(): boolean {
   return connected && authenticated;
 }
 
+/**
+ * Age-based Signed PreKey rotation cadence (B-3). Signal rotates the SPK roughly
+ * weekly regardless of one-time-prekey consumption; doing so bounds how long a
+ * single SPK secret protects new sessions, giving medium-term forward secrecy
+ * even for a low-volume device that never depletes its OPK pool.
+ */
+export const SPK_ROTATION_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * True iff the current SPK is older than `SPK_ROTATION_INTERVAL_MS` and must be
+ * rotated. Lazy backfill: an install that pre-dates B-3 has an SPK but no
+ * creation stamp — we stamp `now` and return false so the upgrade does NOT
+ * force-rotate every device at once (which would needlessly invalidate every
+ * in-flight first-contact handshake). The clock starts from this first sighting.
+ */
+async function isSignedPreKeyStale(now: number): Promise<boolean> {
+  let created: number | null = null;
+  try {
+    created = await getSpkCreatedAt();
+  } catch {
+    // DB read failure — treat as "unknown age", do not rotate this cycle.
+    return false;
+  }
+  if (created === null) {
+    try { await setSpkCreatedAt(now); } catch {/* best-effort backfill */}
+    return false;
+  }
+  return now - created >= SPK_ROTATION_INTERVAL_MS;
+}
+
 async function uploadPreKeys(identity: Identity, deviceId: string) {
   if (!socket) return;
 
@@ -482,6 +514,13 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   } catch (e) {
     if (__DEV__) console.warn('[socket] could not persist SPK keyId to DB', e);
   }
+  // Stamp the new SPK's creation time so the age-based rotation trigger
+  // (isSignedPreKeyStale) measures THIS SPK's lifetime from now (B-3).
+  try {
+    await setSpkCreatedAt(Date.now());
+  } catch (e) {
+    if (__DEV__) console.warn('[socket] could not persist SPK createdAt to DB', e);
+  }
   for (const [keyId, secret] of preKeys.opkSecrets.entries()) {
     try {
       await saveOpkSecret(keyId, encodeBase64(secret));
@@ -490,9 +529,14 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
     }
   }
 
-  // Forward secrecy: drop the SPK secret from TWO rotations ago (kept the
-  // immediately-previous one for in-flight inits — see note below).
-  const staleSpkKeyId = nextSpkKeyId - 2;
+  // Forward secrecy vs deliverability: retain the last K=5 SPK secrets and drop
+  // anything older. With ~weekly age-based rotation (B-3) that keeps ≥28 days of
+  // decryptability, so an initial message that slept in the relay queue (TTL 30
+  // days) and was built against an older SPK still decrypts. Deleting only the
+  // immediately-previous SPK (the pre-B-3 behaviour) would silently break those
+  // queued inits once rotation became time-driven.
+  const SPK_RETAIN = 5;
+  const staleSpkKeyId = nextSpkKeyId - SPK_RETAIN;
   if (staleSpkKeyId >= 1) {
     try { await deleteSpkSecret(staleSpkKeyId); } catch {/* best-effort */}
   }
@@ -824,15 +868,27 @@ export function connect(identity: Identity): Socket {
     }
 
     const count = res?.opkCount ?? 0;
-    if (count < 20) {
+    // Two independent reasons to (re)publish prekeys: the OPK pool is running low
+    // (depletion refill) OR the SPK has aged past the rotation interval (B-3,
+    // Signal ~weekly). Either way a single uploadPreKeys refreshes the SPK
+    // (new keyId + createdAt stamp) and tops the OPK pool back up.
+    const needRefill = count < 20;
+    const needRotate = await isSignedPreKeyStale(Date.now());
+    if (needRefill || needRotate) {
       try {
         await uploadPreKeys(identity, deviceId);
-        if (__DEV__) console.log('[socket] prekeys uploaded (refilled count from', count, ')');
+        if (__DEV__) {
+          console.log(
+            '[socket] prekeys uploaded —',
+            needRotate ? 'SPK rotation (age)' : 'OPK refill',
+            '(count was', count, ')',
+          );
+        }
       } catch (err) {
         if (__DEV__) console.error('[socket] prekey upload error:', err);
       }
     } else {
-      if (__DEV__) console.log('[socket] prekeys count healthy:', count, '— no refill needed');
+      if (__DEV__) console.log('[socket] prekeys count healthy:', count, '— no refill/rotation needed');
     }
 
     // Push our profile (name + avatar as data URI) to all contacts on every connect
