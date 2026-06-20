@@ -113,6 +113,8 @@ function Shell() {
   const [netError, setNetError] = useState(false);
   const [appLocked, setAppLocked] = useState(false);
   const [pinAvailable, setPinAvailable] = useState(false);
+  // C-2 Fase 2: null = checking lock-state, false = needs cold PIN unlock, true = DB open.
+  const [dbUnlocked, setDbUnlocked] = useState<boolean | null>(null);
   const [isBackgroundShieldActive] = useState(false);
 
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -143,10 +145,30 @@ function Shell() {
   const didColdLockRef = useRef(false);
   const online = useConnection((s) => s.online);
 
+  // C-2 Fase 2: if the DB key is PIN-wrapped, the DB cannot open until the user
+  // enters the PIN at cold start. Query lock-state first and gate hydration
+  // (which reads identity from the DB) behind a successful unlock. Legacy /
+  // no-PIN installs report opened=true (eager open) and hydrate immediately.
   useEffect(() => {
+    void (async () => {
+      try {
+        const ls = await window.aegis.db.lockState();
+        if (ls.pinWrapped && !ls.opened) {
+          setDbUnlocked(false); // show the cold lock; do NOT hydrate yet
+          return;
+        }
+      } catch {
+        /* lock-state unavailable → treat as unlocked (legacy path) */
+      }
+      setDbUnlocked(true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (dbUnlocked !== true) return;
     void hydrate();
     void hydratePrefs();
-  }, [hydrate, hydratePrefs]);
+  }, [dbUnlocked, hydrate, hydratePrefs]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -312,6 +334,27 @@ function Shell() {
     callStatus === 'in-call' ||
     callStatus === 'ended';
   const incomingCall = callStatus === 'incoming-ringing';
+
+  // C-2 Fase 2: cold-start PIN gate. Blocks the ENTIRE UI (splash included) until
+  // the PIN-wrapped DB is unlocked. The cold LockScreen derives the KEK and opens
+  // the DB; on success dbUnlocked flips to true and hydration proceeds.
+  if (dbUnlocked === false) {
+    return (
+      <LockScreen
+        variant="cold"
+        onUnlock={() => setDbUnlocked(true)}
+        onPanic={() => {
+          void (async () => {
+            try { await triggerPanic(); } catch { /* ignore */ }
+            // Post-wipe the DB key blob is gone → open a fresh DB (no KEK needed)
+            // so the app proceeds to onboarding instead of staying stuck locked.
+            try { await window.aegis.db.unlock(''); } catch { /* ignore */ }
+            setDbUnlocked(true);
+          })();
+        }}
+      />
+    );
+  }
 
   const isLoading = !showSplash && status === 'loading';
 

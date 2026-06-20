@@ -15,6 +15,14 @@ export interface AegisIPC {
     wipePrekeys(): Promise<void>;
   };
   db: {
+    /** C-2 Fase 2: whether the DB key is PIN-wrapped and whether it is open. */
+    lockState(): Promise<{ pinWrapped: boolean; opened: boolean }>;
+    /** Unlock a PIN-wrapped DB with the renderer-derived KEK; throws on wrong PIN. */
+    unlock(kekB64: string): Promise<void>;
+    /** Wrap the current DB key under the PIN-derived KEK (enable second factor). */
+    enablePinWrap(kekB64: string): Promise<void>;
+    /** Rewrap the DB key as DPAPI-only (disable the PIN second factor). */
+    disablePinWrap(): Promise<void>;
     saveIdentity(activeSlot: string, identity: unknown): Promise<void>;
     loadIdentity(activeSlot: string): Promise<any>;
     clearIdentity(): Promise<void>;
