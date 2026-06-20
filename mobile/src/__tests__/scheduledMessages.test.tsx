@@ -4,7 +4,9 @@
  */
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+// SchedulePicker validates via themedAlert (in-app themed dialog), not Alert.alert.
+jest.mock('../components/AlertHost', () => ({ themedAlert: jest.fn() }));
+import { themedAlert } from '../components/AlertHost';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -97,7 +99,8 @@ describe('SchedulePicker', () => {
   });
 
   it('shows alert when date is set to invalid value', () => {
-    const alertSpy = jest.spyOn(Alert, 'alert');
+    const alertSpy = themedAlert as jest.Mock;
+    alertSpy.mockClear();
     const onConfirm = jest.fn();
 
     // Test the validation logic directly without relying on Modal onShow
@@ -110,7 +113,6 @@ describe('SchedulePicker', () => {
     fireEvent.press(getByText('Programar'));
     expect(alertSpy).toHaveBeenCalled();
     expect(onConfirm).not.toHaveBeenCalled();
-    alertSpy.mockRestore();
   });
 });
 

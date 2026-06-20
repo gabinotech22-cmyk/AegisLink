@@ -15,7 +15,9 @@
 
 import React from 'react';
 import { render, act, waitFor } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+// ScanQR surfaces messages via themedAlert (in-app themed dialog), not Alert.alert.
+jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
+import { themedAlert } from '../../components/AlertHost';
 import {
   encodeGroupInviteLink,
   encodeGroupInviteLinkUniversal,
@@ -125,7 +127,8 @@ describe('ScanQRScreen — group invite routing', () => {
   });
 
   it('shows an explicit alert when a group invite QR is scanned without onGroupInvite wired (wrong context)', () => {
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const alertSpy = themedAlert as jest.Mock;
+    alertSpy.mockClear();
     const onAdded = jest.fn();
     render(<ScanQRScreen onCancel={jest.fn()} onAdded={onAdded} />);
 
