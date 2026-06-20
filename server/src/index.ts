@@ -81,6 +81,12 @@ app.use((_req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-DNS-Prefetch-Control', 'off');
+  // CSP (M-4): the relay serves only JSON + opaque blobs, which never load any
+  // subresource — so the strictest possible policy is also the correct one. The
+  // two HTML landing pages (/g, /a) override this with their own hash-pinned CSP
+  // (see routes/links.ts); setHeader replaces, so their policy wins for those
+  // responses while every JSON/blob endpoint stays locked to 'none'.
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
   // HSTS: enforce HTTPS for 1 year in production (ignored over HTTP by browsers)
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
