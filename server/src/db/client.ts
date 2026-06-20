@@ -322,21 +322,27 @@ function initSqliteSchema(db: DatabaseSync) {
       content_rowid='rowid'
     );
 
+    -- B-5: Work channel bodies are E2EE ciphertext (M-6). Indexing ciphertext in
+    -- FTS is useless (no plaintext term ever matches) and needlessly duplicates
+    -- ciphertext at-rest, so the triggers index an EMPTY body. Full-text search
+    -- over E2EE content is done client-side after decryption. Body is stored as
+    -- '' on both insert and delete so the external-content FTS index stays
+    -- consistent (delete must replay the same value that was indexed).
     CREATE TRIGGER IF NOT EXISTS work_messages_ai AFTER INSERT ON work_messages BEGIN
       INSERT INTO work_messages_fts(rowid, id, body, sender_id, channel_id, org_id)
-      VALUES (new.rowid, new.id, new.body, new.sender_id, new.channel_id, new.org_id);
+      VALUES (new.rowid, new.id, '', new.sender_id, new.channel_id, new.org_id);
     END;
 
     CREATE TRIGGER IF NOT EXISTS work_messages_ad AFTER DELETE ON work_messages BEGIN
       INSERT INTO work_messages_fts(work_messages_fts, rowid, id, body, sender_id, channel_id, org_id)
-      VALUES('delete', old.rowid, old.id, old.body, old.sender_id, old.channel_id, old.org_id);
+      VALUES('delete', old.rowid, old.id, '', old.sender_id, old.channel_id, old.org_id);
     END;
 
     CREATE TRIGGER IF NOT EXISTS work_messages_au AFTER UPDATE ON work_messages BEGIN
       INSERT INTO work_messages_fts(work_messages_fts, rowid, id, body, sender_id, channel_id, org_id)
-      VALUES('delete', old.rowid, old.id, old.body, old.sender_id, old.channel_id, old.org_id);
+      VALUES('delete', old.rowid, old.id, '', old.sender_id, old.channel_id, old.org_id);
       INSERT INTO work_messages_fts(rowid, id, body, sender_id, channel_id, org_id)
-      VALUES (new.rowid, new.id, new.body, new.sender_id, new.channel_id, new.org_id);
+      VALUES (new.rowid, new.id, '', new.sender_id, new.channel_id, new.org_id);
     END;
   `);
 
@@ -357,6 +363,35 @@ function initSqliteSchema(db: DatabaseSync) {
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN parent_id TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN reply_count INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
+  // B-5: recreate the FTS triggers so they index an EMPTY body (E2EE ciphertext
+  // must never enter the FTS index). Existing deployments already have the old
+  // triggers, and CREATE TRIGGER IF NOT EXISTS won't replace them — so drop and
+  // recreate. Also rebuild the index to evict any ciphertext indexed previously.
+  try {
+    db.exec(`
+      DROP TRIGGER IF EXISTS work_messages_ai;
+      DROP TRIGGER IF EXISTS work_messages_ad;
+      DROP TRIGGER IF EXISTS work_messages_au;
+      CREATE TRIGGER work_messages_ai AFTER INSERT ON work_messages BEGIN
+        INSERT INTO work_messages_fts(rowid, id, body, sender_id, channel_id, org_id)
+        VALUES (new.rowid, new.id, '', new.sender_id, new.channel_id, new.org_id);
+      END;
+      CREATE TRIGGER work_messages_ad AFTER DELETE ON work_messages BEGIN
+        INSERT INTO work_messages_fts(work_messages_fts, rowid, id, body, sender_id, channel_id, org_id)
+        VALUES('delete', old.rowid, old.id, '', old.sender_id, old.channel_id, old.org_id);
+      END;
+      CREATE TRIGGER work_messages_au AFTER UPDATE ON work_messages BEGIN
+        INSERT INTO work_messages_fts(work_messages_fts, rowid, id, body, sender_id, channel_id, org_id)
+        VALUES('delete', old.rowid, old.id, '', old.sender_id, old.channel_id, old.org_id);
+        INSERT INTO work_messages_fts(rowid, id, body, sender_id, channel_id, org_id)
+        VALUES (new.rowid, new.id, '', new.sender_id, new.channel_id, new.org_id);
+      END;
+    `);
+    // Clear any previously-indexed ciphertext bodies. NOTE: do NOT 'rebuild' — on
+    // an external-content FTS5 table that re-reads work_messages.body directly
+    // (bypassing the triggers), re-indexing the very ciphertext we want gone.
+    try { db.exec(`INSERT INTO work_messages_fts(work_messages_fts) VALUES('delete-all');`); } catch { /* fts table may not exist on very old DBs */ }
+  } catch { /* triggers/fts absent on older schema — created fresh above */ }
   try { db.exec(`ALTER TABLE work_orgs ADD COLUMN display_name TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_orgs ADD COLUMN invite_policy TEXT NOT NULL DEFAULT 'invite_only';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE work_channels ADD COLUMN retention_days INTEGER;`); } catch { /* exists */ }
