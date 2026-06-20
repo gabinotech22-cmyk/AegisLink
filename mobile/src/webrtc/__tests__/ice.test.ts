@@ -8,6 +8,18 @@
  *   4. A failed fetch falls back to the static STUN config.
  */
 
+// fetchTurnConfig now signs the request with the active identity's Ed25519 key
+// (A-7 TURN auth). Provide a fake identity so the signing path runs and the
+// relay fetch is attempted; without one it correctly falls back to STUN.
+jest.mock('../../store/identity', () => ({
+  __esModule: true,
+  useIdentity: {
+    getState: () => ({
+      identity: { aegisId: 'AEG-TEST-AEGI', signingSecretKey: new Uint8Array(64) },
+    }),
+  },
+}));
+
 import { fetchTurnConfig, clearTurnCache, rtcConfig } from '../ice';
 
 const FAKE_USERNAME = 'test-user';
@@ -83,5 +95,15 @@ describe('fetchTurnConfig', () => {
     const config = await fetchTurnConfig('aegis-id-5');
     const fallback = rtcConfig();
     expect(config.iceServers).toEqual(fallback.iceServers);
+  });
+
+  it('A-7 auth: with NO active identity, falls back to STUN and never calls the relay', async () => {
+    // Cannot sign the request → must not mint TURN creds. STUN-only, no fetch.
+    const { useIdentity } = require('../../store/identity') as typeof import('../../store/identity');
+    const spy = jest.spyOn(useIdentity, 'getState').mockReturnValueOnce({ identity: null } as never);
+    const config = await fetchTurnConfig('aegis-id-noid');
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(config.iceServers).toEqual(rtcConfig().iceServers);
+    spy.mockRestore();
   });
 });
