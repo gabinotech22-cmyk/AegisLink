@@ -14,6 +14,8 @@ const mockReadAsStringAsync = jest.fn();
 const mockWriteAsStringAsync = jest.fn();
 const mockUploadAsync = jest.fn();
 const mockDeleteAsync = jest.fn();
+const mockDownloadAsync = jest.fn();
+const mockMakeDirectoryAsync = jest.fn();
 
 jest.mock('expo-file-system/legacy', () => ({
   cacheDirectory: 'file://cache/',
@@ -22,6 +24,8 @@ jest.mock('expo-file-system/legacy', () => ({
   writeAsStringAsync: (...args: unknown[]) => mockWriteAsStringAsync(...args),
   uploadAsync: (...args: unknown[]) => mockUploadAsync(...args),
   deleteAsync: (...args: unknown[]) => mockDeleteAsync(...args),
+  downloadAsync: (...args: unknown[]) => mockDownloadAsync(...args),
+  makeDirectoryAsync: (...args: unknown[]) => mockMakeDirectoryAsync(...args),
   FileSystemUploadType: { BINARY_CONTENT: 'BINARY_CONTENT' },
   EncodingType: { Base64: 'base64' },
 }));
@@ -59,7 +63,12 @@ jest.mock('../registration', () => ({
 }));
 
 // ── import SUT after mocks ─────────────────────────────────────────────────────
-import { encryptAndUploadMedia } from '../media';
+import {
+  encryptAndUploadMedia,
+  persistEncryptedBlob,
+  resolveMediaDetailed,
+  downloadAndDecryptMedia,
+} from '../media';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -211,5 +220,44 @@ describe('encryptAndUploadMedia', () => {
       { headers?: Record<string, string> },
     ];
     expect(options.headers?.['Content-Type']).toBe('application/octet-stream');
+  });
+});
+
+// ── B-7: expired-attachment handling (graceful 404) ──────────────────────────
+describe('B-7 — expired attachment (server blob TTL elapsed)', () => {
+  const BLOB = 'blob:bid-b7:AAAA:BBBB:CCCC';
+
+  beforeEach(() => {
+    // MEDIA_DIR exists (skip makeDirectory); no local ciphertext/cache files.
+    mockGetInfoAsync.mockImplementation((uri: string) =>
+      Promise.resolve({ exists: typeof uri === 'string' && uri.endsWith('media/') }),
+    );
+    mockDeleteAsync.mockResolvedValue(undefined);
+  });
+
+  it('persistEncryptedBlob returns "expired" on HTTP 404 WITHOUT retrying', async () => {
+    mockDownloadAsync.mockResolvedValue({ status: 404 });
+    const state = await persistEncryptedBlob(BLOB);
+    expect(state).toBe('expired');
+    // The 24h TTL elapsed — the blob never comes back, so we must not burn the
+    // retry budget on it.
+    expect(mockDownloadAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('persistEncryptedBlob returns "ok" on HTTP 200', async () => {
+    mockDownloadAsync.mockResolvedValue({ status: 200 });
+    expect(await persistEncryptedBlob(BLOB)).toBe('ok');
+    expect(mockDownloadAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolveMediaDetailed reports state "expired" when the blob is gone', async () => {
+    mockDownloadAsync.mockResolvedValue({ status: 404 });
+    const res = await resolveMediaDetailed(BLOB, 'jpg');
+    expect(res).toEqual({ path: null, state: 'expired' });
+  });
+
+  it('downloadAndDecryptMedia throws a distinguishable "attachment_expired"', async () => {
+    mockDownloadAsync.mockResolvedValue({ status: 404 });
+    await expect(downloadAndDecryptMedia(BLOB, 'mp4')).rejects.toThrow('attachment_expired');
   });
 });

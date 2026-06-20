@@ -4,7 +4,7 @@ import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import type { Video as VideoRef } from 'expo-av';
 import type { Theme } from '../theme/vault';
 import type { StoredMessage } from '../db/local';
-import { resolveMedia } from '../crypto/media';
+import { resolveMediaDetailed } from '../crypto/media';
 import { I } from './icons';
 import { FormattedText } from './FormattedText';
 
@@ -20,6 +20,7 @@ interface VideoBubbleProps {
 
 export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: VideoBubbleProps) {
   const [loadError, setLoadError] = useState(false);
+  const [expired, setExpired] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<VideoRef>(null);
@@ -48,16 +49,20 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: Vi
 
   useEffect(() => {
     setLoadError(false);
+    setExpired(false);
     setLoading(true);
     setIsPlaying(false);
     let alive = true;
     if (!m.mediaUri) { setLocalUri(null); return; }
     if (!m.mediaUri.startsWith('blob:')) { setLocalUri(m.mediaUri); return; }
     setLocalUri(null);
-    void resolveMedia(m.mediaUri, 'mp4').then((p) => {
+    void resolveMediaDetailed(m.mediaUri, 'mp4').then((res) => {
       if (!alive) return;
-      setLocalUri(p);
-      if (!p) setLoadError(true);
+      setLocalUri(res.path);
+      if (!res.path) {
+        setLoadError(true);
+        setExpired(res.state === 'expired'); // B-7: distinguish expired from transient
+      }
     });
     return () => { alive = false; };
   }, [m.mediaUri]);
@@ -171,7 +176,7 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: Vi
     return (
       <Pressable
         onLongPress={onLongPress}
-        accessibilityLabel="Video message failed to load"
+        accessibilityLabel={expired ? 'Video message expired' : 'Video message failed to load'}
         style={({ pressed }) => ({
           alignSelf: me ? 'flex-end' : 'flex-start',
           width: 220,
@@ -202,7 +207,7 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: Vi
               letterSpacing: 0.5,
             }}
           >
-            ERROR AL CARGAR
+            {expired ? 'ADJUNTO EXPIRADO' : 'ERROR AL CARGAR'}
           </Text>
         </View>
         {renderCaption()}
