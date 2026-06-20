@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
+import { verifyPIN } from '../lock/pin';
 
 const MAX_ATTEMPTS = 5;
 
@@ -117,13 +118,15 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   }
 
   async function validatePin(pin: string) {
-    // Compare against stored PIN; fall back to accepting any 4-digit PIN when none is set
+    // Verify against the stored Argon2id hash (constant-time). No bypass: if no
+    // PIN is set the lock screen should never be shown (App.tsx gates on
+    // hasStoredPIN), and verifyPIN returns false for an empty store — so an
+    // attacker can never unlock with an arbitrary PIN.
     let ok = false;
     try {
-      const storedPin = await (window as unknown as { aegis?: { secureStorage?: { get: (k: string) => Promise<string | null> } } }).aegis?.secureStorage?.get('aegis.pin.v1');
-      ok = storedPin ? pin === storedPin : pin.length === 4;
+      ok = await verifyPIN(pin);
     } catch {
-      ok = pin.length === 4;
+      ok = false;
     }
     if (ok) {
       setPinCode('');

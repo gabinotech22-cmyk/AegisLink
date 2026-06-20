@@ -4,6 +4,8 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
+import { usePreferences } from '../store/preferences';
+import { setPIN, clearPIN, hasStoredPIN } from '../lock/pin';
 
 interface Props {
   onBack: () => void;
@@ -64,10 +66,14 @@ function Numpad({ onDigit, onDelete, t }: { onDigit: (d: string) => void; onDele
 
 export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) {
   const { t } = useTheme();
-  const [appLockEnabled, setAppLockEnabled] = useState(false);
-  const [biometricsEnabled, setBiometricsEnabled] = useState(false);
-  const [lockTimeoutMin, setLockTimeoutMin] = useState(5);
-  const [hideRecents, setHideRecents] = useState(false);
+  // Persisted lock prefs live in the preferences store (App.tsx reads them to
+  // drive cold-lock + inactivity timeout). The PIN hash itself lives in the
+  // secure keystore via lock/pin.ts; `pinStored` mirrors its presence.
+  const appLockEnabled = usePreferences((s) => s.appLockEnabled);
+  const biometricsEnabled = usePreferences((s) => s.biometricsEnabled);
+  const lockTimeoutMin = usePreferences((s) => s.lockTimeoutMin);
+  const hideRecents = usePreferences((s) => s.hideRecents);
+  const setPref = usePreferences((s) => s.set);
   const [pinStored, setPinStored] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
@@ -77,6 +83,13 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   const [showTimeout, setShowTimeout] = useState(false);
   const [shakeModal, setShakeModal] = useState(false);
   const pendingEnable = useRef(false);
+
+  // Reflect whether a PIN hash actually exists in the keystore.
+  useEffect(() => {
+    void (async () => {
+      try { setPinStored(await hasStoredPIN()); } catch { /* treat as no PIN */ }
+    })();
+  }, []);
 
   function shake() {
     setShakeModal(true);
@@ -118,12 +131,26 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
         setPinStep('enter');
         setFirstPin('');
       } else {
-        setPinStored(true);
-        if (pendingEnable.current) {
-          setAppLockEnabled(true);
-          pendingEnable.current = false;
-        }
-        setShowPinModal(false);
+        // Persist the Argon2id-hashed PIN before flipping any UI state, so we
+        // never enable the lock with a PIN we failed to store (which would make
+        // the lock screen unenterable).
+        void (async () => {
+          try {
+            await setPIN(pin);
+            setPinStored(true);
+            if (pendingEnable.current) {
+              await setPref('appLockEnabled', true);
+              pendingEnable.current = false;
+            }
+            setShowPinModal(false);
+          } catch {
+            setPinError('Could not save PIN. Try again.');
+            shake();
+            setPinEntry('');
+            setPinStep('enter');
+            setFirstPin('');
+          }
+        })();
       }
     }
   }
@@ -133,13 +160,16 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
       openPinModal(true);
       return;
     }
-    setAppLockEnabled(val);
+    void setPref('appLockEnabled', val);
   }
 
   function handleClearPin() {
     if (window.confirm('Delete PIN? App lock will be disabled.')) {
-      setPinStored(false);
-      setAppLockEnabled(false);
+      void (async () => {
+        await clearPIN();
+        setPinStored(false);
+        await setPref('appLockEnabled', false);
+      })();
     }
   }
 
@@ -173,7 +203,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
 
           {appLockEnabled && (
             <>
-              <Toggle t={t} label="Face ID / Fingerprint" sub="Use biometrics as primary method" value={biometricsEnabled} onChange={setBiometricsEnabled} />
+              <Toggle t={t} label="Face ID / Fingerprint" sub="Use biometrics as primary method" value={biometricsEnabled} onChange={(v) => void setPref('biometricsEnabled', v)} />
 
               <button
                 onClick={() => setShowTimeout((v) => !v)}
@@ -197,7 +227,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
                   {TIMEOUT_OPTIONS.map((opt, i) => (
                     <button
                       key={opt}
-                      onClick={() => { setLockTimeoutMin(opt); setShowTimeout(false); }}
+                      onClick={() => { void setPref('lockTimeoutMin', opt); setShowTimeout(false); }}
                       aria-label={getTimeoutLabel(opt)}
                       style={{
                         display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -275,7 +305,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
         )}
 
         <Section t={t} label="SCREEN PRIVACY">
-          <Toggle t={t} label="Hide in recents" sub="Screen goes black when switching apps" value={hideRecents} onChange={setHideRecents} noBorder />
+          <Toggle t={t} label="Hide in recents" sub="Screen goes black when switching apps" value={hideRecents} onChange={(v) => void setPref('hideRecents', v)} noBorder />
         </Section>
 
         <div style={{ paddingLeft: 18, paddingRight: 18, marginTop: 10 }}>
