@@ -7,7 +7,8 @@
  *   - distId is a UUID present in both the queued and online-path payloads
  *   - group:rekey_drain_ack removes the row (idempotent on repeat acks)
  *   - online recipients still receive the event immediately (no DB write)
- *   - senderAegisId anti-spoof check still rejects mismatched values
+ *   - sealed sender (Phase 3b): the relay never sees/echoes the distributor's
+ *     senderAegisId — it is sealed inside the per-recipient blob
  */
 
 // In-memory SQLite — must be set before any server module is imported
@@ -214,16 +215,16 @@ function connectAgent(keys: AgentKeys): Promise<ClientSocket> {
 
 // ── Fake SenderKey distribution payload ───────────────────────────────────────
 
-function makeDist(senderAegisId: string, recipientAegisId: string) {
+function makeDist(recipientAegisId: string) {
   // Zod schema requires nonceB64 to be exactly 44 chars (32 bytes base64).
-  // The chain key is sealed INSIDE ciphertextB64 — it must never travel as a
-  // sibling cleartext field on the wire (C-3 fix).
+  // Sealed sender (Phase 3b): BOTH the chain key AND the distributor's
+  // senderAegisId are sealed INSIDE ciphertextB64 — neither travels as a
+  // cleartext wire field (C-3 + sealed-sender).
   return {
     aegisId: recipientAegisId,
     ciphertextB64: encodeBase64(nacl.randomBytes(48)),
     nonceB64: encodeBase64(nacl.randomBytes(32)),   // 32 bytes → 44 base64 chars
     iteration: 1,
-    senderAegisId,
   };
 }
 
@@ -258,12 +259,13 @@ describe('group:rekey — offline queue and drain', () => {
       });
       adminSocket.emit('group:rekey', {
         groupId,
-        distributions: [makeDist(admin.aegisId, memberOnline.aegisId)],
+        distributions: [makeDist(memberOnline.aegisId)],
       });
     });
 
     expect(received.groupId).toBe(groupId);
-    expect(received.senderAegisId).toBe(admin.aegisId);
+    // Sealed sender (Phase 3b): the relay must NOT expose the distributor.
+    expect(received.senderAegisId).toBeUndefined();
     expect(typeof received.distId).toBe('string');
     // distId must be a UUID v4
     expect(received.distId).toMatch(
@@ -286,7 +288,7 @@ describe('group:rekey — offline queue and drain', () => {
         'group:rekey',
         {
           groupId,
-          distributions: [makeDist(admin.aegisId, memberOffline.aegisId)],
+          distributions: [makeDist(memberOffline.aegisId)],
         },
         (ack: { ok: boolean }) => {
           clearTimeout(t);
@@ -303,7 +305,9 @@ describe('group:rekey — offline queue and drain', () => {
     expect(queued.length).toBeGreaterThanOrEqual(1);
     const row = queued.find((r) => r.group_id === groupId);
     expect(row).toBeDefined();
-    expect(row!.sender_aegis_id).toBe(admin.aegisId);
+    // Sealed sender (Phase 3b): the queued row stores NO real distributor — the
+    // sender identity lives inside ciphertext_b64, so the column is empty.
+    expect(row!.sender_aegis_id).toBe('');
     expect(row!.recipient).toBe(memberOffline.aegisId);
 
     adminSocket.disconnect();
@@ -320,7 +324,7 @@ describe('group:rekey — offline queue and drain', () => {
         'group:rekey',
         {
           groupId,
-          distributions: [makeDist(admin.aegisId, memberOffline.aegisId)],
+          distributions: [makeDist(memberOffline.aegisId)],
         },
         (ack: { ok: boolean }) => {
           clearTimeout(t);
@@ -362,7 +366,8 @@ describe('group:rekey — offline queue and drain', () => {
     drainSocket?.disconnect();
 
     expect(drained['groupId']).toBe(groupId);
-    expect(drained['senderAegisId']).toBe(admin.aegisId);
+    // Sealed sender (Phase 3b): no distributor identity on the drained wire.
+    expect(drained['senderAegisId']).toBeUndefined();
     expect(typeof drained['distId']).toBe('string');
     expect(drained['ciphertextB64']).toBeTruthy();
     expect(drained['nonceB64']).toBeTruthy();
@@ -379,7 +384,7 @@ describe('group:rekey — offline queue and drain', () => {
       const t = setTimeout(() => reject(new Error('rekey ack timeout')), 5_000);
       adminSocket.emit(
         'group:rekey',
-        { groupId, distributions: [makeDist(admin.aegisId, memberOffline.aegisId)] },
+        { groupId, distributions: [makeDist(memberOffline.aegisId)] },
         (ack: { ok: boolean }) => { clearTimeout(t); ack.ok ? resolve() : reject(new Error('ack false')); }
       );
     });
@@ -421,28 +426,36 @@ describe('group:rekey — offline queue and drain', () => {
     expect(stillThere).toBeUndefined();
   }, 25_000);
 
-  test('group:rekey rejects if senderAegisId !== authenticated identity (anti-spoof)', async () => {
+  test('sealed sender: relay accepts a rekey carrying NO senderAegisId and never echoes one', async () => {
+    // Phase 3b regression: the old anti-spoof guard (claimed sender must equal
+    // the authenticated socket) is REMOVED precisely because the relay must not
+    // know the distributor — the sender identity is sealed inside the blob. A
+    // rekey with no senderAegisId field must be accepted, and the forwarded
+    // group:rekey_dist must carry no sender identity.
     const adminSocket = await connectAgent(admin);
-    const groupId = 'TEST-GROUP-SPOOF-01';
+    const onlineSocket = await connectAgent(memberOnline);
+    const groupId = 'TEST-GROUP-SEALED-01';
 
-    const err = await new Promise<{ ok: boolean; error?: string }>((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('ack timeout')), 5_000);
-      // Claim senderAegisId = memberOnline.aegisId while we are authenticated as admin
+    const received = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('group:rekey_dist not received')), 5_000);
+      onlineSocket.once('group:rekey_dist', (payload: Record<string, unknown>) => {
+        clearTimeout(t);
+        resolve(payload);
+      });
       adminSocket.emit(
         'group:rekey',
-        {
-          groupId,
-          distributions: [makeDist(memberOnline.aegisId, memberOffline.aegisId)],
-        },
+        { groupId, distributions: [makeDist(memberOnline.aegisId)] },
         (ack: { ok: boolean; error?: string }) => {
-          clearTimeout(t);
-          resolve(ack);
+          if (!ack?.ok) reject(new Error(`rekey rejected: ${ack?.error}`));
         }
       );
     });
 
-    expect(err.ok).toBe(false);
-    expect(err.error).toBe('forbidden');
+    expect(received.groupId).toBe(groupId);
+    expect(received.senderAegisId).toBeUndefined();
+    expect('senderAegisId' in received).toBe(false);
+
     adminSocket.disconnect();
-  }, 10_000);
+    onlineSocket.disconnect();
+  }, 15_000);
 });

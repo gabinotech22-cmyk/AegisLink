@@ -243,12 +243,14 @@ const RequestSenderKeyEvent = z.object({
 // SenderKey, sealed individually per remaining member. The relay is a blind
 // router — it only reads each `aegisId` routing field and fans out the sealed
 // blobs. No key material is read, logged, or stored.
+// Sealed sender (Phase 3b): the distributor's identity is NOT a wire field — it
+// is sealed inside `ciphertextB64`. The relay only routes by the recipient
+// `aegisId` and never learns who re-keyed the group.
 const GroupRekeyDistribution = z.object({
   aegisId: z.string().min(1).max(64),
   ciphertextB64: z.string().max(1024),
   nonceB64: z.string().length(44),
   iteration: z.number().int().min(0),
-  senderAegisId: z.string().min(1).max(64),
 });
 
 // Cap raised to 512 for large groups. Clients with >512 members MUST chunk the
@@ -581,10 +583,11 @@ export function attachRelay(io: SocketServer) {
     // TTL are purged by the background cron (same lifecycle as messageRepo).
     const pendingDists = await senderKeyDistRepo.drainFor(me, deviceId);
     for (const dist of pendingDists) {
+      // Sealed sender (Phase 3b): no senderAegisId on the wire — the distributor
+      // identity is sealed inside ciphertext_b64.
       socket.emit('group:rekey_dist', {
         distId: dist.id,
         groupId: dist.group_id,
-        senderAegisId: dist.sender_aegis_id,  // Do not log — zero-metadata principle
         ciphertextB64: dist.ciphertext_b64,
         nonceB64: dist.nonce_b64,
         iteration: dist.iteration,
@@ -1369,12 +1372,11 @@ export function attachRelay(io: SocketServer) {
       }
       const { groupId, distributions } = parsed.data;
 
-      // Reject if any distribution claims a different sender than the emitter.
-      if (distributions.some((d) => d.senderAegisId !== me)) {
-        ack?.({ ok: false, error: 'forbidden' });
-        return;
-      }
-
+      // Sealed sender (Phase 3b): there is no `senderAegisId` to validate — the
+      // distributor's identity is sealed inside each blob and the relay never
+      // sees it. The old "claimed sender must equal the emitter" guard is gone
+      // precisely because the relay must not know the sender. Anti-abuse is the
+      // per-`me` rekey rate limit (checkRekeyRateLimit above).
       const now = Date.now();
       const enqueuePromises: Promise<void>[] = [];
 
@@ -1383,13 +1385,12 @@ export function attachRelay(io: SocketServer) {
 
         const recipientSockets = sockets.get(d.aegisId);
         if (recipientSockets && recipientSockets.size > 0) {
-          // Recipient is online — forward immediately (existing path).
+          // Recipient is online — forward the opaque blob (no sender identity).
           const distId = randomUUID();
           for (const s of recipientSockets) {
             s.emit('group:rekey_dist', {
               distId,
               groupId,
-              senderAegisId: me,
               ciphertextB64: d.ciphertextB64,
               nonceB64: d.nonceB64,
               iteration: d.iteration,
@@ -1397,17 +1398,16 @@ export function attachRelay(io: SocketServer) {
           }
         } else {
           // Recipient is offline — enqueue the sealed distribution for deferred
-          // delivery. The relay stores the blob opaquely; senderAegisId is needed
-          // only so the drain path can reconstruct the correct wire payload (same
-          // rationale as sender_pub_b64 for init messages in messageRepo, FND-05
-          // exception). The row is purged as soon as all devices drain it.
+          // delivery. The relay stores the blob opaquely; the sender identity is
+          // INSIDE ciphertext_b64, so sender_aegis_id is stored empty (the column
+          // is retained for schema compatibility / older rows only).
           const distId = randomUUID();
           enqueuePromises.push(
             senderKeyDistRepo.enqueue({
               id: distId,
               recipient: d.aegisId,
               group_id: groupId,
-              sender_aegis_id: me,    // Do not log — zero-metadata principle
+              sender_aegis_id: '',    // sealed sender — relay does not learn the distributor
               ciphertext_b64: d.ciphertextB64,
               nonce_b64: d.nonceB64,
               iteration: d.iteration,
