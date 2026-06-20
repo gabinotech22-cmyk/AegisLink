@@ -725,7 +725,40 @@ async function getOrCreateSession(
 
   const contact = useContacts.getState().contacts.find((c) => c.aegisId === contactAegisId);
   if (!contact) throw new Error('Contact not found');
-  bundle.signingPublicKeyB64 = contact.signingPublicKeyB64 ?? '';
+
+  // Treat empty strings as missing (legacy identities may have stored '' for
+  // the signing key). Order of preference: locally pinned > bundle from relay
+  // > directory lookup (ported from mobile/src/socket/client.ts). We MUST end
+  // up with a non-empty Ed25519 key — performX3DH already refuses an empty/
+  // wrong-length key, but trying the directory first means a legitimate
+  // handshake doesn't fail just because the local contact cache is stale.
+  const nonEmpty = (s: string | undefined | null): string | undefined =>
+    typeof s === 'string' && s.length > 0 ? s : undefined;
+
+  let signingPub: string | undefined =
+    nonEmpty(contact.signingPublicKeyB64) ?? nonEmpty(bundle.signingPublicKeyB64);
+
+  if (!signingPub) {
+    try {
+      const { lookupIdentity } = await import('../api');
+      const record = await lookupIdentity(contactAegisId);
+      const fetched = nonEmpty(record.signingPublicKey);
+      if (fetched) {
+        signingPub = fetched;
+        const { saveContact } = await import('../db/local');
+        const updated = { ...contact, signingPublicKeyB64: fetched };
+        await saveContact(updated);
+        useContacts.setState((s) => ({
+          contacts: s.contacts.map((c) => (c.aegisId === contactAegisId ? updated : c)),
+        }));
+      }
+    } catch (e) {
+      if (DEV) console.warn('[socket] failed to fetch signing key from directory');
+      void e;
+    }
+  }
+
+  bundle.signingPublicKeyB64 = signingPub ?? '';
   bundle.identityKeyB64 = contactPublicKeyB64;
 
   const x3dh = performX3DH(identity, bundle);
@@ -785,6 +818,8 @@ const RECOVERY_WINDOW_MS = 90_000;
 const RECOVERY_FALLBACK_MS = 6_000;
 const lastRecoveryAttemptMs = new Map<string, number>();
 const inRecoveryUntilMs = new Map<string, number>();
+/** Pending recovery fallback-flush timers, keyed by peer — see disconnect(). */
+const recoveryFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function amInitiatorFor(myAegisId: string, peerAegisId: string): boolean {
   return myAegisId > peerAegisId;
@@ -905,11 +940,19 @@ async function tryRecoverDesync(
   }
 
   // Fallback: if no glare init arrives to clear the marker, treat our fresh
-  // init session as converged after a short grace.
+  // init session as converged after a short grace. Track the timer per peer
+  // (ported from mobile/src/socket/client.ts): re-entering recovery for the
+  // same peer must replace, not stack, the pending timer, and disconnect()
+  // must cancel them all — a stale timer firing after disconnect would flush
+  // the outbox over a dead socket and leak a timer handle.
   const peerId = contact.aegisId;
-  setTimeout(() => {
+  const prevTimer = recoveryFallbackTimers.get(peerId);
+  if (prevTimer) clearTimeout(prevTimer);
+  const fallbackTimer = setTimeout(() => {
+    recoveryFallbackTimers.delete(peerId);
     inRecoveryUntilMs.delete(peerId);
   }, RECOVERY_FALLBACK_MS);
+  recoveryFallbackTimers.set(peerId, fallbackTimer);
 
   return true;
 }
@@ -1772,6 +1815,10 @@ export function disconnect(): void {
     connected = false;
     authenticated = false;
   }
+  // Cancel pending recovery fallback flushes — they would fire over a dead
+  // socket and leak timer handles.
+  for (const t of recoveryFallbackTimers.values()) clearTimeout(t);
+  recoveryFallbackTimers.clear();
 }
 
 export async function sendMessage(opts: {
