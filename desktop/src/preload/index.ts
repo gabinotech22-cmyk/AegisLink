@@ -17,6 +17,15 @@ contextBridge.exposeInMainWorld('aegis', {
       ipcRenderer.invoke('secureStorage:wipe-prekeys')
   },
   db: {
+    // ── C-2 Fase 2: PIN-as-second-factor at-rest ──
+    lockState: (): Promise<{ pinWrapped: boolean; opened: boolean }> =>
+      ipcRenderer.invoke('db:lock-state'),
+    unlock: (kekB64: string): Promise<void> =>
+      ipcRenderer.invoke('db:unlock', kekB64),
+    enablePinWrap: (kekB64: string): Promise<void> =>
+      ipcRenderer.invoke('db:enable-pin-wrap', kekB64),
+    disablePinWrap: (): Promise<void> =>
+      ipcRenderer.invoke('db:disable-pin-wrap'),
     saveIdentity: (activeSlot: string, identity: any): Promise<void> =>
       ipcRenderer.invoke('db:save-identity', activeSlot, identity),
     loadIdentity: (activeSlot: string): Promise<any> =>
