@@ -276,8 +276,29 @@ const GroupRekeyEvent = z.object({
 
 // Rate-limit buckets for channel:msg — keyed by aegisId, max 120/min
 const channelMsgRateLimit = new Map<string, { count: number; reset: number }>();
-// TODO: migrate to Redis for multi-instance deployments (current Map resets on restart)
+// TODO (A-1, deferred): migrate to Redis ONLY when running >1 relay instance.
+// Single-instance today, so in-memory is correct; the cap below bounds memory.
 const RATE_LIMIT_MAP_MAX = 10_000;
+
+/**
+ * Bound the size of an in-memory rate-limit map WITHOUT letting an attacker reset
+ * a victim's counter. The old code evicted the oldest-INSERTED key (plain FIFO):
+ * flooding the map with fresh keys would evict an active victim entry and hand
+ * them a clean bucket. Instead, evict only entries whose window has already
+ * elapsed (their counter is meaningless anyway); active buckets are never
+ * dropped to make room. As a last resort under a pathological all-active map we
+ * stop inserting churn rather than evicting a live limit. Keyed by aegisId, all
+ * authenticated — and registration now costs an 18-bit PoW (A-2), so minting the
+ * thousands of identities needed to fill this map is already expensive.
+ */
+function evictExpired(map: Map<string, { count: number; reset: number }>): void {
+  if (map.size <= RATE_LIMIT_MAP_MAX) return;
+  const now = Date.now();
+  for (const [key, entry] of map) {
+    if (entry.reset <= now) map.delete(key);
+    if (map.size <= RATE_LIMIT_MAP_MAX) return;
+  }
+}
 
 function checkChannelMsgRateLimit(aegisId: string): boolean {
   const now = Date.now();
@@ -285,11 +306,7 @@ function checkChannelMsgRateLimit(aegisId: string): boolean {
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
   entry.count++;
   channelMsgRateLimit.set(aegisId, entry);
-  // LRU eviction: prevent unbounded memory growth under sustained load
-  if (channelMsgRateLimit.size > RATE_LIMIT_MAP_MAX) {
-    const oldest = channelMsgRateLimit.keys().next().value;
-    if (oldest !== undefined) channelMsgRateLimit.delete(oldest);
-  }
+  evictExpired(channelMsgRateLimit);
   return entry.count <= 120;
 }
 
@@ -306,10 +323,7 @@ function checkLowFreqRateLimit(aegisId: string): boolean {
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 10_000; }
   entry.count++;
   lowFreqRateLimit.set(aegisId, entry);
-  if (lowFreqRateLimit.size > RATE_LIMIT_MAP_MAX) {
-    const oldest = lowFreqRateLimit.keys().next().value;
-    if (oldest !== undefined) lowFreqRateLimit.delete(oldest);
-  }
+  evictExpired(lowFreqRateLimit);
   return entry.count <= 30;
 }
 
@@ -325,10 +339,7 @@ function checkRekeyRateLimit(aegisId: string): boolean {
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
   entry.count++;
   rekeyRateLimit.set(aegisId, entry);
-  if (rekeyRateLimit.size > RATE_LIMIT_MAP_MAX) {
-    const oldest = rekeyRateLimit.keys().next().value;
-    if (oldest !== undefined) rekeyRateLimit.delete(oldest);
-  }
+  evictExpired(rekeyRateLimit);
   return entry.count <= 30;
 }
 

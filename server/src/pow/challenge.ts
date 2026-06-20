@@ -9,12 +9,24 @@ import { createHash, randomBytes } from 'node:crypto';
 /** Difficulty: number of leading zero BITS required in SHA-256(nonce + challenge). */
 export const POW_DIFFICULTY = 14; // ~16 k hashes on average — trivial for a real client, costly for bulk bots
 
+/**
+ * A-2: registration is the squatting-sensitive flow (one identity per solve), so
+ * it gets a harder PoW than the high-frequency blob-upload flow. Raised to 18
+ * bits (~256 k hashes, still well under a second on a real device) in production;
+ * kept at the base difficulty in dev/test to keep the suite fast. Bots that want
+ * to bulk-mint aegisIds now pay ~16× more work per identity.
+ */
+export const REGISTRATION_POW_DIFFICULTY =
+  process.env['NODE_ENV'] === 'production' ? 18 : POW_DIFFICULTY;
+
 /** Challenge TTL in milliseconds. */
 const CHALLENGE_TTL_MS = 300_000;
 
 interface ChallengeEntry {
   challenge: string; // hex
   expiresAt: number;
+  /** Difficulty bound at issuance so a client cannot solve at a lower difficulty. */
+  difficulty: number;
 }
 
 // Keyed by challenge string itself — no IP stored.
@@ -28,12 +40,14 @@ function pruneExpired(): void {
   }
 }
 
-export function issueChallenge(): { challenge: string; difficulty: number; expiresAt: number } {
+export function issueChallenge(
+  difficulty: number = POW_DIFFICULTY,
+): { challenge: string; difficulty: number; expiresAt: number } {
   pruneExpired();
   const challenge = randomBytes(32).toString('hex');
   const expiresAt = Date.now() + CHALLENGE_TTL_MS;
-  store.set(challenge, { challenge, expiresAt });
-  return { challenge, difficulty: POW_DIFFICULTY, expiresAt };
+  store.set(challenge, { challenge, expiresAt, difficulty });
+  return { challenge, difficulty, expiresAt };
 }
 
 /**
@@ -56,7 +70,8 @@ export function verifyPoW(challenge: string, nonce: string): string | null {
     .update(nonce + challenge)
     .digest();
 
-  if (!hasLeadingZeroBits(digest, POW_DIFFICULTY)) return 'insufficient_pow';
+  // Verify against the difficulty bound at issuance (anti-downgrade).
+  if (!hasLeadingZeroBits(digest, entry.difficulty)) return 'insufficient_pow';
 
   // One-time use — consume immediately on success.
   store.delete(challenge);
