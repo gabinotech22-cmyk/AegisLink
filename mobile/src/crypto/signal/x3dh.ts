@@ -685,6 +685,8 @@ export async function ensureDevicePreKeys(identity: Identity): Promise<DevicePre
     }
 
     try { await db.setSpkKeyId(set.signedPreKey.keyId); } catch {/* best-effort */}
+    // Start the SPK age clock for the age-based rotation trigger (B-3).
+    try { await db.setSpkCreatedAt(Date.now()); } catch {/* best-effort */}
     for (const [keyId, secret] of set.opkSecrets.entries()) {
       try { await db.saveOpkSecret(keyId, encodeBase64(secret)); } catch {/* best-effort */}
     }
