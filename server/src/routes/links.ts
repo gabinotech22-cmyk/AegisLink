@@ -15,6 +15,7 @@
  */
 
 import { Router } from 'express';
+import { createHash } from 'node:crypto';
 
 const router = Router();
 
@@ -43,15 +44,42 @@ router.get('/.well-known/assetlinks.json', (_req, res) => {
 });
 
 /**
+ * Inline bootstrap script for a landing page. Extracted so its EXACT bytes can
+ * be SHA-256 hashed for the page's `script-src 'sha256-…'` CSP (M-4): the hash
+ * must cover precisely what sits between <script> and </script>, so the same
+ * string is both embedded and hashed — no whitespace drift. The only variable is
+ * the constant `schemePrefix`; no user input is ever interpolated server-side.
+ */
+function landingScript(schemePrefix: string): string {
+  return `(function(){var h=location.hash.slice(1);if(!h){document.getElementById('msg').textContent='Enlace incompleto.';return;}var u=${JSON.stringify(schemePrefix)}+h;var b=document.getElementById('open');b.href=u;b.style.display='inline-block';location.href=u;})();`;
+}
+
+/**
  * `kind` selects the aegislink:// prefix the fragment is appended to:
  *   /g → aegislink://group/<fragment>   (fragment = v1/<gid>/<name>/<admin>)
  *   /a → aegislink://<fragment>         (fragment = v1/<id>/<pubkey>)
  * No user input is interpolated server-side — the page is a constant.
+ *
+ * Returns the HTML plus the matching `Content-Security-Policy` (M-4). The CSP
+ * pins the inline script by its SHA-256 hash (no 'unsafe-inline' for scripts —
+ * any injected <script> is refused). Inline STYLES are allowed ('unsafe-inline'
+ * for style only): they cannot execute code, and the page is a server-side
+ * constant, so the residual risk is nil. Everything else is denied.
  */
-function landingHtml(kind: 'group' | 'contact'): string {
+function renderLanding(kind: 'group' | 'contact'): { html: string; csp: string } {
   const schemePrefix = kind === 'group' ? 'aegislink://group/' : 'aegislink://';
   const title = kind === 'group' ? 'Invitación a grupo' : 'Contacto AegisLink';
-  return `<!doctype html>
+  const script = landingScript(schemePrefix);
+  const scriptHash = createHash('sha256').update(script, 'utf8').digest('base64');
+  const csp = [
+    "default-src 'none'",
+    `script-src 'sha256-${scriptHash}'`,
+    "style-src 'unsafe-inline'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'none'",
+  ].join('; ');
+  const html = `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>AegisLink — ${title}</title>
 <style>
@@ -67,26 +95,22 @@ function landingHtml(kind: 'group' | 'contact'): string {
 <a class="btn" id="open" href="#" style="display:none">Abrir en AegisLink</a>
 <p>Si no tienes AegisLink instalada, instálala y vuelve a abrir este enlace.</p>
 <p class="mono">E2EE · SIN METADATOS</p>
-<script>
-(function(){
-  var h = location.hash.slice(1);
-  if (!h) { document.getElementById('msg').textContent = 'Enlace incompleto.'; return; }
-  var u = ${JSON.stringify(schemePrefix)} + h;
-  var b = document.getElementById('open');
-  b.href = u; b.style.display = 'inline-block';
-  location.href = u;
-})();
-</script></main></body></html>`;
+<script>${script}</script></main></body></html>`;
+  return { html, csp };
 }
 
 router.get('/g', (_req, res) => {
+  const { html, csp } = renderLanding('group');
   res.setHeader('Cache-Control', 'public, max-age=3600');
-  res.type('html').send(landingHtml('group'));
+  res.setHeader('Content-Security-Policy', csp);
+  res.type('html').send(html);
 });
 
 router.get('/a', (_req, res) => {
+  const { html, csp } = renderLanding('contact');
   res.setHeader('Cache-Control', 'public, max-age=3600');
-  res.type('html').send(landingHtml('contact'));
+  res.setHeader('Content-Security-Policy', csp);
+  res.type('html').send(html);
 });
 
 export default router;
