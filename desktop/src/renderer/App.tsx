@@ -25,6 +25,7 @@ import { DevicesScreen } from './screens/Devices';
 import { LockConfigScreen } from './screens/LockConfig';
 import { LockSettingsScreen } from './screens/LockSettings';
 import { LockScreen } from './screens/Lock';
+import { hasStoredPIN } from './lock/pin';
 import { PanicScreen } from './screens/Panic';
 import { EphemeralScreen } from './screens/Ephemeral';
 import { DataExportScreen } from './screens/DataExport';
@@ -111,6 +112,7 @@ function Shell() {
   const [pendingLinkAfterOnboarding, setPendingLinkAfterOnboarding] = useState(false);
   const [netError, setNetError] = useState(false);
   const [appLocked, setAppLocked] = useState(false);
+  const [pinAvailable, setPinAvailable] = useState(false);
   const [isBackgroundShieldActive] = useState(false);
 
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -159,8 +161,17 @@ function Shell() {
     }
   }, [hydrated, identity, showOnboarding, showSplash, showEntry]);
 
+  // Whether a PIN hash actually exists. Guards the lock so a stray
+  // appLockEnabled=true with no stored PIN can never show an unenterable
+  // LockScreen (verifyPIN would always fail → soft-brick).
   useEffect(() => {
-    if (identity && status === 'ready' && appLockEnabled && !didColdLockRef.current) {
+    void (async () => {
+      try { setPinAvailable(await hasStoredPIN()); } catch { setPinAvailable(false); }
+    })();
+  }, [identity]);
+
+  useEffect(() => {
+    if (identity && status === 'ready' && appLockEnabled && pinAvailable && !didColdLockRef.current) {
       didColdLockRef.current = true;
       setAppLocked(true);
     }
@@ -168,10 +179,10 @@ function Shell() {
       didColdLockRef.current = false;
       setAppLocked(false);
     }
-  }, [identity, status, appLockEnabled]);
+  }, [identity, status, appLockEnabled, pinAvailable]);
 
   useEffect(() => {
-    if (!appLockEnabled || !identity) return;
+    if (!appLockEnabled || !pinAvailable || !identity) return;
     const handler = () => {
       if (document.hidden) {
         lastBgTimeRef.current = Date.now();
@@ -188,7 +199,7 @@ function Shell() {
     };
     document.addEventListener('visibilitychange', handler);
     return () => document.removeEventListener('visibilitychange', handler);
-  }, [appLockEnabled, lockTimeoutMin, identity]);
+  }, [appLockEnabled, lockTimeoutMin, pinAvailable, identity]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
