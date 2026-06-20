@@ -1068,7 +1068,33 @@ export function emitDeleteChannelMsg(payload: {
 // across network round-trips that aren't part of session establishment.
 const sessionLocks = new Map<string, Promise<unknown>>();
 
-async function withSessionLock<T>(aegisId: string, fn: () => Promise<T>): Promise<T> {
+/**
+ * Reentrancy context threaded through a single locked call-chain. `heldKeys`
+ * holds every aegisId already locked by THIS chain, so a nested acquire of an
+ * already-held key passes through instead of deadlocking. It is created fresh
+ * at each top-level acquisition and forwarded explicitly down the only
+ * synchronous re-entrant path (decryptAndAppend → tryRecoverDesync →
+ * sendProfileTo → getOrCreateSession). Two concurrent top-level operations get
+ * DISTINCT contexts, so one chain can never see the other's held keys — which
+ * is what keeps the bypass safe (a different operation still serialises).
+ */
+interface LockCtx { heldKeys: Set<string> }
+
+async function withSessionLock<T>(
+  aegisId: string,
+  fn: (ctx: LockCtx) => Promise<T>,
+  ctx?: LockCtx,
+): Promise<T> {
+  // Reentrant fast-path: this exact call-chain already holds the key, so the
+  // critical section is already serialised — run inline (acquiring again would
+  // wait on our own never-resolving gate = deadlock). This is the fix for the
+  // decryptAndAppend → tryRecoverDesync → sendProfileTo → getOrCreateSession
+  // chain where all four touch the SAME contact aegisId.
+  if (ctx && ctx.heldKeys.has(aegisId)) {
+    return fn(ctx);
+  }
+  const effectiveCtx: LockCtx = ctx ?? { heldKeys: new Set<string>() };
+
   const prev = sessionLocks.get(aegisId) ?? Promise.resolve();
   // The stored tail is a never-rejecting sequencing promise: the next acquirer
   // chains off it regardless of whether our critical section resolved or threw,
@@ -1078,9 +1104,11 @@ async function withSessionLock<T>(aegisId: string, fn: () => Promise<T>): Promis
   sessionLocks.set(aegisId, prev.then(() => gate, () => gate));
   // Wait for the previous holder to settle before entering the section.
   await prev.catch(() => undefined);
+  effectiveCtx.heldKeys.add(aegisId);
   try {
-    return await fn();
+    return await fn(effectiveCtx);
   } finally {
+    effectiveCtx.heldKeys.delete(aegisId);
     release();
     // Best-effort cleanup: if no one chained after us, drop the entry so the map
     // does not grow unbounded for one-shot contacts.
@@ -1088,7 +1116,27 @@ async function withSessionLock<T>(aegisId: string, fn: () => Promise<T>): Promis
   }
 }
 
-async function getOrCreateSession(contactAegisId: string, contactPublicKeyB64: string, identity: Identity): Promise<RatchetState> {
+/**
+ * Public entry: serialise session establishment per contact aegisId so the
+ * create-init+save path can never interleave with decryptAndAppend's
+ * load+adopt path (the glare-divergence fix). `lockCtx` is passed ONLY by the
+ * re-entrant recovery chain (sendProfileTo while already under decryptAndAppend's
+ * lock); top-level callers omit it and acquire the lock fresh.
+ */
+async function getOrCreateSession(
+  contactAegisId: string,
+  contactPublicKeyB64: string,
+  identity: Identity,
+  lockCtx?: LockCtx,
+): Promise<RatchetState> {
+  return withSessionLock(
+    contactAegisId,
+    () => getOrCreateSessionLocked(contactAegisId, contactPublicKeyB64, identity),
+    lockCtx,
+  );
+}
+
+async function getOrCreateSessionLocked(contactAegisId: string, contactPublicKeyB64: string, identity: Identity): Promise<RatchetState> {
   const existingJson = await loadRatchetSession(contactAegisId);
   if (existingJson) {
     const s = JSON.parse(existingJson);
@@ -1371,6 +1419,11 @@ async function tryRecoverDesync(
   existingState: RatchetState | null,
   identity: Identity,
   force = false,
+  // Present when called from inside decryptAndAppendLocked's session lock. The
+  // initiator branch below re-handshakes via sendProfileTo → getOrCreateSession
+  // for the SAME aegisId; threading the context lets that nested acquire pass
+  // through the reentrant fast-path instead of deadlocking on our own gate.
+  lockCtx?: LockCtx,
 ): Promise<boolean> {
   const now = Date.now();
 
@@ -1438,7 +1491,10 @@ async function tryRecoverDesync(
 
   rdiag(`[RDIAG] emitting recovery init me=${identity.aegisId} -> peer=${contact.aegisId} initiator=true`);
   try {
-    await sendProfileTo(contact, identity);
+    // Thread the lock context: this runs inside decryptAndAppendLocked's lock
+    // for contact.aegisId, and sendProfileTo → getOrCreateSession re-acquires
+    // the same key. Without the context that nested acquire would deadlock.
+    await sendProfileTo(contact, identity, lockCtx);
   } catch (e) {
     if (__DEV__) console.warn('[socket] desync re-handshake send failed:', (e as Error).message);
   }
@@ -1504,11 +1560,33 @@ async function saveSessionState(aegisId: string, state: RatchetState) {
   await saveRatchetSession(aegisId, JSON.stringify(s));
 }
 
+/**
+ * Public entry: serialise inbound-message processing per contact aegisId so the
+ * load+adopt path is atomic against getOrCreateSession's create+save (glare
+ * fix). The lock is REENTRANT for this chain: decryptAndAppendLocked may, via
+ * tryRecoverDesync → sendProfileTo → getOrCreateSession, re-acquire the SAME
+ * key; the threaded LockCtx lets that nested acquire pass through instead of
+ * deadlocking on its own gate.
+ */
 async function decryptAndAppend(
   env: WireSealedEnvelope,
   parsed: any,
   contact: any,
-  identity: Identity
+  identity: Identity,
+): Promise<boolean> {
+  return withSessionLock(
+    contact.aegisId,
+    (ctx) => decryptAndAppendLocked(env, parsed, contact, identity, ctx),
+    undefined,
+  );
+}
+
+async function decryptAndAppendLocked(
+  env: WireSealedEnvelope,
+  parsed: any,
+  contact: any,
+  identity: Identity,
+  lockCtx: LockCtx,
 ): Promise<boolean> {
   if (parsed.from !== contact.aegisId) {
     if (__DEV__) console.warn('[socket] sender mismatch — dropping');
@@ -1762,7 +1840,7 @@ async function decryptAndAppend(
   } catch (e) {
     if (existingJson && !parsed.x3dh) {
       if (__DEV__) console.warn('[socket] ratchetDecrypt threw on existing session:', (e as Error).message);
-      await tryRecoverDesync(contact, ratchetState, identity);
+      await tryRecoverDesync(contact, ratchetState, identity, false, lockCtx);
     } else if (__DEV__) {
       console.warn('[socket] Double Ratchet decryption threw:', (e as Error).message);
     }
@@ -1777,7 +1855,7 @@ async function decryptAndAppend(
     // We do NOT recover on an x3dh-init failure: that points to a key/handshake
     // problem, not a recoverable desync.
     if (existingJson && !parsed.x3dh) {
-      await tryRecoverDesync(contact, ratchetState, identity);
+      await tryRecoverDesync(contact, ratchetState, identity, false, lockCtx);
     } else if (__DEV__) {
       console.warn('[socket] Double Ratchet decryption failed');
     }
@@ -3451,7 +3529,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
 }
 
 /** Send our profile (name + avatar as data URI) to one specific contact. */
-export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: string }, identity: Identity): Promise<void> {
+export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: string }, identity: Identity, lockCtx?: LockCtx): Promise<void> {
   const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
   const idState = useIdentity.getState();
   const senderImage = await toDataUri(idState.avatarImage);
@@ -3496,7 +3574,9 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
 
   try {
     const recipientPub = decodeBase64(contact.publicKeyB64);
-    const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
+    // Forward lockCtx so that when this runs inside a desync-recovery (already
+    // holding contact.aegisId's lock) the nested acquire passes through.
+    const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity, lockCtx);
     // Mark first-contact (X3DH-initial) envelopes `init` so the relay attaches
     // our public key when queued for an offline recipient — otherwise the peer
     // cannot decrypt this first profile message and never auto-adds us back.
