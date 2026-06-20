@@ -697,7 +697,60 @@ async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
 }
 
 
+// ─── Session-establishment lock (ported from mobile/src/socket/client.ts) ──
+//
+// Serialise session establishment per contact aegisId so getOrCreateSession's
+// create-init+save can never interleave with decryptAndAppend's load+adopt
+// (the glare-divergence fix). The lock is REENTRANT for a single call-chain via
+// a threaded LockCtx: the recovery path runs
+//   decryptAndAppendLocked [holds peer] → tryRecoverDesync → sendProfileTo
+//     → getOrCreateSession [re-acquires peer]
+// and the context lets that nested acquire pass through instead of deadlocking
+// on its own gate. Two CONCURRENT top-level operations get DISTINCT contexts,
+// so a different operation still serialises — only the same chain bypasses.
+const sessionLocks = new Map<string, Promise<unknown>>();
+
+interface LockCtx { heldKeys: Set<string> }
+
+async function withSessionLock<T>(
+  aegisId: string,
+  fn: (ctx: LockCtx) => Promise<T>,
+  ctx?: LockCtx,
+): Promise<T> {
+  if (ctx && ctx.heldKeys.has(aegisId)) {
+    return fn(ctx);
+  }
+  const effectiveCtx: LockCtx = ctx ?? { heldKeys: new Set<string>() };
+
+  const prev = sessionLocks.get(aegisId) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((res) => { release = res; });
+  sessionLocks.set(aegisId, prev.then(() => gate, () => gate));
+  await prev.catch(() => undefined);
+  effectiveCtx.heldKeys.add(aegisId);
+  try {
+    return await fn(effectiveCtx);
+  } finally {
+    effectiveCtx.heldKeys.delete(aegisId);
+    release();
+    if (sessionLocks.get(aegisId) === undefined) sessionLocks.delete(aegisId);
+  }
+}
+
 async function getOrCreateSession(
+  contactAegisId: string,
+  contactPublicKeyB64: string,
+  identity: Identity,
+  lockCtx?: LockCtx,
+): Promise<RatchetState> {
+  return withSessionLock(
+    contactAegisId,
+    () => getOrCreateSessionLocked(contactAegisId, contactPublicKeyB64, identity),
+    lockCtx,
+  );
+}
+
+async function getOrCreateSessionLocked(
   contactAegisId: string,
   contactPublicKeyB64: string,
   identity: Identity,
@@ -895,6 +948,11 @@ async function tryRecoverDesync(
   contact: { aegisId: string; publicKeyB64: string },
   existingState: RatchetState | null,
   identity: Identity,
+  // Present when called from inside decryptAndAppendLocked's session lock. The
+  // initiator branch re-handshakes via sendProfileTo → getOrCreateSession for
+  // the SAME aegisId; threading the context lets that nested acquire pass
+  // through the reentrant fast-path instead of deadlocking on our own gate.
+  lockCtx?: LockCtx,
 ): Promise<boolean> {
   const now = Date.now();
 
@@ -934,7 +992,10 @@ async function tryRecoverDesync(
   // profile_update ride-along makes getOrCreateSession run a full handshake).
   await deleteContactRatchetSession(contact.aegisId);
   try {
-    await sendProfileTo(contact, identity);
+    // Thread the lock context: this runs inside decryptAndAppendLocked's lock
+    // for contact.aegisId, and sendProfileTo → getOrCreateSession re-acquires
+    // the same key. Without the context that nested acquire would deadlock.
+    await sendProfileTo(contact, identity, lockCtx);
   } catch (e) {
     if (DEV) console.warn('[socket] desync re-handshake send failed:', (e as Error).message);
   }
@@ -962,6 +1023,20 @@ async function decryptAndAppend(
   parsed: any,
   contact: any,
   identity: Identity,
+): Promise<boolean> {
+  return withSessionLock(
+    contact.aegisId,
+    (ctx) => decryptAndAppendLocked(env, parsed, contact, identity, ctx),
+    undefined,
+  );
+}
+
+async function decryptAndAppendLocked(
+  env: WireSealedEnvelope,
+  parsed: any,
+  contact: any,
+  identity: Identity,
+  lockCtx: LockCtx,
 ): Promise<boolean> {
   if (parsed.from !== contact.aegisId) {
     if (DEV) console.warn('[socket] sender mismatch — dropping');
@@ -1110,7 +1185,7 @@ async function decryptAndAppend(
   } catch (e) {
     if (existingJson && !parsed.x3dh) {
       if (DEV) console.warn('[socket] ratchetDecrypt threw on existing session:', (e as Error).message);
-      await tryRecoverDesync(contact, ratchetState, identity);
+      await tryRecoverDesync(contact, ratchetState, identity, lockCtx);
     } else if (DEV) {
       console.warn('[socket] Double Ratchet decryption threw:', (e as Error).message);
     }
@@ -1128,7 +1203,7 @@ async function decryptAndAppend(
       );
     }
     if (existingJson && !parsed.x3dh) {
-      await tryRecoverDesync(contact, ratchetState, identity);
+      await tryRecoverDesync(contact, ratchetState, identity, lockCtx);
     }
     return false;
   }
@@ -2007,6 +2082,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
 export async function sendProfileTo(
   contact: { aegisId: string; publicKeyB64: string },
   identity: Identity,
+  lockCtx?: LockCtx,
 ): Promise<void> {
   if (!socket || !connected || !authenticated) return;
   try {
@@ -2026,7 +2102,9 @@ export async function sendProfileTo(
       ...(await ownDeliveryTokenField()),
     });
     const recipientPub = decodeBase64(contact.publicKeyB64);
-    const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
+    // Forward lockCtx so that when this runs inside a desync-recovery (already
+    // holding contact.aegisId's lock) the nested acquire passes through.
+    const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity, lockCtx);
     const { envelope, newState } = encryptMessage(
       payload,
       identity.aegisId,
