@@ -22,7 +22,7 @@ import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { RELAY_URL, SEALED_TRANSPORT_VERSION } from '../config';
 import nacl from 'tweetnacl';
-import { decodeBase64 } from 'tweetnacl-util';
+import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import {
   sealCallInvite,
   openCallInvite,
@@ -55,24 +55,43 @@ function defaultRtcConfig(): RTCConfigShape {
   return { iceServers };
 }
 
-async function fetchTurnConfig(aegisId: string): Promise<RTCConfigShape> {
+async function fetchTurnConfig(_aegisId: string): Promise<RTCConfigShape> {
+  // A-7 auth (parity with mobile): minting TURN credentials requires proof of a
+  // registered identity. Sign `${aegisId}:turn:${timeBucket}` with the ACTIVE
+  // identity's Ed25519 key (the authoritative signer, read from the store), like
+  // POST /prekeys. No identity → no creds (STUN-only fallback).
+  const id = useIdentity.getState().identity;
+  if (!id?.signingSecretKey) return defaultRtcConfig();
+  const ts = Date.now();
+  const bucket = Math.floor(ts / 30_000);
+  const sig = encodeBase64(
+    nacl.sign.detached(decodeUTF8(`${id.aegisId}:turn:${bucket}`), id.signingSecretKey),
+  );
   try {
+    const query =
+      `aegisId=${encodeURIComponent(id.aegisId)}` +
+      `&sig=${encodeURIComponent(sig)}` +
+      `&ts=${ts}`;
     const res = await fetch(
-      `${RELAY_URL}/turn/credentials?aegisId=${encodeURIComponent(aegisId)}`,
+      `${RELAY_URL}/turn/credentials?${query}`,
       { signal: AbortSignal.timeout(3000) },
     );
     if (!res.ok) return defaultRtcConfig();
-    const { username, password } = (await res.json()) as {
+    // Server returns { urls, username, credential, ttl }. Accept the legacy
+    // `password` alias too for older relays.
+    const { username, credential, password } = (await res.json()) as {
       username: string;
-      password: string;
+      credential?: string;
+      password?: string;
       ttl: number;
     };
+    const cred = credential ?? password ?? '';
     const TURN_URL = (import.meta.env.VITE_TURN_URL as string | undefined) ?? '';
     const iceServers: RTCConfigShape['iceServers'] = [
       { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
     ];
     if (TURN_URL) {
-      iceServers.push({ urls: TURN_URL, username, credential: password });
+      iceServers.push({ urls: TURN_URL, username, credential: cred });
     }
     return { iceServers };
   } catch {
