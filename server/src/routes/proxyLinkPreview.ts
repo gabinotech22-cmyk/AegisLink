@@ -21,6 +21,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+import { lookup } from 'node:dns/promises';
 
 const router = Router();
 
@@ -41,47 +42,63 @@ const PreviewQuerySchema = z.object({
 });
 
 // ── SSRF block list ───────────────────────────────────────────────────────────
-// Returns true when the hostname resolves to a private/loopback/metadata range.
-// We check the hostname textually — DNS rebinding is out of scope here because
-// the relay is not a browser; actual network-level hardening (firewall rules
-// restricting egress from the relay process) is the correct defense-in-depth.
-function isBlockedHostname(hostname: string): boolean {
-  // Normalise: strip IPv6 brackets if present.
-  const h = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+/** True when a literal IP string is in a private/loopback/link-local/metadata range. */
+export function isBlockedIp(ip: string): boolean {
+  const h = ip.replace(/^\[|\]$/g, '').toLowerCase();
 
-  // Explicit blocked names
-  const blockedNames = [
-    'localhost',
-    'metadata.google.internal',
-  ];
-  if (blockedNames.includes(h)) return true;
-
-  // IPv4 address check
-  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  // IPv4 (also matches IPv4-mapped IPv6 like ::ffff:169.254.169.254 via the suffix)
+  const ipv4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (ipv4) {
     const [, a, b] = ipv4.map(Number) as [string, number, number, number, number];
-    // 127.x.x.x — loopback
-    if (a === 127) return true;
-    // 0.x.x.x — unspecified / invalid
-    if (a === 0) return true;
-    // 10.x.x.x — RFC 1918 private
-    if (a === 10) return true;
-    // 172.16.x.x – 172.31.x.x — RFC 1918 private
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    // 192.168.x.x — RFC 1918 private
-    if (a === 192 && b === 168) return true;
-    // 169.254.x.x — link-local (AWS IMDS: 169.254.169.254)
-    if (a === 169 && b === 254) return true;
+    if (a === 127) return true;                 // loopback
+    if (a === 0) return true;                    // unspecified / invalid
+    if (a === 10) return true;                   // RFC 1918
+    if (a === 172 && b >= 16 && b <= 31) return true; // RFC 1918
+    if (a === 192 && b === 168) return true;     // RFC 1918
+    if (a === 169 && b === 254) return true;     // link-local (AWS IMDS 169.254.169.254)
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
+    // Note: do not early-return false here — fall through to IPv6 checks for
+    // mapped forms; the IPv4 regex is anchored to the END of the string.
   }
 
-  // IPv6 loopback ::1
-  if (h === '::1' || h === '0:0:0:0:0:0:0:1') return true;
-  // IPv6 link-local fe80::/10
-  if (/^fe[89ab][0-9a-f]:/i.test(h)) return true;
-  // Unique local fc00::/7
-  if (/^f[cd][0-9a-f]{2}:/i.test(h)) return true;
+  if (h === '::1' || h === '0:0:0:0:0:0:0:1') return true; // IPv6 loopback
+  if (/^fe[89ab][0-9a-f]:/i.test(h)) return true;          // link-local fe80::/10
+  if (/^f[cd][0-9a-f]{2}:/i.test(h)) return true;          // unique-local fc00::/7
+  if (h === '::') return true;                              // unspecified
 
   return false;
+}
+
+// Returns true when the hostname is an explicitly-blocked name or a literal IP
+// in a blocked range. DNS resolution (rebinding defence) is handled separately
+// by assertPublicHost() before any fetch.
+function isBlockedHostname(hostname: string): boolean {
+  const h = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const blockedNames = ['localhost', 'metadata.google.internal'];
+  if (blockedNames.includes(h)) return true;
+  return isBlockedIp(h);
+}
+
+/**
+ * B-8 (DNS rebinding): textual hostname checks are not enough — an attacker can
+ * point a public-looking name at a private IP. Resolve the hostname to ALL of
+ * its A/AAAA records and reject if ANY resolves into a blocked range. Throws on
+ * any blocked/failed resolution. NOTE: a narrow TOCTOU window remains between
+ * this lookup and fetch()'s own resolution; the complete mitigation is an egress
+ * firewall on the relay host (documented in ops). This closes the trivial case.
+ */
+async function assertPublicHost(hostname: string): Promise<void> {
+  const h = hostname.replace(/^\[|\]$/g, '');
+  // A literal IP needs no DNS — validate directly.
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')) {
+    if (isBlockedIp(h)) throw new Error('blocked_ip');
+    return;
+  }
+  const addrs = await lookup(h, { all: true });
+  if (addrs.length === 0) throw new Error('no_address');
+  for (const { address } of addrs) {
+    if (isBlockedIp(address)) throw new Error('blocked_ip');
+  }
 }
 
 // ── OG tag extractor (regex-based, no cheerio dependency) ────────────────────
@@ -149,8 +166,17 @@ router.get('/', previewLimiter, async (req, res) => {
     return;
   }
 
-  // SSRF guard — block private/loopback/metadata ranges.
+  // SSRF guard — block private/loopback/metadata ranges (textual).
   if (isBlockedHostname(parsedUrl.hostname)) {
+    res.status(400).json({ error: 'INVALID_PAYLOAD' });
+    return;
+  }
+
+  // SSRF guard — resolve DNS and reject if the host points at a private IP
+  // (DNS-rebinding defence). Failure to resolve is also rejected.
+  try {
+    await assertPublicHost(parsedUrl.hostname);
+  } catch {
     res.status(400).json({ error: 'INVALID_PAYLOAD' });
     return;
   }
@@ -176,7 +202,8 @@ router.get('/', previewLimiter, async (req, res) => {
     // The final URL after any redirects — used to resolve relative image URLs.
     const finalUrl = upstream.url ?? url;
 
-    // Re-check hostname after redirects (basic open-redirect SSRF mitigation).
+    // Re-check hostname after redirects (open-redirect SSRF mitigation) — both
+    // textually and via DNS resolution (rebinding through a redirect target).
     try {
       const finalParsed = new URL(finalUrl);
       if (
@@ -186,6 +213,7 @@ router.get('/', previewLimiter, async (req, res) => {
         res.status(400).json({ error: 'INVALID_PAYLOAD' });
         return;
       }
+      await assertPublicHost(finalParsed.hostname);
     } catch {
       res.status(400).json({ error: 'INVALID_PAYLOAD' });
       return;
