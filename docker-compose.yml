@@ -39,6 +39,11 @@ services:
       # gif_provider_not_configured when it is unset. Must be listed here or the
       # container never sees it (same gotcha as TURN_HOST).
       KLIPY_KEY: ${KLIPY_KEY:-}
+      # BLOB_SECRET signs the HMAC download tokens that authorize blob fetches
+      # (routes/blob.ts). The relay THROWS on startup in production when it is
+      # unset (fail-closed, Ola 7 / C-1), so — like TURN_SECRET — it must be
+      # listed here or the container never sees the value from .env and crashes.
+      BLOB_SECRET: ${BLOB_SECRET:?BLOB_SECRET must be set in environment or .env}
       # TURN_SECRET is used server-side to sign ephemeral TURN credentials (TTL 24 h).
       # It never leaves the server and is NOT logged anywhere.
       TURN_SECRET: ${TURN_SECRET:?TURN_SECRET must be set in environment or .env}
