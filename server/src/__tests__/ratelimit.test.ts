@@ -1,9 +1,11 @@
 /**
  * ratelimit.test.ts — verifies express-rate-limit rejects past the threshold.
  *
- * Covers two sensitive endpoints:
+ * Covers:
  *   - GET /identity/challenge (PoW challenge flood guard: 20 / 60s)
- *   - POST /polls/vote (ballot-stuffing guard added in this audit: 30 / 60s)
+ *
+ * (The old POST /polls/vote case was removed with the HTTP poll endpoint in the
+ * 2026-06 audit, A-8 — votes are now E2EE-only and tallied client-side.)
  *
  * Once the limit is exceeded the server must respond 429 with a JSON body and
  * must NOT leak any IP in the response.
@@ -21,11 +23,9 @@ let app: express.Express;
 
 beforeAll(async () => {
   const { default: identityRoutes } = await import('../routes/identity.js');
-  const { default: pollsRoutes } = await import('../routes/polls.js');
   app = express();
   app.use(express.json());
   app.use('/identity', identityRoutes);
-  app.use('/polls', pollsRoutes);
 });
 
 describe('rate limiting', () => {
@@ -44,19 +44,5 @@ describe('rate limiting', () => {
     expect(lastBody.error).toBe('rate_limit_exceeded');
     // Zero-metadata: the 429 body must not echo an IP address.
     expect(JSON.stringify(lastBody)).not.toMatch(/\d+\.\d+\.\d+\.\d+/);
-  });
-
-  it('throttles POST /polls/vote after 30 votes/min', async () => {
-    let limited = false;
-    for (let i = 0; i < 40; i++) {
-      const res = await request(app)
-        .post('/polls/vote')
-        .send({ pollId: 'p1', voterHash: `voter-${i}`, optionIndex: 0 });
-      if (res.status === 429) {
-        limited = true;
-        break;
-      }
-    }
-    expect(limited).toBe(true);
   });
 });

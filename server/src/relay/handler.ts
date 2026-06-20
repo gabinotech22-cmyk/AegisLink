@@ -8,7 +8,6 @@ const { decodeBase64 } = naclUtil;
 import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, deliveryTokenRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
-import { setPollUpdateEmitter } from './pollBus.js';
 import { notifyRecipient, sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
@@ -371,10 +370,6 @@ const socketMeta = new WeakMap<Socket, SocketMeta>();
 export function attachRelay(io: SocketServer) {
   // authed aegisId -> set of sockets (multiple devices/tabs allowed)
   const sockets = new Map<string, Set<Socket>>();
-
-  setPollUpdateEmitter((pollId, counts) => {
-    io.emit('poll:update', { pollId, counts });
-  });
 
   // Temporary map for sockets in device-linking flow (unauthenticated desktop sockets)
   // desktopPubKey -> { socket, timer }
