@@ -1170,12 +1170,39 @@ export const deliveryTokenRepo = {
 // ── messageRepo ───────────────────────────────────────────────────────────────
 
 /**
- * Maximum number of distinct device IDs that may drain a queued message before
- * it is hard-deleted. Set to 2 as a conservative ceiling — most users have at
- * most a primary phone + one linked desktop. Increase if you add more device
- * slots in the product.
+ * Floor for the per-message drain cap. A queued message is hard-deleted once
+ * this many distinct devices have drained it OR the cap derived from the
+ * recipient's device count is reached — whichever is higher.
  */
-const MAX_DRAIN_DEVICES = 2;
+const MIN_DRAIN_CAP = 2;
+
+/**
+ * Effective drain cap for a recipient (B-1). Scales to `1 primary + active
+ * linked devices` so multi-device users (>2 devices) never lose a queued
+ * message before every device pulls it, with `MIN_DRAIN_CAP` as a floor.
+ * The cap can only ever rise above the old fixed 2, so this change extends a
+ * row's lifetime at worst — it can never cause under-delivery. Overcounting
+ * (e.g. if the primary is also tracked in linked_devices) is benign: the row
+ * simply lives until its TTL instead of being freed a little earlier.
+ */
+async function drainCapFor(recipient: string): Promise<number> {
+  const linked = await devicesRepo.countActive(recipient);
+  return Math.max(MIN_DRAIN_CAP, 1 + linked);
+}
+
+/**
+ * Parse a `drained_by` TEXT column into a validated `string[]` (M-3). The column
+ * is JSON-in-TEXT with no DB-level shape guarantee, so a corrupted or non-array
+ * payload must degrade to an empty list rather than throw on the downstream
+ * `.includes()` / `.push()`. Non-string array elements are dropped.
+ */
+export function parseDrainedBy(text: string | null | undefined): string[] {
+  if (!text) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return []; }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((x): x is string => typeof x === 'string');
+}
 
 /** Maximum queued messages per recipient — prevents disk exhaustion attacks. */
 export const MAX_QUEUED_PER_RECIPIENT = 500;
@@ -1211,33 +1238,27 @@ export const messageRepo = {
       [recipient, now]
     );
     if (!deviceId) return rows;
-    return rows.filter((row) => {
-      const drained: string[] = (() => {
-        try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
-      })();
-      return !drained.includes(deviceId);
-    });
+    return rows.filter((row) => !parseDrainedBy(row.drained_by).includes(deviceId));
   },
 
   /**
-   * Mark a message as drained by `deviceId`. Deletes the row when all expected
-   * devices have drained it or the caller provides no deviceId (legacy path).
+   * Mark a message as drained by `deviceId`. Deletes the row when the recipient's
+   * full set of devices has drained it (see drainCapFor) or the caller provides
+   * no deviceId (legacy path).
    */
   async delete(id: string, deviceId?: string): Promise<void> {
     if (!deviceId) {
       await dbRun(`DELETE FROM messages WHERE id = ?`, [id]);
       return;
     }
-    const row = await dbGet<Pick<MessageRow, 'drained_by'>>(
-      `SELECT drained_by FROM messages WHERE id = ?`,
+    const row = await dbGet<Pick<MessageRow, 'recipient' | 'drained_by'>>(
+      `SELECT recipient, drained_by FROM messages WHERE id = ?`,
       [id]
     );
     if (!row) return;
-    const drained: string[] = (() => {
-      try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
-    })();
+    const drained = parseDrainedBy(row.drained_by);
     if (!drained.includes(deviceId)) drained.push(deviceId);
-    if (drained.length >= MAX_DRAIN_DEVICES) {
+    if (drained.length >= await drainCapFor(row.recipient)) {
       await dbRun(`DELETE FROM messages WHERE id = ?`, [id]);
     } else {
       await dbRun(`UPDATE messages SET drained_by = ? WHERE id = ?`, [JSON.stringify(drained), id]);
@@ -1320,33 +1341,27 @@ export const senderKeyDistRepo = {
       [recipient, now]
     );
     if (!deviceId) return rows;
-    return rows.filter((row) => {
-      const drained: string[] = (() => {
-        try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
-      })();
-      return !drained.includes(deviceId);
-    });
+    return rows.filter((row) => !parseDrainedBy(row.drained_by).includes(deviceId));
   },
 
   /**
-   * Mark a distribution as drained by `deviceId`. Deletes the row when all
-   * expected devices have drained it — mirrors messageRepo.delete exactly.
+   * Mark a distribution as drained by `deviceId`. Deletes the row when the
+   * recipient's full set of devices has drained it — mirrors messageRepo.delete
+   * exactly (shared drainCapFor / parseDrainedBy).
    */
   async delete(id: string, deviceId?: string): Promise<void> {
     if (!deviceId) {
       await dbRun(`DELETE FROM sender_key_dist_queue WHERE id = ?`, [id]);
       return;
     }
-    const row = await dbGet<Pick<SenderKeyDistRow, 'drained_by'>>(
-      `SELECT drained_by FROM sender_key_dist_queue WHERE id = ?`,
+    const row = await dbGet<Pick<SenderKeyDistRow, 'recipient' | 'drained_by'>>(
+      `SELECT recipient, drained_by FROM sender_key_dist_queue WHERE id = ?`,
       [id]
     );
     if (!row) return;
-    const drained: string[] = (() => {
-      try { return JSON.parse(row.drained_by) as string[]; } catch { return []; }
-    })();
+    const drained = parseDrainedBy(row.drained_by);
     if (!drained.includes(deviceId)) drained.push(deviceId);
-    if (drained.length >= MAX_DRAIN_DEVICES) {
+    if (drained.length >= await drainCapFor(row.recipient)) {
       await dbRun(`DELETE FROM sender_key_dist_queue WHERE id = ?`, [id]);
     } else {
       await dbRun(`UPDATE sender_key_dist_queue SET drained_by = ? WHERE id = ?`, [JSON.stringify(drained), id]);
@@ -1572,6 +1587,14 @@ export const devicesRepo = {
        FROM linked_devices WHERE aegis_id = ? AND revoked = 0`,
       [aegisId]
     );
+  },
+  /** Count of active (non-revoked) linked devices — used to size the drain cap (B-1). */
+  async countActive(aegisId: string): Promise<number> {
+    const row = await dbGet<{ n: number | string }>(
+      `SELECT COUNT(*) AS n FROM linked_devices WHERE aegis_id = ? AND revoked = 0`,
+      [aegisId]
+    );
+    return row ? Number(row.n) : 0;
   },
   async revoke(deviceId: string, aegisId: string): Promise<boolean> {
     const result = await dbRun(
