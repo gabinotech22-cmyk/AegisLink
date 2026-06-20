@@ -1,3 +1,5 @@
+const path = require('path');
+
 /** @type {import('jest-expo').JestPreset} */
 module.exports = {
   preset: 'jest-expo',
@@ -7,7 +9,15 @@ module.exports = {
     '**/__tests__/**/*.test.tsx',
   ],
   transform: {
-    '^.+\\.[jt]sx?$': ['babel-jest', { presets: ['babel-preset-expo'] }],
+    // Local plugin lowers dynamic `import()` to `require()` so screens that
+    // lazy-load modules can be rendered under Jest (see the plugin's header).
+    '^.+\\.[jt]sx?$': [
+      'babel-jest',
+      {
+        presets: ['babel-preset-expo'],
+        plugins: [path.join(__dirname, 'jest/babel-transform-dynamic-import.js')],
+      },
+    ],
   },
   transformIgnorePatterns: [
     'node_modules/(?!(jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|tweetnacl|tweetnacl-util|@scure/base|@noble/hashes|@noble/post-quantum|@noble/ciphers|@noble/curves|react-native-reanimated|react-native-gesture-handler|expo-asset|expo-sqlite|expo-file-system)',
