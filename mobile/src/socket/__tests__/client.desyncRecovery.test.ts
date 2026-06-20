@@ -273,6 +273,38 @@ describe('ratchet desync auto-recovery', () => {
     expect(mockDeleteSpy).toHaveBeenCalledWith(peer.aegisId);
   });
 
+  it('completes the re-entrant recovery chain without deadlocking — emits a fresh init envelope', async () => {
+    // REGRESSION (session-lock reentrancy): the initiator recovery runs
+    //   decryptAndAppend [holds lock for peer]
+    //     → tryRecoverDesync → sendProfileTo → getOrCreateSession [re-acquires peer]
+    // The per-contact lock is NOT reentrant by default, so a naive wrap of every
+    // call site self-deadlocks here (the nested acquire waits on its own gate and
+    // the envelope handler never resolves → 5s timeout). The threaded LockCtx must
+    // let the nested acquire pass through. We assert the FULL chain ran by checking
+    // the recovery `init` envelope was actually emitted to the peer — that only
+    // happens after getOrCreateSession returns a fresh X3DH session.
+    const { me, peer } = buildInitiatorAndPeer();
+
+    connect(me);
+    bringOnline();
+    await new Promise((r) => setImmediate(r));
+
+    mockContactsState.contacts = [{ aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64 }];
+    setPeerBundle(peer);
+
+    const env = buildDesyncedEnvelope(me, peer, Date.now() - 120_000);
+    mockFakeSocket.emit.mockClear();
+    await mockFakeSocket.handlers.get('envelope')!(env);
+    await new Promise((r) => setImmediate(r));
+
+    // A fresh init envelope was emitted to the peer → the nested getOrCreateSession
+    // under the held lock completed (no deadlock).
+    const initEmit = mockFakeSocket.emit.mock.calls.find(
+      (c) => c[0] === 'envelope' && c[1]?.to === peer.aegisId && c[1]?.init === true,
+    );
+    expect(initEmit).toBeDefined();
+  });
+
   it('does NOT recover (grace period) when the desynced session was created recently', async () => {
     const me = buildIdentity();
     const peer = buildIdentity();
