@@ -535,8 +535,16 @@ async function migratePlaintextIfNeeded(dbName: string, keyHex: string): Promise
 
   const dir = `${FileSystem.documentDirectory}SQLite/`;
   const dbUri = `${dir}${dbName}`;
-  const info = await fs.getInfoAsync(dbUri);
-  if (!info.exists || !info.size) return; // fresh DB → opened/created encrypted
+  // Migration is a best-effort upgrade — it must NEVER crash app startup. In a
+  // plain node/jest env the real getInfoAsync resolves to undefined (no native
+  // module), so treat any non-object/throw as "cannot stat → skip migration".
+  let info: { exists: boolean; size?: number } | undefined;
+  try {
+    info = await fs.getInfoAsync(dbUri);
+  } catch {
+    return;
+  }
+  if (!info || !info.exists || !info.size) return; // fresh DB → opened/created encrypted
 
   // ── Detect ────────────────────────────────────────────────────────────────
   // Open a throwaway handle, apply the key, and probe. If the file is already
