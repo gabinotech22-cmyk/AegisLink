@@ -53,18 +53,9 @@ export function lookupIdentity(aegisId: string): Promise<IdentityRecord> {
   return request<IdentityRecord>(`/identity/${encodeURIComponent(aegisId)}`);
 }
 
-export function castAnonymousVote(
-  pollId: string,
-  voterHash: string,
-  optionIndex: number,
-): Promise<{ ok: boolean; counts: number[] }> {
-  return request<{ ok: boolean; counts: number[] }>('/polls/vote', {
-    method: 'POST',
-    body: JSON.stringify({ pollId, voterHash, optionIndex }),
-  });
-}
-
-export function fetchPollTally(pollId: string): Promise<{ counts: number[] }> {
-  return request<{ counts: number[] }>(`/polls/${encodeURIComponent(pollId)}`);
-}
+// NOTE: the HTTP poll endpoint was removed in the 2026-06 audit (A-8). Poll
+// votes travel inside E2EE group messages (`[vote:...]`) and are tallied
+// client-side — the relay never sees a vote. The old castAnonymousVote/
+// fetchPollTally helpers were unused and called a ballot-stuffable,
+// metadata-leaking endpoint; both are gone.
 
