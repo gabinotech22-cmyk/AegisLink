@@ -70,7 +70,7 @@ describe('decideGovernanceUpdate', () => {
     const claim = makeClaim();
     const tampered: ClaimedGovernance = {
       ...claim,
-      permissions: { ...claim.permissions, whoCanCall: 'everyone' },
+      permissions: { ...claim.permissions, whoCanCall: 'admins' },
     };
     expect(decideGovernanceUpdate({ ...base, claimed: tampered }).kind).toBe('reject');
   });

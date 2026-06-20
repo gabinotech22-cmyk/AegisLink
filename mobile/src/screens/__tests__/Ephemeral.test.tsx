@@ -15,7 +15,9 @@
  */
 
 import React from 'react';
-import { Alert } from 'react-native';
+// EphemeralScreen surfaces changes via themedAlert (in-app themed dialog).
+jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
+import { themedAlert } from '../../components/AlertHost';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
 // ── safe-area-context ──────────────────────────────────────────────────────
@@ -153,7 +155,8 @@ describe('EphemeralScreen', () => {
 
   // ── 6. Pressing '30s' shows alertEnabled ─────────────────────────────────
   it('shows Alert with "ephemeral.alertEnabled" when "30s" is pressed', () => {
-    const alertSpy = jest.spyOn(Alert, 'alert');
+    const alertSpy = themedAlert as jest.Mock;
+    alertSpy.mockClear();
     const { getByText } = render(<EphemeralScreen onBack={onBack} chatId="chat-1" />);
     fireEvent.press(getByText('ephemeral.30sLabel'));
     expect(alertSpy).toHaveBeenCalledWith(
@@ -166,7 +169,8 @@ describe('EphemeralScreen', () => {
   it('shows Alert with "ephemeral.alertDisabled" when "off" is pressed', () => {
     // Start with 30s selected so pressing 'off' actually triggers a change alert
     mockGetEphemeralTimer.mockReturnValue(30);
-    const alertSpy = jest.spyOn(Alert, 'alert');
+    const alertSpy = themedAlert as jest.Mock;
+    alertSpy.mockClear();
     const { getByText } = render(<EphemeralScreen onBack={onBack} chatId="chat-1" />);
     fireEvent.press(getByText('ephemeral.offLabel'));
     expect(alertSpy).toHaveBeenCalledWith(

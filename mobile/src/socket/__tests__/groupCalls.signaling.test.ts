@@ -88,11 +88,14 @@ jest.mock('../../store/contacts', () => ({
   },
 }));
 
-// ── store/groups (used by group_call:invite handler) ───────────────────────
+// ── store/groups (used by the group_call:channel membership gate) ──────────
+// Mutable so a test can inject a trusted group; "mock" prefix lets Babel
+// reference it inside the jest.mock() factory below.
+let mockGroups: Array<{ id: string; members: string[] }> = [];
 jest.mock('../../store/groups', () => ({
   useGroups: {
     getState: () => ({
-      groups: [],
+      groups: mockGroups,
     }),
   },
 }));
@@ -113,7 +116,8 @@ jest.mock('../../store/identity', () => ({
 // socket emit/on are jest.fn() so we can assert exact payloads.
 const mockEmit = jest.fn();
 const mockOn = jest.fn();
-const mockSocket = { emit: mockEmit, on: mockOn };
+const mockOff = jest.fn();
+const mockSocket = { emit: mockEmit, on: mockOn, off: mockOff };
 
 // Must be named with "mock" prefix so Babel allows it inside jest.mock() factory
 let mockSocketReturnValue: typeof mockSocket | null = mockSocket;
@@ -128,10 +132,19 @@ jest.mock('../client', () => ({
 // ── react-native (Alert) ───────────────────────────────────────────────────
 jest.mock('react-native', () => ({
   Alert: { alert: jest.fn() },
+  Platform: { OS: 'android', select: (o: Record<string, unknown>) => o.android ?? o.default },
+  NativeModules: {},
+  StyleSheet: { create: (s: Record<string, unknown>) => s },
+}));
+
+// ── AlertHost — cut the theme/StyleSheet chain (themedAlert is fire-and-forget here)
+jest.mock('../../components/AlertHost', () => ({
+  themedAlert: jest.fn(),
 }));
 
 // ── Import the store (real Zustand) and the module under test ──────────────
 import { useGroupCall } from '../../store/groupCall';
+import { useActiveCalls } from '../../store/activeCalls';
 import {
   declineGroupCall,
   hangupGroupCall,
@@ -147,6 +160,11 @@ describe('groupCalls signaling', () => {
     mockSocketReturnValue = mockSocket;
     mockIsConnected.mockReturnValue(true);
     useGroupCall.getState().reset();
+    mockGroups = [];
+    // Clear any banner state left from a prior test.
+    for (const gid of Object.keys(useActiveCalls.getState().calls)) {
+      useActiveCalls.getState().remove(gid);
+    }
   });
 
   afterEach(() => {
@@ -218,13 +236,15 @@ describe('groupCalls signaling', () => {
     expect(mockEmit).not.toHaveBeenCalled();
   });
 
-  // ── 4. attachGroupCallHandlers registers group_call:invite listener ────────
+  // ── 4. attachGroupCallHandlers registers the Discord-style channel banner ──
+  // Group calls no longer ring each member with `group_call:invite`; awareness
+  // comes from the passive `group_call:channel` heartbeat (see groupCalls.ts).
 
-  it('attachGroupCallHandlers registers a group_call:invite listener on the socket', () => {
+  it('attachGroupCallHandlers registers a group_call:channel listener on the socket', () => {
     attachGroupCallHandlers();
 
     const registeredEvents = (mockOn.mock.calls as [string, unknown][]).map(([ev]) => ev);
-    expect(registeredEvents).toContain('group_call:invite');
+    expect(registeredEvents).toContain('group_call:channel');
   });
 
   // ── 5. attachGroupCallHandlers registers group_call:accept listener ────────
@@ -236,61 +256,52 @@ describe('groupCalls signaling', () => {
     expect(registeredEvents).toContain('group_call:accept');
   });
 
-  // ── 6. group_call:invite handler calls startIncoming with correct args ─────
-
-  it('group_call:invite handler calls useGroupCall.getState().startIncoming with correct args', () => {
-    attachGroupCallHandlers();
-
-    // Locate the invite handler registered by socket.on(...)
-    const inviteCall = (mockOn.mock.calls as [string, (...args: unknown[]) => void][]).find(
-      ([ev]) => ev === 'group_call:invite',
+  // Helper: locate the registered group_call:channel handler.
+  function channelHandler(): (msg: unknown) => void {
+    const call = (mockOn.mock.calls as [string, (...args: unknown[]) => void][]).find(
+      ([ev]) => ev === 'group_call:channel',
     );
-    expect(inviteCall).toBeDefined();
-    const inviteHandler = inviteCall![1];
+    expect(call).toBeDefined();
+    return call![1];
+  }
 
-    const inviteMsg = {
+  // ── 6. channel heartbeat from a trusted member surfaces a banner ──────────
+
+  it('group_call:channel handler upserts a banner into useActiveCalls for a trusted group', () => {
+    // The membership gate requires the initiator to be a known group member.
+    mockGroups = [{ id: 'g-channel-001', members: ['initiator-aegis-001', 'self-aegis-id'] }];
+
+    attachGroupCallHandlers();
+    channelHandler()({
       from: 'initiator-aegis-001',
-      callId: 'call-invite-001',
-      groupId: 'g-invite-001',
+      callId: 'call-channel-001',
+      groupId: 'g-channel-001',
       groupName: 'DeltaForce',
-      media: 'audio' as const,
-    };
-
-    inviteHandler(inviteMsg);
-
-    const state = useGroupCall.getState();
-    expect(state.status).toBe('ringing-in');
-    expect(state.callId).toBe('call-invite-001');
-    expect(state.groupId).toBe('g-invite-001');
-    expect(state.groupName).toBe('DeltaForce');
-    expect(state.initiator).toBe('initiator-aegis-001');
-  });
-
-  it('group_call:invite handler auto-declines when already in a call', () => {
-    // Put store in-call before registering handlers
-    useGroupCall.getState().startOutgoing('existing-call', 'g-x', 'ExistingGroup', ['peer-Z']);
-    useGroupCall.getState().setStatus('in-call');
-
-    attachGroupCallHandlers();
-
-    const inviteCall = (mockOn.mock.calls as [string, (...args: unknown[]) => void][]).find(
-      ([ev]) => ev === 'group_call:invite',
-    );
-    const inviteHandler = inviteCall![1];
-
-    inviteHandler({
-      from: 'new-initiator',
-      callId: 'new-call-id',
-      groupId: 'g-new',
-      groupName: 'NewGroup',
+      participants: ['initiator-aegis-001'],
       media: 'audio' as const,
     });
 
-    // Should emit a decline and NOT change the store status
-    expect(mockEmit).toHaveBeenCalledWith(
-      'group_call:decline',
-      expect.objectContaining({ callId: 'new-call-id', to: 'new-initiator' }),
-    );
-    expect(useGroupCall.getState().callId).toBe('existing-call');
+    const banner = useActiveCalls.getState().calls['g-channel-001'];
+    expect(banner).toBeDefined();
+    expect(banner.callId).toBe('call-channel-001');
+    expect(banner.initiator).toBe('initiator-aegis-001');
+    expect(banner.participants).toEqual(['initiator-aegis-001']);
+  });
+
+  it('group_call:channel handler drops heartbeats whose initiator is not a group member', () => {
+    // Group exists but the sender is NOT in its member list → gate rejects it.
+    mockGroups = [{ id: 'g-channel-002', members: ['someone-else'] }];
+
+    attachGroupCallHandlers();
+    channelHandler()({
+      from: 'stranger-aegis',
+      callId: 'call-channel-002',
+      groupId: 'g-channel-002',
+      groupName: 'NewGroup',
+      participants: ['stranger-aegis'],
+      media: 'audio' as const,
+    });
+
+    expect(useActiveCalls.getState().calls['g-channel-002']).toBeUndefined();
   });
 });

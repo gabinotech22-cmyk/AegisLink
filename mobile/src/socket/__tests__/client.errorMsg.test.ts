@@ -133,8 +133,14 @@ jest.mock('../calls', () => ({
 // ── react-native Alert ────────────────────────────────────────────────────────
 jest.mock('react-native', () => ({
   Alert: { alert: jest.fn() },
-  AppState: { currentState: 'active' },
+  AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
+  Platform: { OS: 'android', select: (obj: Record<string, unknown>) => obj.android ?? obj.default },
+  NativeModules: {},
 }));
+
+// client.ts imports themedAlert from AlertHost; mock it so the theme/StyleSheet
+// chain (AlertHost.tsx runs StyleSheet.create at load) is not pulled in here.
+jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
 
 // ── Fake socket.io-client — captures registered handlers ─────────────────────
 type AnyFn = (...args: unknown[]) => unknown;
@@ -170,13 +176,13 @@ jest.mock('socket.io-client', () => ({
 // ── top-level imports (executed AFTER all jest.mock() hoisting) ───────────────
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
-import { Alert } from 'react-native';
+import { themedAlert } from '../../components/AlertHost';
 import type { Identity } from '../../crypto/identity';
 import { endCall } from '../calls';
 import { connect } from '../client';
 
 const mockEndCall = endCall as jest.Mock;
-const mockAlert = Alert.alert as jest.Mock;
+const mockAlert = themedAlert as jest.Mock;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

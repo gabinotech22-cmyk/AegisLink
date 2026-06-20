@@ -13,6 +13,10 @@
 import React from 'react';
 import { render, fireEvent, act, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
+// GroupChat surfaces the "no other members" prompt via themedAlert (in-app
+// themed dialog), not RN's Alert.alert.
+jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
+import { themedAlert } from '../../components/AlertHost';
 
 // ── react-native-reanimated ────────────────────────────────────────────────
 // Manual mock — requireActual('react-native-reanimated/mock') initialises native
@@ -390,7 +394,8 @@ describe('GroupChatScreen — voice note and group call paths', () => {
   // ── 3. Phone button shows Alert when group has 0 other members ────────────
 
   it('shows an Alert and does not call startGroupCall when group has no other members', async () => {
-    const alertSpy = jest.spyOn(Alert, 'alert');
+    const alertSpy = themedAlert as jest.Mock;
+    alertSpy.mockClear();
     mockGroupMembers = ['self-aegis-id'];
     const group = makeGroup({ members: ['self-aegis-id'] });
     const { getByLabelText } = renderGroupChat(group);
@@ -401,7 +406,6 @@ describe('GroupChatScreen — voice note and group call paths', () => {
 
     expect(alertSpy).toHaveBeenCalledTimes(1);
     expect(mockStartGroupCall).not.toHaveBeenCalled();
-    alertSpy.mockRestore();
   });
 
   // ── 4. Phone button calls startGroupCall with valid members ───────────────

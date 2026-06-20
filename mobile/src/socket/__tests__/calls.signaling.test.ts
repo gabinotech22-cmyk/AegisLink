@@ -103,7 +103,10 @@ jest.mock('../../db/local', () => ({ saveCall: jest.fn().mockResolvedValue(undef
 // ── socket/client ──────────────────────────────────────────────────────────
 const mockEmit = jest.fn();
 const mockOn = jest.fn();
-const mockSocket = { emit: mockEmit, on: mockOn };
+const mockOff = jest.fn();
+// attachCallHandlers() calls socket.off(...) to de-dupe handlers before
+// (re)registering, so the mock must provide it.
+const mockSocket = { emit: mockEmit, on: mockOn, off: mockOff };
 let mockSocketReturnValue: typeof mockSocket | null = mockSocket;
 const mockIsConnected = jest.fn().mockReturnValue(true);
 jest.mock('../client', () => ({
@@ -111,19 +114,30 @@ jest.mock('../client', () => ({
   isConnected: () => mockIsConnected(),
 }));
 
-// ── react-native (Alert + AppState) ────────────────────────────────────────
+// ── react-native (AppState + Platform) ──────────────────────────────────────
+// Platform is required because calls.ts' transitive imports call Platform.select()
+// at module-load time; omitting it crashes the suite before any test runs.
 jest.mock('react-native', () => ({
-  Alert: { alert: jest.fn() },
   AppState: { currentState: 'active' },
+  Platform: { OS: 'android', select: (obj: Record<string, unknown>) => obj.android ?? obj.default },
+  // Empty native registry → callForegroundService.native() resolves to null (its
+  // own "module absent in tests" path), instead of crashing on undefined.
+  NativeModules: {},
 }));
 
-import { Alert } from 'react-native';
+// ── components/AlertHost — calls.ts shows user-facing errors via themedAlert()
+//    (the in-app themed dialog), NOT RN's Alert.alert. Mock it directly so the
+//    test observes the real call path AND avoids loading the theme/StyleSheet
+//    chain (AlertHost.tsx runs StyleSheet.create at module load).
+jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
+
+import { themedAlert } from '../../components/AlertHost';
 import { useCall } from '../../store/call';
 import { useMessages } from '../../store/messages';
 import { saveCall } from '../../db/local';
 import { startCall, endCall, attachCallHandlers } from '../calls';
 
-const mockAlert = Alert.alert as jest.Mock;
+const mockAlert = themedAlert as jest.Mock;
 const mockSaveCall = saveCall as jest.Mock;
 const mockAppend = useMessages.getState().append as jest.Mock;
 
