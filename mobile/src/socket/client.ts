@@ -918,7 +918,6 @@ export function connect(identity: Identity): Socket {
     async (dist: {
       distId: string;
       groupId: string;
-      senderAegisId: string;
       ciphertextB64: string;
       nonceB64: string;
       iteration: number;
@@ -928,26 +927,42 @@ export function connect(identity: Identity): Socket {
           require('../crypto/channelKey') as typeof import('../crypto/channelKey');
         const { saveSenderKey } =
           require('../crypto/channelKeyStore') as typeof import('../crypto/channelKeyStore');
+        const { getGroup } = require('../db/local') as typeof import('../db/local');
 
-        const sender = useContacts.getState().contacts.find(
-          (c) => c.aegisId === dist.senderAegisId,
+        // Sealed sender (Phase 3b): the distributor's aegisId is NOT on the wire.
+        // Trial-decrypt the per-recipient box against each ROSTER member's X25519
+        // key (bounded by group size, and re-key is a rare member-removal event).
+        // A successful NaCl box open authenticates the sender; we then read the
+        // signed-in senderAegisId from inside and cross-check it matches the
+        // candidate whose key opened the box.
+        const group = await getGroup(dist.groupId);
+        const roster: string[] = group?.members ?? [];
+        const contactsById = new Map(
+          useContacts.getState().contacts.map((c) => [c.aegisId, c]),
         );
-        if (!sender) return; // unknown distributor — ignore
 
-        const senderKey = openSenderKeyDistribution(
-          {
-            senderAegisId: dist.senderAegisId,
-            channelId: dist.groupId,
-            iteration: dist.iteration,
-            ciphertextB64: dist.ciphertextB64,
-            nonceB64: dist.nonceB64,
-          },
-          identity.secretKeyB64,
-          sender.publicKeyB64,
-        );
-        await saveSenderKey(dist.groupId, dist.senderAegisId, senderKey);
-        // Ack only on success — if we throw above, no ack is sent so the relay
-        // will re-deliver (queued distribution) on the next reconnect.
+        let openedFor: string | null = null;
+        let senderKey: ReturnType<typeof openSenderKeyDistribution> = null;
+        for (const memberId of roster) {
+          if (memberId === identity.aegisId) continue;
+          const candidate = contactsById.get(memberId);
+          if (!candidate?.publicKeyB64) continue;
+          const res = openSenderKeyDistribution(
+            { ciphertextB64: dist.ciphertextB64, nonceB64: dist.nonceB64 },
+            identity.secretKeyB64,
+            candidate.publicKeyB64,
+          );
+          if (res && res.senderAegisId === memberId) {
+            openedFor = memberId;
+            senderKey = res;
+            break;
+          }
+        }
+        if (!openedFor || !senderKey) return; // not addressed to us / unknown distributor
+
+        await saveSenderKey(dist.groupId, openedFor, senderKey.senderKey);
+        // Ack only on success — if we throw/return above without acking, the
+        // relay re-delivers the queued distribution on the next reconnect.
         socket!.emit('group:rekey_drain_ack', { distId: dist.distId });
       } catch (e) {
         if (__DEV__) console.warn('[socket] group:rekey_dist handling failed:', (e as Error).message);
@@ -1052,12 +1067,13 @@ export async function rekeyGroupAfterRemoval(
     identity.secretKeyB64,
     recipients,
   );
+  // Sealed sender (Phase 3b): NO senderAegisId on the wire — it is sealed inside
+  // each per-recipient box, so the relay never learns who re-keyed the group.
   const distributions = sealed.map((dist) => ({
     aegisId: dist.aegisId,
     ciphertextB64: dist.ciphertextB64,
     nonceB64: dist.nonceB64,
     iteration: dist.iteration,
-    senderAegisId: dist.senderAegisId,
   }));
 
   // 4. Fan-out in batches of 512 (server-side limit per group:rekey call).
