@@ -11,7 +11,6 @@ import prekeysRoutes from './routes/prekeys.js';
 import blobRoutes from './routes/blob.js';
 import backupRoutes from './routes/backup.js';
 import linksRoutes from './routes/links.js';
-import pollsRoutes from './routes/polls.js';
 import turnRoutes from './routes/turn.js';
 import proxyGifRoutes from './routes/proxyGif.js';
 import proxyLinkPreviewRoutes from './routes/proxyLinkPreview.js';
@@ -104,7 +103,6 @@ app.use('/prekeys', prekeysRoutes);
 app.use('/blob', blobRoutes);
 app.use('/backup', backupRoutes);
 app.use('/', linksRoutes); // /.well-known/assetlinks.json + /g + /a landings
-app.use('/polls', pollsRoutes);
 app.use('/turn', turnRoutes);
 app.use('/proxy/gif', proxyGifRoutes);
 app.use('/proxy/linkpreview', proxyLinkPreviewRoutes);
