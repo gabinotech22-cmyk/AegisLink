@@ -1105,6 +1105,29 @@ export const identityRepo = {
       [row.aegis_id, row.public_key_b64, row.signing_public_key_b64, row.created_at]
     );
   },
+  /**
+   * B-2: account deletion. Removes every relay-side trace of `aegisId` — the
+   * identity row plus all server-held material keyed to it: prekeys (SPK/OPK/PQ),
+   * queued inbound messages and group-key distributions (by recipient), push +
+   * delivery tokens, and linked-device records. Sealed-sender means the relay
+   * never learns who SENT a message, so outbound copies cannot (and need not) be
+   * targeted — only the user's own inbound queue and published material.
+   *
+   * Deletes run sequentially and are idempotent: a partial failure leaves the
+   * rest deletable on retry. Work/enterprise membership is intentionally out of
+   * scope (separate org-invariant concerns).
+   */
+  async deleteAccount(aegisId: string): Promise<void> {
+    await dbRun(`DELETE FROM messages WHERE recipient = ?`, [aegisId]);
+    await dbRun(`DELETE FROM sender_key_dist_queue WHERE recipient = ?`, [aegisId]);
+    await dbRun(`DELETE FROM prekeys_onetime WHERE aegis_id = ?`, [aegisId]);
+    await dbRun(`DELETE FROM prekeys_signed WHERE aegis_id = ?`, [aegisId]);
+    await dbRun(`DELETE FROM prekeys_pq_signed WHERE aegis_id = ?`, [aegisId]);
+    await dbRun(`DELETE FROM push_tokens WHERE aegis_id = ?`, [aegisId]);
+    await dbRun(`DELETE FROM delivery_tokens WHERE aegis_id = ?`, [aegisId]);
+    await dbRun(`DELETE FROM linked_devices WHERE aegis_id = ?`, [aegisId]);
+    await dbRun(`DELETE FROM identities WHERE aegis_id = ?`, [aegisId]);
+  },
 };
 
 // ── deliveryTokenRepo ─────────────────────────────────────────────────────────

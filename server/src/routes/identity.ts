@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
+import nacl from 'tweetnacl';
+import tweetnaclUtil from 'tweetnacl-util';
 import { z } from 'zod';
 import { identityRepo } from '../db/client.js';
 import { issueChallenge, verifyPoW, REGISTRATION_POW_DIFFICULTY } from '../pow/challenge.js';
+
+const { decodeBase64 } = tweetnaclUtil;
 
 const router = Router();
 
@@ -127,6 +131,80 @@ router.get('/:id', lookupLimiter, async (req, res) => {
     signingPublicKey: row.signing_public_key_b64,
     createdAt: row.created_at,
   });
+});
+
+// ── DELETE /identity/:id ──────────────────────────────────────────────────────
+/**
+ * B-2: account deletion. Wipes every relay-side trace of the identity.
+ *
+ * Auth: a valid Ed25519 signature over `${aegisId}:delete:${timeBucket}` where
+ * timeBucket = Math.floor(ts / 30_000), verified against the stored signing key —
+ * the same proof-of-key-possession scheme as POST /prekeys (golden rule #3:
+ * knowing an ID is not owning it). `ts` must be within ±60s of server time.
+ *
+ * Body: { sig, ts }. Response 200: { deleted: true }.
+ */
+const DeleteBody = z.object({
+  sig: z.string().min(1),
+  ts: z.number().int().positive(),
+});
+
+const deleteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
+  },
+});
+
+router.delete('/:id', deleteLimiter, async (req, res) => {
+  const id = String(req.params.id);
+  if (!AEGIS_ID_RE.test(id)) {
+    res.status(400).json({ error: 'invalid_id_format' });
+    return;
+  }
+  const parsed = DeleteBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });
+    return;
+  }
+  const { sig, ts } = parsed.data;
+
+  if (Math.abs(Date.now() - ts) > 60_000) {
+    res.status(400).json({ error: 'timestamp_out_of_range' });
+    return;
+  }
+
+  const identity = await identityRepo.get(id);
+  if (!identity || !identity.signing_public_key_b64) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+
+  let pubKeyBytes: Uint8Array;
+  let sigBytes: Uint8Array;
+  try {
+    pubKeyBytes = decodeBase64(identity.signing_public_key_b64);
+    sigBytes = decodeBase64(sig);
+  } catch {
+    res.status(403).json({ error: 'invalid_signature' });
+    return;
+  }
+
+  const bucket = Math.floor(ts / 30_000);
+  const encode = (b: number) => new TextEncoder().encode(`${id}:delete:${b}`);
+  const valid =
+    nacl.sign.detached.verify(encode(bucket), sigBytes, pubKeyBytes) ||
+    nacl.sign.detached.verify(encode(bucket - 1), sigBytes, pubKeyBytes);
+  if (!valid) {
+    res.status(403).json({ error: 'invalid_signature' });
+    return;
+  }
+
+  await identityRepo.deleteAccount(id);
+  res.status(200).json({ deleted: true });
 });
 
 export default router;
