@@ -147,10 +147,12 @@ describe('openAndInit — retry logic', () => {
     const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
     openMock.mockResolvedValue(mockDb);
 
-    // First execAsync (journal_mode = DELETE) throws — must be swallowed by
-    // initSchema's try/catch; the rest of init proceeds and succeeds.
+    // execAsync sequence: call 1 = PRAGMA key (SQLCipher, resolves), call 2 =
+    // journal_mode = DELETE (throws → must be swallowed by initSchema's
+    // try/catch), then foreign_keys + the rest succeed.
     const journalError = new Error('unable to open database file: shared memory');
     mockDb.execAsync
+      .mockResolvedValueOnce(undefined)     // PRAGMA key (Ola 10)
       .mockRejectedValueOnce(journalError)  // journal pragma fails → caught
       .mockResolvedValue(undefined);        // foreign_keys + all subsequent succeed
 
