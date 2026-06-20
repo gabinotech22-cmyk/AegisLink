@@ -131,9 +131,9 @@ Esf **M**.
 
 | ID | Sev | Hallazgo | Fix |
 |----|-----|----------|-----|
-| A-3 | 🟠 | Timer efímero solo client-side | Enviar `ephemeralTtl` en el envelope; el relay respeta TTL corto en la cola offline. |
-| M-6 | 🟡 | Work `channel:msg` body en cleartext en DB (`handler.ts:994`) | Cifrado obligatorio server-side-enforced; rechazar body no cifrado. |
-| B-5 | 🔵 | FTS5 indexa body cifrado (gibberish) | Lógica condicional: no indexar si `encrypted:true`; búsqueda client-side. |
+| A-3 | ✅ | Timer efímero solo client-side | **HECHO** (`fix/sec-ephemeral-work`): `ephemeralTtl` opcional en `EnvelopeIn`/`EnvelopeV2In` (bound ≤ MESSAGE_TTL_MS); el relay fija `expires_at = createdAt+ttl` al encolar, `purgeExpired` lo borra a su expiración. Mobile+desktop envían el TTL derivado de `expiresAt`. Test de regresión. |
+| M-6 | ✅ | Work `channel:msg` body en cleartext en DB | **HECHO**: el relay rechaza `channel:msg` salvo `encrypted:true` + `nonce` (`encryption_required`, fail-closed). Nunca persiste body legible. Test de regresión. |
+| B-5 | ✅ | FTS5 indexa body cifrado (gibberish) | **HECHO**: los triggers FTS indexan body `''` (búsqueda full-text server-side imposible sobre E2EE → client-side). Migración recrea triggers + `delete-all` para evictar ciphertext previo. |
 
 ---
 
