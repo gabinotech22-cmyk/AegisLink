@@ -22,6 +22,7 @@ import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getCon
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { spkRotationDecision, spkPruneTargetKeyId } from './spkRotation';
+import { reviveBytes, reviveMkSkipped } from './ratchetSerde';
 import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
@@ -344,61 +345,7 @@ async function flushOfflineQueue(identity: Identity) {
   }
 }
 
-// ── Ratchet state JSON revival ────────────────────────────────────────────────
-function isBufferShape(o: unknown): o is { type: 'Buffer'; data: number[] } {
-  return (
-    typeof o === 'object' &&
-    o !== null &&
-    (o as { type?: unknown }).type === 'Buffer' &&
-    Array.isArray((o as { data?: unknown }).data) &&
-    (o as { data: unknown[] }).data.every((x) => typeof x === 'number')
-  );
-}
-
-function isNumberArray(o: unknown): o is number[] {
-  return Array.isArray(o) && o.every((x) => typeof x === 'number');
-}
-
-function isByteIndexedObject(o: unknown): o is Record<string, number> {
-  if (typeof o !== 'object' || o === null || Array.isArray(o)) return false;
-  const keys = Object.keys(o as object);
-  if (keys.length === 0) return false;
-  for (const k of keys) {
-    if (!/^\d+$/.test(k)) return false;
-    const v = (o as Record<string, unknown>)[k];
-    if (typeof v !== 'number' || v < 0 || v > 255) return false;
-  }
-  return true;
-}
-
-function reviveBytes(o: unknown): Uint8Array | null {
-  if (o === null || o === undefined) return null;
-  if (o instanceof Uint8Array) return o;
-  if (isBufferShape(o)) return new Uint8Array(o.data);
-  if (isNumberArray(o)) return new Uint8Array(o);
-  if (isByteIndexedObject(o)) {
-    const keys = Object.keys(o)
-      .map((k) => parseInt(k, 10))
-      .sort((a, b) => a - b);
-    const out = new Uint8Array(keys.length);
-    for (let i = 0; i < keys.length; i++) out[i] = o[String(keys[i])];
-    return out;
-  }
-  return null;
-}
-
-function reviveMkSkipped(raw: unknown): Map<string, Uint8Array> {
-  const out = new Map<string, Uint8Array>();
-  if (!Array.isArray(raw)) return out;
-  for (const entry of raw) {
-    if (!Array.isArray(entry) || entry.length !== 2) continue;
-    const [k, v] = entry as [unknown, unknown];
-    if (typeof k !== 'string') continue;
-    const bytes = reviveBytes(v);
-    if (bytes) out.set(k, bytes);
-  }
-  return out;
-}
+// Ratchet state JSON revival — see ./ratchetSerde (pure, unit-tested).
 
 export function getSocket(): Socket | null {
   return socket;
