@@ -8,6 +8,7 @@ import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
+import { DeleteAccountSection } from '../components/DeleteAccountSection';
 import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
@@ -129,6 +130,8 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             onPress={() => showAlert('Jurisdiction', 'AegisLink stores zero metadata. Requests for user data return nothing.')}
           />
         </Section>
+
+        <DeleteAccountSection />
       </div>
 
     </div>

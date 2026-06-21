@@ -255,7 +255,9 @@
     "languageEnglish": "🇬🇧 English",
     "languageItalian": "🇮🇹 Italiano",
     "languageSpanish": "🇪🇸 Español",
-    "work": "trabajo"
+    "work": "trabajo",
+    "deleteAccount": "Eliminar cuenta",
+    "deleteAccountSub": "Borra tu identidad del relay y de este dispositivo para siempre"
   },
   "lock": {
     "locked": "BLOQUEADO · AEGISLINK",
@@ -1088,5 +1090,16 @@
     "safetyInfo": "Tus claves se generan y almacenan exclusivamente en este dispositivo. Nunca salen del dispositivo y nadie puede recuperarlas, ni siquiera AegisLink.",
     "copied": "Copiado",
     "copiedDesc": "Valor copiado al portapapeles."
+  },
+  "deleteAccount": {
+    "confirmTitle": "¿Eliminar cuenta?",
+    "confirmBody": "Esto elimina permanentemente tu identidad del relay y borra todo en este dispositivo. Tu historial de mensajes se perderá para siempre. No se puede deshacer.",
+    "confirmCta": "Eliminar cuenta",
+    "deleting": "Eliminando…",
+    "errorTitle": "No se pudo eliminar la cuenta",
+    "errorBody": "El relay rechazó la eliminación: {{reason}}. No se ha borrado nada de este dispositivo.",
+    "wipeAnyway": "Borrar localmente de todos modos",
+    "wipeAnywayTitle": "¿Borrar sin confirmación del servidor?",
+    "wipeAnywayBody": "Esto borra todo en este dispositivo ahora. Tu cuenta podría seguir existiendo en el relay."
   }
 }

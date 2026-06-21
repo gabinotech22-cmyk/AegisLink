@@ -255,7 +255,9 @@
     "languageEnglish": "🇬🇧 English",
     "languageItalian": "🇮🇹 Italiano",
     "languageSpanish": "🇪🇸 Español",
-    "work": "work"
+    "work": "work",
+    "deleteAccount": "Delete account",
+    "deleteAccountSub": "Permanently erase your identity from the relay and this device"
   },
   "lock": {
     "locked": "LOCKED · AEGISLINK",
@@ -538,7 +540,7 @@
     "viewing": "VIEWING · {{seconds}}s LEFT",
     "expired": "Expired",
     "openGallery": "OPEN GALLERY ↗",
-    "selectMedia": "SELECT MEDIA",
+    "selectMedia": "SELECT TYPE",
     "sendEphemeral": "Send ephemeral content",
     "sendEphemeralDesc": "The recipient can only view it once — after that it is deleted everywhere.",
     "previewBadge": "VIEW ONCE",
@@ -552,7 +554,6 @@
     "bullet1": "EXIF and metadata removed before encrypting",
     "bullet2": "No saving to recipient's gallery",
     "bullet3": "E2EE encrypted — the server only sees opaque bytes",
-    "selectMedia": "SELECT TYPE",
     "mediaPhoto": "PHOTO ↗",
     "mediaAudio": "AUDIO ↗",
     "toolDraw": "DRAW",
@@ -1089,5 +1090,16 @@
     "safetyInfo": "Your keys are generated and stored exclusively on this device. They never leave the device and cannot be recovered by anyone — not even AegisLink.",
     "copied": "Copied",
     "copiedDesc": "Value copied to clipboard."
+  },
+  "deleteAccount": {
+    "confirmTitle": "Delete account?",
+    "confirmBody": "This permanently deletes your identity from the relay and wipes everything on this device. Your message history will be lost forever. This cannot be undone.",
+    "confirmCta": "Delete account",
+    "deleting": "Deleting…",
+    "errorTitle": "Couldn't delete account",
+    "errorBody": "The relay rejected the deletion: {{reason}}. Nothing has been wiped from this device.",
+    "wipeAnyway": "Wipe locally anyway",
+    "wipeAnywayTitle": "Wipe without server confirmation?",
+    "wipeAnywayBody": "This erases everything on this device now. Your account may still exist on the relay."
   }
 }

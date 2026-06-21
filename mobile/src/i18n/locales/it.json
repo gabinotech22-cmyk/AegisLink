@@ -292,7 +292,9 @@
     "languageEnglish": "🇬🇧 English",
     "languageItalian": "🇮🇹 Italiano",
     "languageSpanish": "🇪🇸 Español",
-    "work": "work"
+    "work": "work",
+    "deleteAccount": "Elimina account",
+    "deleteAccountSub": "Cancella la tua identità dal relay e da questo dispositivo per sempre"
   },
   "lock": {
     "locked": "BLOCCATO · AEGISLINK",
@@ -1002,7 +1004,7 @@
     "members": "Membri",
     "addMember": "Aggiungi membro",
     "removeMember": "Rimuovi membro",
-    "makeAdmin": "Nomina admin",
+    "makeAdmin": "Rendi admin",
     "deleteGroup": "Elimina gruppo",
     "membersSection": "MEMBRI · {{count}}",
     "fromContacts": "DAI TUOI CONTATTI",
@@ -1035,7 +1037,6 @@
     "roleMod": "MOD",
     "roleMember": "MEMBRO",
     "manageMember": "Gestisci membro",
-    "makeAdmin": "Rendi admin",
     "makeModerator": "Rendi moderatore",
     "makeMember": "Rimuovi ruolo",
     "removeFromGroup": "Rimuovi dal gruppo",
@@ -1242,5 +1243,16 @@
   "attach": {
     "shareContactTitle": "Condividi contatto",
     "shareContactEmpty": "Nessun contatto disponibile da condividere."
+  },
+  "deleteAccount": {
+    "confirmTitle": "Eliminare l'account?",
+    "confirmBody": "Questo elimina definitivamente la tua identità dal relay e cancella tutto su questo dispositivo. La cronologia dei messaggi andrà persa per sempre. Non può essere annullato.",
+    "confirmCta": "Elimina account",
+    "deleting": "Eliminazione…",
+    "errorTitle": "Impossibile eliminare l'account",
+    "errorBody": "Il relay ha rifiutato l'eliminazione: {{reason}}. Nulla è stato cancellato da questo dispositivo.",
+    "wipeAnyway": "Cancella comunque in locale",
+    "wipeAnywayTitle": "Cancellare senza conferma dal server?",
+    "wipeAnywayBody": "Questo cancella tutto su questo dispositivo ora. Il tuo account potrebbe esistere ancora sul relay."
   }
 }

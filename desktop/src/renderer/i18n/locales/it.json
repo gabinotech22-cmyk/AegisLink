@@ -255,7 +255,9 @@
     "languageEnglish": "🇬🇧 English",
     "languageItalian": "🇮🇹 Italiano",
     "languageSpanish": "🇪🇸 Español",
-    "work": "work"
+    "work": "work",
+    "deleteAccount": "Elimina account",
+    "deleteAccountSub": "Cancella la tua identità dal relay e da questo dispositivo per sempre"
   },
   "lock": {
     "locked": "BLOCCATO · AEGISLINK",
@@ -523,7 +525,7 @@
     "viewing": "VISUALIZZAZIONE · {{seconds}}s RIMANENTI",
     "expired": "Scaduto",
     "openGallery": "APRI GALLERIA ↗",
-    "selectMedia": "SELEZIONA MEDIA",
+    "selectMedia": "SELEZIONA TIPO",
     "sendEphemeral": "Invia contenuto effimero",
     "sendEphemeralDesc": "Il destinatario potrà vederlo solo una volta — dopo verrà eliminato ovunque.",
     "previewBadge": "VEDI UNA VOLTA",
@@ -537,7 +539,6 @@
     "bullet1": "EXIF e metadati rimossi prima della cifratura",
     "bullet2": "Nessun salvataggio nella galleria del destinatario",
     "bullet3": "Cifrato E2EE — il server vede solo byte opachi",
-    "selectMedia": "SELEZIONA TIPO",
     "mediaPhoto": "FOTO ↗",
     "mediaAudio": "AUDIO ↗",
     "toolDraw": "DISEGNA",
@@ -1040,5 +1041,16 @@
     "fileFromIn": "{{size}} · da {{from}} · {{time}} · in {{chat}}",
     "fromYou": "te",
     "file": "file"
+  },
+  "deleteAccount": {
+    "confirmTitle": "Eliminare l'account?",
+    "confirmBody": "Questo elimina definitivamente la tua identità dal relay e cancella tutto su questo dispositivo. La cronologia dei messaggi andrà persa per sempre. Non può essere annullato.",
+    "confirmCta": "Elimina account",
+    "deleting": "Eliminazione…",
+    "errorTitle": "Impossibile eliminare l'account",
+    "errorBody": "Il relay ha rifiutato l'eliminazione: {{reason}}. Nulla è stato cancellato da questo dispositivo.",
+    "wipeAnyway": "Cancella comunque in locale",
+    "wipeAnywayTitle": "Cancellare senza conferma dal server?",
+    "wipeAnywayBody": "Questo cancella tutto su questo dispositivo ora. Il tuo account potrebbe esistere ancora sul relay."
   }
 }
