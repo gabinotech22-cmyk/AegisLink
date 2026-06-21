@@ -190,26 +190,38 @@ export async function encryptAndUploadMedia(fileUri: string, mimeType?: string):
   return token ? `blob:${id}:${keyB64}:${nonceB64}:${token}` : `blob:${id}:${keyB64}:${nonceB64}`;
 }
 
+/** Outcome of fetching a server blob into the local encrypted-at-rest store. */
+export type BlobFetchState = 'ok' | 'expired' | 'unavailable';
+
 /**
  * Ensure the ENCRYPTED ciphertext for a `blob:` URI is cached locally and
  * persistently (no decryption). Call this at receive time while online so the
  * media survives the server's 24h blob TTL and the device going offline.
+ *
+ * Returns `'ok'` once the ciphertext is local, `'expired'` if the server reports
+ * the blob is gone for good (B-7: HTTP 404/410 — the 24h TTL elapsed), or
+ * `'unavailable'` if it could not be fetched after the transient-error retries.
  */
-export async function persistEncryptedBlob(mediaUri: string): Promise<void> {
+export async function persistEncryptedBlob(mediaUri: string): Promise<BlobFetchState> {
   const parsed = parseBlobUri(mediaUri);
-  if (!parsed) return;
+  if (!parsed) return 'unavailable';
   const { id, token } = parsed;
   await ensureMediaDir();
-  if (await fileExists(encPathFor(id))) return; // already persisted
+  if (await fileExists(encPathFor(id))) return 'ok'; // already persisted
   const downloadUrl = downloadUrlFor(id, token);
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt]);
     try {
       const result = await FileSystem.downloadAsync(downloadUrl, encPathFor(id));
-      if (result.status === 200) return;
+      if (result.status === 200) return 'ok';
       await FileSystem.deleteAsync(encPathFor(id), { idempotent: true });
-    } catch { /* retry */ }
+      // 404/410 = the server's 24h TTL elapsed; the blob is gone for good. Stop
+      // retrying (it will never reappear) and report it as expired so the UI can
+      // render "adjunto expirado" instead of an endless spinner.
+      if (result.status === 404 || result.status === 410) return 'expired';
+    } catch { /* network error — retry */ }
   }
+  return 'unavailable';
 }
 
 /**
@@ -219,34 +231,52 @@ export async function persistEncryptedBlob(mediaUri: string): Promise<void> {
  * recovered (no local ciphertext and the server blob has expired). Non-blob
  * URIs are returned as-is when the file still exists.
  */
-export async function resolveMedia(mediaUri: string, ext: string = 'jpg'): Promise<string | null> {
-  if (!mediaUri) return null;
+/** Resolution of a media URI: a usable local `path`, or null with the reason. */
+export type MediaResolution =
+  | { path: string; state: 'ok' }
+  | { path: null; state: 'expired' | 'unavailable' };
+
+/**
+ * Like {@link resolveMedia} but reports WHY a blob is unrecoverable so the UI can
+ * distinguish a permanently-expired attachment (B-7: server TTL elapsed → show
+ * "adjunto expirado") from a transient failure (still downloading / decrypt
+ * error → spinner or retry).
+ */
+export async function resolveMediaDetailed(mediaUri: string, ext: string = 'jpg'): Promise<MediaResolution> {
+  if (!mediaUri) return { path: null, state: 'unavailable' };
   if (!mediaUri.startsWith('blob:')) {
-    return (await fileExists(mediaUri)) ? mediaUri : null;
+    return (await fileExists(mediaUri))
+      ? { path: mediaUri, state: 'ok' }
+      : { path: null, state: 'unavailable' };
   }
   const parsed = parseBlobUri(mediaUri);
-  if (!parsed) return null;
+  if (!parsed) return { path: null, state: 'unavailable' };
   const { id, keyB64, nonceB64 } = parsed;
 
   const decPath = decPathFor(id, ext);
-  if (await fileExists(decPath)) return decPath; // already decrypted in cache
+  if (await fileExists(decPath)) return { path: decPath, state: 'ok' }; // already decrypted in cache
 
   await ensureMediaDir();
   if (!(await fileExists(encPathFor(id)))) {
-    await persistEncryptedBlob(mediaUri);
-    if (!(await fileExists(encPathFor(id)))) return null; // unrecoverable
+    const fetched = await persistEncryptedBlob(mediaUri);
+    if (fetched === 'expired') return { path: null, state: 'expired' };
+    if (!(await fileExists(encPathFor(id)))) return { path: null, state: 'unavailable' };
   }
 
   try {
     const encB64 = await FileSystem.readAsStringAsync(encPathFor(id), { encoding: FileSystem.EncodingType.Base64 });
     const ciphertext = decodeBase64(encB64);
     const plaintext = nacl.secretbox.open(ciphertext, decodeBase64(nonceB64), decodeBase64(keyB64));
-    if (!plaintext) return null;
+    if (!plaintext) return { path: null, state: 'unavailable' };
     await FileSystem.writeAsStringAsync(decPath, encodeBase64(plaintext), { encoding: FileSystem.EncodingType.Base64 });
-    return decPath;
+    return { path: decPath, state: 'ok' };
   } catch {
-    return null;
+    return { path: null, state: 'unavailable' };
   }
+}
+
+export async function resolveMedia(mediaUri: string, ext: string = 'jpg'): Promise<string | null> {
+  return (await resolveMediaDetailed(mediaUri, ext)).path;
 }
 
 /**
@@ -258,9 +288,10 @@ export async function resolveMedia(mediaUri: string, ext: string = 'jpg'): Promi
  */
 export async function downloadAndDecryptMedia(mediaUri: string, ext: string = 'jpg'): Promise<string> {
   if (!mediaUri.startsWith('blob:')) return mediaUri;
-  const local = await resolveMedia(mediaUri, ext);
-  if (!local) throw new Error('Failed to download media: unrecoverable (no local ciphertext and server blob expired)');
-  return local;
+  const res = await resolveMediaDetailed(mediaUri, ext);
+  if (res.path) return res.path;
+  // Distinguishable causes so callers can surface "adjunto expirado" (B-7).
+  throw new Error(res.state === 'expired' ? 'attachment_expired' : 'attachment_unavailable');
 }
 
 /**

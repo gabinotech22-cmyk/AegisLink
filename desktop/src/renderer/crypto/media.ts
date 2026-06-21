@@ -114,7 +114,12 @@ export async function downloadAndDecryptMedia(
   const res = await fetch(downloadUrl);
   if (!res.ok) {
     key.fill(0);
-    throw new Error('Failed to download media');
+    // B-7: 404/410 = the server's 24h blob TTL elapsed; the attachment is gone
+    // for good. Surface a distinguishable error so the UI can show "adjunto
+    // expirado" instead of a generic failure. Mirrors mobile's BlobFetchState.
+    throw new Error(
+      res.status === 404 || res.status === 410 ? 'attachment_expired' : 'attachment_unavailable',
+    );
   }
   const ciphertext = new Uint8Array(await res.arrayBuffer());
 
