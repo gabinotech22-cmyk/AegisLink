@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { logger } from '../utils/logger';
 import { View, Text, Pressable, Animated, Easing, Image, StyleSheet } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -55,7 +56,7 @@ export function ViewOnceScreen({ contact, mediaUri, messageId, onBack }: Props) 
         const FileSystem = require('expo-file-system') as typeof import('expo-file-system');
         await FileSystem.deleteAsync(mediaUri, { idempotent: true });
       } catch (err) {
-        if (__DEV__) console.warn('[view-once] failed to physically delete file:', err);
+        if (__DEV__) logger.warn('[view-once] failed to physically delete file:', err);
       }
     }
   };
@@ -66,7 +67,7 @@ export function ViewOnceScreen({ contact, mediaUri, messageId, onBack }: Props) 
       const SC = require('expo-screen-capture');
       SC.preventScreenCaptureAsync().catch(() => {});
     } catch (e) {
-      if (__DEV__) console.warn('[view-once] screen capture block failed:', e);
+      if (__DEV__) logger.warn('[view-once] screen capture block failed:', e);
     }
     return () => {
       try {

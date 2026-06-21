@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { logger } from '../utils/logger';
 import {
   Modal, View, Text, Pressable, TextInput, StyleSheet, Dimensions,
   ActivityIndicator, Image, Platform, Keyboard,
@@ -136,7 +137,7 @@ export function MediaEditorModal({
           h: frame.h - 20,
         });
       } catch (e) {
-        console.warn('Failed to enter crop mode:', e);
+        logger.warn('Failed to enter crop mode:', e);
       } finally {
         setBusy(false);
       }
@@ -266,7 +267,7 @@ export function MediaEditorModal({
       setCropBox(null);
       setImageFrame(null);
     } catch (e) {
-      console.warn('Freeform crop failed:', e);
+      logger.warn('Freeform crop failed:', e);
     } finally {
       setBusy(false);
     }

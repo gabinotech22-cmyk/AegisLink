@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { logger } from '../utils/logger';
 import { useTranslation } from 'react-i18next';
 import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Keyboard, Platform, StyleSheet, Linking, Image, ActivityIndicator, Modal } from 'react-native';
 import { FormattedText } from '../components/FormattedText';
@@ -158,7 +159,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           void showCriticalSecurityNotification('key_changed', contact.name);
         }
       } catch (e) {
-        if (__DEV__) console.warn('[ChatScreen] Directory sync audit failed:', e);
+        if (__DEV__) logger.warn('[ChatScreen] Directory sync audit failed:', e);
       }
     })();
     return () => { active = false; };

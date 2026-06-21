@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { logger } from '../utils/logger';
 import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, pinContact as dbPinContact, type StoredContact } from '../db/local';
 import { lookupIdentity, ApiError } from '../api';
 import { keyMatchesAegisId } from '../crypto/aegisId';
@@ -160,7 +161,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
       try {
         const record = await lookupIdentity(aegisId);
         if (record.publicKey !== publicKeyB64) {
-          if (__DEV__) console.warn('[contacts] directory MITM warning: server publishes a different key than the one scanned');
+          if (__DEV__) logger.warn('[contacts] directory MITM warning: server publishes a different key than the one scanned');
         }
         const fetchedSigning =
           typeof record.signingPublicKey === 'string' && record.signingPublicKey.length > 0

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { logger } from '../utils/logger';
 import { useTranslation } from 'react-i18next';
 import { View, Text, Pressable, Animated, Easing, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -277,7 +278,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         }
       }
     } catch (e) {
-      if (__DEV__) console.warn('[lock-panic] failed to load duress config:', e);
+      if (__DEV__) logger.warn('[lock-panic] failed to load duress config:', e);
     }
 
     const ok = hasPIN ? await verifyPIN(pin) : false;

@@ -1,4 +1,5 @@
 import nacl from 'tweetnacl';
+import { logger } from '../../utils/logger';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { hkdfSHA256 } from './kdf';
@@ -415,7 +416,7 @@ export function shouldUsePqReceiver(
     // rate of v1 fallbacks is observable (a spike could indicate an attack OR a
     // bundle-publish regression).
     if (__DEV__) {
-      console.warn(
+      logger.warn(
         '[PQXDH] downgrade fallback: advertised a PQ prekey but inbound init carried no ML-KEM ciphertext — proceeding with classic v1 X3DH',
       );
     }

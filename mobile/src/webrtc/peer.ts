@@ -5,6 +5,7 @@ import type {
   RTCIceCandidate as RTCIceCandidateT,
   MediaStream,
 } from 'react-native-webrtc';
+import { logger } from '../utils/logger';
 import { rtcConfig, type RTCConfigShape } from './ice';
 
 export type CallMedia = 'audio' | 'video';
@@ -152,6 +153,6 @@ export async function addRemoteIce(pc: RTCPeerConnectionT, candidate: string): P
     const ice = new RTCIceCandidate(JSON.parse(candidate));
     await (pc as any).addIceCandidate(ice);
   } catch (e) {
-    if (__DEV__) console.warn('[webrtc] addIceCandidate failed', (e as Error).message);
+    if (__DEV__) logger.warn('[webrtc] addIceCandidate failed', (e as Error).message);
   }
 }

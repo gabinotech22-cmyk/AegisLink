@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { logger } from '../utils/logger';
 ;
 import { ss } from '../utils/secureStore';
 import { themedAlert } from '../components/AlertHost';
@@ -75,7 +76,7 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
         const config = JSON.parse(raw) as PanicConfig;
         gestureRef.current = config.gesture ?? 'off';
       } catch {
-        if (__DEV__) console.warn('[usePanicGesture] Failed to read panic config');
+        if (__DEV__) logger.warn('[usePanicGesture] Failed to read panic config');
         return;
       }
 
@@ -114,7 +115,7 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
             }
           );
         } catch {
-          if (__DEV__) console.warn('[usePanicGesture] expo-sensors not available — shake gesture disabled');
+          if (__DEV__) logger.warn('[usePanicGesture] expo-sensors not available — shake gesture disabled');
         }
       }
       // 'hold' is handled via registerLongPress() — no listener needed here.

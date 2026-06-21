@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { logger } from '../utils/logger';
 import * as SecureStore from 'expo-secure-store';
 
 // AFTER_FIRST_UNLOCK: required for Android 14 hardware-backed Keystore (StrongBox).
@@ -83,10 +84,10 @@ async function runPublish(identity: Identity, slotId: string, silent = false): P
   // refresh — staying 'published' avoids a false alarm and the retry storm that
   // caused the 429 in the first place.
   if (silent && result.retryAfterMs != null) {
-    if (__DEV__) console.warn('[identity] silent refresh rate-limited (staying published):', result.error);
+    if (__DEV__) logger.warn('[identity] silent refresh rate-limited (staying published):', result.error);
     return;
   }
-  if (__DEV__) console.warn('[identity] publish failed:', result.error);
+  if (__DEV__) logger.warn('[identity] publish failed:', result.error);
   useIdentity.setState({
     publishStatus: 'failed',
     publishError: result.error ?? 'Unknown error',
@@ -307,7 +308,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         persistentAvatarUri = destPath;
       } catch (e) {
         // Non-fatal: fall back to the original URI and log in dev so it is easy to spot
-        if (__DEV__) console.warn('[identity] avatar copy to DocumentDirectory failed:', e);
+        if (__DEV__) logger.warn('[identity] avatar copy to DocumentDirectory failed:', e);
       }
     }
 
@@ -324,7 +325,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     const identity = get().identity;
     if (identity) {
       const { broadcastProfileUpdate } = require('../socket/client');
-      broadcastProfileUpdate(identity).catch((e: Error) => { if (__DEV__) console.warn('[identity] profile broadcast failed:', e); });
+      broadcastProfileUpdate(identity).catch((e: Error) => { if (__DEV__) logger.warn('[identity] profile broadcast failed:', e); });
     }
   },
 
@@ -339,7 +340,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         const { broadcastProfileUpdate } = require('../socket/client');
         await broadcastProfileUpdate(identity);
       } catch (e) {
-        if (__DEV__) console.warn('[identity] status broadcast failed:', e);
+        if (__DEV__) logger.warn('[identity] status broadcast failed:', e);
       }
     }
   },
