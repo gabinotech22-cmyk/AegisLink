@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import { logger } from '../utils/logger';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 ;
@@ -318,7 +319,7 @@ export function attachCallHandlers(): void {
     // (unknown sender, tampered ciphertext, missing identity) drops the invite.
     const offer = openSignal(msg.from, msg);
     if (!offer) {
-      if (__DEV__) console.warn('[calls] call:invite signal decrypt failed — dropping');
+      if (__DEV__) logger.warn('[calls] call:invite signal decrypt failed — dropping');
       return;
     }
     await processIncomingInvite(socket, msg.from, msg.callId, msg.media, offer);
@@ -336,7 +337,7 @@ export function attachCallHandlers(): void {
       Date.now(),
     );
     if (!opened) {
-      if (__DEV__) console.warn('[calls] call:invite:v2 open/auth failed — dropping');
+      if (__DEV__) logger.warn('[calls] call:invite:v2 open/auth failed — dropping');
       return;
     }
     rememberCallKey(msg.callId, opened.callKey);
@@ -346,7 +347,7 @@ export function attachCallHandlers(): void {
   socket.on('call:answer', async (msg: CallAnswerPayload) => {
     const answer = openSignal(msg.from, msg);
     if (!answer) {
-      if (__DEV__) console.warn('[calls] call:answer signal decrypt failed — dropping');
+      if (__DEV__) logger.warn('[calls] call:answer signal decrypt failed — dropping');
       return;
     }
     await processIncomingAnswer(msg.callId, answer);
@@ -357,7 +358,7 @@ export function attachCallHandlers(): void {
     if (!key) return;
     const answer = openWithCallKey(key, { ciphertext: msg.ciphertext, nonce: msg.nonce });
     if (!answer) {
-      if (__DEV__) console.warn('[calls] call:answer:v2 decrypt failed — dropping');
+      if (__DEV__) logger.warn('[calls] call:answer:v2 decrypt failed — dropping');
       return;
     }
     await processIncomingAnswer(msg.callId, answer);
@@ -366,7 +367,7 @@ export function attachCallHandlers(): void {
   socket.on('call:ice', async (msg: CallIcePayload) => {
     const candidate = openSignal(msg.from, msg);
     if (!candidate) {
-      if (__DEV__) console.warn('[calls] call:ice signal decrypt failed — dropping');
+      if (__DEV__) logger.warn('[calls] call:ice signal decrypt failed — dropping');
       return;
     }
     processIncomingIce(msg.callId, candidate);
@@ -377,7 +378,7 @@ export function attachCallHandlers(): void {
     if (!key) return;
     const candidate = openWithCallKey(key, { ciphertext: msg.ciphertext, nonce: msg.nonce });
     if (!candidate) {
-      if (__DEV__) console.warn('[calls] call:ice:v2 decrypt failed — dropping');
+      if (__DEV__) logger.warn('[calls] call:ice:v2 decrypt failed — dropping');
       return;
     }
     processIncomingIce(msg.callId, candidate);
@@ -545,11 +546,11 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
     onIceCandidate: (candidate) => {
       if (!emitSealedSignal(socket, 'ice', callId, toAegisId, JSON.stringify(candidate.toJSON?.() ?? candidate))) {
-        if (__DEV__) console.warn('[calls] cannot seal outgoing ICE — peer key missing');
+        if (__DEV__) logger.warn('[calls] cannot seal outgoing ICE — peer key missing');
       }
     },
     onConnectionStateChange: (state) => {
-      if (__DEV__) console.log('[calls] connectionState:', state);
+      if (__DEV__) logger.debug('[calls] connectionState:', state);
       if (state === 'connected') {
         useCall.getState().setStatus('in-call');
         const { callId: cid } = useCall.getState();
@@ -670,11 +671,11 @@ export async function acceptCall(): Promise<void> {
     onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
     onIceCandidate: (candidate) => {
       if (!emitSealedSignal(socket, 'ice', callId, peerId, JSON.stringify(candidate.toJSON?.() ?? candidate))) {
-        if (__DEV__) console.warn('[calls] cannot seal outgoing ICE — peer key missing');
+        if (__DEV__) logger.warn('[calls] cannot seal outgoing ICE — peer key missing');
       }
     },
     onConnectionStateChange: (state) => {
-      if (__DEV__) console.log('[calls] connectionState:', state);
+      if (__DEV__) logger.debug('[calls] connectionState:', state);
       if (state === 'connected') {
         useCall.getState().setStatus('in-call');
         const { callId: cid } = useCall.getState();

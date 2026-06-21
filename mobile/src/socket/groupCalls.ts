@@ -19,6 +19,7 @@
  */
 
 import * as Crypto from 'expo-crypto';
+import { logger } from '../utils/logger';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import type { MediaStream } from 'react-native-webrtc';
@@ -242,7 +243,7 @@ function maybeFinalizeFailedCall(callId: string): void {
   if (state.callId !== callId) return;
   if (state.status === 'in-call' || state.status === 'ended' || state.status === 'idle') return;
 
-  if (__DEV__) console.warn('[groupCalls] all peers failed for', callId, '— finalizing call');
+  if (__DEV__) logger.warn('[groupCalls] all peers failed for', callId, '— finalizing call');
 
   try {
     const { Audio } = require('expo-av') as typeof import('expo-av');
@@ -297,13 +298,13 @@ async function createGroupPeerAsOfferer(
         const payload = JSON.stringify(candidate.toJSON?.() ?? candidate);
         const sealed = sealSignal(remoteAegisId, payload);
         if (!sealed) {
-          if (__DEV__) console.warn('[groupCalls] cannot seal ICE for', remoteAegisId);
+          if (__DEV__) logger.warn('[groupCalls] cannot seal ICE for', remoteAegisId);
           return;
         }
         socket.emit('group_call:ice', { callId, to: remoteAegisId, ...sealed });
       },
       onConnectionStateChange: (state) => {
-        if (__DEV__) console.log('[groupCalls] peer', remoteAegisId, 'state:', state);
+        if (__DEV__) logger.debug('[groupCalls] peer', remoteAegisId, 'state:', state);
         if (state === 'connected') {
           useGroupCall.getState().setParticipantConnected(remoteAegisId, true);
           useGroupCall.getState().setStatus('in-call');
@@ -326,7 +327,7 @@ async function createGroupPeerAsOfferer(
     const offer = await createOffer(peer.pc);
     const sealed = sealSignal(remoteAegisId, offer);
     if (!sealed) {
-      if (__DEV__) console.warn('[groupCalls] cannot seal offer for', remoteAegisId);
+      if (__DEV__) logger.warn('[groupCalls] cannot seal offer for', remoteAegisId);
       cleanupPeer(groupPeer);
       getPeersForCall(callId).delete(remoteAegisId);
       maybeFinalizeFailedCall(callId);
@@ -334,7 +335,7 @@ async function createGroupPeerAsOfferer(
     }
     socket.emit('group_call:offer', { callId, to: remoteAegisId, ...sealed });
   } catch (e) {
-    if (__DEV__) console.warn('[groupCalls] createOffer failed for', remoteAegisId, e);
+    if (__DEV__) logger.warn('[groupCalls] createOffer failed for', remoteAegisId, e);
     cleanupPeer(groupPeer);
     getPeersForCall(callId).delete(remoteAegisId);
     maybeFinalizeFailedCall(callId);
@@ -673,7 +674,7 @@ export function attachGroupCallHandlers(): void {
       }
 
       void createGroupPeerAsOfferer(msg.callId, msg.from).catch((e) => {
-        if (__DEV__) console.warn('[groupCalls] createGroupPeerAsOfferer failed for', msg.from, e);
+        if (__DEV__) logger.warn('[groupCalls] createGroupPeerAsOfferer failed for', msg.from, e);
       });
     },
   );
@@ -684,7 +685,7 @@ export function attachGroupCallHandlers(): void {
     (msg: { from: string; callId: string }) => {
       const state = useGroupCall.getState();
       if (state.callId !== msg.callId) return;
-      if (__DEV__) console.log('[groupCalls]', msg.from, 'declined');
+      if (__DEV__) logger.debug('[groupCalls]', msg.from, 'declined');
       const peers = groupPeerMap.get(msg.callId);
       if (peers) {
         const peer = peers.get(msg.from);
@@ -702,7 +703,7 @@ export function attachGroupCallHandlers(): void {
 
       const offerSdp = openSignal(msg.from, msg);
       if (!offerSdp) {
-        if (__DEV__) console.warn('[groupCalls] failed to open offer from', msg.from);
+        if (__DEV__) logger.warn('[groupCalls] failed to open offer from', msg.from);
         return;
       }
 
@@ -753,7 +754,7 @@ export function attachGroupCallHandlers(): void {
           const answer = await createAnswer(peer.pc);
           const sealed = sealSignal(msg.from, answer);
           if (!sealed) {
-            if (__DEV__) console.warn('[groupCalls] cannot seal answer for', msg.from);
+            if (__DEV__) logger.warn('[groupCalls] cannot seal answer for', msg.from);
             cleanupPeer(groupPeer);
             getPeersForCall(msg.callId).delete(msg.from);
             maybeFinalizeFailedCall(msg.callId);
@@ -761,7 +762,7 @@ export function attachGroupCallHandlers(): void {
           }
           socket2.emit('group_call:answer', { callId: msg.callId, to: msg.from, ...sealed });
         } catch (e) {
-          if (__DEV__) console.warn('[groupCalls] offer handling failed for', msg.from, e);
+          if (__DEV__) logger.warn('[groupCalls] offer handling failed for', msg.from, e);
           cleanupPeer(groupPeer);
           getPeersForCall(msg.callId).delete(msg.from);
           maybeFinalizeFailedCall(msg.callId);
@@ -779,7 +780,7 @@ export function attachGroupCallHandlers(): void {
 
       const answerSdp = openSignal(msg.from, msg);
       if (!answerSdp) {
-        if (__DEV__) console.warn('[groupCalls] failed to open answer from', msg.from);
+        if (__DEV__) logger.warn('[groupCalls] failed to open answer from', msg.from);
         return;
       }
 
@@ -791,7 +792,7 @@ export function attachGroupCallHandlers(): void {
           await setRemoteAnswer(groupPeer.pc, answerSdp);
           await markRemoteDescSet(groupPeer);
         } catch (e) {
-          if (__DEV__) console.warn('[groupCalls] setRemoteAnswer failed for', msg.from, e);
+          if (__DEV__) logger.warn('[groupCalls] setRemoteAnswer failed for', msg.from, e);
         }
       })();
     },
@@ -806,7 +807,7 @@ export function attachGroupCallHandlers(): void {
 
       const candidateJson = openSignal(msg.from, msg);
       if (!candidateJson) {
-        if (__DEV__) console.warn('[groupCalls] failed to open ICE from', msg.from);
+        if (__DEV__) logger.warn('[groupCalls] failed to open ICE from', msg.from);
         return;
       }
 
@@ -858,7 +859,7 @@ export function attachGroupCallHandlers(): void {
       const existing = useActiveCalls.getState().calls[msg.groupId];
       const initiator = existing?.callId === msg.callId ? existing.initiator : msg.from;
       if (!localGroup.members.includes(initiator)) {
-        if (__DEV__) console.warn('[groupCalls] channel dropped — initiator not in group', initiator);
+        if (__DEV__) logger.warn('[groupCalls] channel dropped — initiator not in group', initiator);
         return;
       }
 
