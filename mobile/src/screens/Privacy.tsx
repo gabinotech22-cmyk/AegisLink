@@ -9,6 +9,7 @@ import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
+import { DeleteAccountSection } from '../components/DeleteAccountSection';
 import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
@@ -289,6 +290,8 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             onPress={() => { themedAlert(i18nT('privacy.jurisdictionAlert'), i18nT('privacy.jurisdictionAlertDesc')); }}
           />
         </Section>
+
+        <DeleteAccountSection />
       </ScrollView>
 
       <TabBar t={t} current="settings" onChange={onTab} />
