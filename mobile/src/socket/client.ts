@@ -44,6 +44,7 @@ import {
   type OutboxJob,
 } from '../db/local';
 import { decideV2GroupMetadata, decideGovernanceUpdate } from './groupMetadataDecision';
+import { reviveBytes, reviveMkSkipped } from './ratchetSerde';
 import {
   computeRosterHash,
   signGroupMetadata,
@@ -300,65 +301,7 @@ async function flushOutbox(identity: Identity): Promise<void> {
   }
 }
 
-// ── Ratchet state JSON revival ────────────────────────────────────────────────
-// JSON.stringify converts Uint8Array to a sparse-keyed object like
-// {"0":12,"1":244,...}. We strictly detect bytes-shapes and never use
-// `instanceof Object` as a catch-all (that fires for any object, including
-// MKSKIPPED whose values may already be plain objects). Only Buffer-shaped
-// objects ({type:'Buffer',data:[]}), pure number arrays, and pure
-// number-keyed objects of byte values are converted to Uint8Array.
-function isBufferShape(o: unknown): o is { type: 'Buffer'; data: number[] } {
-  return (
-    typeof o === 'object' &&
-    o !== null &&
-    (o as { type?: unknown }).type === 'Buffer' &&
-    Array.isArray((o as { data?: unknown }).data) &&
-    (o as { data: unknown[] }).data.every((x) => typeof x === 'number')
-  );
-}
-
-function isNumberArray(o: unknown): o is number[] {
-  return Array.isArray(o) && o.every((x) => typeof x === 'number');
-}
-
-function isByteIndexedObject(o: unknown): o is Record<string, number> {
-  if (typeof o !== 'object' || o === null || Array.isArray(o)) return false;
-  const keys = Object.keys(o as object);
-  if (keys.length === 0) return false;
-  for (const k of keys) {
-    if (!/^\d+$/.test(k)) return false;
-    const v = (o as Record<string, unknown>)[k];
-    if (typeof v !== 'number' || v < 0 || v > 255) return false;
-  }
-  return true;
-}
-
-function reviveBytes(o: unknown): Uint8Array | null {
-  if (o === null || o === undefined) return null;
-  if (o instanceof Uint8Array) return o;
-  if (isBufferShape(o)) return new Uint8Array(o.data);
-  if (isNumberArray(o)) return new Uint8Array(o);
-  if (isByteIndexedObject(o)) {
-    const keys = Object.keys(o).map((k) => parseInt(k, 10)).sort((a, b) => a - b);
-    const out = new Uint8Array(keys.length);
-    for (let i = 0; i < keys.length; i++) out[i] = o[String(keys[i])];
-    return out;
-  }
-  return null;
-}
-
-function reviveMkSkipped(raw: unknown): Map<string, Uint8Array> {
-  const out = new Map<string, Uint8Array>();
-  if (!Array.isArray(raw)) return out;
-  for (const entry of raw) {
-    if (!Array.isArray(entry) || entry.length !== 2) continue;
-    const [k, v] = entry as [unknown, unknown];
-    if (typeof k !== 'string') continue;
-    const bytes = reviveBytes(v);
-    if (bytes) out.set(k, bytes);
-  }
-  return out;
-}
+// Ratchet state JSON revival — see ./ratchetSerde (pure, unit-tested).
 
 export function getSocket(): Socket | null {
   return socket;
