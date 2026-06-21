@@ -17,7 +17,7 @@
   "dependencies": {
     "@noble/hashes": "^1.4.0",
     "@noble/post-quantum": "^0.6.1",
-    "better-sqlite3-multiple-ciphers": "^11.9.1",
+    "better-sqlite3-multiple-ciphers": "^12.11.1",
     "i18next": "^23.11.5",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
@@ -54,9 +54,7 @@
             "x64"
           ]
         }
-      ],
-      "sign": null,
-      "signDlls": false
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -85,8 +83,8 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "electron": "^31.6.0",
-    "electron-builder": "^24.13.3",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.0.16",
     "electron-vite": "^2.3.0",
     "typescript": "^5.5.2",
     "vite": "^5.3.1",
