@@ -1,4 +1,5 @@
 import * as Notifications from 'expo-notifications';
+import { logger } from '../utils/logger';
 import { Platform } from 'react-native';
 import { SERVER_URL } from '../config';
 import type { Identity } from '../crypto/identity';
@@ -175,7 +176,7 @@ function attachLocalNotificationHandlers(): void {
             // Only dismiss once the reply is sent (or safely queued in the outbox).
             await Notifications.dismissNotificationAsync(response.notification.request.identifier);
           } catch (e) {
-            if (__DEV__) console.warn('[push] inline reply failed:', e);
+            if (__DEV__) logger.warn('[push] inline reply failed:', e);
           }
         })();
       }
@@ -188,7 +189,7 @@ function attachLocalNotificationHandlers(): void {
           void useMessages.getState().markRead(chatId);
           void Notifications.dismissNotificationAsync(response.notification.request.identifier);
         } catch (e) {
-          if (__DEV__) console.warn('[push] mark-read action failed:', e);
+          if (__DEV__) logger.warn('[push] mark-read action failed:', e);
         }
       }
     } else if ((data?.type as string) === 'call_invite') {
@@ -338,7 +339,7 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
       granted = asked.granted || asked.status === 'granted';
     }
     if (!granted) {
-      if (__DEV__) console.log('[push] notification permission denied — wake-ups disabled');
+      if (__DEV__) logger.debug('[push] notification permission denied — wake-ups disabled');
       return { token: null };
     }
 
@@ -363,17 +364,17 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
       body: JSON.stringify({ aegisId: identity.aegisId, expoToken, platform }),
     });
     if (!res.ok) {
-      if (__DEV__) console.warn('[push] server rejected token registration', res.status);
+      if (__DEV__) logger.warn('[push] server rejected token registration', res.status);
       return { token: null };
     }
 
     registered = true;
-    if (__DEV__) console.log('[push] registered for wake-ups, token:', expoToken);
+    if (__DEV__) logger.debug('[push] registered for wake-ups, token:', expoToken);
     return { token: expoToken };
   } catch (e) {
     // Token acquisition/registration failed (e.g. emulator without FCM). Local
     // notifications + tap routing already work via attachLocalNotificationHandlers().
-    if (__DEV__) console.warn('[push] remote token registration failed (local notifications still active):', (e as Error).message);
+    if (__DEV__) logger.warn('[push] remote token registration failed (local notifications still active):', (e as Error).message);
     return { token: null };
   }
 }
@@ -425,7 +426,7 @@ export async function showIncomingNotification(
           isMuted = true;
         }
       } catch (e) {
-        if (__DEV__) console.warn('[push] failed to check database muted_until:', e);
+        if (__DEV__) logger.warn('[push] failed to check database muted_until:', e);
       }
     }
 
@@ -494,7 +495,7 @@ export async function showIncomingNotification(
       await Notifications.setBadgeCountAsync(totalUnread + 1);
     }
   } catch (err) {
-    if (__DEV__) console.warn('[push] showIncomingNotification failed:', err);
+    if (__DEV__) logger.warn('[push] showIncomingNotification failed:', err);
   }
 }
 
@@ -531,7 +532,7 @@ export async function showCriticalSecurityNotification(
       trigger: null,
     });
   } catch (err) {
-    if (__DEV__) console.warn('[push] showCriticalSecurityNotification failed:', err);
+    if (__DEV__) logger.warn('[push] showCriticalSecurityNotification failed:', err);
   }
 }
 
@@ -569,7 +570,7 @@ export async function showGroupCallChannelNotification(
       trigger: null,
     });
   } catch (err) {
-    if (__DEV__) console.warn('[push] showGroupCallChannelNotification failed:', err);
+    if (__DEV__) logger.warn('[push] showGroupCallChannelNotification failed:', err);
   }
 }
 
@@ -592,6 +593,6 @@ export async function showIncomingCallNotification(
       trigger: null,
     });
   } catch (err) {
-    if (__DEV__) console.warn('[push] showIncomingCallNotification failed:', err);
+    if (__DEV__) logger.warn('[push] showIncomingCallNotification failed:', err);
   }
 }

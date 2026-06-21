@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { logger } from '../utils/logger';
 import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -48,7 +49,7 @@ export function AttachSheetScreen({ onBack, onPick, onMultipleImages, onMultiple
       );
       return result.uri;
     } catch (e) {
-      if (__DEV__) console.warn('[attach] EXIF strip failed:', e);
+      if (__DEV__) logger.warn('[attach] EXIF strip failed:', e);
       // Fail closed: do not return the original URI with EXIF intact.
       throw new Error(i18nT('attachSheet.errorProcessImage', 'Could not process image securely'));
     }

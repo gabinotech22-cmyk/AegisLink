@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 /**
  * Runtime integrity check — LOCAL ONLY, ZERO TELEMETRY.
  *
@@ -49,7 +50,7 @@ export async function checkIntegrity(): Promise<IntegrityReport> {
     hooked = typeof JM.hookDetected === 'function' ? !!JM.hookDetected() : false;
     debugged = typeof JM.isDebuggedMode === 'function' ? await JM.isDebuggedMode() : false;
   } catch (e) {
-    if (__DEV__) console.warn('[integrity] jail-monkey unavailable:', e);
+    if (__DEV__) logger.warn('[integrity] jail-monkey unavailable:', e);
   }
 
   // Only root + active hooking count as "compromised" for the backup gate.

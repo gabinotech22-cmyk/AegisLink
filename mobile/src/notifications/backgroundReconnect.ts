@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 /**
  * Background notification task — wakes the socket from a killed/backgrounded
  * state WITHOUT leaking metadata.
@@ -117,6 +118,6 @@ export async function registerBackgroundReconnect(): Promise<void> {
     const Notifications = require('expo-notifications') as typeof import('expo-notifications');
     await Notifications.registerTaskAsync(BG_NOTIFICATION_TASK);
   } catch (e) {
-    if (__DEV__) console.warn('[push] background reconnect task registration failed:', (e as Error).message);
+    if (__DEV__) logger.warn('[push] background reconnect task registration failed:', (e as Error).message);
   }
 }

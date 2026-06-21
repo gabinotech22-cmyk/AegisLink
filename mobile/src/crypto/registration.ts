@@ -14,6 +14,7 @@
  */
 
 import nacl from 'tweetnacl';
+import { logger } from '../utils/logger';
 import * as SecureStore from 'expo-secure-store';
 import { encodeBase64 } from 'tweetnacl-util';
 import { sha256 } from '@noble/hashes/sha256';
@@ -36,7 +37,7 @@ import type {
 
 /** Prekey-store diagnostics — dev builds only (see rdiag in socket/client.ts). */
 function rdiag(msg: string): void {
-  if (__DEV__) console.warn(msg);
+  if (__DEV__) logger.warn(msg);
 }
 
 function secureKeyHelpers(slotPrefix: string) {
@@ -428,7 +429,7 @@ async function persistPrekeySecretsDurably(
         const back = await db.loadSpkSecret(spkKeyId);
         if (back === spkSecretB64) return true;
       } catch (e) {
-        if (__DEV__) console.warn('[registration] SPK secret DB write attempt failed', attempt, e);
+        if (__DEV__) logger.warn('[registration] SPK secret DB write attempt failed', attempt, e);
       }
     }
     return false;
@@ -442,19 +443,19 @@ async function persistPrekeySecretsDurably(
   try {
     await db.setSpkKeyId(spkKeyId);
   } catch (e) {
-    if (__DEV__) console.warn('[registration] could not persist SPK keyId to DB', e);
+    if (__DEV__) logger.warn('[registration] could not persist SPK keyId to DB', e);
   }
   // Start the SPK age clock for the age-based rotation trigger (B-3).
   try {
     await db.setSpkCreatedAt(Date.now());
   } catch (e) {
-    if (__DEV__) console.warn('[registration] could not persist SPK createdAt to DB', e);
+    if (__DEV__) logger.warn('[registration] could not persist SPK createdAt to DB', e);
   }
   for (const [keyId, secret] of preKeySecrets.opkSecrets.entries()) {
     try {
       await db.saveOpkSecret(keyId, encodeBase64(secret));
     } catch (e) {
-      if (__DEV__) console.warn('[registration] could not persist OPK secret to DB', keyId, e);
+      if (__DEV__) logger.warn('[registration] could not persist OPK secret to DB', keyId, e);
     }
   }
 
@@ -479,7 +480,7 @@ async function persistPrekeySecretsDurably(
     );
   } catch (err) {
     // Non-fatal: the DB is the durable source of truth.
-    if (__DEV__) console.warn('[registration] SecureStore prekey mirror failed (DB is authoritative):', err);
+    if (__DEV__) logger.warn('[registration] SecureStore prekey mirror failed (DB is authoritative):', err);
   }
 
   // [RDIAG] confirm the SPK secret is readable back from the DURABLE store.

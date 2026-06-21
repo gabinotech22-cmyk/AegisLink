@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { logger } from '../utils/logger';
 import { ss } from '../utils/secureStore';
 import type { SupportedLocale } from '../i18n';
 
@@ -119,7 +120,7 @@ async function persist(prefs: Preferences): Promise<void> {
   try {
     await ss.set(STORAGE_KEY, JSON.stringify(prefs));
   } catch (e) {
-    if (__DEV__) console.warn('[preferences] persist failed:', (e as Error).message);
+    if (__DEV__) logger.warn('[preferences] persist failed:', (e as Error).message);
   }
 }
 
@@ -137,7 +138,7 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
         return;
       }
     } catch (e) {
-      if (__DEV__) console.warn('[preferences] hydrate failed:', (e as Error).message);
+      if (__DEV__) logger.warn('[preferences] hydrate failed:', (e as Error).message);
     }
     setState({ hydrated: true });
   },

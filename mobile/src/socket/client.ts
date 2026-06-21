@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
+import { logger } from '../utils/logger';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
@@ -60,7 +61,7 @@ import {
  * babel's transform-remove-console, which also strips warn in production.
  */
 function rdiag(msg: string): void {
-  if (__DEV__) console.warn(msg);
+  if (__DEV__) logger.warn(msg);
 }
 
 const getSlotPrefix = () => {
@@ -254,7 +255,7 @@ async function flushOutbox(identity: Identity): Promise<void> {
   try {
     jobs = await loadOutboxJobs();
   } catch (e) {
-    if (__DEV__) console.warn('[socket] flushOutbox: could not load jobs', e);
+    if (__DEV__) logger.warn('[socket] flushOutbox: could not load jobs', e);
     return;
   }
   if (jobs.length === 0) return;
@@ -293,7 +294,7 @@ async function flushOutbox(identity: Identity): Promise<void> {
       });
       await deleteOutboxJob(job.jobId);
     } catch (e) {
-      if (__DEV__) console.warn('[socket] flushOutbox: job failed, will retry on next reconnect', job.jobId, e);
+      if (__DEV__) logger.warn('[socket] flushOutbox: job failed, will retry on next reconnect', job.jobId, e);
       try { await incrementOutboxAttempts(job.jobId); } catch { /* non-fatal */ }
     }
   }
@@ -467,7 +468,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
         const back = await loadSpkSecret(nextSpkKeyId);
         if (back === newSecretB64) return true;
       } catch (e) {
-        if (__DEV__) console.warn('[socket] SPK secret DB write attempt failed', attempt, e);
+        if (__DEV__) logger.warn('[socket] SPK secret DB write attempt failed', attempt, e);
       }
     }
     return false;
@@ -494,7 +495,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
         const back = await loadPqSpkSecret(nextPqSpkKeyId);
         if (back === newPqSecretB64) return true;
       } catch (e) {
-        if (__DEV__) console.warn('[socket] PQSPK secret DB write attempt failed', attempt, e);
+        if (__DEV__) logger.warn('[socket] PQSPK secret DB write attempt failed', attempt, e);
       }
     }
     return false;
@@ -502,7 +503,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   const pqSpkDbOk = await persistPqSpkToDb();
   if (pqSpkDbOk) {
     try { await setPqSpkKeyId(nextPqSpkKeyId); } catch (e) {
-      if (__DEV__) console.warn('[socket] could not persist PQSPK keyId to DB', e);
+      if (__DEV__) logger.warn('[socket] could not persist PQSPK keyId to DB', e);
     }
   } else {
     rdiag(`[RDIAG] prekey-store PQSPK-SKIP pqSpkId=${nextPqSpkKeyId} dbReadback=NULL — uploading v1-safe (no pqSignedPreKey)`);
@@ -512,20 +513,20 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
   try {
     await setSpkKeyId(nextSpkKeyId);
   } catch (e) {
-    if (__DEV__) console.warn('[socket] could not persist SPK keyId to DB', e);
+    if (__DEV__) logger.warn('[socket] could not persist SPK keyId to DB', e);
   }
   // Stamp the new SPK's creation time so the age-based rotation trigger
   // (isSignedPreKeyStale) measures THIS SPK's lifetime from now (B-3).
   try {
     await setSpkCreatedAt(Date.now());
   } catch (e) {
-    if (__DEV__) console.warn('[socket] could not persist SPK createdAt to DB', e);
+    if (__DEV__) logger.warn('[socket] could not persist SPK createdAt to DB', e);
   }
   for (const [keyId, secret] of preKeys.opkSecrets.entries()) {
     try {
       await saveOpkSecret(keyId, encodeBase64(secret));
     } catch (e) {
-      if (__DEV__) console.warn('[socket] could not persist OPK secret to DB', keyId, e);
+      if (__DEV__) logger.warn('[socket] could not persist OPK secret to DB', keyId, e);
     }
   }
 
@@ -578,7 +579,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
     );
   } catch (err) {
     // Non-fatal: the DB is the durable source of truth.
-    if (__DEV__) console.warn('[socket] SecureStore prekey cache write failed (DB is authoritative):', err);
+    if (__DEV__) logger.warn('[socket] SecureStore prekey cache write failed (DB is authoritative):', err);
   }
 
   // [RDIAG] confirm the SPK secret is readable back from the DURABLE store.
@@ -729,18 +730,18 @@ export function connect(identity: Identity): Socket {
     connected = true;
     authenticated = false;
     useConnection.getState().setOnline(true);
-    if (__DEV__) console.log('[socket] connected, awaiting auth challenge');
+    if (__DEV__) logger.debug('[socket] connected, awaiting auth challenge');
   });
 
   socket.on('disconnect', (reason) => {
     connected = false;
     authenticated = false;
     useConnection.getState().setOnline(false);
-    if (__DEV__) console.log('[socket] disconnected:', reason);
+    if (__DEV__) logger.debug('[socket] disconnected:', reason);
   });
 
   socket.on('error_msg', async (e: { code?: string; for?: string }) => {
-    if (__DEV__) console.warn('[socket] server error:', e);
+    if (__DEV__) logger.warn('[socket] server error:', e);
     if (e?.code === 'peer_offline' && e?.for === 'call:invite') {
       // Only fatal for call:invite: the relay could not deliver our invite to
       // the callee (no WebSocket connection AND no push tokens). In that case
@@ -762,7 +763,7 @@ export function connect(identity: Identity): Socket {
     }
     if (e?.code === 'unknown_identity') {
       // Server doesn't know us — re-register via the single ensureRegistered path.
-      if (__DEV__) console.log('[socket] unknown_identity — re-registering and reconnecting');
+      if (__DEV__) logger.debug('[socket] unknown_identity — re-registering and reconnecting');
       try {
         const { ensureRegistered } = await import('../crypto/ensureRegistered');
         const { useIdentity } = await import('../store/identity');
@@ -770,19 +771,19 @@ export function connect(identity: Identity): Socket {
         if (result.ok) {
           // Sync the store's publishStatus so the Home banner clears.
           useIdentity.setState({ publishStatus: 'published', publishError: null, publishRetryAfterMs: null });
-          if (__DEV__) console.log('[socket] re-registered — reconnecting');
+          if (__DEV__) logger.debug('[socket] re-registered — reconnecting');
           // The relay already closed this socket server-side (reason
           // 'io server disconnect'), and that reason does NOT trigger Socket.IO's
           // auto-reconnect. Re-open the socket explicitly so the new identity
           // gets a fresh auth challenge and comes back online.
           socket?.connect();
         } else {
-          if (__DEV__) console.warn('[socket] re-registration failed:', result.error);
+          if (__DEV__) logger.warn('[socket] re-registration failed:', result.error);
           useIdentity.setState({ publishStatus: 'failed', publishError: result.error ?? 'Re-registration failed', publishRetryAfterMs: result.retryAfterMs ?? null });
           useConnection.getState().setOnline(false);
         }
       } catch (err) {
-        if (__DEV__) console.warn('[socket] re-registration error:', err);
+        if (__DEV__) logger.warn('[socket] re-registration error:', err);
         useConnection.getState().setOnline(false);
       }
     }
@@ -799,14 +800,14 @@ export function connect(identity: Identity): Socket {
       if (!opened) throw new Error('challenge decrypt failed');
       socket!.emit('auth:response', { plain: encodeBase64(opened) });
     } catch (e) {
-      if (__DEV__) console.warn('[socket] auth failure:', (e as Error).message);
+      if (__DEV__) logger.warn('[socket] auth failure:', (e as Error).message);
       socket?.disconnect();
     }
   });
 
   socket.on('auth:ok', async (res?: { opkCount?: number }) => {
     authenticated = true;
-    if (__DEV__) console.log('[socket] authenticated');
+    if (__DEV__) logger.debug('[socket] authenticated');
 
     // Ensure deviceId is resolved before using it below
     const deviceId = resolvedDeviceId || await deviceIdReady;
@@ -849,7 +850,7 @@ export function connect(identity: Identity): Socket {
           await SecureStore.setItemAsync('aegis.pushToken', freshToken);
         }
       } catch (e) {
-        if (__DEV__) console.warn('[socket] push token registration failed:', e);
+        if (__DEV__) logger.warn('[socket] push token registration failed:', e);
       }
     })();
 
@@ -862,7 +863,7 @@ export function connect(identity: Identity): Socket {
           const raw = await getOwnDeliveryToken();
           socket!.emit('deliveryToken:register', { tokenHashB64: hashDeliveryToken(raw) });
         } catch (e) {
-          if (__DEV__) console.warn('[socket] deliveryToken register failed:', e);
+          if (__DEV__) logger.warn('[socket] deliveryToken register failed:', e);
         }
       })();
     }
@@ -878,17 +879,17 @@ export function connect(identity: Identity): Socket {
       try {
         await uploadPreKeys(identity, deviceId);
         if (__DEV__) {
-          console.log(
+          logger.debug(
             '[socket] prekeys uploaded —',
             needRotate ? 'SPK rotation (age)' : 'OPK refill',
             '(count was', count, ')',
           );
         }
       } catch (err) {
-        if (__DEV__) console.error('[socket] prekey upload error:', err);
+        if (__DEV__) logger.error('[socket] prekey upload error:', err);
       }
     } else {
-      if (__DEV__) console.log('[socket] prekeys count healthy:', count, '— no refill/rotation needed');
+      if (__DEV__) logger.debug('[socket] prekeys count healthy:', count, '— no refill/rotation needed');
     }
 
     // Push our profile (name + avatar as data URI) to all contacts on every connect
@@ -1021,7 +1022,7 @@ export function connect(identity: Identity): Socket {
         // relay re-delivers the queued distribution on the next reconnect.
         socket!.emit('group:rekey_drain_ack', { distId: dist.distId });
       } catch (e) {
-        if (__DEV__) console.warn('[socket] group:rekey_dist handling failed:', (e as Error).message);
+        if (__DEV__) logger.warn('[socket] group:rekey_dist handling failed:', (e as Error).message);
       }
     },
   );
@@ -1336,7 +1337,7 @@ async function getOrCreateSessionLocked(contactAegisId: string, contactPublicKey
         }));
       }
     } catch (e) {
-      if (__DEV__) console.warn('[socket] failed to fetch signing key from directory');
+      if (__DEV__) logger.warn('[socket] failed to fetch signing key from directory');
       void e;
     }
   }
@@ -1531,7 +1532,7 @@ async function sendNudgeOverExistingSession(
     rdiag(`[RDIAG] nudge sent me=${identity.aegisId} -> peer=${contact.aegisId}`);
     return true;
   } catch (e) {
-    if (__DEV__) console.warn('[socket] desync nudge send failed:', (e as Error).message);
+    if (__DEV__) logger.warn('[socket] desync nudge send failed:', (e as Error).message);
     return false;
   }
 }
@@ -1618,7 +1619,7 @@ async function tryRecoverDesync(
     // the same key. Without the context that nested acquire would deadlock.
     await sendProfileTo(contact, identity, lockCtx);
   } catch (e) {
-    if (__DEV__) console.warn('[socket] desync re-handshake send failed:', (e as Error).message);
+    if (__DEV__) logger.warn('[socket] desync re-handshake send failed:', (e as Error).message);
   }
 
   // Deadlock breaker for the asymmetric case: if the lower peer simply nudged us
@@ -1647,7 +1648,7 @@ async function tryRecoverDesync(
   // Node/Jest timer handles expose `.unref()` (React Native's do not — this is a
   // no-op there, production behaviour is unchanged). Without it, this 6s
   // real-clock timer keeps the Jest worker process alive past test completion,
-  // firing `rdiag`'s console.warn after the suite has finished ("Cannot log
+  // firing `rdiag`'s logger.warn after the suite has finished ("Cannot log
   // after tests are done") and destabilising whichever test runs next in the
   // same worker.
   (fallbackTimer as unknown as { unref?: () => void }).unref?.();
@@ -1711,7 +1712,7 @@ async function decryptAndAppendLocked(
   lockCtx: LockCtx,
 ): Promise<boolean> {
   if (parsed.from !== contact.aegisId) {
-    if (__DEV__) console.warn('[socket] sender mismatch — dropping');
+    if (__DEV__) logger.warn('[socket] sender mismatch — dropping');
     return false;
   }
 
@@ -1777,7 +1778,7 @@ async function decryptAndAppendLocked(
     // Bob doesn't have a session, or the sender is re-keying/starting a fresh session via X3DH setup!
     if (!parsed.x3dh) {
       rdiag(`[RDIAG] DROP no-session-no-x3dh from=${contact.aegisId} inRecovery=${isInRecovery(contact.aegisId)}`);
-      if (__DEV__) console.warn('[socket] No session and no X3DH headers received — dropping message');
+      if (__DEV__) logger.warn('[socket] No session and no X3DH headers received — dropping message');
       return false;
     }
 
@@ -1814,7 +1815,7 @@ async function decryptAndAppendLocked(
     }
     if (!spkSec) {
       rdiag(`[RDIAG] x3dh-recv ABORT no-spk me=${identity.aegisId} peer=${contact.aegisId} spkId=${parsed.x3dh.spkId}`);
-      if (__DEV__) console.warn('[socket] mySpkSecret not found in DB or SecureStore — cannot decrypt');
+      if (__DEV__) logger.warn('[socket] mySpkSecret not found in DB or SecureStore — cannot decrypt');
       return false;
     }
     const mySpkSecret = decodeBase64(spkSec);
@@ -1849,7 +1850,7 @@ async function decryptAndAppendLocked(
         rdiag(
           `[RDIAG] x3dh-recv ABORT opk-missing me=${identity.aegisId} peer=${contact.aegisId} opkId=${parsed.x3dh.opkId} — Alice used DH4, Bob cannot; would desync`,
         );
-        if (__DEV__) console.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— aborting (would desync)');
+        if (__DEV__) logger.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— aborting (would desync)');
         return false;
       }
     }
@@ -1880,7 +1881,7 @@ async function decryptAndAppendLocked(
       const pqSecB64 = pqKeyId !== null ? await loadPqSpkSecret(pqKeyId) : null;
       if (!pqSecB64) {
         rdiag(`[RDIAG] x3dh-recv ABORT pqspk-missing me=${identity.aegisId} peer=${contact.aegisId} pqKeyId=${pqKeyId ?? 'none'}`);
-        if (__DEV__) console.warn('[socket] PQSPK secret not found for active keyId — cannot complete v2 handshake');
+        if (__DEV__) logger.warn('[socket] PQSPK secret not found for active keyId — cannot complete v2 handshake');
         return false;
       }
       pqInputs = { cipherText: decodeBase64(pqCtB64!), pqSpkSecret: decodeBase64(pqSecB64) };
@@ -1961,10 +1962,10 @@ async function decryptAndAppendLocked(
     plaintextBytes = ratchetDecrypt(ratchetState, rHeader, rCiphertext, rNonce);
   } catch (e) {
     if (existingJson && !parsed.x3dh) {
-      if (__DEV__) console.warn('[socket] ratchetDecrypt threw on existing session:', (e as Error).message);
+      if (__DEV__) logger.warn('[socket] ratchetDecrypt threw on existing session:', (e as Error).message);
       await tryRecoverDesync(contact, ratchetState, identity, false, lockCtx);
     } else if (__DEV__) {
-      console.warn('[socket] Double Ratchet decryption threw:', (e as Error).message);
+      logger.warn('[socket] Double Ratchet decryption threw:', (e as Error).message);
     }
     return false;
   }
@@ -1979,7 +1980,7 @@ async function decryptAndAppendLocked(
     if (existingJson && !parsed.x3dh) {
       await tryRecoverDesync(contact, ratchetState, identity, false, lockCtx);
     } else if (__DEV__) {
-      console.warn('[socket] Double Ratchet decryption failed');
+      logger.warn('[socket] Double Ratchet decryption failed');
     }
     return false;
   }
@@ -2092,7 +2093,7 @@ async function decryptAndAppendLocked(
             try {
               admin = await useContacts.getState().addByAegisId(claimedAdminId);
             } catch (e) {
-              if (__DEV__) console.warn('[socket] failed to dynamically resolve group admin:', e);
+              if (__DEV__) logger.warn('[socket] failed to dynamically resolve group admin:', e);
             }
           }
           return resolveSigningKey(claimedAdminId, admin?.signingPublicKeyB64);
@@ -2188,13 +2189,13 @@ async function decryptAndAppendLocked(
           switch (decision.kind) {
             case 'drop':
               // v2 content for an unknown group — await the carrier.
-              if (__DEV__) console.warn('[socket] v2 content for unknown group dropped — awaiting carrier');
+              if (__DEV__) logger.warn('[socket] v2 content for unknown group dropped — awaiting carrier');
               await saveSessionState(contact.aegisId, ratchetState);
               return true;
 
             case 'reject':
               // Carrier failed hash↔roster, signature, or membership checks.
-              if (__DEV__) console.warn('[socket] v2 carrier create rejected — hash/sig/membership check failed');
+              if (__DEV__) logger.warn('[socket] v2 carrier create rejected — hash/sig/membership check failed');
               return false;
 
             case 'createGroup': {
@@ -2257,13 +2258,13 @@ async function decryptAndAppendLocked(
           // Without this an attacker could add us to arbitrary groups by
           // crafting a group_msg with chosen groupId/members/name.
           if (!(await metadataIsAuthentic())) {
-            if (__DEV__) console.warn('[socket] group_msg create rejected — invalid or missing adminSig');
+            if (__DEV__) logger.warn('[socket] group_msg create rejected — invalid or missing adminSig');
             return false;
           }
           // We must also be in the member list — otherwise this group isn't
           // actually for us (silently drop).
           if (!claimedMembers.includes(identity.aegisId)) {
-            if (__DEV__) console.warn('[socket] group_msg create rejected — local id not in members');
+            if (__DEV__) logger.warn('[socket] group_msg create rejected — local id not in members');
             return false;
           }
           // Persist avatar image to documentDirectory so it survives restarts.
@@ -2317,7 +2318,7 @@ async function decryptAndAppendLocked(
             const { useGroups } = require('../store/groups');
             void useGroups.getState().hydrate();
           } else if (nameChanged || membersChanged) {
-            if (__DEV__) console.warn('[socket] group metadata change ignored — sender not admin or sig invalid');
+            if (__DEV__) logger.warn('[socket] group metadata change ignored — sender not admin or sig invalid');
           }
         }
 
@@ -2365,7 +2366,7 @@ async function decryptAndAppendLocked(
                 const { useGroups } = require('../store/groups');
                 void useGroups.getState().hydrate();
               } else if (govDecision.kind === 'reject' && __DEV__) {
-                console.warn('[socket] group governance rejected — invalid signature');
+                logger.warn('[socket] group governance rejected — invalid signature');
               }
             }
           }
@@ -2606,7 +2607,7 @@ async function decryptAndAppendLocked(
       }
     }
   } catch (e) {
-    if (__DEV__) console.warn('[socket] Failed parsing structured E2EE message payload:', e);
+    if (__DEV__) logger.warn('[socket] Failed parsing structured E2EE message payload:', e);
   }
 
   await saveSessionState(contact.aegisId, ratchetState);
@@ -2867,7 +2868,7 @@ async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
     Date.now(),
   );
   if (!inner) {
-    if (__DEV__) console.warn('[socket] envelope:v2 failed to open/authenticate — dropping');
+    if (__DEV__) logger.warn('[socket] envelope:v2 failed to open/authenticate — dropping');
     return;
   }
 
@@ -2921,7 +2922,7 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
       matchedContact = await useContacts.getState().addByAegisId(env.from);
       autoAdded = true;
     } catch (e) {
-      if (__DEV__) console.warn('[socket] failed to auto-add unknown sender', e);
+      if (__DEV__) logger.warn('[socket] failed to auto-add unknown sender', e);
     }
     // After auto-adding the sender as a new contact, send them our own profile so
     // they learn our display name without having to wait for our next reconnect
@@ -2977,7 +2978,7 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
     if (success) return;
   }
 
-  if (__DEV__) console.warn('[socket] envelope from unknown sender — add the peer as a contact first to decrypt their messages');
+  if (__DEV__) logger.warn('[socket] envelope from unknown sender — add the peer as a contact first to decrypt their messages');
 }
 
 // ─── Self-encrypted copy (multi-device sync) ─────────────────────────────────
@@ -3023,7 +3024,7 @@ async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
     s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
     return s as RatchetState;
   } catch (e) {
-    if (__DEV__) console.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
+    if (__DEV__) logger.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
     return null;
   }
 }
@@ -3178,7 +3179,7 @@ async function sendSelfCopy(
       selfCopy: true,
     });
   } catch (e) {
-    if (__DEV__) console.warn('[socket] sendSelfCopy failed (non-fatal):', (e as Error).message);
+    if (__DEV__) logger.warn('[socket] sendSelfCopy failed (non-fatal):', (e as Error).message);
   }
 }
 
@@ -3198,16 +3199,16 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     identity.secretKey,
   );
   if (!parsed) {
-    if (__DEV__) console.warn('[socket] self-copy outer decrypt failed');
+    if (__DEV__) logger.warn('[socket] self-copy outer decrypt failed');
     return;
   }
   if (parsed.from !== identity.aegisId) {
-    if (__DEV__) console.warn('[socket] self-copy from mismatch — dropping');
+    if (__DEV__) logger.warn('[socket] self-copy from mismatch — dropping');
     return;
   }
   // Defence-in-depth: the inner payload MUST also self-declare as a self-copy.
   if ((parsed as { selfCopy?: unknown }).selfCopy !== true) {
-    if (__DEV__) console.warn('[socket] self-copy inner flag missing — dropping');
+    if (__DEV__) logger.warn('[socket] self-copy inner flag missing — dropping');
     return;
   }
 
@@ -3217,7 +3218,7 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     // using OUR OWN SPK secret. If we don't have an SPK secret stored
     // (e.g. desktop hasn't run uploadPreKeys yet) we cannot decrypt; drop.
     if (!parsed.x3dh) {
-      if (__DEV__) console.warn('[socket] self-copy: no session and no X3DH headers — dropping');
+      if (__DEV__) logger.warn('[socket] self-copy: no session and no X3DH headers — dropping');
       return;
     }
     const x3dhInit = parsed.x3dh as { aliceEKB64: string; spkId: number; opkId: number | null };
@@ -3237,7 +3238,7 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
       spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
     }
     if (!spkSec) {
-      if (__DEV__) console.warn('[socket] self-copy: missing local SPK secret — dropping (multi-device SPK sync not implemented)');
+      if (__DEV__) logger.warn('[socket] self-copy: missing local SPK secret — dropping (multi-device SPK sync not implemented)');
       return;
     }
     const mySpkSecret = decodeBase64(spkSec);
@@ -3281,11 +3282,11 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
       decodeBase64(r.nonceB64),
     );
   } catch (e) {
-    if (__DEV__) console.warn('[socket] self-copy ratchet decrypt threw:', (e as Error).message);
+    if (__DEV__) logger.warn('[socket] self-copy ratchet decrypt threw:', (e as Error).message);
     return;
   }
   if (!plaintextBytes) {
-    if (__DEV__) console.warn('[socket] self-copy ratchet decrypt failed (null)');
+    if (__DEV__) logger.warn('[socket] self-copy ratchet decrypt failed (null)');
     return;
   }
   await saveSelfRatchet(identity.aegisId, ratchet);
@@ -3307,11 +3308,11 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
   try {
     selfObj = JSON.parse(selfBody);
   } catch {
-    if (__DEV__) console.warn('[socket] self-copy body is not JSON — dropping');
+    if (__DEV__) logger.warn('[socket] self-copy body is not JSON — dropping');
     return;
   }
   if (selfObj.type !== 'self_copy' || !selfObj.msgId || !selfObj.chatId || !selfObj.inner) {
-    if (__DEV__) console.warn('[socket] self-copy malformed payload — dropping');
+    if (__DEV__) logger.warn('[socket] self-copy malformed payload — dropping');
     return;
   }
 
@@ -3331,7 +3332,7 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
   try {
     originalPayload = JSON.parse(selfObj.inner);
   } catch {
-    if (__DEV__) console.warn('[socket] self-copy inner payload not JSON — falling back to raw');
+    if (__DEV__) logger.warn('[socket] self-copy inner payload not JSON — falling back to raw');
   }
 
   const displayBody = typeof originalPayload.text === 'string' ? originalPayload.text : selfObj.inner;
@@ -3453,7 +3454,7 @@ export async function sendMessage(opts: {
   } catch (e) {
     // If we can't persist to the outbox (e.g. DB not ready on first launch),
     // still attempt the send — the best-effort path is better than silence.
-    if (__DEV__) console.warn('[socket] enqueueOutboxJob failed (best-effort send anyway):', e);
+    if (__DEV__) logger.warn('[socket] enqueueOutboxJob failed (best-effort send anyway):', e);
   }
 
   // If offline, the job is already persisted — return so UI shows offline indicator
@@ -3527,7 +3528,7 @@ export async function sendMessage(opts: {
     try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
   } catch (e) {
     // Emit failed — job stays in outbox for retry on next reconnect
-    if (__DEV__) console.warn('[socket] sendMessage emit failed, job retained in outbox:', e);
+    if (__DEV__) logger.warn('[socket] sendMessage emit failed, job retained in outbox:', e);
     try { await incrementOutboxAttempts(jobId); } catch { /* non-fatal */ }
     throw e; // surface to caller so UI can show error
   }
@@ -3592,7 +3593,7 @@ async function toDataUri(imageField: string | null): Promise<string | null> {
     const b64 = await readAsStringAsync(imageField, { encoding: EncodingType.Base64 });
     return `data:image/jpeg;base64,${b64}`;
   } catch (e) {
-    if (__DEV__) console.warn('[socket] toDataUri failed:', e);
+    if (__DEV__) logger.warn('[socket] toDataUri failed:', e);
     return null;
   }
 }
@@ -3651,7 +3652,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
         ...(isInit ? { init: true } : {}),
       });
     } catch (e) {
-      if (__DEV__) console.warn('[socket] profile broadcast failed:', (e as Error).message);
+      if (__DEV__) logger.warn('[socket] profile broadcast failed:', (e as Error).message);
     }
   }
 }
@@ -3689,7 +3690,7 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
       });
       rdiag(`[RDIAG] sendProfileTo ENQUEUED (offline) to=${contact.aegisId}`);
     } catch (e) {
-      if (__DEV__) console.warn('[socket] sendProfileTo enqueue failed:', (e as Error).message);
+      if (__DEV__) logger.warn('[socket] sendProfileTo enqueue failed:', (e as Error).message);
     }
   };
 
@@ -3715,7 +3716,7 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
     rdiag(`[RDIAG] sendProfileTo EMITTED to=${contact.aegisId} isInit=${isInit}`);
   } catch (e) {
     rdiag(`[RDIAG] sendProfileTo FAILED to=${contact.aegisId} err=${(e as Error).message}`);
-    if (__DEV__) console.warn('[socket] sendProfileTo failed:', (e as Error).message);
+    if (__DEV__) logger.warn('[socket] sendProfileTo failed:', (e as Error).message);
     await enqueueForRetry();
   }
 }
@@ -3840,7 +3841,7 @@ export async function sendGroupMessage(opts: {
         // Truly unresolvable (offline, or not in the directory yet). Skip this
         // member for now — the outbox/retry path is per-contact, so we cannot
         // queue without a pubkey; they will be reachable once resolvable.
-        if (__DEV__) console.warn('[socket] group fan-out: could not resolve member', memberId, e);
+        if (__DEV__) logger.warn('[socket] group fan-out: could not resolve member', memberId, e);
         continue;
       }
     }
@@ -3911,7 +3912,7 @@ export async function sendGroupMessage(opts: {
       });
     } catch (e) {
       // Outbox write failed — still attempt the send (best-effort path)
-      if (__DEV__) console.warn('[socket] group enqueueOutboxJob failed for member', contact.aegisId, e);
+      if (__DEV__) logger.warn('[socket] group enqueueOutboxJob failed for member', contact.aegisId, e);
     }
 
     // If offline, job is already persisted — skip emit; flushOutbox handles it.
@@ -3946,7 +3947,7 @@ export async function sendGroupMessage(opts: {
     } catch (e) {
       // Delivery failed for this member — job stays in outbox for retry.
       // DO NOT swallow silently: log and increment attempts so monitoring can detect stuck jobs.
-      if (__DEV__) console.warn('[socket] group message delivery failed for member', contact.aegisId, '— job retained in outbox', e);
+      if (__DEV__) logger.warn('[socket] group message delivery failed for member', contact.aegisId, '— job retained in outbox', e);
       try { await incrementOutboxAttempts(jobId); } catch { /* non-fatal */ }
       // Continue to next member — one failure must not block others.
     }
@@ -4082,7 +4083,7 @@ export async function sendGroupVote(opts: {
         );
       });
     } catch (e) {
-      if (__DEV__) console.warn('[socket] sendGroupVote failed for member', memberId, e);
+      if (__DEV__) logger.warn('[socket] sendGroupVote failed for member', memberId, e);
     }
   });
 

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { logger } from '../utils/logger';
 import { ss } from '../utils/secureStore';
 
 /**
@@ -44,7 +45,7 @@ async function persist(snap: SecDiagSnapshot): Promise<void> {
   try {
     await ss.set(STORAGE_KEY, JSON.stringify(snap));
   } catch (e) {
-    if (__DEV__) console.warn('[secdiag] persist failed:', (e as Error).message);
+    if (__DEV__) logger.warn('[secdiag] persist failed:', (e as Error).message);
   }
 }
 
@@ -61,7 +62,7 @@ export const useSecurityDiagnostics = create<SecDiagState>((setState, get) => ({
         return;
       }
     } catch (e) {
-      if (__DEV__) console.warn('[secdiag] hydrate failed:', (e as Error).message);
+      if (__DEV__) logger.warn('[secdiag] hydrate failed:', (e as Error).message);
     }
     setState({ hydrated: true });
   },

@@ -14,6 +14,7 @@
  */
 
 import { AccessibilityInfo, Vibration } from 'react-native';
+import { logger } from '../utils/logger';
 import { Audio } from 'expo-av';
 
 // ─── Haptics helper ───────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ async function ensureAudioMode(): Promise<void> {
     });
     audioModeReady = true;
   } catch (e) {
-    if (__DEV__) console.warn('[SoundFX] setAudioModeAsync failed:', e);
+    if (__DEV__) logger.warn('[SoundFX] setAudioModeAsync failed:', e);
   }
 }
 
@@ -118,7 +119,7 @@ async function loadSound(key: SoundKey): Promise<Audio.Sound | null> {
     soundCache.set(key, sound);
     return sound;
   } catch (e) {
-    if (__DEV__) console.warn(`[SoundFX] Could not load sound "${key}":`, e);
+    if (__DEV__) logger.warn(`[SoundFX] Could not load sound "${key}":`, e);
     return null;
   }
 }
@@ -146,7 +147,7 @@ async function playSound(key: SoundKey, loop = false): Promise<void> {
     await sound.setIsLoopingAsync(loop);
     await sound.playAsync();
   } catch (e) {
-    if (__DEV__) console.warn(`[SoundFX] Could not play sound "${key}":`, e);
+    if (__DEV__) logger.warn(`[SoundFX] Could not play sound "${key}":`, e);
   }
 }
 

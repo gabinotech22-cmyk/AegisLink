@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { logger } from '../utils/logger';
 import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -81,7 +82,7 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
           setLocationName(`${loc.coords.latitude.toFixed(5)}, ${loc.coords.longitude.toFixed(5)}`);
         }
       } catch (err) {
-        if (__DEV__) console.warn('[location] Failed to fetch live location:', err);
+        if (__DEV__) logger.warn('[location] Failed to fetch live location:', err);
         setLocationName('ZURICH · BAHNHOFSTRASSE (SIMULADA)');
         setCoords({ latitude: 47.3769, longitude: 8.5417 });
       } finally {
