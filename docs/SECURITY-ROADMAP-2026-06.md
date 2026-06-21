@@ -1,12 +1,25 @@
 # AegisLink — Roadmap de remediación de seguridad (auditoría 2026-06)
 
-> Estado: **abierto**. Origen: auditoría de superficie (21 hallazgos) + auditoría profunda
-> (4 críticos nuevos confirmados a mano + ~15 nuevos). Ningún hueco se cierra como "hecho"
-> hasta estar **commiteado, testeado y mergeado a `main`** (regla de oro del proyecto).
+> Estado: **CERRADO** (jun-21) salvo A-1, diferido por diseño. Origen: auditoría de
+> superficie (21 hallazgos) + auditoría profunda (4 críticos nuevos confirmados a mano +
+> ~15 nuevos). Ningún hueco se cierra como "hecho" hasta estar **commiteado, testeado y
+> mergeado a `main`** (regla de oro del proyecto).
 >
 > Orden: de **menor a mayor esfuerzo** para atacar rápido y mantener ritmo, PERO los
 > CRÍTICOS (C-3…C-6) son **bloqueantes de cualquier push público** sin importar su posición.
 > Cada "Ola" = una rama `fix/*` coherente (no fragmentar un mismo cambio en varias ramas).
+>
+> ## Resumen de cierre (jun-21)
+> Las **12 olas están implementadas**. Críticos C-1…C-6 cerrados (Olas 1-3,7). Único ítem
+> abierto: **A-1** (rate-limit distribuido Redis) — DIFERIDO por diseño: el relay es
+> mono-instancia, no es vuln activa, y añadir Redis a la VM es riesgo operativo
+> ([[incident_n8n_oom_vm]]); se migrará solo al escalar horizontalmente.
+>
+> Re-auditoría jun-21: todos los marcadores verificados contra el código (muchos estaban
+> hechos pero sin voltear a ✅). Cabos sueltos finales cerrados: **B-2 cliente** (UI de
+> borrado de cuenta mobile+desktop, antes sin commitear), **suite de guards IPC desktop**
+> (`assertTrustedSender`/`assertKeyAllowed`) y **`reviveBytes`** extraído+testeado — cierran
+> el HIGH "suite mínima desktop" de Ola 5. Pendiente NO-seguridad: reparar CI mobile.
 
 ## Leyenda
 - 🔴 CRÍTICO · 🟠 ALTO · 🟡 MEDIO · 🔵 BAJO
@@ -90,7 +103,7 @@ Esf **M**. El desktop quedó atrás en mecanismos anti-desync. Portar de mobile.
 | MED | 🟡 | Prekey secrets desktop solo en SecureStore | Portar tabla `prekey_secrets` + `loadSpkSecret/saveSpkSecret` (DB como fuente de verdad). |
 | MED | 🟡 | Desktop `getOrCreateSession` sin fallback de directorio para signing key | Portar cadena de fallback de mobile (`lookupIdentity`). |
 | LOW | 🔵 | Recovery fallback timer no se cancela en disconnect | Portar `recoveryFallbackTimers` Map + cleanup. |
-| HIGH | 🟠 | **Cero tests en `desktop/src/`** | Suite mínima: `assertTrustedSender`, `assertKeyAllowed`, round-trip DB, `getDbKey`, `reviveBytes`. |
+| HIGH | ✅ | **Cero tests en `desktop/src/`** | **HECHO**: infra Vitest (PR #60) + suites crypto. Completado jun-21: `assertTrustedSender`/`assertKeyAllowed` y demás guards IPC (PR #84, 12 tests, vía mock electron capturando handlers reales), round-trip DB + `getDbKey` fail-closed (`database.sqlcipher.test.ts`), `reviveBytes` extraído a `socket/ratchetSerde.ts` + testeado mobile+desktop (PR #85). |
 
 ---
 
@@ -154,9 +167,17 @@ Esf **M**.
 ## OLA 10 — Cifrado at-rest completo (SQLCipher) · rama `fix/sec-sqlcipher`
 🟡 MEDIO · Esf **XL** (arquitectónico). El cambio más grande, alineado con "cero metadatos".
 
-- Hoy se cifran campos individuales; quedan en claro: schema, `chat_id`, `created_at`, conteos, membresía, delivery status, WAL/journal.
-- Mobile: `expo-sqlite` con SQLCipher vía módulo nativo. Desktop: `better-sqlite3-multiple-ciphers`.
-- Interino: cifrar columnas restantes o cifrado determinista para columnas indexadas.
+✅ **HECHO** (PR #71, jun-20): DB completa cifrada at-rest en ambas plataformas, reusando la
+`getDbKey` existente. Mobile = `sqlcipher_export` (migración in-place de DB legacy plaintext);
+desktop = `rekey` vía `better-sqlite3-multiple-ciphers`. Ya no quedan en claro schema/`chat_id`/
+`created_at`/conteos/membresía/WAL. Tests: mobile `db/__tests__/sqlcipher.test.ts` +
+`openAndInit.test.ts`; desktop `ipc/__tests__/database.sqlcipher.test.ts` (DB ilegible sin clave,
+migración de plaintext preserva filas, fail-closed en packaged sin safeStorage). Gate APK
+on-device = follow-up operativo.
+
+Estado original: se cifraban campos individuales; quedaban en claro schema, `chat_id`,
+`created_at`, conteos, membresía, delivery status, WAL/journal. Mobile vía SQLCipher nativo en
+`expo-sqlite`; desktop vía `better-sqlite3-multiple-ciphers`.
 
 **Ref.** SimpleX cifra toda la DB con SQLCipher por defecto. **Mirar su esquema de derivación de la clave de DB desde la passphrase del usuario.**
 
@@ -183,7 +204,7 @@ Esf **S-M**. Mayormente robustez y privacidad de borde.
 
 | ID | Sev | Hallazgo | Fix |
 |----|-----|----------|-----|
-| B-2 | ✅ | Sin endpoint de account deletion | `fix/sec-b2-account-deletion`: `DELETE /identity/:id` autenticado por firma Ed25519 sobre `${aegisId}:delete:${bucket}` (±60s, mismo PoK que prekeys — regla #3). `identityRepo.deleteAccount` borra en cascada todo el rastro server-side: identidad, prekeys (SPK/OPK/PQ), mensajes y dist. de SenderKey en cola (por recipient), push + delivery tokens, linked_devices. Sealed-sender ⇒ no hay copias salientes que borrar. Test: `identity.delete.test.ts` (borra+cascada, firma forjada→403, ts viejo→400, id desconocido→404). UI cliente (botón "borrar cuenta" + wipe local) = follow-up. |
+| B-2 | ✅ | Sin endpoint de account deletion | `fix/sec-b2-account-deletion`: `DELETE /identity/:id` autenticado por firma Ed25519 sobre `${aegisId}:delete:${bucket}` (±60s, mismo PoK que prekeys — regla #3). `identityRepo.deleteAccount` borra en cascada todo el rastro server-side: identidad, prekeys (SPK/OPK/PQ), mensajes y dist. de SenderKey en cola (por recipient), push + delivery tokens, linked_devices. Sealed-sender ⇒ no hay copias salientes que borrar. Test: `identity.delete.test.ts` (borra+cascada, firma forjada→403, ts viejo→400, id desconocido→404). **UI cliente HECHA** (PR #83, jun-21): `DeleteAccountSection` en Privacy (mobile+desktop), firma el mismo PoK, fail-closed (solo 200/404 dispara wipe local; escape hatch "wipe anyway"), i18n en/es/it, test espejo mobile+desktop. |
 | B-1 | ✅ | `MAX_DRAIN_DEVICES=2` insuficiente | `fix/sec-ola12-drain-cors-hardening`: cap de drain dinámico `drainCapFor()` = `max(2, 1 primary + linked_devices activos)`. El 2 pasa a ser floor (`MIN_DRAIN_CAP`), así que el cambio solo puede alargar la vida de una fila, nunca acortarla → imposible sub-entrega. `devicesRepo.countActive` cuenta no-revocados. Aplicado a `messageRepo` y `senderKeyDistRepo`. Test `drain-cap.test.ts` (3 devices sobreviven a 2 drains; floor; revocados no inflan). |
 | B-7 | ✅ | Uploads TTL 24h sin aviso | `fix/sec-b7-attachment-expired`: `persistEncryptedBlob` devuelve `'ok'|'expired'|'unavailable'` y un **404/410 corta los reintentos** (el blob expirado no vuelve). Nuevo `resolveMediaDetailed()` expone el estado; `resolveMedia` queda como wrapper fino (cero ripple). `MediaImage` y `VideoBubble` muestran "Adjunto expirado" en vez de spinner infinito; `downloadAndDecryptMedia` lanza `attachment_expired` distinguible. Paridad desktop: `media.ts` lanza el mismo error en 404/410 (UI desktop = parte del gap de cableado de media [[bug_desktop_media_not_wired]]). Test `media.test.ts` (404→expired sin reintentar, estado expired, throw distinguible). |
 | M-3 | ✅ | `drained_by` JSON en TEXT sin validar | `fix/sec-ola12-drain-cors-hardening`: helper `parseDrainedBy()` compartido valida `Array.isArray` + filtra a strings; payload corrupto/no-array degrada a `[]` en vez de lanzar en el `.includes()`/`.push()` downstream. Reemplaza los 4 IIFE con cast inseguro (`as string[]`) en ambos repos. Test directo del helper (`42`, `{}`, `null`, no-json, elementos no-string). |
