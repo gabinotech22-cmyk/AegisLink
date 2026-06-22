@@ -8,6 +8,7 @@ import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
+import { fileToDownscaledDataUrl } from '../utils/image';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -297,38 +298,6 @@ function PhotoVisPicker({ t, value, onChange }: { t: Theme; value: 'all' | 'cont
       ))}
     </div>
   );
-}
-
-/**
- * Read an image file, decode it, and re-encode a downscaled JPEG as a data: URL.
- * Keeps avatars small (max 256px) so they persist cheaply in the DB and don't
- * bloat the profile broadcast. Falls back to the raw data URL if canvas is
- * unavailable.
- */
-function fileToDownscaledDataUrl(file: File, max = 256): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('read failed'));
-    reader.onload = () => {
-      const raw = reader.result as string;
-      const img = new Image();
-      img.onerror = () => reject(new Error('decode failed'));
-      img.onload = () => {
-        const scale = Math.min(1, max / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale));
-        const h = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { resolve(raw); return; }
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
-      };
-      img.src = raw;
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 function outlineBtn(t: Theme): CSSProperties {
