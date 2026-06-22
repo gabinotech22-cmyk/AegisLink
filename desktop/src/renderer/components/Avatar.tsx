@@ -19,17 +19,28 @@ interface Props {
   seed?: string;
 }
 
-/** True only for strings that an <img src> can actually load. Emoji glyphs
- *  (which Profile stores in avatarImage) are NOT URIs and must render as text. */
-function isImageUri(v?: string | null): v is string {
+/**
+ * True only for strings that an <img src> can SAFELY load as a local/embedded
+ * avatar. Emoji glyphs (which Profile stores in avatarImage) are NOT URIs and
+ * must render as text.
+ *
+ * Security/privacy (avatar sources are contact-controlled — a peer picks their
+ * own name/photo):
+ *   - Remote http(s) is rejected: a peer whose name/photo is "http://evil/x.gif"
+ *     would make THIS device fetch it on render, leaking our IP + online status
+ *     to a server of their choosing — a metadata leak (zero-metadata is
+ *     non-negotiable). Avatars are stored locally / as data URLs, never fetched.
+ *   - data: is restricted to data:image/ so a payload can never be
+ *     data:text/html,<script…> reinterpreted as HTML in the img sink
+ *     (CodeQL js/xss-through-dom).
+ */
+export function isImageUri(v?: string | null): v is string {
   if (!v) return false;
   return (
     v.startsWith('file://') ||
     v.startsWith('content://') ||
-    v.startsWith('data:') ||
     v.startsWith('blob:') ||
-    v.startsWith('http://') ||
-    v.startsWith('https://')
+    v.startsWith('data:image/')
   );
 }
 
