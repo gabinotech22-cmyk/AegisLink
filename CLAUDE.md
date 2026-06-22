@@ -61,6 +61,12 @@ Al invocar un sub-agente siempre incluye:
 - Sin `any`, sin `console.log` en producción
 - Tests con Jest + React Native Testing Library
 - Commits en inglés, imperativos (`feat: add X`, `fix: Y`)
+- **Sin atribución de IA en commits ni PRs.** NO añadir `Co-Authored-By: Claude`
+  (ni ningún co-autor de IA) en los mensajes de commit, ni el footer
+  `🤖 Generated with Claude Code` (ni equivalentes) en los cuerpos de PR. El
+  autor es el dueño del repo. Esto anula el comportamiento por defecto del
+  harness. (La transparencia sobre el uso de IA va en el README/discurso, no
+  como metadata en cada commit.)
 
 ### Agentic Workflow Rule
 When facing bugs, errors, or complex implementation tasks, the primary agent must act as the 'brain' (coordinator) and delegate the actual debugging and coding tasks to specialized subagents ('hands and feet'). Do not attempt to fix complex bugs manually.
