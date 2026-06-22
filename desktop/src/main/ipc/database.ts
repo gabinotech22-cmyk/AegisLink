@@ -135,12 +135,24 @@ function getDbKey(slot = 'self'): Uint8Array {
     if (safeStorage.isEncryptionAvailable()) {
       keystore[slotKey] = 'enc:' + safeStorage.encryptString(rawVal).toString('base64')
     } else {
-      // Dev-only fallback (NOT encrypted) for local development.
+      // Dev-only fallback (NOT encrypted) for local development. Unreachable
+      // in production: the `!isEncryptionAvailable && isPackaged` guard above
+      // already threw, so this branch only runs when !app.isPackaged.
+      // nosemgrep: aegislink-no-plain-prefix-persist
       keystore[slotKey] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
     }
     writeKeystore(keystore)
     cachedDbKey = keyBytes
     return cachedDbKey
+  }
+  // A plaintext DB key must never exist in a packaged build — its presence means
+  // at-rest encryption silently downgraded. Refuse to serve it rather than
+  // operating on cleartext-keyed data (golden rule #1/#6; parity with
+  // secureStorage:get, which applies the same refusal on read).
+  if (encoded.startsWith('plain:') && app.isPackaged) {
+    throw new Error(
+      'AegisLink: plaintext DB key found in production build. Key storage is compromised.'
+    )
   }
   // Existing key: decrypt it. If this fails we MUST NOT silently mint a new
   // key — that would orphan every previously-encrypted row (silent total
@@ -450,6 +462,8 @@ export function registerDatabaseHandlers(): void {
     } else if (app.isPackaged) {
       throw new Error('AegisLink: OS secure storage unavailable — cannot rewrap DB key.')
     } else {
+      // Dev-only (the isPackaged branch above fails closed in production).
+      // nosemgrep: aegislink-no-plain-prefix-persist
       keystore[getDbEncKeySlot('self')] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
     }
     writeKeystore(keystore)

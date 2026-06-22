@@ -74,7 +74,9 @@ export function registerSecureStorageHandlers(): void {
           'AegisLink: safeStorage unavailable on production build. Cannot store keys securely.'
         )
       }
-      // Dev-only fallback: base64 encoding (NOT encrypted) for local development.
+      // Dev-only fallback: base64 encoding (NOT encrypted) for local development
+      // (the isPackaged branch above already failed closed in production).
+      // nosemgrep: aegislink-no-plain-prefix-persist
       keystore[key] = 'plain:' + Buffer.from(value, 'utf-8').toString('base64')
     }
     writeKeystore(keystore)
