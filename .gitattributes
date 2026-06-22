@@ -1,0 +1,6 @@
+# Shell scripts and Dockerfiles run in Linux containers (OSS-Fuzz, CI, deploy);
+# a CRLF would break the shebang / line parsing. Force LF regardless of a
+# contributor's core.autocrlf setting.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
