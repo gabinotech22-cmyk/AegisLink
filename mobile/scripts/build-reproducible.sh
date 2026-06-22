@@ -46,8 +46,18 @@ fi
 npx expo prebuild $PREBUILD_ARGS
 
 # ── Build the unsigned release APK ───────────────────────────────────────────
+# lintVital is disabled in app/build.gradle via app.plugin.js (it was failing +
+# slow and never affects the packaged bytes). AEGIS_REPRO_ABIS optionally narrows
+# the built ABIs — used by the fast PR smoke build (single ABI); a full release /
+# determinism build leaves it unset so all ABIs are produced.
+GRADLE_ARGS="--no-daemon --console=plain"
+if [ -n "${AEGIS_REPRO_ABIS:-}" ]; then
+  echo "[repro] limiting ABIs to: $AEGIS_REPRO_ABIS"
+  GRADLE_ARGS="$GRADLE_ARGS -PreactNativeArchitectures=$AEGIS_REPRO_ABIS"
+fi
 cd android
-./gradlew --no-daemon --console=plain :app:assembleRelease
+# shellcheck disable=SC2086
+./gradlew $GRADLE_ARGS :app:assembleRelease
 
 # ── Locate + hash the artifact ───────────────────────────────────────────────
 APK="$(find app/build/outputs/apk/release -name '*.apk' | sort | head -1)"

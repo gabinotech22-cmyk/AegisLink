@@ -1,15 +1,15 @@
 name: Reproducible build
 
-# Heavy (~15-25 min): builds the Android release APK TWICE in a clean Linux
-# environment and asserts the two outputs are byte-for-byte identical. Manual,
-# plus on release tags. Not a per-PR gate.
+# Two modes:
+#  - PR (path-scoped): a FAST single-ABI smoke build that proves the build config
+#    + app.plugin.js determinism injection actually compile and produce an APK.
+#  - Tags / manual: the FULL determinism proof — build all ABIs TWICE in a clean
+#    environment and assert the two outputs are byte-for-byte identical.
 on:
   workflow_dispatch:
   push:
     tags:
       - 'v*'
-  # Path-scoped so it proves determinism whenever the build setup changes,
-  # without burdening unrelated PRs.
   pull_request:
     paths:
       - 'mobile/app.plugin.js'
@@ -22,28 +22,73 @@ permissions:
   contents: read
 
 jobs:
-  reproducible-apk:
-    name: Build twice, diff byte-for-byte
+  # ── Fast PR feedback: does it build + does the plugin inject? (single ABI) ───
+  smoke:
+    if: github.event_name == 'pull_request'
+    name: Build smoke (arm64-v8a)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
           cache-dependency-path: mobile/package-lock.json
-
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
+      # Gradle DEPENDENCY cache (not setup-java's `cache: gradle`, which needs
+      # *.gradle files at checkout — they don't exist until prebuild). Speeds the
+      # cold native download; content-addressed, so it can't affect output bytes.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: gradle-
+      - name: Build (single ABI, unsigned release)
+        working-directory: mobile
+        env:
+          AEGIS_REPRO_ABIS: arm64-v8a
+        run: bash scripts/build-reproducible.sh --clean
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
 
-      # First deterministic build.
+  # ── Full determinism proof: all ABIs, build twice, diff byte-for-byte ────────
+  determinism:
+    if: github.event_name != 'pull_request'
+    name: Build twice, diff byte-for-byte
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: gradle-
+
       - name: Build #1
         working-directory: mobile
         run: bash scripts/build-reproducible.sh --clean
-
       - name: Capture build #1
         working-directory: mobile
         run: |
@@ -52,16 +97,16 @@ jobs:
              "$GITHUB_WORKSPACE/_repro/build1.apk"
           sha256sum "$GITHUB_WORKSPACE/_repro/build1.apk"
 
-      # Wipe generated native output so the second build can't reuse stale state.
+      # Wipe generated native output (NOT ~/.gradle deps) so build #2 recompiles
+      # rather than reusing build #1's outputs — that's what makes the diff a real
+      # determinism test. Gradle's build cache is off by default, so this holds.
       - name: Reset native output
         working-directory: mobile
         run: rm -rf android
 
-      # Second deterministic build, from the same commit + pinned toolchain.
       - name: Build #2
         working-directory: mobile
         run: bash scripts/build-reproducible.sh --clean
-
       - name: Capture build #2
         working-directory: mobile
         run: |
@@ -76,7 +121,6 @@ jobs:
           echo "build2: $(sha256sum build2.apk | cut -d' ' -f1)"
           if ! cmp -s build1.apk build2.apk; then
             echo "::error::Release APK is NOT reproducible — the two builds differ."
-            # Surface WHAT differs (entry list + sizes) to make debugging tractable.
             command -v unzip >/dev/null && {
               unzip -l build1.apk | sort > l1.txt
               unzip -l build2.apk | sort > l2.txt
@@ -87,9 +131,8 @@ jobs:
           fi
           echo "✅ Reproducible: both builds are byte-for-byte identical."
 
-      - name: Upload artifacts
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: reproducible-apk
           path: _repro/*.apk

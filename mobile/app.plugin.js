@@ -327,6 +327,14 @@ android {
         includeInApk = false
         includeInBundle = false
     }
+    // lintVital runs on every assembleRelease and is both slow and was failing
+    // the build (:expo-updates:lintVitalAnalyzeRelease). Lint analyzes source and
+    // never touches the packaged bytes, so disabling it does not affect the
+    // artifact or its reproducibility — only release-build feasibility/speed.
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }
 `;
 

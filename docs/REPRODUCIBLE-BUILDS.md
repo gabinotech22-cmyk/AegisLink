@@ -33,11 +33,16 @@ artifact, exactly as F-Droid does.
 - **Pin embedded time/locale.** The build runs with `TZ=UTC`, `LC_ALL=C`, and
   `SOURCE_DATE_EPOCH` set to the commit time.
 - **No Gradle daemon** (`--no-daemon`) so stale daemon state can't leak in.
+- **Disable lintVital** (in the same injected block). Android's release lint
+  never touches the packaged bytes; it was only slowing/failing the build.
 
-CI proves it on every release tag (and on demand): the
-[`Reproducible build`](../.github/workflows/reproducible-build.yml) workflow
-builds the APK **twice** in a clean environment and fails if the two outputs
-differ by a single byte.
+CI runs the [`Reproducible build`](../.github/workflows/reproducible-build.yml)
+workflow in two modes:
+
+- **On PRs** that touch the build setup: a fast single-ABI (`arm64-v8a`) smoke
+  build — proves the config + plugin injection compile and produce an APK.
+- **On release tags / on demand:** the full proof — build **all ABIs twice** in
+  a clean environment and fail unless the two outputs are byte-for-byte identical.
 
 ## Verify it yourself
 
