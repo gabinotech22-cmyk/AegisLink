@@ -290,9 +290,19 @@ jobs:
           working-directory: mobile
           script: |
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            # ── Diagnostics: capture logcat in the background for crash/JS-error
+            # analysis while the emulator is alive (the runner kills it after). ──
+            adb logcat -c || true
+            adb logcat > maestro-logcat.txt 2>&1 &
+            LOGCAT_PID=$!
             set +e
             maestro test .maestro/ --format junit --output maestro-report.xml
             CODE=$?
+            # Snapshot the final on-screen state + rendered UI tree so we can see
+            # whether it's a splash spinner, a redbox crash, or raw i18n keys.
+            adb exec-out screencap -p > maestro-screen.png 2>/dev/null || true
+            adb exec-out uiautomator dump /dev/tty > maestro-uihierarchy.xml 2>/dev/null || true
+            kill "$LOGCAT_PID" 2>/dev/null || true
             mkdir -p maestro-out
             cp -r "$HOME/.maestro/tests/"* maestro-out/ 2>/dev/null || true
             exit $CODE
@@ -305,6 +315,9 @@ jobs:
           path: |
             mobile/maestro-report.xml
             mobile/maestro-out/**
+            mobile/maestro-logcat.txt
+            mobile/maestro-screen.png
+            mobile/maestro-uihierarchy.xml
           if-no-files-found: ignore
 
   # ─── Permissions audit — Android + iOS native manifests ─────────────────
