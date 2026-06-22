@@ -18,6 +18,7 @@ import { parseIdentityQR, parseGroupInviteLink, universalToScheme } from '../cry
 import { parseMultiPayload } from '../utils/attachmentFormat';
 import { parseGroupPostMarker } from '../utils/groupPost';
 import { parseLocationMessage } from '../utils/parseLocationMessage';
+import { unpad } from '../crypto/metadata';
 
 export interface FuzzTarget {
   name: string;
@@ -25,6 +26,10 @@ export interface FuzzTarget {
   seeds: string[];
   run: (input: string) => void;
 }
+
+// UTF-8 encoder shared by the byte-oriented targets. The in-repo runner and the
+// Jazzer harness both reach `unpad` through here, so the contract is identical.
+const utf8 = new TextEncoder();
 
 export const FUZZ_TARGETS: FuzzTarget[] = [
   {
@@ -75,5 +80,23 @@ export const FUZZ_TARGETS: FuzzTarget[] = [
       '📍(((((((((((((((((((((:',
     ],
     run: (s) => void parseLocationMessage(s),
+  },
+  {
+    // Inner Double Ratchet payload deserializer. After the outer box is opened,
+    // the decrypted bytes are FULLY controlled by a (malicious) authenticated
+    // peer before they reach JSON.parse. `unpad` must fail soft (return null),
+    // never throw and never hang, on arbitrary bytes — a throw here is a remote
+    // crash triggerable by any contact. Fuzzed as UTF-8 bytes; the Jazzer
+    // harness feeds raw bytes to the same function.
+    name: 'unpadInnerPayload',
+    seeds: [
+      '{"v":2,"from":"ABC","ratchet":{"ratchetKeyB64":"AAA=","n":0,"pn":0,"ciphertextB64":"AAA=","nonceB64":"AAA="}}',
+      '{"v":2,"from":"x","ratchet":{}}   ',
+      '{"pad":"AAAA","v":2}',
+      '{}',
+      '[]',
+      'null',
+    ],
+    run: (s) => void unpad(utf8.encode(s)),
   },
 ];

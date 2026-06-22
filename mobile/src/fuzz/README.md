@@ -17,6 +17,7 @@ Declared in [`targets.ts`](./targets.ts):
 | `parseMultiPayload` | message body (relay) | `{…} \| null` |
 | `parseGroupPostMarker` | message body (relay) | typed result |
 | `parseLocationMessage` | message body (relay) | `{…} \| null` |
+| `unpadInnerPayload` | decrypted ratchet payload (malicious peer) | `{…} \| null` |
 
 ## Run it (in-repo, always-on CI gate)
 
@@ -37,16 +38,30 @@ unit regression next to the parser (see the malformed-percent-encoding cases in
 
 The same `run(input)` functions are valid [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js)
 entry points — there an uncaught throw IS the finding, which is why the targets
-do not swallow errors. A Jazzer harness is a one-liner per target:
+do not swallow errors. The harnesses live in [`mobile/fuzz/`](../../fuzz/): a
+thin `<target>.fuzz.js` per target plus a shared `harness.js`. They load a
+single esbuild bundle of `targets.ts` (+ its pure closure — no RN/Expo runtime
+dependency survives), so they run standalone:
 
-```js
-// parseIdentityQR.fuzz.js
-const { FUZZ_TARGETS } = require('../src/fuzz/targets');
-const t = FUZZ_TARGETS.find((x) => x.name === 'parseIdentityQR');
-module.exports.fuzz = (data /* Buffer */) => t.run(data.toString('utf8'));
+```bash
+cd mobile
+npm run fuzz:bundle      # esbuild → fuzz/targets.bundle.js (gitignored)
+# then drive any target with Jazzer, e.g.:
+npx jazzer fuzz/parseIdentityQR.fuzz.js
 ```
 
-For OSS-Fuzz, the `projects/aegislink/` entry needs `project.yaml`
-(`language: javascript`), a `Dockerfile` (clone repo, `npm ci` in `mobile/`),
-and a `build.sh` that runs `compile_javascript_fuzzer mobile <target>.fuzz.js`
-for each target, seeding the corpus from each target's `seeds`.
+### OSS-Fuzz integration
+
+The `projects/aegislink/` entry for [google/oss-fuzz](https://github.com/google/oss-fuzz)
+is kept in-tree at [`infra/oss-fuzz/`](../../../infra/oss-fuzz/) so it's
+versioned with the code it exercises — the OSS-Fuzz PR is a copy of that
+directory:
+
+- `project.yaml` — `language: javascript`, libFuzzer engine, `none` sanitizer.
+- `Dockerfile` — `base-builder-javascript`, shallow-clones the repo.
+- `build.sh` — `npm ci --ignore-scripts` in `mobile/`, bundles, then
+  `compile_javascript_fuzzer` for each target and zips its `seeds` as the
+  seed corpus.
+
+When you add a target to `FUZZ_TARGETS`, also add a `mobile/fuzz/<name>.fuzz.js`
+wrapper and the name to the `TARGETS` list in `infra/oss-fuzz/build.sh`.
