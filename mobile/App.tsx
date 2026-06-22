@@ -348,11 +348,18 @@ function Shell() {
     return () => sub.remove();
   }, [hydrated, identity]);
 
-  // Enforce screenshot / screen-recording block
+  // Enforce screenshot / screen-recording block.
+  // E2E exception: Maestro drives the app through screen capture, which
+  // FLAG_SECURE blocks — the automation run errors out before it can assert
+  // anything. EXPO_PUBLIC_E2E is inlined ONLY into the CI E2E bundle (see the
+  // "Bundle JS into debug assets" step in .github/workflows/ci.yml); it is never
+  // set for release builds, so production still defaults to blocking screenshots
+  // (fail-closed). This only toggles an anti-capture UX flag — no key material.
   useEffect(() => {
     try {
       const SC = require('expo-screen-capture');
-      if (blockScreenshots) {
+      const e2e = process.env.EXPO_PUBLIC_E2E === '1';
+      if (blockScreenshots && !e2e) {
         SC.preventScreenCaptureAsync().catch(() => {});
       } else {
         SC.allowScreenCaptureAsync().catch(() => {});
