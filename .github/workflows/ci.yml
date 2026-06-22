@@ -262,6 +262,21 @@ jobs:
       - name: Expo prebuild (generate android/)
         run: npx expo prebuild --platform android --no-install
 
+      # A debug APK does NOT embed the JS bundle — at runtime it pulls it from
+      # Metro (10.0.2.2:8081). There is no Metro in CI, so the app white-screened
+      # with "Unable to load script" and every Maestro assertion failed. Pre-bundle
+      # the JS into the debug assets so the app loads offline: the debug runtime
+      # falls back to assets/index.android.bundle when Metro is unreachable.
+      - name: Bundle JS into debug assets (no Metro in CI)
+        run: |
+          mkdir -p android/app/src/main/assets
+          npx expo export:embed \
+            --platform android \
+            --dev false \
+            --entry-file index.ts \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
+
       # Build only the emulator ABI (x86_64) to cut build time and avoid OOM.
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
