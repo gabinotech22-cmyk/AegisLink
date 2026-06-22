@@ -8,6 +8,20 @@
 
 import { keyMatchesAegisId } from './aegisId';
 
+/**
+ * decodeURIComponent throws a URIError on a malformed percent-escape (a lone
+ * `%`, `%g`, a truncated `%c0`, …). These parsers run on attacker-controlled
+ * input (a scanned QR / pasted link), so a throw here would crash the scan
+ * handler. Fail soft: a malformed escape means the payload is not a valid link.
+ */
+function safeDecodeURIComponent(s: string): string | null {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
+}
+
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 const SCHEME = 'aegislink://v1/';
 const GROUP_SCHEME = 'aegislink://group/v1/';
@@ -61,7 +75,9 @@ export function parseIdentityQR(raw: string): ParsedIdentityQR | null {
   const slash = rest.indexOf('/');
   if (slash < 0) return null;
   const aegisId = rest.slice(0, slash).trim().toUpperCase();
-  const publicKeyB64 = decodeURIComponent(rest.slice(slash + 1)).trim();
+  const decodedKey = safeDecodeURIComponent(rest.slice(slash + 1));
+  if (decodedKey === null) return null;
+  const publicKeyB64 = decodedKey.trim();
   if (!AEGIS_ID_RE.test(aegisId)) return null;
   // base64-encoded 32-byte Curve25519 key is exactly 44 chars.
   if (publicKeyB64.length !== 44) return null;
@@ -123,9 +139,9 @@ export function parseGroupInviteLink(url: string): ParsedGroupInvite | null {
   const rest = normalized.slice(GROUP_SCHEME.length);
   const parts = rest.split('/');
   if (parts.length < 3) return null;
-  const groupId = decodeURIComponent(parts[0]).trim();
-  const groupName = decodeURIComponent(parts[1]).trim();
-  const adminId = decodeURIComponent(parts[2]).trim();
+  const groupId = safeDecodeURIComponent(parts[0])?.trim();
+  const groupName = safeDecodeURIComponent(parts[1])?.trim();
+  const adminId = safeDecodeURIComponent(parts[2])?.trim();
   if (!groupId || !groupName || !adminId) return null;
   return { groupId, groupName, adminId };
 }
