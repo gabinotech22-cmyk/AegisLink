@@ -1,0 +1,96 @@
+name: Reproducible build
+
+# Heavy (~15-25 min): builds the Android release APK TWICE in a clean Linux
+# environment and asserts the two outputs are byte-for-byte identical. Manual,
+# plus on release tags. Not a per-PR gate.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+  # Path-scoped so it proves determinism whenever the build setup changes,
+  # without burdening unrelated PRs.
+  pull_request:
+    paths:
+      - 'mobile/app.plugin.js'
+      - 'mobile/scripts/build-reproducible.sh'
+      - 'mobile/app.json'
+      - 'mobile/package-lock.json'
+      - '.github/workflows/reproducible-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  reproducible-apk:
+    name: Build twice, diff byte-for-byte
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # First deterministic build.
+      - name: Build #1
+        working-directory: mobile
+        run: bash scripts/build-reproducible.sh --clean
+
+      - name: Capture build #1
+        working-directory: mobile
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/_repro"
+          cp "$(find android/app/build/outputs/apk/release -name '*.apk' | sort | head -1)" \
+             "$GITHUB_WORKSPACE/_repro/build1.apk"
+          sha256sum "$GITHUB_WORKSPACE/_repro/build1.apk"
+
+      # Wipe generated native output so the second build can't reuse stale state.
+      - name: Reset native output
+        working-directory: mobile
+        run: rm -rf android
+
+      # Second deterministic build, from the same commit + pinned toolchain.
+      - name: Build #2
+        working-directory: mobile
+        run: bash scripts/build-reproducible.sh --clean
+
+      - name: Capture build #2
+        working-directory: mobile
+        run: |
+          cp "$(find android/app/build/outputs/apk/release -name '*.apk' | sort | head -1)" \
+             "$GITHUB_WORKSPACE/_repro/build2.apk"
+          sha256sum "$GITHUB_WORKSPACE/_repro/build2.apk"
+
+      - name: Assert byte-for-byte identical
+        run: |
+          cd "$GITHUB_WORKSPACE/_repro"
+          echo "build1: $(sha256sum build1.apk | cut -d' ' -f1)"
+          echo "build2: $(sha256sum build2.apk | cut -d' ' -f1)"
+          if ! cmp -s build1.apk build2.apk; then
+            echo "::error::Release APK is NOT reproducible — the two builds differ."
+            # Surface WHAT differs (entry list + sizes) to make debugging tractable.
+            command -v unzip >/dev/null && {
+              unzip -l build1.apk | sort > l1.txt
+              unzip -l build2.apk | sort > l2.txt
+              echo "--- diff of zip entry listings ---"
+              diff l1.txt l2.txt || true
+            }
+            exit 1
+          fi
+          echo "✅ Reproducible: both builds are byte-for-byte identical."
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproducible-apk
+          path: _repro/*.apk
+          if-no-files-found: warn
