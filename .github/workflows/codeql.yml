@@ -42,8 +42,12 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: javascript-typescript
-          # security-and-quality is the broadest free suite (security + quality).
-          queries: security-and-quality
+          # security-extended = security queries only (no maintainability/style
+          # noise). security-and-quality also flags unused vars / style across
+          # the whole tree, which would fail the PR code-scanning gate on any
+          # diff touching a file with pre-existing lint debt — not what a
+          # security gate should do. Lint belongs to tsc/eslint, not CodeQL.
+          queries: security-extended
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3

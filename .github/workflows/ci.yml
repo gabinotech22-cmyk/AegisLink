@@ -120,6 +120,32 @@ jobs:
       - name: Run tests
         run: npm test -- --passWithNoTests
 
+  # ─── Mobile — parser fuzz campaign (untrusted-input parsers) ─────────────
+  # Deterministic, native-dependency-free fuzzing of the QR/link/message-body
+  # parsers (src/fuzz/). Scoped + serial, so it is fast and safe regardless of
+  # the full Jest suite. A throw/hang on a fuzzed input fails the gate. The same
+  # targets run coverage-guided under Jazzer.js on OSS-Fuzz (src/fuzz/README.md).
+  mobile-fuzz:
+    name: Mobile parser fuzz
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Run parser fuzz campaign
+        run: npm run fuzz
+
   # ─── Desktop — typecheck + tests (Electron main/renderer, vitest) ─────────
   # Golden rule #11: the desktop client MUST have a CI test suite covering IPC,
   # ratchet serialization and DB encryption. The native cipher module
