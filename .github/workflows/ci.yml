@@ -226,11 +226,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          # Cache ~/.gradle/caches and ~/.gradle/wrapper keyed on gradle
-          # lockfiles/wrapper props. Once warm, this avoids re-resolving
-          # dependencies (incl. org.jitsi:webrtc) from jitpack/Maven on every
-          # run — only a cold cache needs network access to those repos.
-          cache: gradle
+          # NOTE: no `cache: gradle` here. This project uses Expo Continuous
+          # Native Generation — android/ is gitignored and only materialises
+          # later via `expo prebuild`. setup-java's gradle cache hashes
+          # **/*.gradle* / gradle-wrapper.properties to build its key, but at
+          # this point in the job no gradle files exist yet, so it errors out
+          # ("No file ... matched to [**/*.gradle*,...]") and fails the whole
+          # job. There is nothing meaningful to cache before prebuild anyway.
 
       - name: Install mobile dependencies
         run: npm ci
