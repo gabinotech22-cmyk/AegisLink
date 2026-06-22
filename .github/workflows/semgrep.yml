@@ -1,0 +1,60 @@
+# Semgrep — fast pattern-based SAST (secrets + security-audit + AegisLink rules)
+#
+# Free, no Semgrep account/token needed: we run the open-source CLI against the
+# public registry packs plus our own .semgrep/aegislink-rules.yml, which encodes
+# the "Reglas de Oro — Seguridad" so they cannot be silently reintroduced.
+#
+# Findings are uploaded as SARIF to Security → Code scanning (same tab as
+# CodeQL). Runs on PRs to main, push to main, and weekly.
+#
+# NOTE: never add secrets, real IPs, or key material to this workflow.
+
+name: Semgrep
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 5 * * 1' # Mondays 05:00 UTC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: Semgrep scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        # p/secrets        — hardcoded credentials / key material
+        # p/security-audit — broad security smells (injection, ssrf, etc.)
+        # p/typescript     — TS-specific correctness/security
+        # .semgrep/        — AegisLink golden-rule checks
+        # Non-blocking exit so SARIF still uploads; findings gate via the
+        # code-scanning tab. Tighten to a hard fail once the baseline is clean.
+        run: |
+          semgrep scan \
+            --config p/secrets \
+            --config p/security-audit \
+            --config p/typescript \
+            --config .semgrep/ \
+            --sarif --output semgrep.sarif \
+            --error || true
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
