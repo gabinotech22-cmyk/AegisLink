@@ -71,3 +71,20 @@ describe('universalToScheme', () => {
     expect(mapped?.startsWith('aegislink://group/')).toBe(true);
   });
 });
+
+// Regression: a malformed percent-escape in scanned/pasted input made
+// decodeURIComponent throw URIError instead of failing soft. Found by the
+// parser fuzz campaign (src/fuzz/__tests__/parsers.fuzz.test.ts).
+describe('malformed percent-encoding fails soft (no URIError)', () => {
+  it('parseIdentityQR returns null on a malformed % escape in the key segment', () => {
+    expect(() => parseIdentityQR('aegislink://v1/ABC-DEFG-HJKL/QUFB%gUFB')).not.toThrow();
+    expect(parseIdentityQR('aegislink://v1/ABC-DEFG-HJKL/QUFB%gUFB')).toBeNull();
+    expect(parseIdentityQR('aegislink://v1/ABC-DEFG-HJKL/%')).toBeNull();
+  });
+
+  it('parseGroupInviteLink returns null on a malformed % escape in any segment', () => {
+    expect(() => parseGroupInviteLink('aegislink://group/v1/%c0/Name/admin')).not.toThrow();
+    expect(parseGroupInviteLink('aegislink://group/v1/%c0/Name/admin')).toBeNull();
+    expect(parseGroupInviteLink('aegislink://group/v1/gid/%/admin')).toBeNull();
+  });
+});
