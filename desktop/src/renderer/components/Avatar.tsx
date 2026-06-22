@@ -44,6 +44,30 @@ export function isImageUri(v?: string | null): v is string {
   );
 }
 
+/** Protocols an <img> may load from a (contact-controlled) avatar source. */
+const SAFE_IMG_PROTOCOLS = new Set(['file:', 'content:']);
+
+/**
+ * Re-derive a safe <img> src from an avatar source, or undefined to fall back
+ * to initials/emoji. blob: and data:image/ are inert local schemes (an
+ * <img>-loaded resource cannot execute script) and pass through. Anything with
+ * a real origin is parsed with the URL API and only an allowlisted protocol
+ * (no http(s)/javascript:/data:text-html) is reconstructed from the parsed URL
+ * — so the value reaching the DOM sink is rebuilt from a validated protocol,
+ * never raw attacker text (closes CodeQL js/xss-through-dom at the sink).
+ */
+export function safeImageSrc(v?: string | null): string | undefined {
+  if (!v) return undefined;
+  if (v.startsWith('blob:') || v.startsWith('data:image/')) return v;
+  try {
+    const u = new URL(v);
+    if (SAFE_IMG_PROTOCOLS.has(u.protocol)) return u.href;
+  } catch {
+    /* not a parseable URL — not a valid avatar source */
+  }
+  return undefined;
+}
+
 export function Avatar({ t, name, color, size = 44, photoUri, group, seed }: Props) {
   const bg = color ?? t.surface2;
   const safeName = typeof name === 'string' ? name.trim() : '';
@@ -66,10 +90,11 @@ export function Avatar({ t, name, color, size = 44, photoUri, group, seed }: Pro
     overflow: 'hidden',
   };
 
-  if (imgUri) {
+  const imgSrc = safeImageSrc(imgUri);
+  if (imgSrc) {
     return (
       <img
-        src={imgUri}
+        src={imgSrc}
         alt={safeName}
         style={{ ...circleStyle, objectFit: 'cover' }}
       />

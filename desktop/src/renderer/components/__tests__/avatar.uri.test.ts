@@ -9,7 +9,7 @@
  * Regression for the XSS/IP-leak CodeQL flagged on Avatar.tsx.
  */
 import { describe, it, expect } from 'vitest';
-import { isImageUri } from '../Avatar';
+import { isImageUri, safeImageSrc } from '../Avatar';
 
 describe('Avatar isImageUri allowlist', () => {
   it('accepts local / embedded image schemes', () => {
@@ -35,5 +35,27 @@ describe('Avatar isImageUri allowlist', () => {
     expect(isImageUri('Alice')).toBe(false);
     expect(isImageUri('🛡️')).toBe(false);
     expect(isImageUri('javascript:alert(1)')).toBe(false);
+  });
+});
+
+describe('Avatar safeImageSrc (sink guard)', () => {
+  it('passes through inert local schemes unchanged', () => {
+    expect(safeImageSrc('blob:abc')).toBe('blob:abc');
+    expect(safeImageSrc('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
+  });
+
+  it('reconstructs allowlisted-protocol URLs from the parsed URL', () => {
+    expect(safeImageSrc('file:///tmp/a.png')).toBe('file:///tmp/a.png');
+    expect(safeImageSrc('content://media/1')?.startsWith('content://')).toBe(true);
+  });
+
+  it('returns undefined for unsafe / non-URI sources (no DOM sink)', () => {
+    expect(safeImageSrc('http://evil.example/track.gif')).toBeUndefined();
+    expect(safeImageSrc('https://evil.example/track.gif')).toBeUndefined();
+    expect(safeImageSrc('data:text/html,<script>alert(1)</script>')).toBeUndefined();
+    expect(safeImageSrc('javascript:alert(1)')).toBeUndefined();
+    expect(safeImageSrc('Alice')).toBeUndefined();
+    expect(safeImageSrc(null)).toBeUndefined();
+    expect(safeImageSrc(undefined)).toBeUndefined();
   });
 });
