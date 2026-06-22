@@ -226,11 +226,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          # Cache ~/.gradle/caches and ~/.gradle/wrapper keyed on gradle
-          # lockfiles/wrapper props. Once warm, this avoids re-resolving
-          # dependencies (incl. org.jitsi:webrtc) from jitpack/Maven on every
-          # run — only a cold cache needs network access to those repos.
-          cache: gradle
+
+      # Gradle DEPENDENCY cache — NOT setup-java's `cache: gradle`, which requires
+      # *.gradle files to exist at checkout. They don't: the native project is
+      # generated later by `expo prebuild`, so `cache: gradle` errored ("No file
+      # matched to **/*.gradle*") and failed the whole job at JDK setup. A plain
+      # actions/cache keyed on the npm lockfile warms ~/.gradle/caches and
+      # ~/.gradle/wrapper without that precondition — avoiding re-resolving deps
+      # (incl. org.jitsi:webrtc) from jitpack/Maven once warm. Mirrors
+      # .github/workflows/reproducible-build.yml.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: gradle-
 
       - name: Install mobile dependencies
         run: npm ci
