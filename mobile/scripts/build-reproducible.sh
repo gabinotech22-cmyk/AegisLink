@@ -45,12 +45,28 @@ fi
 # shellcheck disable=SC2086
 npx expo prebuild $PREBUILD_ARGS
 
+# ── Give the Gradle daemon enough Metaspace ──────────────────────────────────
+# Expo's generated android/gradle.properties pins MaxMetaspaceSize=512m. Android
+# Lint (lintVital*) loads thousands of classes across every library module and
+# blows past that, OOM-ing the daemon (java.lang.OutOfMemoryError: Metaspace)
+# ~12 min in, after which the forked daemon hangs to the CI timeout. We exclude
+# lintVital below (it never touches packaged bytes), and also raise Metaspace as
+# defense in depth. JVM memory args affect only the build process, never the
+# output bytes, so reproducibility is preserved. Later entries override earlier
+# ones, so appending wins.
+{
+  echo ""
+  echo "# Appended by build-reproducible.sh — build-process memory only, not output."
+  echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8"
+} >> android/gradle.properties
+
 # ── Build the unsigned release APK ───────────────────────────────────────────
-# lintVital is disabled in app/build.gradle via app.plugin.js (it was failing +
-# slow and never affects the packaged bytes). AEGIS_REPRO_ABIS optionally narrows
-# the built ABIs — used by the fast PR smoke build (single ABI); a full release /
-# determinism build leaves it unset so all ABIs are produced.
-GRADLE_ARGS="--no-daemon --console=plain"
+# lintVitalAnalyzeRelease is excluded globally here: it runs on EVERY module
+# (the app.plugin.js lint{} block only covers :app), is the main Metaspace hog,
+# is slow, and never affects the packaged bytes. AEGIS_REPRO_ABIS optionally
+# narrows the built ABIs — used by the fast PR smoke build (single ABI); a full
+# release / determinism build leaves it unset so all ABIs are produced.
+GRADLE_ARGS="--no-daemon --console=plain -x lintVitalAnalyzeRelease"
 if [ -n "${AEGIS_REPRO_ABIS:-}" ]; then
   echo "[repro] limiting ABIs to: $AEGIS_REPRO_ABIS"
   GRADLE_ARGS="$GRADLE_ARGS -PreactNativeArchitectures=$AEGIS_REPRO_ABIS"
