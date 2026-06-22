@@ -8,6 +8,7 @@ import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
+import { fileToDownscaledDataUrl } from '../utils/image';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,7 +83,13 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
     input.accept = 'image/*';
     input.onchange = () => {
       const file = input.files?.[0];
-      if (file) setEditImage(URL.createObjectURL(file));
+      if (!file) return;
+      // Downscale to a small JPEG data: URL. Unlike URL.createObjectURL (which is
+      // revoked on reload and never persists), a data URL survives restarts and is
+      // safe to store in the DB / broadcast to contacts.
+      fileToDownscaledDataUrl(file)
+        .then((dataUrl) => setEditImage(dataUrl))
+        .catch(() => setErrorMsg('Could not load that image.'));
     };
     input.click();
   }
@@ -120,7 +127,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
           style={{ margin: '4px 18px 18px', padding: 18, backgroundColor: t.surface, border: `1px solid ${t.borderStrong}`, borderRadius: t.radius, cursor: 'pointer', width: 'calc(100% - 36px)', boxSizing: 'border-box', textAlign: 'left', display: 'block' }}
         >
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <Avatar t={t} name={displayName} color={avatarColor} size={56} photoUri={avatarImage ?? undefined} />
+            <Avatar t={t} name={displayName} color={avatarColor} size={56} photoUri={avatarImage ?? undefined} seed={identity?.publicKeyB64} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontFamily: t.fontDisplay, fontWeight: '600', fontSize: 17, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -187,7 +194,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
             <span style={{ fontFamily: t.font, fontWeight: '600', fontSize: 15, color: t.text, display: 'block', marginBottom: 16 }}>Edit Profile</span>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-              <Avatar t={t} name={editName} color={editColor} size={72} photoUri={editImage ?? undefined} />
+              <Avatar t={t} name={editName} color={editColor} size={72} photoUri={editImage ?? undefined} seed={identity?.publicKeyB64} />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'row', gap: 10, justifyContent: 'center', marginBottom: 20 }}>

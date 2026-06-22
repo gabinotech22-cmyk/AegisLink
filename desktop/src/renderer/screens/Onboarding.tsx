@@ -8,7 +8,9 @@ import { AegisMark } from '../components/AegisMark';
 import { KeySpinner, ProgressBar } from '../components/AegisMark';
 import { I } from '../components/icons';
 import { PrimaryButton, GhostButton } from '../components/Button';
+import { Identicon } from '../components/Identicon';
 import { useIdentity } from '../store/identity';
+import { fingerprintHex } from '../crypto/fingerprint';
 
 interface Props {
   onDone: () => void;
@@ -17,7 +19,9 @@ interface Props {
   initialStep?: 'welcome' | 'generating' | 'show';
 }
 
-type Step = 'welcome' | 'generating' | 'show';
+type Step = 'welcome' | 'generating' | 'show' | 'nickname';
+
+const AVATAR_COLOR_SWATCHES = ['#05b875', '#3b82f6', '#8b5cf6', '#ec4899', '#f97316', '#eab308'];
 
 export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }: Props) {
   const { t } = useTheme();
@@ -26,9 +30,20 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
   const [step, setStep] = useState<Step>(initialStep);
 
   const identity = useIdentity((s) => s.identity);
-  const [fingerprint] = useState<string[]>([]);
+  const storeAvatarColor = useIdentity((s) => s.avatarColor);
+  const updateProfile = useIdentity((s) => s.updateProfile);
+  const [fingerprint, setFingerprint] = useState<string[]>([]);
   const [did] = useState<string | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
+  const [nickname, setNickname] = useState('');
+  const [selectedColor, setSelectedColor] = useState<string>(
+    AVATAR_COLOR_SWATCHES.includes(storeAvatarColor) ? storeAvatarColor : AVATAR_COLOR_SWATCHES[0],
+  );
+
+  // Default display name mirrors the identity store's own fallback derivation
+  // (aegisId lowercased, dashes stripped) so the placeholder and helper text
+  // always agree with what will actually be persisted if the user skips.
+  const defaultName = identity != null ? (identity as { aegisId: string }).aegisId.toLowerCase().replace(/-/g, '') : '';
 
   type RegState = 'idle' | 'registering' | 'error';
   const [regState, setRegState] = useState<RegState>('idle');
@@ -79,6 +94,14 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
     }
   }, [step]);
 
+  // Compute the real public-key fingerprint once we reach the identity screen
+  // (mobile parity — previously the card always rendered placeholder dots).
+  useEffect(() => {
+    if (step === 'show' && identity != null) {
+      setFingerprint(fingerprintHex((identity as { publicKey: Uint8Array }).publicKey));
+    }
+  }, [step, identity]);
+
   async function handleEnter() {
     if (registeredRef.current) {
       onDone();
@@ -87,8 +110,8 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
     setRegState('registering');
     setRegError(null);
     try {
-      // Real registration logic will be wired by another agent.
-      // For now, treat as instant success.
+      // Registration (PoW + prekey upload) already ran inside generate() ->
+      // publishToServer(); entering is just the gate into the app.
       registeredRef.current = true;
       setRegState('idle');
       onDone();
@@ -96,6 +119,21 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
       setRegState('error');
       setRegError((e as Error).message ?? 'Network error. Please retry.');
     }
+  }
+
+  async function handleContinueFromNickname() {
+    const trimmed = nickname.trim();
+    const colorChanged = selectedColor !== storeAvatarColor;
+    // Only persist if the user actually changed something — otherwise generate()'s
+    // defaults already hold and we avoid a redundant write + profile broadcast.
+    if (trimmed || colorChanged) {
+      try {
+        await updateProfile(trimmed || defaultName, selectedColor, null);
+      } catch {
+        /* non-fatal: profile is optional, proceed into the app */
+      }
+    }
+    await handleEnter();
   }
 
   const frame: CSSProperties = {
@@ -257,6 +295,70 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             {i18nT('onboarding.skipAnimation')}
           </span>
         </button>
+      </div>
+    );
+  }
+
+  // ── Step 3: Nickname + avatar (optional) ─────────────────────────────────
+  if (step === 'nickname') {
+    return (
+      <div style={{ ...frame, paddingLeft: 24, paddingRight: 24 }}>
+        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+          <AegisMark t={t} size={28} />
+          <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 1.1 }}>
+            {i18nT('onboarding.almostDone')}
+          </span>
+        </div>
+
+        <h2 style={{ fontFamily: t.fontDisplay, fontSize: 28, color: t.text, fontWeight: '600', letterSpacing: -0.56, marginTop: 0, marginBottom: 10 }}>
+          {i18nT('onboarding.nicknameTitle')}
+        </h2>
+        <p style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: '20px', marginTop: 0, marginBottom: 24 }}>
+          {i18nT('onboarding.nicknameSubtitle')}
+        </p>
+
+        {/* Avatar preview — the identicon is derived from the public key and
+            tinted with the selected swatch (mobile parity). */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+          <div style={{ width: 64, height: 64, borderRadius: '50%', backgroundColor: t.surface2, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+            {identity != null && (
+              <Identicon seed={(identity as { publicKeyB64: string }).publicKeyB64} color={selectedColor} size={64} rounded />
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', gap: 12, marginBottom: 24 }}>
+          {AVATAR_COLOR_SWATCHES.map((c) => {
+            const selected = c === selectedColor;
+            return (
+              <button
+                key={c}
+                onClick={() => setSelectedColor(c)}
+                aria-label={i18nT('onboarding.colorSwatchLabel', { color: c })}
+                style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: c, border: selected ? `2px solid ${t.accent}` : '2px solid transparent', cursor: 'pointer' }}
+              />
+            );
+          })}
+        </div>
+
+        <Label t={t}>{i18nT('onboarding.nicknameLabel')}</Label>
+        <input
+          value={nickname}
+          onChange={(e) => setNickname(e.target.value)}
+          placeholder={defaultName}
+          maxLength={20}
+          autoCapitalize="none"
+          autoCorrect="off"
+          style={{ color: t.text, backgroundColor: t.surface, border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, padding: 12, fontSize: 15, marginBottom: 8, fontFamily: t.font, width: '100%', boxSizing: 'border-box', outline: 'none' }}
+        />
+        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.4, marginBottom: 'auto', display: 'block', flex: 1 }}>
+          {i18nT('onboarding.nicknameDefault', { name: defaultName })}
+        </span>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <PrimaryButton t={t} label={i18nT('onboarding.continueBtn')} onPress={handleContinueFromNickname} />
+          <GhostButton t={t} label={i18nT('onboarding.skipNickname')} onPress={handleEnter} />
+        </div>
       </div>
     );
   }
@@ -432,14 +534,8 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
 
       <PrimaryButton
         t={t}
-        label={
-          regState === 'registering'
-            ? i18nT('onboarding.securingBtn')
-            : regState === 'error'
-            ? i18nT('onboarding.retryBtn')
-            : i18nT('onboarding.enterBtn')
-        }
-        onPress={handleEnter}
+        label={i18nT('onboarding.continueBtn')}
+        onPress={() => setStep('nickname')}
         disabled={regState === 'registering'}
         style={{ marginTop: 8 }}
       />

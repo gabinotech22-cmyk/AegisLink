@@ -117,7 +117,7 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 22 }}>
         {/* Header */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingLeft: 22, paddingRight: 22, paddingTop: 14, paddingBottom: 14 }}>
-          <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.accent} size={88} photoUri={contact.avatarImage ?? undefined} />
+          <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.accent} size={88} photoUri={contact.avatarImage ?? undefined} seed={contact.publicKeyB64 ?? contact.aegisId} />
           <span style={{ fontFamily: isAegisId ? t.fontMono : t.fontDisplay, fontSize: 24, fontWeight: '600', letterSpacing: -0.4, color: t.text, marginTop: 14, textAlign: 'center', display: 'block' }}>
             {contact.name}
           </span>

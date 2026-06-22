@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { Theme } from '../theme/vault';
 import { I } from './icons';
+import { Identicon } from './Identicon';
 
 interface Props {
   t: Theme;
@@ -10,19 +11,72 @@ interface Props {
   photoUri?: string | null;
   /** When true renders a group-style avatar (I.Users icon instead of initials when no image) */
   group?: boolean;
+  /**
+   * Deterministic seed (prefer publicKeyB64, fall back to aegisId) used to render
+   * an identicon when there is no photo. If omitted, falls back to the legacy
+   * initial+color circle so existing call sites without a seed keep working.
+   */
+  seed?: string;
 }
 
-export function Avatar({ t, name, color, size = 44, photoUri, group }: Props) {
+/**
+ * True only for strings that an <img src> can SAFELY load as a local/embedded
+ * avatar. Emoji glyphs (which Profile stores in avatarImage) are NOT URIs and
+ * must render as text.
+ *
+ * Security/privacy (avatar sources are contact-controlled — a peer picks their
+ * own name/photo):
+ *   - Remote http(s) is rejected: a peer whose name/photo is "http://evil/x.gif"
+ *     would make THIS device fetch it on render, leaking our IP + online status
+ *     to a server of their choosing — a metadata leak (zero-metadata is
+ *     non-negotiable). Avatars are stored locally / as data URLs, never fetched.
+ *   - data: is restricted to data:image/ so a payload can never be
+ *     data:text/html,<script…> reinterpreted as HTML in the img sink
+ *     (CodeQL js/xss-through-dom).
+ */
+export function isImageUri(v?: string | null): v is string {
+  if (!v) return false;
+  return (
+    v.startsWith('file://') ||
+    v.startsWith('content://') ||
+    v.startsWith('blob:') ||
+    v.startsWith('data:image/')
+  );
+}
+
+/** Protocols an <img> may load from a (contact-controlled) avatar source. */
+const SAFE_IMG_PROTOCOLS = new Set(['file:', 'content:']);
+
+/**
+ * Re-derive a safe <img> src from an avatar source, or undefined to fall back
+ * to initials/emoji. blob: and data:image/ are inert local schemes (an
+ * <img>-loaded resource cannot execute script) and pass through. Anything with
+ * a real origin is parsed with the URL API and only an allowlisted protocol
+ * (no http(s)/javascript:/data:text-html) is reconstructed from the parsed URL
+ * — so the value reaching the DOM sink is rebuilt from a validated protocol,
+ * never raw attacker text (closes CodeQL js/xss-through-dom at the sink).
+ */
+export function safeImageSrc(v?: string | null): string | undefined {
+  if (!v) return undefined;
+  if (v.startsWith('blob:') || v.startsWith('data:image/')) return v;
+  try {
+    const u = new URL(v);
+    if (SAFE_IMG_PROTOCOLS.has(u.protocol)) return u.href;
+  } catch {
+    /* not a parseable URL — not a valid avatar source */
+  }
+  return undefined;
+}
+
+export function Avatar({ t, name, color, size = 44, photoUri, group, seed }: Props) {
   const bg = color ?? t.surface2;
   const safeName = typeof name === 'string' ? name.trim() : '';
-  const uri =
-    photoUri ||
-    (safeName.startsWith('file://') ||
-    safeName.startsWith('content://') ||
-    safeName.startsWith('data:') ||
-    safeName.startsWith('http')
-      ? safeName
-      : null);
+
+  // photoUri may be a real image URI, an emoji glyph (chosen in Profile), or null.
+  // Only treat it as an <img> source when it's actually a loadable URI — otherwise
+  // an emoji like "🛡️" would render as a broken image icon.
+  const imgUri = isImageUri(photoUri) ? photoUri : isImageUri(safeName) ? safeName : null;
+  const emojiGlyph = !imgUri && photoUri && !isImageUri(photoUri) ? photoUri : null;
 
   const circleStyle: CSSProperties = {
     width: size,
@@ -36,13 +90,24 @@ export function Avatar({ t, name, color, size = 44, photoUri, group }: Props) {
     overflow: 'hidden',
   };
 
-  if (uri) {
+  const imgSrc = safeImageSrc(imgUri);
+  if (imgSrc) {
     return (
       <img
-        src={uri}
+        src={imgSrc}
         alt={safeName}
         style={{ ...circleStyle, objectFit: 'cover' }}
       />
+    );
+  }
+
+  if (emojiGlyph) {
+    return (
+      <div style={circleStyle}>
+        <span style={{ fontSize: Math.round(size * 0.5), userSelect: 'none', lineHeight: 1 }}>
+          {emojiGlyph}
+        </span>
+      </div>
     );
   }
 
@@ -50,6 +115,19 @@ export function Avatar({ t, name, color, size = 44, photoUri, group }: Props) {
     return (
       <div style={circleStyle}>
         <I.Users size={Math.round(size * 0.52)} color={bg === t.surface2 ? t.accent : '#fff'} />
+      </div>
+    );
+  }
+
+  if (seed) {
+    // The identicon sits on a t.surface2 background. Never pass that same
+    // surface color as the identicon tint — the cells would collapse into the
+    // background and the avatar would look empty. When no DISTINCT tint is
+    // provided, let Identicon derive a visible seed-based hue.
+    const tint = color && color !== t.surface2 ? color : undefined;
+    return (
+      <div style={{ ...circleStyle, backgroundColor: t.surface2 }}>
+        <Identicon seed={seed} size={size} color={tint} />
       </div>
     );
   }

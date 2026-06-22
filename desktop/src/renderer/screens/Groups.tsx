@@ -11,6 +11,7 @@ import { useGroups } from '../store/groups';
 import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
 import type { StoredGroup, StoredContact } from '../db/local';
+import { fileToDownscaledDataUrl } from '../utils/image';
 
 const GROUP_COLORS = ['#05b875', '#8b5cf6', '#3b82f6', '#ec4899', '#f97316', '#eab308', '#06b6d4'];
 const GROUP_EMOJIS = [
@@ -54,7 +55,12 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
     input.accept = 'image/*';
     input.onchange = () => {
       const file = input.files?.[0];
-      if (file) setGroupImage(URL.createObjectURL(file));
+      if (!file) return;
+      // Persist a downscaled data: URL — an objectURL would be revoked on reload
+      // and the group image would vanish after restart (same fix as Profile).
+      fileToDownscaledDataUrl(file)
+        .then((dataUrl) => setGroupImage(dataUrl))
+        .catch(() => setErrorMsg('Could not load that image.'));
     };
     input.click();
   }

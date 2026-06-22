@@ -69,7 +69,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
           style={{ margin: '4px 18px 22px', padding: 18, border: `1px solid ${t.borderStrong}`, borderRadius: t.radius, backgroundColor: t.surface, cursor: 'pointer', width: 'calc(100% - 36px)', boxSizing: 'border-box', textAlign: 'left', display: 'block' }}
         >
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <Avatar t={t} name={avatarImage ?? displayName} color={avatarColor} size={52} photoUri={avatarImage ?? undefined} />
+            <Avatar t={t} name={avatarImage ?? displayName} color={avatarColor} size={52} photoUri={avatarImage ?? undefined} seed={identity?.publicKeyB64} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, display: 'block' }}>
                 {displayName}

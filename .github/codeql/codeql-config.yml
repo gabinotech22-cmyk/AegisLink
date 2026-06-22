@@ -1,0 +1,20 @@
+# CodeQL configuration — AegisLink
+#
+# Scope analysis to SHIPPED application code. Generated artifacts (jest
+# coverage / lcov-report), design prototypes and scratch dumps are not part of
+# the product and only produce noise on the code-scanning gate.
+name: AegisLink CodeQL config
+
+# security-extended = security queries only (no maintainability/style noise);
+# lint stays with tsc/eslint.
+queries:
+  - uses: security-extended
+
+paths-ignore:
+  - '**/coverage/**'
+  - '**/lcov-report/**'
+  - 'prototype/**'
+  - '_scratch/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/out/**'

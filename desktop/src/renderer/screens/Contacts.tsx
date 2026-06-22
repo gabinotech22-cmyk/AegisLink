@@ -131,7 +131,7 @@ function ContactRow({ t, contact, onPress, onChat, noBorder }: { t: Theme; conta
       aria-label={`View contact ${contact.name}`}
       style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', paddingLeft: 18, paddingRight: 18, paddingTop: 11, paddingBottom: 11, gap: 12, backgroundColor: hovered ? t.surface : 'transparent', borderBottom: noBorder ? 'none' : `1px solid ${t.divider}`, cursor: 'pointer', transition: 'background-color 0.1s' }}
     >
-      <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={42} photoUri={contact.avatarImage ?? undefined} />
+      <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={42} photoUri={contact.avatarImage ?? undefined} seed={contact.publicKeyB64 ?? contact.aegisId} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <span style={{ fontFamily: isAegisId ? t.fontMono : t.font, fontSize: 15, fontWeight: '600', color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1 }}>

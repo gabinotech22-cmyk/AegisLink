@@ -42,12 +42,9 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: javascript-typescript
-          # security-extended = security queries only (no maintainability/style
-          # noise). security-and-quality also flags unused vars / style across
-          # the whole tree, which would fail the PR code-scanning gate on any
-          # diff touching a file with pre-existing lint debt — not what a
-          # security gate should do. Lint belongs to tsc/eslint, not CodeQL.
-          queries: security-extended
+          # Query suite (security-extended) and paths-ignore (generated/vendored
+          # dirs) live in the config so they apply to every analysis run.
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
