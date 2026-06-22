@@ -120,6 +120,53 @@ jobs:
       - name: Run tests
         run: npm test -- --passWithNoTests
 
+  # ─── Desktop — typecheck + tests (Electron main/renderer, vitest) ─────────
+  # Golden rule #11: the desktop client MUST have a CI test suite covering IPC,
+  # ratchet serialization and DB encryption. The native cipher module
+  # (better-sqlite3-multiple-ciphers) installs a prebuilt binary matching the
+  # runner's Node ABI via `npm ci`, so the SQLCipher tests run the real cipher.
+  desktop-typecheck:
+    name: Desktop TypeScript check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci
+
+      - name: TypeScript strict check
+        run: npm run typecheck
+
+  desktop-test:
+    name: Desktop tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
   # ─── Mobile — E2E (Maestro on a real Android emulator) ───────────────────
   # Builds a debug APK, boots a headless Android emulator, installs the app
   # and runs the Maestro flows in mobile/.maestro/. Runs on pull_request,

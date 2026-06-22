@@ -1,0 +1,112 @@
+# AegisLink custom Semgrep rules — encode the "Reglas de Oro — Seguridad"
+# from CLAUDE.md so they can never be silently reintroduced.
+#
+# These are deliberately high-precision (low false-positive) checks for the
+# exact failure modes that were injected at least once before. Run alongside
+# the public packs (p/secrets, p/security-audit) in semgrep.yml.
+rules:
+  - id: aegislink-no-silent-decrypt-fallback
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      Encryption/decryption must FAIL CLOSED. A catch block that returns the
+      plaintext / original body silently degrades E2EE (Regla de Oro Seguridad
+      #1). Throw the error instead of falling back to cleartext.
+    metadata:
+      category: security
+      golden-rule: '1 — el cifrado nunca degrada en silencio'
+    patterns:
+      - pattern: |
+          try { ... } catch ($E) { ... return $PLAIN; ... }
+      - metavariable-regex:
+          metavariable: $PLAIN
+          # High-precision: only names that unambiguously mean cleartext, so a
+          # FTS→LIKE or network fallback returning `body`/`message` does not trip.
+          regex: (?i).*(plaintext|cleartext|decrypted|unencrypted).*
+
+  - id: aegislink-no-plain-prefix-persist
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      Do not persist an unencrypted body tagged with a "plain:" prefix. In a
+      packaged build the at-rest key may be unavailable; fail closed rather than
+      writing cleartext (Regla de Oro Seguridad #1 / #6).
+    metadata:
+      category: security
+      golden-rule: '1 / 6 — sin claves en plain:'
+    # Match the WRITE (constructing a `plain:`-prefixed value), NOT a read/guard
+    # such as `startsWith('plain:')` — those detect plaintext, they don't create
+    # it. A genuine dev-only fallback gated by `app.isPackaged` should carry a
+    # `// nosemgrep: aegislink-no-plain-prefix-persist` justification.
+    patterns:
+      - pattern-either:
+          - pattern: '"plain:" + $X'
+          - pattern: "'plain:' + $X"
+          - pattern: '`plain:${$X}`'
+    paths:
+      exclude:
+        - '*.test.ts'
+        - '*.test.tsx'
+        - '*.spec.ts'
+        - '**/__tests__/**'
+
+  - id: aegislink-no-key-material-on-wire
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      Possible key material leaving the device. Fields named chainKey /
+      messageKey / rootKey must never be placed on an object that is emitted,
+      sent, posted or stringified to the relay (Regla de Oro Seguridad #2).
+      Only sealed/encrypted blobs travel. Verify this is not on the wire.
+    metadata:
+      category: security
+      golden-rule: '2 — cero material de clave en el wire'
+    patterns:
+      - pattern-either:
+          - pattern: '$SOCKET.emit($EV, { ..., $K: $V, ... })'
+          - pattern: 'JSON.stringify({ ..., $K: $V, ... })'
+      - metavariable-regex:
+          metavariable: $K
+          regex: ^(chainKey|messageKey|rootKey|ck|mk|rk|privateKey|privKey|secretKey)$
+
+  - id: aegislink-no-console-log-production
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >-
+      No console.log in production code (CLAUDE.md convention). Ratchet/crypto
+      diagnostics must sit behind a dedicated flag and hash key prefixes
+      (Regla de Oro Seguridad #6). Remove or gate this log.
+    metadata:
+      category: security
+      golden-rule: '6 — sin fugas por logs'
+    patterns:
+      - pattern: console.log(...)
+    paths:
+      exclude:
+        - '*.test.ts'
+        - '*.test.tsx'
+        - '*.spec.ts'
+        - '**/__tests__/**'
+        - 'scripts/**'
+
+  - id: aegislink-no-cors-wildcard
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      CORS wildcard origin '*' must not be the default in production
+      (Regla de Oro Seguridad #6 — producción falla cerrado). Use an explicit
+      allowlist.
+    metadata:
+      category: security
+      golden-rule: '6 — sin CORS * por defecto'
+    patterns:
+      - pattern-either:
+          - pattern: 'origin: "*"'
+          - pattern: |
+              cors({ ..., origin: "*", ... })
+    paths:
+      exclude:
+        - '*.test.ts'
+        - '*.test.tsx'
+        - '*.spec.ts'
+        - '**/__tests__/**'
