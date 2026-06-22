@@ -293,7 +293,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
           aria-label={`View contact ${contact.name}`}
           style={{ flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
         >
-          <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={36} photoUri={contact.avatarImage ?? undefined} />
+          <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={36} photoUri={contact.avatarImage ?? undefined} seed={contact.publicKeyB64 ?? contact.aegisId} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <span style={{ fontFamily: isAegisId ? t.fontMono : t.font, fontWeight: '600', fontSize: 15, color: t.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {contact.name}

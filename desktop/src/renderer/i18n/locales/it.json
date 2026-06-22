@@ -47,6 +47,14 @@
     "generateError": "Impossibile generare l'identità",
     "registrationFailed": "Registrazione fallita. Controlla la connessione e riprova.",
     "networkError": "Errore di rete. Per favore riprova.",
+    "continueBtn": "Continua",
+    "almostDone": "QUASI FATTO",
+    "nicknameTitle": "Come ti chiamiamo?",
+    "nicknameSubtitle": "Il tuo avatar viene generato dalla tua chiave. Puoi tingerlo, oppure caricare una foto più avanti nel tuo profilo. Il nome che vedranno i tuoi contatti è cifrato end-to-end: il server non lo vede mai. Tutto è opzionale e resti anonimo (niente numero di telefono né email).",
+    "nicknameLabel": "NOME VISIBILE (OPZIONALE)",
+    "nicknameDefault": "Predefinito: {{name}}",
+    "colorSwatchLabel": "Colore avatar {{color}}",
+    "skipNickname": "Salta per ora",
     "langToggle": "EN | IT"
   },
   "home": {

@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { Theme } from '../theme/vault';
 import { I } from './icons';
+import { Identicon } from './Identicon';
 
 interface Props {
   t: Theme;
@@ -10,19 +11,37 @@ interface Props {
   photoUri?: string | null;
   /** When true renders a group-style avatar (I.Users icon instead of initials when no image) */
   group?: boolean;
+  /**
+   * Deterministic seed (prefer publicKeyB64, fall back to aegisId) used to render
+   * an identicon when there is no photo. If omitted, falls back to the legacy
+   * initial+color circle so existing call sites without a seed keep working.
+   */
+  seed?: string;
 }
 
-export function Avatar({ t, name, color, size = 44, photoUri, group }: Props) {
+/** True only for strings that an <img src> can actually load. Emoji glyphs
+ *  (which Profile stores in avatarImage) are NOT URIs and must render as text. */
+function isImageUri(v?: string | null): v is string {
+  if (!v) return false;
+  return (
+    v.startsWith('file://') ||
+    v.startsWith('content://') ||
+    v.startsWith('data:') ||
+    v.startsWith('blob:') ||
+    v.startsWith('http://') ||
+    v.startsWith('https://')
+  );
+}
+
+export function Avatar({ t, name, color, size = 44, photoUri, group, seed }: Props) {
   const bg = color ?? t.surface2;
   const safeName = typeof name === 'string' ? name.trim() : '';
-  const uri =
-    photoUri ||
-    (safeName.startsWith('file://') ||
-    safeName.startsWith('content://') ||
-    safeName.startsWith('data:') ||
-    safeName.startsWith('http')
-      ? safeName
-      : null);
+
+  // photoUri may be a real image URI, an emoji glyph (chosen in Profile), or null.
+  // Only treat it as an <img> source when it's actually a loadable URI — otherwise
+  // an emoji like "🛡️" would render as a broken image icon.
+  const imgUri = isImageUri(photoUri) ? photoUri : isImageUri(safeName) ? safeName : null;
+  const emojiGlyph = !imgUri && photoUri && !isImageUri(photoUri) ? photoUri : null;
 
   const circleStyle: CSSProperties = {
     width: size,
@@ -36,13 +55,23 @@ export function Avatar({ t, name, color, size = 44, photoUri, group }: Props) {
     overflow: 'hidden',
   };
 
-  if (uri) {
+  if (imgUri) {
     return (
       <img
-        src={uri}
+        src={imgUri}
         alt={safeName}
         style={{ ...circleStyle, objectFit: 'cover' }}
       />
+    );
+  }
+
+  if (emojiGlyph) {
+    return (
+      <div style={circleStyle}>
+        <span style={{ fontSize: Math.round(size * 0.5), userSelect: 'none', lineHeight: 1 }}>
+          {emojiGlyph}
+        </span>
+      </div>
     );
   }
 
@@ -50,6 +79,19 @@ export function Avatar({ t, name, color, size = 44, photoUri, group }: Props) {
     return (
       <div style={circleStyle}>
         <I.Users size={Math.round(size * 0.52)} color={bg === t.surface2 ? t.accent : '#fff'} />
+      </div>
+    );
+  }
+
+  if (seed) {
+    // The identicon sits on a t.surface2 background. Never pass that same
+    // surface color as the identicon tint — the cells would collapse into the
+    // background and the avatar would look empty. When no DISTINCT tint is
+    // provided, let Identicon derive a visible seed-based hue.
+    const tint = color && color !== t.surface2 ? color : undefined;
+    return (
+      <div style={{ ...circleStyle, backgroundColor: t.surface2 }}>
+        <Identicon seed={seed} size={size} color={tint} />
       </div>
     );
   }

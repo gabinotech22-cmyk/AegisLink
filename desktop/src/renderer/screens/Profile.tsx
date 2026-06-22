@@ -82,7 +82,13 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
     input.accept = 'image/*';
     input.onchange = () => {
       const file = input.files?.[0];
-      if (file) setEditImage(URL.createObjectURL(file));
+      if (!file) return;
+      // Downscale to a small JPEG data: URL. Unlike URL.createObjectURL (which is
+      // revoked on reload and never persists), a data URL survives restarts and is
+      // safe to store in the DB / broadcast to contacts.
+      fileToDownscaledDataUrl(file)
+        .then((dataUrl) => setEditImage(dataUrl))
+        .catch(() => setErrorMsg('Could not load that image.'));
     };
     input.click();
   }
@@ -120,7 +126,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
           style={{ margin: '4px 18px 18px', padding: 18, backgroundColor: t.surface, border: `1px solid ${t.borderStrong}`, borderRadius: t.radius, cursor: 'pointer', width: 'calc(100% - 36px)', boxSizing: 'border-box', textAlign: 'left', display: 'block' }}
         >
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <Avatar t={t} name={displayName} color={avatarColor} size={56} photoUri={avatarImage ?? undefined} />
+            <Avatar t={t} name={displayName} color={avatarColor} size={56} photoUri={avatarImage ?? undefined} seed={identity?.publicKeyB64} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontFamily: t.fontDisplay, fontWeight: '600', fontSize: 17, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -187,7 +193,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
             <span style={{ fontFamily: t.font, fontWeight: '600', fontSize: 15, color: t.text, display: 'block', marginBottom: 16 }}>Edit Profile</span>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-              <Avatar t={t} name={editName} color={editColor} size={72} photoUri={editImage ?? undefined} />
+              <Avatar t={t} name={editName} color={editColor} size={72} photoUri={editImage ?? undefined} seed={identity?.publicKeyB64} />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'row', gap: 10, justifyContent: 'center', marginBottom: 20 }}>
@@ -291,6 +297,38 @@ function PhotoVisPicker({ t, value, onChange }: { t: Theme; value: 'all' | 'cont
       ))}
     </div>
   );
+}
+
+/**
+ * Read an image file, decode it, and re-encode a downscaled JPEG as a data: URL.
+ * Keeps avatars small (max 256px) so they persist cheaply in the DB and don't
+ * bloat the profile broadcast. Falls back to the raw data URL if canvas is
+ * unavailable.
+ */
+function fileToDownscaledDataUrl(file: File, max = 256): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('read failed'));
+    reader.onload = () => {
+      const raw = reader.result as string;
+      const img = new Image();
+      img.onerror = () => reject(new Error('decode failed'));
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(raw); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = raw;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function outlineBtn(t: Theme): CSSProperties {

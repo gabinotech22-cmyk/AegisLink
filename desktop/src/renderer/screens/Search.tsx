@@ -249,7 +249,7 @@ function PersonRow({ t, contact, onPress, onChat }: { t: Theme; contact: StoredC
       aria-label={`View ${contact.name}`}
       style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 18, paddingRight: 18, paddingTop: 11, paddingBottom: 11, backgroundColor: hovered ? t.surface : 'transparent', borderBottom: `1px solid ${t.divider}`, cursor: 'pointer' }}
     >
-      <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={40} photoUri={contact.avatarImage ?? undefined} />
+      <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={40} photoUri={contact.avatarImage ?? undefined} seed={contact.publicKeyB64 ?? contact.aegisId} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contact.name}</span>
         <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, display: 'block', marginTop: 2, letterSpacing: 0.4 }}>{contact.aegisId}</span>
