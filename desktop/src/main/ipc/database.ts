@@ -135,7 +135,10 @@ function getDbKey(slot = 'self'): Uint8Array {
     if (safeStorage.isEncryptionAvailable()) {
       keystore[slotKey] = 'enc:' + safeStorage.encryptString(rawVal).toString('base64')
     } else {
-      // Dev-only fallback (NOT encrypted) for local development.
+      // Dev-only fallback (NOT encrypted) for local development. Unreachable
+      // in production: the `!isEncryptionAvailable && isPackaged` guard above
+      // already threw, so this branch only runs when !app.isPackaged.
+      // nosemgrep: aegislink-no-plain-prefix-persist
       keystore[slotKey] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
     }
     writeKeystore(keystore)
@@ -459,6 +462,8 @@ export function registerDatabaseHandlers(): void {
     } else if (app.isPackaged) {
       throw new Error('AegisLink: OS secure storage unavailable — cannot rewrap DB key.')
     } else {
+      // Dev-only (the isPackaged branch above fails closed in production).
+      // nosemgrep: aegislink-no-plain-prefix-persist
       keystore[getDbEncKeySlot('self')] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
     }
     writeKeystore(keystore)

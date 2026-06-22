@@ -34,7 +34,15 @@ rules:
     metadata:
       category: security
       golden-rule: '1 / 6 — sin claves en plain:'
-    pattern-regex: '["''`]plain:'
+    # Match the WRITE (constructing a `plain:`-prefixed value), NOT a read/guard
+    # such as `startsWith('plain:')` — those detect plaintext, they don't create
+    # it. A genuine dev-only fallback gated by `app.isPackaged` should carry a
+    # `// nosemgrep: aegislink-no-plain-prefix-persist` justification.
+    patterns:
+      - pattern-either:
+          - pattern: '"plain:" + $X'
+          - pattern: "'plain:' + $X"
+          - pattern: '`plain:${$X}`'
     paths:
       exclude:
         - '*.test.ts'
