@@ -2089,10 +2089,11 @@ export async function sendMessage(opts: {
   // SAME v2 wire over the dedicated mailbox socket, addressed to their opaque
   // rotating mailbox id — the relay learns neither `from` nor real `to`. The
   // mailbox socket is itself possession-authenticated, so no deliveryToken is
-  // needed (the relay rate-limits per sending mailbox). Falls back to the aegisId
-  // transport when not eligible: no root yet, socket not authed, or an ephemeral
-  // TTL the mailbox envelope schema can't carry yet (Slice 5).
-  if (emitEvent === 'envelope:v2' && MAILBOX_ENABLED && isMailboxAuthed() && !ephemeralTtlMs) {
+  // needed (the relay rate-limits per sending mailbox). Ephemeral messages ride
+  // the mailbox too (Slice 5): the TTL bounds only the relay's offline-queue life;
+  // the recipient burns from the decrypted payload. Falls back to the aegisId
+  // transport when not eligible: no root yet, or the socket isn't authed.
+  if (emitEvent === 'envelope:v2' && MAILBOX_ENABLED && isMailboxAuthed()) {
     const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
     if (mboxTo) {
       const ack = await sendViaMailbox({
@@ -2101,6 +2102,7 @@ export async function sendMessage(opts: {
         ciphertext: emitPayload.ciphertext as string,
         nonce: emitPayload.nonce as string,
         epk: emitPayload.epk as string,
+        ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
       });
       if (ack && ack.ok) {
         // Multi-device self-copy stays on the aegisId control socket (it is

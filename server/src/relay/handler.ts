@@ -554,6 +554,11 @@ export function attachRelay(io: SocketServer) {
     ciphertext: z.string().min(1).max(65536),
     nonce: z.string().min(1).max(64),
     epk: z.string().min(1).max(64),
+    // Slice 5: ephemeral TTL in ms — clamps the OFFLINE queue life so an ephemeral
+    // message can't outlive its burn timer in the relay. Parity with EnvelopeIn.
+    // Purely server-side queue expiry; the recipient reads the burn timer from the
+    // decrypted payload, never from this wire field (so online delivery omits it).
+    ephemeralTtl: z.number().int().positive().max(MESSAGE_TTL_MS).optional(),
   });
 
   // Fase 4 Slice 1: authenticate a socket as a MAILBOX (possession proof over the
@@ -622,7 +627,10 @@ export function attachRelay(io: SocketServer) {
         const result = await messageRepo.enqueue({
           id: d.id, recipient: d.to,
           ciphertext_b64: d.ciphertext, nonce_b64: d.nonce,
-          created_at: env.createdAt, expires_at: 0,
+          created_at: env.createdAt,
+          // Slice 5: ephemeral messages expire from the queue at createdAt+ttl;
+          // 0 → messageRepo applies the default MESSAGE_TTL_MS. Mirrors the aegisId path.
+          expires_at: d.ephemeralTtl ? env.createdAt + d.ephemeralTtl : 0,
           sender_pub_b64: null, epk_b64: d.epk,
         });
         if (!result.ok) { ack?.({ ok: false, error: result.reason ?? 'queue_full' }); return; }

@@ -28,7 +28,7 @@ import naclUtil from 'tweetnacl-util';
 
 const { encodeBase64, decodeBase64 } = naclUtil;
 
-import { initDb } from '../db/client.js';
+import { initDb, messageRepo } from '../db/client.js';
 import { attachRelay } from '../relay/handler.js';
 import { mailboxIdForSignPublicKey } from '../crypto/mailbox.js';
 
@@ -91,9 +91,10 @@ function connectMailbox(keys: MailboxKeys, overrideMailboxId?: string): Promise<
 
 interface MbWire { id: string; to: string; ciphertext: string; nonce: string; epk: string; createdAt: number; from?: unknown; mailboxFrom?: unknown }
 
-function sendMb(socket: ClientSocket, payload: Record<string, unknown>): Promise<{ ok: boolean; delivered?: boolean; error?: string }> {
+type MbAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string };
+function sendMb(socket: ClientSocket, payload: Record<string, unknown>): Promise<MbAck> {
   return new Promise((resolve) => {
-    socket.emit('envelope:mb', payload, (res: { ok: boolean; delivered?: boolean; error?: string }) => resolve(res));
+    socket.emit('envelope:mb', payload, (res: MbAck) => resolve(res));
   });
 }
 
@@ -179,6 +180,33 @@ describe('sealed-sender Fase 4 — mailbox auth + addressed delivery', () => {
 
     senderSock.disconnect();
     recSock.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+  }, 30_000);
+
+  test('an ephemeral mailbox envelope bounds the offline-queue expiry to createdAt+ttl (Slice 5)', async () => {
+    const sender = makeMailbox(90041);
+    const recipient = makeMailbox(90042); // offline → message is queued
+
+    const senderSock = await connectMailbox(sender);
+    const ttl = 60_000; // 1 minute
+    const before = Date.now();
+    const ack = await sendMb(senderSock, { ...makeMbWire(recipient.mailboxId, 'mb-ttl1'), ephemeralTtl: ttl });
+    const after = Date.now();
+    expect(ack.ok).toBe(true);
+    expect(ack.queued).toBe(true);
+
+    // drainFor (no deviceId) is non-destructive and surfaces the stored expiry.
+    const rows = await messageRepo.drainFor(recipient.mailboxId);
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    // expires_at MUST be createdAt+ttl, not 0 (which would default to 30-day TTL).
+    // createdAt is the relay's send-time stamp → bound by our before/after window.
+    expect(row.expires_at).toBeGreaterThanOrEqual(before + ttl);
+    expect(row.expires_at).toBeLessThanOrEqual(after + ttl);
+    // sanity: nowhere near the 30-day default it would otherwise inherit.
+    expect(row.expires_at).toBeLessThan(before + 24 * 60 * 60 * 1000);
+
+    senderSock.disconnect();
     await new Promise((r) => setTimeout(r, 50));
   }, 30_000);
 

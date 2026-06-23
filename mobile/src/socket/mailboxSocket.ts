@@ -52,6 +52,8 @@ export interface OutgoingMailboxEnvelope {
   ciphertext: string;
   nonce: string;
   epk: string;
+  /** Slice 5: ephemeral TTL (ms) — server uses it ONLY to bound offline-queue life. */
+  ephemeralTtl?: number;
 }
 
 type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string };
