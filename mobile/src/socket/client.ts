@@ -8,6 +8,7 @@ import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2 } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
+import { getOwnMailboxRootB64, setContactMailboxRoot } from '../crypto/mailboxStore';
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { deriveAegisId } from '../crypto/identity';
@@ -1967,6 +1968,12 @@ async function decryptAndAppendLocked(
         if (typeof parsedPayload.deliveryToken === 'string' && parsedPayload.deliveryToken) {
           try { await setContactDeliveryToken(contact.aegisId, parsedPayload.deliveryToken); } catch { /* non-fatal */ }
         }
+        // Fase 4: store the contact's mailbox root (shared inside this E2EE
+        // profile) so we can derive their per-epoch mailbox id when addressing
+        // them. setContactMailboxRoot ignores malformed input.
+        if (typeof parsedPayload.mailboxRoot === 'string' && parsedPayload.mailboxRoot) {
+          try { await setContactMailboxRoot(contact.aegisId, parsedPayload.mailboxRoot); } catch { /* non-fatal */ }
+        }
         await saveSessionState(contact.aegisId, ratchetState);
         return true;
       }
@@ -2793,6 +2800,19 @@ async function ownDeliveryTokenField(): Promise<Record<string, string>> {
   try { return { deliveryToken: await getOwnDeliveryToken() }; } catch { return {}; }
 }
 
+/**
+ * Returns `{ mailboxRoot }` (base64 of our own mailbox root) when v2 is enabled,
+ * else `{}`. Spread into profile_update payloads so contacts learn our root over
+ * E2EE — whoever holds it derives our mailbox id for any epoch, so it ships ONLY
+ * inside the sealed profile, never on the wire (see mailboxStore.ts). Shared
+ * eagerly under v2 (like the delivery token): pre-distribution makes the eventual
+ * mailbox-transport cutover (Fase 4 Slice 4+, flag-gated) seamless. No-op under v1.
+ */
+async function ownMailboxRootField(): Promise<Record<string, string>> {
+  if (SEALED_TRANSPORT_VERSION !== 'v2') return {};
+  try { return { mailboxRoot: await getOwnMailboxRootB64() }; } catch { return {}; }
+}
+
 async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
   const contacts = useContacts.getState().contacts;
   // Resolve the sender's Ed25519 signing key by the `from` recovered from inside
@@ -3574,6 +3594,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
         senderImage,
         senderStatus,
         ...(await ownDeliveryTokenField()),
+        ...(await ownMailboxRootField()),
       });
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
       const isInit = !!session.x3dhInit;
@@ -3612,6 +3633,7 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
     senderImage,
     senderStatus: idState.profileStatus,
     ...(await ownDeliveryTokenField()),
+    ...(await ownMailboxRootField()),
   });
 
   // Persist the first-contact profile/init in the outbox so it is retried on the

@@ -178,7 +178,7 @@ Lo que cambia:
 - **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
   selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
   `from` igual que un 1:1.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slice 1 hecha).**
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slices 1, 2, 3a, 3b hechas).**
   **Slice 1 ✅ (server):** auth de socket por mailbox — handshake `{mailboxId,
   mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
   el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
@@ -186,8 +186,18 @@ Lo que cambia:
   emisor). `server/src/crypto/mailbox.ts` + tests de relay.
   **Slice 2 ✅ (server):** cola offline + drain por mailbox reusando `messageRepo`
   (recipient=mailboxId, sin tabla nueva, sin sender almacenado; hard-delete al
-  drenar). Slices restantes: 2b=push por mailbox, 3=cliente deriva/registra+reparte
-  root por X3DH, 4=direccionar por mailbox, 5=rotación de época, 6=paridad desktop+gate.
+  drenar).
+  **Slice 3a ✅ (cliente, mobile):** store del root del cliente
+  (`mobile/src/crypto/mailboxStore.ts`, +6 tests): root propio en SecureStore +
+  roots de contactos por-contacto + derivación del mailbox de la época. Espeja
+  `deliveryToken.ts`. Foundation, off the live path.
+  **Slice 3b ✅ (cliente, mobile):** reparto del root por `profile_update` E2EE —
+  `mailboxRoot` viaja junto al `deliveryToken` (pre-distribución bajo v2, idéntico
+  patrón) y el receptor lo persiste vía `setContactMailboxRoot`. Aditivo: nada del
+  transporte cambia aún. La validación en vivo del wiring (3b→) es el test APK
+  2-dispositivos, no automatizable aquí.
+  Slices restantes: 2b=push por mailbox, 4=direccionar por mailbox (corte
+  all-or-nothing tras flag OFF), 5=rotación de época, 6=paridad desktop+gate.
   Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un
