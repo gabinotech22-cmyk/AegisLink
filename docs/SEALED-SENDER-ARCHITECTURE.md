@@ -178,7 +178,15 @@ Lo que cambia:
 - **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
   selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
   `from` igual que un 1:1.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🔬 SPIKE INICIADO (no terminada).**
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slice 1 hecha).**
+  **Slice 1 ✅ (server):** auth de socket por mailbox — handshake `{mailboxId,
+  mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
+  el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
+  bind a `mailboxSockets`; + entrega online de `envelope:mb` (sin identidad de
+  emisor). `server/src/crypto/mailbox.ts` + 4 tests de relay. Slices restantes:
+  2=cola offline+push por mailbox, 3=cliente deriva/registra+reparte root por
+  X3DH, 4=direccionar por mailbox, 5=rotación de época, 6=paridad desktop+gate.
+  Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un
   root compartido una vez por X3DH (`mailbox(epoch)=HKDF(root,epoch)` → rotación

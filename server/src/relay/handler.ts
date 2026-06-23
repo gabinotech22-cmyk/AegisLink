@@ -4,10 +4,11 @@ import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 import { randomUUID } from 'node:crypto';
 
-const { decodeBase64 } = naclUtil;
+const { decodeBase64, encodeBase64 } = naclUtil;
 import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, deliveryTokenRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, MESSAGE_TTL_MS, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
+import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';
 import { notifyRecipient, sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
@@ -400,6 +401,10 @@ export function attachRelay(io: SocketServer) {
   // authed aegisId -> set of sockets (multiple devices/tabs allowed)
   const sockets = new Map<string, Set<Socket>>();
 
+  // Fase 4: mailboxIdB64 -> set of sockets authenticated for that mailbox.
+  // The relay holds no aegisId for these — routing is purely by opaque mailbox id.
+  const mailboxSockets = new Map<string, Set<Socket>>();
+
   // Temporary map for sockets in device-linking flow (unauthenticated desktop sockets)
   // desktopPubKey -> { socket, timer }
   const linkingSockets = new Map<string, { socket: Socket; timer: ReturnType<typeof setTimeout> }>();
@@ -416,7 +421,20 @@ export function attachRelay(io: SocketServer) {
   }
 
   io.on('connection', (socket) => {
-    const auth = socket.handshake.auth as { aegisId?: unknown; platform?: unknown; deviceId?: unknown };
+    const auth = socket.handshake.auth as {
+      aegisId?: unknown; platform?: unknown; deviceId?: unknown;
+      mailboxId?: unknown; mailboxSignPubKey?: unknown;
+    };
+
+    // ── Fase 4: mailbox-mode handshake ────────────────────────────────────────
+    // Authenticate the socket by proving possession of a mailbox signing key —
+    // the relay never receives the aegisId. Selected when the client presents a
+    // mailbox instead of an aegisId. Additive: aegisId clients are unaffected.
+    if (typeof auth?.mailboxId === 'string' && typeof auth?.mailboxSignPubKey === 'string') {
+      handleMailboxConnection(socket, auth.mailboxId, auth.mailboxSignPubKey);
+      return;
+    }
+
     const claimed = auth?.aegisId;
     if (typeof claimed !== 'string' || !AEGIS_ID_RE.test(claimed)) {
       socket.emit('error_msg', { code: 'bad_handshake' });
@@ -527,6 +545,90 @@ export function attachRelay(io: SocketServer) {
       clearTimeout(authTimer);
     });
   });
+
+  // Mailbox-addressed sealed envelope (Fase 4). Carries NO sender identity and
+  // NO real recipient aegisId — only the opaque mailbox routing id in `to`.
+  const MailboxEnvelopeIn = z.object({
+    id: z.string().min(1).max(128),
+    to: z.string().min(1).max(64),          // recipient mailboxId (base64 of 16 bytes)
+    ciphertext: z.string().min(1).max(65536),
+    nonce: z.string().min(1).max(64),
+    epk: z.string().min(1).max(64),
+  });
+
+  // Fase 4 Slice 1: authenticate a socket as a MAILBOX (possession proof over the
+  // mailbox Ed25519 key), bind it by the recomputed id, and deliver mailbox-
+  // addressed envelopes online. The relay never learns the aegisId. Offline queue
+  // + push by mailbox is Slice 2.
+  function handleMailboxConnection(socket: Socket, claimedMailboxId: string, signPubKeyB64: string) {
+    let signPub: Uint8Array;
+    try { signPub = decodeBase64(signPubKeyB64); } catch {
+      socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
+    }
+    if (signPub.length !== 32) {
+      socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
+    }
+    // Binding: the routing id MUST equal SHA256(signPubKey)[0:16]. Any mismatch is
+    // an attempt to claim a mailbox id not derived from this key (hijack) → reject.
+    if (mailboxIdForSignPublicKey(signPub) !== claimedMailboxId) {
+      socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
+    }
+
+    const challenge = nacl.randomBytes(32);
+    let authenticated = false;
+    const authTimer = setTimeout(() => {
+      if (!authenticated) { socket.emit('error_msg', { code: 'auth_timeout' }); socket.disconnect(true); }
+    }, AUTH_TIMEOUT_MS);
+    authTimer.unref?.();
+
+    socket.emit('mailbox:challenge', { nonce: encodeBase64(challenge) });
+
+    socket.once('mailbox:auth:response', (raw: unknown) => {
+      let sig: Uint8Array | null = null;
+      const sigB64 = (raw as { sig?: unknown })?.sig;
+      if (typeof sigB64 === 'string') { try { sig = decodeBase64(sigB64); } catch { sig = null; } }
+      if (!sig || !verifyMailboxAuth(signPub, challenge, sig)) {
+        socket.emit('error_msg', { code: 'auth_failed' }); socket.disconnect(true); return;
+      }
+      authenticated = true;
+      clearTimeout(authTimer);
+
+      const set = mailboxSockets.get(claimedMailboxId) ?? new Set<Socket>();
+      set.add(socket);
+      mailboxSockets.set(claimedMailboxId, set);
+
+      const limiter = makeEnvelopeLimiter();
+
+      socket.on('envelope:mb', (
+        rawEnv: unknown,
+        ack?: (r: { ok: boolean; delivered?: boolean; error?: string }) => void,
+      ) => {
+        if (!limiter.consume()) { ack?.({ ok: false, error: 'rate_limited' }); return; }
+        const parsed = MailboxEnvelopeIn.safeParse(rawEnv);
+        if (!parsed.success) { ack?.({ ok: false, error: 'invalid_envelope' }); return; }
+        const d = parsed.data;
+        // The relay never stamps a sender. Slice 1 = online delivery only.
+        const env = { id: d.id, to: d.to, ciphertext: d.ciphertext, nonce: d.nonce, epk: d.epk, createdAt: Date.now() };
+        const recipients = mailboxSockets.get(d.to);
+        if (recipients && recipients.size > 0) {
+          for (const s of recipients) if (s !== socket) s.emit('envelope:mb', env);
+          ack?.({ ok: true, delivered: true });
+        } else {
+          ack?.({ ok: true, delivered: false });
+        }
+      });
+
+      socket.on('disconnect', () => {
+        limiter.destroy();
+        const cur = mailboxSockets.get(claimedMailboxId);
+        if (cur) { cur.delete(socket); if (cur.size === 0) mailboxSockets.delete(claimedMailboxId); }
+      });
+
+      socket.emit('auth:ok', {});
+    });
+
+    socket.on('disconnect', () => clearTimeout(authTimer));
+  }
 
   // Per-socket token bucket for the 'envelope' event (prevents flooding).
   // 60 messages/minute with a burst allowance of 20.
