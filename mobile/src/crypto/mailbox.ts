@@ -18,8 +18,13 @@
  *    profile_update ride-along, same path as the delivery token). It never
  *    reaches the relay.
  *  - Both sides derive the CURRENT mailbox deterministically from the root and
- *    the epoch (e.g. day index): `mailbox(epoch) = HKDF(root, epoch)`. No
- *    per-epoch re-sharing is needed — rotation is automatic and silent.
+ *    the epoch (e.g. day index): the per-epoch Ed25519 signing key is
+ *    `HKDF(root, epoch)` and the routing id is `SHA256(signPublicKey)[0:16]`.
+ *    No per-epoch re-sharing is needed — rotation is automatic and silent.
+ *  - Binding the id to the signing public key (id = H(pubkey)) is what makes
+ *    mailbox auth hijack-proof: the relay recomputes the id from a key whose
+ *    possession the client just proved, so nobody can claim another mailbox's
+ *    id without a SHA-256 second preimage.
  *  - The owner proves possession of the current mailbox to the relay via
  *    challenge-response over the mailbox's Ed25519 key (same shape as today's
  *    aegisId auth, but the relay only ever sees the rotating mailboxId).
@@ -47,8 +52,8 @@ export const MAILBOX_EPOCH_MS = 24 * 60 * 60 * 1000;
 /** HKDF domain separator for mailbox derivation. */
 const MAILBOX_INFO_PREFIX = 'AegisLinkMailbox';
 
-/** Bytes derived per epoch: 16 (mailboxId) + 32 (Ed25519 seed). */
-const DERIVED_LEN = MAILBOX_ID_BYTES + 32;
+/** Ed25519 seed length derived from (root, epoch). */
+const SEED_LEN = 32;
 
 /** A mailbox derived for one epoch: the routing id plus its auth keypair. */
 export interface Mailbox {
@@ -103,30 +108,40 @@ function mailboxInfo(epoch: number): Uint8Array {
 }
 
 /**
- * Derive the mailbox (routing id + auth keypair) for a given root and epoch.
+ * Derive the 16-byte routing id from a mailbox signing public key:
+ * `mailboxId = SHA256(signPublicKey)[0:16]`. Binding the id to the key is what
+ * lets the relay recompute the id from a key whose possession the client just
+ * proved (hijack-proof: claiming another mailbox's id needs a SHA-256 second
+ * preimage), and lets a sender compute the recipient's id from the signing key
+ * it derives off the shared root.
+ */
+export function mailboxIdForSignPublicKey(
+  signPublicKey: Uint8Array
+): { mailboxId: Uint8Array; mailboxIdB64: string } {
+  const mailboxId = sha256(signPublicKey).slice(0, MAILBOX_ID_BYTES);
+  return { mailboxId, mailboxIdB64: encodeBase64(mailboxId) };
+}
+
+/**
+ * Derive the mailbox (auth keypair + routing id) for a given root and epoch.
  * Deterministic: the same `(root, epoch)` always yields the same mailbox, so
  * the owner and every contact holding the root compute identical ids without
- * any per-epoch coordination. The intermediate KDF output is zeroized.
+ * any per-epoch coordination. The intermediate KDF seed is zeroized.
  */
 export function deriveMailbox(root: Uint8Array, epoch: number): Mailbox {
-  const derived = hkdf(sha256, root, undefined, mailboxInfo(epoch), DERIVED_LEN);
+  const seed = hkdf(sha256, root, undefined, mailboxInfo(epoch), SEED_LEN);
   try {
-    const mailboxId = derived.slice(0, MAILBOX_ID_BYTES);
-    const seed = derived.slice(MAILBOX_ID_BYTES, DERIVED_LEN);
-    try {
-      const kp = nacl.sign.keyPair.fromSeed(seed);
-      return {
-        mailboxId,
-        mailboxIdB64: encodeBase64(mailboxId),
-        signPublicKey: kp.publicKey,
-        signSecretKey: kp.secretKey,
-        epoch,
-      };
-    } finally {
-      seed.fill(0);
-    }
+    const kp = nacl.sign.keyPair.fromSeed(seed);
+    const { mailboxId, mailboxIdB64 } = mailboxIdForSignPublicKey(kp.publicKey);
+    return {
+      mailboxId,
+      mailboxIdB64,
+      signPublicKey: kp.publicKey,
+      signSecretKey: kp.secretKey,
+      epoch,
+    };
   } finally {
-    derived.fill(0);
+    seed.fill(0);
   }
 }
 

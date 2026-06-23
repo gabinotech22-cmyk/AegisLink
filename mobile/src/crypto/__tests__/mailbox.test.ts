@@ -9,10 +9,12 @@ import {
   epochFor,
   deriveMailbox,
   currentMailbox,
+  mailboxIdForSignPublicKey,
   mailboxAuthProof,
   verifyMailboxAuth,
 } from '../mailbox';
 import nacl from 'tweetnacl';
+import { sha256 } from '@noble/hashes/sha256';
 
 const toHex = (b: Uint8Array) => Buffer.from(b).toString('hex');
 
@@ -31,6 +33,25 @@ describe('mailbox derivation', () => {
     expect(m.mailboxId).toHaveLength(MAILBOX_ID_BYTES);
     expect(m.signPublicKey).toHaveLength(32);
     expect(m.signSecretKey).toHaveLength(64);
+  });
+
+  it('binds the id to the signing key: mailboxId === SHA256(signPublicKey)[0:16]', () => {
+    const m = deriveMailbox(generateMailboxRoot(), 42);
+    const expected = sha256(m.signPublicKey).slice(0, MAILBOX_ID_BYTES);
+    expect(toHex(m.mailboxId)).toBe(toHex(expected));
+    // The relay recomputes the same id from just the (proven) public key.
+    expect(mailboxIdForSignPublicKey(m.signPublicKey).mailboxIdB64).toBe(m.mailboxIdB64);
+  });
+
+  it('mailboxIdForSignPublicKey is deterministic and key-specific', () => {
+    const a = nacl.sign.keyPair();
+    const b = nacl.sign.keyPair();
+    expect(mailboxIdForSignPublicKey(a.publicKey).mailboxIdB64).toBe(
+      mailboxIdForSignPublicKey(a.publicKey).mailboxIdB64
+    );
+    expect(mailboxIdForSignPublicKey(a.publicKey).mailboxIdB64).not.toBe(
+      mailboxIdForSignPublicKey(b.publicKey).mailboxIdB64
+    );
   });
 
   it('rotates: a different epoch yields a different, unlinkable mailbox', () => {
