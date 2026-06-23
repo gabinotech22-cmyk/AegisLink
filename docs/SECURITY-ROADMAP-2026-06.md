@@ -222,3 +222,19 @@ Esf **S-M**. Mayormente robustez y privacidad de borde.
 8. **Ola 11 + 12** (pinning, rotación, lifecycle).
 
 > Las Olas 1-3 cierran **todos los críticos**. Ninguna distribución pública antes de eso.
+
+---
+
+## Follow-ups post-auditoría (fuera del alcance de las 12 olas)
+
+Hardening planificado que **no** surgió de un hallazgo de la auditoría 2026-06 pero que
+documentamos para trazabilidad. No bloquean distribución; son mejoras de fondo.
+
+| ID | Sev | Esf | Tema | Plan |
+|----|-----|-----|------|------|
+| F-1 | 🟡 | L | **Núcleo crypto nativo** (timing side-channel runtime) | El crypto core corre en **JS puro** sobre Hermes (mobile) / V8 (desktop): `tweetnacl`, `@noble/*`. Constant-time está garantizado a nivel de **fuente** (linaje NaCl/djb + comparaciones XOR-acumuladas + zeroize), pero **no** verificado a través del JIT+GC del motor JS. No es vuln activa (no hay oráculo remoto: el secreto se opera on-device, por el cable solo va ciphertext normalizado §7.2; explotarlo exige co-residencia local ⇒ ya es endpoint compromise). Plan: portar el hot-path (X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC) tras un **binding nativo de libsodium** (módulo Expo envolviendo libsodium, o `react-native-quick-crypto`), conservando la capa de composición en TS y la misma interfaz pública. Sustitución de implementación, **no** cambio de protocolo. Documentado en `PROTOCOL.md` §2.1 + §10.5 + §8.3. |
+| F-2 | 🔵 | L | **UnifiedPush** (quitar dependencia de Google/Apple en push) | El push wake-up usa FCM/APNs con payload genérico (sin contenido ni identidad de emisor), pero Google/Apple aprenden que *un* device recibió *un* push. Plan: soportar [UnifiedPush](https://unifiedpush.org/) (ntfy/Gotify self-hosted) como transporte de wake-up alternativo, manteniendo FCM/APNs como fallback para quien no corra un distribuidor. Elimina el metadato de "device X despertó en T" del lado de los gigantes. Documentado en README → Known limitations. |
+
+> **Ref.** El estado del arte corre el núcleo en nativo: Signal = `libsignal` (Rust);
+> Session y SimpleX = libsodium nativo. F-1 nos lleva a esa línea base. Mirar cómo
+> `libsignal` expone su API a JS/TS antes de elegir el wrapper.
