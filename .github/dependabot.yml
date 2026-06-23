@@ -1,0 +1,87 @@
+# Dependabot — weekly version updates.
+#
+# This complements (does NOT replace) Dependabot security updates, which are
+# enabled in repo settings and open PRs for vulnerable dependencies on demand.
+# This file adds a predictable weekly cadence for routine version bumps so the
+# tree never drifts far behind upstream — OSTIF best-practices step 5
+# ("up to date security: CVEs, necessary patches").
+#
+# Grouping keeps the PR volume sane for a solo maintainer: one grouped PR per
+# ecosystem per week instead of one PR per dependency.
+
+version: 2
+updates:
+  # ── Mobile (Expo SDK 54 + React Native) ──────────────────────────────────
+  - package-ecosystem: npm
+    directory: /mobile
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - mobile
+    groups:
+      mobile-minor-patch:
+        update-types:
+          - minor
+          - patch
+    # Expo/RN native modules are pinned to the SDK; never auto-bump majors here.
+    ignore:
+      - dependency-name: expo
+        update-types: [version-update:semver-major]
+      - dependency-name: react-native
+        update-types: [version-update:semver-major]
+
+  # ── Relay server (Node/Bun, AGPL) ────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - server
+    groups:
+      server-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ── Desktop (Electron) ───────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - desktop
+    groups:
+      desktop-minor-patch:
+        update-types:
+          - minor
+          - patch
+    # Electron majors carry security-relevant Chromium/Node changes and need a
+    # packaged smoke-test before merge — keep them as separate, visible PRs.
+    ignore:
+      - dependency-name: electron
+        update-types: [version-update:semver-major]
+
+  # ── GitHub Actions (pin and keep CI actions current) ─────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    groups:
+      github-actions:
+        update-types:
+          - minor
+          - patch

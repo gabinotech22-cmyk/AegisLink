@@ -15,6 +15,10 @@ Please use **coordinated disclosure**: give us up to **90 days** to ship a fix
 before publishing details. We will keep you informed of progress and agree on
 a publication date together.
 
+You can also report privately via GitHub's **"Report a vulnerability"** button
+on the Security tab. Our internal handling process (triage, SLAs, fix, CVE/GHSA)
+is documented in [`docs/SECURITY-RESPONSE.md`](docs/SECURITY-RESPONSE.md).
+
 ## Scope
 
 In scope:
