@@ -4,11 +4,12 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION } from '../config';
+import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2 } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
-import { getOwnMailboxRootB64, setContactMailboxRoot } from '../crypto/mailboxStore';
+import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
+import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed } from './mailboxSocket';
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { deriveAegisId } from '../crypto/identity';
@@ -907,6 +908,20 @@ export function connect(identity: Identity): Socket {
     rdiag(`[RDIAG] envelope:v2 RECV id=${env.id}`);
     await handleIncomingV2(env, identity);
   });
+
+  // ── Fase 4: dedicated mailbox delivery socket ────────────────────────────────
+  // When mailbox mode is enabled (and Tor is available — fail-closed inside
+  // connectMailboxSocket), open a SEPARATE Tor-routed socket that authenticates
+  // by mailbox possession proof and receives `envelope:mb` addressed to our
+  // opaque rotating mailbox id. Incoming mailbox envelopes are sealed v2 with the
+  // same shape as envelope:v2, so they reuse the exact same decrypt+append path.
+  // No-op when mailbox mode is off. Idempotent: a live socket is reused.
+  if (MAILBOX_ENABLED) {
+    void connectMailboxSocket((env) => {
+      rdiag(`[RDIAG] envelope:mb RECV id=${env.id}`);
+      void handleIncomingV2(env, identity);
+    });
+  }
 
   // ── Group re-key fan-out (forward secrecy on member removal) ─────────────────
   // The admin who removed a member sealed a fresh group SenderKey for each
@@ -3319,6 +3334,9 @@ export function disconnect(): void {
     connected = false;
     authenticated = false;
   }
+  // Fase 4: tear down the dedicated mailbox delivery socket alongside the
+  // aegisId socket (no-op when mailbox mode was never enabled).
+  disconnectMailboxSocket();
   // Reset per-session tracking so each new session re-sends images once,
   // ensuring freshness after identity or group avatar updates.
   profiledContacts.clear();
@@ -3475,6 +3493,39 @@ export async function sendMessage(opts: {
     emitPayload = { id, to: opts.recipientAegisId, ciphertext: r.envelope.ciphertextB64, nonce: r.envelope.nonceB64, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}) };
   }
   await saveSessionState(opts.recipientAegisId, newState);
+
+  // ── Fase 4: mailbox addressing ──────────────────────────────────────────────
+  // When mailbox mode is up and we hold the recipient's mailbox root, route the
+  // SAME v2 wire over the dedicated mailbox socket, addressed to their opaque
+  // rotating mailbox id — the relay learns neither `from` nor real `to`. The
+  // mailbox socket is itself possession-authenticated, so no deliveryToken is
+  // needed (the relay rate-limits per sending mailbox). Falls back to the aegisId
+  // transport when not eligible: no root yet, socket not authed, or an ephemeral
+  // TTL the mailbox envelope schema can't carry yet (Slice 5).
+  if (emitEvent === 'envelope:v2' && MAILBOX_ENABLED && isMailboxAuthed() && !ephemeralTtlMs) {
+    const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
+    if (mboxTo) {
+      const ack = await sendViaMailbox({
+        id,
+        to: mboxTo,
+        ciphertext: emitPayload.ciphertext as string,
+        nonce: emitPayload.nonce as string,
+        epk: emitPayload.epk as string,
+      });
+      if (ack && ack.ok) {
+        try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
+        // Multi-device self-copy stays on the aegisId control socket (it is
+        // identity-scoped sync, not a recipient-graph leak). Same as below.
+        const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
+        void sendSelfCopy(socket!, opts.identity, opts.recipientAegisId, id, payload, {
+          viewOnce: msgType === 'view_once',
+          ephemeralSeconds: selfEphemeralSeconds,
+        });
+        return;
+      }
+      // ack null/!ok → fall through to the aegisId transport (robust degrade).
+    }
+  }
 
   try {
     await new Promise<void>((resolve, reject) => {

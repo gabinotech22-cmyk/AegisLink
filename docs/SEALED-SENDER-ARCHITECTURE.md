@@ -178,7 +178,7 @@ Lo que cambia:
 - **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
   selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
   `from` igual que un 1:1.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slices 1, 2, 3a, 3b hechas).**
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slices 1, 2, 3a, 3b, 4 hechas; pendiente 2b, 5, 6).**
   **Slice 1 ✅ (server):** auth de socket por mailbox — handshake `{mailboxId,
   mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
   el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
@@ -196,8 +196,20 @@ Lo que cambia:
   patrón) y el receptor lo persiste vía `setContactMailboxRoot`. Aditivo: nada del
   transporte cambia aún. La validación en vivo del wiring (3b→) es el test APK
   2-dispositivos, no automatizable aquí.
-  Slices restantes: 2b=push por mailbox, 4=direccionar por mailbox (corte
-  all-or-nothing tras flag OFF), 5=rotación de época, 6=paridad desktop+gate.
+  **Slice 4 ✅ (cliente, mobile, flag OFF):** direccionar por mailbox — Opción A
+  + Tor obligatorio (ver `FASE4-CONTROL-PLANE-DESIGN.md`). **4a:** socket de
+  entrega dedicado (`mobile/src/socket/mailboxSocket.ts`, +6 tests) — conexión
+  Socket.IO aparte, auth por prueba de posesión del mailbox, solo `envelope:mb`
+  (enviar+recibir); fail-closed sin Tor (`MAILBOX_ENABLED = MAILBOX_MODE &&
+  ONION_URL`). **4b:** cableado en `client.ts` — al conectar se abre el socket
+  mailbox (recepción reusa `handleIncomingV2`); el envío 1:1 rutea el wire v2 por
+  `sendViaMailbox` cuando hay root del contacto + socket autenticado, con fallback
+  robusto al transporte aegisId. El control-plane (prekeys/push/token/perfil)
+  sigue intacto en el socket aegisId. Validación en vivo = test APK 2-dispositivos.
+  Limitación conocida: el `envelope:mb` aún no lleva TTL efímero → esos mensajes
+  caen al transporte aegisId (Slice 5 extiende el schema).
+  Slices restantes: 2b=push por mailbox, 5=rotación de época en vivo + TTL efímero
+  en `envelope:mb`, 6=paridad desktop+gate.
   Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un
