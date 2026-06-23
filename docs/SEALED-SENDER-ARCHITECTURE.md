@@ -178,7 +178,7 @@ Lo que cambia:
 - **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
   selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
   `from` igual que un 1:1.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slices 1, 2, 3a, 3b, 4 hechas; pendiente 2b, 5, 6).**
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slices 1, 2, 3a, 3b, 4, 6 hechas; pendiente 2b, 5).**
   **Slice 1 ✅ (server):** auth de socket por mailbox — handshake `{mailboxId,
   mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
   el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
@@ -208,8 +208,24 @@ Lo que cambia:
   sigue intacto en el socket aegisId. Validación en vivo = test APK 2-dispositivos.
   Limitación conocida: el `envelope:mb` aún no lleva TTL efímero → esos mensajes
   caen al transporte aegisId (Slice 5 extiende el schema).
+  **Slice 6 ✅ (paridad desktop, flag OFF):** port 1:1 a `desktop/src/renderer/`
+  — `crypto/mailbox.ts` (copia **verbatim** del primitivo; la derivación id/firma
+  DEBE ser byte-idéntica entre plataformas), `crypto/mailboxStore.ts` (swap
+  `expo-secure-store`→`window.aegis.secureStorage`, espeja `deliveryToken.ts`),
+  `config.ts` (mismo flag fail-closed `MAILBOX_ENABLED = MAILBOX_MODE &&
+  ONION_URL`), `socket/mailboxSocket.ts`, y cableado en `socket/client.ts`
+  (connect/disconnect, reparto del root por los dos `profile_update`, persistir
+  root entrante, ruteo de envío con fallback robusto). Mismo wire protocol y
+  mismos guards que mobile. **Garantía de paridad:** un **known-answer vector
+  cross-plataforma** (root fijo `0x01..0x20`, época 20600 → `+S61uhsiRrHvLHcFZSv/1A==`)
+  asertado en AMBAS suites (`mailbox.test.ts` mobile + desktop): si la derivación
+  de una plataforma deriva (hash/slice/base64/HKDF-info/encoding de época), uno de
+  los dos tests rompe — atrapa un split silencioso de entrega mobile↔desktop. tsc
+  limpio en ambos; desktop 105/105, mobile mailbox 13/13. Cobertura de los wrappers
+  que tocan `window.aegis` (store/socket) queda diferida al harness jsdom+preload
+  inexistente — misma postura que `deliveryToken.ts` (sin test desktop tampoco).
   Slices restantes: 2b=push por mailbox, 5=rotación de época en vivo + TTL efímero
-  en `envelope:mb`, 6=paridad desktop+gate.
+  en `envelope:mb`.
   Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un

@@ -1,6 +1,10 @@
+import { describe, test, expect } from 'vitest';
 /**
- * Blind mailbox IDs — sealed-sender Fase 4 spike (off the live path).
- * Pins the security properties the live wiring will later depend on.
+ * mailbox.test.ts — blind mailbox IDs, desktop (sealed-sender Fase 4).
+ *
+ * Parity with mobile/src/crypto/__tests__/mailbox.test.ts. Pins the security
+ * properties the live mailbox transport depends on, plus the cross-platform
+ * known-answer vector that proves desktop derivation is byte-identical to mobile.
  */
 import {
   MAILBOX_ID_BYTES,
@@ -19,7 +23,7 @@ import { sha256 } from '@noble/hashes/sha256';
 const toHex = (b: Uint8Array) => Buffer.from(b).toString('hex');
 
 describe('mailbox derivation', () => {
-  it('is deterministic for the same root and epoch', () => {
+  test('is deterministic for the same root and epoch', () => {
     const root = generateMailboxRoot();
     const a = deriveMailbox(root, 20600);
     const b = deriveMailbox(root, 20600);
@@ -28,14 +32,14 @@ describe('mailbox derivation', () => {
     expect(a.mailboxIdB64).toBe(b.mailboxIdB64);
   });
 
-  it('produces a 16-byte id and a valid Ed25519 keypair', () => {
+  test('produces a 16-byte id and a valid Ed25519 keypair', () => {
     const m = deriveMailbox(generateMailboxRoot(), 1);
     expect(m.mailboxId).toHaveLength(MAILBOX_ID_BYTES);
     expect(m.signPublicKey).toHaveLength(32);
     expect(m.signSecretKey).toHaveLength(64);
   });
 
-  it('binds the id to the signing key: mailboxId === SHA256(signPublicKey)[0:16]', () => {
+  test('binds the id to the signing key: mailboxId === SHA256(signPublicKey)[0:16]', () => {
     const m = deriveMailbox(generateMailboxRoot(), 42);
     const expected = sha256(m.signPublicKey).slice(0, MAILBOX_ID_BYTES);
     expect(toHex(m.mailboxId)).toBe(toHex(expected));
@@ -43,7 +47,7 @@ describe('mailbox derivation', () => {
     expect(mailboxIdForSignPublicKey(m.signPublicKey).mailboxIdB64).toBe(m.mailboxIdB64);
   });
 
-  it('mailboxIdForSignPublicKey is deterministic and key-specific', () => {
+  test('mailboxIdForSignPublicKey is deterministic and key-specific', () => {
     const a = nacl.sign.keyPair();
     const b = nacl.sign.keyPair();
     expect(mailboxIdForSignPublicKey(a.publicKey).mailboxIdB64).toBe(
@@ -54,7 +58,7 @@ describe('mailbox derivation', () => {
     );
   });
 
-  it('rotates: a different epoch yields a different, unlinkable mailbox', () => {
+  test('rotates: a different epoch yields a different, unlinkable mailbox', () => {
     const root = generateMailboxRoot();
     const day1 = deriveMailbox(root, 20600);
     const day2 = deriveMailbox(root, 20601);
@@ -62,20 +66,20 @@ describe('mailbox derivation', () => {
     expect(toHex(day1.signPublicKey)).not.toBe(toHex(day2.signPublicKey));
   });
 
-  it('is unlinkable across roots: different roots never collide', () => {
+  test('is unlinkable across roots: different roots never collide', () => {
     const m1 = deriveMailbox(generateMailboxRoot(), 20600);
     const m2 = deriveMailbox(generateMailboxRoot(), 20600);
     expect(toHex(m1.mailboxId)).not.toBe(toHex(m2.mailboxId));
   });
 
-  it('epochFor buckets time by the rotation period', () => {
+  test('epochFor buckets time by the rotation period', () => {
     expect(epochFor(0)).toBe(0);
     expect(epochFor(MAILBOX_EPOCH_MS - 1)).toBe(0);
     expect(epochFor(MAILBOX_EPOCH_MS)).toBe(1);
     expect(epochFor(MAILBOX_EPOCH_MS * 20600 + 5)).toBe(20600);
   });
 
-  it('currentMailbox matches deriveMailbox at the current epoch', () => {
+  test('currentMailbox matches deriveMailbox at the current epoch', () => {
     const root = generateMailboxRoot();
     const now = MAILBOX_EPOCH_MS * 20600 + 1234;
     expect(currentMailbox(root, now).mailboxIdB64).toBe(
@@ -83,12 +87,12 @@ describe('mailbox derivation', () => {
     );
   });
 
-  // CROSS-PLATFORM KNOWN-ANSWER VECTOR. Desktop derives the same constant from
+  // CROSS-PLATFORM KNOWN-ANSWER VECTOR. Mobile derives the same constant from
   // this fixed (root, epoch) in its own mailbox.test.ts. If either platform's
   // derivation drifts (hash, slice, base64, HKDF info/salt, epoch encoding), one
   // of the two asserts breaks — catching a silent mobile↔desktop delivery split
   // that random-root tests cannot. DO NOT edit one copy without the other.
-  it('matches the pinned cross-platform vector (mobile↔desktop parity)', () => {
+  test('matches the pinned cross-platform vector (mobile↔desktop parity)', () => {
     const root = new Uint8Array(32);
     for (let i = 0; i < 32; i++) root[i] = i + 1; // 0x01..0x20
     const m = deriveMailbox(root, 20600);
@@ -97,20 +101,20 @@ describe('mailbox derivation', () => {
 });
 
 describe('mailbox possession proof', () => {
-  it('a valid proof verifies against the mailbox public key', () => {
+  test('a valid proof verifies against the mailbox public key', () => {
     const m = deriveMailbox(generateMailboxRoot(), 20600);
     const challenge = nacl.randomBytes(32);
     const sig = mailboxAuthProof(m.signSecretKey, challenge);
     expect(verifyMailboxAuth(m.signPublicKey, challenge, sig)).toBe(true);
   });
 
-  it('rejects a proof for a different challenge', () => {
+  test('rejects a proof for a different challenge', () => {
     const m = deriveMailbox(generateMailboxRoot(), 20600);
     const sig = mailboxAuthProof(m.signSecretKey, nacl.randomBytes(32));
     expect(verifyMailboxAuth(m.signPublicKey, nacl.randomBytes(32), sig)).toBe(false);
   });
 
-  it('rejects a proof signed by an unrelated mailbox (no impersonation)', () => {
+  test('rejects a proof signed by an unrelated mailbox (no impersonation)', () => {
     const challenge = nacl.randomBytes(32);
     const mine = deriveMailbox(generateMailboxRoot(), 20600);
     const attacker = deriveMailbox(generateMailboxRoot(), 20600);
@@ -118,7 +122,7 @@ describe('mailbox possession proof', () => {
     expect(verifyMailboxAuth(mine.signPublicKey, challenge, forged)).toBe(false);
   });
 
-  it('rejects malformed key / signature lengths', () => {
+  test('rejects malformed key / signature lengths', () => {
     const m = deriveMailbox(generateMailboxRoot(), 20600);
     const challenge = nacl.randomBytes(32);
     const sig = mailboxAuthProof(m.signSecretKey, challenge);
