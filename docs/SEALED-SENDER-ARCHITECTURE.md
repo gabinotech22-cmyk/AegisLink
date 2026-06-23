@@ -183,9 +183,11 @@ Lo que cambia:
   mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
   el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
   bind a `mailboxSockets`; + entrega online de `envelope:mb` (sin identidad de
-  emisor). `server/src/crypto/mailbox.ts` + 4 tests de relay. Slices restantes:
-  2=cola offline+push por mailbox, 3=cliente deriva/registra+reparte root por
-  X3DH, 4=direccionar por mailbox, 5=rotación de época, 6=paridad desktop+gate.
+  emisor). `server/src/crypto/mailbox.ts` + tests de relay.
+  **Slice 2 ✅ (server):** cola offline + drain por mailbox reusando `messageRepo`
+  (recipient=mailboxId, sin tabla nueva, sin sender almacenado; hard-delete al
+  drenar). Slices restantes: 2b=push por mailbox, 3=cliente deriva/registra+reparte
+  root por X3DH, 4=direccionar por mailbox, 5=rotación de época, 6=paridad desktop+gate.
   Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un

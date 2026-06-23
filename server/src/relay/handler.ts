@@ -599,23 +599,34 @@ export function attachRelay(io: SocketServer) {
 
       const limiter = makeEnvelopeLimiter();
 
-      socket.on('envelope:mb', (
+      socket.on('envelope:mb', async (
         rawEnv: unknown,
-        ack?: (r: { ok: boolean; delivered?: boolean; error?: string }) => void,
+        ack?: (r: { ok: boolean; delivered?: boolean; queued?: boolean; error?: string }) => void,
       ) => {
         if (!limiter.consume()) { ack?.({ ok: false, error: 'rate_limited' }); return; }
         const parsed = MailboxEnvelopeIn.safeParse(rawEnv);
         if (!parsed.success) { ack?.({ ok: false, error: 'invalid_envelope' }); return; }
         const d = parsed.data;
-        // The relay never stamps a sender. Slice 1 = online delivery only.
+        // The relay never stamps a sender — the source mailbox is sealed inside.
         const env = { id: d.id, to: d.to, ciphertext: d.ciphertext, nonce: d.nonce, epk: d.epk, createdAt: Date.now() };
         const recipients = mailboxSockets.get(d.to);
         if (recipients && recipients.size > 0) {
           for (const s of recipients) if (s !== socket) s.emit('envelope:mb', env);
           ack?.({ ok: true, delivered: true });
-        } else {
-          ack?.({ ok: true, delivered: false });
+          return;
         }
+        // Offline (Slice 2): queue under the opaque mailbox id, reusing the same
+        // message store as the aegisId path. No sender info is stored (the row
+        // keeps only the sealed ciphertext + epk). Drained on the mailbox's next
+        // connect. Push wake-up by mailbox is Slice 2b.
+        const result = await messageRepo.enqueue({
+          id: d.id, recipient: d.to,
+          ciphertext_b64: d.ciphertext, nonce_b64: d.nonce,
+          created_at: env.createdAt, expires_at: 0,
+          sender_pub_b64: null, epk_b64: d.epk,
+        });
+        if (!result.ok) { ack?.({ ok: false, error: result.reason ?? 'queue_full' }); return; }
+        ack?.({ ok: true, delivered: false, queued: true });
       });
 
       socket.on('disconnect', () => {
@@ -624,7 +635,21 @@ export function attachRelay(io: SocketServer) {
         if (cur) { cur.delete(socket); if (cur.size === 0) mailboxSockets.delete(claimedMailboxId); }
       });
 
-      socket.emit('auth:ok', {});
+      // Drain anything queued while this mailbox was offline, THEN signal ready —
+      // mirrors the aegisId drain order (drain → auth:ok). No deviceId → hard
+      // delete on drain (a mailbox is a single logical inbox).
+      void (async () => {
+        const pending = await messageRepo.drainFor(claimedMailboxId);
+        for (const row of pending) {
+          socket.emit('envelope:mb', {
+            id: row.id, to: claimedMailboxId,
+            ciphertext: row.ciphertext_b64, nonce: row.nonce_b64,
+            epk: row.epk_b64 ?? '', createdAt: row.created_at,
+          });
+          await messageRepo.delete(row.id);
+        }
+        socket.emit('auth:ok', {});
+      })();
     });
 
     socket.on('disconnect', () => clearTimeout(authTimer));

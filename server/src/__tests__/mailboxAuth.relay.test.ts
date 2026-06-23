@@ -137,16 +137,48 @@ describe('sealed-sender Fase 4 — mailbox auth + addressed delivery', () => {
     await new Promise((r) => setTimeout(r, 50));
   }, 30_000);
 
-  test('reports delivered:false when the recipient mailbox is offline (Slice 1: online only)', async () => {
-    const carol = makeMailbox(90011);
-    const daveMailboxId = makeMailbox(90012).mailboxId; // never connects
+  test('queues for an offline mailbox and drains it on reconnect, no sender (Slice 2)', async () => {
+    const sender = makeMailbox(90011);
+    const recipient = makeMailbox(90012); // offline at send time
 
-    const carolSock = await connectMailbox(carol);
-    const ack = await sendMb(carolSock, makeMbWire(daveMailboxId, 'mb-off'));
+    // Recipient offline → message is queued under the opaque mailbox id.
+    const senderSock = await connectMailbox(sender);
+    const ack = await sendMb(senderSock, makeMbWire(recipient.mailboxId, 'mb-q1'));
     expect(ack.ok).toBe(true);
     expect(ack.delivered).toBe(false);
+    expect(ack.queued).toBe(true);
 
-    carolSock.disconnect();
+    // Recipient connects and drains — attach the receive listener BEFORE auth:ok
+    // (the drain emits before auth:ok, mirroring the aegisId path).
+    const drained: MbWire[] = [];
+    const recSock = clientIo(serverUrl, {
+      auth: {
+        mailboxId: recipient.mailboxId,
+        mailboxSignPubKey: encodeBase64(recipient.signKeyPair.publicKey),
+        platform: 'mobile',
+      },
+      transports: ['websocket'], reconnection: false,
+    });
+    recSock.on('envelope:mb', (w: MbWire) => drained.push(w));
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('drain auth timeout')), 8_000);
+      recSock.on('mailbox:challenge', (c: { nonce: string }) => {
+        recSock.emit('mailbox:auth:response', {
+          sig: encodeBase64(nacl.sign.detached(decodeBase64(c.nonce), recipient.signKeyPair.secretKey)),
+        });
+      });
+      recSock.on('auth:ok', () => { clearTimeout(t); setTimeout(resolve, 250); });
+      recSock.on('error_msg', (e: { code: string }) => { clearTimeout(t); reject(new Error(e.code)); });
+    });
+
+    expect(drained).toHaveLength(1);
+    expect(drained[0]!.id).toBe('mb-q1');
+    expect(drained[0]!.epk).toBeTruthy();
+    expect(drained[0]!.from).toBeUndefined();
+    expect(drained[0]!.mailboxFrom).toBeUndefined();
+
+    senderSock.disconnect();
+    recSock.disconnect();
     await new Promise((r) => setTimeout(r, 50));
   }, 30_000);
 
