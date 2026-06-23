@@ -178,7 +178,7 @@ Lo que cambia:
 - **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
   selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
   `from` igual que un 1:1.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slices 1, 2, 3a, 3b, 4, 6 hechas; pendiente 2b, 5).**
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slices 1, 2, 3a, 3b, 4, 5, 6 hechas; pendiente 2b).**
   **Slice 1 ✅ (server):** auth de socket por mailbox — handshake `{mailboxId,
   mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
   el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
@@ -224,8 +224,27 @@ Lo que cambia:
   limpio en ambos; desktop 105/105, mobile mailbox 13/13. Cobertura de los wrappers
   que tocan `window.aegis` (store/socket) queda diferida al harness jsdom+preload
   inexistente — misma postura que `deliveryToken.ts` (sin test desktop tampoco).
-  Slices restantes: 2b=push por mailbox, 5=rotación de época en vivo + TTL efímero
-  en `envelope:mb`.
+  **Slice 5 ✅ (TTL efímero + rotación de época en vivo, flag OFF):** **5a:** el
+  `envelope:mb` lleva un `ephemeralTtl` opcional que acota SOLO la vida de la cola
+  offline (`expires_at = createdAt+ttl`, igual que el path aegisId); el receptor
+  quema desde el payload descifrado, así que la entrega online no lleva el campo
+  (cero metadatos nuevos en el wire). Los efímeros ya no caen a aegisId. **5b:**
+  rotación de época reconciliada con la cola de 30 días vía **multi-bind con
+  multi-firma en un solo handshake** (Opción 1, decidida con 👤): el cliente, al
+  conectar, bindea su época actual + las épocas de catch-up desde su última
+  conexión (cap 31 = `MAX_MAILBOX_BINDS`−1) + la previa (gracia de skew de reloj),
+  firmando el MISMO challenge con la clave de cada época (bindear un id cuyo root
+  no posees es imposible). Rotación viva = **reconectar tras cada boundary** (timer
+  `scheduleEpochRotation`), que re-deriva la época y estrena circuito Tor (el relay
+  no liga épocas consecutivas a un circuito). `lastConnectEpoch` persistido en el
+  store. Tests: server `mailboxAuth.relay` 8/8 (incl. catch-up de época pasada,
+  rechazo de hijack/falta-de-prueba en extra-binds), mobile `mailboxSocket` 7/7
+  (incl. binds de catch-up + multi-firma); server 184/184, desktop 105/105.
+  Límite honesto del catch-up: drenar una cola de época pasada exige revelar al
+  relay (vía Tor, sin identidad) que ese id es tuyo → liga las épocas que drenas en
+  ese tramo; es inevitable dado el modelo de cola y solo afecta a la ventana de
+  recuperación offline, no al estado estable diario.
+  Slices restantes: 2b=push por mailbox (Fase 5).
   Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un

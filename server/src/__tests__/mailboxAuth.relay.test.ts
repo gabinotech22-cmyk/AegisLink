@@ -234,4 +234,101 @@ describe('sealed-sender Fase 4 — mailbox auth + addressed delivery', () => {
       socket.on('error_msg', (e: { code: string }) => { clearTimeout(timer); socket.disconnect(); reject(new Error(e.code)); });
     })).rejects.toThrow(/auth_failed/);
   }, 30_000);
+
+  // ── Slice 5b: multi-bind catch-up across an epoch boundary ──────────────────
+  test('multi-bind drains a past epoch queued while offline across a boundary (Slice 5b)', async () => {
+    const sender = makeMailbox(90051);
+    const epochOld = makeMailbox(90052); // recipient's past-epoch mailbox (offline at send)
+    const epochNew = makeMailbox(90053); // recipient's current-epoch mailbox
+
+    // Sender queues to the OLD epoch id while the recipient is offline.
+    const senderSock = await connectMailbox(sender);
+    const ack = await sendMb(senderSock, makeMbWire(epochOld.mailboxId, 'mb-catchup1'));
+    expect(ack.queued).toBe(true);
+
+    // Recipient reconnects binding current=New + extra=Old (one challenge, a
+    // signature per id). The catch-up drain delivers the message queued under the
+    // past epoch BEFORE auth:ok.
+    const drained: MbWire[] = [];
+    const recSock = clientIo(serverUrl, {
+      auth: {
+        mailboxId: epochNew.mailboxId,
+        mailboxSignPubKey: encodeBase64(epochNew.signKeyPair.publicKey),
+        binds: [{ mailboxId: epochOld.mailboxId, mailboxSignPubKey: encodeBase64(epochOld.signKeyPair.publicKey) }],
+        platform: 'mobile',
+      },
+      transports: ['websocket'], reconnection: false,
+    });
+    recSock.on('envelope:mb', (w: MbWire) => drained.push(w));
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('multi drain timeout')), 8_000);
+      recSock.on('mailbox:challenge', (c: { nonce: string }) => {
+        const nonce = decodeBase64(c.nonce);
+        recSock.emit('mailbox:auth:response', {
+          sig: encodeBase64(nacl.sign.detached(nonce, epochNew.signKeyPair.secretKey)),
+          extraSigs: [{ mailboxId: epochOld.mailboxId, sig: encodeBase64(nacl.sign.detached(nonce, epochOld.signKeyPair.secretKey)) }],
+        });
+      });
+      recSock.on('auth:ok', () => { clearTimeout(t); setTimeout(resolve, 250); });
+      recSock.on('error_msg', (e: { code: string }) => { clearTimeout(t); reject(new Error(e.code)); });
+    });
+
+    expect(drained).toHaveLength(1);
+    expect(drained[0]!.id).toBe('mb-catchup1');
+    expect(drained[0]!.to).toBe(epochOld.mailboxId); // drained under the PAST epoch id
+    expect(drained[0]!.from).toBeUndefined();
+    expect(drained[0]!.mailboxFrom).toBeUndefined();
+
+    senderSock.disconnect();
+    recSock.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+  }, 30_000);
+
+  test('rejects an extra bind whose id is not bound to its key (multi-bind hijack)', async () => {
+    const primary = makeMailbox(90061);
+    const realExtra = makeMailbox(90062);
+    const victimId = makeMailbox(90063).mailboxId;
+    // Present the victim's id with realExtra's key → id != SHA256(realExtra key).
+    await expect(new Promise<ClientSocket>((resolve, reject) => {
+      const socket = clientIo(serverUrl, {
+        auth: {
+          mailboxId: primary.mailboxId,
+          mailboxSignPubKey: encodeBase64(primary.signKeyPair.publicKey),
+          binds: [{ mailboxId: victimId, mailboxSignPubKey: encodeBase64(realExtra.signKeyPair.publicKey) }],
+          platform: 'mobile',
+        },
+        transports: ['websocket'], reconnection: false,
+      });
+      const timer = setTimeout(() => { socket.disconnect(); reject(new Error('timeout')); }, 8_000);
+      socket.on('auth:ok', () => { clearTimeout(timer); resolve(socket); });
+      socket.on('error_msg', (e: { code: string }) => { clearTimeout(timer); socket.disconnect(); reject(new Error(e.code)); });
+    })).rejects.toThrow(/bad_handshake/);
+  }, 30_000);
+
+  test('rejects an extra bind with a missing possession proof (multi-bind)', async () => {
+    const primary = makeMailbox(90071);
+    const extra = makeMailbox(90072);
+    // Declare the extra bind in auth but never sign for it → auth_failed (the
+    // client asked to drain an id it cannot prove it owns).
+    await expect(new Promise<ClientSocket>((resolve, reject) => {
+      const socket = clientIo(serverUrl, {
+        auth: {
+          mailboxId: primary.mailboxId,
+          mailboxSignPubKey: encodeBase64(primary.signKeyPair.publicKey),
+          binds: [{ mailboxId: extra.mailboxId, mailboxSignPubKey: encodeBase64(extra.signKeyPair.publicKey) }],
+          platform: 'mobile',
+        },
+        transports: ['websocket'], reconnection: false,
+      });
+      const timer = setTimeout(() => { socket.disconnect(); reject(new Error('timeout')); }, 8_000);
+      socket.on('mailbox:challenge', (c: { nonce: string }) => {
+        // Only the primary sig; no extraSigs for the declared extra bind.
+        socket.emit('mailbox:auth:response', {
+          sig: encodeBase64(nacl.sign.detached(decodeBase64(c.nonce), primary.signKeyPair.secretKey)),
+        });
+      });
+      socket.on('auth:ok', () => { clearTimeout(timer); resolve(socket); });
+      socket.on('error_msg', (e: { code: string }) => { clearTimeout(timer); socket.disconnect(); reject(new Error(e.code)); });
+    })).rejects.toThrow(/auth_failed/);
+  }, 30_000);
 });

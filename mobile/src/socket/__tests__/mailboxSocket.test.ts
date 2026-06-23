@@ -13,7 +13,7 @@
  * the gate. mailbox.ts is REAL so the signature check is meaningful.
  */
 
-import { deriveMailbox, verifyMailboxAuth, type Mailbox } from '../../crypto/mailbox';
+import { deriveMailbox, verifyMailboxAuth, epochFor, type Mailbox } from '../../crypto/mailbox';
 import { decodeBase64 } from 'tweetnacl-util';
 
 // ── Controllable fake socket ─────────────────────────────────────────────────
@@ -48,11 +48,16 @@ jest.mock('../../config', () => ({
 }));
 
 // A deterministic mailbox from a fixed root, returned by the store mock.
-const ROOT = new Uint8Array(32).fill(7);
+const mockRoot = new Uint8Array(32).fill(7);
 let mockMailbox: Mailbox;
+let mockLastEpoch: number | null = null;
+const mockEpochMailboxes = (epochs: number[]): Mailbox[] => epochs.map((e) => deriveMailbox(mockRoot, e));
 jest.mock('../../crypto/mailboxStore', () => ({
   __esModule: true,
   getOwnCurrentMailbox: jest.fn(async () => mockMailbox),
+  getOwnMailboxesForEpochs: jest.fn(async (epochs: number[]) => mockEpochMailboxes(epochs)),
+  getLastMailboxConnectEpoch: jest.fn(async () => mockLastEpoch),
+  setLastMailboxConnectEpoch: jest.fn(async () => {}),
 }));
 
 jest.mock('../../utils/logger', () => ({ __esModule: true, logger: { debug: jest.fn(), warn: jest.fn(), error: jest.fn() } }));
@@ -73,9 +78,15 @@ describe('mailboxSocket — dedicated mailbox delivery socket', () => {
     jest.clearAllMocks();
     mockConfig.ONION_URL = 'http://onion.test';
     mockConfig.MAILBOX_ENABLED = true;
-    mockMailbox = deriveMailbox(ROOT, 19_000);
+    mockMailbox = deriveMailbox(mockRoot, 19_000);
+    mockLastEpoch = null;
     lastSocket = null;
     lastIoArgs = null;
+    disconnectMailboxSocket();
+  });
+
+  afterEach(() => {
+    // Clears any scheduled epoch-rotation timer so it can't leak across tests.
     disconnectMailboxSocket();
   });
 
@@ -94,6 +105,31 @@ describe('mailboxSocket — dedicated mailbox delivery socket', () => {
     expect(typeof auth.mailboxSignPubKey).toBe('string');
     expect('aegisId' in auth).toBe(false);
     expect(lastIoArgs!.url).toBe('http://onion.test'); // Tor
+  });
+
+  it('binds catch-up epochs since the last connect and proves each (Slice 5b)', async () => {
+    const E = epochFor(Date.now());
+    mockLastEpoch = E - 3; // offline across 3 epoch boundaries
+    await connectMailboxSocket(() => {});
+
+    const auth = lastIoArgs!.opts.auth as { binds?: Array<{ mailboxId: string; mailboxSignPubKey: string }> };
+    // extras = [E-3, E-2, E-1] → 3 binds, in ascending epoch order.
+    const expected = mockEpochMailboxes([E - 3, E - 2, E - 1]);
+    expect(auth.binds).toHaveLength(3);
+    expect(auth.binds!.map((b) => b.mailboxId)).toEqual(expected.map((m) => m.mailboxIdB64));
+
+    // Each extra bind is proven by a signature over the SAME challenge nonce.
+    lastSocket!.connected = true;
+    const nonceB64 = Buffer.from(new Uint8Array(32).fill(9)).toString('base64');
+    lastSocket!.fire('mailbox:challenge', { nonce: nonceB64 });
+    const resp = lastSocket!.emitted.find((e) => e.event === 'mailbox:auth:response');
+    const extraSigs = (resp!.payload as { extraSigs: Array<{ mailboxId: string; sig: string }> }).extraSigs;
+    expect(extraSigs).toHaveLength(3);
+    for (let i = 0; i < expected.length; i++) {
+      expect(extraSigs[i]!.mailboxId).toBe(expected[i]!.mailboxIdB64);
+      const ok = verifyMailboxAuth(expected[i]!.signPublicKey, decodeBase64(nonceB64), decodeBase64(extraSigs[i]!.sig));
+      expect(ok).toBe(true);
+    }
   });
 
   it('answers the challenge with a proof that verifies against the mailbox key', async () => {

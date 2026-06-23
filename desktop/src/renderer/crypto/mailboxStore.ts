@@ -18,11 +18,12 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import { currentMailbox, type Mailbox } from './mailbox';
+import { currentMailbox, deriveMailbox, type Mailbox } from './mailbox';
 import './ipc-types';
 
 const OWN_ROOT_SLOT = 'aegis.mailboxRoot.self';
 const CONTACT_SLOT_PREFIX = 'aegis.mailboxRoot.peer.';
+const LAST_CONNECT_EPOCH_SLOT = 'aegis.mailboxRoot.lastEpoch';
 
 /** Mailbox root length (bytes). */
 const ROOT_BYTES = 32;
@@ -77,6 +78,35 @@ export async function getContactMailboxRoot(aegisId: string): Promise<Uint8Array
 /** Our current-epoch mailbox (routing id + auth keypair). */
 export async function getOwnCurrentMailbox(nowMs: number): Promise<Mailbox> {
   return currentMailbox(await getOwnMailboxRoot(), nowMs);
+}
+
+/**
+ * Our mailboxes for an explicit set of epochs (Slice 5b catch-up binds). Used to
+ * re-bind + drain past-epoch queues we may have been offline across, since the
+ * routing id rotates per epoch but the offline queue retains up to MESSAGE_TTL.
+ */
+export async function getOwnMailboxesForEpochs(epochs: number[]): Promise<Mailbox[]> {
+  const root = await getOwnMailboxRoot();
+  return epochs.map((e) => deriveMailbox(root, e));
+}
+
+/**
+ * The highest epoch we last connected/drained, or null if never. Drives the
+ * catch-up window on the next connect so messages queued under intervening
+ * epochs (while offline across a boundary) still drain. Not secret (a plain
+ * integer) but kept in the same store for simplicity.
+ */
+export async function getLastMailboxConnectEpoch(): Promise<number | null> {
+  const v = await secureStorage().get(LAST_CONNECT_EPOCH_SLOT);
+  if (!v) return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/** Persist the highest epoch we've connected/drained (see getLastMailboxConnectEpoch). */
+export async function setLastMailboxConnectEpoch(epoch: number): Promise<void> {
+  if (!Number.isInteger(epoch) || epoch < 0) return;
+  await secureStorage().set(LAST_CONNECT_EPOCH_SLOT, String(epoch));
 }
 
 /**

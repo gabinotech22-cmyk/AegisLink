@@ -32,8 +32,21 @@ import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { logger } from '../utils/logger';
 import { ONION_URL, MAILBOX_ENABLED } from '../config';
-import { getOwnCurrentMailbox } from '../crypto/mailboxStore';
-import { mailboxAuthProof, type Mailbox } from '../crypto/mailbox';
+import {
+  getOwnCurrentMailbox,
+  getOwnMailboxesForEpochs,
+  getLastMailboxConnectEpoch,
+  setLastMailboxConnectEpoch,
+} from '../crypto/mailboxStore';
+import { mailboxAuthProof, epochFor, MAILBOX_EPOCH_MS, type Mailbox } from '../crypto/mailbox';
+
+/**
+ * Catch-up cap: how many past epochs we re-bind on a single connect. extras must
+ * stay ≤ the relay's MAX_MAILBOX_BINDS (32, incl. headroom). With a 1-day epoch
+ * and a 30-day queue, 31 covers the full retention window; longer offline gaps
+ * lose only messages already expired from the relay queue.
+ */
+const MAX_CATCHUP_EPOCHS = 31;
 
 /** Incoming envelope as forwarded by the relay (createdAt stamped relay-side). */
 export interface IncomingMailboxEnvelope {
@@ -60,7 +73,10 @@ type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?:
 
 let mboxSocket: Socket | null = null;
 let currentEpochMailbox: Mailbox | null = null;
+let extraEpochMailboxes: Mailbox[] = []; // catch-up epochs bound alongside the current one
 let authed = false;
+let onEnvelopeCb: ((env: IncomingMailboxEnvelope) => void) | null = null;
+let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** True once the mailbox socket is connected and possession-proof authenticated. */
 export function isMailboxAuthed(): boolean {
@@ -78,10 +94,22 @@ export async function connectMailboxSocket(
 ): Promise<Socket | null> {
   if (!MAILBOX_ENABLED || !ONION_URL) return null; // fail-closed: needs Tor
   if (mboxSocket && mboxSocket.connected) return mboxSocket;
+  onEnvelopeCb = onEnvelope;
 
-  // Derive the mailbox valid right now (id + auth keypair) from our own root.
-  const mb = await getOwnCurrentMailbox(Date.now());
+  // Derive the mailbox valid right now (id + auth keypair) from our own root, plus
+  // a catch-up window of recent epochs we may have been offline across (Slice 5b).
+  // Always include the just-passed epoch (E-1) for sender clock skew at a boundary.
+  const now = Date.now();
+  const E = epochFor(now);
+  const last = await getLastMailboxConnectEpoch();
+  let start = last !== null ? Math.min(last, E - 1) : E - 1;
+  start = Math.max(start, E - MAX_CATCHUP_EPOCHS, 0);
+  const extraEpochs: number[] = [];
+  for (let e = start; e <= E - 1; e++) extraEpochs.push(e);
+
+  const mb = await getOwnCurrentMailbox(now);
   currentEpochMailbox = mb;
+  extraEpochMailboxes = extraEpochs.length ? await getOwnMailboxesForEpochs(extraEpochs) : [];
   authed = false;
 
   const sock = io(ONION_URL, {
@@ -90,6 +118,10 @@ export async function connectMailboxSocket(
     auth: {
       mailboxId: mb.mailboxIdB64,
       mailboxSignPubKey: encodeBase64(mb.signPublicKey),
+      // Slice 5b: extra epoch mailboxes to bind + drain in this same handshake.
+      ...(extraEpochMailboxes.length
+        ? { binds: extraEpochMailboxes.map((m) => ({ mailboxId: m.mailboxIdB64, mailboxSignPubKey: encodeBase64(m.signPublicKey) })) }
+        : {}),
     },
     reconnection: true,
     reconnectionDelay: 1000,
@@ -116,8 +148,18 @@ export async function connectMailboxSocket(
     try {
       if (typeof chal?.nonce !== 'string') throw new Error('bad challenge');
       const nonce = decodeBase64(chal.nonce);
-      const sig = mailboxAuthProof(mb.signSecretKey, nonce);
-      sock.emit('mailbox:auth:response', { sig: encodeBase64(sig) });
+      // Prove the current epoch + every catch-up epoch by signing the SAME nonce
+      // with each key. Binding an epoch id whose root we don't hold is impossible.
+      const resp: { sig: string; extraSigs?: Array<{ mailboxId: string; sig: string }> } = {
+        sig: encodeBase64(mailboxAuthProof(mb.signSecretKey, nonce)),
+      };
+      if (extraEpochMailboxes.length) {
+        resp.extraSigs = extraEpochMailboxes.map((m) => ({
+          mailboxId: m.mailboxIdB64,
+          sig: encodeBase64(mailboxAuthProof(m.signSecretKey, nonce)),
+        }));
+      }
+      sock.emit('mailbox:auth:response', resp);
     } catch (e) {
       if (__DEV__) logger.warn('[mailbox] auth failure:', (e as Error).message);
       sock.disconnect();
@@ -126,6 +168,8 @@ export async function connectMailboxSocket(
 
   sock.on('auth:ok', () => {
     authed = true;
+    void setLastMailboxConnectEpoch(E);
+    scheduleEpochRotation();
     if (__DEV__) logger.debug('[mailbox] authenticated');
   });
 
@@ -165,10 +209,42 @@ export async function sendViaMailbox(env: OutgoingMailboxEnvelope): Promise<Enve
   });
 }
 
+/**
+ * Live epoch rotation (Slice 5b): schedule a reconnect just after the next epoch
+ * boundary. Reconnecting re-derives the now-current epoch and re-runs the catch-up
+ * binds (which re-bind the just-passed epoch for skew grace), over a FRESH Tor
+ * circuit — so a long-running session never stays stuck on a stale epoch, and the
+ * relay can't link consecutive epochs to one circuit. Idempotent.
+ */
+function scheduleEpochRotation(): void {
+  if (boundaryTimer) { clearTimeout(boundaryTimer); boundaryTimer = null; }
+  const now = Date.now();
+  const msToBoundary = (epochFor(now) + 1) * MAILBOX_EPOCH_MS - now;
+  // +2s grace so both ends have ticked over before we re-derive the new epoch.
+  const delay = Math.max(1000, msToBoundary + 2000);
+  boundaryTimer = setTimeout(() => { void rotateForNewEpoch(); }, delay);
+}
+
+/** Tear down the current socket and reconnect for the new epoch (keeps the callback). */
+async function rotateForNewEpoch(): Promise<void> {
+  const cb = onEnvelopeCb;
+  boundaryTimer = null;
+  if (!cb || !MAILBOX_ENABLED) return;
+  authed = false;
+  if (mboxSocket) {
+    try { mboxSocket.removeAllListeners(); mboxSocket.disconnect(); } catch { /* noop */ }
+    mboxSocket = null;
+  }
+  await connectMailboxSocket(cb);
+}
+
 /** Tear down the mailbox socket (e.g. on logout / profile switch / panic). */
 export function disconnectMailboxSocket(): void {
   authed = false;
   currentEpochMailbox = null;
+  extraEpochMailboxes = [];
+  onEnvelopeCb = null;
+  if (boundaryTimer) { clearTimeout(boundaryTimer); boundaryTimer = null; }
   if (mboxSocket) {
     try { mboxSocket.removeAllListeners(); mboxSocket.disconnect(); } catch { /* noop */ }
     mboxSocket = null;

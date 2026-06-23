@@ -423,15 +423,17 @@ export function attachRelay(io: SocketServer) {
   io.on('connection', (socket) => {
     const auth = socket.handshake.auth as {
       aegisId?: unknown; platform?: unknown; deviceId?: unknown;
-      mailboxId?: unknown; mailboxSignPubKey?: unknown;
+      mailboxId?: unknown; mailboxSignPubKey?: unknown; binds?: unknown;
     };
 
     // ── Fase 4: mailbox-mode handshake ────────────────────────────────────────
     // Authenticate the socket by proving possession of a mailbox signing key —
     // the relay never receives the aegisId. Selected when the client presents a
     // mailbox instead of an aegisId. Additive: aegisId clients are unaffected.
+    // `binds` (Slice 5b) carries additional epoch mailboxes to bind+drain in the
+    // same handshake (catch-up across an offline epoch boundary).
     if (typeof auth?.mailboxId === 'string' && typeof auth?.mailboxSignPubKey === 'string') {
-      handleMailboxConnection(socket, auth.mailboxId, auth.mailboxSignPubKey);
+      handleMailboxConnection(socket, auth.mailboxId, auth.mailboxSignPubKey, auth.binds);
       return;
     }
 
@@ -561,22 +563,60 @@ export function attachRelay(io: SocketServer) {
     ephemeralTtl: z.number().int().positive().max(MESSAGE_TTL_MS).optional(),
   });
 
-  // Fase 4 Slice 1: authenticate a socket as a MAILBOX (possession proof over the
-  // mailbox Ed25519 key), bind it by the recomputed id, and deliver mailbox-
-  // addressed envelopes online. The relay never learns the aegisId. Offline queue
-  // + push by mailbox is Slice 2.
-  function handleMailboxConnection(socket: Socket, claimedMailboxId: string, signPubKeyB64: string) {
-    let signPub: Uint8Array;
-    try { signPub = decodeBase64(signPubKeyB64); } catch {
+  // Fase 4 Slice 1 + Slice 5b: authenticate a socket as one or more MAILBOXES via
+  // possession proofs (Ed25519) over a SINGLE challenge, bind each by its
+  // recomputed id, drain each offline queue, then deliver mailbox-addressed
+  // envelopes online. The relay never learns the aegisId.
+  //
+  // Multi-bind (Slice 5b) reconciles daily id rotation with the 30-day offline
+  // queue: a reconnecting client binds its CURRENT epoch plus any epoch it was
+  // offline across (and the just-passed one, for sender clock skew), so messages
+  // queued under a past epoch's id still drain. Each id is proven independently
+  // (one signature per id over the same challenge) — binding an id whose root you
+  // don't hold is impossible. Capped to bound work. Live rotation is handled
+  // client-side by reconnecting at each epoch boundary (fresh circuit + re-derive).
+  const MAX_MAILBOX_BINDS = 32; // >= MESSAGE_TTL/epoch (30d) + skew grace
+
+  function handleMailboxConnection(
+    socket: Socket,
+    claimedMailboxId: string,
+    signPubKeyB64: string,
+    extraBindsRaw?: unknown,
+  ) {
+    // Validate the primary mailbox id ↔ signing key binding. Any mismatch is an
+    // attempt to claim an id not derived from this key (hijack) → reject.
+    let primarySignPub: Uint8Array;
+    try { primarySignPub = decodeBase64(signPubKeyB64); } catch {
       socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
     }
-    if (signPub.length !== 32) {
+    if (primarySignPub.length !== 32 || mailboxIdForSignPublicKey(primarySignPub) !== claimedMailboxId) {
       socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
     }
-    // Binding: the routing id MUST equal SHA256(signPubKey)[0:16]. Any mismatch is
-    // an attempt to claim a mailbox id not derived from this key (hijack) → reject.
-    if (mailboxIdForSignPublicKey(signPub) !== claimedMailboxId) {
-      socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
+
+    // Additional epoch binds (catch-up + skew window): de-duped, capped, and each
+    // id↔key binding validated up front. A bad binding is a hijack attempt on that
+    // id → reject the whole handshake (a correct client never sends one).
+    const binds = new Map<string, Uint8Array>([[claimedMailboxId, primarySignPub]]);
+    if (Array.isArray(extraBindsRaw)) {
+      if (extraBindsRaw.length > MAX_MAILBOX_BINDS) {
+        socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
+      }
+      for (const e of extraBindsRaw) {
+        const id = (e as { mailboxId?: unknown })?.mailboxId;
+        const pkB64 = (e as { mailboxSignPubKey?: unknown })?.mailboxSignPubKey;
+        if (typeof id !== 'string' || typeof pkB64 !== 'string') {
+          socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
+        }
+        if (binds.has(id)) continue; // already counted (primary or repeat)
+        let pk: Uint8Array;
+        try { pk = decodeBase64(pkB64); } catch {
+          socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
+        }
+        if (pk.length !== 32 || mailboxIdForSignPublicKey(pk) !== id) {
+          socket.emit('error_msg', { code: 'bad_handshake' }); socket.disconnect(true); return;
+        }
+        binds.set(id, pk);
+      }
     }
 
     const challenge = nacl.randomBytes(32);
@@ -589,18 +629,45 @@ export function attachRelay(io: SocketServer) {
     socket.emit('mailbox:challenge', { nonce: encodeBase64(challenge) });
 
     socket.once('mailbox:auth:response', (raw: unknown) => {
-      let sig: Uint8Array | null = null;
+      // Primary possession proof (signs the challenge with the primary key).
       const sigB64 = (raw as { sig?: unknown })?.sig;
-      if (typeof sigB64 === 'string') { try { sig = decodeBase64(sigB64); } catch { sig = null; } }
-      if (!sig || !verifyMailboxAuth(signPub, challenge, sig)) {
+      let primarySig: Uint8Array | null = null;
+      if (typeof sigB64 === 'string') { try { primarySig = decodeBase64(sigB64); } catch { primarySig = null; } }
+      if (!primarySig || !verifyMailboxAuth(primarySignPub, challenge, primarySig)) {
         socket.emit('error_msg', { code: 'auth_failed' }); socket.disconnect(true); return;
       }
+
+      // Per-id proofs for the extra binds (each signs the SAME challenge).
+      const extraSigById = new Map<string, Uint8Array>();
+      const extraSigs = (raw as { extraSigs?: unknown })?.extraSigs;
+      if (Array.isArray(extraSigs)) {
+        for (const s of extraSigs) {
+          const id = (s as { mailboxId?: unknown })?.mailboxId;
+          const sg = (s as { sig?: unknown })?.sig;
+          if (typeof id !== 'string' || typeof sg !== 'string') continue;
+          try { extraSigById.set(id, decodeBase64(sg)); } catch { /* skip malformed */ }
+        }
+      }
+      const boundIds: string[] = [claimedMailboxId];
+      for (const [id, pk] of binds) {
+        if (id === claimedMailboxId) continue;
+        const sg = extraSigById.get(id);
+        if (!sg || !verifyMailboxAuth(pk, challenge, sg)) {
+          // A claimed extra bind that fails its proof aborts the whole handshake:
+          // the client asked to drain an id it cannot prove it owns.
+          socket.emit('error_msg', { code: 'auth_failed' }); socket.disconnect(true); return;
+        }
+        boundIds.push(id);
+      }
+
       authenticated = true;
       clearTimeout(authTimer);
 
-      const set = mailboxSockets.get(claimedMailboxId) ?? new Set<Socket>();
-      set.add(socket);
-      mailboxSockets.set(claimedMailboxId, set);
+      for (const id of boundIds) {
+        const set = mailboxSockets.get(id) ?? new Set<Socket>();
+        set.add(socket);
+        mailboxSockets.set(id, set);
+      }
 
       const limiter = makeEnvelopeLimiter();
 
@@ -639,22 +706,26 @@ export function attachRelay(io: SocketServer) {
 
       socket.on('disconnect', () => {
         limiter.destroy();
-        const cur = mailboxSockets.get(claimedMailboxId);
-        if (cur) { cur.delete(socket); if (cur.size === 0) mailboxSockets.delete(claimedMailboxId); }
+        for (const id of boundIds) {
+          const cur = mailboxSockets.get(id);
+          if (cur) { cur.delete(socket); if (cur.size === 0) mailboxSockets.delete(id); }
+        }
       });
 
-      // Drain anything queued while this mailbox was offline, THEN signal ready —
+      // Drain every bound id (current epoch + catch-up epochs), THEN signal ready —
       // mirrors the aegisId drain order (drain → auth:ok). No deviceId → hard
       // delete on drain (a mailbox is a single logical inbox).
       void (async () => {
-        const pending = await messageRepo.drainFor(claimedMailboxId);
-        for (const row of pending) {
-          socket.emit('envelope:mb', {
-            id: row.id, to: claimedMailboxId,
-            ciphertext: row.ciphertext_b64, nonce: row.nonce_b64,
-            epk: row.epk_b64 ?? '', createdAt: row.created_at,
-          });
-          await messageRepo.delete(row.id);
+        for (const id of boundIds) {
+          const pending = await messageRepo.drainFor(id);
+          for (const row of pending) {
+            socket.emit('envelope:mb', {
+              id: row.id, to: id,
+              ciphertext: row.ciphertext_b64, nonce: row.nonce_b64,
+              epk: row.epk_b64 ?? '', createdAt: row.created_at,
+            });
+            await messageRepo.delete(row.id);
+          }
         }
         socket.emit('auth:ok', {});
       })();
