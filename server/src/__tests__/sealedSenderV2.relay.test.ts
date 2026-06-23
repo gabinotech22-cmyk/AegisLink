@@ -256,4 +256,32 @@ describe('sealed-sender v2 relay transport', () => {
     daveSock2.disconnect();
     await new Promise((r) => setTimeout(r, 50));
   }, 30_000);
+
+  test('rejects send to a recipient with NO registered token (same error as wrong token — no existence oracle)', async () => {
+    const eve = makeAgentKeys(80021);   // sender
+    const frank = makeAgentKeys(80022); // recipient — never registers a token
+    await registerAgent(eve);
+    await registerAgent(frank);
+
+    const frankSock = await connectAgent(frank);
+    const received: V2Wire[] = [];
+    frankSock.on('envelope:v2', (w: V2Wire) => received.push(w));
+
+    const eveSock = await connectAgent(eve);
+
+    // Frank never called deliveryToken:register → storedHash is null. The gate
+    // must (1) fail closed and (2) return the SAME `bad_delivery_token` as a
+    // wrong token, having run the dummy constant-time verify so a network
+    // observer can't tell "no token registered" from "wrong token".
+    const ack = await sendV2(eveSock, makeWire(frank.aegisId, 'any-token', 'm-no-token'));
+    expect(ack.ok).toBe(false);
+    expect(ack.error).toBe('bad_delivery_token');
+
+    await new Promise((r) => setTimeout(r, 150));
+    expect(received).toHaveLength(0);
+
+    eveSock.disconnect();
+    frankSock.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+  }, 30_000);
 });

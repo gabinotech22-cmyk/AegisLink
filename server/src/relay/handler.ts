@@ -12,6 +12,13 @@ import { notifyRecipient, sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } 
 
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
+// Fixed sha256-length (32-byte) dummy hash. The sealed-sender v2 submission gate
+// runs its constant-time delivery-token check against this when `to` has no
+// token registered, so the response time can't reveal whether `to` is a v2
+// recipient — closes a low-severity existence oracle. (The `getHash` DB lookup
+// is a weaker residual timing oracle, out of scope for this application guard.)
+const DUMMY_DELIVERY_TOKEN_HASH = Buffer.alloc(32).toString('base64');
+
 /**
  * Sealed-sender wire format. Server only sees:
  *   - `id`: message identifier (random, opaque)
@@ -761,7 +768,14 @@ export function attachRelay(io: SocketServer) {
           // token. The relay verifies it against the stored hash in constant time
           // (golden rule #8) without learning who is sending.
           const storedHash = await deliveryTokenRepo.getHash(data.to);
-          if (!storedHash || !verifyDeliveryToken(data.deliveryToken, storedHash)) {
+          // Run the constant-time verify even when no token is registered (against
+          // a fixed dummy) so the response time does not reveal whether `to` is a
+          // v2 recipient. The `!storedHash` check still decides the outcome.
+          const tokenOk = verifyDeliveryToken(
+            data.deliveryToken,
+            storedHash ?? DUMMY_DELIVERY_TOKEN_HASH
+          );
+          if (!storedHash || !tokenOk) {
             ack?.({ ok: false, error: 'bad_delivery_token' });
             return;
           }
