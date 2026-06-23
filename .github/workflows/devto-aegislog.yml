@@ -1,0 +1,53 @@
+name: dev.to AegisLog
+
+# Publishes the next queued dev.to article (content/devto/queue/) under the
+# AegisLink organization, every Friday. The human gate is the repo: only
+# markdown already written and merged into the queue can be published.
+
+on:
+  schedule:
+    - cron: '0 15 * * 5' # Fridays 15:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (parse + report, do not publish)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: devto-aegislog
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Publish next queued article
+        env:
+          DEV_TO_API_KEY: ${{ secrets.DEV_TO_API_KEY }}
+          DEVTO_ORG_USERNAME: ${{ vars.DEVTO_ORG_USERNAME || 'aegislink' }}
+          DEVTO_ORG_ID: ${{ vars.DEVTO_ORG_ID }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+        run: node scripts/devto-publish.mjs
+
+      - name: Commit queue move
+        if: ${{ !inputs.dry_run }}
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "aegislink-bot"
+            git config user.email "gabinotech22@gmail.com"
+            git add -A
+            git commit -m "chore(devto): publish next AegisLog article"
+            git push
+          else
+            echo "No changes to commit."
+          fi
