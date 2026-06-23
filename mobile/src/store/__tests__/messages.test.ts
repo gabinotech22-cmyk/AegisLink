@@ -352,6 +352,32 @@ describe('append', () => {
 
     expect(useMessages.getState().unreadCounts['chat-alice']).toBeUndefined();
   });
+
+  it('does NOT increment unreadCounts for an incoming message whose chat is currently focused', async () => {
+    const { setActiveChatNotificationId } = require('../../notifications/push') as typeof import('../../notifications/push');
+    setActiveChatNotificationId('chat-alice');
+    try {
+      const inbound = makeMsg({ id: 'msg-in', chatId: 'chat-alice', direction: 'in' });
+      await useMessages.getState().append(inbound);
+      // User is looking at the chat — badge stays at 0, message still stored.
+      expect(useMessages.getState().unreadCounts['chat-alice']).toBe(0);
+      expect(useMessages.getState().byChat['chat-alice']).toHaveLength(1);
+    } finally {
+      setActiveChatNotificationId(null);
+    }
+  });
+
+  it('STILL increments unreadCounts for an incoming message to a non-focused chat', async () => {
+    const { setActiveChatNotificationId } = require('../../notifications/push') as typeof import('../../notifications/push');
+    setActiveChatNotificationId('chat-alice'); // a DIFFERENT chat is focused
+    try {
+      const inbound = makeMsg({ id: 'msg-in', chatId: 'chat-bob', direction: 'in' });
+      await useMessages.getState().append(inbound);
+      expect(useMessages.getState().unreadCounts['chat-bob']).toBe(1);
+    } finally {
+      setActiveChatNotificationId(null);
+    }
+  });
 });
 
 // ── describe: clearChat ───────────────────────────────────────────────────────
