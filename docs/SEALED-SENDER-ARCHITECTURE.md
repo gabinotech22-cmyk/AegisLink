@@ -167,15 +167,27 @@ Lo que cambia:
   - **Regla para Fases siguientes:** envelopes de chat (poco frecuentes) → seal
     por mensaje directo. Señalización de llamada (alta frecuencia) → seal por
     sesión + secretbox por candidato.
-- **Fase 1 — envelopes 1:1 sealed.** Activar v2 para chat 1:1; `from` fuera del
-  wire. Reparto de delivery-token en el handshake X3DH.
-- **Fase 2 — llamadas sealed.** Migrar `call:*`; retirar `from: me` de
-  `forward()`. Vigilar latencia de ring/ICE.
-- **Fase 3 — grupos.** Fan-out de SenderKey con sobres sealed por miembro.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4).** Registro de mailboxes, auth de
-  socket por mailbox, reparto del mapeo por X3DH, rotación por época. Es la
-  segunda mitad y el cambio de plumbing más profundo; va después de que ocultar
-  `from` esté estable.
+- **Fase 1 — envelopes 1:1 sealed. ✅ HABILITADO POR DEFECTO.** `envelope:v2`
+  (sin `from`, gated por delivery-token del destinatario) + selector v1/v2 +
+  reparto del delivery-token en el `profile_update` E2EE, en server+mobile+desktop.
+  Estuvo construido pero tras `SEALED_TRANSPORT_VERSION=v1`; el default se volteó a
+  **v2** (con fallback v1 por-contacto intacto). Test de regresión fija el default.
+- **Fase 2 — llamadas sealed. ✅ HABILITADO POR DEFECTO.** `call:*:v2` con `epk`
+  por llamada + secretbox por candidato ICE bajo la clave de sesión (regla de
+  amortización de Fase 0); gateado en el mismo flag, mobile+desktop.
+- **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
+  selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
+  `from` igual que un 1:1.
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🔬 SPIKE INICIADO (no terminada).**
+  Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
+  path, estilo Fase 0): derivación **determinista por época** del mailbox desde un
+  root compartido una vez por X3DH (`mailbox(epoch)=HKDF(root,epoch)` → rotación
+  silenciosa sin re-reparto) + prueba de posesión Ed25519 para el auth del socket.
+  **PENDIENTE (el grueso, XL):** auth de socket por mailbox en el relay (dejar de
+  enviar el aegisId), routing por mailbox, reparto del root por X3DH, mapping
+  `mailbox→push`, manejo de rotación/solapamiento de época en vivo, paridad
+  desktop+server. Es el cambio de plumbing más profundo; va después de que ocultar
+  `from` esté estable (ya lo está).
 - **Fase 5 — anti-correlación + push.** Cover traffic / jitter; notifier
   separado o push self-hosted (UnifiedPush/ntfy) para cortar el último reducto.
 - **Fase 6 — retirar v1.** Cuando todos los clientes estén en v2, eliminar el

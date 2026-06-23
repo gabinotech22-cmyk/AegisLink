@@ -65,15 +65,16 @@ export const ONION_URL: string | null =
 
 /**
  * SEALED_TRANSPORT_VERSION — sealed-sender transport for 1:1 chat.
- *   'v1' (default): legacy envelope; the relay stamps `from` on online delivery.
- *   'v2': sealed-sender — the sender's identity never reaches the relay (sealed
- *         inside the box), submission gated by the recipient's delivery token.
- * Opt-in via EXPO_PUBLIC_SEALED_VERSION=v2. v2 degrades to v1 per-contact when
- * the contact's signing key or delivery token isn't available yet (first
- * contact / pre-upgrade peers). See docs/SEALED-SENDER-ARCHITECTURE.md.
+ *   'v2' (default): sealed-sender — the sender's identity never reaches the relay
+ *         (sealed inside the box), submission gated by the recipient's delivery
+ *         token. v2 degrades to v1 per-contact when the contact's signing key or
+ *         delivery token isn't available yet (first contact / pre-upgrade peers).
+ *   'v1': legacy envelope; the relay stamps `from` on online delivery.
+ * Default is v2 (A-6 Fases 1-3). Opt OUT via EXPO_PUBLIC_SEALED_VERSION=v1 as an
+ * escape hatch. See docs/SEALED-SENDER-ARCHITECTURE.md.
  */
 export const SEALED_TRANSPORT_VERSION: 'v1' | 'v2' =
-  (process.env.EXPO_PUBLIC_SEALED_VERSION as string | undefined) === 'v2' ? 'v2' : 'v1';
+  (process.env.EXPO_PUBLIC_SEALED_VERSION as string | undefined) === 'v1' ? 'v1' : 'v2';
 
 /**
  * Fail-fast transport guard. In a production build every backend base URL MUST

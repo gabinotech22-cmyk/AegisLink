@@ -20,9 +20,9 @@ export const TURN_PASSWORD =
 
 /**
  * SEALED_TRANSPORT_VERSION — sealed-sender transport for 1:1 chat. Parity with
- * mobile. 'v1' (default) or 'v2' via VITE_SEALED_VERSION=v2. v2 degrades to v1
- * per-contact when the contact's signing key / delivery token isn't available.
- * See docs/SEALED-SENDER-ARCHITECTURE.md.
+ * mobile. 'v2' (default, A-6 Fases 1-3) or 'v1' (opt-out escape hatch) via
+ * VITE_SEALED_VERSION=v1. v2 degrades to v1 per-contact when the contact's
+ * signing key / delivery token isn't available. See docs/SEALED-SENDER-ARCHITECTURE.md.
  */
 export const SEALED_TRANSPORT_VERSION: 'v1' | 'v2' =
-  (import.meta.env.VITE_SEALED_VERSION as string | undefined) === 'v2' ? 'v2' : 'v1';
+  (import.meta.env.VITE_SEALED_VERSION as string | undefined) === 'v1' ? 'v1' : 'v2';
