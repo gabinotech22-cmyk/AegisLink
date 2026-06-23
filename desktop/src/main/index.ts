@@ -2,7 +2,7 @@ import { app, BrowserWindow, shell, session } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { registerSecureStorageHandlers } from './ipc/secureStorage'
-import { registerDatabaseHandlers, closeDatabase } from './ipc/database'
+import { registerDatabaseHandlers, openMainDbIfUnwrapped, closeDatabase } from './ipc/database'
 import { registerNotificationHandlers } from './ipc/notifications'
 
 function createWindow(): void {
@@ -110,6 +110,11 @@ app.whenReady().then(() => {
     }
     callback({ responseHeaders })
   })
+
+  // Open the main DB for legacy / no-PIN installs now that the app is ready —
+  // safeStorage (used by getDbKey) is illegal before this point on Electron 42+.
+  // PIN-wrapped installs stay closed until the renderer sends db:unlock.
+  openMainDbIfUnwrapped()
 
   createWindow()
 

@@ -403,16 +403,29 @@ function openMainDb(): void {
   ensureSchema(db)
 }
 
-export function registerDatabaseHandlers(): void {
-  mainDbPath = path.join(app.getPath('userData'), 'aegislink.db')
-
-  // C-2 Fase 2: if the DB key is PIN-wrapped, DEFER opening until db:unlock
-  // supplies the PIN-derived KEK. Legacy / no-PIN installs open eagerly as before
-  // (fully backward compatible).
+/**
+ * Eagerly open the main DB for legacy / no-PIN installs. MUST be called AFTER
+ * app.whenReady(): openMainDb() -> getDbKey() uses Electron safeStorage, which
+ * THROWS when used before the app is ready (enforced since Electron 42 — before
+ * that it silently worked, so the eager open could live inside the pre-ready
+ * registerDatabaseHandlers()). PIN-wrapped installs stay closed until db:unlock
+ * supplies the PIN-derived KEK. No-op if already open or path not yet set.
+ */
+export function openMainDbIfUnwrapped(): void {
+  if (db || !mainDbPath) return
   const encoded = readKeystore()[getDbEncKeySlot('self')]
   if (!isPinWrapped(encoded)) {
     openMainDb()
   }
+}
+
+export function registerDatabaseHandlers(): void {
+  mainDbPath = path.join(app.getPath('userData'), 'aegislink.db')
+
+  // C-2 Fase 2: if the DB key is PIN-wrapped, DEFER opening until db:unlock
+  // supplies the PIN-derived KEK. Legacy / no-PIN installs are opened eagerly
+  // too — but from app.whenReady() (see openMainDbIfUnwrapped), NOT here:
+  // getDbKey() touches safeStorage, illegal before the app is ready on Electron 42+.
 
   // ─── Lock / unlock (C-2 Fase 2) ───
   ipcMain.handle('db:lock-state', (event): { pinWrapped: boolean; opened: boolean } => {
