@@ -65,6 +65,78 @@ TweetNaCl and `@noble/hashes`. The protocol layer that composes them
 (X3DH, Double Ratchet, envelope, metadata padding) is the project's own code and
 is the primary surface for which an independent audit is sought.
 
+### 2.1 Implementation posture — side channels and the JavaScript crypto core
+
+A reviewer's first and most legitimate question about a React Native messenger is:
+*"the cryptography runs in JavaScript — isn't that vulnerable to timing
+side-channels?"* This section answers it without hand-waving, and states plainly
+what we do and do not claim.
+
+**What actually runs.** The cryptographic primitives execute in **pure
+JavaScript** on the client's JS engine — Hermes on the mobile client, V8 (via
+Electron) on desktop. There is **no native libsodium/Rust/C++ binding** in the
+build; `tweetnacl`, `@noble/hashes` and `@noble/post-quantum` are JS packages
+(see `mobile/package.json`). We say this explicitly because the opposite claim —
+"constant-time native bindings" — would be trivially falsifiable by anyone who
+opens the manifest, and a falsifiable security claim is worse than an honest
+limitation.
+
+**Constant-time posture (what is in our favor).**
+
+- TweetNaCl is a direct port of Bernstein's NaCl and was **written to be
+  constant-time at the source level** — XSalsa20, Poly1305, X25519 scalar
+  multiplication and Ed25519 avoid secret-dependent branches and table lookups by
+  design. `@noble/*` follows the same constant-time discipline and is widely
+  audited.
+- All **secret/key-material comparisons in this codebase are constant-time**
+  (XOR-accumulated, no early return) rather than relying on `===` or a
+  short-circuiting `Array.every` — e.g. the ratchet MAC/equality check
+  (`mobile/src/crypto/signal/ratchet.ts`). This was a deliberate hardening pass.
+- Intermediate key material (DH outputs, ephemeral secrets, shared secrets,
+  derived buffers) is **zeroized in `try/finally`** after use, shrinking the
+  window in which a secret sits in a recoverable heap object.
+
+**The honest caveat (the real concern, stated precisely).** Source-level
+constant-time is a necessary but **not sufficient** condition once a JIT and a
+garbage collector sit underneath. We do **not** control the bytecode the JS
+engine ultimately emits: Hermes/V8 may, in principle, introduce
+data-dependent optimizations, and GC pauses are non-deterministic. So the
+constant-time *intent* of the libraries is **not machine-checked end-to-end** in
+our runtime. This is the legitimate residual concern, and we do not paper over
+it.
+
+**Why this is a bounded risk for this threat model (not a catastrophe).** A
+timing side-channel is only exploitable through an **oracle the attacker can
+measure**. In a server (TLS terminator, smartcard) the attacker submits millions
+of queries and times the response. AegisLink has no such remote oracle for its
+secret-key operations:
+
+- All secret-key operations (DH, ratchet, decrypt) run **on the user's own
+  device**; only opaque, length-normalized ciphertext (§7.2) crosses the wire. A
+  network or relay adversary cannot time a local `nacl.box`/`secretbox.open`.
+- The realistic exploitation path is therefore **local, co-resident measurement
+  on an already-compromised device** — which is already declared out of scope
+  under endpoint compromise (§8.3). An attacker who can run timing-measurement
+  code inside the victim's process has strictly more powerful attacks available
+  (it can read the keystore once unsealed).
+
+In short: the JS crypto core is a **known, defensible engineering trade-off of
+the React Native platform**, not an oversight. The mitigation is identified and
+bounded — see below — not open-ended.
+
+**Roadmap — migrate the hot path to a native binding.** The battle-tested
+references all run their crypto core in native code (Signal's `libsignal` in
+Rust; Session and SimpleX over native libsodium). That is the correct end state
+and the honest gap. The planned hardening is to move the hot-path primitives
+(X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC) behind a **native libsodium
+binding** (e.g. an Expo module wrapping libsodium, or `react-native-quick-crypto`)
+while keeping the protocol-composition layer in TypeScript and the same public
+interface. This is implementation-substitution behind a stable API, not a
+protocol change. Tracked in
+[`SECURITY-ROADMAP-2026-06.md`](SECURITY-ROADMAP-2026-06.md) (post-audit
+follow-up F-1). Until then, the constant-time guarantee is **source-level, not
+runtime-verified**, as stated above.
+
 ---
 
 ## 3. Identity
@@ -485,6 +557,11 @@ with a key derived from a user passphrase the relay never sees:
   exposed until both ends are v2 — see §10.
 - **Cross-domain key-separation concerns** from the shared X25519/Ed25519 secret
   (§3.1).
+- **Runtime-level timing side-channels in the JS crypto core.** Constant-time is
+  guaranteed at the source level (TweetNaCl/`@noble`) but not machine-verified
+  through the Hermes/V8 JIT+GC (§2.1). Practical exploitation requires a local
+  co-resident oracle, which already implies endpoint compromise. Mitigation
+  (native libsodium binding) is on the roadmap (§10, F-1).
 
 ---
 
@@ -525,6 +602,11 @@ current protocol:
 4. **Independent third-party cryptographic audit** of this protocol and its
    implementation, with full public disclosure of findings. **No independent
    audit has been performed.** This is the project's top funding priority.
+5. **Native crypto core** (post-audit follow-up **F-1**). Move the hot-path
+   primitives behind a native libsodium binding so the constant-time guarantee is
+   enforced in native code rather than source-level JS on Hermes/V8 (§2.1). This
+   is implementation substitution behind a stable TypeScript interface, not a
+   protocol change.
 
 ---
 
