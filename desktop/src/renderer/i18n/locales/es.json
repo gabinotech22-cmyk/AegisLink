@@ -47,6 +47,14 @@
     "generateError": "No se pudo generar la identidad",
     "registrationFailed": "Registro fallido. Comprueba tu conexión y vuelve a intentarlo.",
     "networkError": "Error de red. Por favor, reintenta.",
+    "continueBtn": "Continuar",
+    "almostDone": "CASI LISTO",
+    "nicknameTitle": "¿Cómo te llamamos?",
+    "nicknameSubtitle": "Tu avatar se genera de tu clave. Puedes teñirlo, o subir una foto luego en tu perfil. El nombre que verán tus contactos va cifrado de extremo a extremo: el servidor nunca lo ve. Todo es opcional; sigues siendo anónimo (sin teléfono ni email).",
+    "nicknameLabel": "NOMBRE VISIBLE (OPCIONAL)",
+    "nicknameDefault": "Por defecto: {{name}}",
+    "colorSwatchLabel": "Color de avatar {{color}}",
+    "skipNickname": "Omitir por ahora",
     "langToggle": "ES | EN"
   },
   "home": {

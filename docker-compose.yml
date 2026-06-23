@@ -64,7 +64,11 @@ services:
       # Encrypted blob uploads — purged after 24 h by relay scheduler
       - relay_uploads:/app/uploads
     ports:
-      - "${PORT:-3001}:${PORT:-3001}"
+      # Bind to loopback ONLY: nginx terminates TLS on :443 and proxies to
+      # 127.0.0.1:3001 (upstream aegis_relay). Publishing on 0.0.0.0 would expose
+      # the relay in CLEARTEXT on :3001, bypassing TLS + cert-pinning — a metadata
+      # leak path. The network firewall is defence-in-depth; this is the fix.
+      - "127.0.0.1:${PORT:-3001}:${PORT:-3001}"
     healthcheck:
       # Use 127.0.0.1, not localhost: in Alpine localhost resolves to ::1 first
       # and the relay binds IPv4 only, so localhost yields a false "unhealthy".

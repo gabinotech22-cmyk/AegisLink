@@ -451,7 +451,7 @@ function ContactRow({
         textAlign: 'left',
       }}
     >
-      <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={44} photoUri={contact.avatarImage} />
+      <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={44} photoUri={contact.avatarImage} seed={contact.publicKeyB64 ?? contact.aegisId} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <span

@@ -19,6 +19,7 @@ const {
   withAndroidManifest,
   withDangerousMod,
   withProjectBuildGradle,
+  withAppBuildGradle,
   withGradleProperties,
 } = require('@expo/config-plugins');
 const fs = require('fs');
@@ -305,11 +306,56 @@ function withGradleNetworkResilience(config) {
   });
 }
 
+// ─── Step 5: Reproducible builds — drop the dependency-metadata blob ─────────
+//
+// By default the Android Gradle Plugin embeds a `dependenciesInfo` block in
+// every release APK/AAB: a Protobuf, ENCRYPTED with a Google public key, listing
+// the build's dependency tree. It is (a) non-deterministic — it cannot be
+// reproduced byte-for-byte by a third party, which breaks reproducible builds and
+// F-Droid verification — and (b) metadata: an opaque blob only Google can read,
+// which is at odds with our zero-metadata, fully-auditable stance.
+//
+// Disabling it is the single most important change for a reproducible Android
+// build. Applied via withAppBuildGradle so it survives `expo prebuild`
+// (android/app/build.gradle is regenerated from scratch each time).
+const REPRODUCIBLE_BUILD_BLOCK = `
+// ─── AegisLink: reproducible build (injected by app.plugin.js) ───────────────
+// Strip the encrypted Google dependency-metadata blob from release artifacts so
+// they can be reproduced byte-for-byte and verified by third parties / F-Droid.
+android {
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+    // lintVital runs on every assembleRelease and is both slow and was failing
+    // the build (:expo-updates:lintVitalAnalyzeRelease). Lint analyzes source and
+    // never touches the packaged bytes, so disabling it does not affect the
+    // artifact or its reproducibility — only release-build feasibility/speed.
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+}
+`;
+
+function withReproducibleBuild(config) {
+  return withAppBuildGradle(config, (config) => {
+    if (config.modResults.language !== 'groovy') {
+      return config;
+    }
+    if (!config.modResults.contents.includes('AegisLink: reproducible build')) {
+      config.modResults.contents += REPRODUCIBLE_BUILD_BLOCK;
+    }
+    return config;
+  });
+}
+
 module.exports = (config) => {
   config = withCopyIcons(config);
   config = withIconAliases(config);
   config = withNetworkSecurity(config);
   config = withJitsiWebrtcPin(config);
   config = withGradleNetworkResilience(config);
+  config = withReproducibleBuild(config);
   return config;
 };

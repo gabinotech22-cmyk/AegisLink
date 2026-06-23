@@ -270,6 +270,7 @@ function ChatItem({
         color={contact.color ?? t.surface3}
         size={40}
         photoUri={contact.avatarImage ?? undefined}
+        seed={contact.publicKeyB64 ?? contact.aegisId}
       />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 4 }}>

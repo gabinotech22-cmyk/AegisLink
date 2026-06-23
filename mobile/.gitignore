@@ -29,6 +29,11 @@ yarn-error.*
 # macOS
 .DS_Store
 *.pem
+# …but DO track the expo-updates code-signing certificate (PUBLIC cert, no
+# private key). It ships inside every installed APK and is required for anyone
+# to reproduce the release build byte-for-byte. The signing PRIVATE key lives in
+# EAS, never in the repo.
+!certs/certificate.pem
 
 # local env files
 .env

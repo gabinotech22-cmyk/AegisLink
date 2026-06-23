@@ -111,4 +111,18 @@ describe('openEncrypted — whole-DB SQLCipher', () => {
     resetDbKeyCache();
     expect(() => openEncrypted(dbPath)).toThrow(/secure storage unavailable/i);
   });
+
+  it('refuses to SERVE a pre-existing plaintext DB key in a packaged build (parity with secureStorage:get)', () => {
+    // Dev: create a DB whose key is persisted as a `plain:` keystore entry.
+    mockElectronFlags.isPackaged = false;
+    mockElectronFlags.encryptionAvailable = false;
+    openEncrypted(dbPath).close();
+    expect(Object.values(mockKeystore).some((v) => v.startsWith('plain:'))).toBe(true);
+
+    // Production: re-opening must FAIL CLOSED rather than silently use the
+    // plaintext key (golden rule #1/#6 — at-rest encryption never degrades).
+    mockElectronFlags.isPackaged = true;
+    resetDbKeyCache();
+    expect(() => openEncrypted(dbPath)).toThrow(/plaintext DB key.*production/i);
+  });
 });

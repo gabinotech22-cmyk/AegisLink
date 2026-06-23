@@ -120,6 +120,79 @@ jobs:
       - name: Run tests
         run: npm test -- --passWithNoTests
 
+  # ─── Mobile — parser fuzz campaign (untrusted-input parsers) ─────────────
+  # Deterministic, native-dependency-free fuzzing of the QR/link/message-body
+  # parsers (src/fuzz/). Scoped + serial, so it is fast and safe regardless of
+  # the full Jest suite. A throw/hang on a fuzzed input fails the gate. The same
+  # targets run coverage-guided under Jazzer.js on OSS-Fuzz (src/fuzz/README.md).
+  mobile-fuzz:
+    name: Mobile parser fuzz
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Run parser fuzz campaign
+        run: npm run fuzz
+
+  # ─── Desktop — typecheck + tests (Electron main/renderer, vitest) ─────────
+  # Golden rule #11: the desktop client MUST have a CI test suite covering IPC,
+  # ratchet serialization and DB encryption. The native cipher module
+  # (better-sqlite3-multiple-ciphers) installs a prebuilt binary matching the
+  # runner's Node ABI via `npm ci`, so the SQLCipher tests run the real cipher.
+  desktop-typecheck:
+    name: Desktop TypeScript check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci
+
+      - name: TypeScript strict check
+        run: npm run typecheck
+
+  desktop-test:
+    name: Desktop tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
   # ─── Mobile — E2E (Maestro on a real Android emulator) ───────────────────
   # Builds a debug APK, boots a headless Android emulator, installs the app
   # and runs the Maestro flows in mobile/.maestro/. Runs on pull_request,
@@ -153,11 +226,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          # Cache ~/.gradle/caches and ~/.gradle/wrapper keyed on gradle
-          # lockfiles/wrapper props. Once warm, this avoids re-resolving
-          # dependencies (incl. org.jitsi:webrtc) from jitpack/Maven on every
-          # run — only a cold cache needs network access to those repos.
-          cache: gradle
+
+      # Gradle DEPENDENCY cache — NOT setup-java's `cache: gradle`, which requires
+      # *.gradle files to exist at checkout. They don't: the native project is
+      # generated later by `expo prebuild`, so `cache: gradle` errored ("No file
+      # matched to **/*.gradle*") and failed the whole job at JDK setup. A plain
+      # actions/cache keyed on the npm lockfile warms ~/.gradle/caches and
+      # ~/.gradle/wrapper without that precondition — avoiding re-resolving deps
+      # (incl. org.jitsi:webrtc) from jitpack/Maven once warm. Mirrors
+      # .github/workflows/reproducible-build.yml.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: gradle-
 
       - name: Install mobile dependencies
         run: npm ci
@@ -177,6 +261,26 @@ jobs:
 
       - name: Expo prebuild (generate android/)
         run: npx expo prebuild --platform android --no-install
+
+      # A debug APK does NOT embed the JS bundle — at runtime it pulls it from
+      # Metro (10.0.2.2:8081). There is no Metro in CI, so the app white-screened
+      # with "Unable to load script" and every Maestro assertion failed. Pre-bundle
+      # the JS into the debug assets so the app loads offline: the debug runtime
+      # falls back to assets/index.android.bundle when Metro is unreachable.
+      - name: Bundle JS into debug assets (no Metro in CI)
+        # EXPO_PUBLIC_E2E is inlined into the bundle (Expo exposes EXPO_PUBLIC_*
+        # to the app). It disables FLAG_SECURE so Maestro can capture the screen;
+        # release builds never set it, so production keeps screenshots blocked.
+        env:
+          EXPO_PUBLIC_E2E: '1'
+        run: |
+          mkdir -p android/app/src/main/assets
+          npx expo export:embed \
+            --platform android \
+            --dev false \
+            --entry-file index.ts \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
 
       # Build only the emulator ABI (x86_64) to cut build time and avoid OOM.
       - name: Build debug APK
@@ -206,9 +310,19 @@ jobs:
           working-directory: mobile
           script: |
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            # ── Diagnostics: capture logcat in the background for crash/JS-error
+            # analysis while the emulator is alive (the runner kills it after). ──
+            adb logcat -c || true
+            adb logcat > maestro-logcat.txt 2>&1 &
+            LOGCAT_PID=$!
             set +e
             maestro test .maestro/ --format junit --output maestro-report.xml
             CODE=$?
+            # Snapshot the final on-screen state + rendered UI tree so we can see
+            # whether it's a splash spinner, a redbox crash, or raw i18n keys.
+            adb exec-out screencap -p > maestro-screen.png 2>/dev/null || true
+            adb exec-out uiautomator dump /dev/tty > maestro-uihierarchy.xml 2>/dev/null || true
+            kill "$LOGCAT_PID" 2>/dev/null || true
             mkdir -p maestro-out
             cp -r "$HOME/.maestro/tests/"* maestro-out/ 2>/dev/null || true
             exit $CODE
@@ -221,6 +335,9 @@ jobs:
           path: |
             mobile/maestro-report.xml
             mobile/maestro-out/**
+            mobile/maestro-logcat.txt
+            mobile/maestro-screen.png
+            mobile/maestro-uihierarchy.xml
           if-no-files-found: ignore
 
   # ─── Permissions audit — Android + iOS native manifests ─────────────────

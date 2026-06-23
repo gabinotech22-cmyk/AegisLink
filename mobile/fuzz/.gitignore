@@ -1,0 +1,6 @@
+# Build artifact produced by `npm run fuzz:bundle` / OSS-Fuzz build.sh.
+targets.bundle.js
+# Local Jazzer corpora / crash repros — never versioned (may contain raw input).
+corpus/
+crash-*
+*.options
