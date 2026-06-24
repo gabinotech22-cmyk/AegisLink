@@ -52,7 +52,7 @@
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "~14.0.8",
     "expo-sqlite": "~16.0.10",
-    "expo-status-bar": "~3.0.9",
+    "expo-status-bar": "~56.0.4",
     "expo-updates": "~29.0.17",
     "i18next": "^26.2.0",
     "jail-monkey": "^3.0.0",
