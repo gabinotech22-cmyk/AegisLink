@@ -42,7 +42,7 @@ jobs:
       # Gradle DEPENDENCY cache (not setup-java's `cache: gradle`, which needs
       # *.gradle files at checkout — they don't exist until prebuild). Speeds the
       # cold native download; content-addressed, so it can't affect output bytes.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
@@ -78,7 +78,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
