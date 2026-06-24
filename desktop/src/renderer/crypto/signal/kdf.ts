@@ -1,6 +1,6 @@
-import { hmac } from '@noble/hashes/hmac';
-import { sha256 } from '@noble/hashes/sha256';
-import { hkdf } from '@noble/hashes/hkdf';
+import { hmac } from '@noble/hashes/hmac.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { hkdf } from '@noble/hashes/hkdf.js';
 
 export function hmacSHA256(key: Uint8Array, data: Uint8Array): Uint8Array {
   return hmac(sha256, key, data);
@@ -12,5 +12,8 @@ export function hkdfSHA256(
   info?: Uint8Array | string,
   length: number = 32
 ): Uint8Array {
-  return hkdf(sha256, ikm, salt, info, length);
+  // @noble/hashes v2 requires Uint8Array for `info` (v1 utf8-encoded strings
+  // internally); reproduce that exactly so derived keys stay byte-identical.
+  const infoBytes = typeof info === 'string' ? new TextEncoder().encode(info) : info;
+  return hkdf(sha256, ikm, salt, infoBytes, length);
 }

@@ -28,8 +28,8 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
-import { hkdf } from '@noble/hashes/hkdf';
-import { sha256 } from '@noble/hashes/sha256';
+import { hkdf } from '@noble/hashes/hkdf.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 /** Opaque mailbox identifier length (128-bit — collision-safe routing handle). */
 export const MAILBOX_ID_BYTES = 16;

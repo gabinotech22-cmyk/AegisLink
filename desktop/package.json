@@ -15,18 +15,18 @@
     "package": "electron-builder"
   },
   "dependencies": {
-    "@noble/hashes": "^1.4.0",
+    "@noble/hashes": "^2.2.0",
     "@noble/post-quantum": "^0.6.1",
     "better-sqlite3-multiple-ciphers": "^12.11.1",
     "i18next": "^26.3.2",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-i18next": "^14.1.2",
+    "react-i18next": "^17.0.8",
     "socket.io-client": "^4.7.5",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
-    "zustand": "^4.5.4"
+    "zustand": "^5.0.14"
   },
   "build": {
     "appId": "com.aegislink.desktop",

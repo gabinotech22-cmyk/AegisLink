@@ -18,7 +18,7 @@ import {
   verifyMailboxAuth,
 } from '../mailbox';
 import nacl from 'tweetnacl';
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 const toHex = (b: Uint8Array) => Buffer.from(b).toString('hex');
 

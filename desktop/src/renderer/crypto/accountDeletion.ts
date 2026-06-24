@@ -16,7 +16,7 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
-import { utf8ToBytes } from '@noble/hashes/utils';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
 import type { Identity } from './identity';
 import { RELAY_URL } from '../config';
 

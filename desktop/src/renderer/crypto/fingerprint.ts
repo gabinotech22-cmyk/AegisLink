@@ -1,4 +1,4 @@
-import { sha256 } from '@noble/hashes/sha2';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { WORDLIST_256 } from './wordlist';
 
 function toHex(bytes: Uint8Array): string {
