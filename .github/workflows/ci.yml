@@ -235,7 +235,7 @@ jobs:
       # ~/.gradle/wrapper without that precondition — avoiding re-resolving deps
       # (incl. org.jitsi:webrtc) from jitpack/Maven once warm. Mirrors
       # .github/workflows/reproducible-build.yml.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
