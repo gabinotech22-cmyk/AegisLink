@@ -127,6 +127,7 @@ export function CallScreen({ onClose, onMinimize }: Props) {
 
   const [speakerOn, setSpeakerOn] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
 
   const toggleSpeaker = useCallback(async () => {
     const next = !speakerOn;
@@ -427,43 +428,9 @@ export function CallScreen({ onClose, onMinimize }: Props) {
               <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: t.surface3 }} />
             </View>
 
-            {/* Option: Teclado */}
+            {/* Option: Verificar huella — opens the out-of-band verification view */}
             <Pressable
-              onPress={() => { setMoreOpen(false); /* keypad TODO */ }}
-              accessibilityRole="button"
-              accessibilityLabel={i18nT('call.keypad', 'Teclado')}
-              style={({ pressed }) => ({
-                flexDirection: 'row', alignItems: 'center', gap: 16,
-                paddingHorizontal: 24, paddingVertical: 16,
-                backgroundColor: pressed ? t.surface2 : 'transparent',
-              })}
-            >
-              <Text style={{ fontSize: 18, color: t.text, letterSpacing: 3 }}>···</Text>
-              <Text style={{ fontFamily: t.font, fontSize: 16, color: t.text }}>
-                {i18nT('call.keypad', 'Teclado')}
-              </Text>
-            </Pressable>
-
-            {/* Option: Añadir al grupo */}
-            <Pressable
-              onPress={() => { setMoreOpen(false); /* group add TODO */ }}
-              accessibilityRole="button"
-              accessibilityLabel={i18nT('call.addToGroup', 'Añadir al grupo')}
-              style={({ pressed }) => ({
-                flexDirection: 'row', alignItems: 'center', gap: 16,
-                paddingHorizontal: 24, paddingVertical: 16,
-                backgroundColor: pressed ? t.surface2 : 'transparent',
-              })}
-            >
-              <I.Users size={22} color={t.text} />
-              <Text style={{ fontFamily: t.font, fontSize: 16, color: t.text }}>
-                {i18nT('call.addToGroup', 'Añadir al grupo')}
-              </Text>
-            </Pressable>
-
-            {/* Option: Verificar huella */}
-            <Pressable
-              onPress={() => { setMoreOpen(false); /* show fingerprint */ }}
+              onPress={() => { setMoreOpen(false); setVerifyOpen(true); }}
               accessibilityRole="button"
               accessibilityLabel={i18nT('call.verifyFingerprint', 'Verificar huella')}
               style={({ pressed }) => ({
@@ -483,6 +450,56 @@ export function CallScreen({ onClose, onMinimize }: Props) {
                     : i18nT('call.fingerprintPending', 'Deriving session fingerprint…')}
                 </Text>
               </View>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Fingerprint verification sheet — read the words aloud with your contact */}
+      <Modal
+        transparent
+        visible={verifyOpen}
+        animationType="fade"
+        onRequestClose={() => setVerifyOpen(false)}
+      >
+        <Pressable
+          onPress={() => setVerifyOpen(false)}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', alignItems: 'center', justifyContent: 'center', padding: 28 }}
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation?.()}
+            style={{ width: '100%', maxWidth: 420, backgroundColor: t.surface, borderRadius: t.radiusL, borderWidth: 1, borderColor: t.border, padding: 24, alignItems: 'center' }}
+          >
+            <I.Shield size={34} color={t.accent} />
+            <Text style={{ fontFamily: t.fontDisplay, fontSize: 19, color: t.text, marginTop: 12, fontWeight: '600' }}>
+              {i18nT('call.verifyTitle', 'Verificar huella')}
+            </Text>
+            <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 8, textAlign: 'center', lineHeight: 19 }}>
+              {i18nT('call.verifyDesc', 'Lee este código en voz alta con tu contacto. Si coincide en ambos teléfonos, nadie está interceptando la llamada.')}
+            </Text>
+            {sessionFingerprint ? (
+              <View style={{ marginTop: 18, paddingVertical: 16, paddingHorizontal: 14, backgroundColor: t.surface2, borderRadius: t.radius, borderWidth: 1, borderColor: t.border, width: '100%' }}>
+                <Text
+                  selectable
+                  accessibilityLabel={`Session fingerprint: ${sessionFingerprint}`}
+                  style={{ fontFamily: t.fontMono, fontSize: 17, color: '#fff', letterSpacing: 2, textAlign: 'center', lineHeight: 28 }}
+                >
+                  {sessionFingerprint}
+                </Text>
+              </View>
+            ) : (
+              <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.textDim, marginTop: 18, textAlign: 'center' }}>
+                {i18nT('call.fingerprintPending', 'Deriving session fingerprint…')}
+              </Text>
+            )}
+            <Pressable
+              onPress={() => setVerifyOpen(false)}
+              accessibilityRole="button"
+              style={({ pressed }) => ({ marginTop: 22, backgroundColor: t.accent, borderRadius: 99, paddingHorizontal: 30, paddingVertical: 11, opacity: pressed ? 0.8 : 1 })}
+            >
+              <Text style={{ fontFamily: t.font, fontSize: 14, color: t.accentInk, fontWeight: '600' }}>
+                {i18nT('common.done', 'Listo')}
+              </Text>
             </Pressable>
           </Pressable>
         </Pressable>

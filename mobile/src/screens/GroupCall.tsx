@@ -14,6 +14,7 @@ import { Avatar } from '../components/Avatar';
 import { useGroupCall } from '../store/groupCall';
 import { useContacts } from '../store/contacts';
 import { hangupGroupCall, toggleGroupCallMute } from '../socket/groupCalls';
+import { setInCallSpeaker } from '../webrtc/inCall';
 
 interface Props {
   onClose: () => void;
@@ -32,6 +33,7 @@ export function GroupCallScreen({ onClose }: Props) {
   const contacts = useContacts((s) => s.contacts);
 
   const [elapsed, setElapsed] = useState(0);
+  const [speakerOn, setSpeakerOn] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Proximity sensor + screen-off near the ear is handled at the audio-session
@@ -82,6 +84,14 @@ export function GroupCallScreen({ onClose }: Props) {
 
   function handleMute() {
     toggleGroupCallMute();
+  }
+
+  function handleSpeaker() {
+    setSpeakerOn((prev) => {
+      const next = !prev;
+      setInCallSpeaker(next); // route audio to loudspeaker / back to earpiece
+      return next;
+    });
   }
 
   // Resolve display name from contacts
@@ -174,13 +184,14 @@ export function GroupCallScreen({ onClose }: Props) {
           accessibilityLabel={muted ? 'Unmute microphone' : 'Mute microphone'}
         />
 
-        {/* Speaker placeholder (audio routing) */}
+        {/* Speaker — routes audio to the loudspeaker (accent when on) */}
         <ControlBtn
-          onPress={() => { /* TODO: toggle speaker */ }}
-          color="rgba(255,255,255,0.12)"
+          onPress={handleSpeaker}
+          color={speakerOn ? t.accent : 'rgba(255,255,255,0.12)'}
           icon={<I.Volume size={24} color="#fff" />}
           label={i18nT('call.speaker', 'ALTAVOZ').toUpperCase()}
-          accessibilityLabel="Toggle speaker"
+          accessibilityLabel={speakerOn ? 'Speaker on' : 'Speaker off'}
+          accessibilityState={{ selected: speakerOn }}
         />
 
         {/* Hangup */}
@@ -267,14 +278,16 @@ interface ControlBtnProps {
   label: string;
   rotate?: boolean;
   accessibilityLabel: string;
+  accessibilityState?: { selected?: boolean; disabled?: boolean };
 }
 
-function ControlBtn({ onPress, color, icon, label, rotate, accessibilityLabel }: ControlBtnProps) {
+function ControlBtn({ onPress, color, icon, label, rotate, accessibilityLabel, accessibilityState }: ControlBtnProps) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      accessibilityState={accessibilityState}
       style={({ pressed }) => ({ alignItems: 'center', gap: 8, opacity: pressed ? 0.7 : 1 })}
     >
       <View
