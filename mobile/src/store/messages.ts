@@ -115,15 +115,30 @@ export const useMessages = create<MessagesState>((set, get) => ({
 
   async append(m) {
     await saveMessage(m);
+    // A message that arrives while its own chat screen is focused has already
+    // been seen — it must NOT bump the unread badge. We key off the same active
+    // chat id the push-banner / in-app-sound guards use. When this chat is
+    // active we also clear any residual persisted count so the badge stays at 0.
+    let isActiveChat = false;
+    if (m.direction === 'in') {
+      try {
+        const { getActiveChatNotificationId } = require('../notifications/push') as typeof import('../notifications/push');
+        isActiveChat = getActiveChatNotificationId() === m.chatId;
+      } catch { /* push module unavailable (e.g. tests) — fall through to counting */ }
+    }
+    if (isActiveChat) resetUnread(m.chatId).catch(() => {});
     set((s) => {
       const existing = s.byChat[m.chatId] ?? [];
       const next: Partial<MessagesState> = {
         byChat: { ...s.byChat, [m.chatId]: [...existing, m] },
         previews: { ...s.previews, [m.chatId]: m },
       };
-      if (m.direction === 'in') {
+      if (m.direction === 'in' && !isActiveChat) {
         next.unreadCounts = { ...s.unreadCounts, [m.chatId]: (s.unreadCounts[m.chatId] ?? 0) + 1 };
         incrementUnread(m.chatId).catch(() => {});
+      } else if (m.direction === 'in') {
+        // Active chat: keep the in-memory badge pinned at 0.
+        next.unreadCounts = { ...s.unreadCounts, [m.chatId]: 0 };
       }
       return next;
     });

@@ -400,6 +400,16 @@ export function setActiveChatNotificationId(id: string | null) {
 }
 
 /**
+ * The chat id (contact aegisId or group id) whose screen is currently focused,
+ * or null. Used to suppress unread-count increments for messages that arrive
+ * while the user is already looking at the conversation — same guard the push
+ * banner and in-app sound already use.
+ */
+export function getActiveChatNotificationId(): string | null {
+  return activeChatId;
+}
+
+/**
  * Surface decrypted E2EE messages as local notifications in strict alignment
  * with AegisLink preference switches (sound, badge, keywords bypass, muted, preview).
  */
