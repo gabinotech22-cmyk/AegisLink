@@ -54,7 +54,7 @@ jobs:
         env:
           AEGIS_REPRO_ABIS: arm64-v8a
         run: bash scripts/build-reproducible.sh --clean
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: smoke-apk
@@ -131,7 +131,7 @@ jobs:
           fi
           echo "✅ Reproducible: both builds are byte-for-byte identical."
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: reproducible-apk
