@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="32%" r="82%">
+      <stop offset="0%" stop-color="#16271f"/>
+      <stop offset="55%" stop-color="#0a0e0d"/>
+      <stop offset="100%" stop-color="#06090a"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="42%">
+      <stop offset="0%" stop-color="#5bf2b9" stop-opacity="0.20"/>
+      <stop offset="62%" stop-color="#5bf2b9" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="hexmesh" width="92" height="104" patternUnits="userSpaceOnUse">
+      <path d="M46 6 L86 28 L86 76 L46 98 L6 76 L6 28 Z" fill="none" stroke="#5bf2b9" stroke-opacity="0.05" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect width="1080" height="1920" fill="url(#bg)"/>
+  <rect width="1080" height="1920" fill="url(#hexmesh)"/>
+  <rect width="1080" height="1920" fill="url(#glow)"/>
+  <g transform="translate(540,760) translate(-320,-320) scale(16)">
+    <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+    <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+    <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+  </g>
+  <text x="540" y="1190" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="96" font-weight="600" fill="#e8f0ec" letter-spacing="2">AegisLink</text>
+  <text x="540" y="1262" text-anchor="middle" font-family="Consolas, monospace" font-size="33" fill="#5bf2b9" letter-spacing="7" opacity="0.85">PRIVATE BY DEFAULT</text>
+</svg>
