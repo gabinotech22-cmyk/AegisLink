@@ -26,17 +26,30 @@ updates:
         update-types:
           - minor
           - patch
-    # Expo/RN native modules are pinned to the SDK; never auto-bump majors here.
+    # Expo/RN native modules are pinned to the SDK; never auto-bump them here.
     # `expo-*` covers every Expo module (expo-status-bar, expo-sqlite,
     # expo-file-system, …): their majors track the SDK line, so a bump to the
     # next SDK's major breaks the native install even when JS-only CI is green.
+    #
+    # React Native uses 0.x versioning where a *minor* (0.81 -> 0.86) is an
+    # effectively-breaking native change pinned to the Expo SDK — ignore minors
+    # too, not just majors. `react` is bundled by RN, and reanimated/worklets
+    # ship native code matched to the RN version: keep all three on the SDK line.
+    # These SDK bumps belong to a deliberate Expo-SDK-upgrade PR with on-device
+    # testing, never a routine dependency bump.
     ignore:
       - dependency-name: expo
         update-types: [version-update:semver-major]
       - dependency-name: "expo-*"
         update-types: [version-update:semver-major]
       - dependency-name: react-native
-        update-types: [version-update:semver-major]
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: react
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: react-native-reanimated
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: react-native-worklets
+        update-types: [version-update:semver-major, version-update:semver-minor]
 
   # ── Relay server (Node/Bun, AGPL) ────────────────────────────────────────
   - package-ecosystem: npm
