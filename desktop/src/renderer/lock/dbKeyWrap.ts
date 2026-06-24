@@ -21,7 +21,7 @@
  * the node-env vitest suite; `getDbKEK` touches the preload bridge (on-device).
  */
 
-import { argon2idAsync } from '@noble/hashes/argon2';
+import { argon2idAsync } from '@noble/hashes/argon2.js';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import type { AegisIPC } from '../crypto/ipc-types';
 

@@ -18,7 +18,7 @@
  * wrappers below touch the preload bridge and are exercised on-device only.
  */
 
-import { argon2idAsync } from '@noble/hashes/argon2';
+import { argon2idAsync } from '@noble/hashes/argon2.js';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import type { AegisIPC } from '../crypto/ipc-types';
 

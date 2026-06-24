@@ -11,8 +11,8 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
-import { sha256 } from '@noble/hashes/sha256';
-import { utf8ToBytes } from '@noble/hashes/utils';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
 import type {
   Identity,
   OneTimePreKeyPublic,

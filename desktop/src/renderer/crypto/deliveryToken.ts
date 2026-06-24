@@ -11,7 +11,7 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@noble/hashes/sha2.js';
 import './ipc-types';
 
 const OWN_TOKEN_SLOT = 'aegis.deliveryToken.self';

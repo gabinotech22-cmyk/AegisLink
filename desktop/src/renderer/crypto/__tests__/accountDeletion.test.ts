@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
-import { utf8ToBytes } from '@noble/hashes/utils';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
 
 vi.mock('../../config', () => ({ RELAY_URL: 'https://relay.test' }));
 
