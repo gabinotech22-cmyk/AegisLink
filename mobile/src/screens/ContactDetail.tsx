@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, ActivityIndicator, Modal, Animated, Easing } from 'react-native';
-import { WallpaperPicker, loadWallpaper, type WallpaperOption } from '../components/WallpaperPicker';
+import { WallpaperPicker, loadWallpaper, WALLPAPER_NAMES, type WallpaperOption } from '../components/WallpaperPicker';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -396,7 +396,7 @@ export function ContactDetailScreen({
               t={t}
               icon={<I.Image size={18} color={t.textDim} />}
               label="Chat wallpaper"
-              sub={wallpaper === 0 ? 'None' : `Option ${wallpaper}`}
+              sub={WALLPAPER_NAMES[wallpaper]}
               onPress={() => setWallpaperPickerOpen(true)}
             />
             <Row
