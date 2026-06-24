@@ -407,6 +407,37 @@ function localGroupInfo(groupId: string): { name: string; members: string[] } | 
   }
 }
 
+/**
+ * Broadcast our departure to the WHOLE group so the "Canal de voz activo" banner
+ * updates (or clears) immediately, instead of lingering until the 45s
+ * heartbeat-stale timeout with a wrong participant count. We send the REMAINING
+ * roster (ourselves already excluded); an explicitly-empty array tells receivers
+ * we were the LAST to leave → drop the banner now. Uses the wide-recipient
+ * `group_call:channel` (≤512 members), unlike `group_call:hangup` (≤7 mesh peers).
+ * No new wire field — an empty `participants` is already valid on the relay.
+ */
+function broadcastChannelLeave(
+  callId: string,
+  groupId: string,
+  groupName: string,
+  remaining: string[],
+  members: string[],
+): void {
+  const socket = getSocket();
+  const me = ownKeys()?.aegisId;
+  if (!socket || !me) return;
+  const recipients = members.filter((m) => m !== me);
+  if (recipients.length === 0) return;
+  socket.emit('group_call:channel', {
+    to: recipients,
+    callId,
+    groupId,
+    groupName,
+    participants: remaining, // [] ⇒ channel now empty (closed)
+    media: 'audio',
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -582,14 +613,21 @@ export function declineGroupCall(callId: string, initiatorAegisId: string): void
  * all RTCPeerConnections.
  */
 export function hangupGroupCall(): void {
-  const { callId, participants } = useGroupCall.getState();
+  const { callId, groupId, groupName, participants } = useGroupCall.getState();
   if (!callId) return;
 
   stopHeartbeat();
   const socket = getSocket();
-  const allAegisIds = participants.map((p) => p.aegisId);
-  if (socket && allAegisIds.length > 0) {
-    socket.emit('group_call:hangup', { to: allAegisIds, callId });
+  const others = participants.map((p) => p.aegisId);
+  if (socket && others.length > 0) {
+    socket.emit('group_call:hangup', { to: others, callId });
+  }
+  // Announce our departure to the whole group so banner-watchers update/clear the
+  // "active channel" immediately instead of waiting out the 45s stale timeout.
+  // `others` is the roster minus us; an empty list ⇒ we were the last to leave.
+  if (groupId) {
+    const info = localGroupInfo(groupId);
+    broadcastChannelLeave(callId, groupId, info?.name ?? groupName ?? groupId, others, info?.members ?? others);
   }
 
   cleanupAllPeers(callId);
@@ -854,6 +892,17 @@ export function attachGroupCallHandlers(): void {
         localGroup = useGroups.getState().groups.find((g) => g.id === msg.groupId);
       } catch { return; }
       if (!localGroup) return; // Unknown group — ignore
+
+      // Explicit leave/close: a hanging-up participant broadcasts the REMAINING
+      // roster (themselves removed). An explicitly-empty array means the LAST
+      // participant left → drop the banner now instead of waiting out STALE_MS.
+      // Normal heartbeats always include the sender, so [] is unambiguous.
+      if (Array.isArray(msg.participants) && msg.participants.length === 0) {
+        const entry = useActiveCalls.getState().calls[msg.groupId];
+        if (entry && entry.callId === msg.callId) useActiveCalls.getState().remove(msg.groupId);
+        return;
+      }
+
       // A heartbeat can come from any participant; gate on the channel's
       // initiator. First sighting records the initiator; later heartbeats keep it.
       const existing = useActiveCalls.getState().calls[msg.groupId];
@@ -902,7 +951,10 @@ export function attachGroupCallHandlers(): void {
         const peer = peers.get(msg.from);
         if (peer) { cleanupPeer(peer); peers.delete(msg.from); }
       }
-      useGroupCall.getState().setParticipantConnected(msg.from, false);
+      // Remove (not just mark-disconnected) the leaver so our own heartbeat and
+      // leave-broadcast stop re-listing them — that stale roster was the cause of
+      // the wrong "N en llamada" count after someone left.
+      useGroupCall.getState().removeParticipant(msg.from);
 
       // If the initiator hangs up during ringing-in (before we're in-call), end completely
       const isInitiator = state.initiator === msg.from;

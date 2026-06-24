@@ -34,6 +34,7 @@ export interface GroupCallState {
   startOutgoing: (callId: string, groupId: string, groupName: string, members: string[]) => void;
   startIncoming: (callId: string, groupId: string, groupName: string, initiator: string) => void;
   addParticipant: (aegisId: string) => void;
+  removeParticipant: (aegisId: string) => void;
   setParticipantStream: (aegisId: string, stream: MediaStream) => void;
   setParticipantConnected: (aegisId: string, connected: boolean) => void;
   setLocalStream: (stream: MediaStream | null) => void;
@@ -95,6 +96,11 @@ export const useGroupCall = create<GroupCallState>((set) => ({
       participants: s.participants.some((p) => p.aegisId === aegisId)
         ? s.participants
         : [...s.participants, { aegisId, stream: null, connected: false, muted: false }],
+    })),
+
+  removeParticipant: (aegisId) =>
+    set((s) => ({
+      participants: s.participants.filter((p) => p.aegisId !== aegisId),
     })),
 
   setParticipantStream: (aegisId, stream) =>
