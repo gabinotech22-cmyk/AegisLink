@@ -31,9 +31,10 @@ export interface GroupCallState {
   minimized: boolean;
 
   // actions
-  startOutgoing: (callId: string, groupId: string, groupName: string, members: string[]) => void;
+  startOutgoing: (callId: string, groupId: string, groupName: string, members: string[], initiator?: string | null) => void;
   startIncoming: (callId: string, groupId: string, groupName: string, initiator: string) => void;
   addParticipant: (aegisId: string) => void;
+  removeParticipant: (aegisId: string) => void;
   setParticipantStream: (aegisId: string, stream: MediaStream) => void;
   setParticipantConnected: (aegisId: string, connected: boolean) => void;
   setLocalStream: (stream: MediaStream | null) => void;
@@ -59,12 +60,15 @@ const initial = {
 export const useGroupCall = create<GroupCallState>((set) => ({
   ...initial,
 
-  startOutgoing: (callId, groupId, groupName, members) =>
+  startOutgoing: (callId, groupId, groupName, members, initiator = null) =>
     set({
       callId,
       groupId,
       groupName,
-      initiator: null,
+      // Channel host passes its own aegisId; a joiner passes the channel's
+      // initiator (from the banner). Used by hangupGroupCall to detect "I am the
+      // host" and by the hangup handler for host-ends-for-all.
+      initiator,
       status: 'ringing-out',
       participants: members.map((aegisId) => ({
         aegisId,
@@ -95,6 +99,11 @@ export const useGroupCall = create<GroupCallState>((set) => ({
       participants: s.participants.some((p) => p.aegisId === aegisId)
         ? s.participants
         : [...s.participants, { aegisId, stream: null, connected: false, muted: false }],
+    })),
+
+  removeParticipant: (aegisId) =>
+    set((s) => ({
+      participants: s.participants.filter((p) => p.aegisId !== aegisId),
     })),
 
   setParticipantStream: (aegisId, stream) =>

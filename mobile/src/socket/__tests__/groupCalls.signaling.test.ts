@@ -304,4 +304,126 @@ describe('groupCalls signaling', () => {
 
     expect(useActiveCalls.getState().calls['g-channel-002']).toBeUndefined();
   });
+
+  // Helper: locate the registered group_call:hangup handler.
+  function hangupHandler(): (msg: unknown) => void {
+    const call = (mockOn.mock.calls as [string, (...args: unknown[]) => void][]).find(
+      ([ev]) => ev === 'group_call:hangup',
+    );
+    expect(call).toBeDefined();
+    return call![1];
+  }
+
+  // ── 7. Leaving broadcasts a channel update so banners don't linger ─────────
+
+  it('hangupGroupCall broadcasts a group_call:channel with the remaining roster (self removed)', () => {
+    mockGroups = [{ id: 'g-leave', members: ['self-aegis-id', 'peer-A'] }];
+    useGroupCall.getState().startOutgoing('call-leave', 'g-leave', 'Leavers', ['peer-A']);
+    useGroupCall.getState().setStatus('in-call');
+
+    hangupGroupCall();
+
+    expect(mockEmit).toHaveBeenCalledWith(
+      'group_call:channel',
+      expect.objectContaining({ callId: 'call-leave', participants: ['peer-A'] }),
+    );
+  });
+
+  it('hangupGroupCall by the LAST participant broadcasts an empty roster (channel closed)', () => {
+    mockGroups = [{ id: 'g-last', members: ['self-aegis-id', 'peer-A'] }];
+    // In-call but alone (no other mesh participants) → we are the last to leave.
+    useGroupCall.getState().startOutgoing('call-last', 'g-last', 'Lonely', []);
+    useGroupCall.getState().setStatus('in-call');
+
+    hangupGroupCall();
+
+    expect(mockEmit).toHaveBeenCalledWith(
+      'group_call:channel',
+      expect.objectContaining({ callId: 'call-last', participants: [] }),
+    );
+  });
+
+  // ── 8. An explicitly-empty roster clears the banner immediately ────────────
+
+  it('group_call:channel with an empty participants array removes the active banner', () => {
+    mockGroups = [{ id: 'g-close', members: ['initiator-aegis-001', 'self-aegis-id'] }];
+    attachGroupCallHandlers();
+    const handler = channelHandler();
+
+    // A normal heartbeat opens the banner…
+    handler({
+      from: 'initiator-aegis-001',
+      callId: 'call-close',
+      groupId: 'g-close',
+      groupName: 'Closers',
+      participants: ['initiator-aegis-001'],
+      media: 'audio' as const,
+    });
+    expect(useActiveCalls.getState().calls['g-close']).toBeDefined();
+
+    // …and a leave-broadcast with an empty roster closes it immediately.
+    handler({
+      from: 'initiator-aegis-001',
+      callId: 'call-close',
+      groupId: 'g-close',
+      groupName: 'Closers',
+      participants: [],
+      media: 'audio' as const,
+    });
+    expect(useActiveCalls.getState().calls['g-close']).toBeUndefined();
+  });
+
+  // ── 9. Receiving a hangup removes the leaver from our roster (count fix) ────
+
+  it('group_call:hangup handler removes the leaver from the participant roster', () => {
+    useGroupCall.getState().startOutgoing('call-roster', 'g-roster', 'Roster', ['peer-A', 'peer-B']);
+    useGroupCall.getState().setStatus('in-call');
+    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toEqual(['peer-A', 'peer-B']);
+
+    attachGroupCallHandlers();
+    hangupHandler()({ from: 'peer-A', callId: 'call-roster' });
+
+    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toEqual(['peer-B']);
+  });
+
+  // ── 10. Host-ends-for-all ──────────────────────────────────────────────────
+
+  it('hangupGroupCall by the HOST broadcasts an empty roster (host-ends-for-all)', () => {
+    mockGroups = [{ id: 'g-host', members: ['self-aegis-id', 'peer-A', 'peer-B'] }];
+    // We are the host: our own aegisId is the initiator, peers are still in-call.
+    useGroupCall.getState().startOutgoing('call-host', 'g-host', 'Hosts', ['peer-A', 'peer-B'], 'self-aegis-id');
+    useGroupCall.getState().setStatus('in-call');
+
+    hangupGroupCall();
+
+    // Even though peer-A/peer-B remain, the host broadcasts [] to end for everyone
+    // (a non-host would broadcast the remaining roster — see test 7).
+    expect(mockEmit).toHaveBeenCalledWith(
+      'group_call:channel',
+      expect.objectContaining({ callId: 'call-host', participants: [] }),
+    );
+  });
+
+  it('group_call:hangup from the initiator ends the call for an active participant', () => {
+    // We joined a channel hosted by 'host-aegis' and are in-call with them + peer-B.
+    useGroupCall.getState().startOutgoing('call-join', 'g-join', 'Joiners', ['host-aegis', 'peer-B'], 'host-aegis');
+    useGroupCall.getState().setStatus('in-call');
+
+    attachGroupCallHandlers();
+    hangupHandler()({ from: 'host-aegis', callId: 'call-join' });
+
+    // The host hung up → the whole call ends for us, not just a roster trim.
+    expect(useGroupCall.getState().status).toBe('ended');
+  });
+
+  it('group_call:hangup from a non-initiator drops only them; the call continues', () => {
+    useGroupCall.getState().startOutgoing('call-stay', 'g-stay', 'Stayers', ['host-aegis', 'peer-B'], 'host-aegis');
+    useGroupCall.getState().setStatus('in-call');
+
+    attachGroupCallHandlers();
+    hangupHandler()({ from: 'peer-B', callId: 'call-stay' });
+
+    expect(useGroupCall.getState().status).toBe('in-call');
+    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toEqual(['host-aegis']);
+  });
 });
