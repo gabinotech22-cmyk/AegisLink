@@ -309,8 +309,11 @@ jest.mock('../../store/polls', () => ({
 jest.mock('../../db/local', () => ({}));
 
 // ── groups store ───────────────────────────────────────────────────────────
-// Configurable per-test
+// Configurable per-test. The screen reads the LIVE group from this store (find
+// by id), so the call gate resolves the caller's role against THIS adminId — not
+// the prop passed to renderGroupChat.
 let mockGroupMembers: string[] = ['self-aegis-id', 'peer-001', 'peer-002'];
+let mockGroupAdminId = 'self-aegis-id';
 
 jest.mock('../../store/groups', () => ({
   useGroups: (sel: (s: { groups: unknown[] }) => unknown) => {
@@ -322,8 +325,10 @@ jest.mock('../../store/groups', () => ({
           members: mockGroupMembers,
           createdAt: 1_000_000,
           avatarColor: '#00FF88',
-          // Caller is owner → passes the admin-only call gate (can(call)).
-          adminId: 'self-aegis-id',
+          // adminId drives the admin-only call gate (whoCanCall defaults to
+          // 'admins'). Self as owner → can(call) passes; override to a peer to
+          // exercise the blocked member path.
+          adminId: mockGroupAdminId,
         },
       ],
     });
@@ -373,6 +378,7 @@ describe('GroupChatScreen — voice note and group call paths', () => {
     jest.clearAllMocks();
     mockPendingMediaUri = null;
     mockGroupMembers = ['self-aegis-id', 'peer-001', 'peer-002'];
+    mockGroupAdminId = 'self-aegis-id';
   });
 
   // ── 1. Mic button visible when draft is empty ──────────────────────────────
@@ -432,6 +438,26 @@ describe('GroupChatScreen — voice note and group call paths', () => {
     expect(calledGroup.id).toBe('g-test-1');
     expect(calledOtherMembers).toEqual(expect.arrayContaining(['peer-001', 'peer-002']));
     expect(calledOtherMembers).not.toContain('self-aegis-id');
+  });
+
+  // ── 4b. Phone button is blocked for a non-admin member ────────────────────
+
+  it('blocks startGroupCall and alerts when the caller is a plain member (admin-only gate)', async () => {
+    const alertSpy = themedAlert as jest.Mock;
+    alertSpy.mockClear();
+    // Owner is a peer → self resolves to 'member' → can(call) is false by default
+    // (whoCanCall: 'admins'). Members are present, so this is purely the role gate.
+    mockGroupMembers = ['self-aegis-id', 'peer-001', 'peer-002'];
+    mockGroupAdminId = 'peer-001';
+    const group = makeGroup({ adminId: 'peer-001' });
+    const { getByLabelText } = renderGroupChat(group);
+
+    await act(async () => {
+      fireEvent.press(getByLabelText(/start group call/i));
+    });
+
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(mockStartGroupCall).not.toHaveBeenCalled();
   });
 
   // ── 5. handleVoiceSend calls encryptAndUploadMedia and sendGroupMessage ───

@@ -59,16 +59,14 @@ describe('governance signature (aegis.group.gov.v1)', () => {
     expect(verified).toBe(true);
   });
 
-  it('rejects a tampered permission (member promotes whoCanEditInfo to everyone)', () => {
+  it('rejects a tampered permission (member promotes whoCanCall to everyone)', () => {
     const kp = nacl.sign.keyPair();
     const sig = signGroupGovernance(govArgs(), kp.secretKey);
-    // whoCanCall defaults to 'everyone' already (Discord-style channel model —
-    // see groupRoles.ts DEFAULT_PERMISSIONS), so tampering it to 'everyone'
-    // would be a no-op signature mismatch on an unchanged value. Use
-    // whoCanEditInfo instead, which is still 'admins' by default and so is a
-    // genuine tamper of the signed permission set.
+    // whoCanCall is 'admins' by default (see groupRoles.ts DEFAULT_PERMISSIONS),
+    // so promoting it to 'everyone' is a genuine change to the signed permission
+    // set — verification against the original signature must fail.
     const tampered = govArgs({
-      permissions: { ...DEFAULT_PERMISSIONS, whoCanEditInfo: 'everyone' },
+      permissions: { ...DEFAULT_PERMISSIONS, whoCanCall: 'everyone' },
     });
     expect(verifyGroupGovernance(tampered, sig, encodeBase64(kp.publicKey))).toBe(false);
   });
@@ -131,13 +129,14 @@ describe('can — permission gates', () => {
     expect(effectivePermissions(group)).toEqual(DEFAULT_PERMISSIONS);
   });
 
-  it('default: calls and sending are everyone, editing info is admins-only', () => {
-    // whoCanCall defaults to 'everyone' — the Discord-style voice channel posts
-    // a join banner rather than ringing everyone, so any member opening it is
-    // harmless (see groupRoles.ts DEFAULT_PERMISSIONS).
-    expect(can(group, MEMBER, 'call')).toBe(true);
+  it('default: only sending is everyone; calls, invites and editing info are admins-only', () => {
+    // whoCanCall defaults to 'admins' — starting a group voice channel posts a
+    // join banner to the WHOLE group, so it is an owner/admin action by default
+    // (see groupRoles.ts DEFAULT_PERMISSIONS). A plain member cannot start one.
+    expect(can(group, MEMBER, 'call')).toBe(false);
     expect(can(group, MOD, 'call')).toBe(true);
     expect(can(group, ADMIN, 'call')).toBe(true);
+    expect(can(group, OWNER, 'call')).toBe(true);
     expect(can(group, MEMBER, 'send')).toBe(true);
     expect(can(group, MEMBER, 'editInfo')).toBe(false);
     expect(can(group, MOD, 'editInfo')).toBe(true);

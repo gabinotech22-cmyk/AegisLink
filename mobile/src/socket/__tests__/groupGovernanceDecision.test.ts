@@ -68,9 +68,12 @@ describe('decideGovernanceUpdate', () => {
 
   it('rejects a tampered permission (signature no longer matches)', () => {
     const claim = makeClaim();
+    // Tamper to a value that differs from the signed default (whoCanCall is
+    // 'admins' by default) so the canonical bytes — and thus the signature —
+    // genuinely change. 'everyone' loosens the call gate, the classic attack.
     const tampered: ClaimedGovernance = {
       ...claim,
-      permissions: { ...claim.permissions, whoCanCall: 'admins' },
+      permissions: { ...claim.permissions, whoCanCall: 'everyone' },
     };
     expect(decideGovernanceUpdate({ ...base, claimed: tampered }).kind).toBe('reject');
   });

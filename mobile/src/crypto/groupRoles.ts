@@ -24,16 +24,17 @@ export type GroupAction = 'invite' | 'send' | 'call' | 'editInfo';
  * Default permissions for groups with no signed governance (legacy groups, and
  * the baseline a new group inherits). These match the prototype defaults and the
  * pre-governance behavior: only sending is open to everyone. Invites, calls and
- * info edits default to admins-only — invites/edits preserve the legacy
- * admin-only behavior. Calls default to 'everyone' because the Discord-style
- * channel model posts a join banner — it does NOT ring everyone — so any member
- * opening a channel is harmless. Admins can tighten this per group. Owners can
- * loosen any of these.
+ * info edits default to admins-only. Starting a group voice channel is an
+ * owner/admin action by default: opening a channel posts a join banner to the
+ * WHOLE group, so it is a group-wide action, not a private one — a plain member
+ * should not be able to summon the whole group. Owners/admins can loosen
+ * whoCanCall to 'everyone' per group via governance if they want the open
+ * Discord-style model where any member may open a channel.
  */
 export const DEFAULT_PERMISSIONS: GroupPermissions = {
   whoCanInvite: 'admins',
   whoCanSend: 'everyone',
-  whoCanCall: 'everyone',
+  whoCanCall: 'admins',
   whoCanEditInfo: 'admins',
 };
 

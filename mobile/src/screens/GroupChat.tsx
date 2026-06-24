@@ -429,8 +429,9 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
 
   async function handleGroupCall() {
     if (!identity) return;
-    // Call permission gate (UI side). Defaults to 'everyone'; groups that
-    // explicitly set whoCanCall:'admins' via governance still block members here.
+    // Call permission gate (UI side). whoCanCall defaults to 'admins': starting a
+    // group voice channel is an owner/admin action, so a plain member is blocked
+    // here. (UX gate only — the relay is zero-metadata and cannot enforce roles.)
     const { can } = require('../crypto/groupRoles') as typeof import('../crypto/groupRoles');
     if (!can(group, identity.aegisId, 'call')) {
       themedAlert(
