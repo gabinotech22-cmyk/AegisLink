@@ -27,8 +27,13 @@ updates:
           - minor
           - patch
     # Expo/RN native modules are pinned to the SDK; never auto-bump majors here.
+    # `expo-*` covers every Expo module (expo-status-bar, expo-sqlite,
+    # expo-file-system, …): their majors track the SDK line, so a bump to the
+    # next SDK's major breaks the native install even when JS-only CI is green.
     ignore:
       - dependency-name: expo
+        update-types: [version-update:semver-major]
+      - dependency-name: "expo-*"
         update-types: [version-update:semver-major]
       - dependency-name: react-native
         update-types: [version-update:semver-major]
