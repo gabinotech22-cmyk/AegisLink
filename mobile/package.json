@@ -27,7 +27,7 @@
     "build:native": "npx expo prebuild --platform android && cd android && .\\gradlew.bat assembleRelease"
   },
   "dependencies": {
-    "@noble/hashes": "^1.6.1",
+    "@noble/hashes": "^2.2.0",
     "@noble/post-quantum": "^0.6.1",
     "@react-native-clipboard/clipboard": "^1.16.3",
     "@scure/base": "^2.2.0",
