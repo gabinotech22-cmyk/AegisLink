@@ -212,7 +212,7 @@ describe('Ola 8 — M-6 Work channel encryption required', () => {
 
     // No `encrypted` flag → must be rejected before any persistence.
     const ack = await sendChannelMsg(sock, {
-      id: '33333333-3333-3333-3333-333333333333',
+      id: '33333333-3333-4333-8333-333333333333',
       channelId: CHAN,
       orgId: ORG,
       body: 'hello in cleartext',
@@ -231,7 +231,7 @@ describe('Ola 8 — M-6 Work channel encryption required', () => {
     const sock = await connectAgent(sender);
 
     const ack = await sendChannelMsg(sock, {
-      id: '44444444-4444-4444-4444-444444444444',
+      id: '44444444-4444-4444-8444-444444444444',
       channelId: CHAN,
       orgId: ORG,
       body: encodeBase64(nacl.randomBytes(32)),
