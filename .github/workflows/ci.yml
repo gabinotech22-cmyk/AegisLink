@@ -329,7 +329,7 @@ jobs:
 
       - name: Upload Maestro results (screenshots + report)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: maestro-e2e-results
           path: |
