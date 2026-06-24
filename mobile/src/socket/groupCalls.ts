@@ -462,8 +462,10 @@ export async function startGroupCall(
   void otherMembers; // recipients are derived from group.members in the heartbeat
   const callId = Crypto.randomUUID();
   // Enter the channel immediately (alone). startOutgoing with an empty roster,
-  // then mark in-call — we are "in the channel" and waiting for joiners.
-  useGroupCall.getState().startOutgoing(callId, group.id, group.name, []);
+  // then mark in-call — we are "in the channel" and waiting for joiners. We are
+  // the host: record our own aegisId as the initiator so hangupGroupCall knows to
+  // end the channel for everyone when we leave (host-ends-for-all).
+  useGroupCall.getState().startOutgoing(callId, group.id, group.name, [], identity.aegisId);
   useGroupCall.getState().setStatus('in-call');
 
   try {
@@ -524,7 +526,9 @@ export async function joinGroupCall(groupId: string): Promise<void> {
     return;
   }
 
-  useGroupCall.getState().startOutgoing(active.callId, groupId, groupName, []);
+  // Record the channel's host (banner initiator) so that when the host hangs up,
+  // our group_call:hangup handler ends the call for us too (host-ends-for-all).
+  useGroupCall.getState().startOutgoing(active.callId, groupId, groupName, [], active.initiator);
   useGroupCall.getState().setStatus('connecting');
   for (const p of others) useGroupCall.getState().addParticipant(p);
 
@@ -609,28 +613,16 @@ export function declineGroupCall(callId: string, initiatorAegisId: string): void
 }
 
 /**
- * Leave/end the group call. Sends hangup to all participants and cleans up
- * all RTCPeerConnections.
+ * Local-only group-call teardown: stop heartbeating, tear down every peer,
+ * release the mic, drop audio routing + the foreground service, and end the
+ * store. Emits NO wire signal — used by hangupGroupCall after it has already
+ * announced our departure, and by the host-terminate path on the receiving side
+ * (where re-broadcasting a roster would resurrect the banner on other clients).
  */
-export function hangupGroupCall(): void {
-  const { callId, groupId, groupName, participants } = useGroupCall.getState();
-  if (!callId) return;
-
+function endGroupCallLocally(): void {
   stopHeartbeat();
-  const socket = getSocket();
-  const others = participants.map((p) => p.aegisId);
-  if (socket && others.length > 0) {
-    socket.emit('group_call:hangup', { to: others, callId });
-  }
-  // Announce our departure to the whole group so banner-watchers update/clear the
-  // "active channel" immediately instead of waiting out the 45s stale timeout.
-  // `others` is the roster minus us; an empty list ⇒ we were the last to leave.
-  if (groupId) {
-    const info = localGroupInfo(groupId);
-    broadcastChannelLeave(callId, groupId, info?.name ?? groupName ?? groupId, others, info?.members ?? others);
-  }
-
-  cleanupAllPeers(callId);
+  const { callId } = useGroupCall.getState();
+  if (callId) cleanupAllPeers(callId);
   releaseGroupStream();
 
   try {
@@ -651,6 +643,40 @@ export function hangupGroupCall(): void {
 
   useGroupCall.getState().setStatus('ended');
   setTimeout(() => useGroupCall.getState().reset(), 800);
+}
+
+/**
+ * Leave/end the group call. Sends hangup to all mesh participants, announces our
+ * departure to the whole group, then tears down locally.
+ *
+ * Host-ends-for-all: the member who opened the voice channel owns its lifecycle.
+ * When the HOST hangs up we broadcast an EMPTY roster (the "channel closed"
+ * signal) so banner-watchers clear instantly, and every active participant ends
+ * too via the group_call:hangup handler (which recognises the initiator). A
+ * non-host leaving instead broadcasts the REMAINING roster and the call lives on.
+ */
+export function hangupGroupCall(): void {
+  const { callId, groupId, groupName, participants, initiator } = useGroupCall.getState();
+  if (!callId) return;
+
+  const socket = getSocket();
+  const others = participants.map((p) => p.aegisId);
+  if (socket && others.length > 0) {
+    socket.emit('group_call:hangup', { to: others, callId });
+  }
+  // Announce our departure so banner-watchers update/clear instead of waiting out
+  // the 45s stale timeout. Host → empty roster ends the channel for everyone;
+  // non-host → remaining roster (self removed), and an empty `others` already
+  // means we were simply the last one out.
+  if (groupId) {
+    const me = ownKeys()?.aegisId;
+    const isHost = !!me && initiator === me;
+    const info = localGroupInfo(groupId);
+    const leaveRoster = isHost ? [] : others;
+    broadcastChannelLeave(callId, groupId, info?.name ?? groupName ?? groupId, leaveRoster, info?.members ?? others);
+  }
+
+  endGroupCallLocally();
 }
 
 /**
@@ -951,18 +977,21 @@ export function attachGroupCallHandlers(): void {
         const peer = peers.get(msg.from);
         if (peer) { cleanupPeer(peer); peers.delete(msg.from); }
       }
-      // Remove (not just mark-disconnected) the leaver so our own heartbeat and
-      // leave-broadcast stop re-listing them — that stale roster was the cause of
-      // the wrong "N en llamada" count after someone left.
-      useGroupCall.getState().removeParticipant(msg.from);
 
-      // If the initiator hangs up during ringing-in (before we're in-call), end completely
-      const isInitiator = state.initiator === msg.from;
-      const remainingPeers = peers?.size ?? 0;
-      if (isInitiator && remainingPeers === 0 && state.status !== 'in-call') {
-        useGroupCall.getState().setStatus('ended');
-        setTimeout(() => useGroupCall.getState().reset(), 800);
+      // Host-ends-for-all: if the channel's initiator hangs up, the whole call
+      // ends for us too — the member who opened the voice channel owns its
+      // lifecycle. state.initiator is the host: our own id when we started it, or
+      // the banner's initiator when we joined. This also covers the initiator
+      // cancelling a still-ringing call.
+      if (state.initiator && state.initiator === msg.from) {
+        endGroupCallLocally();
+        return;
       }
+
+      // A non-host left: remove (not just mark-disconnected) just them so our
+      // heartbeat and leave-broadcast stop re-listing them — that stale roster was
+      // the cause of the wrong "N en llamada" count after someone left.
+      useGroupCall.getState().removeParticipant(msg.from);
     },
   );
 }

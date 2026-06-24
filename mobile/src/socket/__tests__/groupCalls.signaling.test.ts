@@ -385,4 +385,45 @@ describe('groupCalls signaling', () => {
 
     expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toEqual(['peer-B']);
   });
+
+  // ── 10. Host-ends-for-all ──────────────────────────────────────────────────
+
+  it('hangupGroupCall by the HOST broadcasts an empty roster (host-ends-for-all)', () => {
+    mockGroups = [{ id: 'g-host', members: ['self-aegis-id', 'peer-A', 'peer-B'] }];
+    // We are the host: our own aegisId is the initiator, peers are still in-call.
+    useGroupCall.getState().startOutgoing('call-host', 'g-host', 'Hosts', ['peer-A', 'peer-B'], 'self-aegis-id');
+    useGroupCall.getState().setStatus('in-call');
+
+    hangupGroupCall();
+
+    // Even though peer-A/peer-B remain, the host broadcasts [] to end for everyone
+    // (a non-host would broadcast the remaining roster — see test 7).
+    expect(mockEmit).toHaveBeenCalledWith(
+      'group_call:channel',
+      expect.objectContaining({ callId: 'call-host', participants: [] }),
+    );
+  });
+
+  it('group_call:hangup from the initiator ends the call for an active participant', () => {
+    // We joined a channel hosted by 'host-aegis' and are in-call with them + peer-B.
+    useGroupCall.getState().startOutgoing('call-join', 'g-join', 'Joiners', ['host-aegis', 'peer-B'], 'host-aegis');
+    useGroupCall.getState().setStatus('in-call');
+
+    attachGroupCallHandlers();
+    hangupHandler()({ from: 'host-aegis', callId: 'call-join' });
+
+    // The host hung up → the whole call ends for us, not just a roster trim.
+    expect(useGroupCall.getState().status).toBe('ended');
+  });
+
+  it('group_call:hangup from a non-initiator drops only them; the call continues', () => {
+    useGroupCall.getState().startOutgoing('call-stay', 'g-stay', 'Stayers', ['host-aegis', 'peer-B'], 'host-aegis');
+    useGroupCall.getState().setStatus('in-call');
+
+    attachGroupCallHandlers();
+    hangupHandler()({ from: 'peer-B', callId: 'call-stay' });
+
+    expect(useGroupCall.getState().status).toBe('in-call');
+    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toEqual(['host-aegis']);
+  });
 });
