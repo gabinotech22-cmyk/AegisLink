@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="ogbg" cx="28%" cy="30%" r="95%">
+      <stop offset="0%" stop-color="#15261e"/>
+      <stop offset="58%" stop-color="#0a0e0d"/>
+      <stop offset="100%" stop-color="#06090a"/>
+    </radialGradient>
+    <radialGradient id="ogaur" cx="88%" cy="92%" r="55%">
+      <stop offset="0%" stop-color="#5bf2b9" stop-opacity="0.16"/>
+      <stop offset="62%" stop-color="#5bf2b9" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="oghex" width="78" height="88" patternUnits="userSpaceOnUse">
+      <path d="M39 5 L72 23 L72 65 L39 83 L6 65 L6 23 Z" fill="none" stroke="#5bf2b9" stroke-opacity="0.05" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#ogbg)"/>
+  <rect width="1200" height="630" fill="url(#oghex)"/>
+  <rect width="1200" height="630" fill="url(#ogaur)"/>
+  <g transform="translate(320,315) translate(-176,-176) scale(8.8)">
+    <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+    <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+    <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+  </g>
+  <text x="560" y="278" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="600" fill="#e8f0ec" letter-spacing="1">AegisLink</text>
+  <text x="562" y="340" font-family="Consolas, monospace" font-size="30" fill="#5bf2b9" letter-spacing="6" opacity="0.85">private by default</text>
+  <text x="562" y="424" font-family="Arial, Helvetica, sans-serif" font-size="32" fill="#e8f0ec" opacity="0.66">Encrypted messaging with zero metadata.</text>
+  <text x="562" y="468" font-family="Arial, Helvetica, sans-serif" font-size="32" fill="#e8f0ec" opacity="0.66">No phone. No email. Open source.</text>
+</svg>
