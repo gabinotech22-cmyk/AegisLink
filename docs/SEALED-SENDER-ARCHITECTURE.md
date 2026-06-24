@@ -178,7 +178,74 @@ Lo que cambia:
 - **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
   selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
   `from` igual que un 1:1.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🔬 SPIKE INICIADO (no terminada).**
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slices 1, 2, 3a, 3b, 4, 5, 6 hechas; pendiente 2b).**
+  **Slice 1 ✅ (server):** auth de socket por mailbox — handshake `{mailboxId,
+  mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
+  el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
+  bind a `mailboxSockets`; + entrega online de `envelope:mb` (sin identidad de
+  emisor). `server/src/crypto/mailbox.ts` + tests de relay.
+  **Slice 2 ✅ (server):** cola offline + drain por mailbox reusando `messageRepo`
+  (recipient=mailboxId, sin tabla nueva, sin sender almacenado; hard-delete al
+  drenar).
+  **Slice 3a ✅ (cliente, mobile):** store del root del cliente
+  (`mobile/src/crypto/mailboxStore.ts`, +6 tests): root propio en SecureStore +
+  roots de contactos por-contacto + derivación del mailbox de la época. Espeja
+  `deliveryToken.ts`. Foundation, off the live path.
+  **Slice 3b ✅ (cliente, mobile):** reparto del root por `profile_update` E2EE —
+  `mailboxRoot` viaja junto al `deliveryToken` (pre-distribución bajo v2, idéntico
+  patrón) y el receptor lo persiste vía `setContactMailboxRoot`. Aditivo: nada del
+  transporte cambia aún. La validación en vivo del wiring (3b→) es el test APK
+  2-dispositivos, no automatizable aquí.
+  **Slice 4 ✅ (cliente, mobile, flag OFF):** direccionar por mailbox — Opción A
+  + Tor obligatorio (ver `FASE4-CONTROL-PLANE-DESIGN.md`). **4a:** socket de
+  entrega dedicado (`mobile/src/socket/mailboxSocket.ts`, +6 tests) — conexión
+  Socket.IO aparte, auth por prueba de posesión del mailbox, solo `envelope:mb`
+  (enviar+recibir); fail-closed sin Tor (`MAILBOX_ENABLED = MAILBOX_MODE &&
+  ONION_URL`). **4b:** cableado en `client.ts` — al conectar se abre el socket
+  mailbox (recepción reusa `handleIncomingV2`); el envío 1:1 rutea el wire v2 por
+  `sendViaMailbox` cuando hay root del contacto + socket autenticado, con fallback
+  robusto al transporte aegisId. El control-plane (prekeys/push/token/perfil)
+  sigue intacto en el socket aegisId. Validación en vivo = test APK 2-dispositivos.
+  Limitación conocida: el `envelope:mb` aún no lleva TTL efímero → esos mensajes
+  caen al transporte aegisId (Slice 5 extiende el schema).
+  **Slice 6 ✅ (paridad desktop, flag OFF):** port 1:1 a `desktop/src/renderer/`
+  — `crypto/mailbox.ts` (copia **verbatim** del primitivo; la derivación id/firma
+  DEBE ser byte-idéntica entre plataformas), `crypto/mailboxStore.ts` (swap
+  `expo-secure-store`→`window.aegis.secureStorage`, espeja `deliveryToken.ts`),
+  `config.ts` (mismo flag fail-closed `MAILBOX_ENABLED = MAILBOX_MODE &&
+  ONION_URL`), `socket/mailboxSocket.ts`, y cableado en `socket/client.ts`
+  (connect/disconnect, reparto del root por los dos `profile_update`, persistir
+  root entrante, ruteo de envío con fallback robusto). Mismo wire protocol y
+  mismos guards que mobile. **Garantía de paridad:** un **known-answer vector
+  cross-plataforma** (root fijo `0x01..0x20`, época 20600 → `+S61uhsiRrHvLHcFZSv/1A==`)
+  asertado en AMBAS suites (`mailbox.test.ts` mobile + desktop): si la derivación
+  de una plataforma deriva (hash/slice/base64/HKDF-info/encoding de época), uno de
+  los dos tests rompe — atrapa un split silencioso de entrega mobile↔desktop. tsc
+  limpio en ambos; desktop 105/105, mobile mailbox 13/13. Cobertura de los wrappers
+  que tocan `window.aegis` (store/socket) queda diferida al harness jsdom+preload
+  inexistente — misma postura que `deliveryToken.ts` (sin test desktop tampoco).
+  **Slice 5 ✅ (TTL efímero + rotación de época en vivo, flag OFF):** **5a:** el
+  `envelope:mb` lleva un `ephemeralTtl` opcional que acota SOLO la vida de la cola
+  offline (`expires_at = createdAt+ttl`, igual que el path aegisId); el receptor
+  quema desde el payload descifrado, así que la entrega online no lleva el campo
+  (cero metadatos nuevos en el wire). Los efímeros ya no caen a aegisId. **5b:**
+  rotación de época reconciliada con la cola de 30 días vía **multi-bind con
+  multi-firma en un solo handshake** (Opción 1, decidida con 👤): el cliente, al
+  conectar, bindea su época actual + las épocas de catch-up desde su última
+  conexión (cap 31 = `MAX_MAILBOX_BINDS`−1) + la previa (gracia de skew de reloj),
+  firmando el MISMO challenge con la clave de cada época (bindear un id cuyo root
+  no posees es imposible). Rotación viva = **reconectar tras cada boundary** (timer
+  `scheduleEpochRotation`), que re-deriva la época y estrena circuito Tor (el relay
+  no liga épocas consecutivas a un circuito). `lastConnectEpoch` persistido en el
+  store. Tests: server `mailboxAuth.relay` 8/8 (incl. catch-up de época pasada,
+  rechazo de hijack/falta-de-prueba en extra-binds), mobile `mailboxSocket` 7/7
+  (incl. binds de catch-up + multi-firma); server 184/184, desktop 105/105.
+  Límite honesto del catch-up: drenar una cola de época pasada exige revelar al
+  relay (vía Tor, sin identidad) que ese id es tuyo → liga las épocas que drenas en
+  ese tramo; es inevitable dado el modelo de cola y solo afecta a la ventana de
+  recuperación offline, no al estado estable diario.
+  Slices restantes: 2b=push por mailbox (Fase 5).
+  Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un
   root compartido una vez por X3DH (`mailbox(epoch)=HKDF(root,epoch)` → rotación

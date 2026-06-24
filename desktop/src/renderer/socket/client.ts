@@ -16,9 +16,11 @@ import { io, type Socket } from 'socket.io-client';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import { sha256 } from '@noble/hashes/sha256';
-import { RELAY_URL, SEALED_TRANSPORT_VERSION } from '../config';
+import { RELAY_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED } from '../config';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2 } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
+import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
+import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed } from './mailboxSocket';
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { spkRotationDecision, spkPruneTargetKeyId } from './spkRotation';
@@ -695,6 +697,19 @@ export function connect(identity: Identity): Socket {
     await handleIncomingV2(env, identity);
   });
 
+  // ── Fase 4: dedicated mailbox delivery socket ────────────────────────────────
+  // When mailbox mode is enabled (and Tor is available — fail-closed inside
+  // connectMailboxSocket), open a SEPARATE Tor-routed socket that authenticates
+  // by mailbox possession proof and receives `envelope:mb` addressed to our
+  // opaque rotating mailbox id. Incoming mailbox envelopes are sealed v2 with the
+  // same shape as envelope:v2, so they reuse the exact same decrypt+append path.
+  // No-op when mailbox mode is off. Idempotent: a live socket is reused.
+  if (MAILBOX_ENABLED) {
+    void connectMailboxSocket((env) => {
+      void handleIncomingV2(env, identity);
+    });
+  }
+
   return socket;
 }
 
@@ -712,6 +727,19 @@ interface WireSealedEnvelopeV2 {
 async function ownDeliveryTokenField(): Promise<Record<string, string>> {
   if (SEALED_TRANSPORT_VERSION !== 'v2') return {};
   try { return { deliveryToken: await getOwnDeliveryToken() }; } catch { return {}; }
+}
+
+/**
+ * `{ mailboxRoot }` (base64 of our own mailbox root) when v2 is on, else `{}`.
+ * Parity with mobile. Spread into profile_update so contacts learn our root over
+ * E2EE — whoever holds it derives our mailbox id for any epoch, so it ships ONLY
+ * inside the sealed profile, never on the wire (see mailboxStore.ts). Shared
+ * eagerly under v2 (like the delivery token): pre-distribution makes the
+ * mailbox-transport cutover (Fase 4, flag-gated) seamless. No-op under v1.
+ */
+async function ownMailboxRootField(): Promise<Record<string, string>> {
+  if (SEALED_TRANSPORT_VERSION !== 'v2') return {};
+  try { return { mailboxRoot: await getOwnMailboxRootB64() }; } catch { return {}; }
 }
 
 async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
@@ -1284,6 +1312,12 @@ async function decryptAndAppendLocked(
         // this E2EE profile) so we can present it when sending them v2 envelopes.
         if (typeof parsedPayload.deliveryToken === 'string' && parsedPayload.deliveryToken) {
           try { await setContactDeliveryToken(contact.aegisId, parsedPayload.deliveryToken); } catch { /* non-fatal */ }
+        }
+        // Fase 4: store the contact's mailbox root (shared inside this E2EE
+        // profile) so we can derive their per-epoch mailbox id when addressing
+        // them. setContactMailboxRoot ignores malformed input.
+        if (typeof parsedPayload.mailboxRoot === 'string' && parsedPayload.mailboxRoot) {
+          try { await setContactMailboxRoot(contact.aegisId, parsedPayload.mailboxRoot); } catch { /* non-fatal */ }
         }
         await saveSessionState(contact.aegisId, ratchetState);
         return true;
@@ -1935,6 +1969,9 @@ export function disconnect(): void {
     connected = false;
     authenticated = false;
   }
+  // Fase 4: tear down the dedicated mailbox delivery socket alongside the
+  // aegisId control socket (no-op if it was never opened).
+  disconnectMailboxSocket();
   // Cancel pending recovery fallback flushes — they would fire over a dead
   // socket and leak timer handles.
   for (const t of recoveryFallbackTimers.values()) clearTimeout(t);
@@ -2047,6 +2084,40 @@ export async function sendMessage(opts: {
   }
   await saveSessionState(opts.recipientAegisId, newState);
 
+  // ── Fase 4: mailbox addressing ──────────────────────────────────────────────
+  // When mailbox mode is up and we hold the recipient's mailbox root, route the
+  // SAME v2 wire over the dedicated mailbox socket, addressed to their opaque
+  // rotating mailbox id — the relay learns neither `from` nor real `to`. The
+  // mailbox socket is itself possession-authenticated, so no deliveryToken is
+  // needed (the relay rate-limits per sending mailbox). Ephemeral messages ride
+  // the mailbox too (Slice 5): the TTL bounds only the relay's offline-queue life;
+  // the recipient burns from the decrypted payload. Falls back to the aegisId
+  // transport when not eligible: no root yet, or the socket isn't authed.
+  if (emitEvent === 'envelope:v2' && MAILBOX_ENABLED && isMailboxAuthed()) {
+    const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
+    if (mboxTo) {
+      const ack = await sendViaMailbox({
+        id,
+        to: mboxTo,
+        ciphertext: emitPayload.ciphertext as string,
+        nonce: emitPayload.nonce as string,
+        epk: emitPayload.epk as string,
+        ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
+      });
+      if (ack && ack.ok) {
+        // Multi-device self-copy stays on the aegisId control socket (it is
+        // identity-scoped sync, not a recipient-graph leak). Same as below.
+        const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
+        void sendSelfCopy(socket!, opts.identity, opts.recipientAegisId, id, payload, {
+          viewOnce: msgType === 'view_once',
+          ephemeralSeconds: selfEphemeralSeconds,
+        });
+        return;
+      }
+      // ack null/!ok → fall through to the aegisId transport (robust degrade).
+    }
+  }
+
   await new Promise<void>((resolve, reject) => {
     socket!.emit(
       emitEvent,
@@ -2105,6 +2176,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
         senderImage,
         senderStatus,
         ...(await ownDeliveryTokenField()),
+        ...(await ownMailboxRootField()),
       });
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
       const { envelope, newState } = encryptMessage(
@@ -2150,6 +2222,7 @@ export async function sendProfileTo(
       senderImage,
       senderStatus,
       ...(await ownDeliveryTokenField()),
+      ...(await ownMailboxRootField()),
     });
     const recipientPub = decodeBase64(contact.publicKeyB64);
     // Forward lockCtx so that when this runs inside a desync-recovery (already

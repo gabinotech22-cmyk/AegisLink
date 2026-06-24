@@ -77,6 +77,30 @@ export const SEALED_TRANSPORT_VERSION: 'v1' | 'v2' =
   (process.env.EXPO_PUBLIC_SEALED_VERSION as string | undefined) === 'v1' ? 'v1' : 'v2';
 
 /**
+ * MAILBOX_MODE — sealed-sender Fase 4: hide the recipient (`to`) from the relay.
+ * When enabled the client routes 1:1 delivery over a DEDICATED mailbox socket
+ * (envelope:mb, authenticated by mailbox possession proof, addressed by an opaque
+ * rotating mailbox id) instead of by aegisId. The aegisId control-plane socket
+ * (prekeys/push/token/profile) is unaffected — see docs/FASE4-CONTROL-PLANE-DESIGN.md
+ * (Option A + mandatory Tor).
+ *
+ * Default OFF: this is an all-or-nothing transport cutover that only works once
+ * both contacts are in mailbox mode with roots exchanged, and is validated by the
+ * 2-device APK test, not unit tests. Opt IN via EXPO_PUBLIC_MAILBOX_MODE=on.
+ *
+ * Privacy gate: mailbox mode is meaningless if the relay still sees our IP next
+ * to the control-plane aegisId — temporal/IP correlation relinks them. So when
+ * enabled we REQUIRE Tor (ONION_URL present); MAILBOX_ENABLED is false otherwise
+ * (fail-closed: degrade to aegisId transport rather than ship a relinkable
+ * "private" mode). See design note §4.
+ */
+export const MAILBOX_MODE: boolean =
+  (process.env.EXPO_PUBLIC_MAILBOX_MODE as string | undefined) === 'on';
+
+/** True only when mailbox mode is requested AND Tor is available (fail-closed). */
+export const MAILBOX_ENABLED: boolean = MAILBOX_MODE && ONION_URL !== null;
+
+/**
  * Fail-fast transport guard. In a production build every backend base URL MUST
  * be https — a misconfigured build that fell back to cleartext would defeat
  * cert pinning and leak identity keys / push tokens / blob ciphertext over the
