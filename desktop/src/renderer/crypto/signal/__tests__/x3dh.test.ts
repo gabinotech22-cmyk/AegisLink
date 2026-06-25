@@ -647,3 +647,26 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     );
   });
 });
+
+// Cross-platform KAT: the hybrid root derivation (dhOut ‖ pqSecret under the
+// 'AegisLinkRootPQ' label) MUST be byte-identical on desktop and mobile, or two
+// twin clients silently derive different roots and every message fails. This
+// exact block + vector is mirrored in the mobile ratchet test
+// (mobile/src/crypto/signal/__tests__/ratchet.test.ts). Vector from
+// _scratch/kat-gen.mjs.
+const KAT_ROOT_PQ_HEX =
+  '4302ce0529c32b63da34f031ea6658753e568732c4fd56526fd421a81b74559c' +
+  'bac8b9ad0a53c62d197de7ecb208b50a35387e4a8c03278e113bf4c44a490fea';
+
+describe('R1 — cross-platform hybrid root KAT', () => {
+  it('hybrid root derivation matches the pinned vector (desktop↔mobile parity)', () => {
+    const rk = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
+    const dhOut = Uint8Array.from({ length: 32 }, (_, i) => (i * 7) & 0xff);
+    const pqSecret = Uint8Array.from({ length: 32 }, (_, i) => (i * 13 + 5) & 0xff);
+    const combined = new Uint8Array(64);
+    combined.set(dhOut, 0);
+    combined.set(pqSecret, 32);
+    const out = hkdfSHA256(combined, rk, new TextEncoder().encode('AegisLinkRootPQ'), 64);
+    expect(Buffer.from(out).toString('hex')).toBe(KAT_ROOT_PQ_HEX);
+  });
+});
