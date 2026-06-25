@@ -171,6 +171,7 @@ jest.mock('../../utils/parseLocationMessage', () => ({
 jest.mock('../../components/WallpaperPicker', () => ({
   loadWallpaper: jest.fn().mockResolvedValue(0),
   wallpaperBg: jest.fn().mockReturnValue(undefined),
+  ChatWallpaper: () => null,
 }));
 
 jest.mock('../../runtime', () => ({ WEBRTC_AVAILABLE: false }));

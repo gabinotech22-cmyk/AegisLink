@@ -1,17 +1,30 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import {
   View,
   Text,
   Pressable,
   Modal,
   FlatList,
+  StyleSheet,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
+import Svg, {
+  Defs,
+  Rect,
+  Circle,
+  Path,
+  G,
+  RadialGradient,
+  Pattern,
+  Stop,
+} from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ss } from '../utils/secureStore';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from './icons';
 
-export type WallpaperOption = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type WallpaperOption = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 interface Props {
   visible: boolean;
@@ -21,21 +34,158 @@ interface Props {
   onSelect: (option: WallpaperOption) => void;
 }
 
+// ─── Brand wallpapers (Vault palette) ─────────────────────────────────────────
+// Dark, low-saturation backgrounds so the mint accent bubbles always pop. The
+// designs use only brand colours and are intentionally theme-independent — a
+// chosen wallpaper is an aesthetic override, like Telegram/Signal wallpapers.
+
+const MINT = '#5bf2b9';
+// The vault hexagon mark (matches assets/icon.svg), in a 40×40 box.
+const HEX = 'M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z';
+
+export const WALLPAPER_NAMES: Record<WallpaperOption, string> = {
+  0: 'None',
+  1: 'Vault',
+  2: 'Forest',
+  3: 'Hex',
+  4: 'Dots',
+  5: 'Aurora',
+  6: 'Circuit',
+  7: 'Mark',
+};
+
+const OPTIONS: WallpaperOption[] = [0, 1, 2, 3, 4, 5, 6, 7];
+
 /**
- * Returns a backgroundColor string for a given wallpaper option,
- * using only theme tokens. Called from Chat.tsx to apply the bg.
+ * Dominant solid colour for a wallpaper — used as the base behind the SVG layer
+ * and anywhere a single colour is enough (e.g. the chat list base).
  */
-export function wallpaperBg(option: WallpaperOption, t: {
-  bg: string; surface: string; surface2: string; accentDeep: string; accent: string;
-}): string | undefined {
+export function wallpaperBg(option: WallpaperOption, t: { bg: string }): string | undefined {
+  return option === 0 ? undefined : '#0a0e0d';
+}
+
+function renderWallpaper(option: WallpaperOption, uid: string) {
   switch (option) {
-    case 0: return undefined;
-    case 1: return t.accentDeep;
-    case 2: return t.surface;
-    case 3: return t.surface2;
-    case 4: return t.bg;
-    default: return t.surface;
+    case 1: // Vault — deep black
+      return <Rect width={400} height={800} fill="#0a0e0d" />;
+    case 2: // Forest — green-whisper radial
+      return (
+        <>
+          <Defs>
+            <RadialGradient id={`df${uid}`} cx="50%" cy="0%" r="100%">
+              <Stop offset="0" stopColor="#10201a" />
+              <Stop offset="0.58" stopColor="#0a0e0d" />
+              <Stop offset="1" stopColor="#06090a" />
+            </RadialGradient>
+          </Defs>
+          <Rect width={400} height={800} fill={`url(#df${uid})`} />
+        </>
+      );
+    case 3: // Hex — brand hexagon mesh
+      return (
+        <>
+          <Defs>
+            <Pattern id={`hx${uid}`} width={46} height={52} patternUnits="userSpaceOnUse">
+              <Path
+                d="M23 3 L43 14 L43 38 L23 49 L3 38 L3 14 Z"
+                fill="none"
+                stroke={MINT}
+                strokeOpacity={0.11}
+                strokeWidth={1.1}
+              />
+            </Pattern>
+          </Defs>
+          <Rect width={400} height={800} fill="#0a0e0d" />
+          <Rect width={400} height={800} fill={`url(#hx${uid})`} />
+        </>
+      );
+    case 4: // Dots — fine carbon dot grid
+      return (
+        <>
+          <Defs>
+            <Pattern id={`dt${uid}`} width={15} height={15} patternUnits="userSpaceOnUse">
+              <Circle cx={2} cy={2} r={1.1} fill={MINT} fillOpacity={0.13} />
+            </Pattern>
+          </Defs>
+          <Rect width={400} height={800} fill="#0b1110" />
+          <Rect width={400} height={800} fill={`url(#dt${uid})`} />
+        </>
+      );
+    case 5: // Aurora — mint glow in a corner
+      return (
+        <>
+          <Defs>
+            <RadialGradient id={`au${uid}`} cx="86%" cy="90%" r="60%">
+              <Stop offset="0" stopColor={MINT} stopOpacity={0.18} />
+              <Stop offset="0.62" stopColor={MINT} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Rect width={400} height={800} fill="#0a0e0d" />
+          <Rect width={400} height={800} fill={`url(#au${uid})`} />
+        </>
+      );
+    case 6: // Circuit — faint crypto lattice
+      return (
+        <>
+          <Rect width={400} height={800} fill="#090d0c" />
+          <G stroke={MINT} strokeOpacity={0.13} strokeWidth={1} fill="none">
+            <Path d="M0 120 H160 V300 H320" />
+            <Path d="M400 60 V220 H300 V420" />
+            <Path d="M40 520 H220 V640" />
+            <Path d="M360 700 V560 H260" />
+            <Path d="M120 770 V620 H40" />
+          </G>
+          <G fill={MINT} fillOpacity={0.22}>
+            <Circle cx={160} cy={120} r={3} />
+            <Circle cx={320} cy={300} r={3} />
+            <Circle cx={300} cy={220} r={3} />
+            <Circle cx={220} cy={520} r={3} />
+            <Circle cx={260} cy={560} r={3} />
+          </G>
+        </>
+      );
+    case 7: // Mark — ghosted vault logo watermark
+      return (
+        <>
+          <Rect width={400} height={800} fill="#0a0e0d" />
+          <G transform="translate(120,320) scale(4)" opacity={0.1}>
+            <Path d={HEX} fill="none" stroke={MINT} strokeWidth={2.4} strokeLinejoin="round" />
+            <Rect x={13} y={15} width={14} height={3.2} rx={0.4} fill={MINT} />
+            <Rect x={13} y={21.8} width={14} height={3.2} rx={0.4} fill={MINT} opacity={0.55} />
+          </G>
+        </>
+      );
+    default:
+      return null;
   }
+}
+
+/**
+ * Full-bleed chat wallpaper. Render as an absolute-fill layer behind a
+ * transparent message list. Option 0 (None) renders nothing — the caller keeps
+ * the theme background.
+ */
+export function ChatWallpaper({
+  option,
+  style,
+}: {
+  option: WallpaperOption;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
+  if (option === 0) return null;
+  return (
+    <Svg
+      style={style}
+      width="100%"
+      height="100%"
+      viewBox="0 0 400 800"
+      preserveAspectRatio="xMidYMid slice"
+      pointerEvents="none"
+    >
+      {renderWallpaper(option, uid)}
+    </Svg>
+  );
 }
 
 const WALLPAPER_KEY = (aegisId: string) => `aegis.wallpaper.${aegisId}`;
@@ -45,7 +195,7 @@ export async function loadWallpaper(aegisId: string): Promise<WallpaperOption> {
     const raw = await ss.get(WALLPAPER_KEY(aegisId));
     if (raw === null) return 0;
     const n = parseInt(raw, 10);
-    if (n >= 0 && n <= 8) return n as WallpaperOption;
+    if (n >= 0 && n <= 7) return n as WallpaperOption;
     return 0;
   } catch {
     return 0;
@@ -69,189 +219,30 @@ function WallpaperPreviewCell({
 }) {
   const { t } = useTheme();
 
-  function renderInner() {
-    if (option === 0) {
-      return (
-        <View
-          style={{
-            flex: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: t.bg,
-            borderWidth: 1,
-            borderColor: t.border,
-            borderRadius: t.radiusS,
-          }}
-        >
-          <Text
-            style={{
-              fontFamily: t.fontMono,
-              fontSize: 10,
-              color: t.textDim,
-              letterSpacing: 0.8,
-            }}
-          >
-            NONE
-          </Text>
-        </View>
-      );
-    }
-
-    // Solid colour swatches (options 1–4)
-    if (option <= 4) {
-      const bg = wallpaperBg(option, t) ?? t.bg;
-      return (
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: bg,
-            borderWidth: 1,
-            borderColor: t.border,
-            borderRadius: t.radiusS,
-          }}
-        />
-      );
-    }
-
-    // Pattern options 5–8: dots, horizontal lines, vertical lines, grid
-    const patternBg = t.surface;
-    const dotColor = t.border;
-
-    if (option === 5) {
-      // Dots pattern
-      return (
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: patternBg,
-            borderWidth: 1,
-            borderColor: t.border,
-            borderRadius: t.radiusS,
-            overflow: 'hidden',
-          }}
-        >
-          {[0, 1, 2, 3].map((row) => (
-            <View key={row} style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-              {[0, 1, 2, 3].map((col) => (
-                <View
-                  key={col}
-                  style={{
-                    flex: 1,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <View
-                    style={{
-                      width: 3,
-                      height: 3,
-                      borderRadius: 1.5,
-                      backgroundColor: dotColor,
-                    }}
-                  />
-                </View>
-              ))}
-            </View>
-          ))}
-        </View>
-      );
-    }
-
-    if (option === 6) {
-      // Horizontal lines
-      return (
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: patternBg,
-            borderWidth: 1,
-            borderColor: t.border,
-            borderRadius: t.radiusS,
-            overflow: 'hidden',
-            justifyContent: 'space-around',
-            paddingVertical: 6,
-          }}
-        >
-          {[0, 1, 2, 3, 4].map((i) => (
-            <View
-              key={i}
-              style={{ height: 1, backgroundColor: dotColor, marginHorizontal: 4 }}
-            />
-          ))}
-        </View>
-      );
-    }
-
-    if (option === 7) {
-      // Vertical lines
-      return (
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: patternBg,
-            borderWidth: 1,
-            borderColor: t.border,
-            borderRadius: t.radiusS,
-            overflow: 'hidden',
-            flexDirection: 'row',
-            justifyContent: 'space-around',
-            paddingHorizontal: 6,
-          }}
-        >
-          {[0, 1, 2, 3, 4].map((i) => (
-            <View
-              key={i}
-              style={{ width: 1, backgroundColor: dotColor, marginVertical: 4 }}
-            />
-          ))}
-        </View>
-      );
-    }
-
-    // option === 8: grid
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: patternBg,
-          borderWidth: 1,
-          borderColor: t.border,
-          borderRadius: t.radiusS,
-          overflow: 'hidden',
-        }}
-      >
-        {[0, 1, 2, 3].map((row) => (
-          <View
-            key={row}
-            style={{ flex: 1, flexDirection: 'row', borderBottomWidth: row < 3 ? 1 : 0, borderBottomColor: dotColor }}
-          >
-            {[0, 1, 2, 3].map((col) => (
-              <View
-                key={col}
-                style={{ flex: 1, borderRightWidth: col < 3 ? 1 : 0, borderRightColor: dotColor }}
-              />
-            ))}
-          </View>
-        ))}
-      </View>
-    );
-  }
-
   return (
     <Pressable
       onPress={onPress}
-      accessibilityLabel={`Wallpaper option ${option}`}
+      accessibilityLabel={`Wallpaper ${WALLPAPER_NAMES[option]}`}
       style={({ pressed }) => ({
-        width: '30%',
+        width: '100%',
         aspectRatio: 0.7,
         borderRadius: t.radiusS,
         borderWidth: selected ? 2 : 1,
         borderColor: selected ? t.accent : t.border,
         overflow: 'hidden',
         opacity: pressed ? 0.8 : 1,
+        backgroundColor: option === 0 ? t.bg : '#0a0e0d',
+        alignItems: 'center',
+        justifyContent: 'center',
       })}
     >
-      {renderInner()}
+      {option === 0 ? (
+        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.8 }}>
+          NONE
+        </Text>
+      ) : (
+        <ChatWallpaper option={option} style={StyleSheet.absoluteFill} />
+      )}
       {selected && (
         <View
           style={{
@@ -274,8 +265,6 @@ function WallpaperPreviewCell({
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-
-const OPTIONS: WallpaperOption[] = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 
 export function WallpaperPicker({ visible, contactAegisId, current, onClose, onSelect }: Props) {
   const { t } = useTheme();
@@ -337,15 +326,29 @@ export function WallpaperPicker({ visible, contactAegisId, current, onClose, onS
           contentContainerStyle={{
             padding: 18,
             paddingBottom: insets.bottom + 18,
-            gap: 12,
+            gap: 16,
           }}
           columnWrapperStyle={{ gap: 12, justifyContent: 'flex-start' }}
           renderItem={({ item }) => (
-            <WallpaperPreviewCell
-              option={item}
-              selected={selected === item}
-              onPress={() => handleSelect(item)}
-            />
+            <View style={{ width: '31%', gap: 6 }}>
+              <WallpaperPreviewCell
+                option={item}
+                selected={selected === item}
+                onPress={() => handleSelect(item)}
+              />
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontFamily: t.fontMono,
+                  fontSize: 9,
+                  color: selected === item ? t.accent : t.textDim,
+                  textAlign: 'center',
+                  letterSpacing: 0.5,
+                }}
+              >
+                {WALLPAPER_NAMES[item]}
+              </Text>
+            </View>
           )}
         />
       </View>
