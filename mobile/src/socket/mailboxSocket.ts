@@ -8,10 +8,12 @@
  * (`envelope:mb`, send + receive). Prekeys/push/token/profile stay on the
  * aegisId socket (Option A, see docs/FASE4-CONTROL-PLANE-DESIGN.md).
  *
- * Privacy gate (fail-closed): only ever connects when MAILBOX_ENABLED — i.e.
- * MAILBOX_MODE on AND Tor (ONION_URL) available. We route this socket over Tor
- * so the relay can't relink the opaque mailbox to our IP next to the aegisId
- * control socket. If Tor is unavailable the caller never enables mailbox mode and
+ * Privacy gate (fail-closed): only ever connects when MAILBOX_ENABLED (mode on
+ * AND ONION_URL configured) AND the embedded Tor native module is present
+ * (Tier 2 — no Orbot; see docs/FASE4-TOR-EMBEDDED-IMPL.md). Every byte of this
+ * socket rides Tor via `TorSioSocket` (../net/tor.ts) so the relay can't relink
+ * the opaque mailbox to our IP next to the aegisId control socket. If Tor is
+ * unavailable or fails to bootstrap, the caller never enables mailbox mode and
  * delivery falls back to the aegisId transport. Default OFF.
  *
  * Wire protocol (mirrors server/src/relay/handler.ts handleMailboxConnection):
@@ -27,7 +29,6 @@
  * brief dual-bind overlap) is Slice 5 — noted, not handled here.
  */
 
-import { io, type Socket } from 'socket.io-client';
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { logger } from '../utils/logger';
@@ -39,6 +40,16 @@ import {
   setLastMailboxConnectEpoch,
 } from '../crypto/mailboxStore';
 import { mailboxAuthProof, epochFor, MAILBOX_EPOCH_MS, type Mailbox } from '../crypto/mailbox';
+import { TorSioSocket, isTorAvailable, startTor } from '../net/tor';
+
+/**
+ * The mailbox socket only ever rides embedded Tor (Tier 2 — no Orbot, no plain
+ * `io()` fallback): a mailbox connection that left over the clear network would
+ * defeat the entire point of this transport (relay relinks `to` next to our IP).
+ * `Socket` here is the structural subset `TorSioSocket` and `socket.io-client`'s
+ * `Socket` both satisfy — see `tor.ts` for why it's a drop-in shape.
+ */
+type Socket = TorSioSocket;
 
 /**
  * Catch-up cap: how many past epochs we re-bind on a single connect. extras must
@@ -94,6 +105,13 @@ export async function connectMailboxSocket(
 ): Promise<Socket | null> {
   if (!MAILBOX_ENABLED || !ONION_URL) return null; // fail-closed: needs Tor
   if (mboxSocket && mboxSocket.connected) return mboxSocket;
+  if (!isTorAvailable()) return null; // fail-closed: no embedded Tor module (Expo Go / non-prebuilt)
+  try {
+    await startTor(); // resolves only once bootstrapped (STATUS_ON); throws on failure
+  } catch (e) {
+    if (__DEV__) logger.warn('[mailbox] Tor start failed, staying disabled:', (e as Error).message);
+    return null;
+  }
   onEnvelopeCb = onEnvelope;
 
   // Derive the mailbox valid right now (id + auth keypair) from our own root, plus
@@ -112,22 +130,13 @@ export async function connectMailboxSocket(
   extraEpochMailboxes = extraEpochs.length ? await getOwnMailboxesForEpochs(extraEpochs) : [];
   authed = false;
 
-  const sock = io(ONION_URL, {
-    transports: ['websocket', 'polling'],
-    tryAllTransports: true,
-    auth: {
-      mailboxId: mb.mailboxIdB64,
-      mailboxSignPubKey: encodeBase64(mb.signPublicKey),
-      // Slice 5b: extra epoch mailboxes to bind + drain in this same handshake.
-      ...(extraEpochMailboxes.length
-        ? { binds: extraEpochMailboxes.map((m) => ({ mailboxId: m.mailboxIdB64, mailboxSignPubKey: encodeBase64(m.signPublicKey) })) }
-        : {}),
-    },
-    reconnection: true,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 8000,
-    reconnectionAttempts: Infinity,
-    timeout: 20000,
+  const sock = new TorSioSocket(ONION_URL, {
+    mailboxId: mb.mailboxIdB64,
+    mailboxSignPubKey: encodeBase64(mb.signPublicKey),
+    // Slice 5b: extra epoch mailboxes to bind + drain in this same handshake.
+    ...(extraEpochMailboxes.length
+      ? { binds: extraEpochMailboxes.map((m) => ({ mailboxId: m.mailboxIdB64, mailboxSignPubKey: encodeBase64(m.signPublicKey) })) }
+      : {}),
   });
   mboxSocket = sock;
 
