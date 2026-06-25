@@ -90,6 +90,7 @@
     "encryptedToday": "CIFRATO END-TO-END · OGGI",
     "dateToday": "Oggi",
     "dateYesterday": "Ieri",
+    "newMessages": "Nuovi messaggi",
     "messagePlaceholder": "Messaggio cifrato…",
     "messageOfflinePlaceholder": "Messaggio (verrà inviato alla riconnessione)…",
     "offlineBanner": "OFFLINE — messaggi in coda",

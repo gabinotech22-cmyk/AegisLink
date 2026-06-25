@@ -208,6 +208,12 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
   const isNearBottomRef = useRef(true);
   const [showScrollFab, setShowScrollFab] = useState(false);
+  // Snapshot the unread count once, before the open-chat markRead effect clears
+  // it, so we can draw a "new messages" divider before the first unread message.
+  const initialUnreadRef = useRef<number | null>(null);
+  if (initialUnreadRef.current === null) {
+    initialUnreadRef.current = useMessages.getState().unreadCounts[contact.aegisId] ?? 0;
+  }
   const hasInitialScrolledRef = useRef(false);
   const sendingRef = useRef(false);
 
@@ -1079,8 +1085,21 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           renderItem={({ item, index }) => {
             const prev = index > 0 ? filteredList[index - 1] : undefined;
             const showDate = !prev || !isSameLocalDay(item.createdAt, prev.createdAt);
+            const unreadN = initialUnreadRef.current ?? 0;
+            const firstUnreadIdx = filteredList.length - unreadN;
+            const showUnreadDivider =
+              !searchActive && unreadN > 0 && firstUnreadIdx > 0 && index === firstUnreadIdx;
             return (
             <View>
+            {showUnreadDivider && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 8, paddingHorizontal: 6 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: `${t.accent}44` }} />
+                <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.8 }}>
+                  {i18nT('chat.newMessages').toUpperCase()}
+                </Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: `${t.accent}44` }} />
+              </View>
+            )}
             {showDate && (
               <View style={{ alignItems: 'center', marginTop: index === 0 ? 2 : 12, marginBottom: 8 }}>
                 <View style={{ backgroundColor: t.surface2, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 99 }}>
