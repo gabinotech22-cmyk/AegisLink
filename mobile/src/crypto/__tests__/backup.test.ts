@@ -14,9 +14,12 @@ import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 
 // Argon2id (v3 backup format) is intentionally slow, and the pure-JS compute
 // runs ~15-20× slower under jest than plain Node — a single 64 MiB derivation
-// takes tens of seconds here, and several tests perform two. Bump the timeout
-// accordingly so CI doesn't flake.
-jest.setTimeout(300_000);
+// can take a couple of minutes under CI runner load, and several tests here
+// perform two sequential derivations (encrypt + decrypt). The v3 cost is
+// version-implied (not env-tunable — see crypto/backup.ts header and the
+// "no env-conditional crypto" golden rule), so the only safe lever is the
+// test timeout. 300s was marginal and flaked; 600s gives comfortable headroom.
+jest.setTimeout(600_000);
 
 import {
   encryptBackup,

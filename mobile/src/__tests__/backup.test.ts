@@ -19,9 +19,11 @@ import { sha256 } from '@noble/hashes/sha256';
 
 // Argon2id m=64 MiB, t=3 is intentionally slow (H-3 mitigation), and the
 // pure-JS compute runs ~15-20× slower under jest than plain Node — a single
-// derivation takes tens of seconds here, and several tests perform multiple
-// round-trips. Raise the per-test timeout to keep CI green.
-jest.setTimeout(300_000);
+// derivation can take a couple of minutes under CI runner load, and several
+// tests perform multiple round-trips. The v3 cost is version-implied (not
+// env-tunable — see crypto/backup.ts header), so the per-test timeout is the
+// only safe lever. 300s was marginal and flaked; 600s gives headroom.
+jest.setTimeout(600_000);
 
 import {
   encryptBackup,
