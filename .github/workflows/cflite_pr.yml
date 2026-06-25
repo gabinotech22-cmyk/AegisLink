@@ -1,0 +1,41 @@
+# ClusterFuzzLite — fuzz code changed in a pull request.
+# Runs the Jazzer.js parser targets (mobile/fuzz/) against the diff so a newly
+# introduced crash in an untrusted-input parser fails the PR.
+name: ClusterFuzzLite PR fuzzing
+on:
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - 'infra/oss-fuzz/**'
+      - '.clusterfuzzlite/**'
+      - '.github/workflows/cflite_pr.yml'
+permissions: read-all
+jobs:
+  PR:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.ref }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        # Jazzer.js does not use native C sanitizers; the JavaScript engine
+        # builds with sanitizer 'none' (matches infra/oss-fuzz/project.yaml).
+        sanitizer: [none]
+    steps:
+      - name: Build fuzzers (${{ matrix.sanitizer }})
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@v1
+        with:
+          language: javascript
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sanitizer: ${{ matrix.sanitizer }}
+      - name: Run fuzzers (${{ matrix.sanitizer }})
+        id: run
+        uses: google/clusterfuzzlite/actions/run_fuzzers@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fuzz-seconds: 300
+          mode: 'code-change'
+          sanitizer: ${{ matrix.sanitizer }}
+          output-sarif: true

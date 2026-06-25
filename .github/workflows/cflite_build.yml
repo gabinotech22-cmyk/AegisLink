@@ -1,0 +1,25 @@
+# ClusterFuzzLite — build fuzzers on every push to main and cache the result.
+# The PR workflow (cflite_pr.yml, mode 'code-change') downloads this cached
+# build to tell whether a crash it finds is new in the PR or pre-existing on
+# main. No separate storage repo is required; the GitHub Actions cache is used.
+name: ClusterFuzzLite continuous build
+on:
+  push:
+    branches: [main]
+permissions: read-all
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [none]
+    steps:
+      - name: Build fuzzers (${{ matrix.sanitizer }})
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@v1
+        with:
+          language: javascript
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sanitizer: ${{ matrix.sanitizer }}
+          upload-build: true
