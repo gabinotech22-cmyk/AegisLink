@@ -207,6 +207,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   }, [contact.aegisId, loadChat, markRead]);
 
   const isNearBottomRef = useRef(true);
+  const [showScrollFab, setShowScrollFab] = useState(false);
   const hasInitialScrolledRef = useRef(false);
   const sendingRef = useRef(false);
 
@@ -1140,8 +1141,10 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             }
           }}
           onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
-            isNearBottomRef.current =
+            const nearBottom =
               contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+            isNearBottomRef.current = nearBottom;
+            setShowScrollFab(!nearBottom);
           }}
           scrollEventThrottle={100}
           ListEmptyComponent={
@@ -1152,6 +1155,28 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             </View>
           }
         />
+
+        {showScrollFab ? (
+          <Pressable
+            onPress={() => { flatlistRef.current?.scrollToEnd({ animated: true }); setShowScrollFab(false); }}
+            accessibilityLabel="Ir al último mensaje"
+            style={{
+              position: 'absolute',
+              right: 16,
+              bottom: 90,
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: t.surface2,
+              borderWidth: 1,
+              borderColor: t.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <I.ChevronD size={22} color={t.text} />
+          </Pressable>
+        ) : null}
 
         {/* Scheduled messages banner */}
         {pendingScheduledCount > 0 ? (
