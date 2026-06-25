@@ -52,8 +52,15 @@ the rest (3+5+6)**. We were close to 100% pillar 4; this brings it back down.
 
 ## Operational note
 
-There's no GitHub Actions poster for X/IG/Mastodon wired up yet (Mastodon's
-native `scheduled_at` and Telegram's GHA cron exist; X/IG remain manual per
-`automation_social_github_actions`). Until that's built, `queue/` is a
-**human-curated bank**, not an auto-publisher — pull from it manually or feed
-it into the VM queue. Building that automation is separate, future work.
+**Telegram and Mastodon are automated as of 2026-06-25.** The `telegram:`/
+`mastodon:` variants of each `bank-NNN.md` item get copied into the private
+`aegislink-social` repo's queues once approved (`social/queue/telegram-queue.json`
+for the GHA cron poster, scheduled `scheduled_at` posts via
+`social/scripts/schedule-mastodon-bank-NNN.ps1` for Mastodon) — they post on
+their own from there, no PC or manual step needed after that one-time queue.
+
+**X and IG remain manual.** X has no viable free API (still 402
+CreditsDepleted on free tier; paid is $100/mo and not worth it yet). IG
+automation exists but is wired for the carousel pipeline
+(`project_ig_content_pipeline`), not this text-post bank — pillar 2 items
+become IG carousels separately, not auto-posted from `queue/bank-NNN.md`.

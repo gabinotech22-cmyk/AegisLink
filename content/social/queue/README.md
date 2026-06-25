@@ -1,16 +1,23 @@
 # Social post queue
 
-Ready-to-post drafts, organized by the 6 pillars in `../STRATEGY.md`. This is
-a **manual human gate**, not an automated publisher (see "Operational note"
-in the strategy doc) — nothing here goes out until a person copies it to the
-platform.
+Ready-to-post drafts, organized by the 6 pillars in `../STRATEGY.md`.
 
-## How to use
+**As of 2026-06-25, Telegram and Mastodon are automated** (see "Operational
+note" in the strategy doc) — the `mastodon:`/`telegram:` variants of
+`bank-001.md` were copied into the private `aegislink-social` repo's
+publishing queues (`social/queue/telegram-queue.json`, scheduled server-side
+via `schedule-mastodon-bank-001.ps1`) and post on their own. **Don't
+hand-copy those two variants out of `bank-001.md` — they'd duplicate.**
+
+**X is still a manual human gate.** Nothing in the `x:` column goes out
+until a person copies it to the platform.
+
+## How to use (X only, for now)
 
 1. Open the lowest-numbered `bank-NNN.md` file.
 2. Pick the next unposted item in roughly pillar-mix order (don't post three
    pillar-1 items in a row even if they're first in the file).
-3. Copy the variant for the target platform (`x:` / `mastodon:` / `telegram:`).
+3. Copy the `x:` variant to X.
 4. After posting, check it off (`- [ ]` → `- [x]`) and commit that change —
    this is the audit trail, same idea as `content/devto/published/`.
 5. When a `bank-NNN.md` file is fully checked off, move it to
