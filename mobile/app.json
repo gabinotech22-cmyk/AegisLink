@@ -119,7 +119,8 @@
           "android": {
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": false,
-            "enableMinifyInReleaseBuilds": true
+            "enableMinifyInReleaseBuilds": true,
+            "buildArchs": ["arm64-v8a", "x86_64"]
           }
         }
       ],
