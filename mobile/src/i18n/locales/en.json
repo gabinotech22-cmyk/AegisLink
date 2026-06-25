@@ -88,6 +88,9 @@
   },
   "chat": {
     "encryptedToday": "END-TO-END ENCRYPTED · TODAY",
+    "dateToday": "Today",
+    "dateYesterday": "Yesterday",
+    "newMessages": "New messages",
     "messagePlaceholder": "Encrypted message…",
     "messageOfflinePlaceholder": "Message (will be sent when reconnected)…",
     "offlineBanner": "OFFLINE — messages queued",

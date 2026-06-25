@@ -277,9 +277,13 @@ const mockMessagesState = {
   togglePin: mockTogglePin,
 };
 
-jest.mock('../../store/messages', () => ({
-  useMessages: jest.fn((sel: (s: unknown) => unknown) => sel(mockMessagesState)),
-}));
+jest.mock('../../store/messages', () => {
+  const hook = jest.fn((sel: (s: unknown) => unknown) => sel(mockMessagesState)) as jest.Mock & {
+    getState: () => typeof mockMessagesState;
+  };
+  hook.getState = () => mockMessagesState;
+  return { useMessages: hook };
+});
 
 jest.mock('../../store/identity', () => {
   // Zustand stores expose .getState() as a static method on the hook itself.

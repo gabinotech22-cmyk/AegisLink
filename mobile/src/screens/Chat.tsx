@@ -62,6 +62,30 @@ function formatLastSeen(ts: number): string {
   return `Visto el ${dd}/${mm}`;
 }
 
+/** True when two timestamps fall on the same local calendar day. */
+function isSameLocalDay(a: number, b: number): boolean {
+  const da = new Date(a);
+  const db = new Date(b);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
+/** Day-separator label: Today / Yesterday / locale date (year only if not current). */
+function dayLabel(ts: number, todayLabel: string, yesterdayLabel: string): string {
+  const now = Date.now();
+  if (isSameLocalDay(ts, now)) return todayLabel;
+  if (isSameLocalDay(ts, now - 86_400_000)) return yesterdayLabel;
+  const d = new Date(ts);
+  const sameYear = d.getFullYear() === new Date(now).getFullYear();
+  return d.toLocaleDateString(
+    undefined,
+    sameYear ? { day: 'numeric', month: 'long' } : { day: 'numeric', month: 'long', year: 'numeric' },
+  );
+}
+
 interface Props {
   contact: StoredContact;
   onBack: () => void;
@@ -183,6 +207,13 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   }, [contact.aegisId, loadChat, markRead]);
 
   const isNearBottomRef = useRef(true);
+  const [showScrollFab, setShowScrollFab] = useState(false);
+  // Snapshot the unread count once, before the open-chat markRead effect clears
+  // it, so we can draw a "new messages" divider before the first unread message.
+  const initialUnreadRef = useRef<number | null>(null);
+  if (initialUnreadRef.current === null) {
+    initialUnreadRef.current = useMessages.getState().unreadCounts[contact.aegisId] ?? 0;
+  }
   const hasInitialScrolledRef = useRef(false);
   const sendingRef = useRef(false);
 
@@ -1051,7 +1082,33 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           style={{ flex: 1, backgroundColor: chatWallpaper === 0 ? t.bg : 'transparent' }}
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10 }}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => {
+            const prev = index > 0 ? filteredList[index - 1] : undefined;
+            const showDate = !prev || !isSameLocalDay(item.createdAt, prev.createdAt);
+            const unreadN = initialUnreadRef.current ?? 0;
+            const firstUnreadIdx = filteredList.length - unreadN;
+            const showUnreadDivider =
+              !searchActive && unreadN > 0 && firstUnreadIdx > 0 && index === firstUnreadIdx;
+            return (
+            <View>
+            {showUnreadDivider && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 8, paddingHorizontal: 6 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: `${t.accent}44` }} />
+                <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.8 }}>
+                  {i18nT('chat.newMessages').toUpperCase()}
+                </Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: `${t.accent}44` }} />
+              </View>
+            )}
+            {showDate && (
+              <View style={{ alignItems: 'center', marginTop: index === 0 ? 2 : 12, marginBottom: 8 }}>
+                <View style={{ backgroundColor: t.surface2, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 99 }}>
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.5 }}>
+                    {dayLabel(item.createdAt, i18nT('chat.dateToday'), i18nT('chat.dateYesterday'))}
+                  </Text>
+                </View>
+              </View>
+            )}
             <View
               style={
                 searchHits.length > 0 && searchHits[searchIdx] === item.id
@@ -1084,7 +1141,9 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               />
             </SwipeableMessage>
             </View>
-          )}
+            </View>
+            );
+          }}
           ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
           onContentSizeChange={() => {
             if (list.length === 0) return;
@@ -1103,8 +1162,10 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             }
           }}
           onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {
-            isNearBottomRef.current =
+            const nearBottom =
               contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+            isNearBottomRef.current = nearBottom;
+            setShowScrollFab(!nearBottom);
           }}
           scrollEventThrottle={100}
           ListEmptyComponent={
@@ -1116,6 +1177,28 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           }
         />
         </View>
+
+        {showScrollFab ? (
+          <Pressable
+            onPress={() => { flatlistRef.current?.scrollToEnd({ animated: true }); setShowScrollFab(false); }}
+            accessibilityLabel="Ir al último mensaje"
+            style={{
+              position: 'absolute',
+              right: 16,
+              bottom: 90,
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: t.surface2,
+              borderWidth: 1,
+              borderColor: t.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <I.ChevronD size={22} color={t.text} />
+          </Pressable>
+        ) : null}
 
         {/* Scheduled messages banner */}
         {pendingScheduledCount > 0 ? (
