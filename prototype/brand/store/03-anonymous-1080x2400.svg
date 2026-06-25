@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="2400" viewBox="0 0 1080 2400">
+  <defs>
+    <radialGradient id="s3bg" cx="50%" cy="20%" r="90%">
+      <stop offset="0%" stop-color="#15261e"/>
+      <stop offset="55%" stop-color="#0a0e0d"/>
+      <stop offset="100%" stop-color="#06090a"/>
+    </radialGradient>
+    <radialGradient id="s3glow" cx="50%" cy="38%" r="34%">
+      <stop offset="0%" stop-color="#5bf2b9" stop-opacity="0.14"/>
+      <stop offset="64%" stop-color="#5bf2b9" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="s3screen"><rect x="168" y="612" width="744" height="1660" rx="60"/></clipPath>
+  </defs>
+  <rect width="1080" height="2400" fill="url(#s3bg)"/>
+
+  <text x="540" y="230" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="78" font-weight="600" fill="#e8f0ec">Anónimo por defecto</text>
+  <text x="540" y="316" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="40" fill="#5bf2b9" opacity="0.85">Sin teléfono. Sin email. Sin nombre real.</text>
+
+  <rect x="150" y="594" width="780" height="1696" rx="76" fill="#000000"/>
+  <rect x="162" y="606" width="756" height="1672" rx="66" fill="none" stroke="#243033" stroke-width="2"/>
+
+  <g clip-path="url(#s3screen)">
+    <rect x="168" y="612" width="744" height="1660" fill="#0a0e0d"/>
+    <rect x="168" y="612" width="744" height="1660" fill="url(#s3glow)"/>
+
+    <g transform="translate(540,820) translate(-104,-104) scale(5.2)">
+      <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+      <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+      <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+    </g>
+
+    <text x="540" y="1010" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="600" fill="#e8f0ec">Tu identidad criptográfica</text>
+    <rect x="248" y="1060" width="584" height="86" rx="20" fill="#11181a" stroke="#1f2d2a" stroke-width="2"/>
+    <text x="540" y="1114" text-anchor="middle" font-family="Consolas, monospace" font-size="34" fill="#5bf2b9" letter-spacing="3">K7QF · 9X2M · TB4D</text>
+    <text x="540" y="1196" text-anchor="middle" font-family="Consolas, monospace" font-size="22" fill="#6b7d76">generada en tu dispositivo</text>
+
+    <g font-family="Arial, Helvetica, sans-serif">
+      <rect x="248" y="1280" width="584" height="96" rx="18" fill="#11181a"/>
+      <g transform="translate(282,1328)"><path d="M0 0 l20 20 M20 0 l-20 20" stroke="#ff6b6b" stroke-width="4" stroke-linecap="round"/></g>
+      <text x="328" y="1336" font-size="32" fill="#cdd8d3">Teléfono</text>
+      <text x="800" y="1336" text-anchor="end" font-size="26" fill="#6b7d76">no requerido</text>
+
+      <rect x="248" y="1396" width="584" height="96" rx="18" fill="#11181a"/>
+      <g transform="translate(282,1444)"><path d="M0 0 l20 20 M20 0 l-20 20" stroke="#ff6b6b" stroke-width="4" stroke-linecap="round"/></g>
+      <text x="328" y="1452" font-size="32" fill="#cdd8d3">Email</text>
+      <text x="800" y="1452" text-anchor="end" font-size="26" fill="#6b7d76">no requerido</text>
+
+      <rect x="248" y="1512" width="584" height="96" rx="18" fill="#11181a"/>
+      <g transform="translate(282,1560)"><path d="M0 0 l20 20 M20 0 l-20 20" stroke="#ff6b6b" stroke-width="4" stroke-linecap="round"/></g>
+      <text x="328" y="1568" font-size="32" fill="#cdd8d3">Nombre real</text>
+      <text x="800" y="1568" text-anchor="end" font-size="26" fill="#6b7d76">no requerido</text>
+    </g>
+
+    <rect x="248" y="1700" width="584" height="100" rx="50" fill="#5bf2b9"/>
+    <text x="540" y="1762" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="600" fill="#06231a">Crear identidad</text>
+  </g>
+
+  <g transform="translate(540,2350) translate(-16,-16) scale(0.8)" opacity="0.9">
+    <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+    <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+    <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+  </g>
+</svg>

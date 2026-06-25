@@ -12,7 +12,7 @@ import { GifPicker } from '../components/GifPicker';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 import { MediaImage } from '../components/MediaImage';
 import { AttachmentGrid } from '../components/AttachmentGrid';
-import { loadWallpaper, wallpaperBg, type WallpaperOption } from '../components/WallpaperPicker';
+import { loadWallpaper, ChatWallpaper, type WallpaperOption } from '../components/WallpaperPicker';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import Svg, { Path, Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
@@ -1042,11 +1042,13 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           </View>
         </View>
 
+        <View style={{ flex: 1 }}>
+        <ChatWallpaper option={chatWallpaper} style={StyleSheet.absoluteFill} />
         <FlatList
           ref={flatlistRef}
           data={filteredList}
           keyExtractor={(m) => m.id}
-          style={{ backgroundColor: wallpaperBg(chatWallpaper, t) ?? t.bg }}
+          style={{ flex: 1, backgroundColor: chatWallpaper === 0 ? t.bg : 'transparent' }}
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10 }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
@@ -1113,6 +1115,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             </View>
           }
         />
+        </View>
 
         {/* Scheduled messages banner */}
         {pendingScheduledCount > 0 ? (

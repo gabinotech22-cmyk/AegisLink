@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="2400" viewBox="0 0 1080 2400">
+  <defs>
+    <radialGradient id="s1bg" cx="50%" cy="20%" r="90%">
+      <stop offset="0%" stop-color="#15261e"/>
+      <stop offset="55%" stop-color="#0a0e0d"/>
+      <stop offset="100%" stop-color="#06090a"/>
+    </radialGradient>
+    <pattern id="s1hex" width="64" height="72" patternUnits="userSpaceOnUse">
+      <path d="M32 4 L59 19 L59 53 L32 68 L5 53 L5 19 Z" fill="none" stroke="#5bf2b9" stroke-opacity="0.07" stroke-width="1.6"/>
+    </pattern>
+    <clipPath id="s1screen"><rect x="168" y="612" width="744" height="1660" rx="60"/></clipPath>
+  </defs>
+
+  <rect width="1080" height="2400" fill="url(#s1bg)"/>
+
+  <text x="540" y="230" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="70" font-weight="600" fill="#e8f0ec">Cifrado de extremo a extremo</text>
+  <text x="540" y="316" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="40" fill="#5bf2b9" opacity="0.85">Nadie más puede leerlo. Ni nosotros.</text>
+
+  <rect x="150" y="594" width="780" height="1696" rx="76" fill="#000000"/>
+  <rect x="162" y="606" width="756" height="1672" rx="66" fill="none" stroke="#243033" stroke-width="2"/>
+
+  <g clip-path="url(#s1screen)">
+    <rect x="168" y="612" width="744" height="1660" fill="#0a0e0d"/>
+
+    <rect x="168" y="612" width="744" height="150" fill="#11181a"/>
+    <path d="M232 678 l-18 12 l18 12" fill="none" stroke="#8aa" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+    <circle cx="300" cy="687" r="30" fill="#1f8a5b"/>
+    <text x="300" y="697" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="600" fill="#06231a">A</text>
+    <text x="350" y="678" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="600" fill="#e8f0ec">Aria</text>
+    <text x="350" y="712" font-family="Consolas, monospace" font-size="22" fill="#5bf2b9" opacity="0.8">cifrado · en línea</text>
+
+    <rect x="168" y="762" width="744" height="1320" fill="#0a0e0d"/>
+    <rect x="168" y="762" width="744" height="1320" fill="url(#s1hex)"/>
+
+    <rect x="384" y="800" width="312" height="52" rx="26" fill="#1a2326"/>
+    <text x="540" y="834" text-anchor="middle" font-family="Consolas, monospace" font-size="22" fill="#9fb3ab">cifrado de extremo a extremo</text>
+
+    <rect x="208" y="900" width="430" height="84" rx="22" fill="#1a2326"/>
+    <text x="234" y="950" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#e8f0ec">¿Llegó el informe?</text>
+
+    <rect x="430" y="1010" width="442" height="84" rx="22" fill="#5bf2b9"/>
+    <text x="456" y="1060" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#06231a">Sí — nadie más lo ve</text>
+
+    <rect x="208" y="1120" width="360" height="84" rx="22" fill="#1a2326"/>
+    <text x="234" y="1170" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#e8f0ec">Sin rastro, sin metadatos</text>
+
+    <rect x="470" y="1230" width="402" height="84" rx="22" fill="#5bf2b9"/>
+    <text x="496" y="1280" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#06231a">Anónimo por defecto</text>
+
+    <rect x="208" y="1990" width="560" height="80" rx="40" fill="#1a2326"/>
+    <text x="244" y="2038" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#6b7d76">Mensaje cifrado…</text>
+    <circle cx="836" cy="2030" r="40" fill="#5bf2b9"/>
+    <path d="M820 2030 h30 M838 2018 l14 12 l-14 12" fill="none" stroke="#06231a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(540,2350) translate(-16,-16) scale(0.8)" opacity="0.9">
+    <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+    <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+    <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+  </g>
+</svg>
