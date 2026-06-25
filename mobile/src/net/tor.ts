@@ -30,6 +30,10 @@ interface AegisTorNative {
   start(): Promise<TorStatus>;
   getStatus(): Promise<TorStatus>;
   stop(): Promise<boolean>;
+  // F2 socket.io-over-SOCKS bridge.
+  sioConnect(id: string, url: string, authJson: string, eventsJson: string): Promise<boolean>;
+  sioEmit(id: string, event: string, payloadJson: string, ackId: string | null): Promise<boolean>;
+  sioDisconnect(id: string): Promise<boolean>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -45,15 +49,35 @@ export function isTorAvailable(): boolean {
 }
 
 /**
+ * Bootstrap timeout: the native `start()` promise only resolves on STATUS_ON —
+ * if Tor never bootstraps (no network, carrier/firewall blocking, cold first-run
+ * fetching consensus) it would otherwise hang forever. 45s is generous for a
+ * normal bootstrap but still bounds the fail-closed fallback to the aegisId
+ * transport (mailboxSocket.ts) to a finite wait. Bootstrap continues natively
+ * after we give up — a later `startTor()` call resolves immediately if it
+ * eventually reaches STATUS_ON.
+ */
+const BOOTSTRAP_TIMEOUT_MS = 45_000;
+
+/**
  * Start the embedded Tor and resolve once it has bootstrapped (STATUS_ON),
- * returning the local SOCKS port. Rejects on native error. No-op-safe: throws a
- * typed error when the native module is absent so callers can fall back.
+ * returning the local SOCKS port. Rejects on native error or bootstrap timeout.
+ * No-op-safe: throws a typed error when the native module is absent so callers
+ * can fall back.
  */
 export async function startTor(): Promise<TorStatus> {
   if (!Native) throw new Error('[tor] native module unavailable (Expo Go or non-prebuilt build)');
-  const status = await Native.start();
-  if (__DEV__) logger.debug('[tor] started:', status.state, 'socks', status.socksPort);
-  return status;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('[tor] bootstrap timed out')), BOOTSTRAP_TIMEOUT_MS);
+  });
+  try {
+    const status = await Promise.race([Native.start(), timeout]);
+    if (__DEV__) logger.debug('[tor] started:', status.state, 'socks', status.socksPort);
+    return status;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Current Tor status without starting it. Returns OFF when unavailable. */
@@ -85,4 +109,99 @@ export function onTorStatus(cb: (status: TorStatus) => void): () => void {
   if (!emitter) return () => {};
   const sub: EmitterSubscription = emitter.addListener('AegisTorStatus', cb);
   return () => sub.remove();
+}
+
+// ─── F2: socket.io-over-Tor transport ─────────────────────────────────────────
+
+/** Generic event/ack callback. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- mirrors socket.io-client's
+// own listener typing: callers narrow each event's argument shape themselves.
+type SioListener = (...args: any[]) => void;
+
+/** Native bridge event payload (args is a JSON-encoded array). */
+interface SioForward { id: string; event: string; args: string }
+
+/** Custom socket.io events the mailbox protocol expects forwarded from native. */
+const MAILBOX_FORWARD_EVENTS = ['mailbox:challenge', 'auth:ok', 'error_msg', 'envelope:mb'];
+
+let _sioCounter = 0;
+
+/**
+ * A minimal socket.io-client-shaped transport backed by the native
+ * socket.io-over-SOCKS bridge (every byte rides Tor). Implements exactly the
+ * subset `mailboxSocket.ts` uses — `on` / `emit(+ack)` / `connected` /
+ * `disconnect` / `removeAllListeners` — so the mailbox transport is a drop-in
+ * swap for `io(ONION_URL)` with no protocol logic leaving JS.
+ */
+export class TorSioSocket {
+  private readonly id: string;
+  private readonly handlers = new Map<string, Set<SioListener>>();
+  private readonly acks = new Map<string, SioListener>();
+  private ackCounter = 0;
+  private unsub: (() => void) | null = null;
+  /** True between the native 'connect' and 'disconnect'/'connect_error' events. */
+  public connected = false;
+
+  constructor(url: string, auth: Record<string, unknown>) {
+    if (!Native || !emitter) throw new Error('[tor] native module unavailable');
+    this.id = `mbx-${++_sioCounter}`;
+    const sub = emitter.addListener('AegisTorSio', (ev: SioForward) => {
+      if (ev?.id === this.id) this.dispatch(ev.event, ev.args);
+    });
+    this.unsub = () => sub.remove();
+    // socket.io-client-java handshake auth is Map<String,String>; non-string
+    // values (the catch-up `binds` array) are pre-serialized to JSON strings —
+    // the relay tolerates a stringified `binds` (see relay/handler.ts).
+    const authStr: Record<string, string> = {};
+    for (const [k, v] of Object.entries(auth)) {
+      authStr[k] = typeof v === 'string' ? v : JSON.stringify(v);
+    }
+    void Native.sioConnect(this.id, url, JSON.stringify(authStr), JSON.stringify(MAILBOX_FORWARD_EVENTS))
+      .catch((e: Error) => { if (__DEV__) logger.warn('[tor] sioConnect failed:', e.message); });
+  }
+
+  private dispatch(event: string, argsJson: string): void {
+    let args: unknown[] = [];
+    try { const p: unknown = JSON.parse(argsJson); if (Array.isArray(p)) args = p; } catch { /* keep [] */ }
+    if (event === 'connect') this.connected = true;
+    else if (event === 'disconnect' || event === 'connect_error') this.connected = false;
+    if (event.startsWith('__ack:')) {
+      const cb = this.acks.get(event.slice('__ack:'.length));
+      if (cb) { this.acks.delete(event.slice('__ack:'.length)); cb(...args); }
+      return;
+    }
+    const set = this.handlers.get(event);
+    if (set) for (const h of set) {
+      try { h(...args); } catch (e) { if (__DEV__) logger.warn('[tor] sio handler threw:', e); }
+    }
+  }
+
+  on(event: string, cb: SioListener): this {
+    let set = this.handlers.get(event);
+    if (!set) { set = new Set(); this.handlers.set(event, set); }
+    set.add(cb);
+    return this;
+  }
+
+  emit(event: string, payload?: unknown, ack?: SioListener): this {
+    if (!Native) return this;
+    let ackId: string | null = null;
+    if (ack) { ackId = `k${++this.ackCounter}`; this.acks.set(ackId, ack); }
+    void Native.sioEmit(this.id, event, JSON.stringify(payload ?? {}), ackId)
+      .catch((e: Error) => { if (__DEV__) logger.warn('[tor] sioEmit failed:', e.message); });
+    return this;
+  }
+
+  removeAllListeners(): this {
+    this.handlers.clear();
+    this.acks.clear();
+    return this;
+  }
+
+  disconnect(): this {
+    this.connected = false;
+    if (this.unsub) { this.unsub(); this.unsub = null; }
+    if (Native) void Native.sioDisconnect(this.id).catch(() => { /* best effort */ });
+    return this;
+  }
 }

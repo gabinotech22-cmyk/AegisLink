@@ -97,15 +97,30 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import io.socket.client.Ack
+import io.socket.client.IO
+import io.socket.client.Socket
+import io.socket.engineio.client.transports.WebSocket
+import okhttp3.OkHttpClient
+import org.json.JSONArray
+import org.json.JSONObject
 import org.torproject.jni.TorService
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * AegisTor — embedded Tor lifecycle (Fase 4 Tier 2, F1).
+ * AegisTor — embedded Tor (Fase 4 Tier 2).
  *
- * Binds Guardian Project's TorService, surfaces bootstrap status to JS, and
- * exposes the local SOCKS port the mailbox transport will route through. The
- * audited crypto stays in JS; this module only owns the Tor process + (later)
- * a dumb socket.io-over-SOCKS pipe.
+ * Two responsibilities, one module (see docs/FASE4-TOR-EMBEDDED-IMPL.md):
+ *   F1: bind Guardian Project's TorService, surface bootstrap status to JS, and
+ *       expose the local SOCKS port the mailbox transport routes through.
+ *   F2: a DUMB, reusable socket.io-over-SOCKS pipe — \`sioConnect/sioEmit/
+ *       sioDisconnect\` run a socket.io-client-java connection over an OkHttp
+ *       client bound to Tor's SOCKS proxy (RN's JS WebSocket can't do SOCKS),
+ *       forwarding every event verbatim to JS as "AegisTorSio". The native side
+ *       never interprets payloads — all protocol logic (possession proofs,
+ *       multi-epoch catch-up, sealed v2) stays in the audited JS layer.
  */
 class AegisTorModule(reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
@@ -115,8 +130,18 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
   private var state: String = "off"
   private var startPromise: Promise? = null
   private var receiverRegistered = false
+  // Last known SOCKS port (survives transient unbind so sioConnect can route).
+  private var cachedSocksPort: Int = 0
+  // Live socket.io-over-Tor connections, keyed by the JS-supplied id.
+  private val sockets = ConcurrentHashMap<String, Socket>()
 
   override fun getName(): String = "AegisTor"
+
+  private fun socksPort(): Int {
+    val live = torService?.socksPort ?: 0
+    if (live > 0) cachedSocksPort = live
+    return if (live > 0) live else cachedSocksPort
+  }
 
   private val statusReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -125,7 +150,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
         TorService.STATUS_ON -> {
           updateState("on")
           startPromise?.let {
-            it.resolve(makeStatusMap("on", torService?.socksPort ?: 0))
+            it.resolve(makeStatusMap("on", socksPort()))
             startPromise = null
           }
         }
@@ -156,7 +181,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
         receiverRegistered = true
       }
       if (state == "on") {
-        promise.resolve(makeStatusMap("on", torService?.socksPort ?: 0))
+        promise.resolve(makeStatusMap("on", socksPort()))
         return
       }
       // Resolve once STATUS_ON arrives via the broadcast receiver.
@@ -170,7 +195,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun getStatus(promise: Promise) {
-    promise.resolve(makeStatusMap(state, torService?.socksPort ?: 0))
+    promise.resolve(makeStatusMap(state, socksPort()))
   }
 
   @ReactMethod
@@ -198,7 +223,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
     state = s
     reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-      .emit("AegisTorStatus", makeStatusMap(s, torService?.socksPort ?: 0))
+      .emit("AegisTorStatus", makeStatusMap(s, socksPort()))
   }
 
   private fun makeStatusMap(s: String, port: Int): WritableMap {
@@ -206,6 +231,117 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
     map.putString("state", s)
     map.putInt("socksPort", port)
     return map
+  }
+
+  // ── F2: socket.io-over-SOCKS bridge ─────────────────────────────────────────
+  // A dumb pipe. JS owns the protocol; the native side only carries socket.io
+  // frames over Tor's SOCKS proxy and forwards every event verbatim.
+
+  /** OkHttp client whose every connection is dialed through Tor's local SOCKS5. */
+  private fun torOkHttp(port: Int): OkHttpClient =
+    OkHttpClient.Builder()
+      // OkHttp passes the (unresolved) host to the SOCKS proxy for remote DNS,
+      // which is exactly what .onion resolution needs — no custom Dns required.
+      .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port)))
+      .build()
+
+  /**
+   * Open a socket.io connection over Tor. authJson is an object whose values
+   * are ALL strings (the catch-up binds array is pre-serialized to a JSON
+   * string by JS — the relay tolerates it), matching socket.io-client-java's
+   * Map<String,String> handshake auth. eventsJson is a JSON array of the
+   * custom event names to forward (lifecycle events are always forwarded).
+   */
+  @ReactMethod
+  fun sioConnect(id: String, url: String, authJson: String, eventsJson: String, promise: Promise) {
+    try {
+      val port = socksPort()
+      if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
+      val client = torOkHttp(port)
+      val opts = IO.Options()
+      opts.callFactory = client
+      opts.webSocketFactory = client
+      opts.transports = arrayOf(WebSocket.NAME)
+      val authObj = JSONObject(authJson)
+      val authMap = HashMap<String, String>()
+      val keys = authObj.keys()
+      while (keys.hasNext()) { val k = keys.next(); authMap[k] = authObj.getString(k) }
+      opts.auth = authMap
+      opts.reconnection = true
+
+      val socket = IO.socket(url, opts)
+      sockets[id] = socket
+
+      socket.on(Socket.EVENT_CONNECT) { _ -> forward(id, "connect", JSONArray()) }
+      socket.on(Socket.EVENT_DISCONNECT) { args -> forward(id, "disconnect", argsToJson(args)) }
+      socket.on(Socket.EVENT_CONNECT_ERROR) { args -> forward(id, "connect_error", argsToJson(args)) }
+
+      val events = JSONArray(eventsJson)
+      for (i in 0 until events.length()) {
+        val ev = events.getString(i)
+        socket.on(ev) { args -> forward(id, ev, argsToJson(args)) }
+      }
+
+      socket.connect()
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("E_SIO_CONNECT", e)
+    }
+  }
+
+  /**
+   * Emit one event with a single JSON payload. If ackId is non-null the relay's
+   * ack is forwarded to JS as the synthetic event __ack:ackId.
+   */
+  @ReactMethod
+  fun sioEmit(id: String, event: String, payloadJson: String, ackId: String?, promise: Promise) {
+    try {
+      val socket = sockets[id] ?: run { promise.reject("E_SIO_NO_SOCKET", "no socket: \$id"); return }
+      val payload = parseJsonValue(payloadJson)
+      if (ackId != null) {
+        socket.emit(event, arrayOf<Any?>(payload), Ack { args -> forward(id, "__ack:\$ackId", argsToJson(args)) })
+      } else {
+        socket.emit(event, payload)
+      }
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("E_SIO_EMIT", e)
+    }
+  }
+
+  @ReactMethod
+  fun sioDisconnect(id: String, promise: Promise) {
+    try {
+      sockets.remove(id)?.let { it.off(); it.disconnect() }
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("E_SIO_DISCONNECT", e)
+    }
+  }
+
+  private fun forward(id: String, event: String, args: JSONArray) {
+    val map = Arguments.createMap()
+    map.putString("id", id)
+    map.putString("event", event)
+    map.putString("args", args.toString())
+    reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit("AegisTorSio", map)
+  }
+
+  private fun argsToJson(args: Array<out Any?>?): JSONArray {
+    val arr = JSONArray()
+    if (args != null) for (a in args) arr.put(a ?: JSONObject.NULL)
+    return arr
+  }
+
+  private fun parseJsonValue(s: String): Any {
+    val t = s.trim()
+    return when {
+      t.startsWith("{") -> JSONObject(t)
+      t.startsWith("[") -> JSONArray(t)
+      else -> t
+    }
   }
 
   // RN event-emitter contract (no-ops; required so NativeEventEmitter is happy).
