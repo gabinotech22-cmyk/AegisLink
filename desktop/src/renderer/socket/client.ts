@@ -36,6 +36,7 @@ import {
   type PreKeyBundle,
   type PqSignedPreKeyPublic,
 } from '../crypto/signal/x3dh';
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import {
   initRatchet,
@@ -837,6 +838,15 @@ async function getOrCreateSessionLocked(
     s.DHr = reviveBytes(s.DHr);
     s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
     s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
+    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
+    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
+    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
+    if (s.PQs) {
+      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
+      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
+    }
+    s.PQr = reviveBytes(s.PQr);
+    s.pqSendCt = reviveBytes(s.pqSendCt);
     s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
     return s as RatchetState;
   }
@@ -888,10 +898,21 @@ async function getOrCreateSessionLocked(
   bundle.identityKeyB64 = contactPublicKeyB64;
 
   const x3dh = performX3DH(identity, bundle);
+  // Hybrid PQ ratchet (R1): only seed PQ bootstrap when X3DH actually
+  // negotiated v2 (bundle carried a verified PQSPK and we encapsulated to
+  // it). A v1 session must stay classic — initRatchet treats any PQ param as
+  // "this session is hybrid" and would then demand pqPub/pqCt on every chain
+  // turn, which a v1 peer can never send.
+  const initialPQr = x3dh.version === 2 && bundle.pqSignedPreKey
+    ? decodeBase64(bundle.pqSignedPreKey.publicKeyB64)
+    : null;
   const ratchetState = initRatchet(
     x3dh.rootKey,
     decodeBase64(bundle.signedPreKey.publicKeyB64),
     true,
+    undefined,
+    undefined,
+    initialPQr,
   );
 
   ratchetState.x3dhInit = {
@@ -978,6 +999,15 @@ async function sendNudgeOverExistingSession(
     s.DHr = reviveBytes(s.DHr);
     s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
     s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
+    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
+    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
+    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
+    if (s.PQs) {
+      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
+      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
+    }
+    s.PQr = reviveBytes(s.PQr);
+    s.pqSendCt = reviveBytes(s.pqSendCt);
     s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
     session = s as RatchetState;
   } catch {
@@ -1151,6 +1181,15 @@ async function decryptAndAppendLocked(
     s.DHr = reviveBytes(s.DHr);
     s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
     s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
+    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
+    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
+    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
+    if (s.PQs) {
+      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
+      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
+    }
+    s.PQr = reviveBytes(s.PQr);
+    s.pqSendCt = reviveBytes(s.pqSendCt);
     s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
     ratchetState = s;
   } else {
@@ -1225,10 +1264,16 @@ async function decryptAndAppendLocked(
     );
 
     const spkPublicKey = nacl.scalarMult.base(mySpkSecret);
+    // Hybrid PQ ratchet (R1) bootstrap: when this handshake negotiated v2,
+    // seed our PQSPK keypair as the ratchet's initial PQs (mirrors mySpkSecret
+    // for DHs above). pqInputs is only set when pqDecision === 'v2'.
+    const initialPQs = pqInputs
+      ? { publicKey: ml_kem768.getPublicKey(pqInputs.pqSpkSecret), secretKey: pqInputs.pqSpkSecret }
+      : null;
     ratchetState = initRatchet(rootKey, decodeBase64(parsed.ratchet.ratchetKeyB64), false, {
       publicKey: spkPublicKey,
       secretKey: mySpkSecret,
-    });
+    }, initialPQs);
 
     // Adopting an inbound init — converged. Clear the recovery marker so stale
     // in-flight messages on the old session don't re-trigger recovery, and
@@ -1697,6 +1742,15 @@ async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
     s.DHr = reviveBytes(s.DHr);
     s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
     s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
+    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
+    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
+    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
+    if (s.PQs) {
+      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
+      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
+    }
+    s.PQr = reviveBytes(s.PQr);
+    s.pqSendCt = reviveBytes(s.pqSendCt);
     s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
     return s as RatchetState;
   } catch (e) {

@@ -530,3 +530,128 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
     ).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R1: Hybrid PQ Double Ratchet. Unlike the PQXDH tests above (which only seed
+// the ML-KEM secret into the INITIAL X3DH root key), these tests seed
+// initRatchet's `initialPQr`/`initialPQs` so the ratchet itself mixes a FRESH
+// ML-KEM-768 shared secret into the root on every chain turn — the actual R1
+// deliverable. Mirrors how socket/client.ts wires this in production.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
+  function establishHybridSession() {
+    const alice = buildIdentity();
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+    const bundle = buildBundle(bob, bobPreKeys, { withOpk: true, withPq: true });
+
+    const aliceX3DH = performX3DH(alice, bundle);
+    expect(aliceX3DH.version).toBe(2);
+
+    // Alice seeds Bob's PQSPK public key as her initial PQr (mirrors
+    // socket/client.ts's getOrCreateSessionLocked).
+    const aliceState = initRatchet(
+      aliceX3DH.rootKey,
+      decodeBase64(bundle.signedPreKey.publicKeyB64),
+      true,
+      undefined,
+      undefined,
+      decodeBase64(bundle.pqSignedPreKey!.publicKeyB64),
+    );
+
+    const opk = bobPreKeys.oneTimePreKeys[0];
+    const bobRoot = performX3DHReceiver(
+      bob,
+      bobPreKeys.signedPreKey.secretKey,
+      bobPreKeys.opkSecrets.get(opk.keyId) ?? null,
+      alice.publicKey,
+      decodeBase64(aliceX3DH.myEphemeralPublicKeyB64),
+      {
+        cipherText: decodeBase64(aliceX3DH.pqCiphertextB64!),
+        pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+      },
+    );
+
+    // First message header carries Alice's pqPub/pqCt because hybrid mode
+    // mixes PQ immediately on initRatchet's isAlice branch.
+    const firstPlaintext = new TextEncoder().encode('hybrid message 1 (alice -> bob)');
+    const first = ratchetEncrypt(aliceState, firstPlaintext);
+    expect(first.header.pqPub).toBeDefined();
+    expect(first.header.pqCt).toBeDefined();
+
+    // Bob seeds his own PQSPK keypair as his initial PQs (mirrors
+    // socket/client.ts's decryptAndAppendLocked).
+    const spkPub = nacl.scalarMult.base(bobPreKeys.signedPreKey.secretKey);
+    const bobState = initRatchet(
+      bobRoot,
+      first.header.ratchetKey,
+      false,
+      { publicKey: spkPub, secretKey: bobPreKeys.signedPreKey.secretKey },
+      {
+        publicKey: decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64),
+        secretKey: bobPreKeys.pqSignedPreKey.secretKey,
+      },
+    );
+
+    const out1 = ratchetDecrypt(bobState, first.header, first.ciphertext, first.nonce);
+    expect(out1).not.toBeNull();
+    expect(encodeBase64(out1!)).toBe(encodeBase64(firstPlaintext));
+
+    return { aliceState, bobState };
+  }
+
+  it('Bob decrypts the first message of a hybrid session (PQ mixed from message 1)', () => {
+    // Assertions already happened inside establishHybridSession(); this just
+    // confirms it doesn't throw and both sides came back hybrid.
+    const { aliceState, bobState } = establishHybridSession();
+    expect(aliceState.PQs).toBeTruthy();
+    expect(bobState.PQs).toBeTruthy();
+  });
+
+  it('survives multiple round-trip chain turns, each rotating PQ material', () => {
+    const { aliceState, bobState } = establishHybridSession();
+
+    // Capture PQ pubkeys before each turn to prove they actually rotate.
+    const alicePqPubRound1 = encodeBase64(aliceState.PQs!.publicKey);
+
+    // Bob replies — this is a NEW sending chain for Bob, so his ratchetEncrypt
+    // attaches HIS fresh pqPub/pqCt (encapsulated to Alice's PQr he just
+    // learned from message 1's header).
+    const reply1Plaintext = new TextEncoder().encode('hybrid message 2 (bob -> alice)');
+    const reply1 = ratchetEncrypt(bobState, reply1Plaintext);
+    expect(reply1.header.pqPub).toBeDefined();
+    expect(reply1.header.pqCt).toBeDefined();
+
+    const aliceOut1 = ratchetDecrypt(aliceState, reply1.header, reply1.ciphertext, reply1.nonce);
+    expect(aliceOut1).not.toBeNull();
+    expect(encodeBase64(aliceOut1!)).toBe(encodeBase64(reply1Plaintext));
+
+    // Alice's PQ keypair rotated when she dh-ratcheted on Bob's reply.
+    const alicePqPubRound2 = encodeBase64(aliceState.PQs!.publicKey);
+    expect(alicePqPubRound2).not.toBe(alicePqPubRound1);
+
+    // One more round trip the other way to confirm steady-state symmetry.
+    const msg2Plaintext = new TextEncoder().encode('hybrid message 3 (alice -> bob)');
+    const msg2 = ratchetEncrypt(aliceState, msg2Plaintext);
+    expect(msg2.header.pqPub).toBeDefined();
+    expect(msg2.header.pqCt).toBeDefined();
+
+    const bobOut2 = ratchetDecrypt(bobState, msg2.header, msg2.ciphertext, msg2.nonce);
+    expect(bobOut2).not.toBeNull();
+    expect(encodeBase64(bobOut2!)).toBe(encodeBase64(msg2Plaintext));
+  });
+
+  it('rejects a chain-turn header stripped of PQ material (downgrade attack)', () => {
+    const { aliceState, bobState } = establishHybridSession();
+
+    const replyPlaintext = new TextEncoder().encode('attempted downgrade');
+    const reply = ratchetEncrypt(bobState, replyPlaintext);
+    // Strip the PQ fields a malicious relay would need to remove to force
+    // Alice's side back to classic-only mixing on this chain turn.
+    const strippedHeader = { ratchetKey: reply.header.ratchetKey, n: reply.header.n, pn: reply.header.pn };
+
+    expect(() => ratchetDecrypt(aliceState, strippedHeader, reply.ciphertext, reply.nonce)).toThrow(
+      /downgrade/i,
+    );
+  });
+});

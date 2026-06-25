@@ -12,7 +12,7 @@ import nacl from 'tweetnacl';
 import { decodeBase64, decodeUTF8, encodeUTF8 } from 'tweetnacl-util';
 
 import { runAnonymousOnboarding } from '../../onboarding';
-import { performX3DH, performX3DHReceiver } from '../x3dh';
+import { performX3DH, performX3DHReceiver, generatePreKeys } from '../x3dh';
 import {
   initRatchet,
   ratchetDecrypt,
@@ -167,6 +167,136 @@ describe('Double Ratchet — security boundaries', () => {
     // skipped-key map never recorded that key.
     const replay = ratchetDecrypt(aliceState, m1.header, m1.ciphertext, m1.nonce);
     expect(replay).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R1 — Hybrid PQ ratchet (ML-KEM-768 mixed into the root key at every chain
+// turn). A hybrid session is bootstrapped from a PQXDH v2 handshake: Bob's
+// PQSPK keypair seeds his initial PQs, Alice learns Bob's PQSPK public as her
+// initial PQr. See docs/R1-PQ-PER-FRAME-DESIGN.md.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function newHybridSession(): Session {
+  const alice = runAnonymousOnboarding(5);
+  const bob = runAnonymousOnboarding(5);
+  const bobPreKeys = generatePreKeys(bob.identity);
+
+  const bundle = {
+    identityKeyB64: bob.identity.publicKeyB64,
+    signingPublicKeyB64: bob.identity.signingPublicKeyB64,
+    signedPreKey: {
+      keyId: bobPreKeys.signedPreKey.keyId,
+      publicKeyB64: bobPreKeys.signedPreKey.publicKeyB64,
+      signatureB64: bobPreKeys.signedPreKey.signatureB64,
+    },
+    oneTimePreKey: null,
+    pqSignedPreKey: {
+      keyId: bobPreKeys.pqSignedPreKey.keyId,
+      publicKeyB64: bobPreKeys.pqSignedPreKey.publicKeyB64,
+      signatureB64: bobPreKeys.pqSignedPreKey.signatureB64,
+    },
+  };
+
+  const x = performX3DH(alice.identity, bundle);
+  expect(x.version).toBe(2); // sanity: PQXDH negotiated
+  const bobRoot = performX3DHReceiver(
+    bob.identity,
+    bobPreKeys.signedPreKey.secretKey,
+    null,
+    alice.identity.publicKey,
+    decodeBase64(x.myEphemeralPublicKeyB64),
+    {
+      cipherText: decodeBase64(x.pqCiphertextB64!),
+      pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+    },
+  );
+
+  const bobSpkPub = decodeBase64(bobPreKeys.signedPreKey.publicKeyB64);
+  const bobPqPub = decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64);
+
+  const aliceState = initRatchet(x.rootKey, bobSpkPub, true, undefined, null, bobPqPub);
+  const bobState = initRatchet(
+    bobRoot,
+    new Uint8Array(),
+    false,
+    { publicKey: bobSpkPub, secretKey: bobPreKeys.signedPreKey.secretKey },
+    { publicKey: bobPqPub, secretKey: bobPreKeys.pqSignedPreKey.secretKey },
+    null,
+  );
+  return { aliceState, bobState };
+}
+
+describe('R1 — hybrid PQ ratchet', () => {
+  it('hybrid roundtrip: alice -> bob decrypts with PQ mixed in', () => {
+    const { aliceState, bobState } = newHybridSession();
+    const out = enc(aliceState, 'hola pq');
+    // The chain-turn (first) message carries the PQ encapsulation key + ciphertext.
+    expect(out.header.pqPub).toBeDefined();
+    expect(out.header.pqCt).toBeDefined();
+    expect(out.header.pqPub!.length).toBe(1184);
+    expect(out.header.pqCt!.length).toBe(1088);
+    expect(dec(bobState, out)).toBe('hola pq');
+  });
+
+  it('intra-chain messages do NOT re-carry PQ material (mixed once per turn)', () => {
+    const { aliceState } = newHybridSession();
+    const m0 = enc(aliceState, 'm0');
+    const m1 = enc(aliceState, 'm1');
+    expect(m0.header.pqPub).toBeDefined();
+    expect(m0.header.pqCt).toBeDefined();
+    // n>0 in the same sending chain omits the (identical) PQ material.
+    expect(m1.header.pqPub).toBeUndefined();
+    expect(m1.header.pqCt).toBeUndefined();
+  });
+
+  it('full bidirectional turn: bob replies, alice decrypts (PQ rotates both ways)', () => {
+    const { aliceState, bobState } = newHybridSession();
+    expect(dec(bobState, enc(aliceState, 'first'))).toBe('first');
+    const reply = enc(bobState, 'reply');
+    // Bob's reply opens his sending chain -> carries his fresh PQ material.
+    expect(reply.header.pqPub).toBeDefined();
+    expect(reply.header.pqCt).toBeDefined();
+    expect(dec(aliceState, reply)).toBe('reply');
+  });
+
+  it('multi-turn ping-pong stays in sync across several PQ chain rotations', () => {
+    const { aliceState, bobState } = newHybridSession();
+    for (let i = 0; i < 4; i++) {
+      expect(dec(bobState, enc(aliceState, `a${i}`))).toBe(`a${i}`);
+      expect(dec(aliceState, enc(bobState, `b${i}`))).toBe(`b${i}`);
+    }
+  });
+
+  it('out-of-order intra-chain decrypts once the chain-turn message is seen first', () => {
+    // Under the phased (v1) design PQ material rides ONLY on the chain-turn
+    // message (n=0), so that message must be processed before later ones in its
+    // chain — guaranteed by our ordered mailbox transport. After it, intra-chain
+    // reordering works exactly like the classic ratchet (skipped-key cache).
+    const { aliceState, bobState } = newHybridSession();
+    const m1 = enc(aliceState, 'uno'); // chain-turn (carries PQ)
+    const m2 = enc(aliceState, 'dos');
+    const m3 = enc(aliceState, 'tres');
+    expect(dec(bobState, m1)).toBe('uno'); // establish the hybrid chain first
+    expect(dec(bobState, m3)).toBe('tres'); // then reorder freely
+    expect(dec(bobState, m2)).toBe('dos');
+  });
+
+  it('anti-downgrade: a chain-turn message stripped of pqCt is rejected (throws)', () => {
+    const { aliceState, bobState } = newHybridSession();
+    const out = enc(aliceState, 'downgrade me');
+    // Simulate a relay/MITM dropping the PQ ciphertext on a hybrid session.
+    const tampered = { ...out.header, pqCt: undefined };
+    expect(() =>
+      ratchetDecrypt(bobState, tampered, out.ciphertext, out.nonce),
+    ).toThrow(/missing PQ material|downgrade/i);
+  });
+
+  it('classic session carries no PQ header fields (v1 interop unchanged)', () => {
+    const { aliceState } = newSession();
+    const out = enc(aliceState, 'classic');
+    expect(out.header.pqPub).toBeUndefined();
+    expect(out.header.pqCt).toBeUndefined();
   });
 });
 
