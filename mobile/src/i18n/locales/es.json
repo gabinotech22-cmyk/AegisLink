@@ -88,6 +88,8 @@
   },
   "chat": {
     "encryptedToday": "CIFRADO EXTREMO A EXTREMO · HOY",
+    "dateToday": "Hoy",
+    "dateYesterday": "Ayer",
     "messagePlaceholder": "Mensaje cifrado…",
     "messageOfflinePlaceholder": "Mensaje (se enviará al recuperar la conexión)…",
     "offlineBanner": "SIN CONEXIÓN — mensajes en cola",
