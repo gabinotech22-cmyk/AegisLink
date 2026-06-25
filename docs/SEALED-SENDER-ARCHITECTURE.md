@@ -244,7 +244,9 @@ Lo que cambia:
   relay (vía Tor, sin identidad) que ese id es tuyo → liga las épocas que drenas en
   ese tramo; es inevitable dado el modelo de cola y solo afecta a la ventana de
   recuperación offline, no al estado estable diario.
-  Slices restantes: 2b=push por mailbox (Fase 5).
+  Slices restantes: 2b=push por mailbox (Fase 5) — diseño en
+  `docs/FASE4-SLICE2B-PUSH-DESIGN.md` (decisión: UnifiedPush/ntfy self-hosted con
+  topic por época sobre Tor; FCM/APNs sólo como fallback opt-in tras flag).
   Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un
