@@ -15,7 +15,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
+import { Avatar } from '../components/Avatar';
 import { useProfiles, type Profile } from '../store/profiles';
+import { useIdentity } from '../store/identity';
 import { themedAlert } from '../components/AlertHost';
 
 interface Props {
@@ -31,6 +33,12 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
   const hydrate = useProfiles((s) => s.hydrate);
   const switchProfile = useProfiles((s) => s.switchProfile);
   const removeProfile = useProfiles((s) => s.removeProfile);
+  // The active profile's key/photo live in the identity store; inactive
+  // profiles only carry metadata (no keys loaded), so they seed by aegisId.
+  // Seeding the active row by publicKeyB64 keeps its identicon identical to
+  // the one shown in Profile / Privacy / Home for the same identity.
+  const activePublicKeyB64 = useIdentity((s) => s.identity?.publicKeyB64);
+  const activeAvatarImage = useIdentity((s) => s.avatarImage);
 
   const [switching, setSwitching] = useState<string | null>(null);
 
@@ -133,6 +141,8 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
               t={t}
               profile={item}
               isSwitching={switching === item.slotId}
+              activeSeed={item.isActive ? activePublicKeyB64 : undefined}
+              activePhoto={item.isActive ? activeAvatarImage : null}
               onPress={() => handleSwitch(item)}
               onLongPress={() => handleDelete(item)}
             />
@@ -190,16 +200,25 @@ function ProfileRow({
   t,
   profile,
   isSwitching,
+  activeSeed,
+  activePhoto,
   onPress,
   onLongPress,
 }: {
   t: import('../theme/vault').Theme;
   profile: Profile;
   isSwitching: boolean;
+  /** Active profile's publicKeyB64 (matches its identicon elsewhere); undefined for inactive rows. */
+  activeSeed?: string;
+  /** Active profile's uploaded avatar photo; null for inactive rows. */
+  activePhoto?: string | null;
   onPress: () => void;
   onLongPress: () => void;
 }) {
-  const initial = (profile.displayName || profile.aegisId)[0]?.toUpperCase() ?? '?';
+  // Seed the identicon by publicKeyB64 when this is the active profile (so it
+  // matches Profile/Privacy/Home), otherwise by the only stable id we have for
+  // an inactive profile: its aegisId. Avatar shows the photo when present.
+  const seed = activeSeed ?? profile.aegisId;
 
   return (
     <Pressable
@@ -216,20 +235,25 @@ function ProfileRow({
         backgroundColor: pressed ? t.surface2 : t.bg,
       })}
     >
-      {/* Color avatar */}
+      {/* Identity avatar (identicon/photo) — matches the rest of the app.
+          Active profile gets a ring; the inner Avatar shrinks to leave the gap. */}
       <View style={{
         width: 48,
         height: 48,
         borderRadius: 24,
-        backgroundColor: profile.avatarColor,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: profile.isActive ? 2 : 0,
         borderColor: t.text,
       }}>
-        <Text style={{ fontFamily: t.fontMono, fontSize: 18, color: '#fff', fontWeight: '700' }}>
-          {initial}
-        </Text>
+        <Avatar
+          t={t}
+          name={profile.displayName || profile.aegisId}
+          color={profile.avatarColor}
+          size={profile.isActive ? 42 : 48}
+          photoUri={activePhoto}
+          seed={seed}
+        />
       </View>
 
       {/* Info */}
