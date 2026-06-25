@@ -30,7 +30,15 @@ Console y honestidad de claims.
 ## 🔴 FASE 1 — Bloqueantes para soft-launch (must)
 
 ### 1. Prueba en dispositivo Android FÍSICO (no emulador)
-- [ ] Instalar el AAB/APK de release en **2-3 teléfonos reales** (gama baja + media + reciente).
+- [x] **Gama-baja extrema probada (25-jun)**: Blackview WAVE 8C (ARMv7 32-bit, 2GB RAM).
+      Resultado: build armeabi-v7a instala y arranca sin native crash; **generación de
+      identidad (argon2id/Hermes) SIN freeze** (riesgo nº1, despejado); onboarding fluye;
+      `FLAG_SECURE` confirmado (el SO no puede screenshotear). **PERO** la app va inusable de
+      lenta: el dispositivo tiene solo ~210MB libres y **swapea**, y el LMK mató el proceso 3×
+      en 5 min. Footprint de la app razonable (103MB PSS) → **no es bug nuestro, es suelo de
+      hardware**. **Decisión: mínimo soportado = arm64-v8a + ~3GB RAM**; se dropearon los ABIs
+      32-bit en `gradle.properties` (ver `fix/min-spec-arm64`).
+- [ ] Instalar el AAB/APK de release en **2-3 teléfonos reales arm64** (3GB+ / 4GB+ / reciente).
 - [ ] Smoke completo en cada uno: onboarding anónimo → identidad → chat 1:1 E2EE → grupo →
       llamada 1:1 → llamada grupal → adjunto (imagen/audio) → efímero → **modo pánico** →
       **push wake-up con la app cerrada**.
@@ -53,6 +61,10 @@ Console y honestidad de claims.
       accesible (landing duckdns / GitHub Pages / dominio). Play exige URL, no un .md del repo.
 - [ ] Content rating questionnaire.
 - [ ] Crear track de **Closed Testing** (lista de testers) antes que producción.
+- [ ] **Device catalog / exclusión por RAM**: al subir un AAB arm64-only, Play ya deja de servir
+      a dispositivos 32-bit. Adicionalmente, excluir en Play Console los equipos con <3GB RAM
+      (Device catalog → exclusion rules) para no recibir reviews de 1★ por lentitud en hardware
+      por debajo del mínimo. Reflejar el mínimo en el store listing.
 
 ### 3. Honestidad de claims (legal + reputacional)
 - [ ] "Known Limitations" visible (README + store listing + About in-app) que diga claro:
