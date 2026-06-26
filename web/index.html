@@ -2892,8 +2892,8 @@
         glowCanvas.width = glowCanvas.height = 128;
         const gctx = glowCanvas.getContext('2d');
         const grad = gctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-        grad.addColorStop(0, 'rgba(91,242,185,0.55)');
-        grad.addColorStop(0.4, 'rgba(91,242,185,0.16)');
+        grad.addColorStop(0, 'rgba(91,242,185,0.26)');
+        grad.addColorStop(0.4, 'rgba(91,242,185,0.08)');
         grad.addColorStop(1, 'rgba(91,242,185,0)');
         gctx.fillStyle = grad;
         gctx.fillRect(0, 0, 128, 128);
@@ -2901,7 +2901,7 @@
           map: new THREE.CanvasTexture(glowCanvas),
           blending: THREE.AdditiveBlending, depthWrite: false, transparent: true
         }));
-        glow.scale.setScalar(6.5);
+        glow.scale.setScalar(5.2);
         group.add(glow);
 
         /* Campo de partículas orbitales (≤ 3000; menos en móvil) */
@@ -3011,7 +3011,7 @@
           dust.rotation.y = -t * 0.00008;
           sparks.rotation.y = t * 0.00014;
           const breathe = 1 + Math.sin(t * 0.0009) * 0.04;
-          glow.scale.setScalar(6.5 * breathe);
+          glow.scale.setScalar(5.2 * breathe);
           fresnelMat.uniforms.uTime.value = t;
           camera.position.z = 8.2 + scrollCur * 1.7;
           camera.position.y = 0.2 + scrollCur * 0.55;
