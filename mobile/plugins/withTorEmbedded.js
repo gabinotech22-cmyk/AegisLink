@@ -62,7 +62,14 @@ dependencies {
     // socket.io-client (artifactId has no -java suffix despite the GitHub repo name):
     // lets us run the mailbox socket over an OkHttp client configured with Tor's
     // local SOCKS proxy (RN's JS WebSocket can't do SOCKS).
-    implementation("io.socket:socket.io-client:2.1.2")
+    // Exclude its bundled org.json: Android ships org.json in the bootclasspath
+    // (wins at runtime), so packaging the Maven copy makes R8 bind callers (incl.
+    // expo-updates) to methods the platform class lacks → NoSuchMethodError crash
+    // at startup. socket.io-client only uses the basic JSONObject/JSONArray API
+    // that Android already provides.
+    implementation("io.socket:socket.io-client:2.1.2") {
+        exclude group: "org.json", module: "json"
+    }
     // Tor status broadcasts arrive via LocalBroadcastManager.
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
 }
@@ -89,6 +96,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.util.Log
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -100,6 +108,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import io.socket.client.Ack
 import io.socket.client.IO
 import io.socket.client.Socket
+import io.socket.engineio.client.transports.Polling
 import io.socket.engineio.client.transports.WebSocket
 import okhttp3.OkHttpClient
 import org.json.JSONArray
@@ -221,6 +230,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
 
   private fun updateState(s: String) {
     state = s
+    Log.i("AegisTor", "state=" + s + " socksPort=" + socksPort())
     reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       .emit("AegisTorStatus", makeStatusMap(s, socksPort()))
@@ -261,7 +271,11 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
       val opts = IO.Options()
       opts.callFactory = client
       opts.webSocketFactory = client
-      opts.transports = arrayOf(WebSocket.NAME)
+      // Polling first (works over OkHttp's SOCKS proxy → Tor → .onion), with an
+      // opportunistic upgrade to WebSocket. Forcing websocket-only fails over
+      // SOCKS (OkHttp's WS path doesn't reach the .onion; the HS sees 0 conns),
+      // while polling on the same client connects fine.
+      opts.transports = arrayOf(Polling.NAME, WebSocket.NAME)
       val authObj = JSONObject(authJson)
       val authMap = HashMap<String, String>()
       val keys = authObj.keys()
@@ -269,17 +283,25 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
       opts.auth = authMap
       opts.reconnection = true
 
+      Log.i("AegisTor", "sioConnect id=" + id + " url=" + url + " viaSocksPort=" + port)
       val socket = IO.socket(url, opts)
       sockets[id] = socket
 
-      socket.on(Socket.EVENT_CONNECT) { _ -> forward(id, "connect", JSONArray()) }
-      socket.on(Socket.EVENT_DISCONNECT) { args -> forward(id, "disconnect", argsToJson(args)) }
-      socket.on(Socket.EVENT_CONNECT_ERROR) { args -> forward(id, "connect_error", argsToJson(args)) }
+      socket.on(Socket.EVENT_CONNECT) { _ -> Log.i("AegisTor", "sio connect id=" + id); forward(id, "connect", JSONArray()) }
+      socket.on(Socket.EVENT_DISCONNECT) { args -> Log.i("AegisTor", "sio disconnect id=" + id); forward(id, "disconnect", argsToJson(args)) }
+      socket.on(Socket.EVENT_CONNECT_ERROR) { args ->
+        val detail = args.joinToString { a ->
+          if (a is Throwable) a.javaClass.simpleName + ":" + a.message + " <-cause " + (a.cause?.javaClass?.name ?: "none") + ":" + (a.cause?.message ?: "")
+          else a.toString()
+        }
+        Log.w("AegisTor", "sio connect_error id=" + id + " " + detail)
+        forward(id, "connect_error", argsToJson(args))
+      }
 
       val events = JSONArray(eventsJson)
       for (i in 0 until events.length()) {
         val ev = events.getString(i)
-        socket.on(ev) { args -> forward(id, ev, argsToJson(args)) }
+        socket.on(ev) { args -> Log.i("AegisTor", "sio event id=" + id + " ev=" + ev); forward(id, ev, argsToJson(args)) }
       }
 
       socket.connect()
@@ -383,6 +405,35 @@ function withKotlinSources(config) {
   ]);
 }
 
+// ── 3b. Keep Tor's JNI surface from R8 minification ──────────────────────────
+// libtor.so reaches into these classes via JNI by their ORIGINAL names; if R8
+// renames/strips them, JNI lookups crash at runtime (NoSuchFieldError on the
+// native `torConfiguration` long pointer, NoSuchMethodError on native methods).
+const TOR_PROGUARD_RULES = `
+# ─── AegisLink: embedded Tor JNI keep rules (injected by withTorEmbedded.js) ───
+-keep class org.torproject.jni.** { *; }
+-keep class IPtProxy.** { *; }
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+`;
+
+function withTorProguardRules(config) {
+  return withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const proguardPath = path.join(
+        config.modRequest.platformProjectRoot, 'app', 'proguard-rules.pro',
+      );
+      let contents = fs.existsSync(proguardPath) ? fs.readFileSync(proguardPath, 'utf8') : '';
+      if (!contents.includes('org.torproject.jni')) {
+        fs.writeFileSync(proguardPath, contents + TOR_PROGUARD_RULES);
+      }
+      return config;
+    },
+  ]);
+}
+
 // ── 4. Register the package in MainApplication.kt ────────────────────────────
 function withPackageRegistration(config) {
   return withMainApplication(config, (config) => {
@@ -401,6 +452,7 @@ function withPackageRegistration(config) {
 module.exports = (config) => {
   config = withGpMavenRepo(config);
   config = withTorDependencies(config);
+  config = withTorProguardRules(config);
   config = withKotlinSources(config);
   config = withPackageRegistration(config);
   return config;
