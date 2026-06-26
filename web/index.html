@@ -49,9 +49,13 @@
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
     @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    html { background: var(--bg); }
+    body { margin: 0; padding: 0; background: transparent; color: var(--text);
                  font-family: var(--sans); -webkit-font-smoothing: antialiased;
                  line-height: 1.5; }
+    /* Constelación global de escudos: fondo fijo detrás de toda la página */
+    #bgGraph { position: fixed; inset: 0; width: 100%; height: 100%;
+               z-index: -2; pointer-events: none; display: block; }
     a { color: inherit; text-decoration: none; }
     button { font-family: inherit; cursor: pointer; }
     section[id], header[id] { scroll-margin-top: 76px; }
@@ -175,18 +179,14 @@
 
     /* Hero visual — 3D + phone with overlay terminal */
     .hero-visual { position: relative; min-height: 540px; }
+    /* Escudo 3D = núcleo del grafo global: fijo y centrado en el viewport */
     .hero3d {
-      position: absolute; inset: -120px -90px; z-index: 0; pointer-events: none;
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(760px, 92vw); height: min(760px, 92vh);
+      z-index: -1; pointer-events: none;
     }
     .hero3d canvas { display: block; width: 100%; height: 100%; }
-    .hero-fallback {
-      position: absolute; inset: -60px; z-index: 0; pointer-events: none;
-      display: flex; align-items: center; justify-content: center;
-      background: radial-gradient(45% 45% at 50% 50%, rgba(91,242,185,0.14), transparent 70%);
-      transition: opacity 0.8s;
-    }
-    .hero-fallback svg { opacity: 0.16; filter: drop-shadow(0 0 32px rgba(91,242,185,0.5)); }
-    .hero-fallback.hidden3d { opacity: 0; }
     .phone-mock {
       position: relative; z-index: 2;
       width: 320px; height: 660px;
@@ -399,6 +399,62 @@
                           font-weight: 600; margin-bottom: 2px; }
     .check .body span { font-size: 13px; color: var(--text-dim); }
 
+    /* ── Bloque de código real verificable ──────────── */
+    .code-proof { position: relative; margin-top: 40px; border: 1px solid var(--border);
+                  border-radius: 12px; background: rgba(13,17,18,0.92); overflow: hidden; }
+    .code-bar { display: flex; align-items: center; gap: 7px; padding: 10px 16px;
+                border-bottom: 1px solid var(--border); font-family: var(--mono);
+                font-size: 12px; color: var(--text-dim); }
+    .cd { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .cd-r { background: var(--danger); } .cd-y { background: var(--warn); } .cd-g { background: var(--accent); }
+    .code-path { margin-left: 8px; }
+    .code-line { margin-left: auto; color: var(--accent); }
+    .code-body { margin: 0; padding: 18px 20px; font-family: var(--mono);
+                 font-size: 13px; line-height: 1.7; color: var(--text);
+                 overflow-x: auto; white-space: pre; }
+    .code-body .cm { color: var(--text-faint); }
+    .code-body .kw { color: #a78bfa; }
+    .code-body .fn { color: var(--accent); }
+    .code-body .ty { color: #7dd3fc; }
+    .code-body .nm { color: var(--warn); }
+    .code-body .st { color: #86efac; }
+    .code-link { display: inline-flex; align-items: center; gap: 8px; margin: 4px 20px 18px;
+                 font-family: var(--mono); font-size: 13px; color: var(--accent);
+                 border: 1px solid rgba(91,242,185,0.35); border-radius: 24px;
+                 padding: 8px 16px; transition: background 0.15s; }
+    .code-link:hover { background: rgba(91,242,185,0.1); }
+
+    /* ── Transporte sobre Tor ───────────────────────── */
+    .transport-stage { border: 1px solid var(--border); border-radius: 14px;
+                       background: rgba(13,17,18,0.78); padding: 22px 18px 26px; }
+    #torCanvas { width: 100%; height: 300px; display: block; }
+    .transport-cap { text-align: center; font-family: var(--mono); font-size: 13px;
+                     color: var(--accent); min-height: 20px; margin-top: 12px; }
+    .transport-sub { text-align: center; font-family: var(--mono); font-size: 11px;
+                     color: var(--text-faint); min-height: 15px; margin-top: 4px; }
+
+    /* ── Lo que ve el servidor ──────────────────────── */
+    .srv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .srv-card { border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+    .srv-bad { border-color: rgba(255,107,107,0.3); background: rgba(20,13,14,0.9); }
+    .srv-good { border-color: rgba(91,242,185,0.3); background: rgba(10,19,17,0.9); }
+    .srv-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+               font-family: var(--mono); font-size: 12px; border-bottom: 1px solid var(--border); }
+    .srv-bad .srv-bar { color: var(--danger); border-color: rgba(255,107,107,0.2); }
+    .srv-good .srv-bar { color: var(--accent); border-color: rgba(91,242,185,0.2); }
+    .srv-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .srv-dot.bad { background: var(--danger); } .srv-dot.good { background: var(--accent); }
+    .srv-rows { padding: 14px 16px; font-family: var(--mono); font-size: 13px; }
+    .srv-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; }
+    .srv-row > span { color: var(--text-faint); }
+    .srv-row b { font-weight: 400; }
+    .srv-row b.bad { color: var(--danger); }
+    .srv-row b.dash { color: var(--text-faint); }
+    .srv-noise-row { align-items: flex-start; }
+    .srv-row b.noise { color: var(--accent); word-break: break-all; text-align: right;
+                       max-width: 62%; line-height: 1.5; font-size: 12px; }
+    @media (max-width: 680px) { .srv-grid { grid-template-columns: 1fr; } }
+
     /* ── Comparison ─────────────────────────────────── */
     .compare {
       border: 1px solid var(--border); border-radius: 14px;
@@ -420,7 +476,7 @@
                      font-weight: 600; }
     .compare td.muted { color: var(--text-faint); }
     .compare td .y { color: var(--accent); }
-    .compare td .n { color: var(--danger); }
+    .compare td .n { color: var(--text-faint); }
     .compare td .partial { color: var(--warn); }
     .compare-note { font-family: var(--mono); font-size: 11px; color: var(--text-faint);
                     letter-spacing: 0.04em; margin-top: 14px; }
@@ -555,73 +611,6 @@
       .marquee-track .tagline-row { flex-wrap: wrap; white-space: normal; }
     }
 
-    /* ── Journey: el viaje de un mensaje ────────────── */
-    .journey { position: relative; height: 300vh; }
-    .journey-sticky {
-      position: sticky; top: 0; height: 100vh;
-      display: flex; flex-direction: column; justify-content: center;
-      overflow: hidden;
-    }
-    .journey-stage {
-      display: grid; grid-template-columns: 1fr 0.8fr 1fr; gap: 24px;
-      align-items: stretch; position: relative; margin-top: 40px;
-    }
-    .jr-node {
-      padding: 22px 20px; border: 1px solid var(--border); border-radius: 14px;
-      background: var(--surface); position: relative; min-height: 190px;
-      display: flex; flex-direction: column; gap: 10px;
-      transition: border-color 0.4s, box-shadow 0.4s;
-    }
-    .jr-node.lit { border-color: rgba(91,242,185,0.5);
-                   box-shadow: 0 0 40px rgba(91,242,185,0.08); }
-    .jr-node .l { font-family: var(--mono); font-size: 10px; color: var(--accent);
-                  letter-spacing: 0.12em; }
-    .jr-node .note { font-size: 12.5px; color: var(--text-dim); line-height: 1.5;
-                     margin-top: auto; }
-    .jr-msg {
-      font-family: var(--mono); font-size: 13px; line-height: 1.6;
-      padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border); min-height: 86px;
-      overflow-wrap: anywhere; color: var(--text);
-    }
-    .jr-msg .ct { color: var(--accent); opacity: 0.85; }
-    .jr-relay-box {
-      display: flex; flex-direction: column; gap: 8px; align-items: center;
-      justify-content: center; text-align: center;
-    }
-    .jr-relay-meta { font-family: var(--mono); font-size: 11px; color: var(--text-faint);
-                     letter-spacing: 0.06em; }
-    .jr-wire {
-      position: absolute; top: 50%; height: 1px; z-index: 0;
-      background: repeating-linear-gradient(90deg,
-        rgba(91,242,185,0.35) 0 6px, transparent 6px 12px);
-    }
-    .jr-wire.w1 { left: calc(33.33% - 12px); width: 24px; }
-    .jr-wire.w2 { right: calc(33.33% - 12px); width: 24px; }
-    .jr-packet {
-      position: absolute; top: 50%; width: 12px; height: 12px; z-index: 4;
-      border-radius: 3px; background: var(--accent);
-      box-shadow: 0 0 18px rgba(91,242,185,0.9), 0 0 40px rgba(91,242,185,0.4);
-      transform: translate(-50%, -50%) rotate(45deg); opacity: 0;
-    }
-    .jr-progress {
-      margin-top: 28px; display: flex; gap: 8px; align-items: center;
-      font-family: var(--mono); font-size: 10px; color: var(--text-faint);
-      letter-spacing: 0.1em;
-    }
-    .jr-bar { flex: 1; height: 2px; background: var(--border); border-radius: 2px;
-              overflow: hidden; }
-    .jr-bar i { display: block; height: 100%; width: 0;
-                background: var(--accent); border-radius: 2px; }
-    .jr-hint { text-align: center; margin-top: 18px; font-family: var(--mono);
-               font-size: 10px; letter-spacing: 0.14em; color: var(--text-faint);
-               text-transform: uppercase; animation: hint-pulse 2.4s ease-in-out infinite; }
-    @keyframes hint-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
-    @media (prefers-reduced-motion: reduce) {
-      .journey { height: auto; }
-      .journey-sticky { position: static; height: auto; padding: 40px 0; }
-      .jr-hint { display: none; }
-    }
 
     /* ── Phone: tour de pantallas ───────────────────── */
     .app-screens { position: relative; flex: 1; min-height: 0; }
@@ -786,7 +775,7 @@
       .nav-gh { display: none; }
       .hero-inner { grid-template-columns: 1fr; gap: 48px; }
       .hero-visual { min-height: auto; }
-      .hero3d { inset: -60px -32px; }
+      .hero3d { width: min(520px, 96vw); height: min(520px, 70vh); }
       .pillars { grid-template-columns: 1fr 1fr; }
       .steps   { grid-template-columns: 1fr; }
       .features{ grid-template-columns: 1fr 1fr; }
@@ -794,11 +783,6 @@
       .trust { padding: 36px 24px; }
       .work-grid { grid-template-columns: 1fr; }
       .foot-row { grid-template-columns: 1fr 1fr; }
-      .journey { height: auto; }
-      .journey-sticky { position: static; height: auto; padding: 48px 0; overflow: visible; }
-      .journey-stage { grid-template-columns: 1fr; gap: 14px; }
-      .jr-node { min-height: 0; }
-      .jr-wire, .jr-packet, .jr-hint, .jr-progress { display: none; }
     }
     @media (max-width: 560px) {
       .wrap { padding: 0 20px; }
@@ -834,6 +818,9 @@
   </style>
 </head>
 <body>
+
+  <canvas id="bgGraph" aria-hidden="true"></canvas>
+  <div class="hero3d" id="hero3d" aria-hidden="true"></div>
 
   <div class="grain" aria-hidden="true"></div>
 
@@ -877,7 +864,7 @@
       <div>
         <span class="eyebrow">
           <span class="dot"></span>
-          v1.0.0 · OPEN SOURCE · GPL-3.0
+          <span data-i18n="hero_eyebrow">v1.0.0 · CIFRADO POST-CUÁNTICO · GPL-3.0</span>
         </span>
         <h1 class="hero-title" data-i18n="hero_title">Mensajería <em>sin</em> rastro.</h1>
         <p class="hero-sub" data-i18n="hero_sub">
@@ -901,20 +888,6 @@
       </div>
 
       <div class="hero-visual">
-        <!-- Fallback estático: visible si no hay WebGL o reduced-motion -->
-        <div class="hero-fallback" id="heroFallback" aria-hidden="true">
-          <svg width="420" height="420" viewBox="0 0 40 40" fill="none">
-            <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z"
-                  stroke="#5bf2b9" stroke-width="0.8" stroke-linejoin="round"/>
-            <path d="M20 6 L31.5 12.2 L31.5 27.8 L20 34 L8.5 27.8 L8.5 12.2 Z"
-                  stroke="#5bf2b9" stroke-width="0.5" stroke-linejoin="round" opacity="0.5"/>
-            <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.8"/>
-            <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.45"/>
-          </svg>
-        </div>
-        <!-- Escena 3D (Three.js, lazy) -->
-        <div class="hero3d" id="hero3d" aria-hidden="true"></div>
-
         <div class="phone-mock">
           <div class="phone-screen">
             <div class="notch"></div>
@@ -1166,51 +1139,24 @@
             </svg>
           </div>
           <h4 data-i18n="s3_title">Hablas tranquilo</h4>
-          <p data-i18n="s3_body">X3DH + Double Ratchet con perfect forward secrecy y XSalsa20-Poly1305. Mensajes, archivos, llamadas, grupos — los servidores sólo enrutan paquetes opacos.</p>
+          <p data-i18n="s3_body">PQXDH post-cuántico (X25519 + ML-KEM-768) + Double Ratchet con perfect forward secrecy y XSalsa20-Poly1305. Mensajes, archivos, llamadas, grupos — los servidores sólo enrutan paquetes opacos.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ─── Journey: el viaje de un mensaje (scroll) ── -->
-  <section class="journey" id="journey">
-    <div class="journey-sticky">
-      <div class="wrap" style="width: 100%;">
-        <div class="section-head" style="margin-bottom: 12px;">
-          <div class="section-eyebrow" data-i18n="jr_eyebrow">El viaje de un mensaje</div>
-          <h2 class="section-title" style="font-size: clamp(32px, 4vw, 54px);" data-i18n="jr_title">
-            Qué ve cada uno. <em style="font-style:italic; color: var(--accent);">Y qué no.</em>
-          </h2>
-        </div>
-        <div class="journey-stage" id="jrStage">
-          <div class="jr-wire w1" id="jrW1"></div>
-          <div class="jr-wire w2" id="jrW2"></div>
-          <div class="jr-packet" id="jrPacket"></div>
-          <div class="jr-node" id="jrA">
-            <div class="l" data-i18n="jr_a_l">TU DISPOSITIVO</div>
-            <div class="jr-msg" id="jrMsgA">Nos vemos a las 21:00 en el sitio de siempre.</div>
-            <div class="note" data-i18n="jr_a_note">Se cifra aquí, con una clave que nunca sale de tu teléfono.</div>
-          </div>
-          <div class="jr-node" id="jrB">
-            <div class="l" data-i18n="jr_b_l">EL RELAY</div>
-            <div class="jr-msg" id="jrMsgB"><span class="jr-relay-meta" id="jrRelayMeta">—</span></div>
-            <div class="note" data-i18n="jr_b_note">Solo enruta un paquete opaco. No sabe qué dice, ni de quién es, ni lo guarda.</div>
-          </div>
-          <div class="jr-node" id="jrC">
-            <div class="l" data-i18n="jr_c_l">SU DISPOSITIVO</div>
-            <div class="jr-msg" id="jrMsgC">Nos vemos a las 21:00 en el sitio de siempre.</div>
-            <div class="note" data-i18n="jr_c_note">Solo la llave de tu contacto puede abrirlo. Ahí vuelve a ser texto.</div>
-          </div>
-        </div>
-        <div class="jr-progress" aria-hidden="true">
-          <span data-i18n="jr_p1">CIFRADO</span>
-          <div class="jr-bar"><i id="jrBar1"></i></div>
-          <span data-i18n="jr_p2">TRÁNSITO</span>
-          <div class="jr-bar"><i id="jrBar2"></i></div>
-          <span data-i18n="jr_p3">DESCIFRADO</span>
-          <div class="jr-bar"><i id="jrBar3"></i></div>
-        </div>
-        <div class="jr-hint" data-i18n="jr_hint">▼ sigue bajando — el mensaje se cifra con el scroll</div>
+  <!-- ─── Transporte sobre Tor (dos circuitos) ────── -->
+  <section class="section" id="transport" style="padding-top: 40px;">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="section-eyebrow" data-i18n="tr_eyebrow">Sobre Tor · relay ciego</div>
+        <h2 class="section-title" data-i18n="tr_title">Pasa por un relay que <em style="font-style:italic; color: var(--accent);">no puede verte</em>.</h2>
+        <p class="section-lead" data-i18n="tr_lead">Se cifra en tu dispositivo y viaja por Tor hasta un relay ciego: no ve quién lo envía, a quién, ni qué dice — y no guarda registros. Self-hostable y auditable.</p>
+      </div>
+      <div class="transport-stage reveal">
+        <canvas id="torCanvas"></canvas>
+        <div id="torCap" class="transport-cap"></div>
+        <div id="torSub" class="transport-sub"></div>
       </div>
     </div>
   </section>
@@ -1228,7 +1174,7 @@
         <div class="feat">
           <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/></svg></div>
           <h5 data-i18n="f1_title">Chat 1:1 E2EE</h5>
-          <p data-i18n="f1_body">X3DH + Double Ratchet con perfect forward secrecy. Cada mensaje, con una clave distinta.</p>
+          <p data-i18n="f1_body">PQXDH post-cuántico (X25519 + ML-KEM-768) + Double Ratchet con perfect forward secrecy. Cada mensaje, con una clave distinta — resistente a "guardar ahora, descifrar después".</p>
         </div>
 
         <div class="feat">
@@ -1354,6 +1300,22 @@
             </div>
           </div>
         </div>
+
+        <div class="code-proof reveal" aria-label="Fragmento de código real verificable">
+          <div class="code-bar">
+            <span class="cd cd-r"></span><span class="cd cd-y"></span><span class="cd cd-g"></span>
+            <span class="code-path">mobile/src/crypto/signal/ratchet.ts</span>
+            <span class="code-line">L69</span>
+          </div>
+<pre class="code-body"><span class="cm">// rechaza claves de bajo orden — un relay malicioso no puede forzar un DH degenerado</span>
+<span class="kw">function</span> <span class="fn">assertNonZeroDH</span>(dh: <span class="ty">Uint8Array</span>): <span class="ty">Uint8Array</span> {
+  <span class="kw">let</span> acc = <span class="nm">0</span>;
+  <span class="kw">for</span> (<span class="kw">let</span> i = <span class="nm">0</span>; i &lt; dh.length; i++) acc |= dh[i];  <span class="cm">// constant-time</span>
+  <span class="kw">if</span> (acc === <span class="nm">0</span>) <span class="kw">throw new</span> <span class="fn">Error</span>(<span class="st">'low-order point attack'</span>);
+  <span class="kw">return</span> dh;
+}</pre>
+          <a class="code-link" href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/mobile/src/crypto/signal/ratchet.ts#L69" target="_blank" rel="noopener" data-i18n="trust_codelink">ver esta línea en GitHub →</a>
+        </div>
       </div>
     </div>
   </section>
@@ -1386,9 +1348,9 @@
             <tr>
               <td data-i18n="r1">Sin teléfono ni email</td>
               <td class="us"><span class="y">✓</span></td>
-              <td><span class="n">✗</span></td>
+              <td><span class="n">—</span></td>
               <td><span class="y">✓</span></td>
-              <td><span class="n">✗</span></td>
+              <td><span class="n">—</span></td>
             </tr>
             <tr>
               <td data-i18n="r2">Cifrado E2EE por defecto</td>
@@ -1402,7 +1364,7 @@
               <td class="us"><span class="y">✓</span></td>
               <td><span class="partial" data-i18n="w_partial_star">parcial*</span></td>
               <td><span class="y">✓</span></td>
-              <td><span class="n">✗</span></td>
+              <td><span class="n">—</span></td>
             </tr>
             <tr>
               <td data-i18n="r4">Push sin contenido (solo wake-up)</td>
@@ -1414,29 +1376,29 @@
             <tr>
               <td data-i18n="r5">Múltiples identidades</td>
               <td class="us"><span class="y">✓</span></td>
-              <td><span class="n">✗</span></td>
-              <td><span class="n">✗</span></td>
-              <td><span class="n">✗</span></td>
+              <td><span class="n">—</span></td>
+              <td><span class="n">—</span></td>
+              <td><span class="n">—</span></td>
             </tr>
             <tr>
               <td data-i18n="r6">Modo pánico + PIN señuelo</td>
               <td class="us"><span class="y">✓</span></td>
-              <td><span class="n">✗</span></td>
-              <td><span class="n">✗</span></td>
-              <td><span class="n">✗</span></td>
+              <td><span class="n">—</span></td>
+              <td><span class="n">—</span></td>
+              <td><span class="n">—</span></td>
             </tr>
             <tr>
               <td data-i18n="r7">Mensajes programados</td>
               <td class="us"><span class="y">✓</span></td>
-              <td><span class="n">✗</span></td>
-              <td><span class="n">✗</span></td>
-              <td><span class="n">✗</span></td>
+              <td><span class="n">—</span></td>
+              <td><span class="n">—</span></td>
+              <td><span class="n">—</span></td>
             </tr>
             <tr>
               <td data-i18n="r8">Encuestas anónimas en grupo</td>
               <td class="us"><span class="y">✓</span></td>
-              <td><span class="n">✗</span></td>
-              <td><span class="n">✗</span></td>
+              <td><span class="n">—</span></td>
+              <td><span class="n">—</span></td>
               <td><span class="partial" data-i18n="w_noanon">no anon.</span></td>
             </tr>
             <tr>
@@ -1444,20 +1406,55 @@
               <td class="us"><span class="y">✓</span></td>
               <td><span class="partial" data-i18n="w_partial2">parcial</span></td>
               <td><span class="partial">OnPrem</span></td>
-              <td><span class="n">✗</span></td>
+              <td><span class="n">—</span></td>
             </tr>
             <tr>
               <td data-i18n="r10">Código abierto · cliente + servidor</td>
               <td class="us"><span class="y">✓</span></td>
               <td><span class="y">✓</span></td>
               <td><span class="partial" data-i18n="w_client">cliente</span></td>
-              <td><span class="n">✗</span></td>
+              <td><span class="n">—</span></td>
             </tr>
           </tbody>
         </table>
         </div>
       </div>
       <p class="compare-note reveal" data-i18n="cmp_note">* Signal aplica sealed sender, pero el registro requiere un número de teléfono.</p>
+    </div>
+  </section>
+
+  <!-- ─── Lo que ve el servidor ────────────────────── -->
+  <section class="section" id="serversees" style="padding-top: 40px;">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="section-eyebrow" data-i18n="srv_eyebrow">Cero metadatos</div>
+        <h2 class="section-title" data-i18n="srv_title">Lo que el servidor <em style="font-style:italic; color: var(--accent);">registra de ti</em>.</h2>
+        <p class="section-lead" data-i18n="srv_lead">El mismo mensaje, dos mundos. A la derecha no hay nada que citar, filtrar ni vender.</p>
+      </div>
+      <div class="srv-grid reveal">
+        <div class="srv-card srv-bad">
+          <div class="srv-bar"><span class="srv-dot bad"></span><span data-i18n="srv_conv">mensajería convencional</span></div>
+          <div class="srv-rows">
+            <div class="srv-row"><span data-i18n="srv_num">número</span><b class="bad">+34 6•• ••3 •••</b></div>
+            <div class="srv-row"><span data-i18n="srv_contact">contacto</span><b class="bad">"Ana 💚"</b></div>
+            <div class="srv-row"><span data-i18n="srv_time">hora</span><b class="bad">23:47:12</b></div>
+            <div class="srv-row"><span data-i18n="srv_size">tamaño</span><b class="bad">512 bytes</b></div>
+            <div class="srv-row"><span>IP</span><b class="bad">81.42.•.•</b></div>
+            <div class="srv-row"><span data-i18n="srv_freq">frecuencia</span><b class="bad" data-i18n="srv_freqval">14 hoy</b></div>
+          </div>
+        </div>
+        <div class="srv-card srv-good">
+          <div class="srv-bar"><span class="srv-dot good"></span>AegisLink</div>
+          <div class="srv-rows">
+            <div class="srv-row"><span data-i18n="srv_num">número</span><b class="dash">—</b></div>
+            <div class="srv-row"><span data-i18n="srv_contact">contacto</span><b class="dash">—</b></div>
+            <div class="srv-row"><span data-i18n="srv_time">hora</span><b class="dash">—</b></div>
+            <div class="srv-row"><span data-i18n="srv_size">tamaño</span><b class="dash" data-i18n="srv_pad">padding fijo</b></div>
+            <div class="srv-row"><span>IP</span><b class="dash" data-i18n="srv_tor">circuito Tor</b></div>
+            <div class="srv-row srv-noise-row"><span data-i18n="srv_payload">payload</span><b class="noise" id="srvNoise"></b></div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1616,6 +1613,7 @@
         nav_why: "Why", nav_how: "How it works", nav_features: "Features",
         nav_trust: "Security", nav_compare: "Compare", nav_download: "Download",
         hero_title: "Messaging <em>without</em> a trace.",
+        hero_eyebrow: "v1.0.0 · POST-QUANTUM ENCRYPTION · GPL-3.0",
         hero_sub: "End-to-end encryption, anchored to a key that exists only on your device. No phone. No email. No metadata.",
         hero_cta1: "Download AegisLink", hero_cta2: "How it works",
         hero_meta1: "iOS · Android — coming soon",
@@ -1644,11 +1642,11 @@
         s2_title: "Verify contacts",
         s2_body: "Scan your contact's QR or compare your key fingerprints. The human handshake protects against any man in the middle.",
         s3_title: "Talk freely",
-        s3_body: "X3DH + Double Ratchet with perfect forward secrecy and XSalsa20-Poly1305. Messages, files, calls, groups — servers only route opaque packets.",
+        s3_body: "Post-quantum PQXDH (X25519 + ML-KEM-768) + Double Ratchet with perfect forward secrecy and XSalsa20-Poly1305. Messages, files, calls, groups — servers only route opaque packets.",
         feat_eyebrow: "What's included",
         feat_title: "Everything you expect. <em style='font-style:italic; color: var(--accent);'>Plus</em> what only we do.",
         f1_title: "1:1 E2EE chat",
-        f1_body: "X3DH + Double Ratchet with perfect forward secrecy. Every message, a different key.",
+        f1_body: "Post-quantum PQXDH (X25519 + ML-KEM-768) + Double Ratchet with perfect forward secrecy. Every message, a different key — resistant to \"harvest now, decrypt later\".",
         f2_title: "Burn-after-reading",
         f2_body: "Configurable timer per chat. When it expires they vanish from the device — and the server never had them in the clear.",
         f3_title: "Encrypted attachments",
@@ -1695,6 +1693,32 @@
         w_partial_star: "partial*", w_partial1: "partial", w_partial2: "partial",
         w_noanon: "not anon.", w_client: "client",
         cmp_note: "* Signal uses sealed sender, but registration requires a phone number.",
+        trust_codelink: "see this line on GitHub →",
+        tr_eyebrow: "Over Tor · blind relay",
+        tr_title: "It goes through a relay that <em style='font-style:italic; color: var(--accent);'>can't see you</em>.",
+        tr_lead: "Encrypted on your device, it travels over Tor to a blind relay: it never sees who sent it, to whom, or what it says — and keeps no logs. Self-hostable and auditable.",
+        tor: {
+          'cifrado en tu dispositivo': 'encrypted on your device',
+          'Double Ratchet + PQXDH post-cuántico': 'Double Ratchet + post-quantum PQXDH',
+          'entra a Tor — tu IP queda oculta': 'enters Tor — your IP stays hidden',
+          'el relay nunca ve desde dónde escribes': 'the relay never sees where you write from',
+          'rebota entre nodos Tor': 'bounces between Tor nodes',
+          'nadie ve origen y destino a la vez': 'no node sees both ends at once',
+          'el relay reenvía un sobre sellado': 'the relay forwards a sealed envelope',
+          'no ve quién, a quién, ni qué — ni lo guarda': "sees no who, no whom, no what — and stores nothing",
+          'sale por el circuito del peer': "exits via the peer's circuit",
+          'sigue cifrado de extremo a extremo': 'still end-to-end encrypted',
+          'último salto hacia su dispositivo': 'last hop to their device',
+          'descifrado en su dispositivo': 'decrypted on their device',
+          'solo su llave privada lo abre': 'only their private key opens it'
+        },
+        srv_eyebrow: "Zero metadata",
+        srv_title: "What the server <em style='font-style:italic; color: var(--accent);'>logs about you</em>.",
+        srv_lead: "Same message, two worlds. On the right there's nothing to subpoena, filter or sell.",
+        srv_conv: "conventional messaging",
+        srv_num: "number", srv_contact: "contact", srv_time: "time",
+        srv_size: "size", srv_freq: "frequency",
+        srv_pad: "fixed padding", srv_tor: "Tor circuit", srv_payload: "payload", srv_freqval: "14 today",
         work_eyebrow: "AegisLink Work · in development",
         work_title: "Privacy <em style='font-style:italic; color: var(--accent);'>for teams</em>.",
         work_lead: "The business edition — rooms, roles and per-team policies, with the same golden rule: zero conversation metadata. It is in development; follow it in the repository.",
@@ -1767,6 +1791,7 @@
         nav_why: "Perché", nav_how: "Come funziona", nav_features: "Funzionalità",
         nav_trust: "Sicurezza", nav_compare: "Confronta", nav_download: "Scarica",
         hero_title: "Messaggi <em>senza</em> tracce.",
+        hero_eyebrow: "v1.0.0 · CIFRATURA POST-QUANTISTICA · GPL-3.0",
         hero_sub: "Cifratura end-to-end, ancorata a una chiave che esiste solo sul tuo dispositivo. Niente telefono. Niente email. Niente metadati.",
         hero_cta1: "Scarica AegisLink", hero_cta2: "Come funziona",
         hero_meta1: "iOS · Android — in arrivo",
@@ -1795,11 +1820,11 @@
         s2_title: "Verifichi i contatti",
         s2_body: "Scansioni il QR del tuo contatto o confrontate le impronte delle vostre chiavi. La stretta di mano umana protegge da qualsiasi intermediario.",
         s3_title: "Parli tranquillo",
-        s3_body: "X3DH + Double Ratchet con perfect forward secrecy e XSalsa20-Poly1305. Messaggi, file, chiamate, gruppi — i server instradano solo pacchetti opachi.",
+        s3_body: "PQXDH post-quantistico (X25519 + ML-KEM-768) + Double Ratchet con perfect forward secrecy e XSalsa20-Poly1305. Messaggi, file, chiamate, gruppi — i server instradano solo pacchetti opachi.",
         feat_eyebrow: "Cosa include",
         feat_title: "Tutto il previsto. <em style='font-style:italic; color: var(--accent);'>Più</em> ciò che facciamo solo noi.",
         f1_title: "Chat 1:1 E2EE",
-        f1_body: "X3DH + Double Ratchet con perfect forward secrecy. Ogni messaggio, una chiave diversa.",
+        f1_body: "PQXDH post-quantistico (X25519 + ML-KEM-768) + Double Ratchet con perfect forward secrecy. Ogni messaggio, una chiave diversa — resistente a \"raccogli ora, decifra dopo\".",
         f2_title: "Messaggi che bruciano",
         f2_body: "Timer configurabile per chat. Alla scadenza spariscono dal dispositivo — e il server non li ha mai avuti in chiaro.",
         f3_title: "Allegati cifrati",
@@ -1846,6 +1871,32 @@
         w_partial_star: "parziale*", w_partial1: "parziale", w_partial2: "parziale",
         w_noanon: "non anon.", w_client: "client",
         cmp_note: "* Signal applica il sealed sender, ma la registrazione richiede un numero di telefono.",
+        trust_codelink: "vedi questa riga su GitHub →",
+        tr_eyebrow: "Su Tor · relay cieco",
+        tr_title: "Passa per un relay che <em style='font-style:italic; color: var(--accent);'>non può vederti</em>.",
+        tr_lead: "Cifrato sul tuo dispositivo, viaggia su Tor fino a un relay cieco: non vede chi lo invia, a chi, né cosa dice — e non conserva log. Self-hostable e verificabile.",
+        tor: {
+          'cifrado en tu dispositivo': 'cifrato sul tuo dispositivo',
+          'Double Ratchet + PQXDH post-cuántico': 'Double Ratchet + PQXDH post-quantistico',
+          'entra a Tor — tu IP queda oculta': 'entra in Tor — il tuo IP resta nascosto',
+          'el relay nunca ve desde dónde escribes': 'il relay non vede mai da dove scrivi',
+          'rebota entre nodos Tor': 'rimbalza tra i nodi Tor',
+          'nadie ve origen y destino a la vez': 'nessun nodo vede entrambi i capi',
+          'el relay reenvía un sobre sellado': 'il relay inoltra una busta sigillata',
+          'no ve quién, a quién, ni qué — ni lo guarda': 'non vede chi, a chi, né cosa — e non conserva nulla',
+          'sale por el circuito del peer': 'esce dal circuito del peer',
+          'sigue cifrado de extremo a extremo': 'resta cifrato end-to-end',
+          'último salto hacia su dispositivo': 'ultimo salto verso il suo dispositivo',
+          'descifrado en su dispositivo': 'decifrato sul suo dispositivo',
+          'solo su llave privada lo abre': 'solo la sua chiave privata lo apre'
+        },
+        srv_eyebrow: "Zero metadati",
+        srv_title: "Ciò che il server <em style='font-style:italic; color: var(--accent);'>registra di te</em>.",
+        srv_lead: "Stesso messaggio, due mondi. A destra non c'è nulla da citare in giudizio, filtrare o vendere.",
+        srv_conv: "messaggistica convenzionale",
+        srv_num: "numero", srv_contact: "contatto", srv_time: "ora",
+        srv_size: "dimensione", srv_freq: "frequenza",
+        srv_pad: "padding fisso", srv_tor: "circuito Tor", srv_payload: "payload", srv_freqval: "14 oggi",
         work_eyebrow: "AegisLink Work · in sviluppo",
         work_title: "Privacy <em style='font-style:italic; color: var(--accent);'>per i team</em>.",
         work_lead: "La versione per aziende — stanze, ruoli e politiche per team, con la stessa regola d'oro: zero metadati di conversazione. È in sviluppo; seguila nel repository.",
@@ -1953,7 +2004,7 @@
         /* El mock del teléfono lee esto en cada iteración del bucle */
         window.AEGIS_CHAT = { script: dict.chat, sent: dict.sent };
         window.AEGIS_DEMO = dict.demo;
-        window.AEGIS_JR = dict.jr_msg;
+        window.AEGIS_TOR = dict.tor;
         if (window.__aegisChatStatic) window.__aegisChatStatic();
         if (window.__aegisAfterLang) window.__aegisAfterLang(l);
         try { localStorage.setItem('aegis-lang', l); } catch (e) { /* ignore */ }
@@ -2473,143 +2524,11 @@
         });
       }
 
-      /* ── Journey: el mensaje se cifra con el scroll ── */
-      var jr = document.getElementById('journey');
-      var lastP = 0;
-      var jrRefresh = null;
-      if (jr) {
-        var jrMsgA = document.getElementById('jrMsgA');
-        var jrMsgC = document.getElementById('jrMsgC');
-        var jrRelayMeta = document.getElementById('jrRelayMeta');
-        var jrPacket = document.getElementById('jrPacket');
-        var jrStage = document.getElementById('jrStage');
-        var nA = document.getElementById('jrA');
-        var nB = document.getElementById('jrB');
-        var nC = document.getElementById('jrC');
-        var w1 = document.getElementById('jrW1');
-        var w2 = document.getElementById('jrW2');
-        var bar1 = document.getElementById('jrBar1');
-        var bar2 = document.getElementById('jrBar2');
-        var bar3 = document.getElementById('jrBar3');
-
-        function jrMsg() {
-          return window.AEGIS_JR || 'Nos vemos a las 21:00 en el sitio de siempre.';
-        }
-        function jrBytes() {
-          try { return new TextEncoder().encode(jrMsg()).length + 40; }
-          catch (e) { return jrMsg().length + 40; }
-        }
-        function cipherChar(i, ch) {
-          return GLYPHS[(i * 31 + ch.charCodeAt(0)) % GLYPHS.length];
-        }
-        function cipherSlice(msg, from, to) {
-          var out = '';
-          for (var i = from; i < to; i++) out += cipherChar(i, msg[i]);
-          return out;
-        }
-        function jrStatic() {
-          var msg = jrMsg();
-          jrMsgA.textContent = msg;
-          jrRelayMeta.textContent = jrBytes() + ' B · 0x' +
-            cipherSlice(msg, 0, Math.min(10, msg.length));
-          jrMsgC.innerHTML = esc(msg) +
-            ' <span class="ct">✓</span>';
-          nA.classList.add('lit'); nB.classList.add('lit'); nC.classList.add('lit');
-        }
-        function clamp01(v) { return Math.min(1, Math.max(0, v)); }
-
-        function jrRender(p) {
-          lastP = p;
-          var msg = jrMsg();
-          var n = msg.length;
-          var encP = clamp01(p / 0.32);
-          var transP = clamp01((p - 0.32) / 0.36);
-          var decP = clamp01((p - 0.72) / 0.28);
-
-          /* A: se cifra de izquierda a derecha */
-          var k = Math.round(encP * n);
-          jrMsgA.innerHTML =
-            '<span class="ct">' + cipherSlice(msg, 0, k) + '</span>' + esc(msg.slice(k));
-
-          /* B: el relay solo ve tamaño + bytes */
-          if (transP > 0.18) {
-            jrRelayMeta.textContent = jrBytes() + ' B · 0x' +
-              cipherSlice(msg, 0, Math.min(10, n));
-          } else {
-            jrRelayMeta.textContent = '—';
-          }
-
-          /* C: llega cifrado y se descifra */
-          if (p < 0.66) {
-            jrMsgC.innerHTML = '<span style="color: var(--text-faint);">· · ·</span>';
-          } else {
-            var dk = Math.round(decP * n);
-            jrMsgC.innerHTML =
-              esc(msg.slice(0, dk)) + '<span class="ct">' + cipherSlice(msg, dk, n) + '</span>';
-          }
-
-          /* Paquete viajando A → C */
-          if (transP > 0 && transP < 1) {
-            var rs = jrStage.getBoundingClientRect();
-            var ra = nA.getBoundingClientRect();
-            var rc = nC.getBoundingClientRect();
-            var x0 = ra.left + ra.width / 2 - rs.left;
-            var x1 = rc.left + rc.width / 2 - rs.left;
-            jrPacket.style.left = (x0 + (x1 - x0) * transP).toFixed(1) + 'px';
-            jrPacket.style.opacity = '1';
-          } else {
-            jrPacket.style.opacity = '0';
-          }
-
-          /* Barras + nodos iluminados */
-          bar1.style.width = (encP * 100).toFixed(1) + '%';
-          bar2.style.width = (transP * 100).toFixed(1) + '%';
-          bar3.style.width = (decP * 100).toFixed(1) + '%';
-          nA.classList.toggle('lit', p < 0.38);
-          nB.classList.toggle('lit', p >= 0.38 && p < 0.7);
-          nC.classList.toggle('lit', p >= 0.7);
-        }
-
-        function jrLayoutWires() {
-          var rs = jrStage.getBoundingClientRect();
-          var ra = nA.getBoundingClientRect();
-          var rb = nB.getBoundingClientRect();
-          var rc = nC.getBoundingClientRect();
-          w1.style.left = (ra.right - rs.left) + 'px';
-          w1.style.width = Math.max(0, rb.left - ra.right) + 'px';
-          w2.style.left = (rb.right - rs.left) + 'px';
-          w2.style.width = Math.max(0, rc.left - rb.right) + 'px';
-        }
-
-        function jrAnimated() {
-          return !reduced && window.matchMedia('(min-width: 901px)').matches;
-        }
-        jrRefresh = function () {
-          if (jrAnimated()) { jrLayoutWires(); jrRender(lastP); }
-          else { jrStatic(); }
-        };
-
-        var jrTick = false;
-        function jrOnScroll() {
-          if (!jrAnimated() || jrTick) return;
-          jrTick = true;
-          requestAnimationFrame(function () {
-            jrTick = false;
-            var r = jr.getBoundingClientRect();
-            var total = r.height - window.innerHeight;
-            jrRender(total > 0 ? clamp01(-r.top / total) : 1);
-          });
-        }
-        window.addEventListener('scroll', jrOnScroll, { passive: true });
-        window.addEventListener('resize', function () { jrRefresh(); }, { passive: true });
-        jrRefresh();
-      }
 
       /* ── Hook: re-aplicar efectos al cambiar de idioma ── */
       window.__aegisAfterLang = function () {
         splitHero();
         ephApply();
-        if (jrRefresh) jrRefresh();
       };
     })();
   </script>
@@ -2725,8 +2644,8 @@
         glowCanvas.width = glowCanvas.height = 128;
         const gctx = glowCanvas.getContext('2d');
         const grad = gctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-        grad.addColorStop(0, 'rgba(91,242,185,0.55)');
-        grad.addColorStop(0.4, 'rgba(91,242,185,0.16)');
+        grad.addColorStop(0, 'rgba(91,242,185,0.26)');
+        grad.addColorStop(0.4, 'rgba(91,242,185,0.08)');
         grad.addColorStop(1, 'rgba(91,242,185,0)');
         gctx.fillStyle = grad;
         gctx.fillRect(0, 0, 128, 128);
@@ -2734,7 +2653,7 @@
           map: new THREE.CanvasTexture(glowCanvas),
           blending: THREE.AdditiveBlending, depthWrite: false, transparent: true
         }));
-        glow.scale.setScalar(6.5);
+        glow.scale.setScalar(5.2);
         group.add(glow);
 
         /* Campo de partículas orbitales (≤ 3000; menos en móvil) */
@@ -2799,16 +2718,14 @@
           });
         }
 
-        /* Parallax sutil con el ratón */
+        /* Parallax sutil con el ratón (global: el hub vive en toda la página) */
         let targetX = 0, targetY = 0, curX = 0, curY = 0;
-        const hero = document.querySelector('.hero');
         const fine = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-        if (fine && hero) {
-          hero.addEventListener('pointermove', (ev) => {
+        if (fine) {
+          window.addEventListener('pointermove', (ev) => {
             targetX = (ev.clientX / window.innerWidth - 0.5) * 0.5;
             targetY = (ev.clientY / window.innerHeight - 0.5) * 0.3;
-          });
-          hero.addEventListener('pointerleave', () => { targetX = 0; targetY = 0; });
+          }, { passive: true });
         }
 
         /* Cámara reactiva al scroll: se aleja y se eleva al bajar */
@@ -2846,7 +2763,7 @@
           dust.rotation.y = -t * 0.00008;
           sparks.rotation.y = t * 0.00014;
           const breathe = 1 + Math.sin(t * 0.0009) * 0.04;
-          glow.scale.setScalar(6.5 * breathe);
+          glow.scale.setScalar(5.2 * breathe);
           fresnelMat.uniforms.uTime.value = t;
           camera.position.z = 8.2 + scrollCur * 1.7;
           camera.position.y = 0.2 + scrollCur * 0.55;
@@ -2889,6 +2806,244 @@
         play();
       }
     }
+  </script>
+
+  <!-- ─── Constelación global de escudos (fondo de toda la página) ─── -->
+  <script>
+  (function () {
+    var c = document.getElementById('bgGraph');
+    if (!c) return;
+    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var x = c.getContext('2d');
+    var DPR = Math.min(window.devicePixelRatio || 1, 2);
+    var W = 0, H = 0;
+    function size() {
+      W = window.innerWidth; H = window.innerHeight;
+      c.width = W * DPR; c.height = H * DPR;
+      x.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    size();
+    window.addEventListener('resize', size);
+
+    var mx = 0, my = 0, tmx = 0, tmy = 0;
+    var fine = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    if (fine) {
+      window.addEventListener('pointermove', function (e) {
+        tmx = e.clientX / window.innerWidth - 0.5;
+        tmy = e.clientY / window.innerHeight - 0.5;
+      }, { passive: true });
+    }
+    var scrollY = 0;
+    window.addEventListener('scroll', function () {
+      scrollY = window.scrollY || 0;
+    }, { passive: true });
+
+    var narrow = W < 760;
+    var N = narrow ? 34 : 64;
+    var nodes = [];
+    for (var i = 0; i < N; i++) {
+      nodes.push({
+        x: (Math.random() - 0.5) * 2.4, y: (Math.random() - 0.5) * 1.7,
+        z: Math.random() * 2 - 1,
+        vx: (Math.random() - 0.5) * 0.0006, vy: (Math.random() - 0.5) * 0.0006,
+        vz: (Math.random() - 0.5) * 0.0006, big: Math.random() < 0.3
+      });
+    }
+
+    function shield(px, py, s, a, glow) {
+      x.save(); x.translate(px, py); x.scale(s, s);
+      if (glow) { x.shadowColor = 'rgba(91,242,185,' + a + ')'; x.shadowBlur = 12; }
+      x.beginPath();
+      x.moveTo(0, -10); x.lineTo(8.5, -5); x.lineTo(8.5, 5);
+      x.lineTo(0, 11); x.lineTo(-8.5, 5); x.lineTo(-8.5, -5); x.closePath();
+      x.strokeStyle = 'rgba(91,242,185,' + a + ')'; x.lineWidth = 1.4; x.stroke();
+      x.shadowBlur = 0;
+      x.fillStyle = 'rgba(91,242,185,' + (a * 0.85) + ')';
+      x.fillRect(-5, -3.4, 10, 2.1);
+      x.globalAlpha = 0.55; x.fillRect(-5, 0.4, 10, 2.1); x.globalAlpha = 1;
+      x.restore();
+    }
+
+    function frame() {
+      mx += (tmx - mx) * 0.05; my += (tmy - my) * 0.05;
+      x.clearRect(0, 0, W, H);
+      var cx = W / 2, cy = H / 2, F = Math.min(W, H) * 0.7;
+      var drift = (scrollY % (H * 4)) / (H * 4);
+      for (var i = 0; i < N; i++) {
+        var n = nodes[i];
+        n.x += n.vx; n.y += n.vy; n.z += n.vz;
+        if (n.x > 1.4 || n.x < -1.4) n.vx *= -1;
+        if (n.y > 1.2 || n.y < -1.2) n.vy *= -1;
+        if (n.z > 1 || n.z < -1) n.vz *= -1;
+      }
+      var pr = [];
+      for (var i = 0; i < N; i++) {
+        var n = nodes[i];
+        var yy = n.y - drift * 0.6;
+        var zz = n.z + 2.3, sc = 1 / zz;
+        var px = cx + (n.x + mx * 0.6) * F * sc;
+        var py = cy + (yy + my * 0.6) * F * sc;
+        pr.push({ px: px, py: py, sc: sc, z: n.z, big: n.big });
+      }
+      for (var i = 0; i < N; i++) for (var j = i + 1; j < N; j++) {
+        var a = pr[i], b = pr[j], dx = a.px - b.px, dy = a.py - b.py;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 175) {
+          var al = (1 - d / 175) * 0.42 * Math.min(a.sc, b.sc);
+          x.strokeStyle = 'rgba(91,242,185,' + al + ')'; x.lineWidth = 0.9;
+          x.beginPath(); x.moveTo(a.px, a.py); x.lineTo(b.px, b.py); x.stroke();
+        }
+      }
+      var hubR = Math.min(W, H) * 0.32;
+      for (var i = 0; i < N; i++) {
+        var p = pr[i], hdx = p.px - cx, hdy = p.py - cy;
+        var hd = Math.sqrt(hdx * hdx + hdy * hdy);
+        if (hd < hubR * 1.8 && hd > hubR * 0.5) {
+          var hal = (1 - hd / (hubR * 1.8)) * 0.3 * p.sc;
+          x.strokeStyle = 'rgba(91,242,185,' + hal + ')'; x.lineWidth = 0.8;
+          x.beginPath(); x.moveTo(p.px, p.py);
+          x.lineTo(cx + hdx / hd * hubR * 0.5, cy + hdy / hd * hubR * 0.5); x.stroke();
+        }
+      }
+      pr.sort(function (p, q) { return p.z - q.z; });
+      for (var i = 0; i < pr.length; i++) {
+        var p = pr[i], a = Math.max(0.16, Math.min(0.95, p.sc * 0.78));
+        if (p.big) shield(p.px, p.py, p.sc * 1.5, a, p.sc > 0.5);
+        else { x.beginPath(); x.arc(p.px, p.py, 2 * p.sc + 0.6, 0, 7); x.fillStyle = 'rgba(91,242,185,' + a * 0.85 + ')'; x.fill(); }
+      }
+    }
+
+    if (reduced) { frame(); return; }
+    var running = false, raf = 0;
+    function loop() { if (!running) return; frame(); raf = requestAnimationFrame(loop); }
+    function play() { if (running || document.hidden) return; running = true; raf = requestAnimationFrame(loop); }
+    function pause() { running = false; cancelAnimationFrame(raf); }
+    document.addEventListener('visibilitychange', function () { if (document.hidden) pause(); else play(); });
+    play();
+  })();
+  </script>
+
+  <!-- ─── Transporte Tor: paquete-cebolla entre teléfonos ─── -->
+  <script>
+  (function () {
+    var c = document.getElementById('torCanvas');
+    if (!c) return;
+    var x = c.getContext('2d'), cap = document.getElementById('torCap'), sub = document.getElementById('torSub');
+    var DPR = Math.min(window.devicePixelRatio || 1, 2), W = 0, H = 0;
+    function size() { W = c.clientWidth; H = c.clientHeight; c.width = W * DPR; c.height = H * DPR; x.setTransform(DPR, 0, 0, DPR, 0, 0); }
+    size(); window.addEventListener('resize', size);
+    function L(es) { var d = window.AEGIS_TOR; return (d && d[es]) || es; }
+    function pts() {
+      var y = H * 0.52;
+      return [
+        { x: W * 0.08, y: y, t: 'TÚ', phone: 1 }, { x: W * 0.27, y: y, t: 'GUARD' },
+        { x: W * 0.4, y: y - 34, t: 'MIDDLE' }, { x: W * 0.5, y: y, t: 'RELAY CIEGO', relay: 1 },
+        { x: W * 0.6, y: y - 34, t: 'MIDDLE' }, { x: W * 0.73, y: y, t: 'GUARD' },
+        { x: W * 0.92, y: y, t: 'PEER', phone: 1 }
+      ];
+    }
+    var info = [
+      ['cifrado en tu dispositivo', 'Double Ratchet + PQXDH post-cuántico'],
+      ['entra a Tor — tu IP queda oculta', 'el relay nunca ve desde dónde escribes'],
+      ['rebota entre nodos Tor', 'nadie ve origen y destino a la vez'],
+      ['el relay reenvía un sobre sellado', 'no ve quién, a quién, ni qué — ni lo guarda'],
+      ['sale por el circuito del peer', 'sigue cifrado de extremo a extremo'],
+      ['último salto hacia su dispositivo', ''],
+      ['descifrado en su dispositivo', 'solo su llave privada lo abre']
+    ];
+    var P, seg = 0, phase = 0, t = 0, tick = 0;
+    function phone(px, py, act, done) {
+      var w = 20, h = 34, r = 4; x.save(); x.translate(px, py);
+      x.beginPath();
+      x.moveTo(-w / 2 + r, -h / 2); x.lineTo(w / 2 - r, -h / 2); x.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+      x.lineTo(w / 2, h / 2 - r); x.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2); x.lineTo(-w / 2 + r, h / 2);
+      x.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r); x.lineTo(-w / 2, -h / 2 + r); x.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2); x.closePath();
+      x.fillStyle = '#0d1112'; x.fill();
+      x.strokeStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.45)'; x.lineWidth = 1.6; x.stroke();
+      x.fillStyle = act ? 'rgba(91,242,185,0.9)' : 'rgba(91,242,185,0.4)';
+      x.fillRect(-w / 2 + 4, -h / 2 + 5, w - 8, 2.4); x.globalAlpha = 0.5; x.fillRect(-w / 2 + 4, -h / 2 + 10, w - 8, 2.4); x.globalAlpha = 1;
+      if (act) { x.beginPath(); x.arc(0, h / 2 - 4, 1.8, 0, 7); x.fillStyle = '#5bf2b9'; x.fill(); }
+      x.restore();
+    }
+    function relayBox(px, py, act) {
+      var w = 30, h = 24, r = 4; x.save(); x.translate(px, py);
+      x.beginPath();
+      x.moveTo(-w / 2 + r, -h / 2); x.lineTo(w / 2 - r, -h / 2); x.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+      x.lineTo(w / 2, h / 2 - r); x.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2); x.lineTo(-w / 2 + r, h / 2);
+      x.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r); x.lineTo(-w / 2, -h / 2 + r); x.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2); x.closePath();
+      x.fillStyle = '#0d1112'; x.fill();
+      x.strokeStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.5)'; x.lineWidth = 1.6; x.stroke();
+      x.strokeStyle = act ? 'rgba(91,242,185,0.85)' : 'rgba(91,242,185,0.4)'; x.lineWidth = 1;
+      for (var r2 = 0; r2 < 3; r2++) { var yy = -h / 2 + 6 + r2 * 6; x.beginPath(); x.moveTo(-w / 2 + 5, yy); x.lineTo(w / 2 - 9, yy); x.stroke();
+        x.beginPath(); x.arc(w / 2 - 6, yy, 1.1, 0, 7); x.fillStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.4)'; x.fill(); }
+      x.restore();
+    }
+    function node(p, act) {
+      if (p.relay) { relayBox(p.x, p.y, act); }
+      else {
+        x.beginPath(); x.arc(p.x, p.y, act ? 10 : 6, 0, 7); x.fillStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.3)'; x.fill();
+        if (act) { x.beginPath(); x.arc(p.x, p.y, 16, 0, 7); x.strokeStyle = 'rgba(91,242,185,0.4)'; x.lineWidth = 1; x.stroke(); }
+      }
+      x.fillStyle = act ? 'rgba(232,240,236,0.85)' : 'rgba(232,240,236,0.42)'; x.font = '9px JetBrains Mono,monospace'; x.textAlign = 'center';
+      x.fillText(p.t, p.x, p.y < H * 0.45 ? p.y - 24 : (p.relay ? p.y + 30 : p.y + 26));
+    }
+    function packet(px, py, layers) {
+      for (var k = layers; k >= 1; k--) { var rr = 8 + k * 5 + Math.sin(tick + k) * 1.2; x.beginPath(); x.arc(px, py, rr, 0, 7); x.strokeStyle = 'rgba(91,242,185,' + (0.13 + k * 0.05) + ')'; x.lineWidth = 1; x.stroke(); }
+      x.beginPath(); x.arc(px, py, 15, 0, 7); x.fillStyle = 'rgba(91,242,185,0.1)'; x.fill();
+      x.beginPath(); x.rect(px - 5, py - 5, 10, 10); x.fillStyle = '#5bf2b9'; x.fill();
+    }
+    function frame() {
+      tick += 0.05; P = pts(); x.clearRect(0, 0, W, H);
+      for (var i = 0; i < P.length - 1; i++) {
+        x.beginPath(); x.moveTo(P[i].x, P[i].y);
+        var mxp = (P[i].x + P[i + 1].x) / 2; x.quadraticCurveTo(mxp, (P[i].y + P[i + 1].y) / 2 - 12, P[i + 1].x, P[i + 1].y);
+        x.strokeStyle = i < seg ? 'rgba(91,242,185,0.28)' : 'rgba(91,242,185,0.1)'; x.lineWidth = 1; x.setLineDash([4, 5]); x.stroke(); x.setLineDash([]);
+      }
+      for (var i = 0; i < P.length; i++) { var act = (phase === 0 && i === seg); if (P[i].phone) phone(P[i].x, P[i].y, act, i > 0); else node(P[i], act); }
+      var layers = Math.max(0, 3 - Math.floor(seg * 3 / (P.length - 1)));
+      if (phase === 0) {
+        t += 0.012; if (seg > 0 && seg < P.length - 1) packet(P[seg].x, P[seg].y, layers);
+        cap.textContent = L(info[seg][0]); sub.textContent = L(info[seg][1]);
+        if (t >= 1) { t = 0; if (seg >= P.length - 1) seg = 0; else phase = 1; }
+      } else {
+        t += 0.009; var a = P[seg], b = P[seg + 1], mxp = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - 12;
+        var e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        var px = (1 - e) * (1 - e) * a.x + 2 * (1 - e) * e * mxp + e * e * b.x;
+        var py = (1 - e) * (1 - e) * a.y + 2 * (1 - e) * e * my + e * e * b.y;
+        packet(px, py, layers); if (t >= 1) { t = 0; seg++; phase = 0; }
+      }
+    }
+    frame();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var running = false, raf = 0;
+    function loop() { if (!running) return; frame(); raf = requestAnimationFrame(loop); }
+    function play() { if (running || document.hidden) return; running = true; raf = requestAnimationFrame(loop); }
+    function pause() { running = false; cancelAnimationFrame(raf); }
+    var io = new IntersectionObserver(function (es) { es.forEach(function (ev) { if (ev.isIntersecting) play(); else pause(); }); }, { threshold: 0.1 });
+    io.observe(c);
+    document.addEventListener('visibilitychange', function () { if (document.hidden) pause(); else play(); });
+  })();
+  </script>
+
+  <!-- ─── Ruido opaco del payload (sección "lo que ve el servidor") ─── -->
+  <script>
+  (function () {
+    var n = document.getElementById('srvNoise');
+    if (!n) return;
+    var ch = '0123456789abcdef', timer = null, on = false;
+    function rnd() { var s = ''; for (var i = 0; i < 40; i++) s += ch[Math.floor(Math.random() * 16)]; return s; }
+    n.textContent = rnd();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    function tick() { n.textContent = rnd(); }
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        on = e.isIntersecting;
+        if (on && !timer) { timer = setInterval(tick, 90); }
+        else if (!on && timer) { clearInterval(timer); timer = null; }
+      });
+    }, { threshold: 0.1 });
+    io.observe(n);
+  })();
   </script>
 </body>
 </html>
