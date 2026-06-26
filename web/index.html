@@ -611,73 +611,6 @@
       .marquee-track .tagline-row { flex-wrap: wrap; white-space: normal; }
     }
 
-    /* ── Journey: el viaje de un mensaje ────────────── */
-    .journey { position: relative; height: 300vh; }
-    .journey-sticky {
-      position: sticky; top: 0; height: 100vh;
-      display: flex; flex-direction: column; justify-content: center;
-      overflow: hidden;
-    }
-    .journey-stage {
-      display: grid; grid-template-columns: 1fr 0.8fr 1fr; gap: 24px;
-      align-items: stretch; position: relative; margin-top: 40px;
-    }
-    .jr-node {
-      padding: 22px 20px; border: 1px solid var(--border); border-radius: 14px;
-      background: var(--surface); position: relative; min-height: 190px;
-      display: flex; flex-direction: column; gap: 10px;
-      transition: border-color 0.4s, box-shadow 0.4s;
-    }
-    .jr-node.lit { border-color: rgba(91,242,185,0.5);
-                   box-shadow: 0 0 40px rgba(91,242,185,0.08); }
-    .jr-node .l { font-family: var(--mono); font-size: 10px; color: var(--accent);
-                  letter-spacing: 0.12em; }
-    .jr-node .note { font-size: 12.5px; color: var(--text-dim); line-height: 1.5;
-                     margin-top: auto; }
-    .jr-msg {
-      font-family: var(--mono); font-size: 13px; line-height: 1.6;
-      padding: 12px; border-radius: 10px; background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border); min-height: 86px;
-      overflow-wrap: anywhere; color: var(--text);
-    }
-    .jr-msg .ct { color: var(--accent); opacity: 0.85; }
-    .jr-relay-box {
-      display: flex; flex-direction: column; gap: 8px; align-items: center;
-      justify-content: center; text-align: center;
-    }
-    .jr-relay-meta { font-family: var(--mono); font-size: 11px; color: var(--text-faint);
-                     letter-spacing: 0.06em; }
-    .jr-wire {
-      position: absolute; top: 50%; height: 1px; z-index: 0;
-      background: repeating-linear-gradient(90deg,
-        rgba(91,242,185,0.35) 0 6px, transparent 6px 12px);
-    }
-    .jr-wire.w1 { left: calc(33.33% - 12px); width: 24px; }
-    .jr-wire.w2 { right: calc(33.33% - 12px); width: 24px; }
-    .jr-packet {
-      position: absolute; top: 50%; width: 12px; height: 12px; z-index: 4;
-      border-radius: 3px; background: var(--accent);
-      box-shadow: 0 0 18px rgba(91,242,185,0.9), 0 0 40px rgba(91,242,185,0.4);
-      transform: translate(-50%, -50%) rotate(45deg); opacity: 0;
-    }
-    .jr-progress {
-      margin-top: 28px; display: flex; gap: 8px; align-items: center;
-      font-family: var(--mono); font-size: 10px; color: var(--text-faint);
-      letter-spacing: 0.1em;
-    }
-    .jr-bar { flex: 1; height: 2px; background: var(--border); border-radius: 2px;
-              overflow: hidden; }
-    .jr-bar i { display: block; height: 100%; width: 0;
-                background: var(--accent); border-radius: 2px; }
-    .jr-hint { text-align: center; margin-top: 18px; font-family: var(--mono);
-               font-size: 10px; letter-spacing: 0.14em; color: var(--text-faint);
-               text-transform: uppercase; animation: hint-pulse 2.4s ease-in-out infinite; }
-    @keyframes hint-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
-    @media (prefers-reduced-motion: reduce) {
-      .journey { height: auto; }
-      .journey-sticky { position: static; height: auto; padding: 40px 0; }
-      .jr-hint { display: none; }
-    }
 
     /* ── Phone: tour de pantallas ───────────────────── */
     .app-screens { position: relative; flex: 1; min-height: 0; }
@@ -850,11 +783,6 @@
       .trust { padding: 36px 24px; }
       .work-grid { grid-template-columns: 1fr; }
       .foot-row { grid-template-columns: 1fr 1fr; }
-      .journey { height: auto; }
-      .journey-sticky { position: static; height: auto; padding: 48px 0; overflow: visible; }
-      .journey-stage { grid-template-columns: 1fr; gap: 14px; }
-      .jr-node { min-height: 0; }
-      .jr-wire, .jr-packet, .jr-hint, .jr-progress { display: none; }
     }
     @media (max-width: 560px) {
       .wrap { padding: 0 20px; }
@@ -1229,49 +1157,6 @@
         <canvas id="torCanvas"></canvas>
         <div id="torCap" class="transport-cap"></div>
         <div id="torSub" class="transport-sub"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ─── Journey: el viaje de un mensaje (scroll) ── -->
-  <section class="journey" id="journey">
-    <div class="journey-sticky">
-      <div class="wrap" style="width: 100%;">
-        <div class="section-head" style="margin-bottom: 12px;">
-          <div class="section-eyebrow" data-i18n="jr_eyebrow">El viaje de un mensaje</div>
-          <h2 class="section-title" style="font-size: clamp(32px, 4vw, 54px);" data-i18n="jr_title">
-            Qué ve cada uno. <em style="font-style:italic; color: var(--accent);">Y qué no.</em>
-          </h2>
-        </div>
-        <div class="journey-stage" id="jrStage">
-          <div class="jr-wire w1" id="jrW1"></div>
-          <div class="jr-wire w2" id="jrW2"></div>
-          <div class="jr-packet" id="jrPacket"></div>
-          <div class="jr-node" id="jrA">
-            <div class="l" data-i18n="jr_a_l">TU DISPOSITIVO</div>
-            <div class="jr-msg" id="jrMsgA">Nos vemos a las 21:00 en el sitio de siempre.</div>
-            <div class="note" data-i18n="jr_a_note">Se cifra aquí, con una clave que nunca sale de tu teléfono.</div>
-          </div>
-          <div class="jr-node" id="jrB">
-            <div class="l" data-i18n="jr_b_l">EL RELAY</div>
-            <div class="jr-msg" id="jrMsgB"><span class="jr-relay-meta" id="jrRelayMeta">—</span></div>
-            <div class="note" data-i18n="jr_b_note">Solo enruta un paquete opaco. No sabe qué dice, ni de quién es, ni lo guarda.</div>
-          </div>
-          <div class="jr-node" id="jrC">
-            <div class="l" data-i18n="jr_c_l">SU DISPOSITIVO</div>
-            <div class="jr-msg" id="jrMsgC">Nos vemos a las 21:00 en el sitio de siempre.</div>
-            <div class="note" data-i18n="jr_c_note">Solo la llave de tu contacto puede abrirlo. Ahí vuelve a ser texto.</div>
-          </div>
-        </div>
-        <div class="jr-progress" aria-hidden="true">
-          <span data-i18n="jr_p1">CIFRADO</span>
-          <div class="jr-bar"><i id="jrBar1"></i></div>
-          <span data-i18n="jr_p2">TRÁNSITO</span>
-          <div class="jr-bar"><i id="jrBar2"></i></div>
-          <span data-i18n="jr_p3">DESCIFRADO</span>
-          <div class="jr-bar"><i id="jrBar3"></i></div>
-        </div>
-        <div class="jr-hint" data-i18n="jr_hint">▼ sigue bajando — el mensaje se cifra con el scroll</div>
       </div>
     </div>
   </section>
@@ -2119,7 +2004,6 @@
         /* El mock del teléfono lee esto en cada iteración del bucle */
         window.AEGIS_CHAT = { script: dict.chat, sent: dict.sent };
         window.AEGIS_DEMO = dict.demo;
-        window.AEGIS_JR = dict.jr_msg;
         window.AEGIS_TOR = dict.tor;
         if (window.__aegisChatStatic) window.__aegisChatStatic();
         if (window.__aegisAfterLang) window.__aegisAfterLang(l);
@@ -2640,143 +2524,11 @@
         });
       }
 
-      /* ── Journey: el mensaje se cifra con el scroll ── */
-      var jr = document.getElementById('journey');
-      var lastP = 0;
-      var jrRefresh = null;
-      if (jr) {
-        var jrMsgA = document.getElementById('jrMsgA');
-        var jrMsgC = document.getElementById('jrMsgC');
-        var jrRelayMeta = document.getElementById('jrRelayMeta');
-        var jrPacket = document.getElementById('jrPacket');
-        var jrStage = document.getElementById('jrStage');
-        var nA = document.getElementById('jrA');
-        var nB = document.getElementById('jrB');
-        var nC = document.getElementById('jrC');
-        var w1 = document.getElementById('jrW1');
-        var w2 = document.getElementById('jrW2');
-        var bar1 = document.getElementById('jrBar1');
-        var bar2 = document.getElementById('jrBar2');
-        var bar3 = document.getElementById('jrBar3');
-
-        function jrMsg() {
-          return window.AEGIS_JR || 'Nos vemos a las 21:00 en el sitio de siempre.';
-        }
-        function jrBytes() {
-          try { return new TextEncoder().encode(jrMsg()).length + 40; }
-          catch (e) { return jrMsg().length + 40; }
-        }
-        function cipherChar(i, ch) {
-          return GLYPHS[(i * 31 + ch.charCodeAt(0)) % GLYPHS.length];
-        }
-        function cipherSlice(msg, from, to) {
-          var out = '';
-          for (var i = from; i < to; i++) out += cipherChar(i, msg[i]);
-          return out;
-        }
-        function jrStatic() {
-          var msg = jrMsg();
-          jrMsgA.textContent = msg;
-          jrRelayMeta.textContent = jrBytes() + ' B · 0x' +
-            cipherSlice(msg, 0, Math.min(10, msg.length));
-          jrMsgC.innerHTML = esc(msg) +
-            ' <span class="ct">✓</span>';
-          nA.classList.add('lit'); nB.classList.add('lit'); nC.classList.add('lit');
-        }
-        function clamp01(v) { return Math.min(1, Math.max(0, v)); }
-
-        function jrRender(p) {
-          lastP = p;
-          var msg = jrMsg();
-          var n = msg.length;
-          var encP = clamp01(p / 0.32);
-          var transP = clamp01((p - 0.32) / 0.36);
-          var decP = clamp01((p - 0.72) / 0.28);
-
-          /* A: se cifra de izquierda a derecha */
-          var k = Math.round(encP * n);
-          jrMsgA.innerHTML =
-            '<span class="ct">' + cipherSlice(msg, 0, k) + '</span>' + esc(msg.slice(k));
-
-          /* B: el relay solo ve tamaño + bytes */
-          if (transP > 0.18) {
-            jrRelayMeta.textContent = jrBytes() + ' B · 0x' +
-              cipherSlice(msg, 0, Math.min(10, n));
-          } else {
-            jrRelayMeta.textContent = '—';
-          }
-
-          /* C: llega cifrado y se descifra */
-          if (p < 0.66) {
-            jrMsgC.innerHTML = '<span style="color: var(--text-faint);">· · ·</span>';
-          } else {
-            var dk = Math.round(decP * n);
-            jrMsgC.innerHTML =
-              esc(msg.slice(0, dk)) + '<span class="ct">' + cipherSlice(msg, dk, n) + '</span>';
-          }
-
-          /* Paquete viajando A → C */
-          if (transP > 0 && transP < 1) {
-            var rs = jrStage.getBoundingClientRect();
-            var ra = nA.getBoundingClientRect();
-            var rc = nC.getBoundingClientRect();
-            var x0 = ra.left + ra.width / 2 - rs.left;
-            var x1 = rc.left + rc.width / 2 - rs.left;
-            jrPacket.style.left = (x0 + (x1 - x0) * transP).toFixed(1) + 'px';
-            jrPacket.style.opacity = '1';
-          } else {
-            jrPacket.style.opacity = '0';
-          }
-
-          /* Barras + nodos iluminados */
-          bar1.style.width = (encP * 100).toFixed(1) + '%';
-          bar2.style.width = (transP * 100).toFixed(1) + '%';
-          bar3.style.width = (decP * 100).toFixed(1) + '%';
-          nA.classList.toggle('lit', p < 0.38);
-          nB.classList.toggle('lit', p >= 0.38 && p < 0.7);
-          nC.classList.toggle('lit', p >= 0.7);
-        }
-
-        function jrLayoutWires() {
-          var rs = jrStage.getBoundingClientRect();
-          var ra = nA.getBoundingClientRect();
-          var rb = nB.getBoundingClientRect();
-          var rc = nC.getBoundingClientRect();
-          w1.style.left = (ra.right - rs.left) + 'px';
-          w1.style.width = Math.max(0, rb.left - ra.right) + 'px';
-          w2.style.left = (rb.right - rs.left) + 'px';
-          w2.style.width = Math.max(0, rc.left - rb.right) + 'px';
-        }
-
-        function jrAnimated() {
-          return !reduced && window.matchMedia('(min-width: 901px)').matches;
-        }
-        jrRefresh = function () {
-          if (jrAnimated()) { jrLayoutWires(); jrRender(lastP); }
-          else { jrStatic(); }
-        };
-
-        var jrTick = false;
-        function jrOnScroll() {
-          if (!jrAnimated() || jrTick) return;
-          jrTick = true;
-          requestAnimationFrame(function () {
-            jrTick = false;
-            var r = jr.getBoundingClientRect();
-            var total = r.height - window.innerHeight;
-            jrRender(total > 0 ? clamp01(-r.top / total) : 1);
-          });
-        }
-        window.addEventListener('scroll', jrOnScroll, { passive: true });
-        window.addEventListener('resize', function () { jrRefresh(); }, { passive: true });
-        jrRefresh();
-      }
 
       /* ── Hook: re-aplicar efectos al cambiar de idioma ── */
       window.__aegisAfterLang = function () {
         splitHero();
         ephApply();
-        if (jrRefresh) jrRefresh();
       };
     })();
   </script>
