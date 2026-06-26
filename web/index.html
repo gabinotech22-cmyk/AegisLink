@@ -403,6 +403,31 @@
                           font-weight: 600; margin-bottom: 2px; }
     .check .body span { font-size: 13px; color: var(--text-dim); }
 
+    /* ── Bloque de código real verificable ──────────── */
+    .code-proof { position: relative; margin-top: 40px; border: 1px solid var(--border);
+                  border-radius: 12px; background: rgba(13,17,18,0.92); overflow: hidden; }
+    .code-bar { display: flex; align-items: center; gap: 7px; padding: 10px 16px;
+                border-bottom: 1px solid var(--border); font-family: var(--mono);
+                font-size: 12px; color: var(--text-dim); }
+    .cd { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .cd-r { background: var(--danger); } .cd-y { background: var(--warn); } .cd-g { background: var(--accent); }
+    .code-path { margin-left: 8px; }
+    .code-line { margin-left: auto; color: var(--accent); }
+    .code-body { margin: 0; padding: 18px 20px; font-family: var(--mono);
+                 font-size: 13px; line-height: 1.7; color: var(--text);
+                 overflow-x: auto; white-space: pre; }
+    .code-body .cm { color: var(--text-faint); }
+    .code-body .kw { color: #a78bfa; }
+    .code-body .fn { color: var(--accent); }
+    .code-body .ty { color: #7dd3fc; }
+    .code-body .nm { color: var(--warn); }
+    .code-body .st { color: #86efac; }
+    .code-link { display: inline-flex; align-items: center; gap: 8px; margin: 4px 20px 18px;
+                 font-family: var(--mono); font-size: 13px; color: var(--accent);
+                 border: 1px solid rgba(91,242,185,0.35); border-radius: 24px;
+                 padding: 8px 16px; transition: background 0.15s; }
+    .code-link:hover { background: rgba(91,242,185,0.1); }
+
     /* ── Comparison ─────────────────────────────────── */
     .compare {
       border: 1px solid var(--border); border-radius: 14px;
@@ -1359,6 +1384,22 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <div class="code-proof reveal" aria-label="Fragmento de código real verificable">
+          <div class="code-bar">
+            <span class="cd cd-r"></span><span class="cd cd-y"></span><span class="cd cd-g"></span>
+            <span class="code-path">mobile/src/crypto/signal/ratchet.ts</span>
+            <span class="code-line">L69</span>
+          </div>
+<pre class="code-body"><span class="cm">// rechaza claves de bajo orden — un relay malicioso no puede forzar un DH degenerado</span>
+<span class="kw">function</span> <span class="fn">assertNonZeroDH</span>(dh: <span class="ty">Uint8Array</span>): <span class="ty">Uint8Array</span> {
+  <span class="kw">let</span> acc = <span class="nm">0</span>;
+  <span class="kw">for</span> (<span class="kw">let</span> i = <span class="nm">0</span>; i &lt; dh.length; i++) acc |= dh[i];  <span class="cm">// constant-time</span>
+  <span class="kw">if</span> (acc === <span class="nm">0</span>) <span class="kw">throw new</span> <span class="fn">Error</span>(<span class="st">'low-order point attack'</span>);
+  <span class="kw">return</span> dh;
+}</pre>
+          <a class="code-link" href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/mobile/src/crypto/signal/ratchet.ts#L69" target="_blank" rel="noopener" data-i18n="trust_codelink">ver esta línea en GitHub →</a>
         </div>
       </div>
     </div>
