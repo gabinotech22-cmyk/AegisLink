@@ -1149,9 +1149,9 @@
   <section class="section" id="transport" style="padding-top: 40px;">
     <div class="wrap">
       <div class="section-head reveal">
-        <div class="section-eyebrow" data-i18n="tr_eyebrow">Sobre Tor · dos circuitos</div>
-        <h2 class="section-title" data-i18n="tr_title">Tu mensaje nunca pasa por <em style="font-style:italic; color: var(--accent);">un servidor</em>.</h2>
-        <p class="section-lead" data-i18n="tr_lead">Se cifra en tu dispositivo y viaja por dos circuitos Tor que convergen en un punto de encuentro, directo al teléfono de tu interlocutor.</p>
+        <div class="section-eyebrow" data-i18n="tr_eyebrow">Sobre Tor · relay ciego</div>
+        <h2 class="section-title" data-i18n="tr_title">Pasa por un relay que <em style="font-style:italic; color: var(--accent);">no puede verte</em>.</h2>
+        <p class="section-lead" data-i18n="tr_lead">Se cifra en tu dispositivo y viaja por Tor hasta un relay ciego: no ve quién lo envía, a quién, ni qué dice — y no guarda registros. Self-hostable y auditable.</p>
       </div>
       <div class="transport-stage reveal">
         <canvas id="torCanvas"></canvas>
@@ -1693,24 +1693,23 @@
         w_noanon: "not anon.", w_client: "client",
         cmp_note: "* Signal uses sealed sender, but registration requires a phone number.",
         trust_codelink: "see this line on GitHub →",
-        tr_eyebrow: "Over Tor · two circuits",
-        tr_title: "Your message never passes through <em style='font-style:italic; color: var(--accent);'>a server</em>.",
-        tr_lead: "It's encrypted on your device and travels over two Tor circuits that meet at a rendezvous point, straight to your contact's phone.",
+        tr_eyebrow: "Over Tor · blind relay",
+        tr_title: "It goes through a relay that <em style='font-style:italic; color: var(--accent);'>can't see you</em>.",
+        tr_lead: "Encrypted on your device, it travels over Tor to a blind relay: it never sees who sent it, to whom, or what it says — and keeps no logs. Self-hostable and auditable.",
         tor: {
-          'cifrando en tu dispositivo': 'encrypting on your device',
-          'XChaCha20-Poly1305 + ML-KEM-768': 'XChaCha20-Poly1305 + ML-KEM-768',
-          'envuelto en 3 capas de cebolla': 'wrapped in 3 onion layers',
-          'el relay solo ve ruido': 'the relay only sees noise',
-          'salto 1 — capa pelada': 'hop 1 — layer peeled',
-          'sealed-sender: sin campo "from"': 'sealed-sender: no "from" field',
-          'los dos circuitos convergen': 'the two circuits converge',
-          'el rendezvous no sabe quién habla': 'the rendezvous never knows who is talking',
-          'salto 2 — otra capa pelada': 'hop 2 — another layer peeled',
-          'nuevo circuito, otra identidad': 'new circuit, another identity',
-          'llega opaco al peer': 'arrives opaque at the peer',
-          'aún cifrado de extremo a extremo': 'still end-to-end encrypted',
-          'descifrado local': 'decrypted locally',
-          'solo el peer tiene la clave privada': 'only the peer holds the private key'
+          'cifrado en tu dispositivo': 'encrypted on your device',
+          'Double Ratchet + PQXDH post-cuántico': 'Double Ratchet + post-quantum PQXDH',
+          'entra a Tor — tu IP queda oculta': 'enters Tor — your IP stays hidden',
+          'el relay nunca ve desde dónde escribes': 'the relay never sees where you write from',
+          'rebota entre nodos Tor': 'bounces between Tor nodes',
+          'nadie ve origen y destino a la vez': 'no node sees both ends at once',
+          'el relay reenvía un sobre sellado': 'the relay forwards a sealed envelope',
+          'no ve quién, a quién, ni qué — ni lo guarda': "sees no who, no whom, no what — and stores nothing",
+          'sale por el circuito del peer': "exits via the peer's circuit",
+          'sigue cifrado de extremo a extremo': 'still end-to-end encrypted',
+          'último salto hacia su dispositivo': 'last hop to their device',
+          'descifrado en su dispositivo': 'decrypted on their device',
+          'solo su llave privada lo abre': 'only their private key opens it'
         },
         srv_eyebrow: "Zero metadata",
         srv_title: "What the server <em style='font-style:italic; color: var(--accent);'>logs about you</em>.",
@@ -1871,24 +1870,23 @@
         w_noanon: "non anon.", w_client: "client",
         cmp_note: "* Signal applica il sealed sender, ma la registrazione richiede un numero di telefono.",
         trust_codelink: "vedi questa riga su GitHub →",
-        tr_eyebrow: "Su Tor · due circuiti",
-        tr_title: "Il tuo messaggio non passa mai per <em style='font-style:italic; color: var(--accent);'>un server</em>.",
-        tr_lead: "Viene cifrato sul tuo dispositivo e viaggia su due circuiti Tor che convergono in un punto d'incontro, dritto al telefono del tuo interlocutore.",
+        tr_eyebrow: "Su Tor · relay cieco",
+        tr_title: "Passa per un relay che <em style='font-style:italic; color: var(--accent);'>non può vederti</em>.",
+        tr_lead: "Cifrato sul tuo dispositivo, viaggia su Tor fino a un relay cieco: non vede chi lo invia, a chi, né cosa dice — e non conserva log. Self-hostable e verificabile.",
         tor: {
-          'cifrando en tu dispositivo': 'cifratura sul tuo dispositivo',
-          'XChaCha20-Poly1305 + ML-KEM-768': 'XChaCha20-Poly1305 + ML-KEM-768',
-          'envuelto en 3 capas de cebolla': 'avvolto in 3 strati di cipolla',
-          'el relay solo ve ruido': 'il relay vede solo rumore',
-          'salto 1 — capa pelada': 'salto 1 — strato rimosso',
-          'sealed-sender: sin campo "from"': 'sealed-sender: nessun campo "from"',
-          'los dos circuitos convergen': 'i due circuiti convergono',
-          'el rendezvous no sabe quién habla': 'il rendezvous non sa chi parla',
-          'salto 2 — otra capa pelada': 'salto 2 — altro strato rimosso',
-          'nuevo circuito, otra identidad': 'nuovo circuito, altra identità',
-          'llega opaco al peer': 'arriva opaco al peer',
-          'aún cifrado de extremo a extremo': 'ancora cifrato end-to-end',
-          'descifrado local': 'decifrato localmente',
-          'solo el peer tiene la clave privada': 'solo il peer ha la chiave privata'
+          'cifrado en tu dispositivo': 'cifrato sul tuo dispositivo',
+          'Double Ratchet + PQXDH post-cuántico': 'Double Ratchet + PQXDH post-quantistico',
+          'entra a Tor — tu IP queda oculta': 'entra in Tor — il tuo IP resta nascosto',
+          'el relay nunca ve desde dónde escribes': 'il relay non vede mai da dove scrivi',
+          'rebota entre nodos Tor': 'rimbalza tra i nodi Tor',
+          'nadie ve origen y destino a la vez': 'nessun nodo vede entrambi i capi',
+          'el relay reenvía un sobre sellado': 'il relay inoltra una busta sigillata',
+          'no ve quién, a quién, ni qué — ni lo guarda': 'non vede chi, a chi, né cosa — e non conserva nulla',
+          'sale por el circuito del peer': 'esce dal circuito del peer',
+          'sigue cifrado de extremo a extremo': 'resta cifrato end-to-end',
+          'último salto hacia su dispositivo': 'ultimo salto verso il suo dispositivo',
+          'descifrado en su dispositivo': 'decifrato sul suo dispositivo',
+          'solo su llave privada lo abre': 'solo la sua chiave privata lo apre'
         },
         srv_eyebrow: "Zero metadati",
         srv_title: "Ciò che il server <em style='font-style:italic; color: var(--accent);'>registra di te</em>.",
@@ -2937,19 +2935,19 @@
       var y = H * 0.52;
       return [
         { x: W * 0.08, y: y, t: 'TÚ', phone: 1 }, { x: W * 0.27, y: y, t: 'GUARD' },
-        { x: W * 0.4, y: y - 34, t: 'MIDDLE' }, { x: W * 0.5, y: y, t: 'RENDEZVOUS', r: 1 },
+        { x: W * 0.4, y: y - 34, t: 'MIDDLE' }, { x: W * 0.5, y: y, t: 'RELAY CIEGO', relay: 1 },
         { x: W * 0.6, y: y - 34, t: 'MIDDLE' }, { x: W * 0.73, y: y, t: 'GUARD' },
         { x: W * 0.92, y: y, t: 'PEER', phone: 1 }
       ];
     }
     var info = [
-      ['cifrando en tu dispositivo', 'XChaCha20-Poly1305 + ML-KEM-768'],
-      ['envuelto en 3 capas de cebolla', 'el relay solo ve ruido'],
-      ['salto 1 — capa pelada', 'sealed-sender: sin campo "from"'],
-      ['los dos circuitos convergen', 'el rendezvous no sabe quién habla'],
-      ['salto 2 — otra capa pelada', 'nuevo circuito, otra identidad'],
-      ['llega opaco al peer', 'aún cifrado de extremo a extremo'],
-      ['descifrado local', 'solo el peer tiene la clave privada']
+      ['cifrado en tu dispositivo', 'Double Ratchet + PQXDH post-cuántico'],
+      ['entra a Tor — tu IP queda oculta', 'el relay nunca ve desde dónde escribes'],
+      ['rebota entre nodos Tor', 'nadie ve origen y destino a la vez'],
+      ['el relay reenvía un sobre sellado', 'no ve quién, a quién, ni qué — ni lo guarda'],
+      ['sale por el circuito del peer', 'sigue cifrado de extremo a extremo'],
+      ['último salto hacia su dispositivo', ''],
+      ['descifrado en su dispositivo', 'solo su llave privada lo abre']
     ];
     var P, seg = 0, phase = 0, t = 0, tick = 0;
     function phone(px, py, act, done) {
@@ -2965,12 +2963,27 @@
       if (act) { x.beginPath(); x.arc(0, h / 2 - 4, 1.8, 0, 7); x.fillStyle = '#5bf2b9'; x.fill(); }
       x.restore();
     }
+    function relayBox(px, py, act) {
+      var w = 30, h = 24, r = 4; x.save(); x.translate(px, py);
+      x.beginPath();
+      x.moveTo(-w / 2 + r, -h / 2); x.lineTo(w / 2 - r, -h / 2); x.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+      x.lineTo(w / 2, h / 2 - r); x.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2); x.lineTo(-w / 2 + r, h / 2);
+      x.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r); x.lineTo(-w / 2, -h / 2 + r); x.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2); x.closePath();
+      x.fillStyle = '#0d1112'; x.fill();
+      x.strokeStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.5)'; x.lineWidth = 1.6; x.stroke();
+      x.strokeStyle = act ? 'rgba(91,242,185,0.85)' : 'rgba(91,242,185,0.4)'; x.lineWidth = 1;
+      for (var r2 = 0; r2 < 3; r2++) { var yy = -h / 2 + 6 + r2 * 6; x.beginPath(); x.moveTo(-w / 2 + 5, yy); x.lineTo(w / 2 - 9, yy); x.stroke();
+        x.beginPath(); x.arc(w / 2 - 6, yy, 1.1, 0, 7); x.fillStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.4)'; x.fill(); }
+      x.restore();
+    }
     function node(p, act) {
-      if (p.r) { x.beginPath(); x.arc(p.x, p.y, act ? 11 : 7, 0, 7); x.fillStyle = act ? '#a78bfa' : 'rgba(167,139,250,0.35)'; x.fill(); }
-      else { x.beginPath(); x.arc(p.x, p.y, act ? 10 : 6, 0, 7); x.fillStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.3)'; x.fill(); }
-      if (act) { x.beginPath(); x.arc(p.x, p.y, 16, 0, 7); x.strokeStyle = p.r ? 'rgba(167,139,250,0.4)' : 'rgba(91,242,185,0.4)'; x.lineWidth = 1; x.stroke(); }
-      x.fillStyle = act ? 'rgba(232,240,236,0.8)' : 'rgba(232,240,236,0.4)'; x.font = '9px JetBrains Mono,monospace'; x.textAlign = 'center';
-      x.fillText(p.t, p.x, p.y < H * 0.45 ? p.y - 24 : p.y + 26);
+      if (p.relay) { relayBox(p.x, p.y, act); }
+      else {
+        x.beginPath(); x.arc(p.x, p.y, act ? 10 : 6, 0, 7); x.fillStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.3)'; x.fill();
+        if (act) { x.beginPath(); x.arc(p.x, p.y, 16, 0, 7); x.strokeStyle = 'rgba(91,242,185,0.4)'; x.lineWidth = 1; x.stroke(); }
+      }
+      x.fillStyle = act ? 'rgba(232,240,236,0.85)' : 'rgba(232,240,236,0.42)'; x.font = '9px JetBrains Mono,monospace'; x.textAlign = 'center';
+      x.fillText(p.t, p.x, p.y < H * 0.45 ? p.y - 24 : (p.relay ? p.y + 30 : p.y + 26));
     }
     function packet(px, py, layers) {
       for (var k = layers; k >= 1; k--) { var rr = 8 + k * 5 + Math.sin(tick + k) * 1.2; x.beginPath(); x.arc(px, py, rr, 0, 7); x.strokeStyle = 'rgba(91,242,185,' + (0.13 + k * 0.05) + ')'; x.lineWidth = 1; x.stroke(); }
