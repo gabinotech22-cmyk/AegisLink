@@ -428,6 +428,15 @@
                  padding: 8px 16px; transition: background 0.15s; }
     .code-link:hover { background: rgba(91,242,185,0.1); }
 
+    /* ── Transporte sobre Tor ───────────────────────── */
+    .transport-stage { border: 1px solid var(--border); border-radius: 14px;
+                       background: rgba(13,17,18,0.78); padding: 22px 18px 26px; }
+    #torCanvas { width: 100%; height: 300px; display: block; }
+    .transport-cap { text-align: center; font-family: var(--mono); font-size: 13px;
+                     color: var(--accent); min-height: 20px; margin-top: 12px; }
+    .transport-sub { text-align: center; font-family: var(--mono); font-size: 11px;
+                     color: var(--text-faint); min-height: 15px; margin-top: 4px; }
+
     /* ── Lo que ve el servidor ──────────────────────── */
     .srv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     .srv-card { border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
@@ -1225,6 +1234,22 @@
     </div>
   </section>
 
+  <!-- ─── Transporte sobre Tor (dos circuitos) ────── -->
+  <section class="section" id="transport" style="padding-top: 40px;">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="section-eyebrow" data-i18n="tr_eyebrow">Sobre Tor · dos circuitos</div>
+        <h2 class="section-title" data-i18n="tr_title">Tu mensaje nunca pasa por <em style="font-style:italic; color: var(--accent);">un servidor</em>.</h2>
+        <p class="section-lead" data-i18n="tr_lead">Se cifra en tu dispositivo y viaja por dos circuitos Tor que convergen en un punto de encuentro, directo al teléfono de tu interlocutor.</p>
+      </div>
+      <div class="transport-stage reveal">
+        <canvas id="torCanvas"></canvas>
+        <div id="torCap" class="transport-cap"></div>
+        <div id="torSub" class="transport-sub"></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ─── Journey: el viaje de un mensaje (scroll) ── -->
   <section class="journey" id="journey">
     <div class="journey-sticky">
@@ -1800,6 +1825,25 @@
         w_noanon: "not anon.", w_client: "client",
         cmp_note: "* Signal uses sealed sender, but registration requires a phone number.",
         trust_codelink: "see this line on GitHub →",
+        tr_eyebrow: "Over Tor · two circuits",
+        tr_title: "Your message never passes through <em style='font-style:italic; color: var(--accent);'>a server</em>.",
+        tr_lead: "It's encrypted on your device and travels over two Tor circuits that meet at a rendezvous point, straight to your contact's phone.",
+        tor: {
+          'cifrando en tu dispositivo': 'encrypting on your device',
+          'XChaCha20-Poly1305 + ML-KEM-768': 'XChaCha20-Poly1305 + ML-KEM-768',
+          'envuelto en 3 capas de cebolla': 'wrapped in 3 onion layers',
+          'el relay solo ve ruido': 'the relay only sees noise',
+          'salto 1 — capa pelada': 'hop 1 — layer peeled',
+          'sealed-sender: sin campo "from"': 'sealed-sender: no "from" field',
+          'los dos circuitos convergen': 'the two circuits converge',
+          'el rendezvous no sabe quién habla': 'the rendezvous never knows who is talking',
+          'salto 2 — otra capa pelada': 'hop 2 — another layer peeled',
+          'nuevo circuito, otra identidad': 'new circuit, another identity',
+          'llega opaco al peer': 'arrives opaque at the peer',
+          'aún cifrado de extremo a extremo': 'still end-to-end encrypted',
+          'descifrado local': 'decrypted locally',
+          'solo el peer tiene la clave privada': 'only the peer holds the private key'
+        },
         srv_eyebrow: "Zero metadata",
         srv_title: "What the server <em style='font-style:italic; color: var(--accent);'>logs about you</em>.",
         srv_lead: "Same message, two worlds. On the right there's nothing to subpoena, filter or sell.",
@@ -1959,6 +2003,25 @@
         w_noanon: "non anon.", w_client: "client",
         cmp_note: "* Signal applica il sealed sender, ma la registrazione richiede un numero di telefono.",
         trust_codelink: "vedi questa riga su GitHub →",
+        tr_eyebrow: "Su Tor · due circuiti",
+        tr_title: "Il tuo messaggio non passa mai per <em style='font-style:italic; color: var(--accent);'>un server</em>.",
+        tr_lead: "Viene cifrato sul tuo dispositivo e viaggia su due circuiti Tor che convergono in un punto d'incontro, dritto al telefono del tuo interlocutore.",
+        tor: {
+          'cifrando en tu dispositivo': 'cifratura sul tuo dispositivo',
+          'XChaCha20-Poly1305 + ML-KEM-768': 'XChaCha20-Poly1305 + ML-KEM-768',
+          'envuelto en 3 capas de cebolla': 'avvolto in 3 strati di cipolla',
+          'el relay solo ve ruido': 'il relay vede solo rumore',
+          'salto 1 — capa pelada': 'salto 1 — strato rimosso',
+          'sealed-sender: sin campo "from"': 'sealed-sender: nessun campo "from"',
+          'los dos circuitos convergen': 'i due circuiti convergono',
+          'el rendezvous no sabe quién habla': 'il rendezvous non sa chi parla',
+          'salto 2 — otra capa pelada': 'salto 2 — altro strato rimosso',
+          'nuevo circuito, otra identidad': 'nuovo circuito, altra identità',
+          'llega opaco al peer': 'arriva opaco al peer',
+          'aún cifrado de extremo a extremo': 'ancora cifrato end-to-end',
+          'descifrado local': 'decifrato localmente',
+          'solo el peer tiene la clave privada': 'solo il peer ha la chiave privata'
+        },
         srv_eyebrow: "Zero metadati",
         srv_title: "Ciò che il server <em style='font-style:italic; color: var(--accent);'>registra di te</em>.",
         srv_lead: "Stesso messaggio, due mondi. A destra non c'è nulla da citare in giudizio, filtrare o vendere.",
@@ -2074,6 +2137,7 @@
         window.AEGIS_CHAT = { script: dict.chat, sent: dict.sent };
         window.AEGIS_DEMO = dict.demo;
         window.AEGIS_JR = dict.jr_msg;
+        window.AEGIS_TOR = dict.tor;
         if (window.__aegisChatStatic) window.__aegisChatStatic();
         if (window.__aegisAfterLang) window.__aegisAfterLang(l);
         try { localStorage.setItem('aegis-lang', l); } catch (e) { /* ignore */ }
@@ -3112,6 +3176,93 @@
     function pause() { running = false; cancelAnimationFrame(raf); }
     document.addEventListener('visibilitychange', function () { if (document.hidden) pause(); else play(); });
     play();
+  })();
+  </script>
+
+  <!-- ─── Transporte Tor: paquete-cebolla entre teléfonos ─── -->
+  <script>
+  (function () {
+    var c = document.getElementById('torCanvas');
+    if (!c) return;
+    var x = c.getContext('2d'), cap = document.getElementById('torCap'), sub = document.getElementById('torSub');
+    var DPR = Math.min(window.devicePixelRatio || 1, 2), W = 0, H = 0;
+    function size() { W = c.clientWidth; H = c.clientHeight; c.width = W * DPR; c.height = H * DPR; x.setTransform(DPR, 0, 0, DPR, 0, 0); }
+    size(); window.addEventListener('resize', size);
+    function L(es) { var d = window.AEGIS_TOR; return (d && d[es]) || es; }
+    function pts() {
+      var y = H * 0.52;
+      return [
+        { x: W * 0.08, y: y, t: 'TÚ', phone: 1 }, { x: W * 0.27, y: y, t: 'GUARD' },
+        { x: W * 0.4, y: y - 34, t: 'MIDDLE' }, { x: W * 0.5, y: y, t: 'RENDEZVOUS', r: 1 },
+        { x: W * 0.6, y: y - 34, t: 'MIDDLE' }, { x: W * 0.73, y: y, t: 'GUARD' },
+        { x: W * 0.92, y: y, t: 'PEER', phone: 1 }
+      ];
+    }
+    var info = [
+      ['cifrando en tu dispositivo', 'XChaCha20-Poly1305 + ML-KEM-768'],
+      ['envuelto en 3 capas de cebolla', 'el relay solo ve ruido'],
+      ['salto 1 — capa pelada', 'sealed-sender: sin campo "from"'],
+      ['los dos circuitos convergen', 'el rendezvous no sabe quién habla'],
+      ['salto 2 — otra capa pelada', 'nuevo circuito, otra identidad'],
+      ['llega opaco al peer', 'aún cifrado de extremo a extremo'],
+      ['descifrado local', 'solo el peer tiene la clave privada']
+    ];
+    var P, seg = 0, phase = 0, t = 0, tick = 0;
+    function phone(px, py, act, done) {
+      var w = 20, h = 34, r = 4; x.save(); x.translate(px, py);
+      x.beginPath();
+      x.moveTo(-w / 2 + r, -h / 2); x.lineTo(w / 2 - r, -h / 2); x.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+      x.lineTo(w / 2, h / 2 - r); x.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2); x.lineTo(-w / 2 + r, h / 2);
+      x.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r); x.lineTo(-w / 2, -h / 2 + r); x.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2); x.closePath();
+      x.fillStyle = '#0d1112'; x.fill();
+      x.strokeStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.45)'; x.lineWidth = 1.6; x.stroke();
+      x.fillStyle = act ? 'rgba(91,242,185,0.9)' : 'rgba(91,242,185,0.4)';
+      x.fillRect(-w / 2 + 4, -h / 2 + 5, w - 8, 2.4); x.globalAlpha = 0.5; x.fillRect(-w / 2 + 4, -h / 2 + 10, w - 8, 2.4); x.globalAlpha = 1;
+      if (act) { x.beginPath(); x.arc(0, h / 2 - 4, 1.8, 0, 7); x.fillStyle = '#5bf2b9'; x.fill(); }
+      x.restore();
+    }
+    function node(p, act) {
+      if (p.r) { x.beginPath(); x.arc(p.x, p.y, act ? 11 : 7, 0, 7); x.fillStyle = act ? '#a78bfa' : 'rgba(167,139,250,0.35)'; x.fill(); }
+      else { x.beginPath(); x.arc(p.x, p.y, act ? 10 : 6, 0, 7); x.fillStyle = act ? '#5bf2b9' : 'rgba(91,242,185,0.3)'; x.fill(); }
+      if (act) { x.beginPath(); x.arc(p.x, p.y, 16, 0, 7); x.strokeStyle = p.r ? 'rgba(167,139,250,0.4)' : 'rgba(91,242,185,0.4)'; x.lineWidth = 1; x.stroke(); }
+      x.fillStyle = act ? 'rgba(232,240,236,0.8)' : 'rgba(232,240,236,0.4)'; x.font = '9px JetBrains Mono,monospace'; x.textAlign = 'center';
+      x.fillText(p.t, p.x, p.y < H * 0.45 ? p.y - 24 : p.y + 26);
+    }
+    function packet(px, py, layers) {
+      for (var k = layers; k >= 1; k--) { var rr = 8 + k * 5 + Math.sin(tick + k) * 1.2; x.beginPath(); x.arc(px, py, rr, 0, 7); x.strokeStyle = 'rgba(91,242,185,' + (0.13 + k * 0.05) + ')'; x.lineWidth = 1; x.stroke(); }
+      x.beginPath(); x.arc(px, py, 15, 0, 7); x.fillStyle = 'rgba(91,242,185,0.1)'; x.fill();
+      x.beginPath(); x.rect(px - 5, py - 5, 10, 10); x.fillStyle = '#5bf2b9'; x.fill();
+    }
+    function frame() {
+      tick += 0.05; P = pts(); x.clearRect(0, 0, W, H);
+      for (var i = 0; i < P.length - 1; i++) {
+        x.beginPath(); x.moveTo(P[i].x, P[i].y);
+        var mxp = (P[i].x + P[i + 1].x) / 2; x.quadraticCurveTo(mxp, (P[i].y + P[i + 1].y) / 2 - 12, P[i + 1].x, P[i + 1].y);
+        x.strokeStyle = i < seg ? 'rgba(91,242,185,0.28)' : 'rgba(91,242,185,0.1)'; x.lineWidth = 1; x.setLineDash([4, 5]); x.stroke(); x.setLineDash([]);
+      }
+      for (var i = 0; i < P.length; i++) { var act = (phase === 0 && i === seg); if (P[i].phone) phone(P[i].x, P[i].y, act, i > 0); else node(P[i], act); }
+      var layers = Math.max(0, 3 - Math.floor(seg * 3 / (P.length - 1)));
+      if (phase === 0) {
+        t += 0.012; if (seg > 0 && seg < P.length - 1) packet(P[seg].x, P[seg].y, layers);
+        cap.textContent = L(info[seg][0]); sub.textContent = L(info[seg][1]);
+        if (t >= 1) { t = 0; if (seg >= P.length - 1) seg = 0; else phase = 1; }
+      } else {
+        t += 0.009; var a = P[seg], b = P[seg + 1], mxp = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - 12;
+        var e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        var px = (1 - e) * (1 - e) * a.x + 2 * (1 - e) * e * mxp + e * e * b.x;
+        var py = (1 - e) * (1 - e) * a.y + 2 * (1 - e) * e * my + e * e * b.y;
+        packet(px, py, layers); if (t >= 1) { t = 0; seg++; phase = 0; }
+      }
+    }
+    frame();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var running = false, raf = 0;
+    function loop() { if (!running) return; frame(); raf = requestAnimationFrame(loop); }
+    function play() { if (running || document.hidden) return; running = true; raf = requestAnimationFrame(loop); }
+    function pause() { running = false; cancelAnimationFrame(raf); }
+    var io = new IntersectionObserver(function (es) { es.forEach(function (ev) { if (ev.isIntersecting) play(); else pause(); }); }, { threshold: 0.1 });
+    io.observe(c);
+    document.addEventListener('visibilitychange', function () { if (document.hidden) pause(); else play(); });
   })();
   </script>
 
