@@ -197,6 +197,16 @@ const NETWORK_SECURITY_XML = `<?xml version="1.0" encoding="utf-8"?>
     <domain includeSubdomains="true">localhost</domain>
     <domain includeSubdomains="true">127.0.0.1</domain>
   </domain-config>
+  <!-- Embedded Tor mailbox (sealed-sender Fase 4): the relay's hidden service
+       speaks http:// over the Tor circuit. NOT a transport downgrade — Tor
+       encrypts the stream end-to-end and authenticates the .onion by its key,
+       and payloads are already E2E-sealed. Cleartext stays blocked for every
+       non-.onion host. Without this the mailbox socket dies with
+       UnknownServiceException (CLEARTEXT not permitted) and falls back to the
+       clear network, defeating Fase 4. -->
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="true">onion</domain>
+  </domain-config>
   <debug-overrides>
     <trust-anchors>
       <certificates src="user"/>

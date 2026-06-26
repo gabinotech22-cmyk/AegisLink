@@ -146,6 +146,14 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
 
   override fun getName(): String = "AegisTor"
 
+  // Diagnostic logging — gated behind BuildConfig.DEBUG so RELEASE builds emit
+  // NOTHING to logcat. Golden rule #6: no diagnostic metadata (event names,
+  // connection lifecycle, mailbox timing) leaks in production. The LOG_TAG
+  // constant lets the helpers call Log directly without recursing into dlog.
+  private val LOG_TAG = "AegisTor"
+  private fun dlog(msg: String) { if (BuildConfig.DEBUG) Log.i(LOG_TAG, msg) }
+  private fun dwarn(msg: String) { if (BuildConfig.DEBUG) Log.w(LOG_TAG, msg) }
+
   private fun socksPort(): Int {
     val live = torService?.socksPort ?: 0
     if (live > 0) cachedSocksPort = live
@@ -230,7 +238,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
 
   private fun updateState(s: String) {
     state = s
-    Log.i("AegisTor", "state=" + s + " socksPort=" + socksPort())
+    dlog("state=" + s + " socksPort=" + socksPort())
     reactApplicationContext
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       .emit("AegisTorStatus", makeStatusMap(s, socksPort()))
@@ -283,25 +291,25 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
       opts.auth = authMap
       opts.reconnection = true
 
-      Log.i("AegisTor", "sioConnect id=" + id + " url=" + url + " viaSocksPort=" + port)
+      dlog("sioConnect id=" + id + " url=" + url + " viaSocksPort=" + port)
       val socket = IO.socket(url, opts)
       sockets[id] = socket
 
-      socket.on(Socket.EVENT_CONNECT) { _ -> Log.i("AegisTor", "sio connect id=" + id); forward(id, "connect", JSONArray()) }
-      socket.on(Socket.EVENT_DISCONNECT) { args -> Log.i("AegisTor", "sio disconnect id=" + id); forward(id, "disconnect", argsToJson(args)) }
+      socket.on(Socket.EVENT_CONNECT) { _ -> dlog("sio connect id=" + id); forward(id, "connect", JSONArray()) }
+      socket.on(Socket.EVENT_DISCONNECT) { args -> dlog("sio disconnect id=" + id); forward(id, "disconnect", argsToJson(args)) }
       socket.on(Socket.EVENT_CONNECT_ERROR) { args ->
         val detail = args.joinToString { a ->
           if (a is Throwable) a.javaClass.simpleName + ":" + a.message + " <-cause " + (a.cause?.javaClass?.name ?: "none") + ":" + (a.cause?.message ?: "")
           else a.toString()
         }
-        Log.w("AegisTor", "sio connect_error id=" + id + " " + detail)
+        dwarn("sio connect_error id=" + id + " " + detail)
         forward(id, "connect_error", argsToJson(args))
       }
 
       val events = JSONArray(eventsJson)
       for (i in 0 until events.length()) {
         val ev = events.getString(i)
-        socket.on(ev) { args -> Log.i("AegisTor", "sio event id=" + id + " ev=" + ev); forward(id, ev, argsToJson(args)) }
+        socket.on(ev) { args -> dlog("sio event id=" + id + " ev=" + ev); forward(id, ev, argsToJson(args)) }
       }
 
       socket.connect()
@@ -319,6 +327,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
   fun sioEmit(id: String, event: String, payloadJson: String, ackId: String?, promise: Promise) {
     try {
       val socket = sockets[id] ?: run { promise.reject("E_SIO_NO_SOCKET", "no socket: \$id"); return }
+      dlog("sio emit id=" + id + " ev=" + event)
       val payload = parseJsonValue(payloadJson)
       if (ackId != null) {
         socket.emit(event, arrayOf<Any?>(payload), Ack { args -> forward(id, "__ack:\$ackId", argsToJson(args)) })
