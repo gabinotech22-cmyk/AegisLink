@@ -49,9 +49,13 @@
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
     @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    html { background: var(--bg); }
+    body { margin: 0; padding: 0; background: transparent; color: var(--text);
                  font-family: var(--sans); -webkit-font-smoothing: antialiased;
                  line-height: 1.5; }
+    /* Constelación global de escudos: fondo fijo detrás de toda la página */
+    #bgGraph { position: fixed; inset: 0; width: 100%; height: 100%;
+               z-index: -1; pointer-events: none; display: block; }
     a { color: inherit; text-decoration: none; }
     button { font-family: inherit; cursor: pointer; }
     section[id], header[id] { scroll-margin-top: 76px; }
@@ -834,6 +838,8 @@
   </style>
 </head>
 <body>
+
+  <canvas id="bgGraph" aria-hidden="true"></canvas>
 
   <div class="grain" aria-hidden="true"></div>
 
@@ -2889,6 +2895,110 @@
         play();
       }
     }
+  </script>
+
+  <!-- ─── Constelación global de escudos (fondo de toda la página) ─── -->
+  <script>
+  (function () {
+    var c = document.getElementById('bgGraph');
+    if (!c) return;
+    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var x = c.getContext('2d');
+    var DPR = Math.min(window.devicePixelRatio || 1, 2);
+    var W = 0, H = 0;
+    function size() {
+      W = window.innerWidth; H = window.innerHeight;
+      c.width = W * DPR; c.height = H * DPR;
+      x.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    size();
+    window.addEventListener('resize', size);
+
+    var mx = 0, my = 0, tmx = 0, tmy = 0;
+    var fine = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    if (fine) {
+      window.addEventListener('pointermove', function (e) {
+        tmx = e.clientX / window.innerWidth - 0.5;
+        tmy = e.clientY / window.innerHeight - 0.5;
+      }, { passive: true });
+    }
+    var scrollY = 0;
+    window.addEventListener('scroll', function () {
+      scrollY = window.scrollY || 0;
+    }, { passive: true });
+
+    var narrow = W < 760;
+    var N = narrow ? 24 : 46;
+    var nodes = [];
+    for (var i = 0; i < N; i++) {
+      nodes.push({
+        x: (Math.random() - 0.5) * 2.4, y: (Math.random() - 0.5) * 1.7,
+        z: Math.random() * 2 - 1,
+        vx: (Math.random() - 0.5) * 0.0006, vy: (Math.random() - 0.5) * 0.0006,
+        vz: (Math.random() - 0.5) * 0.0006, big: Math.random() < 0.3
+      });
+    }
+
+    function shield(px, py, s, a, glow) {
+      x.save(); x.translate(px, py); x.scale(s, s);
+      if (glow) { x.shadowColor = 'rgba(91,242,185,' + a + ')'; x.shadowBlur = 12; }
+      x.beginPath();
+      x.moveTo(0, -10); x.lineTo(8.5, -5); x.lineTo(8.5, 5);
+      x.lineTo(0, 11); x.lineTo(-8.5, 5); x.lineTo(-8.5, -5); x.closePath();
+      x.strokeStyle = 'rgba(91,242,185,' + a + ')'; x.lineWidth = 1.4; x.stroke();
+      x.shadowBlur = 0;
+      x.fillStyle = 'rgba(91,242,185,' + (a * 0.85) + ')';
+      x.fillRect(-5, -3.4, 10, 2.1);
+      x.globalAlpha = 0.55; x.fillRect(-5, 0.4, 10, 2.1); x.globalAlpha = 1;
+      x.restore();
+    }
+
+    function frame() {
+      mx += (tmx - mx) * 0.05; my += (tmy - my) * 0.05;
+      x.clearRect(0, 0, W, H);
+      var cx = W / 2, cy = H / 2, F = Math.min(W, H) * 0.7;
+      var drift = (scrollY % (H * 4)) / (H * 4);
+      for (var i = 0; i < N; i++) {
+        var n = nodes[i];
+        n.x += n.vx; n.y += n.vy; n.z += n.vz;
+        if (n.x > 1.4 || n.x < -1.4) n.vx *= -1;
+        if (n.y > 1.2 || n.y < -1.2) n.vy *= -1;
+        if (n.z > 1 || n.z < -1) n.vz *= -1;
+      }
+      var pr = [];
+      for (var i = 0; i < N; i++) {
+        var n = nodes[i];
+        var yy = n.y - drift * 0.6;
+        var zz = n.z + 2.3, sc = 1 / zz;
+        var px = cx + (n.x + mx * 0.6) * F * sc;
+        var py = cy + (yy + my * 0.6) * F * sc;
+        pr.push({ px: px, py: py, sc: sc, z: n.z, big: n.big });
+      }
+      for (var i = 0; i < N; i++) for (var j = i + 1; j < N; j++) {
+        var a = pr[i], b = pr[j], dx = a.px - b.px, dy = a.py - b.py;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 150) {
+          var al = (1 - d / 150) * 0.26 * Math.min(a.sc, b.sc);
+          x.strokeStyle = 'rgba(91,242,185,' + al + ')'; x.lineWidth = 0.7;
+          x.beginPath(); x.moveTo(a.px, a.py); x.lineTo(b.px, b.py); x.stroke();
+        }
+      }
+      pr.sort(function (p, q) { return p.z - q.z; });
+      for (var i = 0; i < pr.length; i++) {
+        var p = pr[i], a = Math.max(0.1, Math.min(0.8, p.sc * 0.6));
+        if (p.big) shield(p.px, p.py, p.sc * 1.5, a, p.sc > 0.55);
+        else { x.beginPath(); x.arc(p.px, p.py, 1.7 * p.sc + 0.5, 0, 7); x.fillStyle = 'rgba(91,242,185,' + a * 0.8 + ')'; x.fill(); }
+      }
+    }
+
+    if (reduced) { frame(); return; }
+    var running = false, raf = 0;
+    function loop() { if (!running) return; frame(); raf = requestAnimationFrame(loop); }
+    function play() { if (running || document.hidden) return; running = true; raf = requestAnimationFrame(loop); }
+    function pause() { running = false; cancelAnimationFrame(raf); }
+    document.addEventListener('visibilitychange', function () { if (document.hidden) pause(); else play(); });
+    play();
+  })();
   </script>
 </body>
 </html>
