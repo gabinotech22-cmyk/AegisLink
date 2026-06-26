@@ -9,14 +9,15 @@
  *   - auth:ok flips isMailboxAuthed; sendViaMailbox refuses before auth.
  *   - incoming envelope:mb is handed to the onEnvelope callback.
  *
- * socket.io-client is mocked to a controllable fake; config is mocked to toggle
- * the gate. mailbox.ts is REAL so the signature check is meaningful.
+ * The native embedded-Tor bridge (`../../net/tor`) is mocked to a controllable
+ * fake `TorSioSocket`; config is mocked to toggle the gate. mailbox.ts is REAL
+ * so the signature check is meaningful.
  */
 
 import { deriveMailbox, verifyMailboxAuth, epochFor, type Mailbox } from '../../crypto/mailbox';
 import { decodeBase64 } from 'tweetnacl-util';
 
-// ── Controllable fake socket ─────────────────────────────────────────────────
+// ── Controllable fake socket (stands in for TorSioSocket) ───────────────────
 type Handler = (...args: unknown[]) => void;
 class FakeSocket {
   connected = false;
@@ -32,12 +33,20 @@ class FakeSocket {
 
 let lastSocket: FakeSocket | null = null;
 let lastIoArgs: { url: string; opts: Record<string, unknown> } | null = null;
-const mockIo = jest.fn((url: string, opts: Record<string, unknown>) => {
+const mockTorSioSocket = jest.fn((url: string, auth: Record<string, unknown>) => {
   lastSocket = new FakeSocket();
-  lastIoArgs = { url, opts };
+  lastIoArgs = { url, opts: auth };
   return lastSocket;
 });
-jest.mock('socket.io-client', () => ({ __esModule: true, io: (...a: unknown[]) => mockIo(...(a as [string, Record<string, unknown>])) }));
+const mockStartTor = jest.fn(async () => ({ state: 'on' as const, socksPort: 9050 }));
+jest.mock('../../net/tor', () => ({
+  __esModule: true,
+  isTorAvailable: () => true,
+  startTor: () => mockStartTor(),
+  TorSioSocket: function (this: unknown, url: string, auth: Record<string, unknown>) {
+    return mockTorSioSocket(url, auth);
+  },
+}));
 
 // Config gate — mutated per test via the mock object below.
 const mockConfig = { ONION_URL: 'http://onion.test', MAILBOX_ENABLED: true };
@@ -94,13 +103,13 @@ describe('mailboxSocket — dedicated mailbox delivery socket', () => {
     mockConfig.MAILBOX_ENABLED = false;
     const sock = await connectMailboxSocket(() => {});
     expect(sock).toBeNull();
-    expect(mockIo).not.toHaveBeenCalled();
+    expect(mockTorSioSocket).not.toHaveBeenCalled();
   });
 
   it('handshake carries the mailbox id + signing pubkey and NO aegisId', async () => {
     await connectMailboxSocket(() => {});
-    expect(mockIo).toHaveBeenCalledTimes(1);
-    const auth = lastIoArgs!.opts.auth as Record<string, unknown>;
+    expect(mockTorSioSocket).toHaveBeenCalledTimes(1);
+    const auth = lastIoArgs!.opts as Record<string, unknown>;
     expect(auth.mailboxId).toBe(mockMailbox.mailboxIdB64);
     expect(typeof auth.mailboxSignPubKey).toBe('string');
     expect('aegisId' in auth).toBe(false);
@@ -112,7 +121,7 @@ describe('mailboxSocket — dedicated mailbox delivery socket', () => {
     mockLastEpoch = E - 3; // offline across 3 epoch boundaries
     await connectMailboxSocket(() => {});
 
-    const auth = lastIoArgs!.opts.auth as { binds?: Array<{ mailboxId: string; mailboxSignPubKey: string }> };
+    const auth = lastIoArgs!.opts as { binds?: Array<{ mailboxId: string; mailboxSignPubKey: string }> };
     // extras = [E-3, E-2, E-1] → 3 binds, in ascending epoch order.
     const expected = mockEpochMailboxes([E - 3, E - 2, E - 1]);
     expect(auth.binds).toHaveLength(3);

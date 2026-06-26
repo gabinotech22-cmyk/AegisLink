@@ -106,6 +106,7 @@
     "plugins": [
       "./app.plugin.js",
       "./plugins/withCallForegroundService.js",
+      "./plugins/withTorEmbedded.js",
       "expo-secure-store",
       [
         "expo-sqlite",

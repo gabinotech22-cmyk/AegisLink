@@ -433,7 +433,15 @@ export function attachRelay(io: SocketServer) {
     // `binds` (Slice 5b) carries additional epoch mailboxes to bind+drain in the
     // same handshake (catch-up across an offline epoch boundary).
     if (typeof auth?.mailboxId === 'string' && typeof auth?.mailboxSignPubKey === 'string') {
-      handleMailboxConnection(socket, auth.mailboxId, auth.mailboxSignPubKey, auth.binds);
+      // `binds` may arrive as a real array (the JS socket.io client) or as a JSON
+      // string (the native socket.io-client-java transport used for Tor, whose
+      // handshake auth is typed Map<String,String> and cannot carry a nested
+      // array). Tolerate both — a malformed string is treated as no extra binds.
+      let binds: unknown = auth.binds;
+      if (typeof binds === 'string') {
+        try { binds = JSON.parse(binds); } catch { binds = undefined; }
+      }
+      handleMailboxConnection(socket, auth.mailboxId, auth.mailboxSignPubKey, binds);
       return;
     }
 
