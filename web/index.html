@@ -55,7 +55,7 @@
                  line-height: 1.5; }
     /* Constelación global de escudos: fondo fijo detrás de toda la página */
     #bgGraph { position: fixed; inset: 0; width: 100%; height: 100%;
-               z-index: -1; pointer-events: none; display: block; }
+               z-index: -2; pointer-events: none; display: block; }
     a { color: inherit; text-decoration: none; }
     button { font-family: inherit; cursor: pointer; }
     section[id], header[id] { scroll-margin-top: 76px; }
@@ -179,18 +179,14 @@
 
     /* Hero visual — 3D + phone with overlay terminal */
     .hero-visual { position: relative; min-height: 540px; }
+    /* Escudo 3D = núcleo del grafo global: fijo y centrado en el viewport */
     .hero3d {
-      position: absolute; inset: -120px -90px; z-index: 0; pointer-events: none;
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(760px, 92vw); height: min(760px, 92vh);
+      z-index: -1; pointer-events: none;
     }
     .hero3d canvas { display: block; width: 100%; height: 100%; }
-    .hero-fallback {
-      position: absolute; inset: -60px; z-index: 0; pointer-events: none;
-      display: flex; align-items: center; justify-content: center;
-      background: radial-gradient(45% 45% at 50% 50%, rgba(91,242,185,0.14), transparent 70%);
-      transition: opacity 0.8s;
-    }
-    .hero-fallback svg { opacity: 0.16; filter: drop-shadow(0 0 32px rgba(91,242,185,0.5)); }
-    .hero-fallback.hidden3d { opacity: 0; }
     .phone-mock {
       position: relative; z-index: 2;
       width: 320px; height: 660px;
@@ -846,7 +842,7 @@
       .nav-gh { display: none; }
       .hero-inner { grid-template-columns: 1fr; gap: 48px; }
       .hero-visual { min-height: auto; }
-      .hero3d { inset: -60px -32px; }
+      .hero3d { width: min(520px, 96vw); height: min(520px, 70vh); }
       .pillars { grid-template-columns: 1fr 1fr; }
       .steps   { grid-template-columns: 1fr; }
       .features{ grid-template-columns: 1fr 1fr; }
@@ -896,6 +892,7 @@
 <body>
 
   <canvas id="bgGraph" aria-hidden="true"></canvas>
+  <div class="hero3d" id="hero3d" aria-hidden="true"></div>
 
   <div class="grain" aria-hidden="true"></div>
 
@@ -963,20 +960,6 @@
       </div>
 
       <div class="hero-visual">
-        <!-- Fallback estático: visible si no hay WebGL o reduced-motion -->
-        <div class="hero-fallback" id="heroFallback" aria-hidden="true">
-          <svg width="420" height="420" viewBox="0 0 40 40" fill="none">
-            <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z"
-                  stroke="#5bf2b9" stroke-width="0.8" stroke-linejoin="round"/>
-            <path d="M20 6 L31.5 12.2 L31.5 27.8 L20 34 L8.5 27.8 L8.5 12.2 Z"
-                  stroke="#5bf2b9" stroke-width="0.5" stroke-linejoin="round" opacity="0.5"/>
-            <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.8"/>
-            <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.45"/>
-          </svg>
-        </div>
-        <!-- Escena 3D (Three.js, lazy) -->
-        <div class="hero3d" id="hero3d" aria-hidden="true"></div>
-
         <div class="phone-mock">
           <div class="phone-screen">
             <div class="notch"></div>
@@ -2983,16 +2966,14 @@
           });
         }
 
-        /* Parallax sutil con el ratón */
+        /* Parallax sutil con el ratón (global: el hub vive en toda la página) */
         let targetX = 0, targetY = 0, curX = 0, curY = 0;
-        const hero = document.querySelector('.hero');
         const fine = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-        if (fine && hero) {
-          hero.addEventListener('pointermove', (ev) => {
+        if (fine) {
+          window.addEventListener('pointermove', (ev) => {
             targetX = (ev.clientX / window.innerWidth - 0.5) * 0.5;
             targetY = (ev.clientY / window.innerHeight - 0.5) * 0.3;
-          });
-          hero.addEventListener('pointerleave', () => { targetX = 0; targetY = 0; });
+          }, { passive: true });
         }
 
         /* Cámara reactiva al scroll: se aleja y se eleva al bajar */
@@ -3159,6 +3140,17 @@
           var al = (1 - d / 150) * 0.26 * Math.min(a.sc, b.sc);
           x.strokeStyle = 'rgba(91,242,185,' + al + ')'; x.lineWidth = 0.7;
           x.beginPath(); x.moveTo(a.px, a.py); x.lineTo(b.px, b.py); x.stroke();
+        }
+      }
+      var hubR = Math.min(W, H) * 0.32;
+      for (var i = 0; i < N; i++) {
+        var p = pr[i], hdx = p.px - cx, hdy = p.py - cy;
+        var hd = Math.sqrt(hdx * hdx + hdy * hdy);
+        if (hd < hubR * 1.8 && hd > hubR * 0.5) {
+          var hal = (1 - hd / (hubR * 1.8)) * 0.16 * p.sc;
+          x.strokeStyle = 'rgba(91,242,185,' + hal + ')'; x.lineWidth = 0.6;
+          x.beginPath(); x.moveTo(p.px, p.py);
+          x.lineTo(cx + hdx / hd * hubR * 0.5, cy + hdy / hd * hubR * 0.5); x.stroke();
         }
       }
       pr.sort(function (p, q) { return p.z - q.z; });
