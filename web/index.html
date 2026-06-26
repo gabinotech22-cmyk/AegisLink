@@ -3087,7 +3087,7 @@
     }, { passive: true });
 
     var narrow = W < 760;
-    var N = narrow ? 24 : 46;
+    var N = narrow ? 34 : 64;
     var nodes = [];
     for (var i = 0; i < N; i++) {
       nodes.push({
@@ -3136,9 +3136,9 @@
       for (var i = 0; i < N; i++) for (var j = i + 1; j < N; j++) {
         var a = pr[i], b = pr[j], dx = a.px - b.px, dy = a.py - b.py;
         var d = Math.sqrt(dx * dx + dy * dy);
-        if (d < 150) {
-          var al = (1 - d / 150) * 0.26 * Math.min(a.sc, b.sc);
-          x.strokeStyle = 'rgba(91,242,185,' + al + ')'; x.lineWidth = 0.7;
+        if (d < 175) {
+          var al = (1 - d / 175) * 0.42 * Math.min(a.sc, b.sc);
+          x.strokeStyle = 'rgba(91,242,185,' + al + ')'; x.lineWidth = 0.9;
           x.beginPath(); x.moveTo(a.px, a.py); x.lineTo(b.px, b.py); x.stroke();
         }
       }
@@ -3147,17 +3147,17 @@
         var p = pr[i], hdx = p.px - cx, hdy = p.py - cy;
         var hd = Math.sqrt(hdx * hdx + hdy * hdy);
         if (hd < hubR * 1.8 && hd > hubR * 0.5) {
-          var hal = (1 - hd / (hubR * 1.8)) * 0.16 * p.sc;
-          x.strokeStyle = 'rgba(91,242,185,' + hal + ')'; x.lineWidth = 0.6;
+          var hal = (1 - hd / (hubR * 1.8)) * 0.3 * p.sc;
+          x.strokeStyle = 'rgba(91,242,185,' + hal + ')'; x.lineWidth = 0.8;
           x.beginPath(); x.moveTo(p.px, p.py);
           x.lineTo(cx + hdx / hd * hubR * 0.5, cy + hdy / hd * hubR * 0.5); x.stroke();
         }
       }
       pr.sort(function (p, q) { return p.z - q.z; });
       for (var i = 0; i < pr.length; i++) {
-        var p = pr[i], a = Math.max(0.1, Math.min(0.8, p.sc * 0.6));
-        if (p.big) shield(p.px, p.py, p.sc * 1.5, a, p.sc > 0.55);
-        else { x.beginPath(); x.arc(p.px, p.py, 1.7 * p.sc + 0.5, 0, 7); x.fillStyle = 'rgba(91,242,185,' + a * 0.8 + ')'; x.fill(); }
+        var p = pr[i], a = Math.max(0.16, Math.min(0.95, p.sc * 0.78));
+        if (p.big) shield(p.px, p.py, p.sc * 1.5, a, p.sc > 0.5);
+        else { x.beginPath(); x.arc(p.px, p.py, 2 * p.sc + 0.6, 0, 7); x.fillStyle = 'rgba(91,242,185,' + a * 0.85 + ')'; x.fill(); }
       }
     }
 
