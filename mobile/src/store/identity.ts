@@ -77,7 +77,13 @@ async function runPublish(identity: Identity, slotId: string, silent = false): P
   const result = await ensureRegistered(identity);
   if (result.ok) {
     useIdentity.setState({ publishStatus: 'published', publishError: null, publishRetryAfterMs: null });
-    void SecureStore.setItemAsync(`aegis.published.${slotId}`, '1', SS_OPTS).catch(() => {});
+    // Persist the published flag BEFORE returning (was fire-and-forget): if the
+    // process is killed right after a slow first registration, an un-flushed
+    // write meant the next cold-start re-ran a VISIBLE (non-silent) publish and
+    // re-flashed the "Registering identity" banner for an already-registered
+    // identity. The UI banner already cleared via setState above, so awaiting
+    // here costs nothing user-visible — runPublish is always called via void.
+    try { await SecureStore.setItemAsync(`aegis.published.${slotId}`, '1', SS_OPTS); } catch { /* best-effort */ }
     return;
   }
   // Suppress ONLY a transient rate-limit during a silent (already-published)
