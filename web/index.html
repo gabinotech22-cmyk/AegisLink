@@ -428,6 +428,28 @@
                  padding: 8px 16px; transition: background 0.15s; }
     .code-link:hover { background: rgba(91,242,185,0.1); }
 
+    /* ── Lo que ve el servidor ──────────────────────── */
+    .srv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .srv-card { border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+    .srv-bad { border-color: rgba(255,107,107,0.3); background: rgba(20,13,14,0.9); }
+    .srv-good { border-color: rgba(91,242,185,0.3); background: rgba(10,19,17,0.9); }
+    .srv-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+               font-family: var(--mono); font-size: 12px; border-bottom: 1px solid var(--border); }
+    .srv-bad .srv-bar { color: var(--danger); border-color: rgba(255,107,107,0.2); }
+    .srv-good .srv-bar { color: var(--accent); border-color: rgba(91,242,185,0.2); }
+    .srv-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .srv-dot.bad { background: var(--danger); } .srv-dot.good { background: var(--accent); }
+    .srv-rows { padding: 14px 16px; font-family: var(--mono); font-size: 13px; }
+    .srv-row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; }
+    .srv-row > span { color: var(--text-faint); }
+    .srv-row b { font-weight: 400; }
+    .srv-row b.bad { color: var(--danger); }
+    .srv-row b.dash { color: var(--text-faint); }
+    .srv-noise-row { align-items: flex-start; }
+    .srv-row b.noise { color: var(--accent); word-break: break-all; text-align: right;
+                       max-width: 62%; line-height: 1.5; font-size: 12px; }
+    @media (max-width: 680px) { .srv-grid { grid-template-columns: 1fr; } }
+
     /* ── Comparison ─────────────────────────────────── */
     .compare {
       border: 1px solid var(--border); border-radius: 14px;
@@ -1505,6 +1527,41 @@
         </div>
       </div>
       <p class="compare-note reveal" data-i18n="cmp_note">* Signal aplica sealed sender, pero el registro requiere un número de teléfono.</p>
+    </div>
+  </section>
+
+  <!-- ─── Lo que ve el servidor ────────────────────── -->
+  <section class="section" id="serversees" style="padding-top: 40px;">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <div class="section-eyebrow" data-i18n="srv_eyebrow">Cero metadatos</div>
+        <h2 class="section-title" data-i18n="srv_title">Lo que el servidor <em style="font-style:italic; color: var(--accent);">registra de ti</em>.</h2>
+        <p class="section-lead" data-i18n="srv_lead">El mismo mensaje, dos mundos. A la derecha no hay nada que citar, filtrar ni vender.</p>
+      </div>
+      <div class="srv-grid reveal">
+        <div class="srv-card srv-bad">
+          <div class="srv-bar"><span class="srv-dot bad"></span><span data-i18n="srv_conv">mensajería convencional</span></div>
+          <div class="srv-rows">
+            <div class="srv-row"><span data-i18n="srv_num">número</span><b class="bad">+34 6•• ••3 •••</b></div>
+            <div class="srv-row"><span data-i18n="srv_contact">contacto</span><b class="bad">"Ana 💚"</b></div>
+            <div class="srv-row"><span data-i18n="srv_time">hora</span><b class="bad">23:47:12</b></div>
+            <div class="srv-row"><span data-i18n="srv_size">tamaño</span><b class="bad">512 bytes</b></div>
+            <div class="srv-row"><span>IP</span><b class="bad">81.42.•.•</b></div>
+            <div class="srv-row"><span data-i18n="srv_freq">frecuencia</span><b class="bad">14 hoy</b></div>
+          </div>
+        </div>
+        <div class="srv-card srv-good">
+          <div class="srv-bar"><span class="srv-dot good"></span>AegisLink</div>
+          <div class="srv-rows">
+            <div class="srv-row"><span data-i18n="srv_num">número</span><b class="dash">—</b></div>
+            <div class="srv-row"><span data-i18n="srv_contact">contacto</span><b class="dash">—</b></div>
+            <div class="srv-row"><span data-i18n="srv_time">hora</span><b class="dash">—</b></div>
+            <div class="srv-row"><span data-i18n="srv_size">tamaño</span><b class="dash" data-i18n="srv_pad">padding fijo</b></div>
+            <div class="srv-row"><span>IP</span><b class="dash" data-i18n="srv_tor">circuito Tor</b></div>
+            <div class="srv-row srv-noise-row"><span data-i18n="srv_payload">payload</span><b class="noise" id="srvNoise"></b></div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -3039,6 +3096,27 @@
     function pause() { running = false; cancelAnimationFrame(raf); }
     document.addEventListener('visibilitychange', function () { if (document.hidden) pause(); else play(); });
     play();
+  })();
+  </script>
+
+  <!-- ─── Ruido opaco del payload (sección "lo que ve el servidor") ─── -->
+  <script>
+  (function () {
+    var n = document.getElementById('srvNoise');
+    if (!n) return;
+    var ch = '0123456789abcdef', timer = null, on = false;
+    function rnd() { var s = ''; for (var i = 0; i < 40; i++) s += ch[Math.floor(Math.random() * 16)]; return s; }
+    n.textContent = rnd();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    function tick() { n.textContent = rnd(); }
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        on = e.isIntersecting;
+        if (on && !timer) { timer = setInterval(tick, 90); }
+        else if (!on && timer) { clearInterval(timer); timer = null; }
+      });
+    }, { threshold: 0.1 });
+    io.observe(n);
   })();
   </script>
 </body>
