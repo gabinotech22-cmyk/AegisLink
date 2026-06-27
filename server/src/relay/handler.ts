@@ -241,7 +241,11 @@ const SenderKeyRecipient = z.object({
   ciphertextB64: z.string().max(1024),
   nonceB64: z.string().length(44),
   iteration: z.number().int().min(0),
-  senderAegisId: z.string().min(1).max(64),
+  // Server-derived (golden rule #7): the distributor identity is taken from the
+  // authenticated socket, NOT from this client-supplied field, which is ignored
+  // if present. The recipient also recovers + verifies the real distributor from
+  // inside the sealed box (channelKey.ts, Phase 3b), so this never gates trust.
+  senderAegisId: z.string().min(1).max(64).optional(),
 });
 
 const SenderKeyDistEvent = z.object({
@@ -1564,7 +1568,10 @@ export function attachRelay(io: SocketServer) {
               ciphertextB64: recipient.ciphertextB64,
               nonceB64: recipient.nonceB64,
               iteration: recipient.iteration,
-              senderAegisId: recipient.senderAegisId,
+              // Authenticated identity from the socket, never the client-supplied
+              // field — a member cannot spoof a distribution as another member
+              // (golden rule #7: trust derived server-side, not client-supplied).
+              senderAegisId: me,
             });
           }
         }

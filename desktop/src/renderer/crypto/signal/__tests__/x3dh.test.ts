@@ -531,3 +531,142 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
     ).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R1: Hybrid PQ Double Ratchet. Unlike the PQXDH tests above (which only seed
+// the ML-KEM secret into the INITIAL X3DH root key), these tests seed
+// initRatchet's `initialPQr`/`initialPQs` so the ratchet itself mixes a FRESH
+// ML-KEM-768 shared secret into the root on every chain turn — the actual R1
+// deliverable. Mirrors how socket/client.ts wires this in production. Twin of
+// mobile/src/crypto/signal/__tests__/x3dh.test.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
+  function establishHybridSession() {
+    const alice = buildIdentity();
+    const bob = buildIdentity();
+    const bobPreKeys = generatePreKeys(bob);
+    const bundle = buildBundle(bob, bobPreKeys, { withOpk: true, withPq: true });
+
+    const aliceX3DH = performX3DH(alice, bundle);
+    expect(aliceX3DH.version).toBe(2);
+
+    // Alice seeds Bob's PQSPK public key as her initial PQr (mirrors
+    // socket/client.ts's getOrCreateSessionLocked).
+    const aliceState = initRatchet(
+      aliceX3DH.rootKey,
+      decodeBase64(bundle.signedPreKey.publicKeyB64),
+      true,
+      undefined,
+      undefined,
+      decodeBase64(bundle.pqSignedPreKey!.publicKeyB64),
+    );
+
+    const opk = bobPreKeys.oneTimePreKeys[0];
+    const bobRoot = performX3DHReceiver(
+      bob,
+      bobPreKeys.signedPreKey.secretKey,
+      bobPreKeys.opkSecrets.get(opk.keyId) ?? null,
+      alice.publicKey,
+      decodeBase64(aliceX3DH.myEphemeralPublicKeyB64),
+      {
+        cipherText: decodeBase64(aliceX3DH.pqCiphertextB64!),
+        pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+      },
+    );
+
+    // First message header carries Alice's pqPub/pqCt because hybrid mode
+    // mixes PQ immediately on initRatchet's isAlice branch.
+    const firstPlaintext = new TextEncoder().encode('hybrid message 1 (alice -> bob)');
+    const first = ratchetEncrypt(aliceState, firstPlaintext);
+    expect(first.header.pqPub).toBeDefined();
+    expect(first.header.pqCt).toBeDefined();
+
+    // Bob seeds his own PQSPK keypair as his initial PQs (mirrors
+    // socket/client.ts's decryptAndAppendLocked).
+    const spkPub = nacl.scalarMult.base(bobPreKeys.signedPreKey.secretKey);
+    const bobState = initRatchet(
+      bobRoot,
+      first.header.ratchetKey,
+      false,
+      { publicKey: spkPub, secretKey: bobPreKeys.signedPreKey.secretKey },
+      {
+        publicKey: decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64),
+        secretKey: bobPreKeys.pqSignedPreKey.secretKey,
+      },
+    );
+
+    const out1 = ratchetDecrypt(bobState, first.header, first.ciphertext, first.nonce);
+    expect(out1).not.toBeNull();
+    expect(encodeBase64(out1!)).toBe(encodeBase64(firstPlaintext));
+
+    return { aliceState, bobState };
+  }
+
+  it('Bob decrypts the first message of a hybrid session (PQ mixed from message 1)', () => {
+    const { aliceState, bobState } = establishHybridSession();
+    expect(aliceState.PQs).toBeTruthy();
+    expect(bobState.PQs).toBeTruthy();
+  });
+
+  it('survives multiple round-trip chain turns, each rotating PQ material', () => {
+    const { aliceState, bobState } = establishHybridSession();
+
+    const alicePqPubRound1 = encodeBase64(aliceState.PQs!.publicKey);
+
+    const reply1Plaintext = new TextEncoder().encode('hybrid message 2 (bob -> alice)');
+    const reply1 = ratchetEncrypt(bobState, reply1Plaintext);
+    expect(reply1.header.pqPub).toBeDefined();
+    expect(reply1.header.pqCt).toBeDefined();
+
+    const aliceOut1 = ratchetDecrypt(aliceState, reply1.header, reply1.ciphertext, reply1.nonce);
+    expect(aliceOut1).not.toBeNull();
+    expect(encodeBase64(aliceOut1!)).toBe(encodeBase64(reply1Plaintext));
+
+    const alicePqPubRound2 = encodeBase64(aliceState.PQs!.publicKey);
+    expect(alicePqPubRound2).not.toBe(alicePqPubRound1);
+
+    const msg2Plaintext = new TextEncoder().encode('hybrid message 3 (alice -> bob)');
+    const msg2 = ratchetEncrypt(aliceState, msg2Plaintext);
+    expect(msg2.header.pqPub).toBeDefined();
+    expect(msg2.header.pqCt).toBeDefined();
+
+    const bobOut2 = ratchetDecrypt(bobState, msg2.header, msg2.ciphertext, msg2.nonce);
+    expect(bobOut2).not.toBeNull();
+    expect(encodeBase64(bobOut2!)).toBe(encodeBase64(msg2Plaintext));
+  });
+
+  it('rejects a chain-turn header stripped of PQ material (downgrade attack)', () => {
+    const { aliceState, bobState } = establishHybridSession();
+
+    const replyPlaintext = new TextEncoder().encode('attempted downgrade');
+    const reply = ratchetEncrypt(bobState, replyPlaintext);
+    const strippedHeader = { ratchetKey: reply.header.ratchetKey, n: reply.header.n, pn: reply.header.pn };
+
+    expect(() => ratchetDecrypt(aliceState, strippedHeader, reply.ciphertext, reply.nonce)).toThrow(
+      /downgrade/i,
+    );
+  });
+});
+
+// Cross-platform KAT: the hybrid root derivation (dhOut ‖ pqSecret under the
+// 'AegisLinkRootPQ' label) MUST be byte-identical on desktop and mobile, or two
+// twin clients silently derive different roots and every message fails. This
+// exact block + vector is mirrored in the mobile ratchet test
+// (mobile/src/crypto/signal/__tests__/ratchet.test.ts). Vector from
+// _scratch/kat-gen.mjs.
+const KAT_ROOT_PQ_HEX =
+  '4302ce0529c32b63da34f031ea6658753e568732c4fd56526fd421a81b74559c' +
+  'bac8b9ad0a53c62d197de7ecb208b50a35387e4a8c03278e113bf4c44a490fea';
+
+describe('R1 — cross-platform hybrid root KAT', () => {
+  it('hybrid root derivation matches the pinned vector (desktop↔mobile parity)', () => {
+    const rk = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
+    const dhOut = Uint8Array.from({ length: 32 }, (_, i) => (i * 7) & 0xff);
+    const pqSecret = Uint8Array.from({ length: 32 }, (_, i) => (i * 13 + 5) & 0xff);
+    const combined = new Uint8Array(64);
+    combined.set(dhOut, 0);
+    combined.set(pqSecret, 32);
+    const out = hkdfSHA256(combined, rk, new TextEncoder().encode('AegisLinkRootPQ'), 64);
+    expect(Buffer.from(out).toString('hex')).toBe(KAT_ROOT_PQ_HEX);
+  });
+});
