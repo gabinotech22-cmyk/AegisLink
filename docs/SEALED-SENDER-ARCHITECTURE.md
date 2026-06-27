@@ -1,6 +1,8 @@
 # AegisLink — Sealed-Sender en el transporte (épica A-6+)
 
-> Estado: **PROPUESTA DE DISEÑO** — requiere aprobación antes de implementar.
+> Estado: **IMPLEMENTADO** — ya NO es una propuesta. Ocultar `from` (Fases 1–3)
+> está **habilitado por defecto**; ocultar `to` (Fase 4, mailbox IDs + Tor
+> embebido #171/#172) está implementado tras flag. Ver el detalle de fases en §5.
 > Origen: auditoría profunda 2026-06, hallazgo A-6 (el relay ve `from→to` en
 > signaling de llamadas). Al investigarlo se confirmó que el leak está **a la
 > par de los envelopes de chat** (handler.ts:572), así que el problema no es de
