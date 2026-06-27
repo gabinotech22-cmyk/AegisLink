@@ -13,7 +13,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sanitizer: [address]
+        # JS (Jazzer.js) targets: the only sanitizer CFLite accepts is 'none'.
+        sanitizer: [none]
     steps:
       - name: Build fuzzers (${{ matrix.sanitizer }})
         id: build
