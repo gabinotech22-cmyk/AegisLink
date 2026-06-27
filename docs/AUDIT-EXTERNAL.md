@@ -87,9 +87,12 @@ place. It is:
   encoded as custom Semgrep rules. Caught 4 real bugs pre-production
   (silent `plain:` DB key, QR `URIError` crash, contact→`<img src>` XSS/IP-leak).
 - **Continuous fuzzing** — structure-aware parser fuzz campaign as an always-on
-  CI gate (`mobile/src/fuzz/`), plus **OSS-Fuzz integration** (`infra/oss-fuzz/`)
-  for coverage-guided fuzzing of every untrusted-input parser and the ratchet
-  inner-payload deserializer.
+  CI gate (`mobile/src/fuzz/`), plus **ClusterFuzzLite** (`.clusterfuzzlite/`)
+  running coverage-guided Jazzer.js fuzzing in our own CI on every PR and a
+  daily batch — covering every untrusted-input parser and the ratchet
+  inner-payload deserializer. The same targets and build logic
+  (`infra/oss-fuzz/`) are kept OSS-Fuzz-ready for re-application once the
+  project reaches OSS-Fuzz's adoption bar.
 - **Regression discipline** — one regression test per security fix (project rule).
 - **Reference designs** — we track Signal and SimpleX for privacy/crypto
   decisions and cite them in commits.

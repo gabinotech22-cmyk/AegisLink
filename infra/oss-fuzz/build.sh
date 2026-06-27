@@ -1,6 +1,8 @@
 #!/bin/bash -eu
-# OSS-Fuzz build script for AegisLink parser fuzz targets.
-# Mirror of projects/aegislink/build.sh in google/oss-fuzz.
+# Shared fuzzer build script for AegisLink parser fuzz targets.
+# Used by BOTH fuzzing integrations so they never drift:
+#   - OSS-Fuzz: mirrored as projects/aegislink/build.sh in google/oss-fuzz.
+#   - ClusterFuzzLite: .clusterfuzzlite/build.sh execs this file directly.
 #
 # Builds one libFuzzer/Jazzer.js target per untrusted-input parser, each seeded
 # from the in-tree corpus declared in mobile/src/fuzz/targets.ts.
