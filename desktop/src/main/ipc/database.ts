@@ -183,7 +183,7 @@ export function resetDbKeyCache(): void {
   cachedDbKey = null
 }
 
-function encryptBody(body: string, slot = 'self'): string {
+export function encryptBody(body: string, slot = 'self'): string {
   // No try/catch: a cipher failure MUST propagate. Returning the plaintext
   // body here would silently persist cleartext (incl. ratchet state) to disk.
   // (Golden rule #1: encryption never degrades silently.)
@@ -195,19 +195,62 @@ function encryptBody(body: string, slot = 'self'): string {
   return 'encv1:' + JSON.stringify(result)
 }
 
-function decryptBody(encryptedBody: string, slot = 'self'): string {
+/**
+ * Thrown when at-rest decryption fails. Carries no plaintext or key material.
+ * Mirror of mobile/src/db/local.ts:DecryptionError (golden rule #5, parity).
+ */
+class DecryptionError extends Error {
+  constructor(reason: string) {
+    super(`decrypt failed: ${reason}`)
+    this.name = 'DecryptionError'
+  }
+}
+
+/**
+ * Strict decryption primitive: throws {@link DecryptionError} on ANY failure.
+ * Never returns a sentinel string.
+ */
+function decryptBodyStrict(encryptedBody: string, slot = 'self'): string {
+  if (!encryptedBody || !encryptedBody.startsWith('encv1:')) return encryptedBody
+  const key = getDbKey(slot)
+  const jsonStr = encryptedBody.slice(6)
+  let parsed: { ct: string; n: string }
+  try {
+    parsed = JSON.parse(jsonStr)
+  } catch {
+    throw new DecryptionError('malformed envelope')
+  }
+  const ct = decodeBase64(parsed.ct)
+  const nonce = decodeBase64(parsed.n)
+  const decrypted = nacl.secretbox.open(ct, nonce, key)
+  if (!decrypted) throw new DecryptionError('authentication failed')
+  return new TextDecoder().decode(decrypted)
+}
+
+/**
+ * Display-path decryption. On failure returns a VISIBLE marker (never silent,
+ * never fabricated plaintext). NOT for key material — use
+ * {@link decryptSecretOrNull} for ratchet state / prekey secrets.
+ */
+export function decryptBody(encryptedBody: string, slot = 'self'): string {
   if (!encryptedBody || !encryptedBody.startsWith('encv1:')) return encryptedBody
   try {
-    const key = getDbKey(slot)
-    const jsonStr = encryptedBody.slice(6)
-    const parsed = JSON.parse(jsonStr)
-    const ct = decodeBase64(parsed.ct)
-    const nonce = decodeBase64(parsed.n)
-    const decrypted = nacl.secretbox.open(ct, nonce, key)
-    if (!decrypted) return '[DECRYPTION_ERROR]'
-    return new TextDecoder().decode(decrypted)
+    return decryptBodyStrict(encryptedBody, slot)
   } catch {
     return '[DECRYPTION_ERROR]'
+  }
+}
+
+/**
+ * Fail-closed decryption for KEY MATERIAL (ratchet state). Returns null on
+ * failure so the caller re-establishes a fresh session rather than proceeding
+ * with a sentinel string parsed as garbage key material (golden rule #1).
+ */
+export function decryptSecretOrNull(encryptedBody: string, slot = 'self'): string | null {
+  try {
+    return decryptBodyStrict(encryptedBody, slot)
+  } catch {
+    return null
   }
 }
 
@@ -841,7 +884,9 @@ export function registerDatabaseHandlers(): void {
         .prepare('SELECT state_json FROM ratchet_sessions WHERE aegis_id = ?')
         .get(aegisId)
       if (!r) return null
-      return decryptBody(r.state_json, activeSlot)
+      // Fail closed: undecryptable ratchet state => null (re-establish), never a
+      // sentinel that would parse into garbage key material (golden rule #1).
+      return decryptSecretOrNull(r.state_json, activeSlot)
     }
   )
 

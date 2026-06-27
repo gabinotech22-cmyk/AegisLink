@@ -1060,19 +1060,65 @@ export async function encryptBody(body: string): Promise<string> {
   }
 }
 
+/**
+ * Thrown when at-rest decryption fails. Carries no plaintext or key material.
+ * Used by the fail-closed key-material accessors below so that a decryption
+ * failure can never be mistaken for valid data (golden rule #1).
+ */
+export class DecryptionError extends Error {
+  constructor(reason: string) {
+    super(`decrypt failed: ${reason}`);
+    this.name = 'DecryptionError';
+  }
+}
+
+/**
+ * Display-path decryption. On failure returns a VISIBLE marker (never silent,
+ * never fabricated plaintext) so the UI can render an explicit "could not
+ * decrypt" state. NOT for key material — use {@link decryptSecret} /
+ * {@link decryptSecretOrNull} for ratchet state, prekey secrets, etc.
+ */
 export async function decryptBody(encryptedBody: string): Promise<string> {
   if (!encryptedBody || !encryptedBody.startsWith('encv1:')) return encryptedBody;
   try {
-    const key = await getDbKey();
-    const jsonStr = encryptedBody.slice(6);
-    const parsed = JSON.parse(jsonStr);
-    const ct = decodeBase64(parsed.ct);
-    const nonce = decodeBase64(parsed.n);
-    const decrypted = nacl.secretbox.open(ct, nonce, key);
-    if (!decrypted) return '[DECRYPTION_ERROR]';
-    return new TextDecoder().decode(decrypted);
-  } catch (e) {
+    return await decryptBodyStrict(encryptedBody);
+  } catch {
     return '[DECRYPTION_ERROR]';
+  }
+}
+
+/**
+ * Strict decryption primitive: throws {@link DecryptionError} on ANY failure
+ * (bad ciphertext, MAC failure, unavailable DB key). Never returns a sentinel.
+ */
+async function decryptBodyStrict(encryptedBody: string): Promise<string> {
+  if (!encryptedBody || !encryptedBody.startsWith('encv1:')) return encryptedBody;
+  const key = await getDbKey();
+  const jsonStr = encryptedBody.slice(6);
+  let parsed: { ct: string; n: string };
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    throw new DecryptionError('malformed envelope');
+  }
+  const ct = decodeBase64(parsed.ct);
+  const nonce = decodeBase64(parsed.n);
+  const decrypted = nacl.secretbox.open(ct, nonce, key);
+  if (!decrypted) throw new DecryptionError('authentication failed');
+  return new TextDecoder().decode(decrypted);
+}
+
+/**
+ * Fail-closed decryption for KEY MATERIAL (ratchet state, prekey secrets).
+ * Returns null on failure — the caller MUST treat null as "absent" and
+ * regenerate / re-establish rather than proceeding with garbage. NEVER
+ * returns a sentinel string that could be parsed as key material.
+ */
+export async function decryptSecretOrNull(encryptedBody: string): Promise<string | null> {
+  try {
+    return await decryptBodyStrict(encryptedBody);
+  } catch {
+    return null;
   }
 }
 
@@ -1322,7 +1368,10 @@ export async function loadRatchetSession(aegisId: string): Promise<string | null
       aegisId
     );
     if (!row) return null;
-    return decryptBody(row.state_json);
+    // Fail closed: if the stored ratchet state cannot be decrypted, return null
+    // so the caller re-establishes a fresh session rather than proceeding with a
+    // sentinel string that would parse into garbage key material (golden rule #1).
+    return decryptSecretOrNull(row.state_json);
   });
 }
 
@@ -2021,7 +2070,7 @@ export async function loadSpkSecret(keyId: number): Promise<string | null> {
       activeSlot, keyId,
     );
     if (!row) return null;
-    return decryptBody(row.secret_b64);
+    return decryptSecretOrNull(row.secret_b64);
   });
 }
 
@@ -2033,7 +2082,9 @@ export async function loadLatestSpkSecret(): Promise<{ keyId: number; b64: strin
       activeSlot,
     );
     if (!row) return null;
-    return { keyId: row.key_id, b64: await decryptBody(row.secret_b64) };
+    const b64 = await decryptSecretOrNull(row.secret_b64);
+    if (b64 === null) return null; // fail closed: undecryptable SPK secret = absent
+    return { keyId: row.key_id, b64 };
   });
 }
 
@@ -2066,7 +2117,7 @@ export async function loadOpkSecret(keyId: number): Promise<string | null> {
       activeSlot, keyId,
     );
     if (!row) return null;
-    return decryptBody(row.secret_b64);
+    return decryptSecretOrNull(row.secret_b64);
   });
 }
 
@@ -2086,7 +2137,11 @@ export async function loadAllOpkSecrets(): Promise<Map<number, string>> {
     );
     const out = new Map<number, string>();
     for (const row of rows) {
-      out.set(row.key_id, await decryptBody(row.secret_b64));
+      // Fail closed: skip any OPK whose secret cannot be decrypted rather than
+      // inserting a sentinel; a skipped OPK is naturally excluded from the
+      // rebuilt public bundle (treated as already-consumed).
+      const b64 = await decryptSecretOrNull(row.secret_b64);
+      if (b64 !== null) out.set(row.key_id, b64);
     }
     return out;
   });
@@ -2125,7 +2180,7 @@ export async function getSpkKeyId(): Promise<number | null> {
       activeSlot,
     );
     if (!row) return null;
-    const v = parseInt(await decryptBody(row.secret_b64), 10);
+    const v = parseInt((await decryptSecretOrNull(row.secret_b64)) ?? '', 10);
     return Number.isFinite(v) ? v : null;
   });
 }
@@ -2158,7 +2213,7 @@ export async function getSpkCreatedAt(): Promise<number | null> {
       activeSlot,
     );
     if (!row) return null;
-    const v = parseInt(await decryptBody(row.secret_b64), 10);
+    const v = parseInt((await decryptSecretOrNull(row.secret_b64)) ?? '', 10);
     return Number.isFinite(v) ? v : null;
   });
 }
@@ -2203,7 +2258,7 @@ export async function loadPqSpkSecret(keyId: number): Promise<string | null> {
       activeSlot, keyId,
     );
     if (!row) return null;
-    return decryptBody(row.secret_b64);
+    return decryptSecretOrNull(row.secret_b64);
   });
 }
 
@@ -2236,7 +2291,7 @@ export async function getPqSpkKeyId(): Promise<number | null> {
       activeSlot,
     );
     if (!row) return null;
-    const v = parseInt(await decryptBody(row.secret_b64), 10);
+    const v = parseInt((await decryptSecretOrNull(row.secret_b64)) ?? '', 10);
     return Number.isFinite(v) ? v : null;
   });
 }
