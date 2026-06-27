@@ -439,6 +439,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [server-typecheck, mobile-typecheck, permissions-audit]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Best-effort: this submits a preview build with --no-wait (fire-and-forget;
+    # it never waits for or verifies the build result). Its only failure mode is
+    # external — the Expo Free plan exhausts its monthly Android build quota
+    # mid-month, which would otherwise turn `main` red even though nothing in the
+    # repo is broken. Keep it informational so quota limits don't gate merges;
+    # the real gates are the typecheck + test jobs.
+    continue-on-error: true
     defaults:
       run:
         working-directory: mobile
