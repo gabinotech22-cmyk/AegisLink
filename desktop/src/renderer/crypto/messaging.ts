@@ -10,6 +10,12 @@ interface InnerRatchet {
   pn: number;
   ciphertextB64: string;
   nonceB64: string;
+  // Hybrid PQ ratchet (R1): present only on the first message of a NEW
+  // sending chain (Ns === 0) on a session that has ML-KEM-768 material. See
+  // ratchetEncrypt/dhRatchet in signal/ratchet.ts. Absent ⇒ classic v1 chain
+  // turn or the session predates R1.
+  pqPubB64?: string;
+  pqCtB64?: string;
 }
 
 interface InnerPayload {
@@ -52,6 +58,8 @@ export function encryptMessage(
       pn: ratchetOut.header.pn,
       ciphertextB64: encodeBase64(ratchetOut.ciphertext),
       nonceB64: encodeBase64(ratchetOut.nonce),
+      ...(ratchetOut.header.pqPub ? { pqPubB64: encodeBase64(ratchetOut.header.pqPub) } : {}),
+      ...(ratchetOut.header.pqCt ? { pqCtB64: encodeBase64(ratchetOut.header.pqCt) } : {}),
     },
   };
 
@@ -115,6 +123,8 @@ export function tryDecryptMessage(
       ratchetKey: decodeBase64(parsed.ratchet.ratchetKeyB64),
       n: parsed.ratchet.n,
       pn: parsed.ratchet.pn,
+      ...(parsed.ratchet.pqPubB64 ? { pqPub: decodeBase64(parsed.ratchet.pqPubB64) } : {}),
+      ...(parsed.ratchet.pqCtB64 ? { pqCt: decodeBase64(parsed.ratchet.pqCtB64) } : {}),
     };
     const rCiphertext = decodeBase64(parsed.ratchet.ciphertextB64);
     const rNonce = decodeBase64(parsed.ratchet.nonceB64);
@@ -159,6 +169,8 @@ export function encryptMessageV2(
       pn: ratchetOut.header.pn,
       ciphertextB64: encodeBase64(ratchetOut.ciphertext),
       nonceB64: encodeBase64(ratchetOut.nonce),
+      ...(ratchetOut.header.pqPub ? { pqPubB64: encodeBase64(ratchetOut.header.pqPub) } : {}),
+      ...(ratchetOut.header.pqCt ? { pqCtB64: encodeBase64(ratchetOut.header.pqCt) } : {}),
     },
   };
 
@@ -211,6 +223,8 @@ export function decryptMessageV2(
       ratchetKey: decodeBase64(parsed.ratchet.ratchetKeyB64),
       n: parsed.ratchet.n,
       pn: parsed.ratchet.pn,
+      ...(parsed.ratchet.pqPubB64 ? { pqPub: decodeBase64(parsed.ratchet.pqPubB64) } : {}),
+      ...(parsed.ratchet.pqCtB64 ? { pqCt: decodeBase64(parsed.ratchet.pqCtB64) } : {}),
     };
     const plaintextBytes = ratchetDecrypt(
       ratchetState,
