@@ -25,6 +25,8 @@ function assertTrustedSender(e: IpcMainInvokeEvent): void {
 // value — so they never reject real data, only pathological payloads.
 const MAX_RATCHET_STATE_BYTES = 1024 * 1024;   // 1 MB — a session state is a few KB
 const MAX_MESSAGE_BODY_BYTES = 8 * 1024 * 1024; // 8 MB — covers large base64 media refs
+const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB — inline base64 avatar
+const MAX_METADATA_FIELD_BYTES = 256 * 1024;    // 256 KB — names, status, member JSON, etc.
 function assertMaxLen(value: unknown, maxBytes: number, label: string): void {
   if (typeof value === 'string' && value.length > maxBytes) {
     throw new Error(`IPC payload too large: ${label} (${value.length} > ${maxBytes})`)
@@ -574,6 +576,13 @@ export function registerDatabaseHandlers(): void {
   // ─── Contacts ───
   ipcMain.handle('db:save-contact', (event, c: any): void => {
     assertTrustedSender(event)
+    // Defence-in-depth: bound the unbounded string fields a renderer can write
+    // (parity with db:save-message) so a buggy/compromised renderer can't push a
+    // pathological payload into SQLite.
+    assertMaxLen(c?.name, MAX_METADATA_FIELD_BYTES, 'contact.name')
+    assertMaxLen(c?.status, MAX_METADATA_FIELD_BYTES, 'contact.status')
+    assertMaxLen(c?.color, MAX_METADATA_FIELD_BYTES, 'contact.color')
+    assertMaxLen(c?.avatarImage, MAX_AVATAR_IMAGE_BYTES, 'contact.avatarImage')
     const sql = `INSERT OR REPLACE INTO contacts
      (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -893,6 +902,10 @@ export function registerDatabaseHandlers(): void {
   // ─── Groups ───
   ipcMain.handle('db:save-group', (event, g: any): void => {
     assertTrustedSender(event)
+    assertMaxLen(g?.name, MAX_METADATA_FIELD_BYTES, 'group.name')
+    assertMaxLen(g?.avatarColor, MAX_METADATA_FIELD_BYTES, 'group.avatarColor')
+    assertMaxLen(g?.avatarImage, MAX_AVATAR_IMAGE_BYTES, 'group.avatarImage')
+    assertMaxLen(JSON.stringify(g?.members ?? []), MAX_METADATA_FIELD_BYTES, 'group.members')
     db.prepare(
       `INSERT OR REPLACE INTO groups (id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -1060,6 +1073,11 @@ export function registerDatabaseHandlers(): void {
   // ─── Call history ───
   ipcMain.handle('db:save-call', (event, c: any): void => {
     assertTrustedSender(event)
+    assertMaxLen(c?.id, MAX_METADATA_FIELD_BYTES, 'call.id')
+    assertMaxLen(c?.contactId, MAX_METADATA_FIELD_BYTES, 'call.contactId')
+    assertMaxLen(c?.direction, MAX_METADATA_FIELD_BYTES, 'call.direction')
+    assertMaxLen(c?.media, MAX_METADATA_FIELD_BYTES, 'call.media')
+    assertMaxLen(c?.status, MAX_METADATA_FIELD_BYTES, 'call.status')
     db.prepare(
       'INSERT OR REPLACE INTO call_history (id, contact_id, direction, media, status, started_at, duration_s) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).run(c.id, c.contactId, c.direction, c.media, c.status, c.startedAt, c.durationS)
