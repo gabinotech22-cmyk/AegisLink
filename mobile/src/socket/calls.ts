@@ -315,6 +315,15 @@ export function attachCallHandlers(): void {
   socket.off('call:hangup:v2');
 
   socket.on('call:invite', async (msg: CallInvitePayload) => {
+    // Under the default sealed-sender (v2) policy we never PARTICIPATE in a v1
+    // call: answering one would emit our own `from`-bearing v1 answer/ICE to the
+    // relay (golden rule #4). Refuse the invite so the call fails closed — the
+    // caller must update to a v2 client. v1 receive stays wired only when the
+    // user explicitly opted out via SEALED_TRANSPORT_VERSION=v1.
+    if (SEALED_TRANSPORT_VERSION === 'v2') {
+      if (__DEV__) logger.warn('[calls] refusing legacy v1 invite under sealed-sender policy');
+      return;
+    }
     // Decrypt the sealed SDP offer before doing anything else. A failed open
     // (unknown sender, tampered ciphertext, missing identity) drops the invite.
     const offer = openSignal(msg.from, msg);
@@ -600,7 +609,10 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     }
     const sealed = sealCallInvite(recipientPub, me.aegisId, me.signingSecretKey, offer, Date.now(), callKey);
     socket.emit('call:invite:v2', { callId, to: toAegisId, media, ...sealed.wire });
-  } else {
+  } else if (SEALED_TRANSPORT_VERSION === 'v1') {
+    // Legacy escape hatch (EXPO_PUBLIC_SEALED_VERSION=v1): the user opted OUT of
+    // sealed-sender for ALL transport. SDP content is still NaCl-box sealed, but
+    // the relay stamps `from`. Not reachable under the default v2 policy.
     const sealedOffer = sealSignal(toAegisId, offer);
     if (!sealedOffer) {
       // Cannot encrypt the offer — abort rather than leak plaintext SDP to the relay.
@@ -612,6 +624,17 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
       return; // don't throw — call is already ended cleanly
     }
     socket.emit('call:invite', { callId, to: toAegisId, media, ...sealedOffer });
+  } else {
+    // v2 policy (default) but sealed-sender is impossible — the peer's box key or
+    // our own signing identity is unavailable. Fail CLOSED: never fall back to a
+    // `from`-leaking v1 invite (golden rules #4 sealed-sender-in-calls + #6
+    // fail-closed). The call ends cleanly with a clear, actionable message.
+    endCall('encrypt_failure');
+    themedAlert(
+      'Call failed',
+      'Could not start a metadata-free call with this contact. They may need to update AegisLink, or try re-adding them to your contacts.',
+    );
+    return; // don't throw — call is already ended cleanly
   }
 
   // Auto-end if callee does not answer within 45 seconds

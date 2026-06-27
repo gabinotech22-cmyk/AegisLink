@@ -1,8 +1,10 @@
 # Fase 4 — Sealed-sender para señalización de llamadas (1:1 v1 + grupo)
 
-> **Estado:** propuesta de diseño (no implementado). Deriva del hallazgo #2 de la
-> auditoría interna 2026-06 y de la regla de oro de seguridad **#4** ("Sealed-sender
-> en TODO, incluidas las llamadas"). Ver `docs/SECURITY-ROADMAP-2026-06.md`,
+> **Estado:** **Fase A ✅ HECHA** (clientes sellados-only, fail-closed, paridad
+> mobile↔desktop + tests de regresión — ver §8). Fases B (group calls v2) y C
+> (drop v1 en el relay) **pendientes**. Deriva del hallazgo #2 de la auditoría
+> interna 2026-06 y de la regla de oro de seguridad **#4** ("Sealed-sender en
+> TODO, incluidas las llamadas"). Ver `docs/SECURITY-ROADMAP-2026-06.md`,
 > `docs/SEALED-SENDER-ARCHITECTURE.md` y `CLAUDE.md`.
 
 ## 1. Contexto y estado actual
@@ -141,8 +143,20 @@ wire = { to, callId, ciphertext: inner, nonce, epk: senderEphemeralPubKey }
 
 ## 8. Fases de implementación sugeridas
 
-1. **Fase A** (rama `feat/sealed-call-1to1-cutover`): clientes emiten solo v2; server
-   deja de estampar `from` en v1; tests server. Bajo riesgo, v2 ya probado.
+1. **Fase A** ✅ **HECHA** (rama `feat/sealed-call-1to1-cutover`): bajo la política
+   por defecto `SEALED_TRANSPORT_VERSION='v2'`, los clientes emiten **solo** v2 y
+   **fallan cerrado** si no pueden sellar-sender (en vez de degradar a v1 con `from`
+   visible / SDP en claro en desktop); además **rechazan** invites v1 entrantes (así
+   nunca contestan v1 → nunca filtran su propio `from`). Paridad mobile↔desktop
+   (regla #5). El escape-hatch explícito `=v1` se preserva.
+   - Evidencia: `mobile/src/socket/calls.ts`, `desktop/src/renderer/socket/calls.ts`;
+     tests `mobile/src/socket/__tests__/calls.sealedSenderPolicy.test.ts` (3) y
+     `desktop/src/renderer/socket/__tests__/calls.sealedSenderPolicy.test.ts` (3, primera
+     suite de señalización de llamadas del desktop — regla #11).
+   - **Nota:** el relay (`server/src/relay/handler.ts`) **todavía** estampa `from` en
+     los eventos v1 legacy; quitarlo es *breaking* para receptores v1 y se hace en
+     Fase C. Fase A no toca el server (es una mejora puramente client-side, no-breaking
+     para usuarios v2).
 2. **Fase B** (rama `feat/sealed-group-call-v2`): esquema + handlers v2 de grupo;
    sellado de grupo en mobile+desktop; tests server+cliente; negociación de versión.
 3. **Fase C** (rama `chore/drop-v1-call-signaling`): tras la ventana de gracia, remover

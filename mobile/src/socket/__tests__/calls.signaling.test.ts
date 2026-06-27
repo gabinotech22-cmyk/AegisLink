@@ -21,6 +21,18 @@
  * history (saveCall) + appended chat message (useMessages.append) + Alert.
  */
 
+// ── config — pin these finalization tests to the legacy v1 transport policy. ──
+// They predate the sealed-sender-only (v2) call policy and assert ONLY on
+// transport-agnostic finalization behavior (alerts, saved history, chat rows).
+// Under the default v2 policy startCall fails closed unless a full sealed-sender
+// identity is mocked; pinning to v1 keeps them exercising the still-supported
+// legacy path without that scaffolding. The v2-policy behavior (fail-closed,
+// v1-invite refusal) is covered by calls.sealedSenderPolicy.test.ts.
+jest.mock('../../config', () => ({
+  ...jest.requireActual('../../config'),
+  SEALED_TRANSPORT_VERSION: 'v1',
+}));
+
 // ── react-native-webrtc ────────────────────────────────────────────────────
 jest.mock('react-native-webrtc', () => ({
   RTCPeerConnection: jest.fn(),

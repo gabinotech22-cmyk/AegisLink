@@ -228,9 +228,11 @@ interface CallHangupPayload {
 // ── Sealed-sender v2 call signaling (Phase 2) ───────────────────────────────
 // Parity with mobile. v2 hides the caller's identity from the relay: the invite
 // carries a sealed-sender handshake embedding a per-call symmetric `callKey`;
-// answer/ICE are sealed with secretbox under it. v2 SEND is flag-gated; v2
-// RECEIVE is always wired. NOTE: desktop's v1 path emits signaling in cleartext
-// (pre-existing); v2 additionally encrypts the SDP/ICE content end-to-end.
+// answer/ICE are sealed with secretbox under it. v2 RECEIVE is always wired.
+// As of Fase A the default v2 policy is sealed-sender-ONLY: startCall fails
+// closed rather than fall back to v1, and inbound v1 invites are refused — so
+// desktop's legacy v1 path (which emitted signaling in cleartext) is now
+// UNREACHABLE unless the user explicitly opts out via VITE_SEALED_VERSION=v1.
 const callKeys = new Map<string, Uint8Array>();
 function rememberCallKey(callId: string, key: Uint8Array): void { callKeys.set(callId, key); }
 function forgetCallKey(callId: string): void {
@@ -289,6 +291,15 @@ export function attachCallHandlers(): void {
   socket.off('call:invite:v2'); socket.off('call:answer:v2'); socket.off('call:ice:v2'); socket.off('call:hangup:v2');
 
   socket.on('call:invite', async (msg: CallInvitePayload) => {
+    // Under the default sealed-sender (v2) policy we never PARTICIPATE in a v1
+    // call: answering one would emit our own `from`-bearing (cleartext on
+    // desktop) v1 answer/ICE to the relay (golden rule #4). Refuse it so the call
+    // fails closed — the caller must update. v1 receive stays wired only when the
+    // user explicitly opted out via SEALED_TRANSPORT_VERSION=v1. Parity w/ mobile.
+    if (SEALED_TRANSPORT_VERSION === 'v2') {
+      if (DEV) console.warn('[calls] refusing legacy v1 invite under sealed-sender policy');
+      return;
+    }
     processIncomingInvite(socket, msg.from, msg.callId, msg.media, msg.offer);
   });
 
@@ -453,8 +464,19 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     if (!me || !recipientPub || !callKey) { endCall('encrypt_failure'); return; }
     const sealed = sealCallInvite(recipientPub, me.aegisId, me.signingSecretKey, offer, Date.now(), callKey);
     socket.emit('call:invite:v2', { callId, to: toAegisId, media, ...sealed.wire });
-  } else {
+  } else if (SEALED_TRANSPORT_VERSION === 'v1') {
+    // Legacy escape hatch (VITE_SEALED_VERSION=v1): the user opted OUT of
+    // sealed-sender. Desktop's v1 path emits cleartext signaling (pre-existing).
+    // Not reachable under the default v2 policy.
     socket.emit('call:invite', { callId, to: toAegisId, media, offer });
+  } else {
+    // v2 policy (default) but sealed-sender is impossible — peer box key or our
+    // signing identity is unavailable. Fail CLOSED: never fall back to a
+    // `from`-leaking (and, on desktop, cleartext) v1 invite (golden rules #4 +
+    // #6). Parity with mobile/src/socket/calls.ts.
+    if (DEV) console.warn('[calls] cannot seal call invite — failing closed (no v1 fallback)');
+    endCall('encrypt_failure');
+    return;
   }
 
   _ringTimeout = setTimeout(() => {
