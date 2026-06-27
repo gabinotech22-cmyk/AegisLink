@@ -19,9 +19,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Jazzer.js does not use native C sanitizers; the JavaScript engine
-        # builds with sanitizer 'none' (matches infra/oss-fuzz/project.yaml).
-        sanitizer: [none]
+        # Jazzer.js has no native C sanitizer, but ClusterFuzzLite's actions
+        # validate this field against {address,memory,undefined,coverage} and
+        # reject 'none'. JavaScript projects use 'address' as the conventional
+        # placeholder (it has no native effect under Jazzer.js).
+        sanitizer: [address]
     steps:
       - name: Build fuzzers (${{ matrix.sanitizer }})
         id: build
