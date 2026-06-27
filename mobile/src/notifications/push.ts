@@ -354,20 +354,12 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
     const tokenResponse = await Notifications.getExpoPushTokenAsync();
     const expoToken = tokenResponse.data;
 
-    const platform: 'ios' | 'android' | 'unknown' =
-      Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'unknown';
-
-    const res = await fetch(`${SERVER_URL}/push/register`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      signal: makeSignal(10_000),
-      body: JSON.stringify({ aegisId: identity.aegisId, expoToken, platform }),
-    });
-    if (!res.ok) {
-      if (__DEV__) logger.warn('[push] server rejected token registration', res.status);
-      return { token: null };
-    }
-
+    // The actual token→aegisId association happens over the AUTHENTICATED
+    // Socket.IO path (socket.on('push:register') after the Ed25519
+    // challenge-response). The old unauthenticated POST /push/register was
+    // removed server-side (H-4 security fix); calling it here only 404'd and
+    // forced this function to report failure. We just acquire the token; the
+    // socket layer (socket/client.ts) emits push:register once authenticated.
     registered = true;
     if (__DEV__) logger.debug('[push] registered for wake-ups, token:', expoToken);
     return { token: expoToken };
