@@ -120,3 +120,34 @@ completo están en `docs/PROJECT-STRUCTURE.md`; lo obligatorio es esto:
    La respuesta es la carpeta. Si no encaja en ninguna, probablemente no debería existir.
 6. **Una feature no se reparte entre carpetas en ramas distintas** (refuerza la regla de ramas):
    mobile+server+infra de un mismo cambio van juntos en una sola rama.
+
+## REGLA DE ORO — La doc no miente: sincronía doc↔código (NO NEGOCIABLE)
+
+Existe porque YA pasó: `SEALED-SENDER-ARCHITECTURE.md` decía "Fase 4 🟡 EN CURSO /
+PENDIENTE" cuando el código ya tenía mailbox auth + Tor + entrega sin emisor,
+testeados y mergeados. Resultado: revisores externos (y nosotros mismos)
+**subestimamos el proyecto y estuvimos a punto de re-implementar lo ya hecho**. Una
+doc desactualizada no es un detalle cosmético: es deuda que **duplica trabajo**.
+
+1. **El código es la fuente de verdad; la doc lo refleja, nunca al revés.** Si la
+   doc y el código discrepan, **el código gana** y la doc se corrige de inmediato.
+   Antes de declarar algo "pendiente" o "incompleto", **se verifica contra el
+   código y los tests**, no contra un `.md`.
+2. **El estado se actualiza en la MISMA rama/PR que el cambio.** Completar una
+   fase, slice, épica o feature **incluye** mover su marcador de estado
+   (`🟡 EN CURSO` → `✅ HECHO`, "PENDIENTE" → "HECHO") en el doc que lo trackea.
+   Una PR que cambia comportamiento pero deja la doc diciendo lo viejo está
+   **incompleta** y no se mergea.
+3. **Todo marcador de estado es verificable.** Un `✅ HECHO` lleva su prueba al
+   lado: commit/PR, archivo de test o ruta de código (ej. `mailboxAuth.relay.test.ts`,
+   `#171`). Sin evidencia enlazable, no se marca como hecho.
+4. **Una sola fuente por hecho.** El estado de una feature vive en **un** doc
+   canónico; los demás (README, roadmap) **enlazan** a él, no duplican el estado.
+   Duplicar estado = dos sitios que se desincronizan.
+5. **Inventario de drift al cerrar una tanda.** Junto al `git status` limpio de la
+   regla de ramas: si tocaste una feature trackeada en un doc, ese doc quedó al
+   día. Si un doc describe algo que ya no es cierto, se corrige o se borra — no se
+   deja "para después".
+6. **Ante la duda sobre qué está hecho, `grep` y tests, no memoria ni `.md` viejo.**
+   La pregunta "¿esto ya existe?" se responde leyendo código y corriendo la suite,
+   nunca asumiendo desde un documento que pudo quedar atrás.

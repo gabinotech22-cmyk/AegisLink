@@ -178,7 +178,7 @@ Lo que cambia:
 - **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
   selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
   `from` igual que un 1:1.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟡 EN CURSO (Slices 1, 2, 3a, 3b, 4, 5, 6 hechas; pendiente 2b).**
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟢 IMPLEMENTADO tras flag OFF — Slices 1, 2, 3a, 3b, 4, 5, 6 hechas y testeadas; transporte Tor embebido shipped (#171/#172). Pendiente para cerrarla del todo: 2b=push por mailbox (vive en Fase 5), validación en vivo 2-dispositivos y flip del flag a ON.** (El antiguo bloque "PENDIENTE (el grueso, XL)" de más abajo describía trabajo que estas slices YA cubren — prueba: `server/src/__tests__/mailboxAuth.relay.test.ts`.)
   **Slice 1 ✅ (server):** auth de socket por mailbox — handshake `{mailboxId,
   mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
   el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
@@ -252,11 +252,14 @@ Lo que cambia:
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un
   root compartido una vez por X3DH (`mailbox(epoch)=HKDF(root,epoch)` → rotación
   silenciosa sin re-reparto) + prueba de posesión Ed25519 para el auth del socket.
-  **PENDIENTE (el grueso, XL):** auth de socket por mailbox en el relay (dejar de
-  enviar el aegisId), routing por mailbox, reparto del root por X3DH, mapping
-  `mailbox→push`, manejo de rotación/solapamiento de época en vivo, paridad
-  desktop+server. Es el cambio de plumbing más profundo; va después de que ocultar
-  `from` esté estable (ya lo está).
+  **✅ HECHO (lo que este bloque listaba como "el grueso, XL"):** auth de socket
+  por mailbox en el relay (ya no se envía el aegisId), routing por mailbox, reparto
+  del root por X3DH, manejo de rotación/solapamiento de época en vivo (multi-bind
+  multi-firma) y paridad desktop+server — todo implementado en las Slices 1–6 y
+  testeado (`server/src/__tests__/mailboxAuth.relay.test.ts` 8/8, mobile
+  `mailboxSocket` 7/7, known-answer vector cross-plataforma en `mailbox.test.ts`).
+  Único resto: el mapping `mailbox→push` (Slice 2b), que vive en Fase 5. Era el
+  cambio de plumbing más profundo y fue después de estabilizar ocultar `from` (✅).
 - **Fase 5 — anti-correlación + push.** Cover traffic / jitter; notifier
   separado o push self-hosted (UnifiedPush/ntfy) para cortar el último reducto.
 - **Fase 6 — retirar v1.** Cuando todos los clientes estén en v2, eliminar el
