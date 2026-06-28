@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Canales Públicos Sellados</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:wght@400;500;600&display=swap"/>
+  <style>
+    html, body { margin: 0; padding: 0; background: #07090a; color: #e8f0ec; }
+    body { font-family: 'Space Grotesk', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    * { box-sizing: border-box; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 56px 32px 80px; }
+    .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+             background: rgba(91,242,185,0.10); border: 1px solid rgba(91,242,185,0.30);
+             font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5bf2b9;
+             letter-spacing: 0.1em; margin-bottom: 20px; }
+    .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: #5bf2b9; }
+    h1 { font-family: 'EB Garamond', serif; font-weight: 500; font-size: clamp(40px, 6vw, 68px);
+         line-height: 0.98; letter-spacing: -0.025em; margin: 0 0 16px; }
+    h1 em { font-style: italic; color: #5bf2b9; }
+    .lead { font-size: 17px; color: rgba(232,240,236,0.6); max-width: 620px; margin: 0 0 48px; line-height: 1.55; }
+    .stage { display: flex; gap: 40px; flex-wrap: wrap; align-items: flex-start; }
+    .col { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+    .col .lbl { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.1em;
+                color: rgba(232,240,236,0.45); text-transform: uppercase; }
+    .nav-hint { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    .nav-hint button { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.04em;
+                       background: transparent; border: 1px solid rgba(255,255,255,0.14); color: rgba(232,240,236,0.6);
+                       border-radius: 8px; padding: 5px 9px; cursor: pointer; }
+    .nav-hint button:hover { border-color: #5bf2b9; color: #5bf2b9; }
+    .foot { margin-top: 56px; padding-top: 22px; border-top: 1px solid rgba(255,255,255,0.08);
+            display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace;
+            font-size: 11px; color: rgba(232,240,236,0.4); letter-spacing: 0.06em; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="badge"><span class="dot"></span>FEATURE · CANALES PÚBLICOS SELLADOS</div>
+    <h1>Canales <em>dentro de Groups</em>.</h1>
+    <p class="lead">
+      Sin tab nuevo. Los canales públicos viven en la pestaña <strong>Groups</strong> con un
+      segmento Groups / Channels. Posts siempre cifrados (CEK), hash chain verificado en el
+      dispositivo, el relay nunca ve quién publica. Toca para navegar el flujo.
+    </p>
+    <div id="root"></div>
+  </div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="theme.jsx"></script>
+  <script type="text/babel" src="icons.jsx"></script>
+  <script type="text/babel" src="ios-frame.jsx"></script>
+  <script type="text/babel" src="screens.jsx"></script>
+  <script type="text/babel" src="screens-channels.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { VAULT, VAULT_LIGHT, IOSDevice,
+            ScreenChannels, ScreenChannelFeed, ScreenChannelDiscover, ScreenChannelCreate } = window;
+
+    const SCREENS = {
+      channels:        ScreenChannels,
+      channelFeed:     ScreenChannelFeed,
+      channelDiscover: ScreenChannelDiscover,
+      channelCreate:   ScreenChannelCreate,
+    };
+
+    function MiniPhone({ t, initial = 'channels' }) {
+      const [stack, setStack] = React.useState([{ name: initial, payload: null }]);
+      const top = stack[stack.length - 1];
+      const nav = (name, payload) => {
+        setStack(s => {
+          // Map non-channel destinations back to channels (out of scope for this preview)
+          const target = SCREENS[name] ? name : 'channels';
+          const idx = s.findIndex(x => x.name === target);
+          if (idx >= 0) return s.slice(0, idx + 1);
+          return [...s, { name: target, payload }];
+        });
+      };
+      const Cmp = SCREENS[top.name] || ScreenChannels;
+      return (
+        <IOSDevice dark={t.dark} width={372} height={808}>
+          <div style={{
+            position: 'absolute', inset: 0, background: t.bg, color: t.text,
+            display: 'flex', flexDirection: 'column', overflow: 'hidden', paddingTop: 50,
+          }}>
+            <Cmp t={t} nav={nav} contact={top.payload} key={top.name + (top.payload?.id || '')}/>
+          </div>
+        </IOSDevice>
+      );
+    }
+
+    function Stage({ t, label }) {
+      const ref = React.useRef(null);
+      return (
+        <div className="col">
+          <MiniPhone t={t}/>
+          <div className="lbl">{label}</div>
+        </div>
+      );
+    }
+
+    function App() {
+      return (
+        <>
+          <div className="stage">
+            <Stage t={VAULT}       label="Vault · Dark"/>
+            <Stage t={VAULT_LIGHT} label="Vault · Light"/>
+          </div>
+          <div className="foot">
+            <span>VAULT · SEALED PUBLIC CHANNELS</span>
+            <span>docs/SEALED-PUBLIC-CHANNELS.md</span>
+          </div>
+        </>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>
