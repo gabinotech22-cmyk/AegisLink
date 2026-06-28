@@ -15,6 +15,7 @@ import turnRoutes from './routes/turn.js';
 import proxyGifRoutes from './routes/proxyGif.js';
 import proxyLinkPreviewRoutes from './routes/proxyLinkPreview.js';
 import { createWorkRouter } from './routes/work.js';
+import { createPublicChannelsRouter } from './routes/publicChannels.js';
 import { attachRelay } from './relay/handler.js';
 import { initDb, messageRepo, senderKeyDistRepo, pruneExpiredWorkMessages } from './db/client.js';
 
@@ -112,6 +113,7 @@ app.use('/', linksRoutes); // /.well-known/assetlinks.json + /g + /a landings
 app.use('/turn', turnRoutes);
 app.use('/proxy/gif', proxyGifRoutes);
 app.use('/proxy/linkpreview', proxyLinkPreviewRoutes);
+app.use('/public-channels', createPublicChannelsRouter());
 
 // ── Direct TLS (optional) ────────────────────────────────────────────────────
 // When TLS_CERT_PATH + TLS_KEY_PATH are set, the relay terminates HTTPS/WSS

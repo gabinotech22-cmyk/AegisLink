@@ -232,6 +232,79 @@ export function verifyManifest(
   return nacl.sign.detached.verify(labeled, sig, manifest.channelEd25519Pub);
 }
 
+/**
+ * Extract the AUTHORITATIVE channel signing public key from a stored, signed
+ * manifest blob (JSON). The relay MUST verify admin actions (delete/ban/
+ * tombstone) against THIS key — never against a client-supplied pubkey, or
+ * anyone who knows the public channelId could forge admin actions by signing
+ * with their own key (golden rules #3, #7).
+ *
+ * Re-derives the channelId from (pub, salt) and checks it matches the blob's
+ * channelId, so a tampered blob whose pub no longer binds to the id is rejected.
+ * Returns the 32-byte pubkey, or null on any parse/binding failure.
+ */
+export function extractChannelSignerPub(manifestBlobStr: string): Uint8Array | null {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(manifestBlobStr) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  try {
+    const channelId = parsed['channelId'];
+    const pubB64 = parsed['channelEd25519Pub'];
+    const saltB64 = parsed['salt'];
+    if (typeof channelId !== 'string' || typeof pubB64 !== 'string' || typeof saltB64 !== 'string') {
+      return null;
+    }
+    const pub = decodeBase64(pubB64);
+    const salt = decodeBase64(saltB64);
+    if (pub.length !== nacl.sign.publicKeyLength || salt.length !== 16) return null;
+    // Binding check: the id must be reproducible from this exact pub + salt.
+    if (deriveChannelId(pub, salt) !== channelId) return null;
+    return pub;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// §13 — Admin action signatures (delete / ban) — domain-separated
+// ---------------------------------------------------------------------------
+
+const DELETE_LABEL = encoder.encode('aegislink/CHANNEL_DELETE');
+const BAN_LABEL = encoder.encode('aegislink/CHANNEL_BAN');
+
+function deleteSignedInput(channelId: string, seqNum: number): Uint8Array {
+  return concat([DELETE_LABEL, decodeBase64(channelId), u64be(seqNum)]);
+}
+
+/** Sign a post-deletion with the channel's private key. */
+export function signDelete(channelId: string, seqNum: number, channelEd25519Secret: Uint8Array): Uint8Array {
+  return nacl.sign.detached(deleteSignedInput(channelId, seqNum), channelEd25519Secret);
+}
+
+/** Verify a post-deletion signature against the channel's public key. */
+export function verifyDelete(channelId: string, seqNum: number, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
+  if (sig.length !== nacl.sign.signatureLength) return false;
+  return nacl.sign.detached.verify(deleteSignedInput(channelId, seqNum), sig, channelEd25519Pub);
+}
+
+function banSignedInput(channelId: string, banRecord: string): Uint8Array {
+  return concat([BAN_LABEL, decodeBase64(channelId), encoder.encode(banRecord)]);
+}
+
+/** Sign a ban record with the channel's private key. */
+export function signBan(channelId: string, banRecord: string, channelEd25519Secret: Uint8Array): Uint8Array {
+  return nacl.sign.detached(banSignedInput(channelId, banRecord), channelEd25519Secret);
+}
+
+/** Verify a ban-record signature against the channel's public key. */
+export function verifyBan(channelId: string, banRecord: string, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
+  if (sig.length !== nacl.sign.signatureLength) return false;
+  return nacl.sign.detached.verify(banSignedInput(channelId, banRecord), sig, channelEd25519Pub);
+}
+
 // ---------------------------------------------------------------------------
 // §6 — Post encryption + hash chain
 // ---------------------------------------------------------------------------
