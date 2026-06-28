@@ -352,6 +352,7 @@ function initSqliteSchema(db: DatabaseSync) {
       signed_manifest_blob    TEXT NOT NULL,
       delivery_token_hash_b64 TEXT NOT NULL,
       channel_type            TEXT NOT NULL DEFAULT 'open',
+      content_key_envelope    TEXT NOT NULL DEFAULT '',
       created_at              INTEGER NOT NULL
     );
 
@@ -380,6 +381,9 @@ function initSqliteSchema(db: DatabaseSync) {
 
   // Schema migrations for existing deployments
   try { db.exec(`ALTER TABLE identities ADD COLUMN signing_public_key_b64 TEXT NOT NULL DEFAULT '';`); } catch { /* exists */ }
+  // Sealed public channels: the wrapped CEK envelope a joiner unwraps with the
+  // capability (docs §4.2/§10.1). Added after Phase 1 shipped the table.
+  try { db.exec(`ALTER TABLE public_channels ADD COLUMN content_key_envelope TEXT NOT NULL DEFAULT '';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages DROP COLUMN sender;`); } catch { /* absent */ }
   // C-3 (security roadmap Ola 2): the SenderKey chain key must never be persisted
@@ -758,6 +762,7 @@ async function initPgSchema(): Promise<void> {
       signed_manifest_blob    TEXT NOT NULL,
       delivery_token_hash_b64 TEXT NOT NULL,
       channel_type            TEXT NOT NULL DEFAULT 'open',
+      content_key_envelope    TEXT NOT NULL DEFAULT '',
       created_at              BIGINT NOT NULL
     );
 
@@ -789,6 +794,7 @@ async function initPgSchema(): Promise<void> {
   // may have tables from an older schema that lack newer columns. Each statement
   // is wrapped in a DO block so it's a no-op when the column already exists.
   const pgMigrations = [
+    `ALTER TABLE public_channels ADD COLUMN content_key_envelope TEXT NOT NULL DEFAULT ''`, // sealed channels CEK envelope
     `ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`,
     `ALTER TABLE prekeys_onetime ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`, // M-2
 
@@ -2281,6 +2287,8 @@ export interface PublicChannelRow {
   signed_manifest_blob: string;
   delivery_token_hash_b64: string;
   channel_type: string;
+  /** Wrapped CEK (JSON {ivB64,wrappedB64}) a joiner unwraps with the capability; '' if none. */
+  content_key_envelope: string;
   created_at: number;
 }
 
@@ -2311,28 +2319,28 @@ export const publicChannelRepo = {
   async create(row: PublicChannelRow): Promise<void> {
     if (USE_PG) {
       await dbRun(
-        `INSERT INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, created_at) VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(channel_id) DO NOTHING`,
-        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.created_at]
+        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.content_key_envelope, row.created_at]
       );
     } else {
       await dbRun(
-        `INSERT OR IGNORE INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, created_at) VALUES (?, ?, ?, ?, ?)`,
-        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.created_at]
+        `INSERT OR IGNORE INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.content_key_envelope, row.created_at]
       );
     }
   },
 
   async get(channelId: string): Promise<PublicChannelRow | undefined> {
     return dbGet<PublicChannelRow>(
-      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, created_at FROM public_channels WHERE channel_id = ?`,
+      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at FROM public_channels WHERE channel_id = ?`,
       [channelId]
     );
   },
 
   async list(): Promise<PublicChannelRow[]> {
     return dbAll<PublicChannelRow>(
-      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, created_at FROM public_channels ORDER BY created_at DESC`
+      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at FROM public_channels ORDER BY created_at DESC`
     );
   },
 

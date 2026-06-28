@@ -32,6 +32,12 @@ const RegisterChannelBody = z.object({
   deliveryTokenHashB64: z.string().min(1).max(128),
   /** Channel type string. */
   channelType: z.enum(['open', 'readonly', 'moderated', 'approval']),
+  /**
+   * Wrapped CEK envelope (JSON {ivB64,wrappedB64}) the relay stores opaquely and
+   * returns on join so a capability-holder can unwrap the CEK (docs §4.2/§10.1).
+   * Optional only for forward-compat; a real channel always has one.
+   */
+  contentKeyEnvelope: z.string().max(4096).optional(),
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -129,7 +135,7 @@ export function createPublicChannelsRouter(): Router {
       return;
     }
 
-    const { signedManifestBlob, deliveryTokenHashB64, channelType } = parsed.data;
+    const { signedManifestBlob, deliveryTokenHashB64, channelType, contentKeyEnvelope } = parsed.data;
 
     // Parse + verify manifest signature server-side (golden rule #3)
     const result = parseManifestBlob(signedManifestBlob);
@@ -150,6 +156,7 @@ export function createPublicChannelsRouter(): Router {
         signed_manifest_blob: signedManifestBlob,
         delivery_token_hash_b64: deliveryTokenHashB64,
         channel_type: channelType,
+        content_key_envelope: contentKeyEnvelope ?? '',
         created_at: Date.now(),
       });
       res.status(201).json({ channelId: manifest.channelId });

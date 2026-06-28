@@ -2042,7 +2042,7 @@ const PubChannelTombstoneSchema = z.object({
 
 function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
   // ── pubchannel:join ─────────────────────────────────────────────────────
-  socket.on('pubchannel:join', (raw: unknown, ack?: (res: { ok: boolean; manifest?: string; error?: string }) => void) => {
+  socket.on('pubchannel:join', (raw: unknown, ack?: (res: { ok: boolean; manifest?: string; contentKeyEnvelope?: string; error?: string }) => void) => {
     if (!PUBCHANNEL_FLAG()) { ack?.({ ok: false, error: 'feature_disabled' }); return; }
     const parsed = PubChannelJoinSchema.safeParse(raw);
     if (!parsed.success) { ack?.({ ok: false, error: 'invalid_payload' }); return; }
@@ -2063,7 +2063,9 @@ function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
       }
 
       void socket.join(`pubchannel:${channelId}`);
-      ack?.({ ok: true, manifest: channel.signed_manifest_blob });
+      // Return the wrapped CEK so a capability-holder can unwrap it (docs §10.1).
+      // The relay forwards it opaquely — it never holds the capability/CEK.
+      ack?.({ ok: true, manifest: channel.signed_manifest_blob, contentKeyEnvelope: channel.content_key_envelope });
     })();
   });
 

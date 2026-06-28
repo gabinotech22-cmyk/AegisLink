@@ -32,6 +32,7 @@ import {
   signManifest,
   deriveChannelDeliveryToken,
   hashChannelDeliveryToken,
+  wrapCEK,
   type ChannelManifestData,
 } from '../crypto/publicChannelKey.js';
 import { createPublicChannelsRouter } from '../routes/publicChannels.js';
@@ -116,6 +117,7 @@ describe('public-channels REST (flag ON)', () => {
     const deliveryToken = deriveChannelDeliveryToken(capability, identity.channelId);
     const tokenHash = hashChannelDeliveryToken(deliveryToken);
 
+    const contentKeyEnvelope = JSON.stringify(wrapCEK(cek, capability, identity.channelId));
     const res = await fetch(`${serverUrl}/public-channels`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -123,17 +125,20 @@ describe('public-channels REST (flag ON)', () => {
         signedManifestBlob: blob,
         deliveryTokenHashB64: tokenHash,
         channelType: 'open',
+        contentKeyEnvelope,
       }),
     });
     expect(res.status).toBe(201);
     const body = await res.json() as { channelId: string };
     expect(body.channelId).toBe(identity.channelId);
 
-    // Verify it appears in the list
+    // Verify it appears in the list, with the stored CEK envelope round-tripped.
     const listRes = await fetch(`${serverUrl}/public-channels`);
-    const listBody = await listRes.json() as { channels: Array<{ channel_id: string }> };
+    const listBody = await listRes.json() as { channels: Array<{ channel_id: string; content_key_envelope: string }> };
     expect(listBody.channels.length).toBeGreaterThanOrEqual(1);
-    expect(listBody.channels.some((c: { channel_id: string }) => c.channel_id === identity.channelId)).toBe(true);
+    const row = listBody.channels.find((c) => c.channel_id === identity.channelId);
+    expect(row).toBeDefined();
+    expect(row!.content_key_envelope).toBe(contentKeyEnvelope);
 
     // Verify single manifest endpoint (URL-encode because channelId is base64, may contain / or +)
     const singleRes = await fetch(`${serverUrl}/public-channels/${encodeURIComponent(identity.channelId)}/manifest`);

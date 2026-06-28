@@ -39,6 +39,8 @@ import {
   hashChannelDeliveryToken,
   signTombstone,
   signDelete,
+  wrapCEK,
+  unwrapCEK,
   type ChannelManifestData,
 } from '../crypto/publicChannelKey.js';
 
@@ -192,14 +194,16 @@ async function seedChannel(identity: ReturnType<typeof generateChannelIdentity>,
   const blob = manifestToBlob(manifest, sig);
   const deliveryToken = deriveChannelDeliveryToken(capability, identity.channelId);
   const tokenHash = hashChannelDeliveryToken(deliveryToken);
+  const contentKeyEnvelope = JSON.stringify(wrapCEK(cek, capability, identity.channelId));
   await publicChannelRepo.create({
     channel_id: identity.channelId,
     signed_manifest_blob: blob,
     delivery_token_hash_b64: tokenHash,
     channel_type: 'open',
+    content_key_envelope: contentKeyEnvelope,
     created_at: Date.now(),
   });
-  return { blob, deliveryToken, tokenHash };
+  return { blob, deliveryToken, tokenHash, contentKeyEnvelope };
 }
 
 describe('pubchannel:join — delivery token gate', () => {
@@ -213,11 +217,19 @@ describe('pubchannel:join — delivery token gate', () => {
     const { blob, deliveryToken } = await seedChannel(identity, cek, capability);
 
     const sock = await connectAgent(alice);
-    const ack = await new Promise<{ ok: boolean; manifest?: string; error?: string }>((resolve) => {
-      sock.emit('pubchannel:join', { channelId: identity.channelId, deliveryToken }, (res: { ok: boolean; manifest?: string; error?: string }) => resolve(res));
+    const ack = await new Promise<{ ok: boolean; manifest?: string; contentKeyEnvelope?: string; error?: string }>((resolve) => {
+      sock.emit('pubchannel:join', { channelId: identity.channelId, deliveryToken }, (res: { ok: boolean; manifest?: string; contentKeyEnvelope?: string; error?: string }) => resolve(res));
     });
     expect(ack.ok).toBe(true);
     expect(ack.manifest).toBe(blob);
+
+    // The join ack carries the wrapped CEK; a capability-holder unwraps it back
+    // to the exact CEK (docs §10.1). The relay forwards it opaquely.
+    expect(typeof ack.contentKeyEnvelope).toBe('string');
+    const env = JSON.parse(ack.contentKeyEnvelope!) as { ivB64: string; wrappedB64: string };
+    const unwrapped = unwrapCEK(env.ivB64, env.wrappedB64, capability, identity.channelId);
+    expect(unwrapped).not.toBeNull();
+    expect(Buffer.from(unwrapped!).toString('hex')).toBe(Buffer.from(cek).toString('hex'));
 
     sock.disconnect();
   });
