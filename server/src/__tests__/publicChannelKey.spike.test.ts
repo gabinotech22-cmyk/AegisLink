@@ -282,6 +282,14 @@ describe('post seal/open', () => {
     expect(opened).toBeNull();
   });
 
+  test('malformed nonce fails closed (null), never throws', () => {
+    const post = makePost(0, ZERO_HASH);
+    const sealed = sealChannelPost(channel.channelId, post, subscriber.sign.secretKey, cek);
+    const badNonce = encodeBase64(new Uint8Array(5)); // wrong length → secretbox throws
+    expect(() => openChannelPost(channel.channelId, sealed.ciphertextB64, badNonce, cek, resolveKey)).not.toThrow();
+    expect(openChannelPost(channel.channelId, sealed.ciphertextB64, badNonce, cek, resolveKey)).toBeNull();
+  });
+
   test('forged sender fails signature verification', () => {
     const post: ChannelPostInner = {
       from: subscriber.aegisId, // claims to be subscriber

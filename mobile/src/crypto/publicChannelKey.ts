@@ -438,6 +438,10 @@ export function openChannelPost(
     nonce = decodeBase64(nonceB64);
   } catch { return null; }
 
+  // Fail closed on malformed wire: nacl.secretbox.open THROWS on a wrong-length
+  // nonce/key (checkLengths), which a malicious relay could exploit to crash the
+  // live-message handler. Guard so a bad blob is dropped (null), not thrown.
+  if (nonce.length !== nacl.secretbox.nonceLength) return null;
   const plaintext = nacl.secretbox.open(ciphertext, nonce, cek);
   if (!plaintext) return null;
 

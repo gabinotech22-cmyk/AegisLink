@@ -190,6 +190,17 @@ describe('publicChannelKey — server parity (known-answer vectors)', () => {
     const opened = openChannelPost(V.channelId, V.sealed.ciphertextB64, V.sealed.nonceB64, cek, () => null);
     expect(opened).toBeNull();
   });
+
+  // Regression: a wrong-length nonce makes nacl.secretbox.open throw; the guard
+  // must fail closed (null), not propagate the throw to the live handler.
+  test('fails closed (no throw) on a malformed nonce from a hostile relay', () => {
+    expect(() =>
+      openChannelPost(V.channelId, V.sealed.ciphertextB64, encodeBase64(new Uint8Array(5)), cek, () => senderKp.publicKey),
+    ).not.toThrow();
+    expect(
+      openChannelPost(V.channelId, V.sealed.ciphertextB64, encodeBase64(new Uint8Array(5)), cek, () => senderKp.publicKey),
+    ).toBeNull();
+  });
 });
 
 describe('publicChannelKey — internal round-trips', () => {
