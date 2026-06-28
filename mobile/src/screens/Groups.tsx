@@ -29,6 +29,8 @@ interface Props {
   onTab: (tab: Tab) => void;
   onOpenGroupChat: (group: StoredGroup) => void;
   onJoinByLink?: (groupId: string, groupName: string, adminId: string) => void;
+  /** Open the sealed public Channels surface (separate from private groups). */
+  onOpenChannels?: () => void;
 }
 
 const GROUP_COLORS = [
@@ -54,7 +56,7 @@ const GROUP_EMOJIS = [
   { label: 'Cubo', val: '🧊' },
 ];
 
-export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
+export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChannels }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -461,6 +463,11 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink }: Props) {
         t={t}
         title={i18nT('groups.title')}
         big
+        left={onOpenChannels ? (
+          <Pressable onPress={onOpenChannels} hitSlop={8} style={{ padding: 4 }}>
+            <I.Globe size={22} color={t.accent} />
+          </Pressable>
+        ) : undefined}
         right={
           <Pressable onPress={() => setIsCreating(true)} hitSlop={8} style={{ padding: 4 }}>
             <I.Plus size={22} color={t.accent} />
