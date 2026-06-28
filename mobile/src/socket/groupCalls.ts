@@ -124,7 +124,7 @@ function sealSignal(recipientAegisId: string, payload: string): SealedSignalWire
   return { ciphertext: encodeBase64(ciphertext), nonce: encodeBase64(nonce) };
 }
 
-function openSignal(senderAegisId: string, wire: SealedSignalWire): string | null {
+function openSignalFrom(senderAegisId: string, wire: SealedSignalWire): string | null {
   const senderPub = peerPublicKey(senderAegisId);
   const me = ownKeys();
   if (!senderPub || !me) return null;
@@ -139,6 +139,9 @@ function openSignal(senderAegisId: string, wire: SealedSignalWire): string | nul
   }
   if (nonce.length !== nacl.box.nonceLength) return null;
 
+  // The static box is authenticated: a successful open against `senderPub`
+  // proves the body was sealed by the holder of that peer's X25519 secret. The
+  // inner `from` is then bound to that key — a contact cannot claim another's id.
   const opened = nacl.box.open(ciphertext, nonce, senderPub, me.secretKey);
   if (!opened) return null;
 
@@ -152,6 +155,77 @@ function openSignal(senderAegisId: string, wire: SealedSignalWire): string | nul
   if (inner.from !== senderAegisId) return null;
   if (typeof inner.payload !== 'string') return null;
   return inner.payload;
+}
+
+/**
+ * Sealed-sender recovery (Fase B): the relay no longer stamps `from`, so we learn
+ * the sender by trial-decrypting against each candidate in the call/group roster
+ * — exactly the envelope pattern the messaging layer uses. The first candidate
+ * whose key opens the box (and whose id the inner `from` confirms) IS the
+ * authenticated sender. Returns null (fail-closed) if none opens — we never act
+ * on an unauthenticated signal.
+ */
+function openSignalTrial(
+  wire: SealedSignalWire,
+  candidateAegisIds: string[],
+): { from: string; payload: string } | null {
+  for (const candidate of candidateAegisIds) {
+    const payload = openSignalFrom(candidate, wire);
+    if (payload !== null) return { from: candidate, payload };
+  }
+  return null;
+}
+
+/**
+ * Candidate senders for a signal received while we are IN `callId`: the current
+ * mesh participants, the channel host, and the wider group roster (covers a fresh
+ * offerer not yet in our participant list). Self excluded.
+ */
+function callRosterCandidates(callId: string): string[] {
+  const st = useGroupCall.getState();
+  const set = new Set<string>();
+  if (st.callId === callId) {
+    for (const p of st.participants) set.add(p.aegisId);
+    if (st.initiator) set.add(st.initiator);
+    if (st.groupId) for (const m of localGroupInfo(st.groupId)?.members ?? []) set.add(m);
+  }
+  const me = ownKeys()?.aegisId;
+  if (me) set.delete(me);
+  return [...set];
+}
+
+/** Candidate senders for a channel heartbeat: the members of `groupId` (cleartext on the wire), self excluded. */
+function groupMemberCandidates(groupId: string): string[] {
+  const me = ownKeys()?.aegisId;
+  return (localGroupInfo(groupId)?.members ?? []).filter((m) => m !== me);
+}
+
+/** A per-recipient sealed item on the wire (the relay fans these out by `to`). */
+interface SealedItem {
+  to: string;
+  ciphertext: string;
+  nonce: string;
+}
+
+/**
+ * Seal `payload` once PER recipient (each against that recipient's key) for a
+ * fan-out signal (hangup, channel heartbeat). Recipients we cannot seal for
+ * (no known public key) are dropped — fail-closed: we never emit an unsealed
+ * fallback that would leak `from` to the relay.
+ */
+function sealItems(recipients: string[], payload: string): SealedItem[] {
+  const items: SealedItem[] = [];
+  for (const to of recipients) {
+    const sealed = sealSignal(to, payload);
+    if (sealed) items.push({ to, ...sealed });
+  }
+  return items;
+}
+
+/** Sealed inner body of a channel heartbeat — roster + group name travel encrypted. */
+interface ChannelInner {
+  groupName: string;
+  participants: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -374,13 +448,16 @@ function emitChannelHeartbeat(): void {
   if (!socket || !channelMeta || !me) return;
   const recipients = channelMeta.members.filter((m) => m !== me);
   if (recipients.length === 0) return;
+  // Seal the roster + group name PER recipient — the relay sees neither who is in
+  // the call nor who is heartbeating. groupId/media stay cleartext (routing only).
+  const inner = JSON.stringify({ groupName: channelMeta.groupName, participants: currentParticipants() } satisfies ChannelInner);
+  const items = sealItems(recipients, inner);
+  if (items.length === 0) return;
   socket.emit('group_call:channel', {
-    to: recipients,
     callId: channelMeta.callId,
     groupId: channelMeta.groupId,
-    groupName: channelMeta.groupName,
-    participants: currentParticipants(),
     media: 'audio',
+    items,
   });
 }
 
@@ -428,14 +505,11 @@ function broadcastChannelLeave(
   if (!socket || !me) return;
   const recipients = members.filter((m) => m !== me);
   if (recipients.length === 0) return;
-  socket.emit('group_call:channel', {
-    to: recipients,
-    callId,
-    groupId,
-    groupName,
-    participants: remaining, // [] ⇒ channel now empty (closed)
-    media: 'audio',
-  });
+  // [] participants ⇒ channel now empty (closed). Roster + name sealed per recipient.
+  const inner = JSON.stringify({ groupName, participants: remaining } satisfies ChannelInner);
+  const items = sealItems(recipients, inner);
+  if (items.length === 0) return;
+  socket.emit('group_call:channel', { callId, groupId, media: 'audio', items });
 }
 
 // ---------------------------------------------------------------------------
@@ -558,8 +632,11 @@ export async function joinGroupCall(groupId: string): Promise<void> {
   startCallService(useGroupCall.getState().groupName || 'AegisLink', 'Llamada de voz en curso');
 
   // Tell each current participant we joined — their accept handler offers to us.
+  // Sealed-sender: our identity rides inside the box; the relay never sees `from`.
   for (const p of others) {
-    socket.emit('group_call:accept', { to: p, callId: active.callId });
+    const sealed = sealSignal(p, '');
+    if (!sealed) { if (__DEV__) logger.warn('[groupCalls] cannot seal accept for', p); continue; }
+    socket.emit('group_call:accept', { callId: active.callId, to: p, ...sealed });
   }
 
   // Start our own heartbeat so the rest of the group sees us in the roster, and
@@ -598,7 +675,12 @@ export async function acceptGroupCall(
   startInCallAudio();
   startCallService(useGroupCall.getState().groupName || 'AegisLink', 'Llamada de voz en curso');
 
-  socket.emit('group_call:accept', { to: initiatorAegisId, callId });
+  const sealed = sealSignal(initiatorAegisId, '');
+  if (!sealed) {
+    if (__DEV__) logger.warn('[groupCalls] cannot seal accept for', initiatorAegisId);
+    return;
+  }
+  socket.emit('group_call:accept', { callId, to: initiatorAegisId, ...sealed });
 }
 
 /**
@@ -607,7 +689,9 @@ export async function acceptGroupCall(
 export function declineGroupCall(callId: string, initiatorAegisId: string): void {
   const socket = getSocket();
   if (socket) {
-    socket.emit('group_call:decline', { to: initiatorAegisId, callId });
+    const sealed = sealSignal(initiatorAegisId, '');
+    if (sealed) socket.emit('group_call:decline', { callId, to: initiatorAegisId, ...sealed });
+    else if (__DEV__) logger.warn('[groupCalls] cannot seal decline for', initiatorAegisId);
   }
   useGroupCall.getState().reset();
 }
@@ -662,7 +746,9 @@ export function hangupGroupCall(): void {
   const socket = getSocket();
   const others = participants.map((p) => p.aegisId);
   if (socket && others.length > 0) {
-    socket.emit('group_call:hangup', { to: others, callId });
+    // Per-recipient sealed fan-out — our identity rides inside each box, no `from`.
+    const items = sealItems(others, '');
+    if (items.length > 0) socket.emit('group_call:hangup', { callId, items });
   }
   // Announce our departure so banner-watchers update/clear instead of waiting out
   // the 45s stale timeout. Host → empty roster ends the channel for everyone;
@@ -727,18 +813,24 @@ export function attachGroupCallHandlers(): void {
   // ── Initiator receives accept from a member ─────────────────────────────
   socket.on(
     'group_call:accept',
-    (msg: { from: string; callId: string }) => {
+    (msg: { callId: string; ciphertext: string; nonce: string }) => {
       const state = useGroupCall.getState();
       if (state.callId !== msg.callId) return;
       if (state.status !== 'ringing-out' && state.status !== 'in-call' && state.status !== 'connecting') return;
 
-      state.addParticipant(msg.from);
+      // Sealed-sender: recover + authenticate the accepter from the box (no relay
+      // `from`). An accepter who is not a known group member can't be opened → drop.
+      const opened = openSignalTrial(msg, callRosterCandidates(msg.callId));
+      if (!opened) { if (__DEV__) logger.warn('[groupCalls] could not authenticate accept'); return; }
+      const from = opened.from;
+
+      state.addParticipant(from);
       if (state.status === 'ringing-out') {
         useGroupCall.getState().setStatus('connecting');
       }
 
-      void createGroupPeerAsOfferer(msg.callId, msg.from).catch((e) => {
-        if (__DEV__) logger.warn('[groupCalls] createGroupPeerAsOfferer failed for', msg.from, e);
+      void createGroupPeerAsOfferer(msg.callId, from).catch((e) => {
+        if (__DEV__) logger.warn('[groupCalls] createGroupPeerAsOfferer failed for', from, e);
       });
     },
   );
@@ -746,14 +838,16 @@ export function attachGroupCallHandlers(): void {
   // ── Member receives decline ─────────────────────────────────────────────
   socket.on(
     'group_call:decline',
-    (msg: { from: string; callId: string }) => {
+    (msg: { callId: string; ciphertext: string; nonce: string }) => {
       const state = useGroupCall.getState();
       if (state.callId !== msg.callId) return;
-      if (__DEV__) logger.debug('[groupCalls]', msg.from, 'declined');
+      const opened = openSignalTrial(msg, callRosterCandidates(msg.callId));
+      if (!opened) return;
+      if (__DEV__) logger.debug('[groupCalls]', opened.from, 'declined');
       const peers = groupPeerMap.get(msg.callId);
       if (peers) {
-        const peer = peers.get(msg.from);
-        if (peer) { cleanupPeer(peer); peers.delete(msg.from); }
+        const peer = peers.get(opened.from);
+        if (peer) { cleanupPeer(peer); peers.delete(opened.from); }
       }
     },
   );
@@ -761,17 +855,21 @@ export function attachGroupCallHandlers(): void {
   // ── Receive sealed SDP offer (non-initiator gets this) ────────────────────
   socket.on(
     'group_call:offer',
-    (msg: { from: string; callId: string; ciphertext: string; nonce: string }) => {
+    (msg: { callId: string; ciphertext: string; nonce: string }) => {
       const state = useGroupCall.getState();
       if (state.callId !== msg.callId) return;
 
-      const offerSdp = openSignal(msg.from, msg);
-      if (!offerSdp) {
-        if (__DEV__) logger.warn('[groupCalls] failed to open offer from', msg.from);
+      // Sealed-sender: recover + authenticate the offerer from the box (no relay
+      // `from`); the same trial-decrypt yields the SDP offer payload.
+      const opened = openSignalTrial(msg, callRosterCandidates(msg.callId));
+      if (!opened) {
+        if (__DEV__) logger.warn('[groupCalls] failed to open/authenticate offer');
         return;
       }
+      const from = opened.from;
+      const offerSdp = opened.payload;
 
-      state.addParticipant(msg.from);
+      state.addParticipant(from);
 
       const socket2 = getSocket();
       const me = ownKeys();
@@ -787,20 +885,20 @@ export function attachGroupCallHandlers(): void {
           'audio',
           {
             onLocalStream: () => { /* managed by acquireGroupStream */ },
-            onRemoteStream: (stream) => useGroupCall.getState().setParticipantStream(msg.from, stream),
+            onRemoteStream: (stream) => useGroupCall.getState().setParticipantStream(from, stream),
             onIceCandidate: (candidate) => {
               const payload = JSON.stringify(candidate.toJSON?.() ?? candidate);
-              const sealed = sealSignal(msg.from, payload);
+              const sealed = sealSignal(from, payload);
               if (!sealed) return;
-              socket2.emit('group_call:ice', { callId: msg.callId, to: msg.from, ...sealed });
+              socket2.emit('group_call:ice', { callId: msg.callId, to: from, ...sealed });
             },
             onConnectionStateChange: (connState) => {
               if (connState === 'connected') {
-                useGroupCall.getState().setParticipantConnected(msg.from, true);
+                useGroupCall.getState().setParticipantConnected(from, true);
                 useGroupCall.getState().setStatus('in-call');
               }
               if (connState === 'failed' || connState === 'closed') {
-                useGroupCall.getState().setParticipantConnected(msg.from, false);
+                useGroupCall.getState().setParticipantConnected(from, false);
               }
             },
           },
@@ -809,26 +907,26 @@ export function attachGroupCallHandlers(): void {
         );
 
         const groupPeer: GroupActivePeer = { ...peer, remoteDescSet: false, pendingIce: [] };
-        getPeersForCall(msg.callId).set(msg.from, groupPeer);
-        drainPrePeerIce(msg.callId, msg.from, groupPeer);
+        getPeersForCall(msg.callId).set(from, groupPeer);
+        drainPrePeerIce(msg.callId, from, groupPeer);
 
         try {
           await setRemoteOffer(peer.pc, offerSdp);
           await markRemoteDescSet(groupPeer);
           const answer = await createAnswer(peer.pc);
-          const sealed = sealSignal(msg.from, answer);
+          const sealed = sealSignal(from, answer);
           if (!sealed) {
-            if (__DEV__) logger.warn('[groupCalls] cannot seal answer for', msg.from);
+            if (__DEV__) logger.warn('[groupCalls] cannot seal answer for', from);
             cleanupPeer(groupPeer);
-            getPeersForCall(msg.callId).delete(msg.from);
+            getPeersForCall(msg.callId).delete(from);
             maybeFinalizeFailedCall(msg.callId);
             return;
           }
-          socket2.emit('group_call:answer', { callId: msg.callId, to: msg.from, ...sealed });
+          socket2.emit('group_call:answer', { callId: msg.callId, to: from, ...sealed });
         } catch (e) {
-          if (__DEV__) logger.warn('[groupCalls] offer handling failed for', msg.from, e);
+          if (__DEV__) logger.warn('[groupCalls] offer handling failed for', from, e);
           cleanupPeer(groupPeer);
-          getPeersForCall(msg.callId).delete(msg.from);
+          getPeersForCall(msg.callId).delete(from);
           maybeFinalizeFailedCall(msg.callId);
         }
       })();
@@ -838,17 +936,19 @@ export function attachGroupCallHandlers(): void {
   // ── Receive sealed SDP answer ─────────────────────────────────────────────
   socket.on(
     'group_call:answer',
-    (msg: { from: string; callId: string; ciphertext: string; nonce: string }) => {
+    (msg: { callId: string; ciphertext: string; nonce: string }) => {
       const state = useGroupCall.getState();
       if (state.callId !== msg.callId) return;
 
-      const answerSdp = openSignal(msg.from, msg);
-      if (!answerSdp) {
-        if (__DEV__) logger.warn('[groupCalls] failed to open answer from', msg.from);
+      const opened = openSignalTrial(msg, callRosterCandidates(msg.callId));
+      if (!opened) {
+        if (__DEV__) logger.warn('[groupCalls] failed to open/authenticate answer');
         return;
       }
+      const from = opened.from;
+      const answerSdp = opened.payload;
 
-      const groupPeer = getPeersForCall(msg.callId).get(msg.from);
+      const groupPeer = getPeersForCall(msg.callId).get(from);
       if (!groupPeer) return;
 
       void (async () => {
@@ -856,7 +956,7 @@ export function attachGroupCallHandlers(): void {
           await setRemoteAnswer(groupPeer.pc, answerSdp);
           await markRemoteDescSet(groupPeer);
         } catch (e) {
-          if (__DEV__) logger.warn('[groupCalls] setRemoteAnswer failed for', msg.from, e);
+          if (__DEV__) logger.warn('[groupCalls] setRemoteAnswer failed for', from, e);
         }
       })();
     },
@@ -865,22 +965,24 @@ export function attachGroupCallHandlers(): void {
   // ── Receive sealed ICE candidate ──────────────────────────────────────────
   socket.on(
     'group_call:ice',
-    (msg: { from: string; callId: string; ciphertext: string; nonce: string }) => {
+    (msg: { callId: string; ciphertext: string; nonce: string }) => {
       const state = useGroupCall.getState();
       if (state.callId !== msg.callId) return;
 
-      const candidateJson = openSignal(msg.from, msg);
-      if (!candidateJson) {
-        if (__DEV__) logger.warn('[groupCalls] failed to open ICE from', msg.from);
+      const opened = openSignalTrial(msg, callRosterCandidates(msg.callId));
+      if (!opened) {
+        if (__DEV__) logger.warn('[groupCalls] failed to open/authenticate ICE');
         return;
       }
+      const from = opened.from;
+      const candidateJson = opened.payload;
 
-      const groupPeer = getPeersForCall(msg.callId).get(msg.from);
+      const groupPeer = getPeersForCall(msg.callId).get(from);
       if (!groupPeer) {
         // Peer for this remote not created yet (still acquiring mic / TURN).
         // Buffer the candidate instead of dropping it; drainPrePeerIce flushes
         // it as soon as the peer is created.
-        const key = prePeerKey(msg.callId, msg.from);
+        const key = prePeerKey(msg.callId, from);
         const arr = _groupPrePeerIce.get(key) ?? [];
         arr.push(candidateJson);
         _groupPrePeerIce.set(key, arr);
@@ -895,23 +997,23 @@ export function attachGroupCallHandlers(): void {
   socket.on(
     'group_call:channel',
     (msg: {
-      from: string;
       callId: string;
       groupId: string;
-      groupName: string;
-      participants?: string[];
       media: 'audio' | 'video';
+      ciphertext: string;
+      nonce: string;
     }) => {
       // If this heartbeat is for the call I'm already in, it's not a banner.
       if (useGroupCall.getState().callId === msg.callId) return;
 
       // ── Membership gate (receiver-side) ────────────────────────────────────
-      // Drop heartbeats from unknown groups or from senders not in our trusted
-      // member list. This is a UX gate, not a cryptographic boundary — the relay
-      // already authenticates every sender via Ed25519 challenge-response. We
-      // intentionally do NOT enforce admin-only here: the Discord-style channel
-      // model lets any member open a voice channel (the banner is passive, it does
-      // not ring anyone).
+      // groupId rides cleartext (routing); the roster + sender identity are
+      // sealed. We resolve the trusted member list from the cleartext groupId and
+      // trial-decrypt against it. A heartbeat we cannot open against any member is
+      // dropped (fail-closed) — an unknown/non-member sender never reaches us. We
+      // intentionally do NOT enforce admin-only: the Discord-style channel model
+      // lets any member open a voice channel (the banner is passive, it does not
+      // ring anyone).
       let localGroup: import('../db/local').StoredGroup | undefined;
       try {
         const { useGroups } = require('../store/groups') as typeof import('../store/groups');
@@ -919,11 +1021,27 @@ export function attachGroupCallHandlers(): void {
       } catch { return; }
       if (!localGroup) return; // Unknown group — ignore
 
+      // Sealed-sender: recover + authenticate the heartbeat sender, and the sealed
+      // roster + group name, from the box (no relay `from`).
+      const opened = openSignalTrial(msg, groupMemberCandidates(msg.groupId));
+      if (!opened) {
+        if (__DEV__) logger.warn('[groupCalls] channel dropped — could not authenticate sender');
+        return;
+      }
+      const from = opened.from;
+      let inner: ChannelInner;
+      try {
+        inner = JSON.parse(opened.payload) as ChannelInner;
+      } catch { return; }
+      if (typeof inner.groupName !== 'string' || !Array.isArray(inner.participants)) return;
+      const groupName = inner.groupName;
+      const participants = inner.participants;
+
       // Explicit leave/close: a hanging-up participant broadcasts the REMAINING
       // roster (themselves removed). An explicitly-empty array means the LAST
       // participant left → drop the banner now instead of waiting out STALE_MS.
       // Normal heartbeats always include the sender, so [] is unambiguous.
-      if (Array.isArray(msg.participants) && msg.participants.length === 0) {
+      if (participants.length === 0) {
         const entry = useActiveCalls.getState().calls[msg.groupId];
         if (entry && entry.callId === msg.callId) useActiveCalls.getState().remove(msg.groupId);
         return;
@@ -932,7 +1050,7 @@ export function attachGroupCallHandlers(): void {
       // A heartbeat can come from any participant; gate on the channel's
       // initiator. First sighting records the initiator; later heartbeats keep it.
       const existing = useActiveCalls.getState().calls[msg.groupId];
-      const initiator = existing?.callId === msg.callId ? existing.initiator : msg.from;
+      const initiator = existing?.callId === msg.callId ? existing.initiator : from;
       if (!localGroup.members.includes(initiator)) {
         if (__DEV__) logger.warn('[groupCalls] channel dropped — initiator not in group', initiator);
         return;
@@ -944,7 +1062,7 @@ export function attachGroupCallHandlers(): void {
         callId: msg.callId,
         groupId: msg.groupId,
         initiator,
-        participants: msg.participants && msg.participants.length > 0 ? msg.participants : [msg.from],
+        participants: participants.length > 0 ? participants : [from],
         lastHeartbeat: Date.now(),
       });
 
@@ -959,7 +1077,7 @@ export function attachGroupCallHandlers(): void {
         try {
           const { showGroupCallChannelNotification } =
             require('../notifications/push') as typeof import('../notifications/push');
-          void showGroupCallChannelNotification(msg.groupId, msg.groupName, msg.callId);
+          void showGroupCallChannelNotification(msg.groupId, groupName, msg.callId);
         } catch { /* push module not ready — banner still shows in-app */ }
       }
     },
@@ -968,14 +1086,19 @@ export function attachGroupCallHandlers(): void {
   // ── Remote peer hangs up ──────────────────────────────────────────────────
   socket.on(
     'group_call:hangup',
-    (msg: { from: string; callId: string }) => {
+    (msg: { callId: string; ciphertext: string; nonce: string }) => {
       const state = useGroupCall.getState();
       if (state.callId !== msg.callId) return;
 
+      // Recover + authenticate the leaver from the sealed body (no relay `from`).
+      const opened = openSignalTrial(msg, callRosterCandidates(msg.callId));
+      if (!opened) return;
+      const from = opened.from;
+
       const peers = groupPeerMap.get(msg.callId);
       if (peers) {
-        const peer = peers.get(msg.from);
-        if (peer) { cleanupPeer(peer); peers.delete(msg.from); }
+        const peer = peers.get(from);
+        if (peer) { cleanupPeer(peer); peers.delete(from); }
       }
 
       // Host-ends-for-all: if the channel's initiator hangs up, the whole call
@@ -983,7 +1106,7 @@ export function attachGroupCallHandlers(): void {
       // lifecycle. state.initiator is the host: our own id when we started it, or
       // the banner's initiator when we joined. This also covers the initiator
       // cancelling a still-ringing call.
-      if (state.initiator && state.initiator === msg.from) {
+      if (state.initiator && state.initiator === from) {
         endGroupCallLocally();
         return;
       }
@@ -991,7 +1114,7 @@ export function attachGroupCallHandlers(): void {
       // A non-host left: remove (not just mark-disconnected) just them so our
       // heartbeat and leave-broadcast stop re-listing them — that stale roster was
       // the cause of the wrong "N en llamada" count after someone left.
-      useGroupCall.getState().removeParticipant(msg.from);
+      useGroupCall.getState().removeParticipant(from);
     },
   );
 }

@@ -1,18 +1,35 @@
 /**
- * groupCalls.ts — signaling layer unit tests
+ * groupCalls.ts — sealed-sender signaling tests (Fase B)
  *
- * Covers:
- * 1. declineGroupCall emits group_call:decline with { callId, to: initiatorAegisId }
- * 2. hangupGroupCall emits group_call:hangup and calls useGroupCall.getState().reset()
- * 3. startGroupCall with no socket (returns early, does not throw)
- * 4. attachGroupCallHandlers registers a group_call:invite listener
- * 5. attachGroupCallHandlers registers a group_call:accept listener
- * 6. group_call:invite handler calls useGroupCall.getState().startIncoming(...) with correct args
+ * Group-call signaling is now sealed-sender: the relay never stamps `from`, so
+ * every control/SDP/ICE body carries the sender's identity SEALED inside a NaCl
+ * box, and the receiver recovers it by trial-decrypting against the call/group
+ * roster. These tests use REAL crypto (tweetnacl is NOT mocked) with real
+ * keypairs for self + simulated peers, so they exercise the actual seal → open
+ * round-trip, prove no `from` leaks onto the wire, and prove a spoofed inner
+ * identity is rejected.
  *
- * Socket is mocked at the module boundary via getSocket() / isConnected() in
- * ../client. The real useGroupCall Zustand store is used so state transitions
- * can be verified without extra mocking ceremony.
+ * Socket is mocked at the module boundary; the real useGroupCall / useActiveCalls
+ * Zustand stores are used so state transitions are verified without extra mocking.
  */
+
+import nacl from 'tweetnacl';
+import { encodeBase64 } from 'tweetnacl-util';
+
+// ── Real keypairs (generated once) ─────────────────────────────────────────
+// Declared with the `mock` prefix so the hoisted jest.mock() factories below may
+// reference them. Populated in the top-level setup before any module loads them.
+const mockSelfKp = nacl.box.keyPair();
+const mockPeerAKp = nacl.box.keyPair();
+const mockPeerBKp = nacl.box.keyPair();
+const mockHostKp = nacl.box.keyPair();
+const mockInitKp = nacl.box.keyPair();
+
+const SELF = 'self-aegis-id';
+const PEER_A = 'peer-A';
+const PEER_B = 'peer-B';
+const HOST = 'host-aegis';
+const INIT = 'initiator-aegis-001';
 
 // ── react-native-webrtc ────────────────────────────────────────────────────
 jest.mock('react-native-webrtc', () => ({
@@ -28,50 +45,15 @@ jest.mock('react-native-webrtc', () => ({
   },
 }));
 
-// ── expo-crypto ────────────────────────────────────────────────────────────
-jest.mock('expo-crypto', () => ({
-  randomUUID: jest.fn().mockReturnValue('test-call-uuid'),
-}));
+jest.mock('expo-crypto', () => ({ randomUUID: jest.fn().mockReturnValue('test-call-uuid') }));
+jest.mock('expo-av', () => ({ Audio: { setAudioModeAsync: jest.fn().mockResolvedValue(undefined) } }));
+jest.mock('../../webrtc/ice', () => ({ fetchTurnConfig: jest.fn().mockResolvedValue({}) }));
+jest.mock('../../webrtc/inCall', () => ({ startInCallAudio: jest.fn(), stopInCallAudio: jest.fn() }));
+jest.mock('../../webrtc/callForegroundService', () => ({ startCallService: jest.fn(), stopCallService: jest.fn() }));
+jest.mock('../../notifications/push', () => ({ showGroupCallChannelNotification: jest.fn() }));
 
-// ── expo-av ────────────────────────────────────────────────────────────────
-jest.mock('expo-av', () => ({
-  Audio: {
-    setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
-  },
-}));
-
-// ── tweetnacl / tweetnacl-util (sealed signaling helpers) ─────────────────
-// We do not test NaCl encryption here — just that the emit payloads are correct
-// for the non-encrypted control messages (decline, hangup, invite).
-jest.mock('tweetnacl', () => ({
-  randomBytes: jest.fn().mockReturnValue(new Uint8Array(24)),
-  box: Object.assign(
-    jest.fn().mockReturnValue(new Uint8Array(32)),
-    {
-      open: jest.fn().mockReturnValue(null),
-      publicKeyLength: 32,
-      secretKeyLength: 32,
-      nonceLength: 24,
-    },
-  ),
-}));
-
-jest.mock('tweetnacl-util', () => ({
-  encodeBase64: jest.fn().mockReturnValue('base64string=='),
-  decodeBase64: jest.fn().mockReturnValue(new Uint8Array(32)),
-}));
-
-// ── webrtc/ice ─────────────────────────────────────────────────────────────
-jest.mock('../../webrtc/ice', () => ({
-  fetchTurnConfig: jest.fn().mockResolvedValue({}),
-}));
-
-// ── webrtc/peer ────────────────────────────────────────────────────────────
 jest.mock('../../webrtc/peer', () => ({
-  createPeer: jest.fn().mockResolvedValue({
-    pc: {},
-    cleanup: jest.fn(),
-  }),
+  createPeer: jest.fn().mockResolvedValue({ pc: {}, cleanup: jest.fn() }),
   createOffer: jest.fn().mockResolvedValue('sdp-offer'),
   setRemoteOffer: jest.fn().mockResolvedValue(undefined),
   createAnswer: jest.fn().mockResolvedValue('sdp-answer'),
@@ -79,70 +61,46 @@ jest.mock('../../webrtc/peer', () => ({
   addRemoteIce: jest.fn().mockResolvedValue(undefined),
 }));
 
-// ── store/contacts (used by sealSignal / peerPublicKey) ────────────────────
+// ── store/contacts — real box public keys per peer ─────────────────────────
+const mockContacts: Record<string, { publicKeyB64: string }> = {};
 jest.mock('../../store/contacts', () => ({
-  useContacts: {
-    getState: () => ({
-      get: jest.fn().mockReturnValue(undefined),
-    }),
-  },
+  useContacts: { getState: () => ({ get: (id: string) => mockContacts[id] }) },
 }));
 
-// ── store/groups (used by the group_call:channel membership gate) ──────────
-// Mutable so a test can inject a trusted group; "mock" prefix lets Babel
-// reference it inside the jest.mock() factory below.
-let mockGroups: Array<{ id: string; members: string[] }> = [];
-jest.mock('../../store/groups', () => ({
-  useGroups: {
-    getState: () => ({
-      groups: mockGroups,
-    }),
-  },
-}));
-
-// ── store/identity (used by ownKeys) ──────────────────────────────────────
+// ── store/identity — our real box secret key + aegisId ─────────────────────
 jest.mock('../../store/identity', () => ({
   useIdentity: {
-    getState: () => ({
-      identity: {
-        aegisId: 'self-aegis-id',
-        secretKey: new Uint8Array(32),
-      },
-    }),
+    getState: () => ({ identity: { aegisId: SELF, secretKey: mockSelfKp.secretKey } }),
   },
 }));
 
-// ── socket/client ─────────────────────────────────────────────────────────
-// socket emit/on are jest.fn() so we can assert exact payloads.
+// ── store/groups — mutable trusted membership ──────────────────────────────
+let mockGroups: Array<{ id: string; name: string; members: string[] }> = [];
+jest.mock('../../store/groups', () => ({
+  useGroups: { getState: () => ({ groups: mockGroups }) },
+}));
+
+// ── socket/client ──────────────────────────────────────────────────────────
 const mockEmit = jest.fn();
 const mockOn = jest.fn();
 const mockOff = jest.fn();
 const mockSocket = { emit: mockEmit, on: mockOn, off: mockOff };
-
-// Must be named with "mock" prefix so Babel allows it inside jest.mock() factory
 let mockSocketReturnValue: typeof mockSocket | null = mockSocket;
-
 const mockIsConnected = jest.fn().mockReturnValue(true);
-
 jest.mock('../client', () => ({
   getSocket: () => mockSocketReturnValue,
   isConnected: () => mockIsConnected(),
 }));
 
-// ── react-native (Alert) ───────────────────────────────────────────────────
 jest.mock('react-native', () => ({
   Alert: { alert: jest.fn() },
   Platform: { OS: 'android', select: (o: Record<string, unknown>) => o.android ?? o.default },
   NativeModules: {},
   StyleSheet: { create: (s: Record<string, unknown>) => s },
 }));
+jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
 
-// ── AlertHost — cut the theme/StyleSheet chain (themedAlert is fire-and-forget here)
-jest.mock('../../components/AlertHost', () => ({
-  themedAlert: jest.fn(),
-}));
-
-// ── Import the store (real Zustand) and the module under test ──────────────
+// ── Module under test + stores ─────────────────────────────────────────────
 import { useGroupCall } from '../../store/groupCall';
 import { useActiveCalls } from '../../store/activeCalls';
 import {
@@ -152,278 +110,258 @@ import {
   attachGroupCallHandlers,
 } from '../groupCalls';
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+// ── Test helpers ────────────────────────────────────────────────────────────
 
-describe('groupCalls signaling', () => {
+/** Seal a signaling body AS `senderAegisId` would, addressed to self. Mirrors groupCalls' sealSignal. */
+function sealFrom(senderKp: nacl.BoxKeyPair, senderAegisId: string, payload: string): { ciphertext: string; nonce: string } {
+  const inner = { v: 1, from: senderAegisId, payload };
+  const innerBytes = new TextEncoder().encode(JSON.stringify(inner));
+  const nonce = nacl.randomBytes(nacl.box.nonceLength);
+  const ct = nacl.box(innerBytes, nonce, mockSelfKp.publicKey, senderKp.secretKey);
+  return { ciphertext: encodeBase64(ct), nonce: encodeBase64(nonce) };
+}
+
+/** Open a wire that WE emitted (sealed by self) using the recipient's secret key. Returns the inner. */
+function openAsRecipient(recipientKp: nacl.BoxKeyPair, wire: { ciphertext: string; nonce: string }): { v: number; from: string; payload: string } {
+  const { decodeBase64 } = require('tweetnacl-util');
+  const opened = nacl.box.open(decodeBase64(wire.ciphertext), decodeBase64(wire.nonce), mockSelfKp.publicKey, recipientKp.secretKey);
+  if (!opened) throw new Error('open failed');
+  return JSON.parse(new TextDecoder().decode(opened));
+}
+
+const flush = () => new Promise<void>((r) => setImmediate(r));
+
+function handlerFor(event: string): (msg: unknown) => void {
+  const call = (mockOn.mock.calls as [string, (...a: unknown[]) => void][]).find(([ev]) => ev === event);
+  expect(call).toBeDefined();
+  return call![1];
+}
+
+/** Every group_call:* payload the relay would receive must NOT carry a plaintext `from`. */
+function assertNoFromOnAnyEmit(): void {
+  for (const [, payload] of mockEmit.mock.calls as [string, Record<string, unknown>][]) {
+    expect(payload).not.toHaveProperty('from');
+    // The fan-out events must not carry a cleartext recipient/roster list either.
+    expect(payload).not.toHaveProperty('participants');
+    expect(payload).not.toHaveProperty('groupName');
+  }
+}
+
+// ─── Tests ──────────────────────────────────────────────────────────────────
+
+describe('groupCalls sealed-sender signaling', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSocketReturnValue = mockSocket;
     mockIsConnected.mockReturnValue(true);
     useGroupCall.getState().reset();
     mockGroups = [];
-    // Clear any banner state left from a prior test.
-    for (const gid of Object.keys(useActiveCalls.getState().calls)) {
-      useActiveCalls.getState().remove(gid);
+    for (const k of Object.keys(mockContacts)) delete mockContacts[k];
+    mockContacts[PEER_A] = { publicKeyB64: encodeBase64(mockPeerAKp.publicKey) };
+    mockContacts[PEER_B] = { publicKeyB64: encodeBase64(mockPeerBKp.publicKey) };
+    mockContacts[HOST] = { publicKeyB64: encodeBase64(mockHostKp.publicKey) };
+    mockContacts[INIT] = { publicKeyB64: encodeBase64(mockInitKp.publicKey) };
+    for (const gid of Object.keys(useActiveCalls.getState().calls)) useActiveCalls.getState().remove(gid);
+  });
+
+  afterEach(() => useGroupCall.getState().reset());
+
+  // ── Listener registration + early returns (no crypto) ──────────────────────
+
+  it('attachGroupCallHandlers registers all group_call:* listeners', () => {
+    attachGroupCallHandlers();
+    const events = (mockOn.mock.calls as [string, unknown][]).map(([ev]) => ev);
+    for (const ev of ['group_call:accept', 'group_call:decline', 'group_call:offer', 'group_call:answer', 'group_call:ice', 'group_call:channel', 'group_call:hangup']) {
+      expect(events).toContain(ev);
     }
   });
 
-  afterEach(() => {
-    useGroupCall.getState().reset();
-  });
-
-  // ── 1. declineGroupCall emits correct payload ──────────────────────────────
-
-  it('declineGroupCall emits group_call:decline with callId and to: initiatorAegisId', () => {
-    declineGroupCall('call-abc', 'initiator-aegis-001');
-
-    expect(mockEmit).toHaveBeenCalledWith('group_call:decline', {
-      callId: 'call-abc',
-      to: 'initiator-aegis-001',
-    });
-  });
-
-  it('declineGroupCall resets the groupCall store', () => {
-    useGroupCall.getState().startIncoming('call-abc', 'g-1', 'Alpha', 'initiator-aegis-001');
-    expect(useGroupCall.getState().status).toBe('ringing-in');
-
-    declineGroupCall('call-abc', 'initiator-aegis-001');
-
-    expect(useGroupCall.getState().status).toBe('idle');
-    expect(useGroupCall.getState().callId).toBeNull();
-  });
-
-  // ── 2. hangupGroupCall emits group_call:hangup and resets store ────────────
-
-  it('hangupGroupCall emits group_call:hangup and calls store reset', () => {
-    // Put the store into an in-call state with a known callId and participants
-    useGroupCall.getState().startOutgoing('call-xyz', 'g-2', 'BetaGroup', ['peer-A', 'peer-B']);
-    useGroupCall.getState().setStatus('in-call');
-
-    hangupGroupCall();
-
-    expect(mockEmit).toHaveBeenCalledWith(
-      'group_call:hangup',
-      expect.objectContaining({ callId: 'call-xyz' }),
-    );
-
-    // After the synchronous hangup the status transitions to 'ended'
-    // (reset is deferred by setTimeout(800ms) in production code)
-    expect(useGroupCall.getState().status).toBe('ended');
-  });
-
-  it('hangupGroupCall does nothing (no emit) when callId is null', () => {
-    // Store is already idle with callId = null from the beforeEach reset
-    hangupGroupCall();
-    expect(mockEmit).not.toHaveBeenCalled();
-  });
-
-  // ── 3. startGroupCall with no socket returns early without throwing ────────
-
-  it('startGroupCall returns early and does not throw when getSocket() returns null', async () => {
+  it('startGroupCall returns early (no emit, no throw) when getSocket() is null', async () => {
     mockSocketReturnValue = null;
-
-    const identity = {
-      aegisId: 'self-aegis-id',
-      publicKeyB64: 'pubkey',
-      secretKey: new Uint8Array(32),
-      // Minimal identity shape required by the function signature
-    } as Parameters<typeof startGroupCall>[0];
-
-    await expect(
-      startGroupCall(identity, { id: 'g-3', name: 'GammaCrew', members: [] }, ['peer-X']),
-    ).resolves.toBeUndefined();
-
+    const identity = { aegisId: SELF, publicKeyB64: 'pk', secretKey: mockSelfKp.secretKey } as Parameters<typeof startGroupCall>[0];
+    await expect(startGroupCall(identity, { id: 'g', name: 'G', members: [] }, [PEER_A])).resolves.toBeUndefined();
     expect(mockEmit).not.toHaveBeenCalled();
   });
 
-  // ── 4. attachGroupCallHandlers registers the Discord-style channel banner ──
-  // Group calls no longer ring each member with `group_call:invite`; awareness
-  // comes from the passive `group_call:channel` heartbeat (see groupCalls.ts).
-
-  it('attachGroupCallHandlers registers a group_call:channel listener on the socket', () => {
-    attachGroupCallHandlers();
-
-    const registeredEvents = (mockOn.mock.calls as [string, unknown][]).map(([ev]) => ev);
-    expect(registeredEvents).toContain('group_call:channel');
+  it('hangupGroupCall is a no-op (no emit) when callId is null', () => {
+    hangupGroupCall();
+    expect(mockEmit).not.toHaveBeenCalled();
   });
 
-  // ── 5. attachGroupCallHandlers registers group_call:accept listener ────────
+  // ── Emit shapes: sealed, no `from`, recipient can authenticate us ──────────
 
-  it('attachGroupCallHandlers registers a group_call:accept listener on the socket', () => {
-    attachGroupCallHandlers();
+  it('declineGroupCall emits a SEALED decline (no plaintext from; body authenticates self)', () => {
+    declineGroupCall('call-abc', INIT);
 
-    const registeredEvents = (mockOn.mock.calls as [string, unknown][]).map(([ev]) => ev);
-    expect(registeredEvents).toContain('group_call:accept');
+    expect(mockEmit).toHaveBeenCalledTimes(1);
+    const [event, payload] = mockEmit.mock.calls[0] as [string, Record<string, unknown>];
+    expect(event).toBe('group_call:decline');
+    expect(payload).toMatchObject({ callId: 'call-abc', to: INIT });
+    expect(payload.ciphertext).toEqual(expect.any(String));
+    expect(payload.nonce).toEqual(expect.any(String));
+    expect(payload).not.toHaveProperty('from');
+    // The initiator (recipient) opens it → our identity is sealed inside.
+    const inner = openAsRecipient(mockInitKp, payload as { ciphertext: string; nonce: string });
+    expect(inner.from).toBe(SELF);
   });
 
-  // Helper: locate the registered group_call:channel handler.
-  function channelHandler(): (msg: unknown) => void {
-    const call = (mockOn.mock.calls as [string, (...args: unknown[]) => void][]).find(
-      ([ev]) => ev === 'group_call:channel',
-    );
-    expect(call).toBeDefined();
-    return call![1];
-  }
+  it('hangupGroupCall emits a per-recipient SEALED fan-out (items[], no plaintext to[]/from)', () => {
+    mockGroups = [{ id: 'g-2', name: 'Beta', members: [SELF, PEER_A, PEER_B] }];
+    useGroupCall.getState().startOutgoing('call-xyz', 'g-2', 'Beta', [PEER_A, PEER_B]);
+    useGroupCall.getState().setStatus('in-call');
 
-  // ── 6. channel heartbeat from a trusted member surfaces a banner ──────────
+    hangupGroupCall();
 
-  it('group_call:channel handler upserts a banner into useActiveCalls for a trusted group', () => {
-    // The membership gate requires the initiator to be a known group member.
-    mockGroups = [{ id: 'g-channel-001', members: ['initiator-aegis-001', 'self-aegis-id'] }];
+    const hangup = (mockEmit.mock.calls as [string, Record<string, unknown>][]).find(([e]) => e === 'group_call:hangup');
+    expect(hangup).toBeDefined();
+    const payload = hangup![1] as { callId: string; items: Array<{ to: string; ciphertext: string; nonce: string }> };
+    expect(payload.callId).toBe('call-xyz');
+    expect(payload.items).toHaveLength(2);
+    expect(payload.items.map((i) => i.to).sort()).toEqual([PEER_A, PEER_B]);
+    expect(payload).not.toHaveProperty('from');
+    expect(payload).not.toHaveProperty('to');
+    // Each item authenticates us to its specific recipient.
+    const toA = payload.items.find((i) => i.to === PEER_A)!;
+    expect(openAsRecipient(mockPeerAKp, toA).from).toBe(SELF);
+    assertNoFromOnAnyEmit();
+  });
+
+  it('startGroupCall heartbeat seals the roster (no cleartext participants/groupName on the wire)', async () => {
+    mockGroups = [{ id: 'g-hb', name: 'Heartbeat', members: [SELF, PEER_A, PEER_B] }];
+    const identity = { aegisId: SELF, publicKeyB64: 'pk', secretKey: mockSelfKp.secretKey } as Parameters<typeof startGroupCall>[0];
+
+    await startGroupCall(identity, { id: 'g-hb', name: 'Heartbeat', members: [SELF, PEER_A, PEER_B] }, [PEER_A, PEER_B]);
+
+    const channel = (mockEmit.mock.calls as [string, Record<string, unknown>][]).find(([e]) => e === 'group_call:channel');
+    expect(channel).toBeDefined();
+    const payload = channel![1] as { callId: string; groupId: string; media: string; items: Array<{ to: string; ciphertext: string; nonce: string }> };
+    expect(payload.groupId).toBe('g-hb');           // routing stays cleartext
+    expect(payload.media).toBe('audio');
+    expect(payload.items.length).toBe(2);            // one sealed copy per recipient
+    expect(payload).not.toHaveProperty('from');
+    expect(payload).not.toHaveProperty('participants'); // roster is NOT in cleartext
+    expect(payload).not.toHaveProperty('groupName');
+    // The sealed body carries the roster + group name to the recipient only.
+    const inner = openAsRecipient(mockPeerAKp, payload.items.find((i) => i.to === PEER_A)!);
+    const body = JSON.parse(inner.payload) as { groupName: string; participants: string[] };
+    expect(body.groupName).toBe('Heartbeat');
+    expect(body.participants).toContain(SELF);
+    expect(inner.from).toBe(SELF);
+    assertNoFromOnAnyEmit();
+  });
+
+  // ── Handler round-trip + authentication ────────────────────────────────────
+
+  it('group_call:offer handler opens a sealed offer, adds the peer, and answers (sealed, no from)', async () => {
+    mockGroups = [{ id: 'g-off', name: 'Off', members: [SELF, PEER_A] }];
+    useGroupCall.getState().startOutgoing('call-off', 'g-off', 'Off', [], SELF);
+    useGroupCall.getState().setStatus('in-call');
 
     attachGroupCallHandlers();
-    channelHandler()({
-      from: 'initiator-aegis-001',
-      callId: 'call-channel-001',
-      groupId: 'g-channel-001',
-      groupName: 'DeltaForce',
-      participants: ['initiator-aegis-001'],
-      media: 'audio' as const,
+    handlerFor('group_call:offer')({ callId: 'call-off', ...sealFrom(mockPeerAKp, PEER_A, 'remote-offer-sdp') });
+    await flush();
+    await flush();
+
+    // peer-A was recovered from the sealed body and added to the roster.
+    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toContain(PEER_A);
+    // …and we answered them, sealed, with no plaintext from.
+    const answer = (mockEmit.mock.calls as [string, Record<string, unknown>][]).find(([e]) => e === 'group_call:answer');
+    expect(answer).toBeDefined();
+    const payload = answer![1] as Record<string, unknown>;
+    expect(payload).toMatchObject({ callId: 'call-off', to: PEER_A });
+    expect(payload).not.toHaveProperty('from');
+    expect(openAsRecipient(mockPeerAKp, payload as { ciphertext: string; nonce: string }).from).toBe(SELF);
+  });
+
+  it('group_call:offer handler REJECTS a spoofed inner identity (sealed by A, claims B)', async () => {
+    mockGroups = [{ id: 'g-spoof', name: 'Spoof', members: [SELF, PEER_A, PEER_B] }];
+    useGroupCall.getState().startOutgoing('call-spoof', 'g-spoof', 'Spoof', [], SELF);
+    useGroupCall.getState().setStatus('in-call');
+
+    // peer-A seals the body but claims to be peer-B inside.
+    const spoofed = sealFrom(mockPeerAKp, PEER_B, 'evil-offer');
+    attachGroupCallHandlers();
+    handlerFor('group_call:offer')({ callId: 'call-spoof', ...spoofed });
+    await flush();
+    await flush();
+
+    // Neither identity is accepted: B's key can't open A's box, and A's key opens
+    // it but the inner `from` (B) won't match A → trial yields nothing.
+    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).not.toContain(PEER_B);
+    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).not.toContain(PEER_A);
+    expect((mockEmit.mock.calls as [string][]).some(([e]) => e === 'group_call:answer')).toBe(false);
+  });
+
+  // ── Channel banner from a sealed heartbeat ─────────────────────────────────
+
+  it('group_call:channel handler upserts a banner from a sealed heartbeat (trusted member)', () => {
+    mockGroups = [{ id: 'g-ch', name: 'Delta', members: [INIT, SELF] }];
+    attachGroupCallHandlers();
+
+    handlerFor('group_call:channel')({
+      callId: 'call-ch',
+      groupId: 'g-ch',
+      media: 'audio',
+      ...sealFrom(mockInitKp, INIT, JSON.stringify({ groupName: 'Delta', participants: [INIT] })),
     });
 
-    const banner = useActiveCalls.getState().calls['g-channel-001'];
+    const banner = useActiveCalls.getState().calls['g-ch'];
     expect(banner).toBeDefined();
-    expect(banner.callId).toBe('call-channel-001');
-    expect(banner.initiator).toBe('initiator-aegis-001');
-    expect(banner.participants).toEqual(['initiator-aegis-001']);
+    expect(banner.callId).toBe('call-ch');
+    expect(banner.initiator).toBe(INIT);
+    expect(banner.participants).toEqual([INIT]);
   });
 
-  it('group_call:channel handler drops heartbeats whose initiator is not a group member', () => {
-    // Group exists but the sender is NOT in its member list → gate rejects it.
-    mockGroups = [{ id: 'g-channel-002', members: ['someone-else'] }];
-
+  it('group_call:channel handler DROPS a heartbeat it cannot authenticate against the roster', () => {
+    // The sealing key (a stranger) is not a member → not a trial candidate → drop.
+    const strangerKp = nacl.box.keyPair();
+    mockGroups = [{ id: 'g-strange', name: 'NG', members: [SELF] }];
     attachGroupCallHandlers();
-    channelHandler()({
-      from: 'stranger-aegis',
-      callId: 'call-channel-002',
-      groupId: 'g-channel-002',
-      groupName: 'NewGroup',
-      participants: ['stranger-aegis'],
-      media: 'audio' as const,
+
+    handlerFor('group_call:channel')({
+      callId: 'call-strange',
+      groupId: 'g-strange',
+      media: 'audio',
+      ...sealFrom(strangerKp, 'stranger-aegis', JSON.stringify({ groupName: 'NG', participants: ['stranger-aegis'] })),
     });
 
-    expect(useActiveCalls.getState().calls['g-channel-002']).toBeUndefined();
+    expect(useActiveCalls.getState().calls['g-strange']).toBeUndefined();
   });
 
-  // Helper: locate the registered group_call:hangup handler.
-  function hangupHandler(): (msg: unknown) => void {
-    const call = (mockOn.mock.calls as [string, (...args: unknown[]) => void][]).find(
-      ([ev]) => ev === 'group_call:hangup',
-    );
-    expect(call).toBeDefined();
-    return call![1];
-  }
-
-  // ── 7. Leaving broadcasts a channel update so banners don't linger ─────────
-
-  it('hangupGroupCall broadcasts a group_call:channel with the remaining roster (self removed)', () => {
-    mockGroups = [{ id: 'g-leave', members: ['self-aegis-id', 'peer-A'] }];
-    useGroupCall.getState().startOutgoing('call-leave', 'g-leave', 'Leavers', ['peer-A']);
-    useGroupCall.getState().setStatus('in-call');
-
-    hangupGroupCall();
-
-    expect(mockEmit).toHaveBeenCalledWith(
-      'group_call:channel',
-      expect.objectContaining({ callId: 'call-leave', participants: ['peer-A'] }),
-    );
-  });
-
-  it('hangupGroupCall by the LAST participant broadcasts an empty roster (channel closed)', () => {
-    mockGroups = [{ id: 'g-last', members: ['self-aegis-id', 'peer-A'] }];
-    // In-call but alone (no other mesh participants) → we are the last to leave.
-    useGroupCall.getState().startOutgoing('call-last', 'g-last', 'Lonely', []);
-    useGroupCall.getState().setStatus('in-call');
-
-    hangupGroupCall();
-
-    expect(mockEmit).toHaveBeenCalledWith(
-      'group_call:channel',
-      expect.objectContaining({ callId: 'call-last', participants: [] }),
-    );
-  });
-
-  // ── 8. An explicitly-empty roster clears the banner immediately ────────────
-
-  it('group_call:channel with an empty participants array removes the active banner', () => {
-    mockGroups = [{ id: 'g-close', members: ['initiator-aegis-001', 'self-aegis-id'] }];
+  it('group_call:channel with a sealed EMPTY roster closes the banner', () => {
+    mockGroups = [{ id: 'g-close', name: 'Closers', members: [INIT, SELF] }];
     attachGroupCallHandlers();
-    const handler = channelHandler();
+    const channel = handlerFor('group_call:channel');
 
-    // A normal heartbeat opens the banner…
-    handler({
-      from: 'initiator-aegis-001',
-      callId: 'call-close',
-      groupId: 'g-close',
-      groupName: 'Closers',
-      participants: ['initiator-aegis-001'],
-      media: 'audio' as const,
-    });
+    channel({ callId: 'call-close', groupId: 'g-close', media: 'audio', ...sealFrom(mockInitKp, INIT, JSON.stringify({ groupName: 'Closers', participants: [INIT] })) });
     expect(useActiveCalls.getState().calls['g-close']).toBeDefined();
 
-    // …and a leave-broadcast with an empty roster closes it immediately.
-    handler({
-      from: 'initiator-aegis-001',
-      callId: 'call-close',
-      groupId: 'g-close',
-      groupName: 'Closers',
-      participants: [],
-      media: 'audio' as const,
-    });
+    channel({ callId: 'call-close', groupId: 'g-close', media: 'audio', ...sealFrom(mockInitKp, INIT, JSON.stringify({ groupName: 'Closers', participants: [] })) });
     expect(useActiveCalls.getState().calls['g-close']).toBeUndefined();
   });
 
-  // ── 9. Receiving a hangup removes the leaver from our roster (count fix) ────
+  // ── Hangup handler ─────────────────────────────────────────────────────────
 
-  it('group_call:hangup handler removes the leaver from the participant roster', () => {
-    useGroupCall.getState().startOutgoing('call-roster', 'g-roster', 'Roster', ['peer-A', 'peer-B']);
-    useGroupCall.getState().setStatus('in-call');
-    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toEqual(['peer-A', 'peer-B']);
-
-    attachGroupCallHandlers();
-    hangupHandler()({ from: 'peer-A', callId: 'call-roster' });
-
-    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toEqual(['peer-B']);
-  });
-
-  // ── 10. Host-ends-for-all ──────────────────────────────────────────────────
-
-  it('hangupGroupCall by the HOST broadcasts an empty roster (host-ends-for-all)', () => {
-    mockGroups = [{ id: 'g-host', members: ['self-aegis-id', 'peer-A', 'peer-B'] }];
-    // We are the host: our own aegisId is the initiator, peers are still in-call.
-    useGroupCall.getState().startOutgoing('call-host', 'g-host', 'Hosts', ['peer-A', 'peer-B'], 'self-aegis-id');
-    useGroupCall.getState().setStatus('in-call');
-
-    hangupGroupCall();
-
-    // Even though peer-A/peer-B remain, the host broadcasts [] to end for everyone
-    // (a non-host would broadcast the remaining roster — see test 7).
-    expect(mockEmit).toHaveBeenCalledWith(
-      'group_call:channel',
-      expect.objectContaining({ callId: 'call-host', participants: [] }),
-    );
-  });
-
-  it('group_call:hangup from the initiator ends the call for an active participant', () => {
-    // We joined a channel hosted by 'host-aegis' and are in-call with them + peer-B.
-    useGroupCall.getState().startOutgoing('call-join', 'g-join', 'Joiners', ['host-aegis', 'peer-B'], 'host-aegis');
+  it('group_call:hangup handler removes the (authenticated) leaver from the roster', () => {
+    mockGroups = [{ id: 'g-roster', name: 'Roster', members: [SELF, PEER_A, PEER_B, HOST] }];
+    useGroupCall.getState().startOutgoing('call-roster', 'g-roster', 'Roster', [PEER_A, PEER_B], HOST);
     useGroupCall.getState().setStatus('in-call');
 
     attachGroupCallHandlers();
-    hangupHandler()({ from: 'host-aegis', callId: 'call-join' });
+    handlerFor('group_call:hangup')({ callId: 'call-roster', ...sealFrom(mockPeerAKp, PEER_A, '') });
 
-    // The host hung up → the whole call ends for us, not just a roster trim.
-    expect(useGroupCall.getState().status).toBe('ended');
-  });
-
-  it('group_call:hangup from a non-initiator drops only them; the call continues', () => {
-    useGroupCall.getState().startOutgoing('call-stay', 'g-stay', 'Stayers', ['host-aegis', 'peer-B'], 'host-aegis');
-    useGroupCall.getState().setStatus('in-call');
-
-    attachGroupCallHandlers();
-    hangupHandler()({ from: 'peer-B', callId: 'call-stay' });
-
+    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toEqual([PEER_B]);
     expect(useGroupCall.getState().status).toBe('in-call');
-    expect(useGroupCall.getState().participants.map((p) => p.aegisId)).toEqual(['host-aegis']);
+  });
+
+  it('group_call:hangup from the host ends the call for an active participant', () => {
+    mockGroups = [{ id: 'g-join', name: 'Joiners', members: [SELF, HOST, PEER_B] }];
+    useGroupCall.getState().startOutgoing('call-join', 'g-join', 'Joiners', [HOST, PEER_B], HOST);
+    useGroupCall.getState().setStatus('in-call');
+
+    attachGroupCallHandlers();
+    handlerFor('group_call:hangup')({ callId: 'call-join', ...sealFrom(mockHostKp, HOST, '') });
+
+    expect(useGroupCall.getState().status).toBe('ended');
   });
 });
