@@ -22,7 +22,9 @@ import { create } from 'zustand';
 import { decodeBase64 } from 'tweetnacl-util';
 import type { Identity } from '../crypto/identity';
 import { useContacts } from './contacts';
-import { listPublicChannels, type PublicChannelType } from '../api/publicChannels';
+import nacl from 'tweetnacl';
+import { sha256 } from '@noble/hashes/sha2';
+import { listPublicChannels, registerPublicChannel, getPublicChannelManifest, type PublicChannelType } from '../api/publicChannels';
 import {
   pubchannelJoin,
   pubchannelPost,
@@ -35,11 +37,25 @@ import {
   ingestChannelPosts,
   buildAndSealPost,
   normalizePullRow,
+  serializeSignedManifest,
   type ChainHead,
   type SignerResolver,
 } from '../channels/channelService';
 import {
+  generateChannelIdentity,
+  generateCEK,
+  signManifest,
+  deriveChannelId,
+  deriveChannelDeliveryToken,
+  hashChannelDeliveryToken,
+  wrapCEK,
+  unwrapCEK,
+  type ChannelManifestData,
+} from '../crypto/publicChannelKey';
+import { buildInviteLink, parseInviteLink } from '../channels/inviteLink';
+import {
   saveChannelSecrets,
+  saveChannelSigningKey,
   getChannelCEK,
   getChannelDeliveryToken,
   isChannelOwned,
@@ -47,6 +63,12 @@ import {
 } from '../crypto/publicChannelStore';
 
 const CHANNEL_TYPE_NAMES: PublicChannelType[] = ['open', 'readonly', 'moderated', 'approval'];
+const HOUR_MS = 60 * 60 * 1000;
+
+/** constant-time-ish equality for two byte arrays (lengths first). */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && nacl.verify(a, b);
+}
 
 /** A verified directory entry — name/type extracted from a signature-checked manifest. */
 export interface DirectoryEntry {
@@ -81,6 +103,11 @@ interface ChannelsState {
   heads: Record<string, ChainHead | null>;
 
   loadDirectory: () => Promise<void>;
+  createChannel: (
+    params: { name: string; description: string; channelType: PublicChannelType },
+    identity: Identity,
+  ) => Promise<{ ok: boolean; channelId?: string; invite?: string; error?: string }>;
+  joinViaInvite: (inviteUrl: string, identity: Identity) => Promise<{ ok: boolean; channelId?: string; error?: string }>;
   joinChannel: (channelId: string, capability: Uint8Array, cek: Uint8Array) => Promise<{ ok: boolean; error?: string }>;
   loadFeed: (channelId: string, identity: Identity) => Promise<void>;
   sendPost: (channelId: string, body: string, identity: Identity) => Promise<{ ok: boolean; error?: string }>;
@@ -136,6 +163,122 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     } finally {
       set({ loadingDirectory: false });
     }
+  },
+
+  async createChannel(params, identity) {
+    // 1. Fresh channel identity + content key + access capability.
+    const id = generateChannelIdentity();
+    const cek = generateCEK();
+    const capability = nacl.randomBytes(32);
+    const channelType = CHANNEL_TYPE_NAMES.indexOf(params.channelType);
+    if (channelType < 0) return { ok: false, error: 'bad_channel_type' };
+
+    // 2. Signed manifest binding name/type/contentKeyHash to the channel key.
+    const manifest: ChannelManifestData = {
+      channelId: id.channelId,
+      salt: id.salt,
+      channelEd25519Pub: id.channelEd25519Pub,
+      name: params.name,
+      description: params.description,
+      avatarHash: null,
+      channelType: channelType as 0 | 1 | 2 | 3,
+      createdAtHourMs: Math.floor(Date.now() / HOUR_MS) * HOUR_MS, // hour-truncated (metadata minimization)
+      manifestSeq: 1,
+      contentKeyHash: sha256(cek),
+      delegationsHash: new Uint8Array(32),
+      revokedHash: new Uint8Array(32),
+      pinnedPostSeq: -1,
+      discussionsEnabled: true,
+    };
+    const sig = signManifest(manifest, id.channelEd25519Secret);
+    const blob = serializeSignedManifest(manifest, sig);
+
+    // 3. Wrap the CEK for capability-holders; register the channel (relay stores
+    //    the blob + token hash + opaque envelope).
+    const contentKeyEnvelope = JSON.stringify(wrapCEK(cek, capability, id.channelId));
+    const deliveryToken = deriveChannelDeliveryToken(capability, id.channelId);
+    try {
+      await registerPublicChannel({
+        signedManifestBlob: blob,
+        deliveryTokenHashB64: hashChannelDeliveryToken(deliveryToken),
+        channelType: params.channelType,
+        contentKeyEnvelope,
+      });
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'register_failed' };
+    }
+
+    // 4. Persist OUR secrets (we own this channel → also the signing key).
+    await saveChannelSecrets(id.channelId, { cek, capability });
+    await saveChannelSigningKey(id.channelId, id.channelEd25519Secret);
+
+    set((s) => ({
+      subscribed: [...s.subscribed, { channelId: id.channelId, name: params.name, channelType: params.channelType, owned: true }],
+    }));
+
+    // 5. Share link. Approval-gated channels omit the capability (p=1).
+    const invite = buildInviteLink({
+      channelId: id.channelId,
+      channelEd25519Pub: id.channelEd25519Pub,
+      capability: params.channelType === 'approval' ? null : capability,
+      approvalGated: params.channelType === 'approval',
+    });
+    return { ok: true, channelId: id.channelId, invite };
+  },
+
+  async joinViaInvite(inviteUrl, identity) {
+    const parsed = parseInviteLink(inviteUrl);
+    if (!parsed) return { ok: false, error: 'bad_invite' };
+    // Approval-gated joins need the admin to deliver the capability (gap E / Phase 4).
+    if (!parsed.capability) return { ok: false, error: 'approval_required' };
+
+    // Fetch + verify the manifest, and bind it to the invite's channelId/pubkey.
+    let blob: string;
+    try {
+      ({ signed_manifest_blob: blob } = await getPublicChannelManifest(parsed.channelId));
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'manifest_fetch_failed' };
+    }
+    const manifest = parseAndVerifyManifest(blob);
+    if (!manifest) return { ok: false, error: 'bad_manifest' };
+    if (manifest.channelId !== parsed.channelId) return { ok: false, error: 'channel_id_mismatch' };
+    if (!bytesEqual(manifest.channelEd25519Pub, parsed.channelEd25519Pub)) return { ok: false, error: 'pubkey_mismatch' };
+    // The id must bind to (pub, salt) — a forged manifest claiming someone's id fails here.
+    if (deriveChannelId(manifest.channelEd25519Pub, manifest.salt) !== parsed.channelId) {
+      return { ok: false, error: 'channel_id_unbound' };
+    }
+
+    // Join to obtain the wrapped CEK envelope.
+    const deliveryToken = deriveChannelDeliveryToken(parsed.capability, parsed.channelId);
+    const ack = await pubchannelJoin(parsed.channelId, deliveryToken);
+    if (!ack.ok) return { ok: false, error: ack.error };
+    if (!ack.contentKeyEnvelope) return { ok: false, error: 'no_content_key' };
+
+    let env: { ivB64: string; wrappedB64: string };
+    try {
+      env = JSON.parse(ack.contentKeyEnvelope) as { ivB64: string; wrappedB64: string };
+    } catch { return { ok: false, error: 'bad_envelope' }; }
+
+    const cek = unwrapCEK(env.ivB64, env.wrappedB64, parsed.capability, parsed.channelId);
+    if (!cek) return { ok: false, error: 'cek_unwrap_failed' };
+    // The unwrapped CEK must match the signed manifest's contentKeyHash.
+    if (manifest.contentKeyHash && !bytesEqual(sha256(cek), manifest.contentKeyHash)) {
+      return { ok: false, error: 'cek_mismatch' };
+    }
+
+    await saveChannelSecrets(parsed.channelId, { cek, capability: parsed.capability });
+    set((s) => ({
+      subscribed: s.subscribed.some((c) => c.channelId === parsed.channelId)
+        ? s.subscribed
+        : [...s.subscribed, {
+            channelId: parsed.channelId,
+            name: manifest.name,
+            channelType: CHANNEL_TYPE_NAMES[manifest.channelType] ?? 'open',
+            owned: false,
+          }],
+    }));
+    await get().loadFeed(parsed.channelId, identity);
+    return { ok: true, channelId: parsed.channelId };
   },
 
   async joinChannel(channelId, capability, cek) {

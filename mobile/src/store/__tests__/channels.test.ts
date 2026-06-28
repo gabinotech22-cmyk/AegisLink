@@ -12,16 +12,19 @@ import nacl from 'tweetnacl';
 
 jest.mock('../../api/publicChannels', () => ({
   listPublicChannels: jest.fn(),
+  registerPublicChannel: jest.fn(async () => ({ channelId: 'x' })),
+  getPublicChannelManifest: jest.fn(),
 }));
 jest.mock('../../socket/publicChannels', () => ({
   pubchannelJoin: jest.fn(),
   pubchannelPost: jest.fn(),
-  pubchannelPull: jest.fn(),
+  pubchannelPull: jest.fn(async () => ({ ok: true, posts: [] })),
   onPubchannelMsg: jest.fn(() => () => {}),
   onPubchannelTombstone: jest.fn(() => () => {}),
 }));
 jest.mock('../../crypto/publicChannelStore', () => ({
   saveChannelSecrets: jest.fn(async () => {}),
+  saveChannelSigningKey: jest.fn(async () => {}),
   getChannelCEK: jest.fn(),
   getChannelDeliveryToken: jest.fn(async () => 'tok'),
   isChannelOwned: jest.fn(async () => false),
@@ -44,6 +47,7 @@ import {
   signManifest,
   type ChannelManifestData,
 } from '../../crypto/publicChannelKey';
+import { parseInviteLink } from '../../channels/inviteLink';
 import type { Identity } from '../../crypto/identity';
 
 const CHANNEL_ID = 'SKKk3vgfTWu1MxRtJYx6DA==';
@@ -183,5 +187,95 @@ describe('attachLive', () => {
     expect(useChannels.getState().heads[CHANNEL_ID]!.seqNum).toBe(0);
 
     off();
+  });
+});
+
+describe('createChannel (gap C)', () => {
+  it('registers a signed channel with a CEK envelope and returns a parseable invite', async () => {
+    const res = await useChannels.getState().createChannel(
+      { name: 'Aegis Notes', description: 'signed announcements', channelType: 'open' },
+      identity,
+    );
+    expect(res.ok).toBe(true);
+    expect(res.channelId).toBeDefined();
+    expect(res.invite).toBeDefined();
+
+    // Registration carries a signed blob + a non-empty wrapped CEK envelope.
+    const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
+    expect(typeof regArg.signedManifestBlob).toBe('string');
+    expect(regArg.channelType).toBe('open');
+    expect(JSON.parse(regArg.contentKeyEnvelope)).toHaveProperty('wrappedB64');
+
+    // The invite carries this channel's id + a capability (open channel).
+    const parsed = parseInviteLink(res.invite!);
+    expect(parsed!.channelId).toBe(res.channelId);
+    expect(parsed!.capability).not.toBeNull();
+
+    // It is owned, and appears in the subscribed list.
+    const sub = useChannels.getState().subscribed.find((c) => c.channelId === res.channelId);
+    expect(sub).toMatchObject({ name: 'Aegis Notes', owned: true });
+  });
+
+  it('builds an approval-gated invite with no capability', async () => {
+    const res = await useChannels.getState().createChannel(
+      { name: 'Private', description: 'd', channelType: 'approval' },
+      identity,
+    );
+    const parsed = parseInviteLink(res.invite!);
+    expect(parsed!.approvalGated).toBe(true);
+    expect(parsed!.capability).toBeNull();
+  });
+});
+
+describe('joinViaInvite (gap D)', () => {
+  it('full create → share → join handshake (manifest verify + CEK unwrap)', async () => {
+    // Admin creates a channel; capture the blob + envelope the relay would store.
+    const created = await useChannels.getState().createChannel(
+      { name: 'OpSec', description: 'field notes', channelType: 'open' },
+      identity,
+    );
+    const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: regArg.signedManifestBlob });
+    (socket.pubchannelJoin as jest.Mock).mockResolvedValue({ ok: true, contentKeyEnvelope: regArg.contentKeyEnvelope });
+
+    // A different user joins from the invite link.
+    useChannels.setState({ subscribed: [] });
+    const joiner = { aegisId: 'AEGIS-JOINER', signingPublicKey: meKp.publicKey, signingSecretKey: meKp.secretKey } as unknown as Identity;
+    const res = await useChannels.getState().joinViaInvite(created.invite!, joiner);
+
+    expect(res).toEqual({ ok: true, channelId: created.channelId });
+    expect(useChannels.getState().subscribed.find((c) => c.channelId === created.channelId)).toMatchObject({ name: 'OpSec', owned: false });
+  });
+
+  it('rejects a malformed invite link', async () => {
+    const res = await useChannels.getState().joinViaInvite('https://evil/x', identity);
+    expect(res).toEqual({ ok: false, error: 'bad_invite' });
+  });
+
+  it('rejects an approval-gated invite (capability not in link)', async () => {
+    const created = await useChannels.getState().createChannel(
+      { name: 'Gated', description: 'd', channelType: 'approval' },
+      identity,
+    );
+    const res = await useChannels.getState().joinViaInvite(created.invite!, identity);
+    expect(res).toEqual({ ok: false, error: 'approval_required' });
+  });
+
+  it('rejects when the unwrapped CEK does not match the manifest contentKeyHash', async () => {
+    const created = await useChannels.getState().createChannel(
+      { name: 'Tampered', description: 'd', channelType: 'open' },
+      identity,
+    );
+    const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: regArg.signedManifestBlob });
+    // Relay returns an envelope wrapping a DIFFERENT CEK → unwrap succeeds but the
+    // contentKeyHash check must fail.
+    const parsed = parseInviteLink(created.invite!)!;
+    const { wrapCEK } = require('../../crypto/publicChannelKey') as typeof import('../../crypto/publicChannelKey');
+    const wrongEnvelope = JSON.stringify(wrapCEK(new Uint8Array(32).fill(9), parsed.capability!, created.channelId!));
+    (socket.pubchannelJoin as jest.Mock).mockResolvedValue({ ok: true, contentKeyEnvelope: wrongEnvelope });
+
+    const res = await useChannels.getState().joinViaInvite(created.invite!, identity);
+    expect(res).toEqual({ ok: false, error: 'cek_mismatch' });
   });
 });

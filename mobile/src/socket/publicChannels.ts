@@ -23,6 +23,8 @@ export interface PubChannelAck {
 }
 export interface PubChannelJoinAck extends PubChannelAck {
   manifest?: string;
+  /** Wrapped CEK envelope (JSON {ivB64,wrappedB64}) to unwrap with the capability. */
+  contentKeyEnvelope?: string;
 }
 export interface PubChannelPullAck extends PubChannelAck {
   posts?: PubChannelPostWire[];

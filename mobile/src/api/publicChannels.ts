@@ -58,6 +58,8 @@ export interface RegisterChannelRequest {
   /** SHA-256 hash of the channel delivery token, base64. */
   deliveryTokenHashB64: string;
   channelType: PublicChannelType;
+  /** Wrapped CEK envelope (JSON {ivB64,wrappedB64}) the relay stores + serves on join. */
+  contentKeyEnvelope?: string;
 }
 
 /** Public directory of channels. Manifests are unverified blobs — verify before trust. */

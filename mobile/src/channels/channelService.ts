@@ -23,7 +23,7 @@
  */
 
 import nacl from 'tweetnacl';
-import { decodeBase64 } from 'tweetnacl-util';
+import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import {
   openChannelPost,
   sealChannelPost,
@@ -112,6 +112,31 @@ export function parseAndVerifyManifest(blobStr: string): ChannelManifestData | n
   } catch {
     return null;
   }
+}
+
+/**
+ * Serialize a manifest + its signature into the canonical signed-blob JSON the
+ * relay stores and parseAndVerifyManifest reads back. Inverse of
+ * parseAndVerifyManifest — keep the two in lockstep.
+ */
+export function serializeSignedManifest(m: ChannelManifestData, sig: Uint8Array): string {
+  return JSON.stringify({
+    channelId: m.channelId,
+    salt: encodeBase64(m.salt),
+    channelEd25519Pub: encodeBase64(m.channelEd25519Pub),
+    sig: encodeBase64(sig),
+    name: m.name,
+    description: m.description,
+    avatarHash: m.avatarHash ? encodeBase64(m.avatarHash) : null,
+    channelType: m.channelType,
+    createdAtHourMs: m.createdAtHourMs,
+    manifestSeq: m.manifestSeq,
+    contentKeyHash: m.contentKeyHash ? encodeBase64(m.contentKeyHash) : null,
+    delegationsHash: encodeBase64(m.delegationsHash),
+    revokedHash: encodeBase64(m.revokedHash),
+    pinnedPostSeq: m.pinnedPostSeq,
+    discussionsEnabled: m.discussionsEnabled,
+  });
 }
 
 // ── Incoming posts: authenticate + chain-verify ──────────────────────────────
