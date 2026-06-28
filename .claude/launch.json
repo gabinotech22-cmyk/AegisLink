@@ -4,8 +4,9 @@
     {
       "name": "web",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["--yes", "serve", "-l", "4173", "web"],
-      "port": 4173
+      "runtimeArgs": ["--yes", "serve", "web"],
+      "port": 4173,
+      "autoPort": true
     },
     {
       "name": "prototype",
