@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
+import { Avatar } from '../components/Avatar';
 import { themedAlert } from '../components/AlertHost';
 import { useChannels, type FeedPost } from '../store/channels';
 import { useIdentity } from '../store/identity';
@@ -65,9 +66,7 @@ export function ChannelFeedScreen({ channelId, onBack }: Props) {
     return (
       <View style={{ paddingVertical: 12, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-          <View style={{ width: 24, height: 24, borderRadius: t.radiusS, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-            <I.Shield size={12} color={t.accent} />
-          </View>
+          <Avatar t={t} name={mine ? (summary?.name ?? '?') : item.from} seed={item.from} size={24} />
           <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>{mine ? i18nT('channels.you') : item.from}</Text>
           <Text style={{ marginLeft: 'auto', fontFamily: t.fontMono, fontSize: 9, color: t.textFaint }}>#{item.seqNum}</Text>
         </View>

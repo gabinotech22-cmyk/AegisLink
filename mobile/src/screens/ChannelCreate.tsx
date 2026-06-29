@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
+import { Avatar } from '../components/Avatar';
 import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import { themedAlert } from '../components/AlertHost';
 import { useChannels } from '../store/channels';
@@ -74,9 +75,10 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
       />
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
         <View style={{ alignItems: 'center', marginBottom: 20 }}>
-          <View style={{ width: 64, height: 64, borderRadius: t.radiusL, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-            <I.Globe size={30} color={t.accent} />
-          </View>
+          {/* No channelId exists yet; seed from current name so the identicon
+              updates live as the user types. Once created, the real channelId
+              becomes the stable seed everywhere else. */}
+          <Avatar t={t} name={name.trim() || 'Channel'} seed={name.trim() || 'new-channel'} size={64} />
         </View>
 
         <Text style={lbl}>{i18nT('channels.nameLabel')}</Text>

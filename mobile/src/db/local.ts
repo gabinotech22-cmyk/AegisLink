@@ -237,7 +237,7 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       state_json TEXT NOT NULL
     );
 
-    -- MLS Group Chats (Fase 4)
+    -- E2EE group chats — Sender Keys (Fase 4)
     CREATE TABLE IF NOT EXISTS groups (
       id                    TEXT PRIMARY KEY,
       name                  TEXT NOT NULL,

@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
+import { Avatar } from '../components/Avatar';
 import { useChannels, type DirectoryEntry } from '../store/channels';
 
 interface Props {
@@ -39,9 +40,7 @@ export function ChannelDiscoverScreen({ onBack, onOpenChannel }: Props) {
         onPress={() => onOpenChannel(item.channelId)}
         style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}
       >
-        <View style={{ width: 42, height: 42, borderRadius: t.radiusL, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-          {isApproval ? <I.Lock size={19} color={t.accent} /> : <I.Globe size={20} color={t.accent} />}
-        </View>
+        <Avatar t={t} name={item.name} seed={item.channelId} size={42} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text numberOfLines={1} style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}>{item.name}</Text>
           <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 2 }}>

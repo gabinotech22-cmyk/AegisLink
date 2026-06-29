@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, FlatList, Modal } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, Pressable, ScrollView, TextInput, FlatList, Modal, useWindowDimensions } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { withPickingGuard } from '../utils/pickingGuard';
 import { previewLabel } from '../utils/messagePreview';
-import Svg, { Circle, Line, G, Path } from 'react-native-svg';
+import { ConstellationVisual } from '../components/ConstellationVisual';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -72,7 +72,15 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
   const previews = useMessages((s) => s.previews);
   const unreadCounts = useMessages((s) => s.unreadCounts);
 
+  const { width: screenWidth } = useWindowDimensions();
+  const swipeRef = useRef<ScrollView>(null);
   const [seg, setSeg] = useState<'groups' | 'channels'>('groups');
+
+  /** Tap on segment control -> scroll the horizontal pager. */
+  const handleSegTap = useCallback((s: 'groups' | 'channels') => {
+    setSeg(s);
+    swipeRef.current?.scrollTo({ x: s === 'channels' ? screenWidth : 0, animated: true });
+  }, [screenWidth]);
   const [isCreating, setIsCreating] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
@@ -250,7 +258,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
             {i18nT('groups.avatarPreviewLabel')}
           </Text>
           <View style={{ alignItems: 'center', padding: 14, backgroundColor: t.surface, borderWidth: 1, borderColor: t.border, borderRadius: t.radius, marginBottom: 10 }}>
-            <Avatar t={t} name={groupImage || (groupName.trim() || 'G')} color={groupColor} size={64} />
+            <Avatar t={t} name={groupImage || (groupName.trim() || 'G')} color={groupColor} size={64} seed={groupName.trim() || 'new-group'} />
           </View>
 
           {/* Photo picking buttons */}
@@ -483,7 +491,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
             return (
               <Pressable
                 key={s}
-                onPress={() => setSeg(s)}
+                onPress={() => handleSegTap(s)}
                 style={{ flex: 1, paddingVertical: 7, borderRadius: t.radiusS, backgroundColor: on ? t.accent : 'transparent', alignItems: 'center' }}
               >
                 <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: on ? t.accentInk : t.textDim }}>
@@ -496,14 +504,22 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
       )}
 
 
-      {seg === 'channels' ? (
-        <ChannelsPanel
-          bottomInset={insets.bottom}
-          onOpenChannel={(channelId) => onOpenChannel?.(channelId)}
-          onDiscover={() => onDiscoverChannels?.()}
-          onCreate={() => onCreateChannel?.()}
-        />
-      ) : activeGroups.length === 0 && pendingInvites.length === 0 ? (
+      {channelsEnabled ? (
+        <ScrollView
+          ref={swipeRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onMomentumScrollEnd={(e) => {
+            const page = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
+            setSeg(page === 1 ? 'channels' : 'groups');
+          }}
+          style={{ flex: 1 }}
+        >
+          {/* Page 0: Groups */}
+          <View style={{ width: screenWidth, flex: 1 }}>
+            {activeGroups.length === 0 && pendingInvites.length === 0 ? (
         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
           <View
             style={{
@@ -693,6 +709,118 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
           }}
         />
       )}
+          </View>
+
+          {/* Page 1: Channels */}
+          <View style={{ width: screenWidth, flex: 1 }}>
+            <ChannelsPanel
+              bottomInset={insets.bottom}
+              onOpenChannel={(channelId) => onOpenChannel?.(channelId)}
+              onDiscover={() => onDiscoverChannels?.()}
+              onCreate={() => onCreateChannel?.()}
+            />
+          </View>
+        </ScrollView>
+      ) : (
+        /* Channels not enabled -- show groups only (no pager) */
+        activeGroups.length === 0 && pendingInvites.length === 0 ? (
+          <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, paddingTop: 40 }}>
+              <ConstellationVisual t={t} />
+              <Text style={{ fontFamily: t.fontDisplay, fontSize: 24, fontWeight: '600', letterSpacing: -0.4, color: t.text, marginTop: 28, marginBottom: 10 }}>
+                {i18nT('groups.emptyTitle')}
+              </Text>
+              <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: 21, textAlign: 'center', maxWidth: 280, marginBottom: 26 }}>
+                {i18nT('groups.emptyPersonalDesc')}
+              </Text>
+              <Pressable
+                onPress={() => setIsCreating(true)}
+                style={({ pressed }) => ({ backgroundColor: t.accent, paddingHorizontal: 24, paddingVertical: 13, borderRadius: t.radius, flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, opacity: pressed ? 0.85 : 1 })}
+              >
+                <I.Plus size={18} color={t.accentInk} />
+                <Text style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>{i18nT('groups.createGroup')}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { setJoinLinkInput(''); setShowJoinModal(true); }}
+                style={({ pressed }) => ({ backgroundColor: 'transparent', borderWidth: 1, borderColor: t.borderStrong, paddingHorizontal: 24, paddingVertical: 12, borderRadius: t.radius, opacity: pressed ? 0.7 : 1 })}
+              >
+                <Text style={{ color: t.text, fontFamily: t.font, fontWeight: '500', fontSize: 14 }}>{i18nT('groups.joinByLink')}</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        ) : (
+          <FlatList
+            data={activeGroups}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ paddingBottom: 22 }}
+            ListHeaderComponent={pendingInvites.length > 0 ? (
+              <View>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.1, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 6 }}>
+                  {i18nT('groups.invitesSection', 'INVITACIONES').toUpperCase()}
+                </Text>
+                {pendingInvites.map((item) => (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => setInviteMenuFor(item)}
+                    style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 14, backgroundColor: pressed ? t.surface : `${t.accent}0a`, borderBottomWidth: 1, borderBottomColor: t.divider })}
+                  >
+                    <Avatar t={t} name={item.avatarImage || item.name} color={item.avatarColor || t.accent} size={44} seed={item.id} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>{item.name}</Text>
+                      <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 4 }}>{i18nT('groups.inviteSubtitle', 'Te invitaron a este grupo')}</Text>
+                    </View>
+                    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99, borderWidth: 1, borderColor: `${t.accent}66` }}>
+                      <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.8 }}>{i18nT('groups.inviteBadge', 'INVITACION')}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            renderItem={({ item }) => {
+              const previewMsg = previews[item.id];
+              const unread = unreadCounts[item.id] ?? 0;
+              let lastText = i18nT('groups.noMessagesPreview');
+              if (previewMsg) {
+                if (previewMsg.body.includes(': ')) {
+                  const colonIdx = previewMsg.body.indexOf(': ');
+                  const sender = previewMsg.body.substring(0, colonIdx);
+                  const actual = previewMsg.body.substring(colonIdx + 2);
+                  lastText = `${sender.substring(0, 8)}: ${previewLabel(actual, i18nT)}`;
+                } else {
+                  lastText = previewLabel(previewMsg.body, i18nT);
+                }
+              }
+              return (
+                <Pressable
+                  onPress={() => onOpenGroupChat(item)}
+                  onLongPress={() => setMenuGroup(item)}
+                  style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: t.divider, backgroundColor: pressed ? t.surface : 'transparent' })}
+                >
+                  <Avatar t={t} name={item.avatarImage || item.name} color={item.avatarColor || t.accent} size={44} seed={item.id} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>{item.name}</Text>
+                      {previewMsg ? <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim }}>{new Date(previewMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text> : null}
+                    </View>
+                    <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 4 }}>{lastText}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                      <I.Lock size={10} color={t.accent} />
+                      <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.5 }}>
+                        {`E2EE · ${i18nT('search.member', { count: item.members.length }).toUpperCase()}`}
+                      </Text>
+                    </View>
+                  </View>
+                  {unread > 0 ? (
+                    <View style={{ minWidth: 20, height: 20, borderRadius: 10, backgroundColor: t.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, alignSelf: 'center' }}>
+                      <Text style={{ fontFamily: t.fontMono, fontSize: 11, fontWeight: '700', color: t.accentInk }}>{unread > 99 ? '99+' : String(unread)}</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            }}
+          />
+        )
+      )}
 
       {/* Group actions floating menu */}
       <FloatingMenu
@@ -853,28 +981,4 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
   );
 }
 
-function ConstellationVisual({ t }: { t: Theme }) {
-  return (
-    <Svg viewBox="0 0 180 140" width={180} height={140}>
-      <Line x1={50} y1={40} x2={90} y2={70} stroke={t.borderStrong} strokeWidth={1} strokeDasharray="2 4" />
-      <Line x1={130} y1={40} x2={90} y2={70} stroke={t.borderStrong} strokeWidth={1} strokeDasharray="2 4" />
-      <Line x1={40} y1={100} x2={90} y2={70} stroke={t.borderStrong} strokeWidth={1} strokeDasharray="2 4" />
-      <Line x1={140} y1={100} x2={90} y2={70} stroke={t.borderStrong} strokeWidth={1} strokeDasharray="2 4" />
-      <Circle cx={50} cy={40} r={14} fill={t.surface} stroke={t.borderStrong} strokeWidth={1} strokeDasharray="3 3" />
-      <Circle cx={130} cy={40} r={14} fill={t.surface} stroke={t.borderStrong} strokeWidth={1} strokeDasharray="3 3" />
-      <Circle cx={40} cy={100} r={14} fill={t.surface} stroke={t.borderStrong} strokeWidth={1} strokeDasharray="3 3" />
-      <Circle cx={140} cy={100} r={14} fill={t.surface} stroke={t.borderStrong} strokeWidth={1} strokeDasharray="3 3" />
-      <Circle cx={90} cy={70} r={22} fill={`${t.accent}22`} stroke={t.accent} strokeWidth={1.5} />
-      <G x={78} y={58}>
-        <Path
-          d="M12 0 L21 6 L21 18 L12 24 L3 18 L3 6 Z"
-          fill="none"
-          stroke={t.accent}
-          strokeWidth={1.6}
-          strokeLinejoin="round"
-        />
-      </G>
-    </Svg>
-  );
-}
 
