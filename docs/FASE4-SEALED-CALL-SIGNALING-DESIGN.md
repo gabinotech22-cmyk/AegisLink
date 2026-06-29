@@ -1,8 +1,10 @@
 # Fase 4 — Sealed-sender para señalización de llamadas (1:1 v1 + grupo)
 
-> **Estado:** **Fase A ✅ HECHA** (clientes sellados-only, fail-closed, paridad
-> mobile↔desktop + tests de regresión — ver §8). Fases B (group calls v2) y C
-> (drop v1 en el relay) **pendientes**. Deriva del hallazgo #2 de la auditoría
+> **Estado:** **Fases A + B ✅ HECHAS.** A: clientes 1:1 sellados-only, fail-closed,
+> paridad mobile↔desktop. B: señalización de grupo sealed-sender — el relay ya no
+> estampa `from` en NINGÚN `group_call:*` y el roster del heartbeat viaja sellado
+> per-recipient (ver §8). Falta sólo **Fase C** (drop v1 en el relay) + validación
+> E2E en device del mesh de grupo. Deriva del hallazgo #2 de la auditoría
 > interna 2026-06 y de la regla de oro de seguridad **#4** ("Sealed-sender en
 > TODO, incluidas las llamadas"). Ver `docs/SECURITY-ROADMAP-2026-06.md`,
 > `docs/SEALED-SENDER-ARCHITECTURE.md` y `CLAUDE.md`.
@@ -157,8 +159,24 @@ wire = { to, callId, ciphertext: inner, nonce, epk: senderEphemeralPubKey }
      los eventos v1 legacy; quitarlo es *breaking* para receptores v1 y se hace en
      Fase C. Fase A no toca el server (es una mejora puramente client-side, no-breaking
      para usuarios v2).
-2. **Fase B** (rama `feat/sealed-group-call-v2`): esquema + handlers v2 de grupo;
-   sellado de grupo en mobile+desktop; tests server+cliente; negociación de versión.
+2. **Fase B** ✅ **HECHA** (rama `feat/sealed-group-call-v2`, commit `d2a4cc7`): el
+   relay deja de estampar `from` en TODOS los `group_call:*` (`fwdSealed`, mirror de
+   `forwardSealed`); `accept`/`decline` pasan a sellados; `hangup`/`channel` a
+   fan-out per-recipient sellado, con el **roster + groupName del heartbeat sellados**
+   (groupId/media quedan en claro — el relay ya los infiere del `to`-set). El receptor
+   recupera + autentica al emisor por **trial-decryption** contra el roster (patrón del
+   sealed-sender legacy de mensajes), fail-closed si ningún candidato abre. Sólo
+   mobile+server (desktop no tiene group calls → paridad N/A). **Decisión de diseño:**
+   se mantuvo el box-estático+trial existente en vez del `epk` del §4 para no reescribir
+   el lifecycle de mesh/ICE (menor riesgo, sin regresión de perf).
+   - Evidencia: `server/src/relay/handler.ts`, `mobile/src/socket/groupCalls.ts`; tests
+     `server/src/__tests__/call-signaling.test.ts` (cero-`from` en wire) y
+     `mobile/src/socket/__tests__/groupCalls.signaling.test.ts` (round-trip,
+     spoof-rejection, roster sellado — 16/16, cripto real). Typecheck mobile+server limpio.
+   - **Pendiente / honesto:** validación E2E del mesh en device (no automatizable, §7);
+     el box-estático **no** lleva guard de replay/`ts` (igual que antes — **no** es
+     regresión; endurecer en follow-up); `group_call:invite` legacy aún estampa `from`
+     (inusado por clientes — se elimina en Fase C).
 3. **Fase C** (rama `chore/drop-v1-call-signaling`): tras la ventana de gracia, remover
    handlers v1 y `forward()`; actualizar docs.
 

@@ -1811,24 +1811,38 @@ const GroupCallInvite = z.object({
   groupName: z.string().min(1).max(64),
   media: z.enum(['audio', 'video']),
 });
-const GroupCallAccept  = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().uuid() });
-const GroupCallDecline = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().uuid() });
-const GroupCallOffer   = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().uuid(), ciphertext: z.string().min(1).max(65536), nonce: z.string().min(1).max(64) });
+// Sealed signaling fields: opaque ciphertext+nonce. The sender's identity is
+// sealed INSIDE the body (recovered by the recipient via trial-decryption against
+// the call/group roster); the relay never sees `from`. ciphertext caps at 64 KB —
+// a sealed channel roster of ≤512 aegisIds fits comfortably.
+const sealedFields = { ciphertext: z.string().min(1).max(65536), nonce: z.string().min(1).max(64) };
+// A sealed item addressed to one recipient — used by the per-recipient fan-outs
+// (hangup, channel heartbeat), where every recipient gets its OWN ciphertext.
+const SealedItem = z.object({ to: z.string().regex(AEGIS_ID_RE), ...sealedFields });
+
+const GroupCallOffer   = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().uuid(), ...sealedFields });
 const GroupCallAnswer  = GroupCallOffer;
 const GroupCallIce     = GroupCallOffer;
-const GroupCallHangup  = z.object({ to: AEGIS_ID_ARRAY, callId: z.string().uuid(), reason: z.string().max(64).optional() });
-// Channel heartbeat announces an open voice channel to the WHOLE group (not just
-// the ≤8 mesh), so its recipient list is wider than AEGIS_ID_ARRAY. groupName +
-// participants are surfaced only on already-trusting clients (the receiver
-// re-checks governance locally); the relay never persists them.
-const GROUP_MEMBER_ARRAY = z.array(z.string().regex(AEGIS_ID_RE)).min(1).max(512);
+// accept/decline now carry the sender's identity SEALED (previously plaintext with
+// a relay-stamped `from`, which leaked the group-call graph).
+const GroupCallAccept  = GroupCallOffer;
+const GroupCallDecline = GroupCallOffer;
+// hangup fans a per-recipient sealed item out to each mesh peer (≤7), no `from`.
+const GroupCallHangup  = z.object({
+  callId: z.string().uuid(),
+  reason: z.string().max(64).optional(),
+  items: z.array(SealedItem).min(1).max(7),
+});
+// Channel heartbeat announces an open voice channel to the WHOLE group. The live
+// roster, groupName and sender identity travel SEALED, one item per recipient, so
+// the relay learns neither who is in the call nor who is heartbeating. groupId +
+// media stay cleartext: the relay already fingerprints the group from the
+// recipient set (the `to` of each item), so sealing them would add nothing.
 const GroupCallChannel = z.object({
-  to: GROUP_MEMBER_ARRAY,
   callId: z.string().uuid(),
   groupId: z.string().min(1).max(128),
-  groupName: z.string().min(1).max(64),
-  participants: z.array(z.string().regex(AEGIS_ID_RE)).max(512).optional(),
   media: z.enum(['audio', 'video']),
+  items: z.array(SealedItem).min(1).max(512),
 });
 
 // Rate-limit buckets for call:offer — keyed by aegisId, max 5 per minute
@@ -2465,29 +2479,69 @@ function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Se
 
 }
 
-// ─── Group call mesh signaling (new sealed-sender protocol) ─────────────────
-// The relay is a dumb forwarder: SDP offers/answers and ICE candidates are
-// E2EE-sealed (NaCl box) by the client before sending. The relay only sees
-// opaque ciphertext+nonce and routes them verbatim. It never stores or
-// inspects any SDP or ICE content.
+// ─── Group call mesh signaling (sealed-sender, Fase B) ──────────────────────
+// The relay is a blind forwarder: every signaling body is E2EE-sealed (NaCl box)
+// by the client, with the sender's identity SEALED INSIDE. The relay sees only
+// opaque ciphertext+nonce and the routing `to`; it NEVER stamps `from`, so it
+// learns no group-call graph (who calls/conferences with whom). The recipient
+// recovers + authenticates the sender by trial-decrypting against its roster.
 function attachGroupCallSignaling(socket: Socket, me: string, sockets: Map<string, Set<Socket>>) {
-  // Forward to a single peer, injecting from: me
-  function fwd<T extends { to: string }>(event: string, parsed: T) {
-    const { to, ...rest } = parsed;
-    const target = sockets.get(to);
-    if (target) for (const s of target) s.emit(event, { ...rest, from: me });
+  // Sealed forward to a single peer — routes by `to`, NEVER stamps `from`.
+  // Mirror of the 1:1 v2 forwardSealed(): the caller's identity rides sealed
+  // inside the ciphertext and is recovered only by the recipient.
+  function fwdSealed<T extends { to: string }>(event: string, parsed: T) {
+    const { to: _to, ...rest } = parsed;
+    const target = sockets.get(parsed.to);
+    if (target) for (const s of target) s.emit(event, rest);
   }
 
-  // Fan-out to multiple peers, skipping self
-  function fanout<T extends { to: string[] }>(event: string, parsed: T) {
-    const { to, ...rest } = parsed;
-    for (const id of to) {
-      if (id === me) continue;
-      const target = sockets.get(id);
-      if (target) for (const s of target) s.emit(event, { ...rest, from: me });
+  socket.on('group_call:accept',  (raw) => { const p = GroupCallAccept.safeParse(raw);  if (p.success) fwdSealed('group_call:accept',  p.data); });
+  socket.on('group_call:decline', (raw) => { const p = GroupCallDecline.safeParse(raw); if (p.success) fwdSealed('group_call:decline', p.data); });
+  socket.on('group_call:offer',   (raw) => { const p = GroupCallOffer.safeParse(raw);   if (p.success) fwdSealed('group_call:offer',   p.data); });
+  socket.on('group_call:answer',  (raw) => { const p = GroupCallAnswer.safeParse(raw);  if (p.success) fwdSealed('group_call:answer',  p.data); });
+  socket.on('group_call:ice',     (raw) => { const p = GroupCallIce.safeParse(raw);     if (p.success) fwdSealed('group_call:ice',     p.data); });
+
+  // Hangup: per-recipient sealed fan-out to each mesh peer (≤7), no `from`.
+  socket.on('group_call:hangup', (raw) => {
+    const p = GroupCallHangup.safeParse(raw);
+    if (!p.success) return;
+    const { callId, reason, items } = p.data;
+    for (const it of items) {
+      if (it.to === me) continue;
+      const target = sockets.get(it.to);
+      if (target) {
+        const payload = reason === undefined
+          ? { callId, ciphertext: it.ciphertext, nonce: it.nonce }
+          : { callId, reason, ciphertext: it.ciphertext, nonce: it.nonce };
+        for (const s of target) s.emit('group_call:hangup', payload);
+      }
     }
-  }
+  });
 
+  // Voice-channel heartbeat: per-recipient sealed roster, no `from`. ONLINE
+  // members get the sealed banner; OFFLINE members get a deduped zero-metadata
+  // wake-up push so a backgrounded/killed app reconnects and re-receives it.
+  socket.on('group_call:channel', (raw) => {
+    const parsed = GroupCallChannel.safeParse(raw);
+    if (!parsed.success) return;
+    if (!checkGroupCallChannelRateLimit(me)) return;
+    const { callId, groupId, media, items } = parsed.data;
+    for (const it of items) {
+      if (it.to === me) continue;
+      const target = sockets.get(it.to);
+      if (target && target.size > 0) {
+        for (const s of target) s.emit('group_call:channel', { callId, groupId, media, ciphertext: it.ciphertext, nonce: it.nonce });
+      } else if (shouldPushGroupCallWake(callId, it.to)) {
+        // Offline (no live socket): wake them. Best-effort, never blocks the loop.
+        void sendGroupCallWakeUp(it.to);
+      }
+    }
+  });
+
+  // group_call:invite (legacy ring-all) is unused by current clients — the
+  // Discord-style `group_call:channel` heartbeat replaced it. Its fanout still
+  // stamps `from`; left intact only so an old build can't crash the relay, and
+  // slated for removal in the Fase C cleanup (drop legacy v1 handlers).
   socket.on('group_call:invite', (raw) => {
     const parsed = GroupCallInvite.safeParse(raw);
     if (!parsed.success) return;
@@ -2495,33 +2549,11 @@ function attachGroupCallSignaling(socket: Socket, me: string, sockets: Map<strin
       socket.emit('error_msg', { code: 'rate_limited', for: 'group_call:invite' });
       return;
     }
-    fanout('group_call:invite', parsed.data);
-  });
-
-  // Voice-channel heartbeat: fan out to ONLINE members (banner awareness) and
-  // fire a deduped zero-metadata wake-up push to OFFLINE members so a backgrounded/
-  // killed app reconnects and re-receives the heartbeat (→ local "Unirse" notif).
-  socket.on('group_call:channel', (raw) => {
-    const parsed = GroupCallChannel.safeParse(raw);
-    if (!parsed.success) return;
-    if (!checkGroupCallChannelRateLimit(me)) return;
-    const { to, callId, ...rest } = parsed.data;
+    const { to, ...rest } = parsed.data;
     for (const id of to) {
       if (id === me) continue;
       const target = sockets.get(id);
-      if (target && target.size > 0) {
-        for (const s of target) s.emit('group_call:channel', { ...rest, callId, from: me });
-      } else if (shouldPushGroupCallWake(callId, id)) {
-        // Offline (no live socket): wake them. Best-effort, never blocks the loop.
-        void sendGroupCallWakeUp(id);
-      }
+      if (target) for (const s of target) s.emit('group_call:invite', { ...rest, from: me });
     }
   });
-
-  socket.on('group_call:accept',  (raw) => { const p = GroupCallAccept.safeParse(raw);  if (p.success) fwd('group_call:accept',  p.data); });
-  socket.on('group_call:decline', (raw) => { const p = GroupCallDecline.safeParse(raw); if (p.success) fwd('group_call:decline', p.data); });
-  socket.on('group_call:offer',   (raw) => { const p = GroupCallOffer.safeParse(raw);   if (p.success) fwd('group_call:offer',   p.data); });
-  socket.on('group_call:answer',  (raw) => { const p = GroupCallAnswer.safeParse(raw);  if (p.success) fwd('group_call:answer',  p.data); });
-  socket.on('group_call:ice',     (raw) => { const p = GroupCallIce.safeParse(raw);     if (p.success) fwd('group_call:ice',     p.data); });
-  socket.on('group_call:hangup',  (raw) => { const p = GroupCallHangup.safeParse(raw);  if (p.success) fanout('group_call:hangup', p.data); });
 }

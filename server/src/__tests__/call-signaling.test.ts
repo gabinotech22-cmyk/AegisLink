@@ -508,18 +508,18 @@ describe('(d) call:ice buffer cap', () => {
 // (e) group_call:channel — heartbeat fans out to ONLINE members (banner aware)
 // ═════════════════════════════════════════════════════════════════════════════
 
+// Sealed-sender channel heartbeat (Fase B): the roster + groupName + sender
+// identity ride sealed, one item per recipient. groupId + media stay cleartext.
 function makeChannelPayload(to: string[], callId: string): Record<string, unknown> {
   return {
-    to,
     callId,
     groupId: 'grp-treasury',
-    groupName: 'DAO · Treasury',
-    participants: [to[0]],
     media: 'audio',
+    items: to.map((t) => ({ to: t, ciphertext: 'c2VhbGVkLXJvc3Rlcg==', nonce: 'bm9uY2UtMjQtYnl0ZXMtaGVyZQ==' })),
   };
 }
 
-describe('(e) group_call:channel fanout to online members', () => {
+describe('(e) group_call:channel fanout to online members (sealed-sender)', () => {
   let initiatorSocket: ClientSocket;
 
   beforeEach(async () => {
@@ -530,7 +530,7 @@ describe('(e) group_call:channel fanout to online members', () => {
     initiatorSocket?.disconnect();
   });
 
-  it('online member receives the channel heartbeat with from injected', async () => {
+  it('online member receives the sealed heartbeat with NO `from` and NO `to` on the wire', async () => {
     // A real UUID — the schema requires z.string().uuid().
     const callId = '11111111-2222-4333-8444-555555555555';
     const memberSocket = await connectAgent(memberE);
@@ -543,9 +543,43 @@ describe('(e) group_call:channel fanout to online members', () => {
       );
       const found = channels.find((c) => c['callId'] === callId);
       expect(found).toBeDefined();
-      expect(found!['from']).toBe(initiatorE.aegisId);
+      // Cleartext routing fields survive…
       expect(found!['groupId']).toBe('grp-treasury');
-      // The relay strips `to` before forwarding.
+      expect(found!['media']).toBe('audio');
+      // …the sealed body is forwarded verbatim…
+      expect(found!['ciphertext']).toBe('c2VhbGVkLXJvc3Rlcg==');
+      expect(found!['nonce']).toBe('bm9uY2UtMjQtYnl0ZXMtaGVyZQ==');
+      // …and the relay leaks NEITHER the sender identity NOR the routing list.
+      expect(found!['from']).toBeUndefined();
+      expect(found!['to']).toBeUndefined();
+      expect(found!['items']).toBeUndefined();
+      // The cleartext roster is gone — it now lives sealed inside ciphertext.
+      expect(found!['participants']).toBeUndefined();
+      expect(found!['groupName']).toBeUndefined();
+    } finally {
+      memberSocket.disconnect();
+    }
+  }, 12_000);
+
+  it('single-recipient sealed forward (group_call:offer) never stamps `from`', async () => {
+    const callId = '22222222-3333-4444-8555-666666666666';
+    const memberSocket = await connectAgent(memberE);
+    try {
+      const offers = await collectWithin<Record<string, unknown>>(
+        memberSocket,
+        'group_call:offer',
+        () => initiatorSocket.emit('group_call:offer', {
+          to: memberE.aegisId,
+          callId,
+          ciphertext: 'c2VhbGVkLW9mZmVy',
+          nonce: 'bm9uY2UtMjQtYnl0ZXMtaGVyZQ==',
+        }),
+        500,
+      );
+      const found = offers.find((c) => c['callId'] === callId);
+      expect(found).toBeDefined();
+      expect(found!['ciphertext']).toBe('c2VhbGVkLW9mZmVy');
+      expect(found!['from']).toBeUndefined();
       expect(found!['to']).toBeUndefined();
     } finally {
       memberSocket.disconnect();
