@@ -1,12 +1,15 @@
 # Fase 4 — Sealed-sender para señalización de llamadas (1:1 v1 + grupo)
 
-> **Estado:** **Fases A + B ✅ HECHAS.** A: clientes 1:1 sellados-only, fail-closed,
-> paridad mobile↔desktop. B: señalización de grupo sealed-sender — el relay ya no
-> estampa `from` en NINGÚN `group_call:*` y el roster del heartbeat viaja sellado
-> per-recipient (ver §8). Falta sólo **Fase C** (drop v1 en el relay) + validación
-> E2E en device del mesh de grupo. Deriva del hallazgo #2 de la auditoría
-> interna 2026-06 y de la regla de oro de seguridad **#4** ("Sealed-sender en
-> TODO, incluidas las llamadas"). Ver `docs/SECURITY-ROADMAP-2026-06.md`,
+> **Estado:** **Fases A + B + C ✅ HECHAS.** A: clientes 1:1 sellados-only,
+> fail-closed, paridad mobile↔desktop. B: señalización de grupo sealed-sender —
+> el relay ya no estampa `from` en NINGÚN `group_call:*` y el roster del heartbeat
+> viaja sellado per-recipient. C: handlers v1 eliminados del relay y de los
+> clientes (mobile + desktop); `forward()` eliminado; pendingCallInvite v2-only;
+> schemas Zod v1 eliminados. El relay ya **no puede** estampar `from` en NINGÚN
+> evento de señalización de llamadas (1:1 ni grupo). Queda sólo la validación E2E
+> en device del mesh de grupo. Deriva del hallazgo #2 de la auditoría interna
+> 2026-06 y de la regla de oro de seguridad **#4** ("Sealed-sender en TODO,
+> incluidas las llamadas"). Ver `docs/SECURITY-ROADMAP-2026-06.md`,
 > `docs/SEALED-SENDER-ARCHITECTURE.md` y `CLAUDE.md`.
 
 ## 1. Contexto y estado actual
@@ -177,8 +180,21 @@ wire = { to, callId, ciphertext: inner, nonce, epk: senderEphemeralPubKey }
      el box-estático **no** lleva guard de replay/`ts` (igual que antes — **no** es
      regresión; endurecer en follow-up); `group_call:invite` legacy aún estampa `from`
      (inusado por clientes — se elimina en Fase C).
-3. **Fase C** (rama `chore/drop-v1-call-signaling`): tras la ventana de gracia, remover
-   handlers v1 y `forward()`; actualizar docs.
+3. **Fase C** ✅ **HECHA** (rama `chore/drop-v1-call-signaling`): eliminados todos
+   los handlers v1 del relay (`call:invite`, `call:answer`, `call:ice`,
+   `call:hangup`, `call:end`, `call:reject`) y el helper `forward()` que
+   estampaba `from: me`. `PendingCallInvite` simplificado a v2-only (sin
+   discriminante `version`). Schemas Zod v1 (`CallInvite`, `CallAnswer`,
+   `CallIce`, `CallHangup`, `CallEnd`, `CallReject`) eliminados. Clientes
+   (mobile + desktop): eliminado el escape-hatch `SEALED_TRANSPORT_VERSION=v1`
+   de `startCall`, los handlers v1 entrantes, y el fallback v1 de
+   `emitSealedSignal`/`emitCallSignal` — fail-closed si no hay `callKey`.
+   - Evidencia: `server/src/relay/handler.ts`, `mobile/src/socket/calls.ts`,
+     `desktop/src/renderer/socket/calls.ts`; tests actualizados:
+     `server/src/__tests__/call-signaling.test.ts` (tests f+g: v1 no routed,
+     zero-`from` en wire), `mobile/src/socket/__tests__/calls.sealedSenderPolicy.test.ts`,
+     `desktop/src/renderer/socket/__tests__/calls.sealedSenderPolicy.test.ts`,
+     `mobile/src/socket/__tests__/calls.signaling.test.ts`.
 
 Cada fase va **junta** en mobile+server+desktop (regla #5), commiteada, pusheada y a `main`.
 
