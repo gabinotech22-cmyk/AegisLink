@@ -1309,6 +1309,7 @@
   },
   "channels": {
     "title": "Channels",
+    "channelPhoto": "Channel photo",
     "segGroups": "Groups",
     "segChannels": "Channels",
     "emptySubscribed": "You're not following any channels yet.",
