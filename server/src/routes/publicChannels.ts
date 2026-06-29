@@ -14,8 +14,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { decodeBase64 } from 'tweetnacl-util';
+import fs from 'node:fs';
+import path from 'node:path';
 import { publicChannelRepo } from '../db/client.js';
-import { verifyManifest, type ChannelManifestData } from '../crypto/publicChannelKey.js';
+import {
+  verifyManifest,
+  extractChannelSignerPub,
+  verifyAvatarSet,
+  verifyAvatarDelete,
+  type ChannelManifestData,
+} from '../crypto/publicChannelKey.js';
 
 // ── Feature flag ─────────────────────────────────────────────────────────────
 
@@ -39,6 +47,28 @@ const RegisterChannelBody = z.object({
    */
   contentKeyEnvelope: z.string().max(4096).optional(),
 });
+
+/** Slice 2 — avatar association request body. Owner-authenticated via Ed25519 sig. */
+const SetAvatarBody = z.object({
+  /** Blob store ID returned by POST /blob/upload. */
+  blobId: z.string().min(1).max(128),
+  /** base64-encoded Ed25519 signature over domain-separated (channelId ‖ blobId). */
+  sigB64: z.string().min(1).max(256),
+});
+
+/** Slice 2 — avatar deletion request body. Owner-authenticated via Ed25519 sig. */
+const DeleteAvatarBody = z.object({
+  /** base64-encoded Ed25519 signature over domain-separated (channelId). */
+  sigB64: z.string().min(1).max(256),
+});
+
+/** Maximum avatar blob size: 256 KB (256px avatar, PNG/WebP). */
+const MAX_AVATAR_BYTES = 256 * 1024;
+
+/** Uploads directory (same as blob store). Lazily resolved so tests can override cwd. */
+function getUploadsDir(): string {
+  return path.join(process.cwd(), 'uploads');
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -158,11 +188,140 @@ export function createPublicChannelsRouter(): Router {
         channel_type: channelType,
         content_key_envelope: contentKeyEnvelope ?? '',
         created_at: Date.now(),
+        avatar_blob_id: null,
       });
       res.status(201).json({ channelId: manifest.channelId });
     } catch {
       res.status(500).json({ error: 'SERVER_ERROR' });
     }
+  });
+
+  // ── Slice 2: Channel avatar endpoints ──────────────────────────────────────
+
+  // POST /:channelId/avatar — associate a blob-store avatar with a channel.
+  // Owner-authenticated: requires Ed25519 sig over (channelId ‖ blobId) verified
+  // against the channel's signing key extracted from the stored manifest.
+  router.post('/:channelId/avatar', async (req, res) => {
+    const channelId = req.params['channelId'] as string;
+    const parsed = SetAvatarBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'INVALID_PAYLOAD' });
+      return;
+    }
+
+    const { blobId, sigB64 } = parsed.data;
+
+    // Fetch channel to extract the authoritative signer pub from the stored manifest.
+    const channel = await publicChannelRepo.get(channelId);
+    if (!channel) {
+      res.status(404).json({ error: 'NOT_FOUND' });
+      return;
+    }
+
+    const signerPub = extractChannelSignerPub(channel.signed_manifest_blob);
+    if (!signerPub) {
+      res.status(500).json({ error: 'SERVER_ERROR' });
+      return;
+    }
+
+    // Verify owner signature (golden rule #3: proof of possession).
+    let sig: Uint8Array;
+    try { sig = decodeBase64(sigB64); } catch {
+      res.status(400).json({ error: 'INVALID_PAYLOAD' });
+      return;
+    }
+
+    if (!verifyAvatarSet(channelId, blobId, sig, signerPub)) {
+      res.status(403).json({ error: 'INVALID_SIGNATURE' });
+      return;
+    }
+
+    // Verify the blob exists in the blob store and is within size limits.
+    const blobPath = path.join(getUploadsDir(), blobId);
+    try {
+      const stat = fs.statSync(blobPath);
+      if (stat.size > MAX_AVATAR_BYTES) {
+        res.status(413).json({ error: 'AVATAR_TOO_LARGE' });
+        return;
+      }
+    } catch {
+      res.status(400).json({ error: 'BLOB_NOT_FOUND' });
+      return;
+    }
+
+    try {
+      await publicChannelRepo.setAvatarBlobId(channelId, blobId);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'SERVER_ERROR' });
+    }
+  });
+
+  // DELETE /:channelId/avatar — remove the avatar association.
+  // Owner-authenticated: requires Ed25519 sig over domain-separated (channelId).
+  router.delete('/:channelId/avatar', async (req, res) => {
+    const channelId = req.params['channelId'] as string;
+    const parsed = DeleteAvatarBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'INVALID_PAYLOAD' });
+      return;
+    }
+
+    const { sigB64 } = parsed.data;
+
+    const channel = await publicChannelRepo.get(channelId);
+    if (!channel) {
+      res.status(404).json({ error: 'NOT_FOUND' });
+      return;
+    }
+
+    const signerPub = extractChannelSignerPub(channel.signed_manifest_blob);
+    if (!signerPub) {
+      res.status(500).json({ error: 'SERVER_ERROR' });
+      return;
+    }
+
+    let sig: Uint8Array;
+    try { sig = decodeBase64(sigB64); } catch {
+      res.status(400).json({ error: 'INVALID_PAYLOAD' });
+      return;
+    }
+
+    if (!verifyAvatarDelete(channelId, sig, signerPub)) {
+      res.status(403).json({ error: 'INVALID_SIGNATURE' });
+      return;
+    }
+
+    try {
+      await publicChannelRepo.setAvatarBlobId(channelId, null);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'SERVER_ERROR' });
+    }
+  });
+
+  // GET /:channelId/avatar — serve the avatar bytes publicly (no auth required).
+  // No metadata logged (golden rule #10): no IP, no requester identity.
+  router.get('/:channelId/avatar', async (req, res) => {
+    const channelId = req.params['channelId'] as string;
+
+    const blobId = await publicChannelRepo.getAvatarBlobId(channelId);
+    if (!blobId) {
+      res.status(404).json({ error: 'NO_AVATAR' });
+      return;
+    }
+
+    const blobPath = path.join(getUploadsDir(), blobId);
+    if (!fs.existsSync(blobPath)) {
+      res.status(404).json({ error: 'BLOB_EXPIRED' });
+      return;
+    }
+
+    // Serve as image with cache headers. Avatars are public branding content.
+    res.set('Content-Type', 'application/octet-stream');
+    res.set('Cache-Control', 'public, max-age=3600, immutable');
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.sendFile(blobPath);
   });
 
   return router;

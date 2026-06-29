@@ -269,6 +269,73 @@ export function extractChannelSignerPub(manifestBlobStr: string): Uint8Array | n
 }
 
 // ---------------------------------------------------------------------------
+// §14 — Channel avatar association signature (Slice 2) — domain-separated
+// ---------------------------------------------------------------------------
+
+const AVATAR_SET_LABEL = encoder.encode('aegislink/CHANNEL_AVATAR_SET');
+
+/**
+ * Build signed input for an avatar association action.
+ * The owner signs (channelId ‖ blobId) so the relay can verify ownership
+ * without the client needing to present the full manifest.
+ */
+function avatarSetSignedInput(channelId: string, blobId: string): Uint8Array {
+  return concat([AVATAR_SET_LABEL, decodeBase64(channelId), encoder.encode(blobId)]);
+}
+
+/** Sign an avatar-set action with the channel's private key. */
+export function signAvatarSet(
+  channelId: string,
+  blobId: string,
+  channelEd25519Secret: Uint8Array
+): Uint8Array {
+  return nacl.sign.detached(avatarSetSignedInput(channelId, blobId), channelEd25519Secret);
+}
+
+/** Verify an avatar-set signature against the channel's public key. */
+export function verifyAvatarSet(
+  channelId: string,
+  blobId: string,
+  sig: Uint8Array,
+  channelEd25519Pub: Uint8Array
+): boolean {
+  if (sig.length !== nacl.sign.signatureLength) return false;
+  return nacl.sign.detached.verify(
+    avatarSetSignedInput(channelId, blobId),
+    sig,
+    channelEd25519Pub
+  );
+}
+
+const AVATAR_DELETE_LABEL = encoder.encode('aegislink/CHANNEL_AVATAR_DELETE');
+
+function avatarDeleteSignedInput(channelId: string): Uint8Array {
+  return concat([AVATAR_DELETE_LABEL, decodeBase64(channelId)]);
+}
+
+/** Sign an avatar-delete action with the channel's private key. */
+export function signAvatarDelete(
+  channelId: string,
+  channelEd25519Secret: Uint8Array
+): Uint8Array {
+  return nacl.sign.detached(avatarDeleteSignedInput(channelId), channelEd25519Secret);
+}
+
+/** Verify an avatar-delete signature against the channel's public key. */
+export function verifyAvatarDelete(
+  channelId: string,
+  sig: Uint8Array,
+  channelEd25519Pub: Uint8Array
+): boolean {
+  if (sig.length !== nacl.sign.signatureLength) return false;
+  return nacl.sign.detached.verify(
+    avatarDeleteSignedInput(channelId),
+    sig,
+    channelEd25519Pub
+  );
+}
+
+// ---------------------------------------------------------------------------
 // §13 — Admin action signatures (delete / ban) — domain-separated
 // ---------------------------------------------------------------------------
 

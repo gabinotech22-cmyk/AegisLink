@@ -380,6 +380,9 @@ function initSqliteSchema(db: DatabaseSync) {
   `);
 
   // Schema migrations for existing deployments
+  // Slice 2 — channel avatars: stores the blob ID (from blob store) associated
+  // with the channel's public avatar. Nullable — absence means no avatar set.
+  try { db.exec(`ALTER TABLE public_channels ADD COLUMN avatar_blob_id TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE identities ADD COLUMN signing_public_key_b64 TEXT NOT NULL DEFAULT '';`); } catch { /* exists */ }
   // Sealed public channels: the wrapped CEK envelope a joiner unwraps with the
   // capability (docs §4.2/§10.1). Added after Phase 1 shipped the table.
@@ -812,6 +815,8 @@ async function initPgSchema(): Promise<void> {
     `ALTER TABLE work_channels ADD COLUMN retention_days INTEGER`,
     // C-3 (security roadmap Ola 2): drop the legacy plaintext SenderKey chain key.
     `ALTER TABLE sender_key_dist_queue DROP COLUMN IF EXISTS chain_key_b64`,
+    // Slice 2 — channel avatars
+    `ALTER TABLE public_channels ADD COLUMN avatar_blob_id TEXT`,
   ];
   for (const ddl of pgMigrations) {
     try { await pool.query(ddl); } catch { /* column already exists — expected */ }
@@ -2290,6 +2295,8 @@ export interface PublicChannelRow {
   /** Wrapped CEK (JSON {ivB64,wrappedB64}) a joiner unwraps with the capability; '' if none. */
   content_key_envelope: string;
   created_at: number;
+  /** Blob store ID of the channel's public avatar (Slice 2). Null when no avatar is set. */
+  avatar_blob_id: string | null;
 }
 
 export interface PublicChannelPostRow {
@@ -2319,28 +2326,28 @@ export const publicChannelRepo = {
   async create(row: PublicChannelRow): Promise<void> {
     if (USE_PG) {
       await dbRun(
-        `INSERT INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at) VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at, avatar_blob_id) VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(channel_id) DO NOTHING`,
-        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.content_key_envelope, row.created_at]
+        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.content_key_envelope, row.created_at, row.avatar_blob_id ?? null]
       );
     } else {
       await dbRun(
-        `INSERT OR IGNORE INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.content_key_envelope, row.created_at]
+        `INSERT OR IGNORE INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at, avatar_blob_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.content_key_envelope, row.created_at, row.avatar_blob_id ?? null]
       );
     }
   },
 
   async get(channelId: string): Promise<PublicChannelRow | undefined> {
     return dbGet<PublicChannelRow>(
-      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at FROM public_channels WHERE channel_id = ?`,
+      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at, avatar_blob_id FROM public_channels WHERE channel_id = ?`,
       [channelId]
     );
   },
 
   async list(): Promise<PublicChannelRow[]> {
     return dbAll<PublicChannelRow>(
-      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at FROM public_channels ORDER BY created_at DESC`
+      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at, avatar_blob_id FROM public_channels ORDER BY created_at DESC`
     );
   },
 
@@ -2358,6 +2365,37 @@ export const publicChannelRepo = {
       [tokenHashB64, channelId]
     );
     return result.changes > 0;
+  },
+
+  /** Slice 2 — associate a blob store avatar with a channel. Null clears it. */
+  async setAvatarBlobId(channelId: string, blobId: string | null): Promise<boolean> {
+    const result = await dbRun(
+      `UPDATE public_channels SET avatar_blob_id = ? WHERE channel_id = ?`,
+      [blobId, channelId]
+    );
+    return result.changes > 0;
+  },
+
+  /**
+   * Slice 2 — return the set of all blob IDs currently referenced as channel
+   * avatars. Used by the blob store TTL cleanup to exempt pinned avatars from
+   * deletion. The set is small (one entry per channel with an avatar) so
+   * fetching all rows is fine.
+   */
+  async listPinnedAvatarBlobIds(): Promise<Set<string>> {
+    const rows = await dbAll<{ avatar_blob_id: string }>(
+      `SELECT avatar_blob_id FROM public_channels WHERE avatar_blob_id IS NOT NULL`,
+    );
+    return new Set(rows.map((r) => r.avatar_blob_id));
+  },
+
+  /** Slice 2 — read the avatar blob ID for a channel. */
+  async getAvatarBlobId(channelId: string): Promise<string | null> {
+    const row = await dbGet<{ avatar_blob_id: string | null }>(
+      `SELECT avatar_blob_id FROM public_channels WHERE channel_id = ?`,
+      [channelId]
+    );
+    return row?.avatar_blob_id ?? null;
   },
 
   async delete(channelId: string): Promise<boolean> {
