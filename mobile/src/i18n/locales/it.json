@@ -1305,7 +1305,15 @@
     "composePlaceholder": "Pubblica nel canale…",
     "postFailed": "Impossibile pubblicare",
     "you": "tu",
-    "unknownError": "Errore sconosciuto"
+    "unknownError": "Errore sconosciuto",
+    "sendOrSchedule": "Invia — tieni premuto per programmare",
+    "postScheduledTitle": "Post programmato",
+    "postScheduledDesc": "Verrà pubblicato automaticamente nel canale all'ora scelta.",
+    "scheduledQueue": "Post programmati",
+    "scheduledQueueTitle": "POST PROGRAMMATI",
+    "deleteScheduledTitle": "Elimina post programmato",
+    "deleteScheduledDesc": "Eliminare questo post programmato? Non si potrà annullare.",
+    "draftChip": "BOZZA"
   },
   "channelInfo": {
     "title": "Info canale",

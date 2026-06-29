@@ -1354,7 +1354,15 @@
     "composePlaceholder": "Post to the channel…",
     "postFailed": "Couldn't post",
     "you": "you",
-    "unknownError": "Unknown error"
+    "unknownError": "Unknown error",
+    "sendOrSchedule": "Send — long-press to schedule",
+    "postScheduledTitle": "Post scheduled",
+    "postScheduledDesc": "It will be posted to the channel automatically at the chosen time.",
+    "scheduledQueue": "Scheduled posts",
+    "scheduledQueueTitle": "SCHEDULED POSTS",
+    "deleteScheduledTitle": "Delete scheduled post",
+    "deleteScheduledDesc": "Delete this scheduled post? This cannot be undone.",
+    "draftChip": "DRAFT"
   },
   "channelInfo": {
     "title": "Channel info",

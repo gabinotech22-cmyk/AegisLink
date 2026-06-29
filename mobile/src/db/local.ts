@@ -302,7 +302,8 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       status            TEXT NOT NULL DEFAULT 'pending',
       retry_count       INTEGER NOT NULL DEFAULT 0,
       group_id          TEXT,
-      post_meta         TEXT
+      post_meta         TEXT,
+      channel_id        TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_scheduled_send_at ON scheduled_messages(send_at, status);
 
@@ -342,7 +343,7 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 10;
+  const USER_DB_VERSION = 11;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -434,6 +435,13 @@ async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // TABLE above. NULL on existing rows → treated as not pending (joined).
     try { await d.execAsync('ALTER TABLE groups ADD COLUMN pending INTEGER;'); } catch {}
     await d.execAsync('PRAGMA user_version = 10');
+  }
+
+  if (currentVersion < 11) {
+    // v10 → v11: add channel_id to scheduled_messages (scheduled channel posts).
+    // Fresh installs already have the column via CREATE TABLE above.
+    try { await d.execAsync('ALTER TABLE scheduled_messages ADD COLUMN channel_id TEXT;'); } catch {}
+    await d.execAsync('PRAGMA user_version = 11');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.
@@ -1839,6 +1847,8 @@ export interface StoredScheduledMessage {
   groupId?: string;
   /** encryptBody(JSON GroupPostOptions) — group posts only. */
   postMeta?: string;
+  /** Set only for scheduled channel posts. */
+  channelId?: string;
 }
 
 type ScheduledRow = {
@@ -1851,6 +1861,7 @@ type ScheduledRow = {
   retry_count: number;
   group_id: string | null;
   post_meta: string | null;
+  channel_id: string | null;
 };
 
 function rowToScheduled(r: ScheduledRow): StoredScheduledMessage {
@@ -1864,6 +1875,7 @@ function rowToScheduled(r: ScheduledRow): StoredScheduledMessage {
     retryCount: r.retry_count,
     groupId: r.group_id ?? undefined,
     postMeta: r.post_meta ?? undefined,
+    channelId: r.channel_id ?? undefined,
   };
 }
 
@@ -1871,8 +1883,8 @@ export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> 
   return withDb(async (d) => {
     await d.runAsync(
       `INSERT OR REPLACE INTO scheduled_messages
-       (id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta, channel_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       msg.id,
       msg.recipientAegisId,
       msg.encryptedPayload,
@@ -1882,6 +1894,7 @@ export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> 
       msg.retryCount,
       msg.groupId ?? null,
       msg.postMeta ?? null,
+      msg.channelId ?? null,
     );
   });
 }
@@ -1889,7 +1902,7 @@ export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> 
 export async function loadPendingScheduled(): Promise<StoredScheduledMessage[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<ScheduledRow>(
-      `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta
+      `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta, channel_id
        FROM scheduled_messages WHERE status = 'pending' ORDER BY send_at ASC`,
     );
     return rows.map(rowToScheduled);
@@ -1899,7 +1912,7 @@ export async function loadPendingScheduled(): Promise<StoredScheduledMessage[]> 
 export async function loadAllScheduled(): Promise<StoredScheduledMessage[]> {
   return withDb(async (d) => {
     const rows = await d.getAllAsync<ScheduledRow>(
-      `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta
+      `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta, channel_id
        FROM scheduled_messages ORDER BY send_at ASC`,
     );
     return rows.map(rowToScheduled);
