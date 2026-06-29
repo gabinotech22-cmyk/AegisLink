@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
-import { ConstellationVisual } from '../components/ConstellationVisual';
+import { ChannelsEmptyVisual } from '../components/ChannelsEmptyVisual';
 import { themedAlert } from '../components/AlertHost';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
@@ -69,7 +69,7 @@ export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate
     </Pressable>
   );
 
-  /* ---- Empty state (mirrors Groups empty with ConstellationVisual) ---- */
+  /* ---- Empty state — channel-specific visual (Globe), same family as Chats/Groups ---- */
   if (subscribed.length === 0) {
     return (
       <View style={{ flex: 1 }}>
@@ -83,7 +83,7 @@ export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate
               paddingTop: 40,
             }}
           >
-            <ConstellationVisual t={t} />
+            <ChannelsEmptyVisual t={t} />
             <Text
               style={{
                 fontFamily: t.fontDisplay,
