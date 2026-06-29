@@ -14,7 +14,33 @@ import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { useChannelAvatar } from '../channels/useChannelAvatar';
 import { useChannels, type DirectoryEntry } from '../store/channels';
+import type { Theme } from '../theme/vault';
+
+/** Per-row component so useChannelAvatar runs per-item. */
+function DiscoverRow({ item, t, onPress, i18nT }: { item: DirectoryEntry; t: Theme; onPress: () => void; i18nT: (k: string) => string }) {
+  const photoUri = useChannelAvatar(item.channelId, item.avatarHash);
+  const isApproval = item.channelType === 'approval';
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={item.name}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}
+    >
+      <Avatar t={t} name={item.name} seed={item.channelId} size={42} photoUri={photoUri} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}>{item.name}</Text>
+        <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 2 }}>
+          {item.description || item.channelType}
+        </Text>
+      </View>
+      <View style={{ backgroundColor: t.accent, borderRadius: t.radiusS, paddingVertical: 5, paddingHorizontal: 12 }}>
+        <Text style={{ fontFamily: t.font, fontSize: 11, fontWeight: '600', color: t.accentInk }}>{isApproval ? i18nT('channels.apply') : i18nT('channels.open')}</Text>
+      </View>
+    </Pressable>
+  );
+}
 
 interface Props {
   onBack: () => void;
@@ -33,26 +59,9 @@ export function ChannelDiscoverScreen({ onBack, onOpenChannel }: Props) {
     void loadDirectory();
   }, [loadDirectory]);
 
-  const renderRow = ({ item }: { item: DirectoryEntry }) => {
-    const isApproval = item.channelType === 'approval';
-    return (
-      <Pressable
-        onPress={() => onOpenChannel(item.channelId)}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}
-      >
-        <Avatar t={t} name={item.name} seed={item.channelId} size={42} />
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text numberOfLines={1} style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}>{item.name}</Text>
-          <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 2 }}>
-            {item.description || item.channelType}
-          </Text>
-        </View>
-        <View style={{ backgroundColor: t.accent, borderRadius: t.radiusS, paddingVertical: 5, paddingHorizontal: 12 }}>
-          <Text style={{ fontFamily: t.font, fontSize: 11, fontWeight: '600', color: t.accentInk }}>{isApproval ? i18nT('channels.apply') : i18nT('channels.open')}</Text>
-        </View>
-      </Pressable>
-    );
-  };
+  const renderRow = ({ item }: { item: DirectoryEntry }) => (
+    <DiscoverRow item={item} t={t} onPress={() => onOpenChannel(item.channelId)} i18nT={i18nT} />
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>

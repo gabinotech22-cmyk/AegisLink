@@ -13,8 +13,32 @@ import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { ChannelsEmptyVisual } from '../components/ChannelsEmptyVisual';
 import { themedAlert } from '../components/AlertHost';
+import { useChannelAvatar } from '../channels/useChannelAvatar';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
+import type { Theme } from '../theme/vault';
+
+/** Extracts each row into its own component so useChannelAvatar runs per-item. */
+function ChannelRow({ item, t, onPress }: { item: ChannelSummary; t: Theme; onPress: () => void }) {
+  const photoUri = useChannelAvatar(item.channelId, item.avatarHash);
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={item.name}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}
+    >
+      <Avatar t={t} name={item.name} seed={item.channelId} size={42} photoUri={photoUri} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text numberOfLines={1} style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}>{item.name}</Text>
+          {item.owned && <I.Key size={12} color={t.accent} />}
+        </View>
+        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, marginTop: 2 }}>{item.channelType}</Text>
+      </View>
+      <I.ChevronL size={16} color={t.textFaint} style={{ transform: [{ rotate: '180deg' }] }} />
+    </Pressable>
+  );
+}
 
 interface Props {
   bottomInset: number;
@@ -52,21 +76,7 @@ export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate
   };
 
   const renderRow = ({ item }: { item: ChannelSummary }) => (
-    <Pressable
-      onPress={() => onOpenChannel(item.channelId)}
-      accessibilityLabel={item.name}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}
-    >
-      <Avatar t={t} name={item.name} seed={item.channelId} size={42} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Text numberOfLines={1} style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}>{item.name}</Text>
-          {item.owned && <I.Key size={12} color={t.accent} />}
-        </View>
-        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, marginTop: 2 }}>{item.channelType}</Text>
-      </View>
-      <I.ChevronL size={16} color={t.textFaint} style={{ transform: [{ rotate: '180deg' }] }} />
-    </Pressable>
+    <ChannelRow item={item} t={t} onPress={() => onOpenChannel(item.channelId)} />
   );
 
   /* ---- Empty state — channel-specific visual (Globe), same family as Chats/Groups ---- */

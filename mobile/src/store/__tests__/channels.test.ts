@@ -14,6 +14,14 @@ jest.mock('../../api/publicChannels', () => ({
   listPublicChannels: jest.fn(),
   registerPublicChannel: jest.fn(async () => ({ channelId: 'x' })),
   getPublicChannelManifest: jest.fn(),
+  setChannelAvatar: jest.fn(async () => ({ ok: true })),
+}));
+jest.mock('../../channels/channelAvatarCache', () => ({
+  uploadAvatarBlob: jest.fn(async () => 'mock-blob-id'),
+  cacheLocalAvatar: jest.fn(async () => '/cached/avatar.jpg'),
+}));
+jest.mock('../../utils/logger', () => ({
+  logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 jest.mock('../../socket/publicChannels', () => ({
   pubchannelJoin: jest.fn(),
@@ -38,6 +46,7 @@ import { useChannels } from '../channels';
 import * as api from '../../api/publicChannels';
 import * as socket from '../../socket/publicChannels';
 import * as store from '../../crypto/publicChannelStore';
+import * as avatarCache from '../../channels/channelAvatarCache';
 import {
   buildAndSealPost,
   type ChainHead,
@@ -277,5 +286,72 @@ describe('joinViaInvite (gap D)', () => {
 
     const res = await useChannels.getState().joinViaInvite(created.invite!, identity);
     expect(res).toEqual({ ok: false, error: 'cek_mismatch' });
+  });
+});
+
+describe('createChannel with avatar (Slice 2)', () => {
+  const fakeAvatarHash = new Uint8Array(32).fill(0xab);
+
+  it('sets avatarHash non-null in the manifest when avatar is provided', async () => {
+    const res = await useChannels.getState().createChannel(
+      {
+        name: 'WithAvatar',
+        description: 'has a photo',
+        channelType: 'open',
+        avatarUri: 'file:///mock/avatar.jpg',
+        avatarHash: fakeAvatarHash,
+      },
+      identity,
+    );
+    expect(res.ok).toBe(true);
+
+    // The signed manifest blob must contain the avatarHash (non-null).
+    const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
+    const manifestBlob = JSON.parse(regArg.signedManifestBlob) as { avatarHash: string | null };
+    expect(manifestBlob.avatarHash).not.toBeNull();
+    expect(typeof manifestBlob.avatarHash).toBe('string');
+
+    // Avatar upload should have been attempted.
+    expect(avatarCache.uploadAvatarBlob).toHaveBeenCalledWith('file:///mock/avatar.jpg');
+    expect(api.setChannelAvatar).toHaveBeenCalled();
+    expect(avatarCache.cacheLocalAvatar).toHaveBeenCalled();
+
+    // The subscribed entry should carry the avatarHash.
+    const sub = useChannels.getState().subscribed.find((c) => c.channelId === res.channelId);
+    expect(sub?.avatarHash).toEqual(fakeAvatarHash);
+  });
+
+  it('sets avatarHash null when no avatar is provided', async () => {
+    const res = await useChannels.getState().createChannel(
+      { name: 'NoAvatar', description: 'd', channelType: 'readonly' },
+      identity,
+    );
+    expect(res.ok).toBe(true);
+
+    const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
+    const manifestBlob = JSON.parse(regArg.signedManifestBlob) as { avatarHash: string | null };
+    expect(manifestBlob.avatarHash).toBeNull();
+
+    // Avatar upload should NOT have been attempted.
+    expect(avatarCache.uploadAvatarBlob).not.toHaveBeenCalled();
+  });
+
+  it('still creates the channel even if avatar upload fails', async () => {
+    (avatarCache.uploadAvatarBlob as jest.Mock).mockRejectedValueOnce(new Error('network'));
+
+    const res = await useChannels.getState().createChannel(
+      {
+        name: 'FailAvatar',
+        description: 'd',
+        channelType: 'open',
+        avatarUri: 'file:///mock/fail.jpg',
+        avatarHash: fakeAvatarHash,
+      },
+      identity,
+    );
+    // Channel creation succeeds despite avatar failure.
+    expect(res.ok).toBe(true);
+    expect(res.channelId).toBeDefined();
+    expect(useChannels.getState().subscribed.find((c) => c.channelId === res.channelId)).toBeDefined();
   });
 });

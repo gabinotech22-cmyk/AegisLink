@@ -48,6 +48,8 @@ export interface PublicChannelRecord {
   delivery_token_hash_b64: string;
   channel_type: string;
   created_at: number;
+  /** Blob store ID of the channel avatar, if set. Null/absent = no avatar. */
+  avatar_blob_id?: string | null;
 }
 
 export type PublicChannelType = 'open' | 'readonly' | 'moderated' | 'approval';
@@ -65,6 +67,40 @@ export interface RegisterChannelRequest {
 /** Public directory of channels. Manifests are unverified blobs — verify before trust. */
 export function listPublicChannels(): Promise<{ channels: PublicChannelRecord[] }> {
   return request<{ channels: PublicChannelRecord[] }>('/public-channels');
+}
+
+// ── Slice 2: Channel avatar API ─────────────────────────────────────────────
+
+/** Associate a blob-store avatar with a channel (owner-authenticated). */
+export function setChannelAvatar(
+  channelId: string,
+  blobId: string,
+  sigB64: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/public-channels/${encodeURIComponent(channelId)}/avatar`,
+    { method: 'POST', body: JSON.stringify({ blobId, sigB64 }) },
+  );
+}
+
+/** Remove the avatar association (owner-authenticated). */
+export function deleteChannelAvatar(
+  channelId: string,
+  sigB64: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/public-channels/${encodeURIComponent(channelId)}/avatar`,
+    { method: 'DELETE', body: JSON.stringify({ sigB64 }) },
+  );
+}
+
+/**
+ * Build the public avatar URL for a channel. The relay serves raw bytes at
+ * GET /public-channels/:channelId/avatar (no auth). Returns null when
+ * SERVER_URL is not configured.
+ */
+export function channelAvatarUrl(channelId: string): string {
+  return `${SERVER_URL}/public-channels/${encodeURIComponent(channelId)}/avatar`;
 }
 
 /** A single channel's signed manifest blob. Verify its signature before trusting it. */

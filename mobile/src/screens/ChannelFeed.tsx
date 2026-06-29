@@ -17,6 +17,7 @@ import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { themedAlert } from '../components/AlertHost';
+import { useChannelAvatar } from '../channels/useChannelAvatar';
 import { useChannels, type FeedPost } from '../store/channels';
 import { useIdentity } from '../store/identity';
 
@@ -36,6 +37,8 @@ export function ChannelFeedScreen({ channelId, onBack }: Props) {
   const loadFeed = useChannels((s) => s.loadFeed);
   const sendPost = useChannels((s) => s.sendPost);
   const attachLive = useChannels((s) => s.attachLive);
+
+  const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
 
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -80,7 +83,12 @@ export function ChannelFeedScreen({ channelId, onBack }: Props) {
       <TopBar
         t={t}
         title={summary?.name ?? i18nT('channels.title')}
-        left={<Pressable onPress={onBack} hitSlop={8}><I.ChevronL size={22} color={t.text} /></Pressable>}
+        left={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Pressable onPress={onBack} hitSlop={8} accessibilityLabel={i18nT('common.back', 'Back')}><I.ChevronL size={22} color={t.text} /></Pressable>
+            <Avatar t={t} name={summary?.name ?? '?'} seed={channelId} size={28} photoUri={channelAvatarUri} />
+          </View>
+        }
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <I.Lock size={11} color={t.accent} />

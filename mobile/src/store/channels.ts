@@ -19,12 +19,14 @@
  */
 
 import { create } from 'zustand';
-import { decodeBase64 } from 'tweetnacl-util';
+import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import type { Identity } from '../crypto/identity';
 import { useContacts } from './contacts';
 import nacl from 'tweetnacl';
 import { sha256 } from '@noble/hashes/sha2';
-import { listPublicChannels, registerPublicChannel, getPublicChannelManifest, type PublicChannelType } from '../api/publicChannels';
+import { listPublicChannels, registerPublicChannel, getPublicChannelManifest, setChannelAvatar, type PublicChannelType } from '../api/publicChannels';
+import { uploadAvatarBlob, cacheLocalAvatar } from '../channels/channelAvatarCache';
+import { logger } from '../utils/logger';
 import {
   pubchannelJoin,
   pubchannelPost,
@@ -45,6 +47,7 @@ import {
   generateChannelIdentity,
   generateCEK,
   signManifest,
+  signAvatarSet,
   deriveChannelId,
   deriveChannelDeliveryToken,
   hashChannelDeliveryToken,
@@ -76,6 +79,10 @@ export interface DirectoryEntry {
   name: string;
   description: string;
   channelType: PublicChannelType;
+  /** SHA-256 committed in the signed manifest, or null if no avatar. */
+  avatarHash: Uint8Array | null;
+  /** Blob ID from the directory listing (relay-side association). */
+  avatarBlobId: string | null;
 }
 
 /** A channel we hold secrets for (appears in the subscribed list). */
@@ -84,6 +91,8 @@ export interface ChannelSummary {
   name: string;
   channelType: PublicChannelType;
   owned: boolean;
+  /** SHA-256 committed in the signed manifest, or null if no avatar. */
+  avatarHash: Uint8Array | null;
 }
 
 /** A UI-facing, already-authenticated post. */
@@ -104,7 +113,15 @@ interface ChannelsState {
 
   loadDirectory: () => Promise<void>;
   createChannel: (
-    params: { name: string; description: string; channelType: PublicChannelType },
+    params: {
+      name: string;
+      description: string;
+      channelType: PublicChannelType;
+      /** Local file:// URI of the 256px compressed avatar, or null for no avatar. */
+      avatarUri?: string | null;
+      /** SHA-256 of the avatar file bytes (pre-computed by the caller). */
+      avatarHash?: Uint8Array | null;
+    },
     identity: Identity,
   ) => Promise<{ ok: boolean; channelId?: string; invite?: string; error?: string }>;
   joinViaInvite: (inviteUrl: string, identity: Identity) => Promise<{ ok: boolean; channelId?: string; error?: string }>;
@@ -157,6 +174,8 @@ export const useChannels = create<ChannelsState>((set, get) => ({
           name: manifest.name,
           description: manifest.description,
           channelType: manifestType(manifest.channelType),
+          avatarHash: manifest.avatarHash,
+          avatarBlobId: row.avatar_blob_id ?? null,
         });
       }
       set({ directory: verified });
@@ -174,13 +193,16 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     if (channelType < 0) return { ok: false, error: 'bad_channel_type' };
 
     // 2. Signed manifest binding name/type/contentKeyHash to the channel key.
+    //    avatarHash is committed here BEFORE signing so the manifest binds the
+    //    avatar to the channel's Ed25519 key. This makes the avatar verifiable
+    //    even when downloaded from the untrusted relay.
     const manifest: ChannelManifestData = {
       channelId: id.channelId,
       salt: id.salt,
       channelEd25519Pub: id.channelEd25519Pub,
       name: params.name,
       description: params.description,
-      avatarHash: null,
+      avatarHash: params.avatarHash ?? null,
       channelType: channelType as 0 | 1 | 2 | 3,
       createdAtHourMs: Math.floor(Date.now() / HOUR_MS) * HOUR_MS, // hour-truncated (metadata minimization)
       manifestSeq: 1,
@@ -213,10 +235,32 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     await saveChannelSigningKey(id.channelId, id.channelEd25519Secret);
 
     set((s) => ({
-      subscribed: [...s.subscribed, { channelId: id.channelId, name: params.name, channelType: params.channelType, owned: true }],
+      subscribed: [...s.subscribed, {
+        channelId: id.channelId,
+        name: params.name,
+        channelType: params.channelType,
+        owned: true,
+        avatarHash: params.avatarHash ?? null,
+      }],
     }));
 
-    // 5. Share link. Approval-gated channels omit the capability (p=1).
+    // 5. Avatar upload (best-effort -- the channel is already created; the
+    //    avatar can be retried later). ORDER: upload bytes to blob store, then
+    //    sign proof-of-ownership and associate via POST /avatar.
+    if (params.avatarUri && params.avatarHash) {
+      try {
+        const blobId = await uploadAvatarBlob(params.avatarUri);
+        const avatarSig = signAvatarSet(id.channelId, blobId, id.channelEd25519Secret);
+        await setChannelAvatar(id.channelId, blobId, encodeBase64(avatarSig));
+        // Cache the avatar locally so it renders immediately for the creator.
+        await cacheLocalAvatar(id.channelId, params.avatarUri);
+      } catch (e) {
+        // Non-fatal: the channel exists, the avatar just didn't attach.
+        logger.warn(`[channels] avatar upload failed: ${(e as Error).message}`);
+      }
+    }
+
+    // 6. Share link. Approval-gated channels omit the capability (p=1).
     const invite = buildInviteLink({
       channelId: id.channelId,
       channelEd25519Pub: id.channelEd25519Pub,
@@ -275,6 +319,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
             name: manifest.name,
             channelType: CHANNEL_TYPE_NAMES[manifest.channelType] ?? 'open',
             owned: false,
+            avatarHash: manifest.avatarHash,
           }],
     }));
     await get().loadFeed(parsed.channelId, identity);
@@ -302,6 +347,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       name: manifest?.name ?? channelId,
       channelType: manifest ? manifestType(manifest.channelType) : 'open',
       owned: await isChannelOwned(channelId),
+      avatarHash: manifest?.avatarHash ?? null,
     };
     set((s) => ({
       subscribed: s.subscribed.some((c) => c.channelId === channelId)

@@ -1,22 +1,33 @@
 /**
- * ChannelCreate — create a sealed public channel (Phase 2d-2)
+ * ChannelCreate -- create a sealed public channel (Phase 2d-2, Slice 2 avatar)
  *
- * Collects name/description/type and calls useChannels.createChannel, which does
- * ALL the crypto (identity, CEK, manifest sign, CEK wrap, register, invite). On
- * success the shareable invite link is surfaced via ShareLinkSheet. This screen
- * does no crypto. Design ref: prototype/screens-channels.jsx (ScreenChannelCreate).
+ * Collects name/description/type + optional avatar photo, then calls
+ * useChannels.createChannel which does ALL the crypto (identity, CEK, manifest
+ * sign with avatarHash, CEK wrap, register, avatar upload, invite). On success
+ * the shareable invite link is surfaced via ShareLinkSheet.
+ *
+ * Avatar picker follows EXACTLY the Groups.tsx pattern: pick image, hand off
+ * to AvatarCropModal (256px square), compress, hash (SHA-256), pass to store.
+ *
+ * Design ref: prototype/screens-channels.jsx (ScreenChannelCreate, preview 64px)
+ *           + Groups.tsx (pickAvatar + AvatarCropModal + groupImage).
  */
 
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { AvatarCropModal } from '../components/AvatarCropModal';
 import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import { themedAlert } from '../components/AlertHost';
+import { withPickingGuard } from '../utils/pickingGuard';
+import { hashLocalFile } from '../channels/channelAvatarCache';
 import { useChannels } from '../store/channels';
 import { useIdentity } from '../store/identity';
 import type { PublicChannelType } from '../api/publicChannels';
@@ -46,13 +57,85 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
   const [busy, setBusy] = useState(false);
   const [invite, setInvite] = useState<string | null>(null);
 
+  // Avatar state -- same pattern as Groups.tsx
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
+
   const canCreate = name.trim().length > 0 && !busy && identity;
+
+  // ---- Avatar picker (identical to Groups.tsx handlePickImage) ----
+  async function handlePickImage() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      themedAlert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedGallery'));
+      return;
+    }
+    const result = await withPickingGuard(() =>
+      ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'] as ImagePicker.MediaType[],
+        quality: 0.8,
+      })
+    );
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      const asset = result.assets[0];
+      setCropSource({ uri: asset.uri, width: asset.width ?? 0, height: asset.height ?? 0 });
+    }
+  }
+
+  async function handleTakePhoto() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      themedAlert(i18nT('groups.permissionDeniedTitle'), i18nT('groups.permissionDeniedCamera'));
+      return;
+    }
+    const result = await withPickingGuard(() =>
+      ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'] as ImagePicker.MediaType[],
+        quality: 0.8,
+      })
+    );
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      const asset = result.assets[0];
+      setCropSource({ uri: asset.uri, width: asset.width ?? 0, height: asset.height ?? 0 });
+    }
+  }
+
+  // Confirm from AvatarCropModal -- compress to 256px and stage.
+  async function handleConfirmAvatar(uri: string) {
+    setCropSource(null);
+    try {
+      const compressed = await manipulateAsync(
+        uri,
+        [{ resize: { width: 256 } }],
+        { compress: 0.7, format: SaveFormat.JPEG },
+      );
+      setAvatarUri(compressed.uri);
+    } catch (e) {
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
+    }
+  }
 
   const handleCreate = async () => {
     if (!identity || !canCreate) return;
     setBusy(true);
     try {
-      const res = await createChannel({ name: name.trim(), description: description.trim(), channelType: type }, identity);
+      // Compute SHA-256 of the avatar file BEFORE passing to createChannel
+      // (the hash goes into the manifest before signing).
+      let avatarHash: Uint8Array | null = null;
+      if (avatarUri) {
+        avatarHash = await hashLocalFile(avatarUri);
+      }
+
+      const res = await createChannel(
+        {
+          name: name.trim(),
+          description: description.trim(),
+          channelType: type,
+          avatarUri,
+          avatarHash,
+        },
+        identity,
+      );
       if (res.ok && res.invite) {
         setInvite(res.invite);
       } else {
@@ -71,14 +154,78 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
       <TopBar
         t={t}
         title={i18nT('channels.newChannel')}
-        left={<Pressable onPress={onBack} hitSlop={8}><I.ChevronL size={22} color={t.text} /></Pressable>}
+        left={<Pressable onPress={onBack} hitSlop={8} accessibilityLabel={i18nT('common.back', 'Back')}><I.ChevronL size={22} color={t.text} /></Pressable>}
       />
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
-        <View style={{ alignItems: 'center', marginBottom: 20 }}>
-          {/* No channelId exists yet; seed from current name so the identicon
-              updates live as the user types. Once created, the real channelId
-              becomes the stable seed everywhere else. */}
-          <Avatar t={t} name={name.trim() || 'Channel'} seed={name.trim() || 'new-channel'} size={64} />
+        {/* Avatar preview -- 64px, photo if chosen, identicon/Globe otherwise */}
+        <View style={{ alignItems: 'center', marginBottom: 12 }}>
+          <Avatar
+            t={t}
+            name={name.trim() || 'Channel'}
+            seed={name.trim() || 'new-channel'}
+            size={64}
+            photoUri={avatarUri}
+          />
+        </View>
+
+        {/* Photo picking buttons -- identical layout to Groups.tsx */}
+        <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'center', marginBottom: 20 }}>
+          <Pressable
+            onPress={handlePickImage}
+            accessibilityLabel={i18nT('common.gallery', 'Gallery')}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: t.radiusS,
+              backgroundColor: t.surface,
+              borderWidth: 1,
+              borderColor: t.borderStrong,
+            }}
+          >
+            <I.Plus size={14} color={t.text} />
+            <Text style={{ fontFamily: t.font, fontSize: 12, color: t.text }}>{i18nT('common.gallery', 'Gallery')}</Text>
+          </Pressable>
+          <Pressable
+            onPress={handleTakePhoto}
+            accessibilityLabel={i18nT('common.camera', 'Camera')}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: t.radiusS,
+              backgroundColor: t.surface,
+              borderWidth: 1,
+              borderColor: t.borderStrong,
+            }}
+          >
+            <I.Video size={14} color={t.text} />
+            <Text style={{ fontFamily: t.font, fontSize: 12, color: t.text }}>{i18nT('common.camera', 'Camera')}</Text>
+          </Pressable>
+          {avatarUri && (
+            <Pressable
+              onPress={() => setAvatarUri(null)}
+              accessibilityLabel={i18nT('common.remove', 'Remove')}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: t.radiusS,
+                backgroundColor: `${t.danger}15`,
+                borderWidth: 1,
+                borderColor: t.danger,
+              }}
+            >
+              <I.Trash size={14} color={t.danger} />
+              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.danger }}>{i18nT('common.remove', 'Remove')}</Text>
+            </Pressable>
+          )}
         </View>
 
         <Text style={lbl}>{i18nT('channels.nameLabel')}</Text>
@@ -95,6 +242,7 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
               <Pressable
                 key={ty.id}
                 onPress={() => setType(ty.id)}
+                accessibilityLabel={i18nT(ty.labelKey)}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 13, borderWidth: 1, borderColor: on ? t.accent : t.border, borderRadius: t.radius, backgroundColor: on ? t.surface2 : t.surface }}
               >
                 <View style={{ width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: on ? t.accent : t.borderStrong, backgroundColor: on ? t.accent : 'transparent' }} />
@@ -117,6 +265,7 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
         <Pressable
           onPress={handleCreate}
           disabled={!canCreate}
+          accessibilityLabel={i18nT('channels.create')}
           style={{ marginTop: 22, backgroundColor: canCreate ? t.accent : t.surface2, borderRadius: t.radius, paddingVertical: 15, alignItems: 'center' }}
         >
           {busy ? <ActivityIndicator color={t.accentInk} /> : (
@@ -131,6 +280,19 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
         link={invite ?? ''}
         title={i18nT('channels.shareTitle')}
         shareMessage={i18nT('channels.shareMessage', { name: name.trim() })}
+      />
+
+      <AvatarCropModal
+        t={t}
+        visible={cropSource !== null}
+        imageUri={cropSource?.uri ?? null}
+        imageWidth={cropSource?.width ?? 0}
+        imageHeight={cropSource?.height ?? 0}
+        title={i18nT('channels.channelPhoto', 'Channel photo')}
+        confirmLabel={i18nT('common.confirm', 'Confirm')}
+        cancelLabel={i18nT('common.cancel', 'Cancel')}
+        onCancel={() => setCropSource(null)}
+        onConfirm={(uri) => { void handleConfirmAvatar(uri); }}
       />
     </View>
   );
