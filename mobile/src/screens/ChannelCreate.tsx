@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
@@ -24,15 +25,16 @@ interface Props {
   onCreated: () => void;
 }
 
-const TYPES: Array<{ id: PublicChannelType; label: string; desc: string }> = [
-  { id: 'open', label: 'Abierto', desc: 'Cualquiera publica' },
-  { id: 'readonly', label: 'Solo lectura', desc: 'Solo admins publican' },
-  { id: 'moderated', label: 'Moderado', desc: 'Posts en cola de aprobación' },
-  { id: 'approval', label: 'Privado', desc: 'Join requiere aprobación' },
+const TYPE_IDS: Array<{ id: PublicChannelType; labelKey: string; descKey: string }> = [
+  { id: 'open', labelKey: 'channels.typeOpen', descKey: 'channels.typeOpenDesc' },
+  { id: 'readonly', labelKey: 'channels.typeReadonly', descKey: 'channels.typeReadonlyDesc' },
+  { id: 'moderated', labelKey: 'channels.typeModerated', descKey: 'channels.typeModeratedDesc' },
+  { id: 'approval', labelKey: 'channels.typeApproval', descKey: 'channels.typeApprovalDesc' },
 ];
 
 export function ChannelCreateScreen({ onBack, onCreated }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const identity = useIdentity((s) => s.identity);
   const createChannel = useChannels((s) => s.createChannel);
@@ -53,7 +55,7 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
       if (res.ok && res.invite) {
         setInvite(res.invite);
       } else {
-        themedAlert('No se pudo crear', res.error ?? 'Error desconocido');
+        themedAlert(i18nT('channels.createFailed'), res.error ?? i18nT('channels.unknownError'));
       }
     } finally {
       setBusy(false);
@@ -67,7 +69,7 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <TopBar
         t={t}
-        title="New channel"
+        title={i18nT('channels.newChannel')}
         left={<Pressable onPress={onBack} hitSlop={8}><I.ChevronL size={22} color={t.text} /></Pressable>}
       />
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 24 }} keyboardShouldPersistTaps="handled">
@@ -77,15 +79,15 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
           </View>
         </View>
 
-        <Text style={lbl}>NOMBRE</Text>
-        <TextInput value={name} onChangeText={setName} placeholder="Aegis Notes" placeholderTextColor={t.textFaint} style={inp} maxLength={64} />
+        <Text style={lbl}>{i18nT('channels.nameLabel')}</Text>
+        <TextInput value={name} onChangeText={setName} placeholder={i18nT('channels.namePlaceholder')} placeholderTextColor={t.textFaint} style={inp} maxLength={64} />
 
-        <Text style={[lbl, { marginTop: 16 }]}>DESCRIPCIÓN</Text>
-        <TextInput value={description} onChangeText={setDescription} placeholder="Anuncios firmados del proyecto" placeholderTextColor={t.textFaint} style={inp} maxLength={140} />
+        <Text style={[lbl, { marginTop: 16 }]}>{i18nT('channels.descLabel')}</Text>
+        <TextInput value={description} onChangeText={setDescription} placeholder={i18nT('channels.descPlaceholder')} placeholderTextColor={t.textFaint} style={inp} maxLength={140} />
 
-        <Text style={[lbl, { marginTop: 16 }]}>TIPO DE CANAL</Text>
+        <Text style={[lbl, { marginTop: 16 }]}>{i18nT('channels.typeLabel')}</Text>
         <View style={{ gap: 8 }}>
-          {TYPES.map((ty) => {
+          {TYPE_IDS.map((ty) => {
             const on = type === ty.id;
             return (
               <Pressable
@@ -95,8 +97,8 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
               >
                 <View style={{ width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: on ? t.accent : t.borderStrong, backgroundColor: on ? t.accent : 'transparent' }} />
                 <View>
-                  <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.text }}>{ty.label}</Text>
-                  <Text style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 1 }}>{ty.desc}</Text>
+                  <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.text }}>{i18nT(ty.labelKey)}</Text>
+                  <Text style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 1 }}>{i18nT(ty.descKey)}</Text>
                 </View>
               </Pressable>
             );
@@ -106,7 +108,7 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 16 }}>
           <I.Lock size={12} color={t.textDim} />
           <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 10, color: t.textDim, lineHeight: 15 }}>
-            Los posts se cifran siempre (CEK). El relay nunca ve el contenido ni quién publica.
+            {i18nT('channels.encryptNote')}
           </Text>
         </View>
 
@@ -116,7 +118,7 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
           style={{ marginTop: 22, backgroundColor: canCreate ? t.accent : t.surface2, borderRadius: t.radius, paddingVertical: 15, alignItems: 'center' }}
         >
           {busy ? <ActivityIndicator color={t.accentInk} /> : (
-            <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '700', color: canCreate ? t.accentInk : t.textFaint }}>Crear canal</Text>
+            <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '700', color: canCreate ? t.accentInk : t.textFaint }}>{i18nT('channels.create')}</Text>
           )}
         </Pressable>
       </ScrollView>
@@ -125,8 +127,8 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
         visible={invite !== null}
         onClose={() => { setInvite(null); onCreated(); }}
         link={invite ?? ''}
-        title="Comparte tu canal"
-        shareMessage={`Únete a mi canal "${name.trim()}" en AegisLink`}
+        title={i18nT('channels.shareTitle')}
+        shareMessage={i18nT('channels.shareMessage', { name: name.trim() })}
       />
     </View>
   );

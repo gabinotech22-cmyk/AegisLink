@@ -11,6 +11,7 @@ import { useEffect } from 'react';
 import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
@@ -25,6 +26,7 @@ interface Props {
 
 export function ChannelFeedScreen({ channelId, onBack }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const identity = useIdentity((s) => s.identity);
 
@@ -52,7 +54,7 @@ export function ChannelFeedScreen({ channelId, onBack }: Props) {
     try {
       const res = await sendPost(channelId, draft.trim(), identity);
       if (res.ok) setDraft('');
-      else themedAlert('No se pudo publicar', res.error ?? 'Error');
+      else themedAlert(i18nT('channels.postFailed'), res.error ?? i18nT('channels.unknownError'));
     } finally {
       setSending(false);
     }
@@ -66,7 +68,7 @@ export function ChannelFeedScreen({ channelId, onBack }: Props) {
           <View style={{ width: 24, height: 24, borderRadius: t.radiusS, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
             <I.Shield size={12} color={t.accent} />
           </View>
-          <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>{mine ? 'tú' : item.from}</Text>
+          <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>{mine ? i18nT('channels.you') : item.from}</Text>
           <Text style={{ marginLeft: 'auto', fontFamily: t.fontMono, fontSize: 9, color: t.textFaint }}>#{item.seqNum}</Text>
         </View>
         <Text style={{ fontFamily: t.font, fontSize: 13, lineHeight: 20, color: t.text }}>{item.body}</Text>
@@ -78,12 +80,12 @@ export function ChannelFeedScreen({ channelId, onBack }: Props) {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <TopBar
         t={t}
-        title={summary?.name ?? 'Canal'}
+        title={summary?.name ?? i18nT('channels.title')}
         left={<Pressable onPress={onBack} hitSlop={8}><I.ChevronL size={22} color={t.text} /></Pressable>}
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <I.Lock size={11} color={t.accent} />
-            <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, textTransform: 'uppercase' }}>sealed</Text>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, textTransform: 'uppercase' }}>{i18nT('channels.sealed')}</Text>
           </View>
         }
       />
@@ -94,7 +96,7 @@ export function ChannelFeedScreen({ channelId, onBack }: Props) {
         contentContainerStyle={{ paddingBottom: 12 }}
         ListEmptyComponent={
           <Text style={{ textAlign: 'center', marginTop: 40, fontFamily: t.font, fontSize: 13, color: t.textDim }}>
-            Aún no hay posts en este canal.
+            {i18nT('channels.feedEmpty')}
           </Text>
         }
       />
@@ -104,7 +106,7 @@ export function ChannelFeedScreen({ channelId, onBack }: Props) {
           <TextInput
             value={draft}
             onChangeText={setDraft}
-            placeholder="Publicar en el canal…"
+            placeholder={i18nT('channels.composePlaceholder')}
             placeholderTextColor={t.textFaint}
             multiline
             style={{ flex: 1, maxHeight: 120, backgroundColor: t.surface2, borderRadius: t.radius, paddingHorizontal: 14, paddingVertical: 10, color: t.text, fontFamily: t.font, fontSize: 15 }}

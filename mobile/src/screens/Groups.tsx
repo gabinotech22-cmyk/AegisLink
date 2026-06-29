@@ -13,6 +13,7 @@ import { TabBar, type Tab } from '../components/TabBar';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { AvatarCropModal } from '../components/AvatarCropModal';
+import { ChannelsPanel } from './ChannelsPanel';
 import { FloatingMenu } from '../components/FloatingMenu';
 import type { Theme } from '../theme/vault';
 import { useGroups, LARGE_GROUP_THRESHOLD } from '../store/groups';
@@ -29,8 +30,10 @@ interface Props {
   onTab: (tab: Tab) => void;
   onOpenGroupChat: (group: StoredGroup) => void;
   onJoinByLink?: (groupId: string, groupName: string, adminId: string) => void;
-  /** Open the sealed public Channels surface (separate from private groups). */
-  onOpenChannels?: () => void;
+  /** Channels segment navigation (sealed public channels live inside this tab). */
+  onOpenChannel?: (channelId: string) => void;
+  onDiscoverChannels?: () => void;
+  onCreateChannel?: () => void;
 }
 
 const GROUP_COLORS = [
@@ -56,7 +59,7 @@ const GROUP_EMOJIS = [
   { label: 'Cubo', val: '🧊' },
 ];
 
-export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChannels }: Props) {
+export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChannel, onDiscoverChannels, onCreateChannel }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -69,6 +72,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
   const previews = useMessages((s) => s.previews);
   const unreadCounts = useMessages((s) => s.unreadCounts);
 
+  const [seg, setSeg] = useState<'groups' | 'channels'>('groups');
   const [isCreating, setIsCreating] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
@@ -457,26 +461,49 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
   }
 
   // RENDER: Normal Group List Tab
+  const channelsEnabled = !!onOpenChannel;
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <TopBar
         t={t}
-        title={i18nT('groups.title')}
+        title={seg === 'channels' ? i18nT('channels.title') : i18nT('groups.title')}
         big
-        left={onOpenChannels ? (
-          <Pressable onPress={onOpenChannels} hitSlop={8} style={{ padding: 4 }}>
-            <I.Globe size={22} color={t.accent} />
-          </Pressable>
-        ) : undefined}
-        right={
+        right={seg === 'groups' ? (
           <Pressable onPress={() => setIsCreating(true)} hitSlop={8} style={{ padding: 4 }}>
             <I.Plus size={22} color={t.accent} />
           </Pressable>
-        }
+        ) : undefined}
       />
 
+      {/* Groups | Channels segment (sealed public channels live in this tab). */}
+      {channelsEnabled && (
+        <View style={{ flexDirection: 'row', gap: 4, marginHorizontal: 14, marginTop: 2, marginBottom: 8, backgroundColor: t.surface, borderWidth: 1, borderColor: t.border, borderRadius: t.radius, padding: 3 }}>
+          {(['groups', 'channels'] as const).map((s) => {
+            const on = seg === s;
+            return (
+              <Pressable
+                key={s}
+                onPress={() => setSeg(s)}
+                style={{ flex: 1, paddingVertical: 7, borderRadius: t.radiusS, backgroundColor: on ? t.accent : 'transparent', alignItems: 'center' }}
+              >
+                <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: on ? t.accentInk : t.textDim }}>
+                  {s === 'groups' ? i18nT('channels.segGroups') : i18nT('channels.segChannels')}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
 
-      {activeGroups.length === 0 && pendingInvites.length === 0 ? (
+
+      {seg === 'channels' ? (
+        <ChannelsPanel
+          bottomInset={insets.bottom}
+          onOpenChannel={(channelId) => onOpenChannel?.(channelId)}
+          onDiscover={() => onDiscoverChannels?.()}
+          onCreate={() => onCreateChannel?.()}
+        />
+      ) : activeGroups.length === 0 && pendingInvites.length === 0 ? (
         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
           <View
             style={{

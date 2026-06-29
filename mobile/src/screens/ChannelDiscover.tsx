@@ -9,6 +9,7 @@
 import { useEffect } from 'react';
 import { View, Text, Pressable, FlatList, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
@@ -19,15 +20,9 @@ interface Props {
   onOpenChannel: (channelId: string) => void;
 }
 
-const TYPE_LABEL: Record<string, string> = {
-  open: 'abierto',
-  readonly: 'solo lectura',
-  moderated: 'moderado',
-  approval: 'aprobación',
-};
-
 export function ChannelDiscoverScreen({ onBack, onOpenChannel }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const directory = useChannels((s) => s.directory);
   const loading = useChannels((s) => s.loadingDirectory);
@@ -50,11 +45,11 @@ export function ChannelDiscoverScreen({ onBack, onOpenChannel }: Props) {
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text numberOfLines={1} style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}>{item.name}</Text>
           <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 2 }}>
-            {item.description || `Canal ${TYPE_LABEL[item.channelType] ?? 'público'}`}
+            {item.description || item.channelType}
           </Text>
         </View>
         <View style={{ backgroundColor: t.accent, borderRadius: t.radiusS, paddingVertical: 5, paddingHorizontal: 12 }}>
-          <Text style={{ fontFamily: t.font, fontSize: 11, fontWeight: '600', color: t.accentInk }}>{isApproval ? 'Apply' : 'Open'}</Text>
+          <Text style={{ fontFamily: t.font, fontSize: 11, fontWeight: '600', color: t.accentInk }}>{isApproval ? i18nT('channels.apply') : i18nT('channels.open')}</Text>
         </View>
       </Pressable>
     );
@@ -64,11 +59,11 @@ export function ChannelDiscoverScreen({ onBack, onOpenChannel }: Props) {
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <TopBar
         t={t}
-        title="Discover"
+        title={i18nT('channels.discoverTitle')}
         left={<Pressable onPress={onBack} hitSlop={8}><I.ChevronL size={22} color={t.text} /></Pressable>}
       />
       <Text style={{ paddingHorizontal: 15, paddingTop: 12, paddingBottom: 8, fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 1, textTransform: 'uppercase' }}>
-        Directorio público · manifests firmados
+        {i18nT('channels.directorySubtitle')}
       </Text>
       {loading && directory.length === 0 ? (
         <ActivityIndicator color={t.accent} style={{ marginTop: 32 }} />
@@ -80,7 +75,7 @@ export function ChannelDiscoverScreen({ onBack, onOpenChannel }: Props) {
           contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
           ListEmptyComponent={
             <Text style={{ textAlign: 'center', marginTop: 40, fontFamily: t.font, fontSize: 13, color: t.textDim }}>
-              No hay canales públicos todavía.
+              {i18nT('channels.directoryEmpty')}
             </Text>
           }
         />

@@ -57,7 +57,6 @@ import { FloatingGroupCallBar } from './src/components/FloatingGroupCallBar';
 import { NetworkErrorScreen } from './src/screens/NetworkError';
 import { LockSettingsScreen } from './src/screens/LockSettings';
 import { KeysScreen } from './src/screens/Keys';
-import { ChannelsHomeScreen } from './src/screens/ChannelsHome';
 import { ChannelDiscoverScreen } from './src/screens/ChannelDiscover';
 import { ChannelCreateScreen } from './src/screens/ChannelCreate';
 import { ChannelFeedScreen } from './src/screens/ChannelFeed';
@@ -162,7 +161,6 @@ type PushRoute =
   | { name: 'groupCall' }
   | { name: 'multiPreview'; contact: StoredContact; assets: import('./src/screens/MultiPreview').MultiPreviewAsset[] }
   | { name: 'groupMultiPreview'; group: StoredGroup; assets: import('./src/screens/MultiPreview').MultiPreviewAsset[] }
-  | { name: 'channelsHome' }
   | { name: 'channelDiscover' }
   | { name: 'channelCreate' }
   | { name: 'channelFeed'; channelId: string };
@@ -1244,15 +1242,6 @@ function Shell() {
         return <AppIconScreen onBack={pop} />;
       case 'keys':
         return <KeysScreen onBack={pop} />;
-      case 'channelsHome':
-        return (
-          <ChannelsHomeScreen
-            onBack={pop}
-            onOpenChannel={(channelId) => push({ name: 'channelFeed', channelId })}
-            onDiscover={() => push({ name: 'channelDiscover' })}
-            onCreate={() => push({ name: 'channelCreate' })}
-          />
-        );
       case 'channelDiscover':
         return (
           <ChannelDiscoverScreen
@@ -1631,7 +1620,9 @@ function Shell() {
           onJoinByLink={(groupId, groupName, adminId) =>
             push({ name: 'groupJoin', groupId, groupName, adminId })
           }
-          onOpenChannels={() => push({ name: 'channelsHome' })}
+          onOpenChannel={(channelId) => push({ name: 'channelFeed', channelId })}
+          onDiscoverChannels={() => push({ name: 'channelDiscover' })}
+          onCreateChannel={() => push({ name: 'channelCreate' })}
         />
       );
     case 'settings':

@@ -1,32 +1,29 @@
 /**
- * ChannelsHome — subscribed sealed channels + entry points (Phase 2d-2)
- *
- * The Channels surface (reached from the Groups tab). Lists channels we hold
- * secrets for, plus Discover (public directory), New channel, and Join-by-link.
- * Joining/creating crypto lives entirely in useChannels. Design ref:
- * prototype/screens-channels.jsx (ScreenChannels, channels segment).
+ * ChannelsPanel — the Channels content rendered inside the Groups tab's
+ * "Groups | Channels" segment (Phase 2d-2). Self-contained body (no TopBar /
+ * TabBar — the host Groups screen provides those): subscribed list + Discover +
+ * New + Join-by-link. All crypto lives in useChannels; this is pure UI.
  */
 
 import { useState } from 'react';
 import { View, Text, Pressable, FlatList, Modal, TextInput, ActivityIndicator } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
-import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
 import { themedAlert } from '../components/AlertHost';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
 
 interface Props {
-  onBack: () => void;
+  bottomInset: number;
   onOpenChannel: (channelId: string) => void;
   onDiscover: () => void;
   onCreate: () => void;
 }
 
-export function ChannelsHomeScreen({ onBack, onOpenChannel, onDiscover, onCreate }: Props) {
+export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate }: Props) {
   const { t } = useTheme();
-  const insets = useSafeAreaInsets();
+  const { t: i18nT } = useTranslation();
   const identity = useIdentity((s) => s.identity);
   const subscribed = useChannels((s) => s.subscribed);
   const joinViaInvite = useChannels((s) => s.joinViaInvite);
@@ -45,7 +42,7 @@ export function ChannelsHomeScreen({ onBack, onOpenChannel, onDiscover, onCreate
         setInviteText('');
         onOpenChannel(res.channelId);
       } else {
-        themedAlert('No se pudo unir', res.error ?? 'Invite inválido');
+        themedAlert(i18nT('channels.joinFailed'), res.error ?? i18nT('channels.invalidInvite'));
       }
     } finally {
       setJoining(false);
@@ -82,28 +79,22 @@ export function ChannelsHomeScreen({ onBack, onOpenChannel, onDiscover, onCreate
   );
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
-      <TopBar
-        t={t}
-        title="Channels"
-        big
-        left={<Pressable onPress={onBack} hitSlop={8}><I.ChevronL size={22} color={t.text} /></Pressable>}
-        right={<Pressable onPress={onCreate} hitSlop={8}><I.Plus size={22} color={t.text} /></Pressable>}
-      />
+    <View style={{ flex: 1 }}>
       <FlatList
         data={subscribed}
         keyExtractor={(c) => c.channelId}
         renderItem={renderRow}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+        contentContainerStyle={{ paddingBottom: bottomInset + 16 }}
         ListEmptyComponent={
           <Text style={{ textAlign: 'center', marginTop: 32, fontFamily: t.font, fontSize: 13, color: t.textDim }}>
-            No sigues ningún canal todavía.
+            {i18nT('channels.emptySubscribed')}
           </Text>
         }
         ListFooterComponent={
           <View>
-            {dashedBtn(<I.Search size={16} color={t.accent} />, 'Discover channels', onDiscover)}
-            {dashedBtn(<I.Plus size={16} color={t.accent} />, 'Unirse con un enlace', () => setJoinOpen(true))}
+            {dashedBtn(<I.Search size={16} color={t.accent} />, i18nT('channels.discover'), onDiscover)}
+            {dashedBtn(<I.Plus size={16} color={t.accent} />, i18nT('channels.joinByLink'), () => setJoinOpen(true))}
+            {dashedBtn(<I.Plus size={16} color={t.accent} />, i18nT('channels.newChannel'), onCreate)}
           </View>
         }
       />
@@ -111,11 +102,11 @@ export function ChannelsHomeScreen({ onBack, onOpenChannel, onDiscover, onCreate
       <Modal visible={joinOpen} transparent animationType="fade" onRequestClose={() => setJoinOpen(false)}>
         <Pressable onPress={() => setJoinOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 }}>
           <Pressable onPress={() => {}} style={{ backgroundColor: t.surface, borderRadius: t.radius, padding: 18, borderWidth: 1, borderColor: t.border }}>
-            <Text style={{ fontFamily: t.fontDisplay, fontSize: 18, color: t.text, marginBottom: 12 }}>Unirse a un canal</Text>
+            <Text style={{ fontFamily: t.fontDisplay, fontSize: 18, color: t.text, marginBottom: 12 }}>{i18nT('channels.joinTitle')}</Text>
             <TextInput
               value={inviteText}
               onChangeText={setInviteText}
-              placeholder="aegislink://channel/…"
+              placeholder={i18nT('channels.joinPlaceholder')}
               placeholderTextColor={t.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
@@ -127,7 +118,7 @@ export function ChannelsHomeScreen({ onBack, onOpenChannel, onDiscover, onCreate
               style={{ marginTop: 14, backgroundColor: inviteText.trim() ? t.accent : t.surface2, borderRadius: t.radius, paddingVertical: 13, alignItems: 'center' }}
             >
               {joining ? <ActivityIndicator color={t.accentInk} /> : (
-                <Text style={{ fontFamily: t.font, fontWeight: '700', color: inviteText.trim() ? t.accentInk : t.textFaint }}>Unirse</Text>
+                <Text style={{ fontFamily: t.font, fontWeight: '700', color: inviteText.trim() ? t.accentInk : t.textFaint }}>{i18nT('channels.join')}</Text>
               )}
             </Pressable>
           </Pressable>
