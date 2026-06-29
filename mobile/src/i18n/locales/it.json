@@ -1306,5 +1306,28 @@
     "postFailed": "Impossibile pubblicare",
     "you": "tu",
     "unknownError": "Errore sconosciuto"
+  },
+  "channelInfo": {
+    "title": "Info canale",
+    "notFound": "Canale non trovato o non sei più iscritto.",
+    "changeAvatar": "Cambia foto del canale",
+    "ownerBadge": "PROPRIETARIO",
+    "avatarSection": "Avatar",
+    "replacePhoto": "Sostituisci foto",
+    "removePhoto": "Rimuovi foto",
+    "removePhotoTitle": "Rimuovi foto",
+    "removePhotoDesc": "Rimuovere l'avatar del canale?",
+    "inviteSection": "Link di invito",
+    "shareInvite": "Condividi link di invito",
+    "shareInviteSub": "Chiunque con il link può unirsi",
+    "dangerZone": "Zona pericolosa",
+    "deleteChannel": "Elimina canale",
+    "deleteChannelTitle": "Elimina canale",
+    "deleteChannelDesc": "Questo distrugge permanentemente il canale per tutti. Non può essere annullato.",
+    "deleteConfirm": "Elimina per sempre",
+    "leaveChannel": "Lascia canale",
+    "leaveTitle": "Lascia canale",
+    "leaveDesc": "Non riceverai più post e le tue chiavi saranno eliminate.",
+    "leaveConfirm": "Lascia"
   }
 }

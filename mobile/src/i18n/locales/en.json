@@ -1355,5 +1355,28 @@
     "postFailed": "Couldn't post",
     "you": "you",
     "unknownError": "Unknown error"
+  },
+  "channelInfo": {
+    "title": "Channel info",
+    "notFound": "Channel not found or you are no longer subscribed.",
+    "changeAvatar": "Change channel photo",
+    "ownerBadge": "OWNER",
+    "avatarSection": "Avatar",
+    "replacePhoto": "Replace photo",
+    "removePhoto": "Remove photo",
+    "removePhotoTitle": "Remove photo",
+    "removePhotoDesc": "Remove the channel avatar?",
+    "inviteSection": "Invite link",
+    "shareInvite": "Share invite link",
+    "shareInviteSub": "Anyone with the link can join",
+    "dangerZone": "Danger zone",
+    "deleteChannel": "Delete channel",
+    "deleteChannelTitle": "Delete channel",
+    "deleteChannelDesc": "This permanently destroys the channel for everyone. This cannot be undone.",
+    "deleteConfirm": "Delete forever",
+    "leaveChannel": "Leave channel",
+    "leaveTitle": "Leave channel",
+    "leaveDesc": "You will stop receiving posts and your keys will be deleted.",
+    "leaveConfirm": "Leave"
   }
 }

@@ -24,9 +24,10 @@ import { useIdentity } from '../store/identity';
 interface Props {
   channelId: string;
   onBack: () => void;
+  onOpenInfo?: () => void;
 }
 
-export function ChannelFeedScreen({ channelId, onBack }: Props) {
+export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -90,9 +91,16 @@ export function ChannelFeedScreen({ channelId, onBack }: Props) {
           </View>
         }
         right={
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <I.Lock size={11} color={t.accent} />
-            <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, textTransform: 'uppercase' }}>{i18nT('channels.sealed')}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <I.Lock size={11} color={t.accent} />
+              <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, textTransform: 'uppercase' }}>{i18nT('channels.sealed')}</Text>
+            </View>
+            {onOpenInfo && (
+              <Pressable onPress={onOpenInfo} hitSlop={8} accessibilityLabel={i18nT('channelInfo.title', 'Channel info')}>
+                <I.More size={20} color={t.text} />
+              </Pressable>
+            )}
           </View>
         }
       />

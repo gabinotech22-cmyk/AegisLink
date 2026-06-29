@@ -289,6 +289,38 @@ describe('joinViaInvite (gap D)', () => {
   });
 });
 
+describe('removeChannel (leave)', () => {
+  it('removes the channel from subscribed, feeds, heads and wipes secrets', async () => {
+    // Seed state with a subscribed channel + feed + head.
+    useChannels.setState({
+      subscribed: [{ channelId: CHANNEL_ID, name: 'Leaving', channelType: 'open', owned: false, avatarHash: null }],
+      feeds: { [CHANNEL_ID]: [{ id: `${CHANNEL_ID}:0`, from: 'A', body: 'hi', ts: 1, seqNum: 0 }] },
+      heads: { [CHANNEL_ID]: { seqNum: 0, postHash: new Uint8Array(32) } },
+    });
+
+    await useChannels.getState().removeChannel(CHANNEL_ID);
+
+    expect(useChannels.getState().subscribed).toHaveLength(0);
+    expect(useChannels.getState().feeds[CHANNEL_ID]).toBeUndefined();
+    expect(useChannels.getState().heads[CHANNEL_ID]).toBeUndefined();
+    expect(store.deleteChannel).toHaveBeenCalledWith(CHANNEL_ID);
+  });
+});
+
+describe('tombstone (delete channel with valid signature)', () => {
+  it('signTombstone produces a valid signature that verifyTombstone accepts', () => {
+    const { signTombstone, verifyTombstone, generateChannelIdentity } = require('../../crypto/publicChannelKey') as typeof import('../../crypto/publicChannelKey');
+    const ch = generateChannelIdentity();
+    const ts = Date.now();
+    const sig = signTombstone(ch.channelId, ts, ch.channelEd25519Secret);
+    expect(sig).toBeInstanceOf(Uint8Array);
+    expect(sig.length).toBe(64);
+    expect(verifyTombstone(ch.channelId, ts, sig, ch.channelEd25519Pub)).toBe(true);
+    // Wrong timestamp must fail
+    expect(verifyTombstone(ch.channelId, ts + 1, sig, ch.channelEd25519Pub)).toBe(false);
+  });
+});
+
 describe('createChannel with avatar (Slice 2)', () => {
   const fakeAvatarHash = new Uint8Array(32).fill(0xab);
 

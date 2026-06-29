@@ -60,6 +60,7 @@ import { KeysScreen } from './src/screens/Keys';
 import { ChannelDiscoverScreen } from './src/screens/ChannelDiscover';
 import { ChannelCreateScreen } from './src/screens/ChannelCreate';
 import { ChannelFeedScreen } from './src/screens/ChannelFeed';
+import { ChannelInfoScreen } from './src/screens/ChannelInfo';
 import { DistributionListsScreen } from './src/screens/DistributionLists';
 import { BroadcastComposeScreen } from './src/screens/BroadcastCompose';
 import { ProfileSwitcherScreen } from './src/screens/ProfileSwitcher';
@@ -163,7 +164,8 @@ type PushRoute =
   | { name: 'groupMultiPreview'; group: StoredGroup; assets: import('./src/screens/MultiPreview').MultiPreviewAsset[] }
   | { name: 'channelDiscover' }
   | { name: 'channelCreate' }
-  | { name: 'channelFeed'; channelId: string };
+  | { name: 'channelFeed'; channelId: string }
+  | { name: 'channelInfo'; channelId: string };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -1252,7 +1254,9 @@ function Shell() {
       case 'channelCreate':
         return <ChannelCreateScreen onBack={pop} onCreated={pop} />;
       case 'channelFeed':
-        return <ChannelFeedScreen channelId={top.channelId} onBack={pop} />;
+        return <ChannelFeedScreen channelId={top.channelId} onBack={pop} onOpenInfo={() => push({ name: 'channelInfo', channelId: top.channelId })} />;
+      case 'channelInfo':
+        return <ChannelInfoScreen channelId={top.channelId} onBack={pop} />;
       case 'distribution':
         return (
           <DistributionListsScreen
