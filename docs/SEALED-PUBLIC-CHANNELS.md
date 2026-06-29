@@ -1,6 +1,9 @@
 # AegisLink — Canales Públicos Sellados (Sealed Public Channels)
 
-> Estado: **documento de arquitectura, pre-implementación.**
+> Estado (2026-06-29): **EN CURSO.** Phase 0 (crypto), Phase 1 (server) y Phase 2
+> (mobile) ✅ hechas; Phase 3 (paridad desktop), Phase 4 (delegations + approval +
+> rekey), Phase 5 (comments/reactions/attachments) y Phase 6 (Tor) ⏳ pendientes.
+> Estado verificable por fase en §18. Flag `PUBLIC_CHANNELS=off` (feature dormida).
 > Origen: feature request — canales públicos descubribles manteniendo sealed-sender.
 > Referencia primaria: **Zerion Channels Wire Protocol** (topología STAR sobre Tor,
 > hash chain, manifest firmado, editor delegations, HMAC challenge, approval-gated).
@@ -584,38 +587,58 @@ esté online.
 
 ## 18. Fases de implementación
 
-### Phase 0 — Spike crypto (1 semana)
+### Phase 0 — Spike crypto (1 semana) — ✅ HECHO
+> Evidencia: `mobile/src/crypto/publicChannelKey.ts`, `channelKey.ts`; tests
+> `publicChannelKey.parity.test.ts`, `channelKey.sealRecipients.test.ts`.
+
 - `server/src/crypto/channelKey.ts`: CEK, HKDF delivery token, content key wrap,
   secretbox seal/unseal con firma interna, hash chain, manifest signing.
 - Tests: round-trip, hash chain verification, delegation cert, tombstone, HMAC challenge.
 - Aislado del path vivo.
 
-### Phase 1 — Server infrastructure (1-2 semanas)
+### Phase 1 — Server infrastructure (1-2 semanas) — ✅ HECHO
+> Evidencia: handlers `pubchannel:*` en `server/src/relay/handler.ts`; test
+> `server/src/__tests__/publicChannels.relay.test.ts`. Flag `PUBLIC_CHANNELS=off`.
+
 - DB: `public_channels`, `public_channel_pending_joins`, `public_channel_posts`.
 - REST: `GET/POST /public-channels`.
 - Socket events: todos los de §5.1.
 - Flag-gated: `PUBLIC_CHANNELS=off`.
 
-### Phase 2 — Mobile client (2 semanas)
+### Phase 2 — Mobile client (2 semanas) — ✅ HECHO
+> Evidencia: `mobile/src/channels/`, `mobile/src/socket/publicChannels.ts`,
+> `mobile/src/store/channels.ts`, pantallas `Channel*.tsx` + `ChannelsPanel.tsx`
+> (segmento dentro de Groups); 69 tests de canales en verde.
+
 - `mobile/src/crypto/channelKey.ts`: CEK store, derivation, secretbox wrapper.
 - UI: discovery, channel view, join/apply flow, post composition.
 - Hash chain verification, manifest validation.
 
-### Phase 3 — Desktop parity (1 semana)
+### Phase 3 — Desktop parity (1 semana) — ⏳ PENDIENTE
+> Sin empezar (cero archivos `pubchannel` en `desktop/`). Bloquea la regla de oro #5
+> (paridad mobile↔desktop) para activar el flag, aunque con `PUBLIC_CHANNELS=off` la
+> feature está dormida y el resto es mergeable.
+
 - Port verbatim de `channelKey.ts` (known-answer vectors).
 - Socket events desktop.
 
-### Phase 4 — Moderation + delegations (1 semana)
+### Phase 4 — Moderation + delegations (1 semana) — ⏳ PARCIAL
+> Hechos: `pubchannel:ban`, `pubchannel:delete`, `pubchannel:tombstone` (server+mobile).
+> Pendientes: editor delegations (`pubchannel:delegation`), flujo approval-gated completo
+> (`apply`/`check_approval`/`approval_response`), CEK rotation (`pubchannel:rekey`).
+
 - Ban + CEK rotation.
 - Read-only, moderated, approval-gated.
 - Editor delegations con DelegationCert.
 
-### Phase 5 — Comments, reactions, attachments (1-2 semanas)
+### Phase 5 — Comments, reactions, attachments (1-2 semanas) — ⏳ PENDIENTE
+> Sin implementar (no existen eventos `comment`/`reaction`/`announce`/`get_attachment`).
+
 - Comments/reactions firmados por subscriber.
 - Attachments con per-attachment key + AES-256-GCM.
 - Announce (display name).
 
-### Phase 6 — Tor + anti-correlation (diferido)
+### Phase 6 — Tor + anti-correlation (diferido) — ⏳ DIFERIDO
 - Tráfico por Tor embebido.
 - Cover traffic.
 
