@@ -32,10 +32,6 @@ export function generateKeyPair(): KeyPair {
   return nacl.box.keyPair();
 }
 
-export function generateSigningKeyPair(): KeyPair {
-  return nacl.sign.keyPair();
-}
-
 export function createIdentity(): Identity {
   const { publicKey, secretKey } = generateKeyPair();
   // Derive signing key from box secret key so a 32-word mnemonic fully restores the identity.

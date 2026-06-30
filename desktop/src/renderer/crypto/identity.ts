@@ -30,10 +30,6 @@ export function generateKeyPair(): KeyPair {
   return nacl.box.keyPair();
 }
 
-export function generateSigningKeyPair(): KeyPair {
-  return nacl.sign.keyPair();
-}
-
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 function encodeBase32(bytes: Uint8Array, charsOut: number): string {
