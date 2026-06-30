@@ -6,7 +6,12 @@
 > Complements — does not replace — `SECURITY-ROADMAP-2026-06.md` (the 12 "olas", mostly closed).
 >
 > Severity: 🔴 CRITICAL · 🟠 HIGH · 🟡 MEDIUM · 🔵 LOW · ✅ verified-clean.
-> Status column: `OPEN` / `FIXED` / `ACCEPTED` (documented trade-off).
+> Status column: `OPEN` / `FIXED` / `ACCEPTED` (documented trade-off) / `DEFERRED-WORK`.
+>
+> **Scope note (2026-06-30):** "AegisLink Work" (the enterprise variant) will move to its
+> **own separate repo**. Therefore all Work-only findings (H1, H2, M2) are marked
+> `DEFERRED-WORK` and are **NOT** fixed here — they travel with the Work code to its repo.
+> This audit's active scope is **AegisLink normal** only.
 
 ## Verified-clean (spot-checked, no action)
 - ✅ No silent plaintext fallback in crypto (`catch { return body }`) on either platform.
@@ -30,7 +35,7 @@
   Exploitation needs a signature leak (traffic is TLS) → rated HIGH not CRITICAL, but it's a design flaw.
 - **Fix:** include a canonical digest of the full mutated payload in the signed message
   (`sign(orgId:action:targetId:sha256(fields):bucket)`). Regression test: captured sig + modified body → 403.
-- Status: OPEN
+- Status: **DEFERRED-WORK** (Work moves to its own repo; fix travels with it, not done here).
 
 ### H2 — Work REST `POST .../messages` persists plaintext bodies (M-6 fail-closed bypass)
 - `server/src/routes/work.ts:836-874`. `body` inserted directly; **no `encrypted===true` + `nonce` guard**,
@@ -38,7 +43,7 @@
 - Plaintext Work message bodies at-rest in `work_messages.body`. Violates golden rule #1 / M-6.
 - **Fix:** add the same fail-closed encryption guard to the REST handler, or explicitly document Work-REST
   as a server-side-readable compliance path (decide intent). Regression test mirroring the socket path.
-- Status: OPEN
+- Status: **DEFERRED-WORK** (Work moves to its own repo; fix travels with it, not done here).
 
 ### H3 — `@noble/hashes` major-version drift between platforms (crypto parity)
 - mobile `package.json` `^1.6.1` (25 source files) vs desktop `^2.2.0` (13 source files).
@@ -63,7 +68,7 @@
 - `server/src/routes/work.ts:259-282`. `escape()` quotes `,"\n` but not leading `= + - @` →
   Excel/Sheets formula injection via audit `message`/`metadata` (e.g. channel name).
 - **Fix:** prefix cells starting with `= + - @ \t \r` with `'`.
-- Status: OPEN
+- Status: **DEFERRED-WORK** (an initial fix was prototyped then reverted — it belongs in the Work repo).
 
 ### M3 — Incomplete logger migration: 77 raw `console.*` in production source
 - mobile+desktop non-test source. M-5 added `src/utils/logger.ts` but 77 call sites remain.
@@ -81,7 +86,7 @@
 | `desktop/src/renderer/socket/client.ts` | 2517 | |
 | `mobile/src/db/local.ts` | 2310 | |
 | `mobile/src/screens/GroupChat.tsx` | 1905 | |
-| `server/src/routes/work.ts` | 1244 | |
+| ~~`server/src/routes/work.ts`~~ | 1244 | DEFERRED-WORK (own repo) |
 - High coupling, hard to review, parity drift risk (the two socket clients are ~the same logic duplicated).
 - **Fix:** extract cohesive modules (transport, ratchet wiring, handlers). Prioritize the two `socket/client.ts`
   since their divergence is the parity hotspot. Effort L — schedule, don't rush.
@@ -110,11 +115,17 @@ full outputs were lost to a session limit. Re-derived the high-value items direc
 
 ---
 
-## Proposed fix order (cheapest verified wins first)
-1. **M2** (CSV escape) — XS · **L1** (untrack uploads) — XS · **L2** (comment) — XS
-2. **H2** (Work REST encryption guard) — S, with regression test
-3. **H1** (sign full payload) — S/M, touches ~20 endpoints + test
-4. **H3** (noble version alignment + KAT) — S, careful (crypto)
-5. **M3** (logger sweep + lint) — S mechanical
-6. **M5** (any reduction) — M · **M4** (god-file refactor) — L, scheduled
-7. **M1** — decision needed (intent), then implement
+## Proposed fix order — AegisLink normal only (Work findings excluded)
+1. ✅ **L1** (untrack uploads) — DONE (commit `93ccd27`)
+2. **L2** (HMAC bit-strength comment) — XS
+3. **H3** (noble version alignment + cross-platform KAT) — S, careful (crypto parity)
+4. **M3** (logger sweep + lint banning `console.*` in `src/`) — S mechanical
+5. **M5** (`any` reduction) — M
+6. **M4** (god-file refactor, two `socket/client.ts` first) — L, scheduled
+7. **M1** (sealed-channel role) — decision/intent, then document or implement
+
+### Deferred to the AegisLink **Work** repo (not actioned here)
+- **H1** — Work admin signatures don't bind payload
+- **H2** — Work REST persists plaintext bodies
+- **M2** — Work CSV audit export formula-injection
+- **M4 (partial)** — `server/src/routes/work.ts` refactor
