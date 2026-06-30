@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 import { create } from 'zustand';
 import '../crypto/ipc-types';
 
@@ -94,7 +95,7 @@ async function persist(prefs: Preferences): Promise<void> {
   try {
     await secureStorage().set(STORAGE_KEY, JSON.stringify(prefs));
   } catch (e) {
-    if (DEV) console.warn('[preferences] persist failed:', (e as Error).message);
+    if (DEV) logger.warn('[preferences] persist failed:', (e as Error).message);
   }
 }
 
@@ -112,7 +113,7 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
         return;
       }
     } catch (e) {
-      if (DEV) console.warn('[preferences] hydrate failed:', (e as Error).message);
+      if (DEV) logger.warn('[preferences] hydrate failed:', (e as Error).message);
     }
     setState({ hydrated: true });
   },

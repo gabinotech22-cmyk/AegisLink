@@ -14,6 +14,7 @@
  * Chromium APIs — no polyfill required.
  */
 
+import { logger } from '../utils/logger';
 import { getSocket, isConnected } from './client';
 import { useCall } from '../store/call';
 import { saveCall } from '../db/local';
@@ -184,7 +185,7 @@ async function addRemoteIce(pc: RTCPeerConnection, candidate: string): Promise<v
     const ice = new RTCIceCandidate(JSON.parse(candidate) as RTCIceCandidateInit);
     await pc.addIceCandidate(ice);
   } catch (e) {
-    if (DEV) console.warn('[webrtc] addIceCandidate failed', (e as Error).message);
+    if (DEV) logger.warn('[webrtc] addIceCandidate failed', (e as Error).message);
   }
 }
 
@@ -257,6 +258,9 @@ export function attachCallHandlers(): void {
 
   socket.off('call:invite:v2'); socket.off('call:answer:v2'); socket.off('call:ice:v2'); socket.off('call:hangup:v2');
 
+  // Legacy v1 call:invite receive listener REMOVED in Fase C — calls are
+  // unconditionally v2-only (no SEALED_TRANSPORT_VERSION guard). Parity with
+  // mobile/src/socket/calls.ts; the relay no longer emits v1 events.
   // Sealed-sender v2 invite: no `from`; openCallInvite authenticates the caller
   // and yields the per-call key.
   socket.on('call:invite:v2', async (msg: SealedInviteWire) => {
@@ -269,7 +273,7 @@ export function attachCallHandlers(): void {
       Date.now(),
     );
     if (!opened) {
-      if (DEV) console.warn('[calls] call:invite:v2 open/auth failed — dropping');
+      if (DEV) logger.warn('[calls] call:invite:v2 open/auth failed — dropping');
       return;
     }
     rememberCallKey(msg.callId, opened.callKey);
@@ -280,7 +284,7 @@ export function attachCallHandlers(): void {
     const key = callKeys.get(msg.callId);
     if (!key) return;
     const answer = openWithCallKey(key, { ciphertext: msg.ciphertext, nonce: msg.nonce });
-    if (!answer) { if (DEV) console.warn('[calls] call:answer:v2 decrypt failed'); return; }
+    if (!answer) { if (DEV) logger.warn('[calls] call:answer:v2 decrypt failed'); return; }
     await processIncomingAnswer(msg.callId, answer);
   });
 
@@ -288,7 +292,7 @@ export function attachCallHandlers(): void {
     const key = callKeys.get(msg.callId);
     if (!key) return;
     const candidate = openWithCallKey(key, { ciphertext: msg.ciphertext, nonce: msg.nonce });
-    if (!candidate) { if (DEV) console.warn('[calls] call:ice:v2 decrypt failed'); return; }
+    if (!candidate) { if (DEV) logger.warn('[calls] call:ice:v2 decrypt failed'); return; }
     await processIncomingIce(msg.callId, candidate);
   });
 
@@ -412,10 +416,11 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     const sealed = sealCallInvite(recipientPub, me.aegisId, me.signingSecretKey, offer, Date.now(), callKey);
     socket.emit('call:invite:v2', { callId, to: toAegisId, media, ...sealed.wire });
   } else {
-    // Sealed-sender impossible — peer box key or our signing identity is
-    // unavailable. Fail CLOSED: never fall back to a `from`-leaking v1 invite
-    // (golden rules #4 + #6). Parity with mobile/src/socket/calls.ts.
-    if (DEV) console.warn('[calls] cannot seal call invite — failing closed');
+    // v2 policy but sealed-sender is impossible — peer box key or our signing
+    // identity is unavailable. Fail CLOSED: never fall back to a `from`-leaking
+    // (and, on desktop, cleartext) v1 invite (golden rules #4 + #6). Parity with
+    // mobile/src/socket/calls.ts.
+    if (DEV) logger.warn('[calls] cannot seal call invite — failing closed (no v1 fallback)');
     endCall('encrypt_failure');
     return;
   }

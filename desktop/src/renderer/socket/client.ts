@@ -12,6 +12,7 @@
  *  - require('../notifications/push') → static import from ../notifications/push
  */
 
+import { logger } from '../utils/logger';
 import { io, type Socket } from 'socket.io-client';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
@@ -263,7 +264,7 @@ async function flushGroupOfflineQueue(identity: Identity) {
       // so the replay must NOT append again.
       await sendGroupMessage({ identity, groupId: item.groupId, plaintext: item.plaintext, skipLocalAppend: true });
     } catch (e) {
-      if (DEV) console.warn('[socket] group offline queue flush error', e);
+      if (DEV) logger.warn('[socket] group offline queue flush error', e);
       groupOfflineQueue.push(item);
     }
   }
@@ -342,7 +343,7 @@ async function flushOfflineQueue(identity: Identity) {
         );
       });
     } catch (e) {
-      if (DEV) console.warn('[socket] offline queue flush error', e);
+      if (DEV) logger.warn('[socket] offline queue flush error', e);
       offlineQueue.push(item);
     }
   }
@@ -421,7 +422,7 @@ export async function persistPrekeySecrets(
     const readback = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
     return readback === newSecretB64;
   } catch (err) {
-    if (DEV) console.error('[socket] Failed to persist prekey secrets:', err);
+    if (DEV) logger.error('[socket] Failed to persist prekey secrets:', err);
     return false;
   }
 }
@@ -540,20 +541,20 @@ export function connect(identity: Identity): Socket {
     connected = true;
     authenticated = false;
     useConnection.getState().setOnline(true);
-    if (DEV) console.log('[socket] connected, awaiting auth challenge');
+    if (DEV) logger.debug('[socket] connected, awaiting auth challenge');
   });
 
   socket.on('disconnect', (reason) => {
     connected = false;
     authenticated = false;
     useConnection.getState().setOnline(false);
-    if (DEV) console.log('[socket] disconnected:', reason);
+    if (DEV) logger.debug('[socket] disconnected:', reason);
   });
 
   socket.on('error_msg', async (e: { code?: string }) => {
-    if (DEV) console.warn('[socket] server error:', e);
+    if (DEV) logger.warn('[socket] server error:', e);
     if (e?.code === 'unknown_identity') {
-      if (DEV) console.log('[socket] unknown_identity — re-registering and reconnecting');
+      if (DEV) logger.debug('[socket] unknown_identity — re-registering and reconnecting');
       try {
         const { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } = await import(
           '../crypto/registration'
@@ -582,14 +583,14 @@ export function connect(identity: Identity): Socket {
           },
         );
         if (result.ok) {
-          if (DEV) console.log('[socket] re-registered — reconnecting');
+          if (DEV) logger.debug('[socket] re-registered — reconnecting');
           socket?.disconnect();
         } else {
-          if (DEV) console.warn('[socket] re-registration failed:', result.error);
+          if (DEV) logger.warn('[socket] re-registration failed:', result.error);
           useConnection.getState().setOnline(false);
         }
       } catch (err) {
-        if (DEV) console.warn('[socket] re-registration failed:', err);
+        if (DEV) logger.warn('[socket] re-registration failed:', err);
         useConnection.getState().setOnline(false);
       }
     }
@@ -606,14 +607,14 @@ export function connect(identity: Identity): Socket {
       if (!opened) throw new Error('challenge decrypt failed');
       socket!.emit('auth:response', { plain: encodeBase64(opened) });
     } catch (e) {
-      if (DEV) console.warn('[socket] auth failure:', (e as Error).message);
+      if (DEV) logger.warn('[socket] auth failure:', (e as Error).message);
       socket?.disconnect();
     }
   });
 
   socket.on('auth:ok', async (res?: { opkCount?: number }) => {
     authenticated = true;
-    if (DEV) console.log('[socket] authenticated');
+    if (DEV) logger.debug('[socket] authenticated');
     void flushOfflineQueue(identity);
     void flushGroupOfflineQueue(identity);
 
@@ -627,7 +628,7 @@ export function connect(identity: Identity): Socket {
           const raw = await getOwnDeliveryToken();
           socket!.emit('deliveryToken:register', { tokenHashB64: hashDeliveryToken(raw) });
         } catch (e) {
-          if (DEV) console.warn('[socket] deliveryToken register failed:', e);
+          if (DEV) logger.warn('[socket] deliveryToken register failed:', e);
         }
       })();
     }
@@ -642,17 +643,17 @@ export function connect(identity: Identity): Socket {
       try {
         await uploadPreKeys(identity);
         if (DEV) {
-          console.log(
+          logger.debug(
             '[socket] prekeys uploaded —',
             needRotate ? 'SPK rotation (age)' : 'OPK refill',
             '(count was', count, ')',
           );
         }
       } catch (err) {
-        if (DEV) console.error('[socket] prekey upload error:', err);
+        if (DEV) logger.error('[socket] prekey upload error:', err);
       }
     } else {
-      if (DEV) console.log('[socket] prekeys count healthy:', count, '— no refill/rotation needed');
+      if (DEV) logger.debug('[socket] prekeys count healthy:', count, '— no refill/rotation needed');
     }
 
     void broadcastProfileUpdate(identity);
@@ -889,7 +890,7 @@ async function getOrCreateSessionLocked(
         }));
       }
     } catch (e) {
-      if (DEV) console.warn('[socket] failed to fetch signing key from directory');
+      if (DEV) logger.warn('[socket] failed to fetch signing key from directory');
       void e;
     }
   }
@@ -1042,7 +1043,7 @@ async function sendNudgeOverExistingSession(
     });
     return true;
   } catch (e) {
-    if (DEV) console.warn('[socket] desync nudge send failed:', (e as Error).message);
+    if (DEV) logger.warn('[socket] desync nudge send failed:', (e as Error).message);
     return false;
   }
 }
@@ -1078,7 +1079,7 @@ async function tryRecoverDesync(
 
   const initiator = amInitiatorFor(identity.aegisId, contact.aegisId);
   if (DEV)
-    console.warn(
+    logger.warn(
       `[socket] ratchet desync detected peer=${contact.aegisId} decision=${initiator ? 'INITIATE' : 'NUDGE'}`,
     );
 
@@ -1100,7 +1101,7 @@ async function tryRecoverDesync(
     // the same key. Without the context that nested acquire would deadlock.
     await sendProfileTo(contact, identity, lockCtx);
   } catch (e) {
-    if (DEV) console.warn('[socket] desync re-handshake send failed:', (e as Error).message);
+    if (DEV) logger.warn('[socket] desync re-handshake send failed:', (e as Error).message);
   }
 
   // Fallback: if no glare init arrives to clear the marker, treat our fresh
@@ -1142,7 +1143,7 @@ async function decryptAndAppendLocked(
   lockCtx: LockCtx,
 ): Promise<boolean> {
   if (parsed.from !== contact.aegisId) {
-    if (DEV) console.warn('[socket] sender mismatch — dropping');
+    if (DEV) logger.warn('[socket] sender mismatch — dropping');
     return false;
   }
 
@@ -1164,7 +1165,7 @@ async function decryptAndAppendLocked(
     }
     if (myInitPending || isInRecovery(contact.aegisId)) {
       if (DEV)
-        console.warn(
+        logger.warn(
           `[socket] glare: higher peer keeps own init, ignoring lower's (peer=${contact.aegisId})`,
         );
       return false;
@@ -1194,7 +1195,7 @@ async function decryptAndAppendLocked(
     ratchetState = s;
   } else {
     if (!parsed.x3dh) {
-      if (DEV) console.warn('[socket] No session and no X3DH headers — dropping message');
+      if (DEV) logger.warn('[socket] No session and no X3DH headers — dropping message');
       return false;
     }
 
@@ -1209,7 +1210,7 @@ async function decryptAndAppendLocked(
       spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
     }
     if (!spkSec) {
-      if (DEV) console.warn('[socket] mySpkSecret not found — cannot decrypt');
+      if (DEV) logger.warn('[socket] mySpkSecret not found — cannot decrypt');
       return false;
     }
     const mySpkSecret = decodeBase64(spkSec);
@@ -1226,7 +1227,7 @@ async function decryptAndAppendLocked(
         consumeOpkIdAfterDecrypt = parsed.x3dh.opkId;
       } else {
         if (DEV)
-          console.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— aborting (would desync)');
+          logger.warn('[socket] OPK secret missing for keyId', parsed.x3dh.opkId, '— aborting (would desync)');
         return false;
       }
     }
@@ -1247,7 +1248,7 @@ async function decryptAndAppendLocked(
       const pqKeyId = await getActivePqSpkKeyId();
       const pqSecB64 = pqKeyId !== null ? await SecureStore.getItemAsync(pqSpkSecretKey(pqKeyId)) : null;
       if (!pqSecB64) {
-        if (DEV) console.warn('[socket] PQSPK secret not found for active keyId — cannot complete v2 handshake');
+        if (DEV) logger.warn('[socket] PQSPK secret not found for active keyId — cannot complete v2 handshake');
         return false;
       }
       pqInputs = { cipherText: decodeBase64(pqCtB64!), pqSpkSecret: decodeBase64(pqSecB64) };
@@ -1302,16 +1303,16 @@ async function decryptAndAppendLocked(
     plaintextBytes = ratchetDecrypt(ratchetState, rHeader, rCiphertext, rNonce);
   } catch (e) {
     if (existingJson && !parsed.x3dh) {
-      if (DEV) console.warn('[socket] ratchetDecrypt threw on existing session:', (e as Error).message);
+      if (DEV) logger.warn('[socket] ratchetDecrypt threw on existing session:', (e as Error).message);
       await tryRecoverDesync(contact, ratchetState, identity, lockCtx);
     } else if (DEV) {
-      console.warn('[socket] Double Ratchet decryption threw:', (e as Error).message);
+      logger.warn('[socket] Double Ratchet decryption threw:', (e as Error).message);
     }
     return false;
   }
   if (!plaintextBytes) {
     if (RATCHET_DEBUG) {
-      console.warn(
+      logger.warn(
         '[socket] Double Ratchet decryption failed',
         `peer=${contact.aegisId} hadSession=${Boolean(existingJson)} hadX3dh=${Boolean(parsed.x3dh)}`,
         `hdr(n=${rHeader.n} pn=${rHeader.pn} rk=${ratchetFp(rHeader.ratchetKey)})`,
@@ -1386,7 +1387,7 @@ async function decryptAndAppendLocked(
             try {
               admin = await useContacts.getState().addByAegisId(claimedAdminId);
             } catch (e) {
-              if (DEV) console.warn('[socket] failed to dynamically resolve group admin:', e);
+              if (DEV) logger.warn('[socket] failed to dynamically resolve group admin:', e);
             }
           }
           return admin?.signingPublicKeyB64 ?? null;
@@ -1415,12 +1416,12 @@ async function decryptAndAppendLocked(
         if (!existingGroup) {
           if (!(await metadataIsAuthentic())) {
             if (DEV)
-              console.warn('[socket] group_msg create rejected — invalid or missing adminSig');
+              logger.warn('[socket] group_msg create rejected — invalid or missing adminSig');
             return false;
           }
           if (!claimedMembers.includes(identity.aegisId)) {
             if (DEV)
-              console.warn('[socket] group_msg create rejected — local id not in members');
+              logger.warn('[socket] group_msg create rejected — local id not in members');
             return false;
           }
           await saveGroup({
@@ -1454,7 +1455,7 @@ async function decryptAndAppendLocked(
             const { useGroups } = await import('../store/groups');
             void useGroups.getState().hydrate();
           } else if ((nameChanged || membersChanged) && DEV) {
-            console.warn('[socket] group metadata change ignored — sender not admin or sig invalid');
+            logger.warn('[socket] group metadata change ignored — sender not admin or sig invalid');
           }
         }
 
@@ -1527,7 +1528,7 @@ async function decryptAndAppendLocked(
       }
     }
   } catch (e) {
-    if (DEV) console.warn('[socket] Failed parsing structured E2EE message payload:', e);
+    if (DEV) logger.warn('[socket] Failed parsing structured E2EE message payload:', e);
   }
 
   await saveSessionState(contact.aegisId, ratchetState);
@@ -1673,12 +1674,12 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
             env.from,
             env.senderPublicKeyB64,
           );
-          if (DEV) console.log('[socket] auto-added unknown sender from envelope key:', env.from);
+          if (DEV) logger.debug('[socket] auto-added unknown sender from envelope key:', env.from);
         } catch (e2) {
-          if (DEV) console.warn('[socket] addFromEnvelope also failed:', e2);
+          if (DEV) logger.warn('[socket] addFromEnvelope also failed:', e2);
         }
       } else {
-        if (DEV) console.warn('[socket] unknown sender and no senderPublicKeyB64 in envelope — dropping');
+        if (DEV) logger.warn('[socket] unknown sender and no senderPublicKeyB64 in envelope — dropping');
       }
     }
   }
@@ -1723,7 +1724,7 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
   }
 
   if (DEV)
-    console.warn(
+    logger.warn(
       '[socket] envelope from unknown sender — add the peer as a contact first to decrypt their messages',
     );
 }
@@ -1754,7 +1755,7 @@ async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
     s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
     return s as RatchetState;
   } catch (e) {
-    if (DEV) console.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
+    if (DEV) logger.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
     return null;
   }
 }
@@ -1876,7 +1877,7 @@ async function sendSelfCopy(
       selfCopy: true,
     });
   } catch (e) {
-    if (DEV) console.warn('[socket] sendSelfCopy failed (non-fatal):', (e as Error).message);
+    if (DEV) logger.warn('[socket] sendSelfCopy failed (non-fatal):', (e as Error).message);
   }
 }
 
@@ -1887,27 +1888,27 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     identity.secretKey,
   );
   if (!parsed) {
-    if (DEV) console.warn('[socket] self-copy outer decrypt failed');
+    if (DEV) logger.warn('[socket] self-copy outer decrypt failed');
     return;
   }
   if (parsed.from !== identity.aegisId) {
-    if (DEV) console.warn('[socket] self-copy from mismatch — dropping');
+    if (DEV) logger.warn('[socket] self-copy from mismatch — dropping');
     return;
   }
   if ((parsed as { selfCopy?: unknown }).selfCopy !== true) {
-    if (DEV) console.warn('[socket] self-copy inner flag missing — dropping');
+    if (DEV) logger.warn('[socket] self-copy inner flag missing — dropping');
     return;
   }
 
   let ratchet = await getSelfRatchet(identity.aegisId);
   if (!ratchet) {
     if (!parsed.x3dh) {
-      if (DEV) console.warn('[socket] self-copy: no session and no X3DH headers — dropping');
+      if (DEV) logger.warn('[socket] self-copy: no session and no X3DH headers — dropping');
       return;
     }
     const spkSec = await SecureStore.getItemAsync(SECURE_SPK_SECRET_KEY());
     if (!spkSec) {
-      if (DEV) console.warn('[socket] self-copy: missing local SPK secret — dropping (multi-device SPK sync not implemented)');
+      if (DEV) logger.warn('[socket] self-copy: missing local SPK secret — dropping (multi-device SPK sync not implemented)');
       return;
     }
     const mySpkSecret = decodeBase64(spkSec);
@@ -1946,11 +1947,11 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
       decodeBase64(r.nonceB64),
     );
   } catch (e) {
-    if (DEV) console.warn('[socket] self-copy ratchet decrypt threw:', (e as Error).message);
+    if (DEV) logger.warn('[socket] self-copy ratchet decrypt threw:', (e as Error).message);
     return;
   }
   if (!plaintextBytes) {
-    if (DEV) console.warn('[socket] self-copy ratchet decrypt failed (null)');
+    if (DEV) logger.warn('[socket] self-copy ratchet decrypt failed (null)');
     return;
   }
   await saveSelfRatchet(identity.aegisId, ratchet);
@@ -1972,11 +1973,11 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
   try {
     selfObj = JSON.parse(selfBody);
   } catch {
-    if (DEV) console.warn('[socket] self-copy body is not JSON — dropping');
+    if (DEV) logger.warn('[socket] self-copy body is not JSON — dropping');
     return;
   }
   if (selfObj.type !== 'self_copy' || !selfObj.msgId || !selfObj.chatId || !selfObj.inner) {
-    if (DEV) console.warn('[socket] self-copy malformed payload — dropping');
+    if (DEV) logger.warn('[socket] self-copy malformed payload — dropping');
     return;
   }
 
@@ -1994,7 +1995,7 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
   try {
     originalPayload = JSON.parse(selfObj.inner);
   } catch {
-    if (DEV) console.warn('[socket] self-copy inner payload not JSON — falling back to raw');
+    if (DEV) logger.warn('[socket] self-copy inner payload not JSON — falling back to raw');
   }
 
   const displayBody = typeof originalPayload.text === 'string' ? originalPayload.text : selfObj.inner;
@@ -2250,7 +2251,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
         nonce: envelope.nonceB64,
       });
     } catch (e) {
-      if (DEV) console.warn('[socket] profile broadcast failed:', (e as Error).message);
+      if (DEV) logger.warn('[socket] profile broadcast failed:', (e as Error).message);
     }
   }
 }
@@ -2297,7 +2298,7 @@ export async function sendProfileTo(
       nonce: envelope.nonceB64,
     });
   } catch (e) {
-    if (DEV) console.warn('[socket] sendProfileTo failed:', (e as Error).message);
+    if (DEV) logger.warn('[socket] sendProfileTo failed:', (e as Error).message);
   }
 }
 
@@ -2426,7 +2427,7 @@ export async function sendGroupMessage(opts: {
         );
       });
     } catch (e) {
-      if (DEV) console.error('[socket] Multicast E2EE group message failed:', e);
+      if (DEV) logger.error('[socket] Multicast E2EE group message failed:', e);
     }
   });
 
@@ -2509,7 +2510,7 @@ export async function sendGroupVote(opts: {
         );
       });
     } catch (e) {
-      if (DEV) console.warn('[socket] sendGroupVote failed for member', memberId, e);
+      if (DEV) logger.warn('[socket] sendGroupVote failed for member', memberId, e);
     }
   });
 

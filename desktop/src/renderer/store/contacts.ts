@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 import { create } from 'zustand';
 import {
   loadContacts,
@@ -167,7 +168,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
       try {
         const record = await lookupIdentity(aegisId);
         if (record.publicKey !== publicKeyB64) {
-          if (DEV) console.warn('[contacts] directory MITM warning: server publishes a different key than the one scanned');
+          if (DEV) logger.warn('[contacts] directory MITM warning: server publishes a different key than the one scanned');
         }
       } catch { /* server unreachable is fine here */ }
     })();

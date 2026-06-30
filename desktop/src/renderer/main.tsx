@@ -1,3 +1,4 @@
+import { logger } from './utils/logger';
 import React, { Component, type ReactNode, type ErrorInfo } from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
@@ -19,7 +20,7 @@ class RootErrorBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     // Visible in %APPDATA%\AegisLink\logs\ on Windows (packaged app)
-    console.error('[AegisLink] Render crash:', error.message, info.componentStack)
+    logger.error('[AegisLink] Render crash:', error.message, info.componentStack)
   }
 
   render() {
