@@ -93,25 +93,29 @@
 | ~~`server/src/relay/handler.ts`~~ | 2257→756 | ✅ split → schemas/rateLimits/callSignaling/handlers/* |
 | ~~`server/src/db/client.ts`~~ | 2534→701 | ✅ split → sqlite/pg/driver/types/repos/work |
 | `desktop/src/renderer/socket/client.ts` | 2517 | |
-| `mobile/src/db/local.ts` | 2310 | |
+| ~~`mobile/src/db/local.ts`~~ | 2310→733 | ✅ split → core/schema + 10 domain modules + barrel |
 | `mobile/src/screens/GroupChat.tsx` | 1905 | |
 | ~~`server/src/routes/work.ts`~~ | 1244 | DEFERRED-WORK (own repo) |
 - High coupling, hard to review, parity drift risk (the two socket clients are ~the same logic duplicated).
 - **Fix:** extract cohesive modules (transport, ratchet wiring, handlers). Prioritize the two `socket/client.ts`
   since their divergence is the parity hotspot. Effort L — schedule, don't rush.
-- Status: **IN PROGRESS** — 2 of the server god-files done:
+- Status: **IN PROGRESS** — 3 done (2 server + 1 mobile):
   - `server/src/db/client.ts` (2241→701; extracted `db/sqlite.ts`, `db/pg.ts`, `db/driver.ts`,
     `db/types.ts`, `db/repos/work.ts`).
   - `server/src/relay/handler.ts` (2257→756; extracted `relay/schemas.ts`, `relay/rateLimits.ts`,
     `relay/callSignaling.ts`, `relay/handlers/{messaging,prekeys,channels,devices}.ts`). Handlers
     pulled out as `attach*(socket, me, deps)` following the existing `attachCallSignaling` pattern;
     sealed-sender v1/v2 asymmetry preserved verbatim (not "fixed").
-  - Both: behavior-preserving relocation, every module <800, typecheck clean + 186 server tests
-    green per commit.
+  - `mobile/src/db/local.ts` (2310→733; extracted `db/core.ts` (module state + db()/withDb +
+    identity CRUD + at-rest crypto/fail-closed), `db/schema.ts` (initSchema: PRAGMA/DDL/migrations),
+    and per-domain modules `db/{contacts,messages,ratchet,groups,chatState,calls,polls,scheduled,
+    outbox,prekeys}.ts`. `local.ts` is now a 14-line barrel re-exporting all — every call-site
+    import unchanged. Mobile-only, no crypto/parity surface touched.
+  - All three: behavior-preserving relocation, every module <800, typecheck clean + tests green per
+    commit (186 server / 105 mobile-db).
   Remaining: `mobile/src/socket/client.ts`, `mobile/src/screens/Chat.tsx`,
-  `desktop/src/renderer/socket/client.ts`, `mobile/src/db/local.ts`,
-  `mobile/src/screens/GroupChat.tsx` (the two `socket/client.ts` are the parity hotspot —
-  port together, don't rush).
+  `desktop/src/renderer/socket/client.ts`, `mobile/src/screens/GroupChat.tsx`
+  (the two `socket/client.ts` are the parity hotspot — port together, don't rush).
 
 ### M5 — `any` density (type-safety holes): desktop 48, mobile 26 (server 0 ✓)
 - **Fix:** replace with `unknown` + narrowing at boundaries; enable `noImplicitAny` if not already. Effort M.
