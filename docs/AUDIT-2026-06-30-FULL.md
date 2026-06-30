@@ -76,11 +76,14 @@
 - **Fix:** prefix cells starting with `= + - @ \t \r` with `'`.
 - Status: **DEFERRED-WORK** (an initial fix was prototyped then reverted — it belongs in the Work repo).
 
-### M3 — Incomplete logger migration: 77 raw `console.*` in production source
-- mobile+desktop non-test source. M-5 added `src/utils/logger.ts` but 77 call sites remain.
-- Defense-in-depth gap (babel strips console in prod, but runtime level-gating is bypassed; dev leakage risk).
-- **Fix:** mechanical sweep to `logger.*`; add lint rule banning `console.*` in `src/`.
-- Status: OPEN
+### M3 — Incomplete logger migration: raw `console.*` in production source
+- Re-scoped: **mobile is already clean (0)** — M-5 finished it. All 74 remaining were **desktop-only**,
+  which had **no logger** at all (`desktop/src/renderer/socket/client.ts` alone had 54).
+- Defense-in-depth gap (no runtime level-gating; dev leakage risk to devtools/log files).
+- Status: **FIXED** — ported the leveled logger to `desktop/src/renderer/utils/logger.ts`
+  (API-identical to mobile, Vite `import.meta.env.DEV` gate) and swept all 74 `console.*` → `logger.*`
+  across 7 files. Desktop typecheck clean; 144/144 desktop tests pass.
+- Follow-up (optional): add an ESLint `no-console` rule for `desktop/src/renderer/**` to prevent regressions.
 
 ### M4 — God files far over the 800-line hard limit (coding-style rule)
 | File | Lines | |
