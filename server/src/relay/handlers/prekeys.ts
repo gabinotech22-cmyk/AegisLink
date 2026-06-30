@@ -3,6 +3,7 @@ import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 import { prekeysRepo, identityRepo } from '../../db/client.js';
 import { PreKeyUpload, PreKeyFetch, type PreKeyBundle } from '../schemas.js';
+import { checkPrekeysUploadRateLimit, checkPrekeysFetchRateLimit } from '../rateLimits.js';
 
 const { decodeBase64 } = naclUtil;
 
@@ -13,6 +14,10 @@ export interface PrekeysDeps {
 
 export function attachPrekeys(socket: Socket, { me, deviceId }: PrekeysDeps): void {
   socket.on('prekeys:upload', (raw, ack?: (res: { ok: boolean; error?: string }) => void) => {
+    if (!checkPrekeysUploadRateLimit(me)) {
+      ack?.({ ok: false, error: 'rate_limited' });
+      return;
+    }
     const parsed = PreKeyUpload.safeParse(raw);
     if (!parsed.success) {
       ack?.({ ok: false, error: 'invalid_payload' });
@@ -80,6 +85,10 @@ export function attachPrekeys(socket: Socket, { me, deviceId }: PrekeysDeps): vo
   });
 
   socket.on('prekeys:fetch', (raw, ack?: (res: { ok: boolean; bundle?: PreKeyBundle; error?: string }) => void) => {
+    if (!checkPrekeysFetchRateLimit(me)) {
+      ack?.({ ok: false, error: 'rate_limited' });
+      return;
+    }
     const parsed = PreKeyFetch.safeParse(raw);
     if (!parsed.success) {
       ack?.({ ok: false, error: 'invalid_payload' });
