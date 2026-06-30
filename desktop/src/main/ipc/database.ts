@@ -957,7 +957,7 @@ export function registerDatabaseHandlers(): void {
   ipcMain.handle('db:get-group', (event, id: string) => {
     assertTrustedSender(event)
     const r = db
-      .prepare(
+      .prepare<unknown[], GroupRow>(
         `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig FROM groups WHERE id = ?`
       )
       .get(id)
