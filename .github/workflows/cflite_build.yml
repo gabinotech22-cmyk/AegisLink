@@ -13,8 +13,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # JS (Jazzer.js) targets: the only sanitizer CFLite accepts is 'none'.
-        sanitizer: [none]
+        # build_fuzzers@v1 rejects 'none' (valid: address/memory/undefined/
+        # coverage). Jazzer.js/JS has no native sanitizer → label is a no-op;
+        # use 'address', the ClusterFuzzLite default.
+        sanitizer: [address]
     steps:
       - name: Build fuzzers (${{ matrix.sanitizer }})
         id: build

@@ -19,11 +19,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Jazzer.js has no native C sanitizer. ClusterFuzzLite's build_fuzzers
-        # action rejects address/memory/undefined for JavaScript projects
-        # ("JavaScript projects cannot be fuzzed with sanitizers"); the only
-        # valid value here is 'none'.
-        sanitizer: [none]
+        # ClusterFuzzLite's build_fuzzers@v1 REJECTS 'none' (ConfigError:
+        # "Invalid SANITIZER: none. Must be one of address/memory/undefined/
+        # coverage"). Jazzer.js has no native C sanitizer, so the label is a
+        # runtime no-op for JS — use 'address', the ClusterFuzzLite default.
+        sanitizer: [address]
     steps:
       - name: Build fuzzers (${{ matrix.sanitizer }})
         id: build
