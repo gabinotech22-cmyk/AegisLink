@@ -103,7 +103,20 @@
 
 ### M5 — `any` density (type-safety holes): desktop 48, mobile 26 (server 0 ✓)
 - **Fix:** replace with `unknown` + narrowing at boundaries; enable `noImplicitAny` if not already. Effort M.
-- Status: OPEN
+- Status: **PARTIALLY FIXED** — the high-value cluster is done; the rest is triaged.
+  - ✅ **`desktop/src/main/ipc/database.ts`: 33 → 0.** Added `dbTypes.ts` (Input/Row interfaces),
+    applied via the `prepare<_, Row>()` generic so `.get()/.all()` are typed (TS now verifies every
+    row→DTO mapping), handler returns inferred. Typecheck clean; 15/15 DB tests pass.
+  - ⏸️ **Remaining ~40 are triaged, not blindly removed:**
+    - **Legitimate library-gap casts (keep as-is):** `mobile/src/webrtc/peer.ts` (8× `pc as any` —
+      react-native-webrtc methods untyped), `groupCalls.ts` `mediaDevices as any`, `videoTrim.ts`
+      native-module casts, `mobile/src/net/tor.ts:119` (already eslint-justified, mirrors socket.io
+      listener typing). Forcing these out would mean fake types / `@ts-ignore` (worse).
+    - **IPC contract (`preload/index.ts` 17, `ipc-types.ts` 11):** typing the *return* values
+      cascades into the renderer's own `db/local.ts` type layer — a real "reconcile duplicated
+      types" refactor. Scheduled, not rushed (cascade risk to the renderer build).
+    - **Scattered low-value:** component-prop `: any` (`AddContact.tsx` ×3), socket parse helpers.
+      Worth a pass when those files are next touched.
 
 ---
 
