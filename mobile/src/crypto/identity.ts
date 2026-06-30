@@ -118,14 +118,18 @@ export function identityFromStored(opts: {
 }): Identity {
   const publicKey = decodeBase64(opts.publicKeyB64);
   const secretKey = decodeBase64(opts.secretKeyB64);
-  // Fallback for old identities during migration testing: generate a throwaway sign key 
-  // (though in reality old DBs will be wiped)
-  const signKeys = (opts.signingPublicKeyB64 && opts.signingSecretKeyB64) 
+  // Missing signing material (pre-multi-key DBs): DERIVE it deterministically
+  // from the box secret key, exactly as createIdentity does
+  // (nacl.sign.keyPair.fromSeed). A throwaway RANDOM pair would produce
+  // signatures no contact can verify (sealed-sender rejects everything) AND would
+  // mask a corrupted/half-written identity as valid. Deterministic derivation
+  // restores the user's REAL signing identity instead (golden rule #1/#3).
+  const signKeys = (opts.signingPublicKeyB64 && opts.signingSecretKeyB64)
     ? {
         publicKey: decodeBase64(opts.signingPublicKeyB64),
         secretKey: decodeBase64(opts.signingSecretKeyB64)
       }
-    : generateSigningKeyPair();
+    : nacl.sign.keyPair.fromSeed(secretKey);
 
   return {
     aegisId: deriveAegisId(publicKey),
