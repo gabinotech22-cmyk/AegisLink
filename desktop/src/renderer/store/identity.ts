@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 import { create } from 'zustand';
 import { createIdentity, identityFromStored, type Identity } from '../crypto/identity';
 import {
@@ -60,7 +61,7 @@ async function tryBroadcastProfileUpdate(identity: Identity): Promise<void> {
       | null;
     if (mod?.broadcastProfileUpdate) await mod.broadcastProfileUpdate(identity);
   } catch (e) {
-    if (DEV) console.warn('[identity] broadcast skipped:', (e as Error).message);
+    if (DEV) logger.warn('[identity] broadcast skipped:', (e as Error).message);
   }
 }
 
@@ -95,7 +96,7 @@ async function doPublishToServer(identity: Identity): Promise<boolean> {
       opkSecrets: preKeys.opkSecrets,
     });
     if (!persisted) {
-      if (DEV) console.warn('[identity] publish aborted: could not persist prekey secrets');
+      if (DEV) logger.warn('[identity] publish aborted: could not persist prekey secrets');
       return false;
     }
 
@@ -131,7 +132,7 @@ async function doPublishToServer(identity: Identity): Promise<boolean> {
         : null,
     );
     if (!result.ok) {
-      if (DEV) console.warn('[identity] publish failed:', result.error);
+      if (DEV) logger.warn('[identity] publish failed:', result.error);
       return false;
     }
     // Mark this slot's prekeys as published so later boots skip the republish
@@ -144,7 +145,7 @@ async function doPublishToServer(identity: Identity): Promise<boolean> {
     } catch { /* best-effort flag */ }
     return true;
   } catch (e) {
-    if (DEV) console.warn('[identity] publish failed (network?):', (e as Error).message);
+    if (DEV) logger.warn('[identity] publish failed (network?):', (e as Error).message);
     return false;
   }
 }
