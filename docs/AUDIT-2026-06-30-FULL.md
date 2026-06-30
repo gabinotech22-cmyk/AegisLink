@@ -51,7 +51,13 @@
   Direct golden-rule-#5 (mobile↔desktop parity) risk; subtle divergence could break interop or hashing.
 - **Fix:** pin both platforms to one major version; add a cross-platform KAT (known-answer test) for
   the shared hash/HKDF paths. Audit v1→v2 call sites for behavioral change.
-- Status: OPEN
+- Status: **MITIGATED** — added a cross-platform KAT on **both** platforms
+  (`mobile/src/crypto/__tests__/noble-kat.test.ts` v1, `desktop/src/renderer/crypto/__tests__/noble-kat.test.ts` v2)
+  asserting SHA-256/HMAC/HKDF/PBKDF2 against public RFC vectors. Both pass with identical output →
+  parity proven and locked (any future divergence fails CI). Full version unification (mobile→v2)
+  is a **scheduled migration** requiring on-device Metro build verification — not a blind bump here.
+  Note: `desktop/.../signal/kdf.ts:15` already adapts the one v1↔v2 API difference (HKDF `info`
+  must be `Uint8Array` in v2) so outputs match.
 
 ---
 
