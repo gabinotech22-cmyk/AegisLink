@@ -5,7 +5,7 @@ import naclUtil from 'tweetnacl-util';
 import { randomUUID } from 'node:crypto';
 
 const { decodeBase64, encodeBase64 } = naclUtil;
-import { messageRepo, senderKeyDistRepo, prekeysRepo, pushRepo, devicesRepo, identityRepo, deliveryTokenRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
+import { messageRepo, senderKeyDistRepo, prekeysRepo, devicesRepo, identityRepo, deliveryTokenRepo, workRepo, workChannelRepo, workMessageRepo, workAttachmentRepo, workChannelPermissionRepo, getPermissions, type WorkRole } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';
@@ -16,10 +16,6 @@ import {
   EnvelopeIn,
   EnvelopeV2In,
   DeliveryTokenRegister,
-  TypingEvent,
-  MsgRead,
-  MsgDelete,
-  PushRegister,
   ChannelJoin,
   ChannelMsg,
   ChannelDeleteMsg,
@@ -42,11 +38,11 @@ export type { PreKeyBundle, SealedEnvelope, QueuedEnvelope, SealedEnvelopeV2 } f
 
 import {
   checkChannelMsgRateLimit,
-  checkLowFreqRateLimit,
   checkRekeyRateLimit,
 } from './rateLimits.js';
 import { attachCallSignaling, attachGroupCallSignaling, takePendingCallInvite } from './callSignaling.js';
 import { attachPrekeys } from './handlers/prekeys.js';
+import { attachMessagingEphemeral } from './handlers/messaging.js';
 
 // Fixed sha256-length (32-byte) dummy hash. The sealed-sender v2 submission gate
 // runs its constant-time delivery-token check against this when `to` has no
@@ -715,68 +711,8 @@ export function attachRelay(io: SocketServer) {
     // ─── PreKeys (X3DH) ──────────────────────────────────────────────────
     attachPrekeys(socket, { me, deviceId });
 
-    // ─── Typing indicators ───────────────────────────────────────────────────
-    socket.on('typing', (raw) => {
-      if (!checkLowFreqRateLimit(me)) {
-        socket.emit('error_msg', { code: 'rate_limited', for: 'typing' });
-        return;
-      }
-      const parsed = TypingEvent.safeParse(raw);
-      if (!parsed.success) return;
-      // 1:1 DM path — forward directly to the target user's sockets
-      const target = sockets.get(parsed.data.to);
-      if (target) {
-        for (const s of target) s.emit('typing', { from: me, isTyping: parsed.data.isTyping });
-      }
-      // Work channel path — also broadcast to the channel room so Work clients
-      // can display per-channel "X is typing" indicators
-      if (parsed.data.channelId) {
-        socket.to(`channel:${parsed.data.channelId}`).emit('typing', {
-          from: me,
-          isTyping: parsed.data.isTyping,
-          orgId: parsed.data.orgId,
-          channelId: parsed.data.channelId,
-        });
-      }
-    });
-
-    // ─── Read receipts ───────────────────────────────────────────────────────
-    socket.on('msg:read', (raw) => {
-      if (!checkLowFreqRateLimit(me)) {
-        socket.emit('error_msg', { code: 'rate_limited', for: 'msg:read' });
-        return;
-      }
-      const parsed = MsgRead.safeParse(raw);
-      if (!parsed.success) return;
-      const target = sockets.get(parsed.data.to);
-      if (!target) return;
-      for (const s of target) s.emit('msg:read', { from: me, msgIds: parsed.data.msgIds });
-    });
-
-    // ─── Remote delete ───────────────────────────────────────────────────────
-    socket.on('msg:delete', (raw) => {
-      if (!checkLowFreqRateLimit(me)) {
-        socket.emit('error_msg', { code: 'rate_limited', for: 'msg:delete' });
-        return;
-      }
-      const parsed = MsgDelete.safeParse(raw);
-      if (!parsed.success) return;
-      const target = sockets.get(parsed.data.to);
-      if (!target) return;
-      for (const s of target) s.emit('msg:delete', { from: me, msgId: parsed.data.msgId });
-    });
-
-    // ─── Push token registration ─────────────────────────────────────────────
-    socket.on('push:register', (raw) => {
-      const parsed = PushRegister.safeParse(raw);
-      if (!parsed.success) return;
-      void pushRepo.upsert({
-        aegis_id: me,
-        expo_token: parsed.data.token,
-        platform: parsed.data.platform,
-        updated_at: Date.now(),
-      }).catch(() => { /* silent — do not log token or aegisId */ });
-    });
+    // ─── Typing / read receipts / remote delete / push registration ─────────
+    attachMessagingEphemeral(socket, { me, sockets });
 
     // ─── Device linking (mobile side — approve) ──────────────────────────────
     // Mobile emits this after scanning the desktop QR code and approving.
