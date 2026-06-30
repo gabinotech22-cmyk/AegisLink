@@ -30,10 +30,11 @@
 - [x] **G6**: Tor routing — **HECHO (vía Orbot/onion + mailbox)**. `routeViaTor` + `ONION_URL`
   + mailbox mode fail-closed en `mobile/src/config.ts`; transporte mailbox sellado (#171/#172).
   Ver `docs/FASE4-TOR-EMBEDDED-IMPL.md`, `docs/SEALED-SENDER-ARCHITECTURE.md`.
-- [~] **W1**: DID en Onboarding/Profile — **EN CURSO** (rama `feat/w1-did-profile`). El
-  `did:key` ya se deriva en Onboarding (`getOrCreateDID`, off-chain, opt-in); falta mostrarlo
-  en Profile. Evidencia: `mobile/src/web3/did/`. El anclaje on-chain `did:ethr` queda como
-  opt-in futuro documentado (rompería "anónimo por defecto, sin wallet").
+- [x] **W1**: DID en Onboarding/Profile — **HECHO** (rama `feat/sealed-public-channels`). El
+  `did:key` se deriva en Onboarding (`getOrCreateDID`, off-chain) y ahora se muestra en
+  `Profile.tsx` (sección "Identidad descentralizada", copiable, opt-in). Evidencia:
+  `mobile/src/web3/did/`, `mobile/src/screens/Profile.tsx`. El anclaje on-chain `did:ethr`
+  queda como opt-in futuro documentado (rompería "anónimo por defecto, sin wallet").
 
 ---
 ## Notas de realización (divergencias del plan original)

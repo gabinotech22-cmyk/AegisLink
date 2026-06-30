@@ -170,6 +170,9 @@
   },
   "profile": {
     "title": "Profile",
+    "didSection": "Decentralized identity",
+    "didHint": "Optional · off-chain · derived from your key",
+    "didCopied": "DID copied",
     "personal": "Personal",
     "work": "Work",
     "addStatus": "Add status…",
