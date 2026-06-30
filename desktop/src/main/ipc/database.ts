@@ -1,4 +1,9 @@
-import { ipcMain, app, safeStorage } from 'electron'
+﻿import { ipcMain, app, safeStorage } from 'electron'
+import type {
+  IdentityInput, ContactInput, MessageInput, GroupInput, CallInput,
+  IdentityRow, ContactRow, MessageRow, LastMessageRow, RatchetRow,
+  GroupRow, ChatStateRow, UnreadRow, CallRow,
+} from './dbTypes.js';
 import type { IpcMainInvokeEvent } from 'electron'
 import Database from 'better-sqlite3-multiple-ciphers'
 import path from 'path'
@@ -21,35 +26,35 @@ function assertTrustedSender(e: IpcMainInvokeEvent): void {
 
 // IPC payload size guard (defence-in-depth): a compromised or buggy renderer
 // must not be able to push an unbounded string into the main process / SQLite
-// (memory-exhaustion / disk-fill). Bounds are generous — far above any legitimate
-// value — so they never reject real data, only pathological payloads.
-const MAX_RATCHET_STATE_BYTES = 1024 * 1024;   // 1 MB — a session state is a few KB
-const MAX_MESSAGE_BODY_BYTES = 8 * 1024 * 1024; // 8 MB — covers large base64 media refs
-const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB — inline base64 avatar
-const MAX_METADATA_FIELD_BYTES = 256 * 1024;    // 256 KB — names, status, member JSON, etc.
+// (memory-exhaustion / disk-fill). Bounds are generous â€” far above any legitimate
+// value â€” so they never reject real data, only pathological payloads.
+const MAX_RATCHET_STATE_BYTES = 1024 * 1024;   // 1 MB â€” a session state is a few KB
+const MAX_MESSAGE_BODY_BYTES = 8 * 1024 * 1024; // 8 MB â€” covers large base64 media refs
+const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB â€” inline base64 avatar
+const MAX_METADATA_FIELD_BYTES = 256 * 1024;    // 256 KB â€” names, status, member JSON, etc.
 function assertMaxLen(value: unknown, maxBytes: number, label: string): void {
   if (typeof value === 'string' && value.length > maxBytes) {
     throw new Error(`IPC payload too large: ${label} (${value.length} > ${maxBytes})`)
   }
 }
 
-// ─── DB encryption at-rest ───────────────────────────────────────────────────
+// â”€â”€â”€ DB encryption at-rest â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function getDbEncKeySlot(slot = 'self'): string {
   return slot === 'self' ? 'aegis.dbEncKey.b64' : `aegis.${slot}.dbEncKey.b64`
 }
 
-// ─── C-2 Fase 2: PIN-wrapped DB key (second factor at-rest) ──────────────────
+// â”€â”€â”€ C-2 Fase 2: PIN-wrapped DB key (second factor at-rest) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // When the user enables the app lock, the 32-byte DB key is wrapped under a KEK
 // derived from the PIN (Argon2id, derived in the renderer) *inside* the DPAPI
 // layer. Opening the DB then requires BOTH the OS session (DPAPI) AND the PIN.
-// Format of the keystore value (slot 'self' → `aegis.dbEncKey.b64`):
-//   `pinv1:<nonceB64>.<dpapiB64>`   — secretbox(dbKey,nonce,KEK) then DPAPI
-//   `pinv1plain:<nonceB64>.<ctB64>` — dev-only fallback when safeStorage absent
+// Format of the keystore value (slot 'self' â†’ `aegis.dbEncKey.b64`):
+//   `pinv1:<nonceB64>.<dpapiB64>`   â€” secretbox(dbKey,nonce,KEK) then DPAPI
+//   `pinv1plain:<nonceB64>.<ctB64>` â€” dev-only fallback when safeStorage absent
 // (base64 alphabet has no '.', so it is an unambiguous separator). The KEK salt
 // lives separately in `aegis.dbkek.salt.v1` (renderer-owned); only the 32-byte
-// KEK crosses IPC — the raw DB key never leaves main.
+// KEK crosses IPC â€” the raw DB key never leaves main.
 const PIN_WRAP_PREFIX = 'pinv1:'
 const PIN_WRAP_PLAIN_PREFIX = 'pinv1plain:'
 const DBKEK_SALT_KEY = 'aegis.dbkek.salt.v1'
@@ -81,7 +86,7 @@ export function wrapDbKeyUnderPin(dbKey: Uint8Array, kek: Uint8Array): string {
   }
   // No try/catch fallback to plaintext in production (golden rule #1/#6).
   if (app.isPackaged) {
-    throw new Error('AegisLink: OS secure storage unavailable — cannot PIN-wrap DB key.')
+    throw new Error('AegisLink: OS secure storage unavailable â€” cannot PIN-wrap DB key.')
   }
   return `${PIN_WRAP_PLAIN_PREFIX}${nonceB64}.${ctB64}`
 }
@@ -104,8 +109,8 @@ export function unwrapDbKeyUnderPin(encoded: string, kek: Uint8Array): Uint8Arra
   const opened = nacl.secretbox.open(decodeBase64(ctB64), decodeBase64(nonceB64), kek)
   if (!opened) {
     // Wrong PIN (or tampered blob): the unwrap is itself the PIN check. Never
-    // fall through to a fresh key — that would orphan all encrypted rows.
-    throw new Error('AegisLink: incorrect PIN — DB key unwrap failed.')
+    // fall through to a fresh key â€” that would orphan all encrypted rows.
+    throw new Error('AegisLink: incorrect PIN â€” DB key unwrap failed.')
   }
   if (opened.length !== 32) throw new Error('decrypted DB key has invalid length')
   return opened
@@ -118,8 +123,8 @@ function getDbKey(slot = 'self'): Uint8Array {
   const encoded = keystore[slotKey]
   if (isPinWrapped(encoded)) {
     // PIN-wrapped (Fase 2): recoverable only via db:unlock(kek), which populates
-    // cachedDbKey above. Reaching here means the DB is locked — fail closed.
-    throw new Error('AegisLink: database is PIN-locked — unlock required before access.')
+    // cachedDbKey above. Reaching here means the DB is locked â€” fail closed.
+    throw new Error('AegisLink: database is PIN-locked â€” unlock required before access.')
   }
   if (!encoded) {
     // First run for this slot: generate and persist a fresh DB key.
@@ -129,7 +134,7 @@ function getDbKey(slot = 'self'): Uint8Array {
       // encryption. (Golden rule #1/#6: encryption never degrades silently;
       // production fails closed.)
       throw new Error(
-        'AegisLink: OS secure storage unavailable — cannot create DB key securely.'
+        'AegisLink: OS secure storage unavailable â€” cannot create DB key securely.'
       )
     }
     const keyBytes = nacl.randomBytes(32)
@@ -147,7 +152,7 @@ function getDbKey(slot = 'self'): Uint8Array {
     cachedDbKey = keyBytes
     return cachedDbKey
   }
-  // A plaintext DB key must never exist in a packaged build — its presence means
+  // A plaintext DB key must never exist in a packaged build â€” its presence means
   // at-rest encryption silently downgraded. Refuse to serve it rather than
   // operating on cleartext-keyed data (golden rule #1/#6; parity with
   // secureStorage:get, which applies the same refusal on read).
@@ -157,7 +162,7 @@ function getDbKey(slot = 'self'): Uint8Array {
     )
   }
   // Existing key: decrypt it. If this fails we MUST NOT silently mint a new
-  // key — that would orphan every previously-encrypted row (silent total
+  // key â€” that would orphan every previously-encrypted row (silent total
   // history loss). Surface the error so the caller can offer recovery.
   try {
     let decrypted = ''
@@ -173,7 +178,7 @@ function getDbKey(slot = 'self'): Uint8Array {
     return cachedDbKey
   } catch (e) {
     throw new Error(
-      'AegisLink: failed to decrypt the local DB key — refusing to regenerate ' +
+      'AegisLink: failed to decrypt the local DB key â€” refusing to regenerate ' +
         '(would orphan existing encrypted data). ' +
         (e instanceof Error ? e.message : String(e))
     )
@@ -231,7 +236,7 @@ function decryptBodyStrict(encryptedBody: string, slot = 'self'): string {
 
 /**
  * Display-path decryption. On failure returns a VISIBLE marker (never silent,
- * never fabricated plaintext). NOT for key material — use
+ * never fabricated plaintext). NOT for key material â€” use
  * {@link decryptSecretOrNull} for ratchet state / prekey secrets.
  */
 export function decryptBody(encryptedBody: string, slot = 'self'): string {
@@ -256,7 +261,7 @@ export function decryptSecretOrNull(encryptedBody: string, slot = 'self'): strin
   }
 }
 
-// ─── Schema Setup ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Schema Setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ensureSchema(db: Database.Database): void {
   const statements = [
@@ -382,9 +387,9 @@ function ensureSchema(db: Database.Database): void {
   safeAddColumn('call_history', 'duration_s', 'INTEGER NOT NULL DEFAULT 0')
 }
 
-// ─── SQLCipher at-rest encryption (Ola 10) ────────────────────────────────────
+// â”€â”€â”€ SQLCipher at-rest encryption (Ola 10) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/** Lowercase hex of the 32-byte DB key for `PRAGMA key = "x'…'"`. */
+/** Lowercase hex of the 32-byte DB key for `PRAGMA key = "x'â€¦'"`. */
 function dbKeyHex(slot = 'self'): string {
   return Buffer.from(getDbKey(slot)).toString('hex')
 }
@@ -392,24 +397,24 @@ function dbKeyHex(slot = 'self'): string {
 /**
  * Open `dbPath` encrypted at-rest, migrating a legacy plaintext file in place.
  *
- * Detection probes whether the file is readable with NO key (⇒ plaintext); if so
+ * Detection probes whether the file is readable with NO key (â‡’ plaintext); if so
  * it is encrypted in place via `PRAGMA rekey` (SQLite3MultipleCiphers supports
- * plaintext→encrypted rekey, preserving all rows). The key PRAGMA is applied as
+ * plaintextâ†’encrypted rekey, preserving all rows). The key PRAGMA is applied as
  * the first statement on the returned handle. Fails closed: getDbKey() throws
  * when OS secure storage is unavailable in a packaged build.
  */
 export function openEncrypted(dbPath: string, slot = 'self'): Database.Database {
   const keyHex = dbKeyHex(slot)
 
-  // ── Migrate a pre-existing PLAINTEXT database (readable without a key) ──────
+  // â”€â”€ Migrate a pre-existing PLAINTEXT database (readable without a key) â”€â”€â”€â”€â”€â”€
   if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
     let plaintext = false
     const probe = new Database(dbPath)
     try {
-      probe.exec('SELECT count(*) FROM sqlite_master') // no key → succeeds iff plaintext
+      probe.exec('SELECT count(*) FROM sqlite_master') // no key â†’ succeeds iff plaintext
       plaintext = true
     } catch {
-      plaintext = false // unreadable without a key → already encrypted
+      plaintext = false // unreadable without a key â†’ already encrypted
     } finally {
       probe.close()
     }
@@ -428,7 +433,7 @@ export function openEncrypted(dbPath: string, slot = 'self'): Database.Database 
   return handle
 }
 
-// ─── Handlers Registration ────────────────────────────────────────────────────
+// â”€â”€â”€ Handlers Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 let mainDbPath = ''
 
@@ -451,7 +456,7 @@ function openMainDb(): void {
 /**
  * Eagerly open the main DB for legacy / no-PIN installs. MUST be called AFTER
  * app.whenReady(): openMainDb() -> getDbKey() uses Electron safeStorage, which
- * THROWS when used before the app is ready (enforced since Electron 42 — before
+ * THROWS when used before the app is ready (enforced since Electron 42 â€” before
  * that it silently worked, so the eager open could live inside the pre-ready
  * registerDatabaseHandlers()). PIN-wrapped installs stay closed until db:unlock
  * supplies the PIN-derived KEK. No-op if already open or path not yet set.
@@ -469,10 +474,10 @@ export function registerDatabaseHandlers(): void {
 
   // C-2 Fase 2: if the DB key is PIN-wrapped, DEFER opening until db:unlock
   // supplies the PIN-derived KEK. Legacy / no-PIN installs are opened eagerly
-  // too — but from app.whenReady() (see openMainDbIfUnwrapped), NOT here:
+  // too â€” but from app.whenReady() (see openMainDbIfUnwrapped), NOT here:
   // getDbKey() touches safeStorage, illegal before the app is ready on Electron 42+.
 
-  // ─── Lock / unlock (C-2 Fase 2) ───
+  // â”€â”€â”€ Lock / unlock (C-2 Fase 2) â”€â”€â”€
   ipcMain.handle('db:lock-state', (event): { pinWrapped: boolean; opened: boolean } => {
     assertTrustedSender(event)
     const enc = readKeystore()[getDbEncKeySlot('self')]
@@ -518,7 +523,7 @@ export function registerDatabaseHandlers(): void {
     if (safeStorage.isEncryptionAvailable()) {
       keystore[getDbEncKeySlot('self')] = 'enc:' + safeStorage.encryptString(rawVal).toString('base64')
     } else if (app.isPackaged) {
-      throw new Error('AegisLink: OS secure storage unavailable — cannot rewrap DB key.')
+      throw new Error('AegisLink: OS secure storage unavailable â€” cannot rewrap DB key.')
     } else {
       // Dev-only (the isPackaged branch above fails closed in production).
       // nosemgrep: aegislink-no-plain-prefix-persist
@@ -527,8 +532,8 @@ export function registerDatabaseHandlers(): void {
     writeKeystore(keystore)
   })
 
-  // ─── Identity ───
-  ipcMain.handle('db:save-identity', (event, activeSlot: string, identity: any): void => {
+  // â”€â”€â”€ Identity â”€â”€â”€
+  ipcMain.handle('db:save-identity', (event, activeSlot: string, identity: IdentityInput): void => {
     assertTrustedSender(event)
     const sql = `INSERT OR REPLACE INTO identity (slot, aegis_id, public_key_b64, signing_public_key_b64, created_at)
                  VALUES (?, ?, ?, ?, ?)`
@@ -541,10 +546,10 @@ export function registerDatabaseHandlers(): void {
     )
   })
 
-  ipcMain.handle('db:load-identity', (event, activeSlot: string): any => {
+  ipcMain.handle('db:load-identity', (event, activeSlot: string) => {
     assertTrustedSender(event)
-    const row: any = db
-      .prepare(
+    const row = db
+      .prepare<unknown[], IdentityRow>(
         `SELECT aegis_id, public_key_b64, signing_public_key_b64, created_at FROM identity WHERE slot = ?`
       )
       .get(activeSlot)
@@ -573,8 +578,8 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // ─── Contacts ───
-  ipcMain.handle('db:save-contact', (event, c: any): void => {
+  // â”€â”€â”€ Contacts â”€â”€â”€
+  ipcMain.handle('db:save-contact', (event, c: ContactInput): void => {
     assertTrustedSender(event)
     // Defence-in-depth: bound the unbounded string fields a renderer can write
     // (parity with db:save-message) so a buggy/compromised renderer can't push a
@@ -605,18 +610,18 @@ export function registerDatabaseHandlers(): void {
     )
   })
 
-  ipcMain.handle('db:load-contacts', (event, profile?: string): any[] => {
+  ipcMain.handle('db:load-contacts', (event, profile?: string) => {
     assertTrustedSender(event)
-    let rows: any[]
+    let rows: ContactRow[]
     if (profile) {
       rows = db
-        .prepare(
+        .prepare<unknown[], ContactRow>(
           `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile FROM contacts WHERE profile = ? ORDER BY added_at DESC`
         )
         .all(profile)
     } else {
       rows = db
-        .prepare(
+        .prepare<unknown[], ContactRow>(
           `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile FROM contacts ORDER BY added_at DESC`
         )
         .all()
@@ -640,10 +645,10 @@ export function registerDatabaseHandlers(): void {
     }))
   })
 
-  ipcMain.handle('db:get-contact', (event, aegisId: string): any => {
+  ipcMain.handle('db:get-contact', (event, aegisId: string) => {
     assertTrustedSender(event)
-    const r: any = db
-      .prepare(
+    const r = db
+      .prepare<unknown[], ContactRow>(
         `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile FROM contacts WHERE aegis_id = ?`
       )
       .get(aegisId)
@@ -683,8 +688,8 @@ export function registerDatabaseHandlers(): void {
     db.prepare('DELETE FROM contacts WHERE aegis_id = ?').run(aegisId)
   })
 
-  // ─── Messages ───
-  ipcMain.handle('db:save-message', (event, activeSlot: string, m: any): void => {
+  // â”€â”€â”€ Messages â”€â”€â”€
+  ipcMain.handle('db:save-message', (event, activeSlot: string, m: MessageInput): void => {
     assertTrustedSender(event)
     assertMaxLen(m?.body, MAX_MESSAGE_BODY_BYTES, 'message.body')
     assertMaxLen(m?.mediaUri, MAX_MESSAGE_BODY_BYTES, 'message.mediaUri')
@@ -716,17 +721,17 @@ export function registerDatabaseHandlers(): void {
     db.prepare('UPDATE messages SET delivery_status = ? WHERE id = ?').run(status, id)
   })
 
-  ipcMain.handle('db:load-messages-by-chat', (event, activeSlot: string, chatId: string): any[] => {
+  ipcMain.handle('db:load-messages-by-chat', (event, activeSlot: string, chatId: string) => {
     assertTrustedSender(event)
     const rows = db
-      .prepare(
+      .prepare<unknown[], MessageRow>(
         `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
        FROM messages WHERE chat_id = ? ORDER BY created_at ASC`
       )
-      .all(chatId) as any[]
+      .all(chatId)
 
     return rows.map((r) => {
-      let reactions: any
+      let reactions: unknown
       if (r.reactions) {
         try {
           reactions = JSON.parse(r.reactions)
@@ -755,16 +760,16 @@ export function registerDatabaseHandlers(): void {
     })
   })
 
-  ipcMain.handle('db:get-message', (event, activeSlot: string, id: string): any => {
+  ipcMain.handle('db:get-message', (event, activeSlot: string, id: string) => {
     assertTrustedSender(event)
-    const r: any = db
-      .prepare(
+    const r = db
+      .prepare<unknown[], MessageRow>(
         `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
        FROM messages WHERE id = ?`
       )
       .get(id)
     if (!r) return null
-    let reactions: any
+    let reactions: unknown
     if (r.reactions) {
       try {
         reactions = JSON.parse(r.reactions)
@@ -797,16 +802,16 @@ export function registerDatabaseHandlers(): void {
     db.prepare('UPDATE messages SET pinned = ? WHERE id = ?').run(pinned ? 1 : 0, id)
   })
 
-  ipcMain.handle('db:get-pinned-message', (event, activeSlot: string, chatId: string): any => {
+  ipcMain.handle('db:get-pinned-message', (event, activeSlot: string, chatId: string) => {
     assertTrustedSender(event)
-    const r: any = db
-      .prepare(
+    const r = db
+      .prepare<unknown[], MessageRow>(
         `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
        FROM messages WHERE chat_id = ? AND pinned = 1 ORDER BY created_at DESC LIMIT 1`
       )
       .get(chatId)
     if (!r) return null
-    let reactions: any
+    let reactions: unknown
     if (r.reactions) {
       try {
         reactions = JSON.parse(r.reactions)
@@ -848,15 +853,15 @@ export function registerDatabaseHandlers(): void {
     )
   })
 
-  ipcMain.handle('db:set-message-reactions', (event, id: string, reactions: any): void => {
+  ipcMain.handle('db:set-message-reactions', (event, id: string, reactions: unknown): void => {
     assertTrustedSender(event)
     db.prepare('UPDATE messages SET reactions = ? WHERE id = ?').run(JSON.stringify(reactions), id)
   })
 
-  ipcMain.handle('db:last-message-by-chat', (event, activeSlot: string, chatId: string): any => {
+  ipcMain.handle('db:last-message-by-chat', (event, activeSlot: string, chatId: string) => {
     assertTrustedSender(event)
-    const r: any = db
-      .prepare(
+    const r = db
+      .prepare<unknown[], LastMessageRow>(
         `SELECT id, chat_id, direction, body, created_at FROM messages
        WHERE chat_id = ? ORDER BY created_at DESC LIMIT 1`
       )
@@ -871,7 +876,7 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // ─── Double Ratchet sessions ───
+  // â”€â”€â”€ Double Ratchet sessions â”€â”€â”€
   ipcMain.handle(
     'db:save-ratchet-session',
     (event, activeSlot: string, aegisId: string, stateJson: string): void => {
@@ -889,8 +894,8 @@ export function registerDatabaseHandlers(): void {
     'db:load-ratchet-session',
     (event, activeSlot: string, aegisId: string): string | null => {
       assertTrustedSender(event)
-      const r: any = db
-        .prepare('SELECT state_json FROM ratchet_sessions WHERE aegis_id = ?')
+      const r = db
+        .prepare<unknown[], RatchetRow>('SELECT state_json FROM ratchet_sessions WHERE aegis_id = ?')
         .get(aegisId)
       if (!r) return null
       // Fail closed: undecryptable ratchet state => null (re-establish), never a
@@ -899,8 +904,8 @@ export function registerDatabaseHandlers(): void {
     }
   )
 
-  // ─── Groups ───
-  ipcMain.handle('db:save-group', (event, g: any): void => {
+  // â”€â”€â”€ Groups â”€â”€â”€
+  ipcMain.handle('db:save-group', (event, g: GroupInput): void => {
     assertTrustedSender(event)
     assertMaxLen(g?.name, MAX_METADATA_FIELD_BYTES, 'group.name')
     assertMaxLen(g?.avatarColor, MAX_METADATA_FIELD_BYTES, 'group.avatarColor')
@@ -923,13 +928,13 @@ export function registerDatabaseHandlers(): void {
     )
   })
 
-  ipcMain.handle('db:load-groups', (event): any[] => {
+  ipcMain.handle('db:load-groups', (event) => {
     assertTrustedSender(event)
     const rows = db
-      .prepare(
+      .prepare<unknown[], GroupRow>(
         `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig FROM groups ORDER BY created_at DESC`
       )
-      .all() as any[]
+      .all()
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -946,12 +951,12 @@ export function registerDatabaseHandlers(): void {
 
   ipcMain.handle('db:delete-group', (event, id: string): void => {
     assertTrustedSender(event)
-    db.prepare('DELETE FROM groups WHERE id = ?').run(id)
+    db.prepare<unknown[], GroupRow>('DELETE FROM groups WHERE id = ?').run(id)
   })
 
-  ipcMain.handle('db:get-group', (event, id: string): any => {
+  ipcMain.handle('db:get-group', (event, id: string) => {
     assertTrustedSender(event)
-    const r: any = db
+    const r = db
       .prepare(
         `SELECT id, name, members, created_at, avatar_color, avatar_image, admin_only_invite, moderate_new_members, admin_id, admin_sig FROM groups WHERE id = ?`
       )
@@ -971,11 +976,11 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // ─── Panic wipe ───
+  // â”€â”€â”€ Panic wipe â”€â”€â”€
   ipcMain.handle('db:wipe-database', (event, activeSlot: string): void => {
     assertTrustedSender(event)
     // Tolerate a LOCKED DB (Fase 2 cold-start panic, before db:unlock): the SQL
-    // deletes are skipped, but the keystore wipe below removes the DB key blob —
+    // deletes are skipped, but the keystore wipe below removes the DB key blob â€”
     // the encrypted DB file is then unrecoverable, so panic still leaves nothing.
     if (db) {
       db.prepare('DELETE FROM messages').run()
@@ -1006,11 +1011,11 @@ export function registerDatabaseHandlers(): void {
     writeKeystore(keystore)
   })
 
-  // ─── Chat state ───
-  ipcMain.handle('db:get-chat-state', (event, activeSlot: string, chatId: string): any => {
+  // â”€â”€â”€ Chat state â”€â”€â”€
+  ipcMain.handle('db:get-chat-state', (event, activeSlot: string, chatId: string) => {
     assertTrustedSender(event)
-    const r: any = db
-      .prepare('SELECT draft, unread_count FROM chat_state WHERE chat_id = ?')
+    const r = db
+      .prepare<unknown[], ChatStateRow>('SELECT draft, unread_count FROM chat_state WHERE chat_id = ?')
       .get(chatId)
     if (!r) return { draft: null, unreadCount: 0 }
     const decryptedDraft = r.draft ? decryptBody(r.draft, activeSlot) : null
@@ -1050,14 +1055,14 @@ export function registerDatabaseHandlers(): void {
   ipcMain.handle('db:get-all-unread-counts', (event): Record<string, number> => {
     assertTrustedSender(event)
     const rows = db
-      .prepare('SELECT chat_id, unread_count FROM chat_state WHERE unread_count > 0')
-      .all() as any[]
+      .prepare<unknown[], UnreadRow>('SELECT chat_id, unread_count FROM chat_state WHERE unread_count > 0')
+      .all()
     const result: Record<string, number> = {}
     for (const r of rows) result[r.chat_id] = r.unread_count
     return result
   })
 
-  // ─── Ephemeral cleanup ───
+  // â”€â”€â”€ Ephemeral cleanup â”€â”€â”€
   ipcMain.handle('db:delete-expired-messages', (event, timerSeconds: number): void => {
     assertTrustedSender(event)
     const now = Date.now()
@@ -1070,8 +1075,8 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // ─── Call history ───
-  ipcMain.handle('db:save-call', (event, c: any): void => {
+  // â”€â”€â”€ Call history â”€â”€â”€
+  ipcMain.handle('db:save-call', (event, c: CallInput): void => {
     assertTrustedSender(event)
     assertMaxLen(c?.id, MAX_METADATA_FIELD_BYTES, 'call.id')
     assertMaxLen(c?.contactId, MAX_METADATA_FIELD_BYTES, 'call.contactId')
@@ -1083,13 +1088,13 @@ export function registerDatabaseHandlers(): void {
     ).run(c.id, c.contactId, c.direction, c.media, c.status, c.startedAt, c.durationS)
   })
 
-  ipcMain.handle('db:get-call-history', (event, contactId: string, limit: number): any[] => {
+  ipcMain.handle('db:get-call-history', (event, contactId: string, limit: number) => {
     assertTrustedSender(event)
     const rows = db
-      .prepare(
+      .prepare<unknown[], CallRow>(
         'SELECT id, contact_id, direction, media, status, started_at, duration_s FROM call_history WHERE contact_id = ? ORDER BY started_at DESC LIMIT ?'
       )
-      .all(contactId, limit) as any[]
+      .all(contactId, limit)
     return rows.map((r) => ({
       id: r.id,
       contactId: r.contact_id,
