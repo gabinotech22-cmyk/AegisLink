@@ -43,81 +43,19 @@ import {
 
 export type { PreKeyBundle, SealedEnvelope, QueuedEnvelope, SealedEnvelopeV2 } from './schemas.js';
 
+import {
+  RATE_LIMIT_MAP_MAX,
+  checkChannelMsgRateLimit,
+  checkLowFreqRateLimit,
+  checkRekeyRateLimit,
+} from './rateLimits.js';
+
 // Fixed sha256-length (32-byte) dummy hash. The sealed-sender v2 submission gate
 // runs its constant-time delivery-token check against this when `to` has no
 // token registered, so the response time can't reveal whether `to` is a v2
 // recipient — closes a low-severity existence oracle. (The `getHash` DB lookup
 // is a weaker residual timing oracle, out of scope for this application guard.)
 const DUMMY_DELIVERY_TOKEN_HASH = Buffer.alloc(32).toString('base64');
-
-// Rate-limit buckets for channel:msg — keyed by aegisId, max 120/min
-const channelMsgRateLimit = new Map<string, { count: number; reset: number }>();
-// TODO (A-1, deferred): migrate to Redis ONLY when running >1 relay instance.
-// Single-instance today, so in-memory is correct; the cap below bounds memory.
-const RATE_LIMIT_MAP_MAX = 10_000;
-
-/**
- * Bound the size of an in-memory rate-limit map WITHOUT letting an attacker reset
- * a victim's counter. The old code evicted the oldest-INSERTED key (plain FIFO):
- * flooding the map with fresh keys would evict an active victim entry and hand
- * them a clean bucket. Instead, evict only entries whose window has already
- * elapsed (their counter is meaningless anyway); active buckets are never
- * dropped to make room. As a last resort under a pathological all-active map we
- * stop inserting churn rather than evicting a live limit. Keyed by aegisId, all
- * authenticated — and registration now costs an 18-bit PoW (A-2), so minting the
- * thousands of identities needed to fill this map is already expensive.
- */
-function evictExpired(map: Map<string, { count: number; reset: number }>): void {
-  if (map.size <= RATE_LIMIT_MAP_MAX) return;
-  const now = Date.now();
-  for (const [key, entry] of map) {
-    if (entry.reset <= now) map.delete(key);
-    if (map.size <= RATE_LIMIT_MAP_MAX) return;
-  }
-}
-
-function checkChannelMsgRateLimit(aegisId: string): boolean {
-  const now = Date.now();
-  const entry = channelMsgRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
-  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
-  entry.count++;
-  channelMsgRateLimit.set(aegisId, entry);
-  evictExpired(channelMsgRateLimit);
-  return entry.count <= 120;
-}
-
-// ── Shared low-frequency rate-limit (FIX D) ───────────────────────────────────
-// typing + msg:read + msg:delete share a single bucket: 30 ops / 10 s per socket.
-// group:rekey has its own stricter bucket: 10 ops / 60 s per aegisId.
-// Keyed by aegisId — no IP involved.
-const lowFreqRateLimit = new Map<string, { count: number; reset: number }>();
-const rekeyRateLimit   = new Map<string, { count: number; reset: number }>();
-
-function checkLowFreqRateLimit(aegisId: string): boolean {
-  const now = Date.now();
-  const entry = lowFreqRateLimit.get(aegisId) ?? { count: 0, reset: now + 10_000 };
-  if (now > entry.reset) { entry.count = 0; entry.reset = now + 10_000; }
-  entry.count++;
-  lowFreqRateLimit.set(aegisId, entry);
-  evictExpired(lowFreqRateLimit);
-  return entry.count <= 30;
-}
-
-// Raised from 10 to 30 per minute to support large-group re-keys.
-// Rationale: with GROUP_REKEY_MAX_DIST=512, an admin re-keying a 512-member
-// group needs exactly 1 call (fits in one batch). The extra headroom (30 calls)
-// covers concurrent group memberships and retry attempts without opening a
-// meaningful DoS vector — sustained abuse would only exhaust the attacker's own
-// per-identity bucket, not others'.
-function checkRekeyRateLimit(aegisId: string): boolean {
-  const now = Date.now();
-  const entry = rekeyRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
-  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
-  entry.count++;
-  rekeyRateLimit.set(aegisId, entry);
-  evictExpired(rekeyRateLimit);
-  return entry.count <= 30;
-}
 
 // ── Online presence (ephemeral — never persisted, zero metadata) ─────────────
 // orgId → Set of aegisIds currently online in that org
