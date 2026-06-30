@@ -44,3 +44,6 @@ docs/SESSION_HANDOFF.md
 # Signing keystore backup + ad-hoc test scripts — never commit
 /_keystore_backup/
 /_powtest.mjs
+
+# Runtime upload dir — transient blobs, never commit (relay writes here)
+/uploads/
