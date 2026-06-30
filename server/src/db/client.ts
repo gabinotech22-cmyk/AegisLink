@@ -9,17 +9,12 @@
  * regardless of which backend is active.
  */
 
-// ── Backend detection ─────────────────────────────────────────────────────────
-
-const DATABASE_URL = process.env.DATABASE_URL ?? '';
-const USE_PG = DATABASE_URL.startsWith('postgres://') || DATABASE_URL.startsWith('postgresql://');
-
 // ── SQLite backend ── (getSqlite / closeSqlite / schema → ./sqlite, M4 split)
 import { randomUUID } from 'node:crypto';
 import { getSqlite, closeSqlite } from './sqlite';
 
 // ── PostgreSQL backend ── (getPool / closePg / schema → ./pg, M4 split)
-import { getPool, closePg, initPgSchema } from './pg';
+import { closePg, initPgSchema } from './pg';
 
 // ── DB init (called once at startup) ─────────────────────────────────────────
 
@@ -52,84 +47,8 @@ export async function closeDb(): Promise<void> {
   await closePg();
 }
 
-// ── Low-level query helpers ───────────────────────────────────────────────────
-// These are used internally by repos; not exported publicly.
-
-// SQLite's SQLInputValue: null | number | bigint | string | Uint8Array
-type SqlParam = null | number | bigint | string | Uint8Array;
-
-function toSqlParams(params: unknown[]): SqlParam[] {
-  return params as SqlParam[];
-}
-
-function toPgParams(params: unknown[]): unknown[] {
-  return params;
-}
-
-async function dbRun(sql: string, params: unknown[] = []): Promise<{ changes: number }> {
-  if (USE_PG) {
-    let i = 0;
-    const pgSql = sql.replace(/\?/g, () => `$${++i}`);
-    const result = await getPool().query(pgSql, toPgParams(params));
-    return { changes: result.rowCount ?? 0 };
-  } else {
-    const stmt = getSqlite().prepare(sql);
-    const result = stmt.run(...toSqlParams(params)) as { changes: number };
-    return result;
-  }
-}
-
-async function dbAll<T>(sql: string, params: unknown[] = []): Promise<T[]> {
-  if (USE_PG) {
-    let i = 0;
-    const pgSql = sql.replace(/\?/g, () => `$${++i}`);
-    const result = await getPool().query(pgSql, toPgParams(params));
-    return result.rows as T[];
-  } else {
-    const stmt = getSqlite().prepare(sql);
-    return stmt.all(...toSqlParams(params)) as unknown as T[];
-  }
-}
-
-async function dbGet<T>(sql: string, params: unknown[] = []): Promise<T | undefined> {
-  if (USE_PG) {
-    let i = 0;
-    const pgSql = sql.replace(/\?/g, () => `$${++i}`);
-    const result = await getPool().query(pgSql, toPgParams(params));
-    return result.rows[0] as T | undefined;
-  } else {
-    const stmt = getSqlite().prepare(sql);
-    return stmt.get(...toSqlParams(params)) as unknown as T | undefined;
-  }
-}
-
-// PG-specific: run multiple statements in a transaction, consuming an OPK atomically.
-async function pgPopOpk(aegisId: string, deviceId = 'default'): Promise<{ key_id: number; public_key_b64: string } | undefined> {
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
-    const sel = await client.query(
-      `SELECT key_id, public_key_b64 FROM prekeys_onetime WHERE aegis_id = $1 AND device_id = $2 ORDER BY key_id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
-      [aegisId, deviceId]
-    );
-    if (sel.rows.length === 0) {
-      await client.query('COMMIT');
-      return undefined;
-    }
-    const opk = sel.rows[0] as { key_id: number; public_key_b64: string };
-    await client.query(
-      `DELETE FROM prekeys_onetime WHERE aegis_id = $1 AND device_id = $2 AND key_id = $3`,
-      [aegisId, deviceId, opk.key_id]
-    );
-    await client.query('COMMIT');
-    return opk;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-}
+// ── Query dispatch (USE_PG / dbRun / dbAll / dbGet / pgPopOpk → ./driver, M4 split)
+import { USE_PG, dbRun, dbAll, dbGet, pgPopOpk } from './driver';
 
 // ── Exported interfaces & repos ───────────────────────────────────────────────
 
