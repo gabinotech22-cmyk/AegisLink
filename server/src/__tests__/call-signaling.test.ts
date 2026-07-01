@@ -1,13 +1,16 @@
 /**
  * call-signaling.test.ts
  *
- * Integration tests for the call:invite / call:ice offline handling:
+ * Integration tests for sealed-sender v2 call signaling (v2-only after Fase C):
  *
- *   (a) invite offline with push tokens → NO peer_offline + invite re-delivered
+ *   (a) invite:v2 offline with push tokens → NO peer_offline + invite re-delivered
  *       at reconnect (with buffered ICE drained after it)
- *   (b) invite offline without push tokens → peer_offline + queue cancelled
- *   (c) ICE buffered while callee offline, drained in order after invite on reconnect
+ *   (b) invite:v2 offline without push tokens → peer_offline + queue cancelled
+ *   (c) ICE:v2 buffered while callee offline, drained in order after invite on reconnect
  *   (d) ICE buffer cap: candidates beyond 32 are silently discarded
+ *   (e) group_call:channel sealed-sender fanout
+ *   (f) Fase C regression: v1 call events are no longer routed by the relay
+ *   (g) Fase C regression: relay NEVER emits `from` on any call:* or group_call:*
  *
  * Each test group uses its own caller/callee agent pair (unique seeds) to avoid
  * sharing rate-limit buckets (max 5 call:invite/min per aegisId).
@@ -194,8 +197,8 @@ function connectAndCollectCalls(keys: AgentKeys, windowMs = 500): Promise<CallDr
       reconnection: false,
     });
 
-    socket.on('call:invite', (data: Record<string, unknown>) => invites.push(data));
-    socket.on('call:ice', (data: Record<string, unknown>) => iceEvents.push(data));
+    socket.on('call:invite:v2', (data: Record<string, unknown>) => invites.push(data));
+    socket.on('call:ice:v2', (data: Record<string, unknown>) => iceEvents.push(data));
 
     const authTimer = setTimeout(() => {
       socket.disconnect();
@@ -254,9 +257,10 @@ function collectWithin<T>(
   });
 }
 
+/** Build a v2 invite payload (sealed-sender: includes `epk`, no `from`). */
 function makeInvitePayload(to: string, callId: string, media: 'audio' | 'video' = 'audio'): Record<string, unknown> {
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  return { to, callId, media, ciphertext: encodeBase64(nacl.randomBytes(64)), nonce: encodeBase64(nonce) };
+  return { to, callId, media, ciphertext: encodeBase64(nacl.randomBytes(64)), nonce: encodeBase64(nonce), epk: encodeBase64(nacl.randomBytes(32)) };
 }
 
 function makeIcePayload(to: string, callId: string): Record<string, unknown> {
@@ -293,6 +297,14 @@ const calleeD = makeAgentKeys(241);
 const initiatorE = makeAgentKeys(250);
 const memberE = makeAgentKeys(251);
 
+// (f) group: seeds 260 / 261 — Fase C regression: v1 events no longer routed
+const callerF = makeAgentKeys(260);
+const calleeF = makeAgentKeys(261);
+
+// (g) group: seeds 270 / 271 — Fase C regression: no `from` on ANY call/group event
+const callerG = makeAgentKeys(270);
+const calleeG = makeAgentKeys(271);
+
 beforeAll(async () => {
   // Direct DB insertion — bypasses HTTP rate limiting.
   await Promise.all([
@@ -301,6 +313,8 @@ beforeAll(async () => {
     registerAgent(callerC), registerAgent(calleeC),
     registerAgent(callerD), registerAgent(calleeD),
     registerAgent(initiatorE), registerAgent(memberE),
+    registerAgent(callerF), registerAgent(calleeF),
+    registerAgent(callerG), registerAgent(calleeG),
   ]);
 }, 30_000);
 
@@ -331,7 +345,7 @@ describe('(a) call:invite offline — callee HAS push tokens', () => {
     const errors = await collectWithin<{ code: string; for?: string }>(
       callerSocket,
       'error_msg',
-      () => callerSocket.emit('call:invite', makeInvitePayload(calleeA.aegisId, callId)),
+      () => callerSocket.emit('call:invite:v2', makeInvitePayload(calleeA.aegisId, callId)),
       600,
     );
     const peerOffline = errors.filter((e) => e.code === 'peer_offline' && e.for === 'call:invite');
@@ -340,14 +354,15 @@ describe('(a) call:invite offline — callee HAS push tokens', () => {
 
   it('invite is re-delivered when callee reconnects', async () => {
     const callId = `ca-rdr-${Date.now()}`;
-    callerSocket.emit('call:invite', makeInvitePayload(calleeA.aegisId, callId));
+    callerSocket.emit('call:invite:v2', makeInvitePayload(calleeA.aegisId, callId));
     await new Promise<void>((r) => setTimeout(r, 200));
 
     const { socket: cs, invites } = await connectAndCollectCalls(calleeA);
     try {
       const found = invites.find((inv) => inv['callId'] === callId);
       expect(found).toBeDefined();
-      expect(found!['from']).toBe(callerA.aegisId);
+      // Sealed-sender: the relay NEVER stamps `from` on the wire.
+      expect(found!['from']).toBeUndefined();
     } finally {
       cs.disconnect();
     }
@@ -371,7 +386,7 @@ describe('(b) call:invite offline — callee has NO push tokens', () => {
 
   it('emits peer_offline to caller', async () => {
     const errPromise = once<{ code: string; for?: string }>(callerSocket, 'error_msg', 4_000);
-    callerSocket.emit('call:invite', makeInvitePayload(calleeB.aegisId, `cb-pof-${Date.now()}`));
+    callerSocket.emit('call:invite:v2', makeInvitePayload(calleeB.aegisId, `cb-pof-${Date.now()}`));
     const err = await errPromise;
     expect(err.code).toBe('peer_offline');
     expect(err.for).toBe('call:invite');
@@ -380,7 +395,7 @@ describe('(b) call:invite offline — callee has NO push tokens', () => {
   it('queue is cancelled — callee reconnect does NOT receive the invite', async () => {
     const callId = `cb-qcl-${Date.now()}`;
     const errPromise = once<{ code: string; for?: string }>(callerSocket, 'error_msg', 4_000);
-    callerSocket.emit('call:invite', makeInvitePayload(calleeB.aegisId, callId));
+    callerSocket.emit('call:invite:v2', makeInvitePayload(calleeB.aegisId, callId));
     await errPromise;
 
     const { socket: cs, invites } = await connectAndCollectCalls(calleeB, 300);
@@ -417,10 +432,10 @@ describe('(c) call:ice buffering and drain', () => {
   it('ICE candidates buffered offline are drained after invite on callee reconnect', async () => {
     const callId = `cc-buf-${Date.now()}`;
 
-    callerSocket.emit('call:invite', makeInvitePayload(calleeC.aegisId, callId));
-    callerSocket.emit('call:ice', makeIcePayload(calleeC.aegisId, callId));
-    callerSocket.emit('call:ice', makeIcePayload(calleeC.aegisId, callId));
-    callerSocket.emit('call:ice', makeIcePayload(calleeC.aegisId, callId));
+    callerSocket.emit('call:invite:v2', makeInvitePayload(calleeC.aegisId, callId));
+    callerSocket.emit('call:ice:v2', makeIcePayload(calleeC.aegisId, callId));
+    callerSocket.emit('call:ice:v2', makeIcePayload(calleeC.aegisId, callId));
+    callerSocket.emit('call:ice:v2', makeIcePayload(calleeC.aegisId, callId));
 
     await new Promise<void>((r) => setTimeout(r, 250));
 
@@ -428,10 +443,11 @@ describe('(c) call:ice buffering and drain', () => {
     try {
       const foundInvite = invites.find((inv) => inv['callId'] === callId);
       expect(foundInvite).toBeDefined();
-      expect(foundInvite!['from']).toBe(callerC.aegisId);
+      // Sealed-sender: the relay NEVER stamps `from` on the wire.
+      expect(foundInvite!['from']).toBeUndefined();
       expect(iceEvents).toHaveLength(3);
       for (const ice of iceEvents) {
-        expect(ice['from']).toBe(callerC.aegisId);
+        expect(ice['from']).toBeUndefined();
       }
     } finally {
       cs.disconnect();
@@ -440,15 +456,15 @@ describe('(c) call:ice buffering and drain', () => {
 
   it('call:ice does NOT emit peer_offline to caller when callee is offline', async () => {
     const callId = `cc-npo-${Date.now()}`;
-    callerSocket.emit('call:invite', makeInvitePayload(calleeC.aegisId, callId));
+    callerSocket.emit('call:invite:v2', makeInvitePayload(calleeC.aegisId, callId));
     await new Promise<void>((r) => setTimeout(r, 100));
 
     const errors = await collectWithin<{ code: string; for?: string }>(
       callerSocket,
       'error_msg',
       () => {
-        callerSocket.emit('call:ice', makeIcePayload(calleeC.aegisId, callId));
-        callerSocket.emit('call:ice', makeIcePayload(calleeC.aegisId, callId));
+        callerSocket.emit('call:ice:v2', makeIcePayload(calleeC.aegisId, callId));
+        callerSocket.emit('call:ice:v2', makeIcePayload(calleeC.aegisId, callId));
       },
       400,
     );
@@ -486,11 +502,11 @@ describe('(d) call:ice buffer cap', () => {
   it('at most 32 ICE candidates delivered on drain when 50 were sent', async () => {
     const callId = `cd-cap-${Date.now()}`;
 
-    callerSocket.emit('call:invite', makeInvitePayload(calleeD.aegisId, callId));
+    callerSocket.emit('call:invite:v2', makeInvitePayload(calleeD.aegisId, callId));
     await new Promise<void>((r) => setTimeout(r, 100));
 
     for (let i = 0; i < 50; i++) {
-      callerSocket.emit('call:ice', makeIcePayload(calleeD.aegisId, callId));
+      callerSocket.emit('call:ice:v2', makeIcePayload(calleeD.aegisId, callId));
     }
     await new Promise<void>((r) => setTimeout(r, 400));
 
@@ -585,4 +601,121 @@ describe('(e) group_call:channel fanout to online members (sealed-sender)', () =
       memberSocket.disconnect();
     }
   }, 12_000);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// (f) Fase C regression: legacy v1 call:invite is no longer routed
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe('(f) Fase C — v1 call events are no longer routed', () => {
+  let callerSocket: ClientSocket;
+
+  beforeEach(async () => {
+    callerSocket = await connectAgent(callerF);
+  });
+
+  afterEach(() => {
+    callerSocket?.disconnect();
+  });
+
+  it('a v1 call:invite does NOT produce a delivery to the callee (handler removed)', async () => {
+    const calleeSocket = await connectAgent(calleeF);
+    try {
+      // Listen on BOTH v1 and v2 invite events on the callee side.
+      const invites = await collectWithin<Record<string, unknown>>(
+        calleeSocket,
+        'call:invite',
+        () => {
+          // Emit a v1-shaped invite (no epk). The relay no longer has a handler.
+          const nonce = nacl.randomBytes(nacl.box.nonceLength);
+          callerSocket.emit('call:invite', {
+            to: calleeF.aegisId,
+            callId: `cf-v1-${Date.now()}`,
+            media: 'audio',
+            ciphertext: encodeBase64(nacl.randomBytes(64)),
+            nonce: encodeBase64(nonce),
+          });
+        },
+        600,
+      );
+      expect(invites).toHaveLength(0);
+    } finally {
+      calleeSocket.disconnect();
+    }
+  }, 12_000);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// (g) Fase C regression: relay NEVER emits `from` on ANY call signaling event
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe('(g) Fase C — relay never emits `from` on any call:* or group_call:* event', () => {
+  let callerSocket: ClientSocket;
+  let calleeSocket: ClientSocket;
+
+  beforeEach(async () => {
+    callerSocket = await connectAgent(callerG);
+    calleeSocket = await connectAgent(calleeG);
+  });
+
+  afterEach(() => {
+    callerSocket?.disconnect();
+    calleeSocket?.disconnect();
+  });
+
+  it('call:invite:v2 delivery to online peer has no `from`', async () => {
+    const callId = `cg-inv-${Date.now()}`;
+    const invites = await collectWithin<Record<string, unknown>>(
+      calleeSocket,
+      'call:invite:v2',
+      () => callerSocket.emit('call:invite:v2', makeInvitePayload(calleeG.aegisId, callId)),
+      500,
+    );
+    const found = invites.find((inv) => inv['callId'] === callId);
+    expect(found).toBeDefined();
+    expect(found!['from']).toBeUndefined();
+    expect(found!['to']).toBeUndefined();
+  }, 10_000);
+
+  it('call:answer:v2 delivery has no `from`', async () => {
+    const callId = `cg-ans-${Date.now()}`;
+    const answers = await collectWithin<Record<string, unknown>>(
+      callerSocket,
+      'call:answer:v2',
+      () => calleeSocket.emit('call:answer:v2', makeIcePayload(callerG.aegisId, callId)),
+      500,
+    );
+    const found = answers.find((a) => a['callId'] === callId);
+    expect(found).toBeDefined();
+    expect(found!['from']).toBeUndefined();
+    expect(found!['to']).toBeUndefined();
+  }, 10_000);
+
+  it('call:ice:v2 delivery has no `from`', async () => {
+    const callId = `cg-ice-${Date.now()}`;
+    const iceEvents = await collectWithin<Record<string, unknown>>(
+      calleeSocket,
+      'call:ice:v2',
+      () => callerSocket.emit('call:ice:v2', makeIcePayload(calleeG.aegisId, callId)),
+      500,
+    );
+    const found = iceEvents.find((i) => i['callId'] === callId);
+    expect(found).toBeDefined();
+    expect(found!['from']).toBeUndefined();
+    expect(found!['to']).toBeUndefined();
+  }, 10_000);
+
+  it('call:hangup:v2 delivery has no `from`', async () => {
+    const callId = `cg-hng-${Date.now()}`;
+    const hangups = await collectWithin<Record<string, unknown>>(
+      calleeSocket,
+      'call:hangup:v2',
+      () => callerSocket.emit('call:hangup:v2', { callId, to: calleeG.aegisId, reason: 'bye' }),
+      500,
+    );
+    const found = hangups.find((h) => h['callId'] === callId);
+    expect(found).toBeDefined();
+    expect(found!['from']).toBeUndefined();
+    expect(found!['to']).toBeUndefined();
+  }, 10_000);
 });

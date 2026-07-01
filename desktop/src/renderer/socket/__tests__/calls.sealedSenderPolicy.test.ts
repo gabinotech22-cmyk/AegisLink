@@ -1,17 +1,15 @@
 /**
- * calls.sealedSenderPolicy.test.ts — sealed-sender (v2) call policy, Fase A.
+ * calls.sealedSenderPolicy.test.ts — sealed-sender (v2) call policy, Fase A+C.
  *
  * Desktop twin of mobile/src/socket/__tests__/calls.sealedSenderPolicy.test.ts
  * (golden rules #4 sealed-sender-in-calls, #5 mobile↔desktop parity, #6 fail
- * closed, #11 a test per fix — desktop previously had NO call-signaling suite).
+ * closed, #11 a test per fix).
  *
- * Under the default SEALED_TRANSPORT_VERSION='v2' policy an updated desktop
- * client must never hand the relay a `from`-bearing (and, on desktop, cleartext)
- * v1 call event:
+ * The desktop client must never hand the relay a `from`-bearing v1 call event:
  *   1. startCall() with no resolvable peer box key FAILS CLOSED — no v1 invite.
  *   2. startCall() with keys present emits the sealed `call:invite:v2` (no `from`).
- *   3. An inbound legacy v1 `call:invite` is REFUSED (we never answer → never
- *      emit our own `from`).
+ *   3. (Fase C) The v1 call:invite handler is no longer wired — the relay no
+ *      longer routes v1 events, and the client does not listen for them.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -34,7 +32,6 @@ vi.mock('../client', () => ({
 }));
 vi.mock('../../config', () => ({
   RELAY_URL: 'https://relay.test',
-  SEALED_TRANSPORT_VERSION: 'v2',
 }));
 vi.mock('../../db/local', () => ({ saveCall: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../store/messages', () => ({ useMessages: { getState: () => ({ append: vi.fn() }) } }));
@@ -132,16 +129,19 @@ describe('desktop calls.ts — sealed-sender (v2) policy', () => {
     expect(useCall.getState().status).toBe('ended');
   });
 
-  it('refuses an inbound legacy v1 call:invite under the v2 policy', () => {
+  it('v1 call:invite handler is not wired (Fase C: v1 removed entirely)', () => {
     attachCallHandlers();
-    const inviteEntry = (h.on.mock.calls as [string, (m: unknown) => void][]).find(([ev]) => ev === 'call:invite');
-    expect(inviteEntry).toBeDefined();
-    const v1InviteHandler = inviteEntry![1];
-
-    // Desktop v1 invites are cleartext; absent the guard this would ring.
-    v1InviteHandler({ callId: 'call-x', from: 'peer-C', media: 'audio', offer: 'plain-sdp' });
-
-    expect(useCall.getState().status).toBe('idle'); // refused before ringing
-    expect(emittedEvents()).toHaveLength(0);
+    // After Fase C the client no longer registers a handler for the v1
+    // `call:invite` event at all. The `call:invite:v2` handler IS wired.
+    const registeredEvents = (h.on.mock.calls as [string, unknown][]).map(([ev]) => ev);
+    expect(registeredEvents).not.toContain('call:invite');
+    expect(registeredEvents).not.toContain('call:answer');
+    expect(registeredEvents).not.toContain('call:ice');
+    expect(registeredEvents).not.toContain('call:hangup');
+    // v2 handlers ARE wired
+    expect(registeredEvents).toContain('call:invite:v2');
+    expect(registeredEvents).toContain('call:answer:v2');
+    expect(registeredEvents).toContain('call:ice:v2');
+    expect(registeredEvents).toContain('call:hangup:v2');
   });
 });
