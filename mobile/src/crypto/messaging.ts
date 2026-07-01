@@ -4,7 +4,7 @@ import { ratchetEncrypt, ratchetDecrypt, type RatchetState } from './signal/ratc
 import { stripAndPad, unpad } from './metadata';
 import { sealEnvelope, openEnvelope as openSealedEnvelope, type SealedWire } from './sealedSender';
 
-interface InnerRatchet {
+export interface InnerRatchet {
   ratchetKeyB64: string;
   n: number;
   pn: number;
@@ -16,6 +16,26 @@ interface InnerRatchet {
   // turn or the session predates R1.
   pqPubB64?: string;
   pqCtB64?: string;
+}
+
+/**
+ * Rebuild a ratchet header from its wire form. SINGLE point of truth — every
+ * decrypt path (v1, v2, and the socket client's init-adoption path) MUST use
+ * this. A hand-rolled copy that forgets pqPubB64/pqCtB64 makes a hybrid
+ * receiver reject the first chain-turn message as a downgrade attack
+ * ("missing PQ material on hybrid session") and no fresh v2 session can ever
+ * be established.
+ */
+export function parseRatchetHeader(r: InnerRatchet): {
+  ratchetKey: Uint8Array; n: number; pn: number; pqPub?: Uint8Array; pqCt?: Uint8Array;
+} {
+  return {
+    ratchetKey: decodeBase64(r.ratchetKeyB64),
+    n: r.n,
+    pn: r.pn,
+    ...(r.pqPubB64 ? { pqPub: decodeBase64(r.pqPubB64) } : {}),
+    ...(r.pqCtB64 ? { pqCt: decodeBase64(r.pqCtB64) } : {}),
+  };
 }
 
 interface InnerPayload {
@@ -129,13 +149,7 @@ export function tryDecryptMessage(
 
   try {
     // 2. Decrypt Inner Double Ratchet payload
-    const rHeader = {
-      ratchetKey: decodeBase64(parsed.ratchet.ratchetKeyB64),
-      n: parsed.ratchet.n,
-      pn: parsed.ratchet.pn,
-      ...(parsed.ratchet.pqPubB64 ? { pqPub: decodeBase64(parsed.ratchet.pqPubB64) } : {}),
-      ...(parsed.ratchet.pqCtB64 ? { pqCt: decodeBase64(parsed.ratchet.pqCtB64) } : {}),
-    };
+    const rHeader = parseRatchetHeader(parsed.ratchet);
     const rCiphertext = decodeBase64(parsed.ratchet.ciphertextB64);
     const rNonce = decodeBase64(parsed.ratchet.nonceB64);
 
@@ -254,13 +268,7 @@ export function decryptMessageV2(
 
   const working = cloneRatchetState(ratchetState);
   try {
-    const rHeader = {
-      ratchetKey: decodeBase64(parsed.ratchet.ratchetKeyB64),
-      n: parsed.ratchet.n,
-      pn: parsed.ratchet.pn,
-      ...(parsed.ratchet.pqPubB64 ? { pqPub: decodeBase64(parsed.ratchet.pqPubB64) } : {}),
-      ...(parsed.ratchet.pqCtB64 ? { pqCt: decodeBase64(parsed.ratchet.pqCtB64) } : {}),
-    };
+    const rHeader = parseRatchetHeader(parsed.ratchet);
     const plaintextBytes = ratchetDecrypt(
       working,
       rHeader,

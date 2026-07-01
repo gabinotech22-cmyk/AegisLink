@@ -6,7 +6,7 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED } from '../config';
 import { usePreferences } from '../store/preferences';
-import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2 } from '../crypto/messaging';
+import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed } from './mailboxSocket';
@@ -2064,12 +2064,13 @@ async function decryptAndAppendLocked(
     }
   }
 
-  // Now decrypt the message body using the Double Ratchet session
-  const rHeader = {
-    ratchetKey: decodeBase64(parsed.ratchet.ratchetKeyB64),
-    n: parsed.ratchet.n,
-    pn: parsed.ratchet.pn
-  };
+  // Now decrypt the message body using the Double Ratchet session.
+  // Hybrid PQ ratchet (R1): parseRatchetHeader forwards pqPub/pqCt — a hybrid
+  // receiver treats their absence on a chain turn as a downgrade attack and
+  // rejects the message (see dhRatchet in signal/ratchet.ts). A hand-rolled
+  // header here that dropped them broke every fresh v2 handshake with
+  // "missing PQ material on hybrid session".
+  const rHeader = parseRatchetHeader(parsed.ratchet);
   const rCiphertext = decodeBase64(parsed.ratchet.ciphertextB64);
   const rNonce = decodeBase64(parsed.ratchet.nonceB64);
 
