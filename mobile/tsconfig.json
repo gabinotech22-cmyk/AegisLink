@@ -1,7 +1,13 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    // TS 6.0 no longer auto-includes every node_modules/@types package as an
+    // ambient global under moduleResolution:"bundler" (it did through 5.x).
+    // List the ones the app + tests rely on so jest globals (describe/it/expect)
+    // and the node/react-native ambients resolve. tsconfig only affects the
+    // typecheck job — the Metro/EAS build runs through babel, not tsc.
+    "types": ["jest", "node", "react-native"]
   },
   "exclude": [
     "node_modules",
