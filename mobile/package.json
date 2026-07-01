@@ -27,6 +27,8 @@
     "build:native": "npx expo prebuild --platform android && cd android && .\\gradlew.bat assembleRelease"
   },
   "dependencies": {
+    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
+    "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@noble/hashes": "^1.6.1",
     "@noble/post-quantum": "^0.6.1",
     "@react-native-clipboard/clipboard": "^1.16.3",
@@ -43,6 +45,7 @@
     "expo-dev-client": "~6.0.21",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.23",
+    "expo-font": "~14.0.12",
     "expo-image-manipulator": "~14.0.8",
     "expo-image-picker": "~17.0.11",
     "expo-localization": "~17.0.9",

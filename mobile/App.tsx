@@ -11,6 +11,8 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import * as SecureStore from 'expo-secure-store';
+import { useFonts } from 'expo-font';
+import { fontAssets } from './src/theme/fontAssets';
 import { I } from './src/components/icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -1694,6 +1696,12 @@ function FloatingGroupCallBarRoot() {
 }
 
 export default function App() {
+  // Load the VAULT brand fonts (Space Grotesk + JetBrains Mono) before render so
+  // screens match the prototype. Render proceeds on error too — a font failure
+  // must never brick the UI; RN falls back to the system font in that case.
+  const [fontsLoaded, fontError] = useFonts(fontAssets);
+  if (!fontsLoaded && !fontError) return null;
+
   return (
     <SafeAreaProvider>
       <ThemeProvider>

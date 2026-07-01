@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 export interface Theme {
   name: 'Vault';
   dark: boolean;
@@ -33,30 +31,23 @@ export interface Theme {
   fontDisplay: string;
 }
 
-// Optional-chain Platform.select: in a real RN runtime Platform is always
-// present, but this module loads at import time deep in many import graphs, so
-// a unit test that mocks 'react-native' without Platform would otherwise crash
-// the whole suite here. Fall back to the cross-platform default in that case.
-const fontMono = (Platform?.select?.({
-  ios: 'Menlo',
-  android: 'monospace',
-  default: 'monospace',
-}) ?? 'monospace') as string;
-
-const fontDisplay = (Platform?.select?.({
-  ios: 'System',
-  android: 'sans-serif',
-  default: 'System',
-}) ?? 'System') as string;
+// Brand font families, registered by useFonts() at startup (see fontAssets.ts).
+// The app gates render until these resolve, so screens reference them directly.
+// If font loading ever fails, RN silently falls back to the system font for the
+// unknown family — graceful degradation, never a crash. Display weight 600
+// mirrors the prototype's VAULT `displayWeight` (prototype/theme.jsx).
+const FONT_BODY = 'SpaceGrotesk_400Regular';
+const FONT_DISPLAY = 'SpaceGrotesk_600SemiBold';
+const FONT_MONO = 'JetBrainsMono_400Regular';
 
 const baseShape = {
   name: 'Vault' as const,
   radius: 14,
   radiusS: 8,
   radiusL: 22,
-  font: fontDisplay,
-  fontMono,
-  fontDisplay,
+  font: FONT_BODY,
+  fontMono: FONT_MONO,
+  fontDisplay: FONT_DISPLAY,
 };
 
 export const VAULT_DARK: Theme = {
