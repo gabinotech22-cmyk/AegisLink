@@ -12,6 +12,7 @@
  */
 
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { decodeBase64 } from 'tweetnacl-util';
 import fs from 'node:fs';
@@ -124,6 +125,40 @@ function parseManifestBlob(blobStr: string): { manifest: ChannelManifestData; si
 export function createPublicChannelsRouter(): Router {
   const router = Router();
 
+  // ── Rate limiters (golden rule: rate-limit every endpoint) ──────────────────
+  // express-rate-limit keys on the client IP internally; that IP is NEVER
+  // written to SQLite or any application log — the store is in-memory and
+  // ephemeral, so zero-metadata holds. Maxes are ops-tunable via env; defaults
+  // are strict-but-CI-safe. Defined per factory call so counters are isolated
+  // per router instance (test isolation) and pick up env overrides at call time.
+  const createLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes — anti-squatting on channel creation
+    max: Number(process.env['AEGIS_PUBCHANNEL_CREATE_RATELIMIT_MAX'] ?? 50),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
+    },
+  });
+  const avatarWriteLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // owner-authed avatar set/delete
+    max: Number(process.env['AEGIS_PUBCHANNEL_AVATAR_RATELIMIT_MAX'] ?? 100),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
+    },
+  });
+  const readLimiter = rateLimit({
+    windowMs: 60 * 1000, // directory / manifest / avatar reads — flood guard
+    max: Number(process.env['AEGIS_PUBCHANNEL_READ_RATELIMIT_MAX'] ?? 200),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
+    },
+  });
+
   // Flag gate middleware — all routes return 404 when disabled.
   router.use((_req, res, next) => {
     if (!isPublicChannelsEnabled()) {
@@ -134,7 +169,7 @@ export function createPublicChannelsRouter(): Router {
   });
 
   // GET / — directory of all channels (public, no auth required)
-  router.get('/', async (_req, res) => {
+  router.get('/', readLimiter, async (_req, res) => {
     try {
       const channels = await publicChannelRepo.list();
       res.json({ channels });
@@ -144,7 +179,7 @@ export function createPublicChannelsRouter(): Router {
   });
 
   // GET /:channelId/manifest — single manifest
-  router.get('/:channelId/manifest', async (req, res) => {
+  router.get('/:channelId/manifest', readLimiter, async (req, res) => {
     try {
       const channel = await publicChannelRepo.get(req.params['channelId'] as string);
       if (!channel) {
@@ -158,7 +193,7 @@ export function createPublicChannelsRouter(): Router {
   });
 
   // POST / — register a new channel
-  router.post('/', async (req, res) => {
+  router.post('/', createLimiter, async (req, res) => {
     const parsed = RegisterChannelBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'INVALID_PAYLOAD' });
@@ -201,7 +236,7 @@ export function createPublicChannelsRouter(): Router {
   // POST /:channelId/avatar — associate a blob-store avatar with a channel.
   // Owner-authenticated: requires Ed25519 sig over (channelId ‖ blobId) verified
   // against the channel's signing key extracted from the stored manifest.
-  router.post('/:channelId/avatar', async (req, res) => {
+  router.post('/:channelId/avatar', avatarWriteLimiter, async (req, res) => {
     const channelId = req.params['channelId'] as string;
     const parsed = SetAvatarBody.safeParse(req.body);
     if (!parsed.success) {
@@ -259,7 +294,7 @@ export function createPublicChannelsRouter(): Router {
 
   // DELETE /:channelId/avatar — remove the avatar association.
   // Owner-authenticated: requires Ed25519 sig over domain-separated (channelId).
-  router.delete('/:channelId/avatar', async (req, res) => {
+  router.delete('/:channelId/avatar', avatarWriteLimiter, async (req, res) => {
     const channelId = req.params['channelId'] as string;
     const parsed = DeleteAvatarBody.safeParse(req.body);
     if (!parsed.success) {
@@ -302,7 +337,7 @@ export function createPublicChannelsRouter(): Router {
 
   // GET /:channelId/avatar — serve the avatar bytes publicly (no auth required).
   // No metadata logged (golden rule #10): no IP, no requester identity.
-  router.get('/:channelId/avatar', async (req, res) => {
+  router.get('/:channelId/avatar', readLimiter, async (req, res) => {
     const channelId = req.params['channelId'] as string;
 
     const blobId = await publicChannelRepo.getAvatarBlobId(channelId);

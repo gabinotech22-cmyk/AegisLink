@@ -225,3 +225,48 @@ describe('public-channels REST (flag OFF)', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// Regression: every public-channels endpoint must be rate-limited (CodeQL
+// js/missing-rate-limiting; golden rule "rate limiting on all endpoints").
+// The limiter counts EVERY request that reaches it (even a 400), so we exceed
+// a tiny per-instance ceiling and assert the 429 JSON envelope.
+describe('public-channels rate limiting', () => {
+  let rlServer: Server;
+  let rlUrl: string;
+  let savedMax: string | undefined;
+
+  beforeAll(async () => {
+    process.env['PUBLIC_CHANNELS'] = 'on';
+    savedMax = process.env['AEGIS_PUBCHANNEL_CREATE_RATELIMIT_MAX'];
+    // Fresh router picks up the env max at creation time; 2 keeps the test fast.
+    process.env['AEGIS_PUBCHANNEL_CREATE_RATELIMIT_MAX'] = '2';
+
+    const app = express();
+    app.use(express.json({ limit: '64kb' }));
+    app.use('/public-channels', createPublicChannelsRouter());
+    rlServer = createServer(app);
+    await new Promise<void>((resolve) => { rlServer.listen(0, '127.0.0.1', () => resolve()); });
+    rlUrl = `http://127.0.0.1:${(rlServer.address() as AddressInfo).port}`;
+  }, 10_000);
+
+  afterAll(async () => {
+    if (savedMax !== undefined) process.env['AEGIS_PUBCHANNEL_CREATE_RATELIMIT_MAX'] = savedMax;
+    else delete process.env['AEGIS_PUBCHANNEL_CREATE_RATELIMIT_MAX'];
+    await new Promise<void>((resolve) => { rlServer.close(() => resolve()); });
+  }, 10_000);
+
+  test('POST /public-channels returns 429 once the create limit is exceeded', async () => {
+    const post = () => fetch(`${rlUrl}/public-channels`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bad: 'data' }), // invalid → 400, but still counted
+    });
+
+    expect((await post()).status).toBe(400); // 1/2
+    expect((await post()).status).toBe(400); // 2/2
+    const limited = await post();            // 3rd trips the limiter
+    expect(limited.status).toBe(429);
+    const body = await limited.json() as { error: string };
+    expect(body.error).toBe('rate_limit_exceeded');
+  });
+});
