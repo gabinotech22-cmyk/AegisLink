@@ -24,10 +24,6 @@ module.exports = {
   ],
   setupFiles: [
     './node_modules/react-native-gesture-handler/jestSetup.js',
-    // Jest 30 forbids require() mid-test; Expo's winter globals install lazily
-    // on first access. Pre-warm them during setup so parsers can touch
-    // TextDecoder/etc. inside a test without crashing the suite.
-    './jest/setup-winter-globals.js',
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   moduleNameMapper: {

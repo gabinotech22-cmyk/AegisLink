@@ -20,7 +20,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "test": "jest",
-    "fuzz": "jest src/fuzz --maxWorkers=1",
+    "fuzz": "jest --config jest.fuzz.config.js src/fuzz --maxWorkers=1",
     "fuzz:bundle": "esbuild src/fuzz/targets.ts --bundle --platform=node --format=cjs --outfile=fuzz/targets.bundle.js",
     "gen-icons": "node scripts/gen-icons.mjs",
     "build:apk": "eas build --platform android --profile production-apk --local",
