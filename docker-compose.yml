@@ -58,6 +58,11 @@ services:
       FCM_SERVER_KEY: ${FCM_SERVER_KEY:-}
       APNS_KEY_ID: ${APNS_KEY_ID:-}
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      # PUBLIC_CHANNELS gates the /public-channels routes (routes/publicChannels.ts).
+      # Default OFF: the relay returns 404 FEATURE_DISABLED until this is 'on'.
+      # Same gotcha as TURN_HOST/KLIPY_KEY: it MUST be listed here or the
+      # container never sees the value from .env and the flag stays off forever.
+      PUBLIC_CHANNELS: ${PUBLIC_CHANNELS:-off}
     volumes:
       # Persistent SQLite database
       - relay_data:/data
