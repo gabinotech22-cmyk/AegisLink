@@ -491,11 +491,10 @@ export function attachRelay(io: SocketServer) {
     // connection can begin processing candidates immediately.
     const takenInvite = takePendingCallInvite(me);
     if (takenInvite) {
-      const inviteEvent = takenInvite.version === 'v2' ? 'call:invite:v2' : 'call:invite';
-      const iceEvent = takenInvite.version === 'v2' ? 'call:ice:v2' : 'call:ice';
-      socket.emit(inviteEvent, takenInvite.payload);
+      // v2-only (Fase C): the relay never re-delivers legacy v1 call events.
+      socket.emit('call:invite:v2', takenInvite.payload);
       for (const candidate of takenInvite.ice) {
-        socket.emit(iceEvent, candidate);
+        socket.emit('call:ice:v2', candidate);
       }
     }
 

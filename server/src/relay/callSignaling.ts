@@ -14,16 +14,10 @@ const SealedSignal = z.object({
   ciphertext: z.string().min(1).max(32768),
   nonce: z.string().min(1).max(64),
 });
-const CallInvite = CallTo.extend({
-  media: z.enum(['audio', 'video']),
-}).merge(SealedSignal);
-const CallAnswer = CallTo.merge(SealedSignal);
-const CallIce = CallTo.merge(SealedSignal);
-const CallHangup = CallTo.extend({ reason: z.string().max(64).optional() });
-const CallEnd = CallTo.extend({ reason: z.string().max(64).optional() });
-const CallReject = CallTo.extend({ reason: z.string().max(64).optional() });
+// Legacy v1 schemas (CallInvite, CallAnswer, CallIce, CallHangup, CallEnd,
+// CallReject) removed in Fase C — no client emits them under the v2 policy.
 
-// ─── Sealed-sender v2 call signaling (Fase 2) ────────────────────────────────
+// ─── Sealed-sender v2 call signaling (v2-only, Fase C) ───────────────────────
 // The relay NEVER stamps `from` on these — the caller's identity is sealed inside
 // the invite ciphertext (ephemeral box + Ed25519 sig, recovered only by the
 // callee). The invite adds `epk` (per-call ephemeral pubkey); answer/ICE carry a
@@ -36,14 +30,8 @@ const CallIceV2 = CallTo.merge(SealedSignal);
 const CallHangupV2 = CallTo.extend({ reason: z.string().max(64).optional() });
 
 // ─── Group call Zod schemas ──────────────────────────────────────────────────
-const AEGIS_ID_ARRAY = z.array(z.string().regex(AEGIS_ID_RE)).min(1).max(7);
-const GroupCallInvite = z.object({
-  to: AEGIS_ID_ARRAY,
-  callId: z.string().uuid(),
-  groupId: z.string().min(1).max(128),
-  groupName: z.string().min(1).max(64),
-  media: z.enum(['audio', 'video']),
-});
+// GroupCallInvite (legacy ring-all) removed in Fase C — it stamped `from: me`
+// and was replaced by the sealed group_call:channel heartbeat.
 // Sealed signaling fields: opaque ciphertext+nonce. The sender's identity is
 // sealed INSIDE the body (recovered by the recipient via trial-decryption against
 // the call/group roster); the relay never sees `from`. ciphertext caps at 64 KB —
@@ -95,21 +83,7 @@ function checkCallOfferRateLimit(aegisId: string): boolean {
   return entry.count <= 5;
 }
 
-// Rate-limit buckets for group_call:invite — keyed by aegisId, max 3 per minute
-const groupCallInviteRateLimit = new Map<string, { count: number; reset: number }>();
-
-function checkGroupCallInviteRateLimit(aegisId: string): boolean {
-  const now = Date.now();
-  const entry = groupCallInviteRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
-  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
-  entry.count++;
-  groupCallInviteRateLimit.set(aegisId, entry);
-  if (groupCallInviteRateLimit.size > RATE_LIMIT_MAP_MAX) {
-    const oldest = groupCallInviteRateLimit.keys().next().value;
-    if (oldest !== undefined) groupCallInviteRateLimit.delete(oldest);
-  }
-  return entry.count <= 3;
-}
+// group_call:invite rate limiter removed in Fase C (handler removed).
 
 // Rate-limit buckets for group_call:channel heartbeats — keyed by aegisId. A
 // channel re-broadcasts every ~20s and joiners emit their own, so allow more
@@ -164,10 +138,9 @@ const ICE_BUFFER_CAP = 32;
 
 interface PendingCallInvite {
   callId: string;
-  payload: Record<string, unknown>; // exactly what forward() would emit ({ ...rest } [+ from for v1])
+  payload: Record<string, unknown>; // exactly what forwardSealed() emits (NEVER contains `from`)
   ice: Record<string, unknown>[];   // buffered trickle ICE candidates (max ICE_BUFFER_CAP)
   timer: ReturnType<typeof setTimeout>;
-  version: 'v1' | 'v2';             // which call:invite / call:ice events to drain on
 }
 const pendingCallInvites = new Map<string, PendingCallInvite>();
 const CALL_INVITE_TTL_MS = 35_000;
@@ -176,20 +149,18 @@ function queueCallInvite(
   to: string,
   callId: string,
   payload: Record<string, unknown>,
-  version: 'v1' | 'v2' = 'v1',
 ): void {
   const existing = pendingCallInvites.get(to);
   if (existing) clearTimeout(existing.timer);
   const t = setTimeout(() => { pendingCallInvites.delete(to); }, CALL_INVITE_TTL_MS);
   // Never let a ringing invite keep the event loop alive.
   (t as unknown as { unref?: () => void }).unref?.();
-  pendingCallInvites.set(to, { callId, payload, ice: [], timer: t, version });
+  pendingCallInvites.set(to, { callId, payload, ice: [], timer: t });
 }
 
 interface TakenCallInvite {
   payload: Record<string, unknown>;
   ice: Record<string, unknown>[];
-  version: 'v1' | 'v2';
 }
 
 export function takePendingCallInvite(to: string): TakenCallInvite | null {
@@ -197,7 +168,7 @@ export function takePendingCallInvite(to: string): TakenCallInvite | null {
   if (!pending) return null;
   clearTimeout(pending.timer);
   pendingCallInvites.delete(to);
-  return { payload: pending.payload, ice: pending.ice, version: pending.version };
+  return { payload: pending.payload, ice: pending.ice };
 }
 
 function cancelCallInvite(to: string, callId: string): void {
@@ -211,20 +182,9 @@ function cancelCallInvite(to: string, callId: string): void {
 export function attachCallSignaling(socket: Socket, me: string, sockets: Map<string, Set<Socket>>) {
   // `silent`: when true, suppresses the peer_offline error_msg emit so callers
   // that handle offline specially (call:ice buffering) can avoid the false error.
-  function forward<T extends { to: string }>(eventOut: string, parsed: T, silent = false): boolean {
-    const target = sockets.get(parsed.to);
-    if (!target || target.size === 0) {
-      if (!silent) socket.emit('error_msg', { code: 'peer_offline', for: eventOut });
-      return false;
-    }
-    const { to: _to, ...rest } = parsed;
-    for (const s of target) s.emit(eventOut, { ...rest, from: me });
-    return true;
-  }
-
-  // Sealed-sender v2 forward: identical routing by `to`, but NEVER stamps `from`.
-  // The caller's identity is sealed inside the invite ciphertext and recovered
-  // only by the callee (Fase 2). Returns the payload it would emit (sans `to`).
+  // Sealed-sender forward: routes by `to`, NEVER stamps `from`. The caller's
+  // identity is sealed inside the invite ciphertext and recovered only by the
+  // callee. Returns the payload it would emit (sans `to`).
   function forwardSealed<T extends { to: string }>(
     eventOut: string,
     parsed: T,
@@ -241,90 +201,11 @@ export function attachCallSignaling(socket: Socket, me: string, sockets: Map<str
     return { delivered: true, payload };
   }
 
-  // ── Legacy invite-style signaling (Fase 3c) ──────────────────────────────
-  socket.on('call:invite', (raw) => {
-    const parsed = CallInvite.safeParse(raw);
-    if (!parsed.success) return;
-    if (!checkCallOfferRateLimit(me)) {
-      socket.emit('error_msg', { code: 'rate_limited', for: 'call:invite' });
-      return;
-    }
-    // Use silent=true: if the callee is offline we decide below whether to emit
-    // peer_offline based on whether the push wake-up succeeded. An immediate
-    // peer_offline from forward() would incorrectly tear the call down even when
-    // the callee is reachable via push (Doze/killed app scenario).
-    const delivered = forward('call:invite', parsed.data, /* silent */ true);
-    if (!delivered) {
-      // Recipient offline. Hold the sealed invite in memory so it can be
-      // re-delivered when their app cold-starts from the push and reconnects
-      // within the ring window, then fire the visible high-priority push so the
-      // OS rings even when the app is killed.
-      //
-      // Critically: we only tell the caller peer_offline if we could not reach
-      // the callee via push either (no tokens registered). If push succeeded we
-      // stay silent — the caller's 45s no-answer timeout handles the case where
-      // the callee never connects.
-      const { to, ...rest } = parsed.data;
-      queueCallInvite(to, parsed.data.callId, { ...rest, from: me });
-      sendCallWakeUp(
-        parsed.data.to,
-        me,
-        parsed.data.media as CallMedia,
-        parsed.data.callId,
-      ).then((pushed) => {
-        if (!pushed) {
-          // Callee unreachable: no push tokens — cancel the queued invite and
-          // notify the caller immediately so they can tear down.
-          cancelCallInvite(parsed.data.to, parsed.data.callId);
-          socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
-        }
-        // pushed === true: silent — caller keeps ringing, 45s timeout covers it.
-      }).catch(() => {
-        // Push subsystem down — treat as unreachable.
-        cancelCallInvite(parsed.data.to, parsed.data.callId);
-        socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
-      });
-    }
-  });
-  socket.on('call:answer', (raw) => {
-    const parsed = CallAnswer.safeParse(raw);
-    if (!parsed.success) return;
-    forward('call:answer', parsed.data);
-  });
-  socket.on('call:ice', (raw) => {
-    const parsed = CallIce.safeParse(raw);
-    if (!parsed.success) return;
-    // Attempt delivery silently — never emit peer_offline for ICE candidates.
-    // If the callee is offline but we have a matching pending call:invite,
-    // buffer the candidate (up to ICE_BUFFER_CAP) so it can be drained when
-    // the callee reconnects and the invite is re-delivered.
-    const delivered = forward('call:ice', parsed.data, /* silent */ true);
-    if (!delivered) {
-      const pending = pendingCallInvites.get(parsed.data.to);
-      if (pending && pending.callId === parsed.data.callId) {
-        if (pending.ice.length < ICE_BUFFER_CAP) {
-          const { to: _to, ...rest } = parsed.data;
-          pending.ice.push({ ...rest, from: me });
-        }
-        // else: silently discard — cap reached
-      }
-      // No matching pending invite → silently discard. Never emit peer_offline.
-    }
-  });
-  socket.on('call:hangup', (raw) => {
-    const parsed = CallHangup.safeParse(raw);
-    if (!parsed.success) return;
-    // Caller gave up before the callee came online — drop any queued invite so a
-    // late reconnect doesn't ring a phantom call.
-    cancelCallInvite(parsed.data.to, parsed.data.callId);
-    forward('call:hangup', parsed.data);
-  });
-
-  // ── Sealed-sender v2 call signaling (Fase 2) ─────────────────────────────
-  // Same routing/offline/ICE-buffer behaviour as v1, but the relay NEVER stamps
-  // `from`: the caller's identity is sealed inside the invite and recovered only
-  // by the callee. The offline queue is tagged v2 so drain re-delivers on the
-  // matching v2 events.
+  // ── Sealed-sender call signaling (v2-only, Fase C) ───────────────────────
+  // The relay NEVER stamps `from`: the caller's identity is sealed inside the
+  // invite and recovered only by the callee. The offline queue re-delivers on
+  // the matching v2 events. Legacy v1 handlers (call:invite/:answer/:ice/:hangup,
+  // which stamped `from`) were removed in Fase C — no client emits them.
   socket.on('call:invite:v2', (raw) => {
     const parsed = CallInviteV2.safeParse(raw);
     if (!parsed.success) return;
@@ -334,7 +215,7 @@ export function attachCallSignaling(socket: Socket, me: string, sockets: Map<str
     }
     const { delivered, payload } = forwardSealed('call:invite:v2', parsed.data, /* silent */ true);
     if (!delivered) {
-      queueCallInvite(parsed.data.to, parsed.data.callId, payload, 'v2');
+      queueCallInvite(parsed.data.to, parsed.data.callId, payload);
       sendCallWakeUp(parsed.data.to, me, parsed.data.media as CallMedia, parsed.data.callId)
         .then((pushed) => {
           if (!pushed) {
@@ -359,7 +240,7 @@ export function attachCallSignaling(socket: Socket, me: string, sockets: Map<str
     const { delivered, payload } = forwardSealed('call:ice:v2', parsed.data, /* silent */ true);
     if (!delivered) {
       const pending = pendingCallInvites.get(parsed.data.to);
-      if (pending && pending.callId === parsed.data.callId && pending.version === 'v2') {
+      if (pending && pending.callId === parsed.data.callId) {
         if (pending.ice.length < ICE_BUFFER_CAP) pending.ice.push(payload);
         // else: silently discard — cap reached
       }
@@ -386,39 +267,6 @@ export function attachCallSignaling(socket: Socket, me: string, sockets: Map<str
   socket.on('call:sdp:answer', (_raw) => {
     socket.emit('error_msg', { code: 'plaintext_sdp_rejected', for: 'call:sdp:answer',
       message: 'Use call:answer with sealed NaCl box signaling' });
-  });
-
-  socket.on('call:end', (raw) => {
-    const parsed = CallEnd.safeParse(raw);
-    if (!parsed.success) {
-      socket.emit('error_msg', { code: 'invalid_payload', for: 'call:end' });
-      return;
-    }
-    // Notify both the recipient AND reflect back to the sender so both sides
-    // tear down the peer connection simultaneously.
-    const { to, callId, reason } = parsed.data;
-    // Drop any queued invite so a late reconnect doesn't ring a phantom call.
-    cancelCallInvite(to, callId);
-    const target = sockets.get(to);
-    if (target) {
-      for (const s of target) s.emit('call:end', { callId, reason, from: me });
-    }
-    // Reflect to sender's other devices (multi-device awareness)
-    const mySockets = sockets.get(me);
-    if (mySockets) {
-      for (const s of mySockets) {
-        if (s !== socket) s.emit('call:end', { callId, reason, from: me });
-      }
-    }
-  });
-
-  socket.on('call:reject', (raw) => {
-    const parsed = CallReject.safeParse(raw);
-    if (!parsed.success) {
-      socket.emit('error_msg', { code: 'invalid_payload', for: 'call:reject' });
-      return;
-    }
-    forward('call:reject', parsed.data);
   });
 
 }
@@ -482,22 +330,6 @@ export function attachGroupCallSignaling(socket: Socket, me: string, sockets: Ma
     }
   });
 
-  // group_call:invite (legacy ring-all) is unused by current clients — the
-  // Discord-style `group_call:channel` heartbeat replaced it. Its fanout still
-  // stamps `from`; left intact only so an old build can't crash the relay, and
-  // slated for removal in the Fase C cleanup (drop legacy v1 handlers).
-  socket.on('group_call:invite', (raw) => {
-    const parsed = GroupCallInvite.safeParse(raw);
-    if (!parsed.success) return;
-    if (!checkGroupCallInviteRateLimit(me)) {
-      socket.emit('error_msg', { code: 'rate_limited', for: 'group_call:invite' });
-      return;
-    }
-    const { to, ...rest } = parsed.data;
-    for (const id of to) {
-      if (id === me) continue;
-      const target = sockets.get(id);
-      if (target) for (const s of target) s.emit('group_call:invite', { ...rest, from: me });
-    }
-  });
+  // group_call:invite (legacy ring-all) REMOVED in Fase C — it stamped `from: me`
+  // and was replaced by the sealed group_call:channel heartbeat.
 }
