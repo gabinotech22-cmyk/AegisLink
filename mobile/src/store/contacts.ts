@@ -15,7 +15,9 @@ interface ContactsState {
   error: string | null;
   hydrate: () => Promise<void>;
   /** Resolve an Aegis ID against the directory server, then save locally. */
-  addByAegisId: (aegisId: string, displayName?: string) => Promise<StoredContact>;
+  addByAegisId: (aegisId: string, displayName?: string, opts?: { pending?: boolean }) => Promise<StoredContact>;
+  /** Accept a pending message request — clears the pending flag. */
+  acceptContact: (aegisId: string) => Promise<void>;
   /**
    * Add from a QR scan. The pubkey came in via the QR itself (out-of-band) so
    * we mark as verified by default. Server lookup is done in parallel to flag
@@ -58,10 +60,20 @@ export const useContacts = create<ContactsState>((set, get) => ({
     }
   },
 
-  async addByAegisId(aegisId, displayName) {
+  async addByAegisId(aegisId, displayName, opts) {
     set({ error: null });
     const existing = await getContact(aegisId);
-    if (existing) return existing;
+    if (existing) {
+      // A user-initiated add (pending !== true) of a contact that is still a
+      // pending message request implicitly accepts it — clear the flag.
+      if (existing.pending && opts?.pending !== true) {
+        const accepted = { ...existing, pending: false };
+        await saveContact(accepted);
+        set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? accepted : c)) });
+        return accepted;
+      }
+      return existing;
+    }
 
     let record;
     try {
@@ -102,10 +114,19 @@ export const useContacts = create<ContactsState>((set, get) => ({
       verified: false,
       addedAt: Date.now(),
       profile: 'personal',
+      pending: opts?.pending === true,
     };
     await saveContact(contact);
     set({ contacts: [contact, ...get().contacts.filter((c) => c.aegisId !== aegisId)] });
     return contact;
+  },
+
+  async acceptContact(aegisId) {
+    const existing = await getContact(aegisId);
+    if (!existing || !existing.pending) return;
+    const updated = { ...existing, pending: false };
+    await saveContact(updated);
+    set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
   },
 
   async addFromQR(aegisId, publicKeyB64, displayName) {

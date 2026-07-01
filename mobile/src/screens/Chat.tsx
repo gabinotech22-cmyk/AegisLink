@@ -1205,6 +1205,52 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                 {i18nT('chat.blockedContact')}
               </Text>
             </View>
+          ) : contact.pending ? (
+            <View
+              style={{
+                flex: 1,
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                backgroundColor: t.surface2,
+                borderRadius: t.radius,
+                marginHorizontal: 12,
+                marginVertical: 4,
+                gap: 10,
+              }}
+            >
+              <Text style={{ fontFamily: t.font, fontSize: 12.5, color: t.textDim, textAlign: 'center', lineHeight: 18 }}>
+                {i18nT('chat.requestPrompt')}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void useContacts.getState().acceptContact(contact.aegisId)}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: t.radiusS, backgroundColor: t.accent, alignItems: 'center' }}
+                >
+                  <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '700', color: t.accentInk ?? '#000' }}>
+                    {i18nT('chat.requestAccept')}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void useContacts.getState().setBlocked(contact.aegisId, true)}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: t.radiusS, borderWidth: 1, borderColor: t.borderStrong, alignItems: 'center' }}
+                >
+                  <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.text }}>
+                    {i18nT('chat.requestBlock')}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={async () => { await useContacts.getState().removeContact(contact.aegisId); onBack(); }}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: t.radiusS, borderWidth: 1, borderColor: `${t.danger}66`, alignItems: 'center' }}
+                >
+                  <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.danger }}>
+                    {i18nT('chat.requestDelete')}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           ) : (
             <>
               {/* Reply banner */}

@@ -2946,7 +2946,10 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
   if (!matchedContact && env.from) {
     let autoAdded = false;
     try {
-      matchedContact = await useContacts.getState().addByAegisId(env.from);
+      // Unknown incoming sender → auto-add as a PENDING message request. The chat
+      // opens in accept/block/delete mode; the stranger never lands directly in a
+      // normal thread and cannot be replied to until the user accepts.
+      matchedContact = await useContacts.getState().addByAegisId(env.from, undefined, { pending: true });
       autoAdded = true;
     } catch (e) {
       if (__DEV__) logger.warn('[socket] failed to auto-add unknown sender', e);

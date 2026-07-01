@@ -317,6 +317,10 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   try { await d.execAsync('ALTER TABLE contacts ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE contacts ADD COLUMN last_seen_at INTEGER;'); } catch (e) {}
   try { await d.execAsync('ALTER TABLE contacts ADD COLUMN online INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
+  // `pending` = auto-added from an unknown incoming sender (message request).
+  // The chat opens in "accept/block/delete" mode and sending is gated until the
+  // user accepts — a stranger never lands directly in a normal thread.
+  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN pending INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
 
   // Message capabilities (replies, reactions, star, delete, media)
   try { await d.execAsync('ALTER TABLE messages ADD COLUMN type TEXT;'); } catch (e) {}
