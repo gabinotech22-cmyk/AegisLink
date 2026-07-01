@@ -44,7 +44,12 @@ function samplePayload(): BackupPayload {
       createdAt: 1_700_000_000_000,
     },
     profile: {
-      displayName: 'Anon',
+      // Long, distinctive sentinel: the leak assertion below scans the base64
+      // wire form for this string. A short value like 'Anon' collides by chance
+      // with random ciphertext bytes (~1/64^4 per position over ~800 chars),
+      // which flaked CI. A 12+ char sentinel makes a random collision (~1/64^N)
+      // effectively impossible while still proving the profile never leaks.
+      displayName: 'Anon-Sentinel-DoNotLeak',
       avatarColor: '#abc',
       avatarImage: null,
       profileStatus: '',
@@ -90,7 +95,7 @@ describe('encrypted backup', () => {
     const wire = JSON.stringify(env);
     expect(wire).not.toContain('c2VjcmV0S2V5QjY0VmVyeVNlY3JldA==');
     expect(wire).not.toContain('c2lnblNlY3JldFZlcnlTZWNyZXQ=');
-    expect(wire).not.toContain('Anon');
+    expect(wire).not.toContain('Anon-Sentinel-DoNotLeak');
   });
 
   it('enforces minimum passphrase length on encrypt', async () => {
