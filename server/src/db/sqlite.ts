@@ -340,10 +340,48 @@ export function initSqliteSchema(db: DatabaseSync) {
       INSERT INTO work_messages_fts(rowid, id, body, sender_id, channel_id, org_id)
       VALUES (new.rowid, new.id, '', new.sender_id, new.channel_id, new.org_id);
     END;
+
+    -- ── Public Channels (Phase 1, docs/SEALED-PUBLIC-CHANNELS.md) ──────────
+    CREATE TABLE IF NOT EXISTS public_channels (
+      channel_id              TEXT PRIMARY KEY,
+      signed_manifest_blob    TEXT NOT NULL,
+      delivery_token_hash_b64 TEXT NOT NULL,
+      channel_type            TEXT NOT NULL DEFAULT 'open',
+      content_key_envelope    TEXT NOT NULL DEFAULT '',
+      created_at              INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS public_channel_posts (
+      id              TEXT PRIMARY KEY,
+      channel_id      TEXT NOT NULL,
+      seq_num         INTEGER NOT NULL,
+      ciphertext_b64  TEXT NOT NULL,
+      nonce_b64       TEXT NOT NULL,
+      post_hash_b64   TEXT NOT NULL,
+      created_at      INTEGER NOT NULL,
+      expires_at      INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_public_channel_posts_channel_seq
+      ON public_channel_posts(channel_id, seq_num);
+
+    CREATE TABLE IF NOT EXISTS public_channel_pending_joins (
+      join_pubkey_b64 TEXT NOT NULL,
+      channel_id      TEXT NOT NULL,
+      created_at      INTEGER NOT NULL,
+      expires_at      INTEGER NOT NULL,
+      PRIMARY KEY (join_pubkey_b64, channel_id)
+    );
   `);
 
   // Schema migrations for existing deployments
+  // Slice 2 — channel avatars: stores the blob ID (from blob store) associated
+  // with the channel's public avatar. Nullable — absence means no avatar set.
+  try { db.exec(`ALTER TABLE public_channels ADD COLUMN avatar_blob_id TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE identities ADD COLUMN signing_public_key_b64 TEXT NOT NULL DEFAULT '';`); } catch { /* exists */ }
+  // Sealed public channels: the wrapped CEK envelope a joiner unwraps with the
+  // capability (docs §4.2/§10.1). Added after Phase 1 shipped the table.
+  try { db.exec(`ALTER TABLE public_channels ADD COLUMN content_key_envelope TEXT NOT NULL DEFAULT '';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages DROP COLUMN sender;`); } catch { /* absent */ }
   // C-3 (security roadmap Ola 2): the SenderKey chain key must never be persisted

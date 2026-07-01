@@ -699,3 +699,221 @@ export const backupRepo = {
     return result.changes > 0;
   },
 };
+
+// ── Public Channel repos (Phase 1, docs/SEALED-PUBLIC-CHANNELS.md) ──────────
+
+export interface PublicChannelRow {
+  channel_id: string;
+  signed_manifest_blob: string;
+  delivery_token_hash_b64: string;
+  channel_type: string;
+  /** Wrapped CEK (JSON {ivB64,wrappedB64}) a joiner unwraps with the capability; '' if none. */
+  content_key_envelope: string;
+  created_at: number;
+  /** Blob store ID of the channel's public avatar (Slice 2). Null when no avatar is set. */
+  avatar_blob_id: string | null;
+}
+
+export interface PublicChannelPostRow {
+  id: string;
+  channel_id: string;
+  seq_num: number;
+  ciphertext_b64: string;
+  nonce_b64: string;
+  post_hash_b64: string;
+  created_at: number;
+  expires_at: number;
+}
+
+export interface PublicChannelPendingJoinRow {
+  join_pubkey_b64: string;
+  channel_id: string;
+  created_at: number;
+  expires_at: number;
+}
+
+/** Maximum pending join requests per channel (approval-gated). */
+const MAX_PENDING_JOINS_PER_CHANNEL = 256;
+/** Pending join TTL: 24 hours in ms. */
+const PENDING_JOIN_TTL_MS = 24 * 60 * 60 * 1000;
+
+export const publicChannelRepo = {
+  async create(row: PublicChannelRow): Promise<void> {
+    if (USE_PG) {
+      await dbRun(
+        `INSERT INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at, avatar_blob_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(channel_id) DO NOTHING`,
+        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.content_key_envelope, row.created_at, row.avatar_blob_id ?? null]
+      );
+    } else {
+      await dbRun(
+        `INSERT OR IGNORE INTO public_channels (channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at, avatar_blob_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [row.channel_id, row.signed_manifest_blob, row.delivery_token_hash_b64, row.channel_type, row.content_key_envelope, row.created_at, row.avatar_blob_id ?? null]
+      );
+    }
+  },
+
+  async get(channelId: string): Promise<PublicChannelRow | undefined> {
+    return dbGet<PublicChannelRow>(
+      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at, avatar_blob_id FROM public_channels WHERE channel_id = ?`,
+      [channelId]
+    );
+  },
+
+  async list(): Promise<PublicChannelRow[]> {
+    return dbAll<PublicChannelRow>(
+      `SELECT channel_id, signed_manifest_blob, delivery_token_hash_b64, channel_type, content_key_envelope, created_at, avatar_blob_id FROM public_channels ORDER BY created_at DESC`
+    );
+  },
+
+  async updateManifest(channelId: string, signedManifestBlob: string): Promise<boolean> {
+    const result = await dbRun(
+      `UPDATE public_channels SET signed_manifest_blob = ? WHERE channel_id = ?`,
+      [signedManifestBlob, channelId]
+    );
+    return result.changes > 0;
+  },
+
+  async setDeliveryTokenHash(channelId: string, tokenHashB64: string): Promise<boolean> {
+    const result = await dbRun(
+      `UPDATE public_channels SET delivery_token_hash_b64 = ? WHERE channel_id = ?`,
+      [tokenHashB64, channelId]
+    );
+    return result.changes > 0;
+  },
+
+  /** Slice 2 — associate a blob store avatar with a channel. Null clears it. */
+  async setAvatarBlobId(channelId: string, blobId: string | null): Promise<boolean> {
+    const result = await dbRun(
+      `UPDATE public_channels SET avatar_blob_id = ? WHERE channel_id = ?`,
+      [blobId, channelId]
+    );
+    return result.changes > 0;
+  },
+
+  /**
+   * Slice 2 — return the set of all blob IDs currently referenced as channel
+   * avatars. Used by the blob store TTL cleanup to exempt pinned avatars from
+   * deletion. The set is small (one entry per channel with an avatar) so
+   * fetching all rows is fine.
+   */
+  async listPinnedAvatarBlobIds(): Promise<Set<string>> {
+    const rows = await dbAll<{ avatar_blob_id: string }>(
+      `SELECT avatar_blob_id FROM public_channels WHERE avatar_blob_id IS NOT NULL`,
+    );
+    return new Set(rows.map((r) => r.avatar_blob_id));
+  },
+
+  /** Slice 2 — read the avatar blob ID for a channel. */
+  async getAvatarBlobId(channelId: string): Promise<string | null> {
+    const row = await dbGet<{ avatar_blob_id: string | null }>(
+      `SELECT avatar_blob_id FROM public_channels WHERE channel_id = ?`,
+      [channelId]
+    );
+    return row?.avatar_blob_id ?? null;
+  },
+
+  async delete(channelId: string): Promise<boolean> {
+    // Also delete associated posts and pending joins
+    await dbRun(`DELETE FROM public_channel_posts WHERE channel_id = ?`, [channelId]);
+    await dbRun(`DELETE FROM public_channel_pending_joins WHERE channel_id = ?`, [channelId]);
+    const result = await dbRun(`DELETE FROM public_channels WHERE channel_id = ?`, [channelId]);
+    return result.changes > 0;
+  },
+};
+
+export const publicChannelPostRepo = {
+  async append(row: PublicChannelPostRow): Promise<void> {
+    if (USE_PG) {
+      await dbRun(
+        `INSERT INTO public_channel_posts (id, channel_id, seq_num, ciphertext_b64, nonce_b64, post_hash_b64, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
+        [row.id, row.channel_id, row.seq_num, row.ciphertext_b64, row.nonce_b64, row.post_hash_b64, row.created_at, row.expires_at]
+      );
+    } else {
+      await dbRun(
+        `INSERT OR IGNORE INTO public_channel_posts (id, channel_id, seq_num, ciphertext_b64, nonce_b64, post_hash_b64, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [row.id, row.channel_id, row.seq_num, row.ciphertext_b64, row.nonce_b64, row.post_hash_b64, row.created_at, row.expires_at]
+      );
+    }
+  },
+
+  async listSince(channelId: string, sinceSeqNum: number, limit = 100): Promise<PublicChannelPostRow[]> {
+    return dbAll<PublicChannelPostRow>(
+      `SELECT id, channel_id, seq_num, ciphertext_b64, nonce_b64, post_hash_b64, created_at, expires_at
+       FROM public_channel_posts
+       WHERE channel_id = ? AND seq_num > ?
+       ORDER BY seq_num ASC LIMIT ?`,
+      [channelId, sinceSeqNum, limit]
+    );
+  },
+
+  async deleteBySeq(channelId: string, seqNum: number): Promise<boolean> {
+    const result = await dbRun(
+      `DELETE FROM public_channel_posts WHERE channel_id = ? AND seq_num = ?`,
+      [channelId, seqNum]
+    );
+    return result.changes > 0;
+  },
+
+  async highestSeq(channelId: string): Promise<number> {
+    const row = await dbGet<{ max_seq: number | null }>(
+      `SELECT MAX(seq_num) AS max_seq FROM public_channel_posts WHERE channel_id = ?`,
+      [channelId]
+    );
+    return row?.max_seq ?? -1;
+  },
+};
+
+export const publicChannelJoinRepo = {
+  async enqueue(joinPubkeyB64: string, channelId: string): Promise<{ ok: boolean; reason?: string }> {
+    // Check cap
+    const countRow = await dbGet<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM public_channel_pending_joins WHERE channel_id = ?`,
+      [channelId]
+    );
+    if (countRow && Number(countRow.n) >= MAX_PENDING_JOINS_PER_CHANNEL) {
+      return { ok: false, reason: 'pending_cap_reached' };
+    }
+    const now = Date.now();
+    if (USE_PG) {
+      await dbRun(
+        `INSERT INTO public_channel_pending_joins (join_pubkey_b64, channel_id, created_at, expires_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(join_pubkey_b64, channel_id) DO NOTHING`,
+        [joinPubkeyB64, channelId, now, now + PENDING_JOIN_TTL_MS]
+      );
+    } else {
+      await dbRun(
+        `INSERT OR IGNORE INTO public_channel_pending_joins (join_pubkey_b64, channel_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
+        [joinPubkeyB64, channelId, now, now + PENDING_JOIN_TTL_MS]
+      );
+    }
+    return { ok: true };
+  },
+
+  async listForChannel(channelId: string): Promise<PublicChannelPendingJoinRow[]> {
+    return dbAll<PublicChannelPendingJoinRow>(
+      `SELECT join_pubkey_b64, channel_id, created_at, expires_at
+       FROM public_channel_pending_joins
+       WHERE channel_id = ? AND expires_at > ?
+       ORDER BY created_at ASC`,
+      [channelId, Date.now()]
+    );
+  },
+
+  async remove(joinPubkeyB64: string, channelId: string): Promise<boolean> {
+    const result = await dbRun(
+      `DELETE FROM public_channel_pending_joins WHERE join_pubkey_b64 = ? AND channel_id = ?`,
+      [joinPubkeyB64, channelId]
+    );
+    return result.changes > 0;
+  },
+
+  async pruneExpired(): Promise<number> {
+    const result = await dbRun(
+      `DELETE FROM public_channel_pending_joins WHERE expires_at > 0 AND expires_at <= ?`,
+      [Date.now()]
+    );
+    return result.changes;
+  },
+};

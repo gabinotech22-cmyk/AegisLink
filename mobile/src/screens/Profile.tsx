@@ -16,6 +16,8 @@ import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
 import { withPickingGuard } from '../utils/pickingGuard';
 import { themedAlert } from '../components/AlertHost';
+import * as Clipboard from 'expo-clipboard';
+import { getOrCreateDID } from '../web3/did/DIDManager';
 
 // expo-file-system v19 removed EncodingType from the main index — use legacy subpath
 const FileSystem = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
@@ -49,6 +51,19 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
 
   const [isSwappingSlot, setIsSwappingSlot] = useState(false);
   const [showShareLink, setShowShareLink] = useState(false);
+  const [did, setDid] = useState<string | null>(null);
+
+  // Derive the user's did:key for awareness display. Off-chain, no network,
+  // cached in SecureStore. Optional — silence errors, never block the screen.
+  useEffect(() => {
+    const id = identity;
+    if (!id?.aegisId || !id?.signingPublicKey) return;
+    let active = true;
+    getOrCreateDID(id.aegisId, id.signingPublicKey)
+      .then((rec) => { if (active) setDid(rec.did); })
+      .catch(() => { /* DID derivation is optional */ });
+    return () => { active = false; };
+  }, [identity]);
 
   const setPreference = usePreferences((s) => s.set);
   const photoVis = usePreferences((s) => s.photoVis);
@@ -317,6 +332,33 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
             </Pressable>
           </Pressable>
         </Modal>
+
+        {did && (
+          <Section t={t} label={i18nT('profile.didSection')} hint={i18nT('profile.didHint')}>
+            <Pressable
+              onPress={() => { void Clipboard.setStringAsync(did); themedAlert(i18nT('profile.didCopied'), did); }}
+              accessibilityLabel={i18nT('profile.didCopied')}
+              style={{ padding: 14 }}
+            >
+              <View
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  backgroundColor: t.surface2,
+                  borderRadius: t.radiusS,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: t.textDim }} numberOfLines={2}>
+                  {did}
+                </Text>
+                <I.Copy size={14} color={t.textFaint} />
+              </View>
+            </Pressable>
+          </Section>
+        )}
 
         <Section t={t} label={i18nT('profile.visibilitySection')} hint={i18nT('profile.visibilityHint')}>
           <View

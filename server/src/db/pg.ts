@@ -287,6 +287,38 @@ export async function initPgSchema(): Promise<void> {
       can_upload  INTEGER NOT NULL DEFAULT 1,
       PRIMARY KEY (channel_id, role)
     );
+
+    -- ── Public Channels (Phase 1, docs/SEALED-PUBLIC-CHANNELS.md) ──────────
+    CREATE TABLE IF NOT EXISTS public_channels (
+      channel_id              TEXT PRIMARY KEY,
+      signed_manifest_blob    TEXT NOT NULL,
+      delivery_token_hash_b64 TEXT NOT NULL,
+      channel_type            TEXT NOT NULL DEFAULT 'open',
+      content_key_envelope    TEXT NOT NULL DEFAULT '',
+      created_at              BIGINT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS public_channel_posts (
+      id              TEXT PRIMARY KEY,
+      channel_id      TEXT NOT NULL,
+      seq_num         INTEGER NOT NULL,
+      ciphertext_b64  TEXT NOT NULL,
+      nonce_b64       TEXT NOT NULL,
+      post_hash_b64   TEXT NOT NULL,
+      created_at      BIGINT NOT NULL,
+      expires_at      BIGINT NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_public_channel_posts_channel_seq
+      ON public_channel_posts(channel_id, seq_num);
+
+    CREATE TABLE IF NOT EXISTS public_channel_pending_joins (
+      join_pubkey_b64 TEXT NOT NULL,
+      channel_id      TEXT NOT NULL,
+      created_at      BIGINT NOT NULL,
+      expires_at      BIGINT NOT NULL,
+      PRIMARY KEY (join_pubkey_b64, channel_id)
+    );
   `);
 
   // ── PG migrations (safe to run repeatedly) ─────────────────────────────────
@@ -294,6 +326,7 @@ export async function initPgSchema(): Promise<void> {
   // may have tables from an older schema that lack newer columns. Each statement
   // is wrapped in a DO block so it's a no-op when the column already exists.
   const pgMigrations = [
+    `ALTER TABLE public_channels ADD COLUMN content_key_envelope TEXT NOT NULL DEFAULT ''`, // sealed channels CEK envelope
     `ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`,
     `ALTER TABLE prekeys_onetime ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`, // M-2
 
@@ -311,6 +344,8 @@ export async function initPgSchema(): Promise<void> {
     `ALTER TABLE work_channels ADD COLUMN retention_days INTEGER`,
     // C-3 (security roadmap Ola 2): drop the legacy plaintext SenderKey chain key.
     `ALTER TABLE sender_key_dist_queue DROP COLUMN IF EXISTS chain_key_b64`,
+    // Slice 2 — channel avatars
+    `ALTER TABLE public_channels ADD COLUMN avatar_blob_id TEXT`,
   ];
   for (const ddl of pgMigrations) {
     try { await pool.query(ddl); } catch { /* column already exists — expected */ }

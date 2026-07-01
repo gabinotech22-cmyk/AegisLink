@@ -31,6 +31,7 @@ import { checkDeviceLinkRateLimit, RATE_LIMIT_MAP_MAX } from './rateLimits.js';
 import { attachPrekeys } from './handlers/prekeys.js';
 import { attachMessagingEphemeral } from './handlers/messaging.js';
 import { attachChannels } from './handlers/channels.js';
+import { attachPublicChannelEvents } from './handlers/publicChannels.js';
 import { attachDevices } from './handlers/devices.js';
 
 // Fixed sha256-length (32-byte) dummy hash. The sealed-sender v2 submission gate
@@ -718,6 +719,9 @@ export function attachRelay(io: SocketServer) {
 
     // ─── Work channels / SenderKey / group re-key ────────────────────────────
     attachChannels(socket, { me, deviceId, sockets, io, orgPresence, socketOrgMembership });
+
+    // ─── Public channels (sealed, blind-forwarded — no `from`) ───────────────
+    attachPublicChannelEvents(socket, io);
 
     // ─── WebRTC signaling (Fase 3c/3d) ─────────────────────────────────────
     // The server is a dumb forwarder — it never inspects offer/answer/ICE.

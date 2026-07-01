@@ -19,6 +19,8 @@ export interface StoredScheduledMessage {
   groupId?: string;
   /** encryptBody(JSON GroupPostOptions) — group posts only. */
   postMeta?: string;
+  /** Set only for scheduled channel posts. */
+  channelId?: string;
 }
 
 type ScheduledRow = {
@@ -31,6 +33,7 @@ type ScheduledRow = {
   retry_count: number;
   group_id: string | null;
   post_meta: string | null;
+  channel_id: string | null;
 };
 
 function rowToScheduled(r: ScheduledRow): StoredScheduledMessage {
@@ -44,17 +47,18 @@ function rowToScheduled(r: ScheduledRow): StoredScheduledMessage {
     retryCount: r.retry_count,
     groupId: r.group_id ?? undefined,
     postMeta: r.post_meta ?? undefined,
+    channelId: r.channel_id ?? undefined,
   };
 }
 
-const SCHED_SELECT = `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta`;
+const SCHED_SELECT = `SELECT id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta, channel_id`;
 
 export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(
       `INSERT OR REPLACE INTO scheduled_messages
-       (id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, recipient_aegis_id, encrypted_payload, send_at, created_at, status, retry_count, group_id, post_meta, channel_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       msg.id,
       msg.recipientAegisId,
       msg.encryptedPayload,
@@ -64,6 +68,7 @@ export async function saveScheduled(msg: StoredScheduledMessage): Promise<void> 
       msg.retryCount,
       msg.groupId ?? null,
       msg.postMeta ?? null,
+      msg.channelId ?? null,
     );
   });
 }

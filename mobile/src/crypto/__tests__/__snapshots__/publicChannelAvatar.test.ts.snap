@@ -1,0 +1,5 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`signAvatarDelete / verifyAvatarDelete KAT: known-answer vector is stable 1`] = `"5BsxMwDEBjcFKbFjlTxlsH+K4L7OO76cqWB0zV6qXJEYBjKJBMFymigJMLKVDHUxSMYLijkXOWS8uGEnMptABQ=="`;
+
+exports[`signAvatarSet / verifyAvatarSet KAT: known-answer vector is stable 1`] = `"4Nc6R6C2w02qXbZKx9ExR/fD+0273D8fPrcfR6XCSBstMh2ly5KXVay1udrHunEJbsGxNGDFDFONBHBDu3mmBQ=="`;

@@ -84,7 +84,7 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       state_json TEXT NOT NULL
     );
 
-    -- MLS Group Chats (Fase 4)
+    -- E2EE group chats — Sender Keys (Fase 4)
     CREATE TABLE IF NOT EXISTS groups (
       id                    TEXT PRIMARY KEY,
       name                  TEXT NOT NULL,
@@ -149,7 +149,8 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       status            TEXT NOT NULL DEFAULT 'pending',
       retry_count       INTEGER NOT NULL DEFAULT 0,
       group_id          TEXT,
-      post_meta         TEXT
+      post_meta         TEXT,
+      channel_id        TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_scheduled_send_at ON scheduled_messages(send_at, status);
 
@@ -189,7 +190,7 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 10;
+  const USER_DB_VERSION = 11;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -281,6 +282,13 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // TABLE above. NULL on existing rows → treated as not pending (joined).
     try { await d.execAsync('ALTER TABLE groups ADD COLUMN pending INTEGER;'); } catch {}
     await d.execAsync('PRAGMA user_version = 10');
+  }
+
+  if (currentVersion < 11) {
+    // v10 → v11: add channel_id to scheduled_messages (scheduled channel posts).
+    // Fresh installs already have the column via CREATE TABLE above.
+    try { await d.execAsync('ALTER TABLE scheduled_messages ADD COLUMN channel_id TEXT;'); } catch {}
+    await d.execAsync('PRAGMA user_version = 11');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.

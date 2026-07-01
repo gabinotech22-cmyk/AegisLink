@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import { issueChallenge, verifyPoW } from '../pow/challenge.js';
+import { publicChannelRepo } from '../db/client.js';
 import { z } from 'zod';
 
 const router = Router();
@@ -188,24 +189,65 @@ router.get('/download/:id', (req, res) => {
 
 // Background task to delete files older than 24h.
 // Also keeps currentTotalBytes accurate so the quota check stays correct.
-setInterval(() => {
-  fs.readdir(UPLOADS_DIR, (err, files) => {
-    if (err) return;
-    const now = Date.now();
-    for (const file of files) {
-      if (file === '.gitkeep') continue;
-      const filePath = path.join(UPLOADS_DIR, file);
-      fs.stat(filePath, (statErr, stats) => {
-        if (!statErr && now - stats.mtimeMs > 24 * 60 * 60 * 1000) {
-          fs.unlink(filePath, (unlinkErr) => {
-            if (!unlinkErr) {
-              currentTotalBytes = Math.max(0, currentTotalBytes - stats.size);
-            }
-          });
+// Slice 2: blobs referenced as channel avatars are exempt — they are persistent
+// assets, not ephemeral attachments. When an avatar is replaced or deleted the
+// old blob ID is no longer referenced and becomes eligible for cleanup normally.
+
+/**
+ * Run one TTL cleanup pass: delete files older than 24h from the uploads dir,
+ * EXCEPT blobs currently referenced as channel avatars (pinned).
+ * Exported so tests can invoke it directly without waiting for the interval.
+ */
+export async function runBlobCleanup(): Promise<void> {
+  // Fetch the set of pinned avatar blob IDs ONCE per sweep (small set).
+  let pinnedIds: Set<string>;
+  try {
+    pinnedIds = await publicChannelRepo.listPinnedAvatarBlobIds();
+  } catch {
+    pinnedIds = new Set(); // DB unavailable — fail open, skip nothing (safe: worst case is an avatar re-upload)
+  }
+
+  return new Promise<void>((resolve) => {
+    fs.readdir(UPLOADS_DIR, (err, files) => {
+      if (err) { resolve(); return; }
+      const now = Date.now();
+      let pending = 0;
+      let settled = false;
+
+      const checkDone = () => {
+        if (!settled && pending === 0) {
+          settled = true;
+          resolve();
         }
-      });
-    }
+      };
+
+      for (const file of files) {
+        if (file === '.gitkeep') continue;
+        // Skip blobs currently pinned as channel avatars.
+        if (pinnedIds.has(file)) continue;
+        const filePath = path.join(UPLOADS_DIR, file);
+        pending++;
+        fs.stat(filePath, (statErr, stats) => {
+          if (!statErr && now - stats.mtimeMs > 24 * 60 * 60 * 1000) {
+            fs.unlink(filePath, (unlinkErr) => {
+              if (!unlinkErr) {
+                currentTotalBytes = Math.max(0, currentTotalBytes - stats.size);
+              }
+              pending--;
+              checkDone();
+            });
+          } else {
+            pending--;
+            checkDone();
+          }
+        });
+      }
+      // If no files matched, resolve immediately.
+      checkDone();
+    });
   });
-}, 60 * 60 * 1000).unref();
+}
+
+setInterval(() => { void runBlobCleanup(); }, 60 * 60 * 1000).unref();
 
 export default router;

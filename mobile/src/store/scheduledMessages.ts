@@ -82,6 +82,20 @@ export function canScheduleGroupPost(
 }
 
 /**
+ * Permission gate for scheduled channel posts: open channels allow any
+ * subscriber; readonly/moderated/approval channels only allow the owner.
+ * Pure function so the UI gate and the fire-time re-check share one definition.
+ */
+export function canScheduleChannelPost(
+  summary: { channelType?: string; owned?: boolean } | undefined | null,
+  hasIdentity: boolean,
+): boolean {
+  if (!summary || !hasIdentity) return false;
+  if (summary.channelType === 'open') return true;
+  return summary.owned === true;
+}
+
+/**
  * Decrypt + parse the at-rest post options, falling back to defaults on any
  * missing/corrupt input. Shared by the fire path and the cleanup paths.
  */
@@ -181,6 +195,19 @@ interface ScheduledState {
     sendAt: number;
     options?: GroupPostOptions;
     /** Provide to update an existing post/draft in place. */
+    id?: string;
+    status?: 'pending' | 'draft';
+  }): Promise<void>;
+
+  /**
+   * Schedule a channel post — text only, no attachments. The body is stored
+   * at-rest encrypted (encryptBody). At fire time processDue calls
+   * useChannels.getState().sendPost(), re-checking the permission gate.
+   */
+  scheduleChannelPost(opts: {
+    channelId: string;
+    body: string;
+    sendAt: number;
     id?: string;
     status?: 'pending' | 'draft';
   }): Promise<void>;
@@ -352,6 +379,30 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
         await deleteStagedPostFile(previousOptions.filePath);
       }
     }
+    set((s) => {
+      const exists = s.scheduled.some((m) => m.id === stored.id);
+      return {
+        scheduled: exists
+          ? s.scheduled.map((m) => (m.id === stored.id ? stored : m))
+          : [...s.scheduled, stored],
+      };
+    });
+  },
+
+  async scheduleChannelPost({ channelId, body, sendAt, id, status }) {
+    const { encryptBody } = require('../db/local') as typeof import('../db/local');
+    const encryptedPayload = await encryptBody(body);
+    const stored: StoredScheduledMessage = {
+      id: id ?? Crypto.randomUUID(),
+      recipientAegisId: channelId,
+      channelId,
+      encryptedPayload,
+      sendAt,
+      createdAt: Date.now(),
+      status: status ?? 'pending',
+      retryCount: 0,
+    };
+    await saveScheduled(stored);
     set((s) => {
       const exists = s.scheduled.some((m) => m.id === stored.id);
       return {
@@ -538,6 +589,45 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
               ),
             }));
           }
+        } catch {
+          await bumpRetry(msg);
+        }
+        continue;
+      }
+
+      // ── Scheduled CHANNEL post: decrypt at-rest text and send via
+      //    useChannels.sendPost(). Re-checks permission at fire time.
+      if (msg.channelId) {
+        const { useIdentity } = require('./identity') as typeof import('./identity');
+        const identity = useIdentity.getState().identity;
+        if (!identity) continue; // locked — skip without burning retry
+        try {
+          const { useChannels } = require('./channels') as typeof import('./channels');
+          const summary = useChannels.getState().subscribed.find(
+            (c) => c.channelId === msg.channelId,
+          );
+          // Channel gone (unsubscribed) or author lost permission — permanent fail.
+          if (!canScheduleChannelPost(summary, true)) {
+            await failNow(msg, msg.retryCount);
+            continue;
+          }
+          const { decryptBody } = require('../db/local') as typeof import('../db/local');
+          const plaintext = await decryptBody(msg.encryptedPayload);
+          if (typeof plaintext !== 'string' || plaintext === '[DECRYPTION_ERROR]') {
+            await failNow(msg, msg.retryCount);
+            continue;
+          }
+          const res = await useChannels.getState().sendPost(msg.channelId, plaintext, identity);
+          if (!res.ok) {
+            await bumpRetry(msg);
+            continue;
+          }
+          await markScheduledSent(msg.id);
+          set((s) => ({
+            scheduled: s.scheduled.map((m) =>
+              m.id === msg.id ? { ...m, status: 'sent' as const } : m,
+            ),
+          }));
         } catch {
           await bumpRetry(msg);
         }

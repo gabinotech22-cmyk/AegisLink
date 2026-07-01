@@ -57,6 +57,10 @@ import { FloatingGroupCallBar } from './src/components/FloatingGroupCallBar';
 import { NetworkErrorScreen } from './src/screens/NetworkError';
 import { LockSettingsScreen } from './src/screens/LockSettings';
 import { KeysScreen } from './src/screens/Keys';
+import { ChannelDiscoverScreen } from './src/screens/ChannelDiscover';
+import { ChannelCreateScreen } from './src/screens/ChannelCreate';
+import { ChannelFeedScreen } from './src/screens/ChannelFeed';
+import { ChannelInfoScreen } from './src/screens/ChannelInfo';
 import { DistributionListsScreen } from './src/screens/DistributionLists';
 import { BroadcastComposeScreen } from './src/screens/BroadcastCompose';
 import { ProfileSwitcherScreen } from './src/screens/ProfileSwitcher';
@@ -157,7 +161,11 @@ type PushRoute =
   | { name: 'groupJoin'; groupId: string; groupName: string; adminId: string }
   | { name: 'groupCall' }
   | { name: 'multiPreview'; contact: StoredContact; assets: import('./src/screens/MultiPreview').MultiPreviewAsset[] }
-  | { name: 'groupMultiPreview'; group: StoredGroup; assets: import('./src/screens/MultiPreview').MultiPreviewAsset[] };
+  | { name: 'groupMultiPreview'; group: StoredGroup; assets: import('./src/screens/MultiPreview').MultiPreviewAsset[] }
+  | { name: 'channelDiscover' }
+  | { name: 'channelCreate' }
+  | { name: 'channelFeed'; channelId: string }
+  | { name: 'channelInfo'; channelId: string };
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -1236,6 +1244,19 @@ function Shell() {
         return <AppIconScreen onBack={pop} />;
       case 'keys':
         return <KeysScreen onBack={pop} />;
+      case 'channelDiscover':
+        return (
+          <ChannelDiscoverScreen
+            onBack={pop}
+            onOpenChannel={(channelId) => push({ name: 'channelFeed', channelId })}
+          />
+        );
+      case 'channelCreate':
+        return <ChannelCreateScreen onBack={pop} onCreated={pop} />;
+      case 'channelFeed':
+        return <ChannelFeedScreen channelId={top.channelId} onBack={pop} onOpenInfo={() => push({ name: 'channelInfo', channelId: top.channelId })} />;
+      case 'channelInfo':
+        return <ChannelInfoScreen channelId={top.channelId} onBack={pop} />;
       case 'distribution':
         return (
           <DistributionListsScreen
@@ -1603,6 +1624,9 @@ function Shell() {
           onJoinByLink={(groupId, groupName, adminId) =>
             push({ name: 'groupJoin', groupId, groupName, adminId })
           }
+          onOpenChannel={(channelId) => push({ name: 'channelFeed', channelId })}
+          onDiscoverChannels={() => push({ name: 'channelDiscover' })}
+          onCreateChannel={() => push({ name: 'channelCreate' })}
         />
       );
     case 'settings':
