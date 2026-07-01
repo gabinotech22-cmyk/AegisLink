@@ -85,7 +85,7 @@
     "cross-env": "^10.1.0",
     "jest": "~30.4.2",
     "jest-expo": "~54.0.17",
-    "typescript": "~5.8.3"
+    "typescript": "~6.0.3"
   },
   "overrides": {
     "postcss": "^8.5.10",
