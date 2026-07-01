@@ -118,9 +118,18 @@
     import unchanged. Mobile-only, no crypto/parity surface touched.
   - All three: behavior-preserving relocation, every module <800, typecheck clean + tests green per
     commit (186 server / 105 mobile-db).
-  Remaining: `mobile/src/socket/client.ts`, `mobile/src/screens/Chat.tsx`,
-  `desktop/src/renderer/socket/client.ts`, `mobile/src/screens/GroupChat.tsx`
-  (the two `socket/client.ts` are the parity hotspot — port together, don't rush).
+  Remaining 4 files: `mobile/src/socket/client.ts` (4170), `desktop/src/renderer/socket/client.ts`
+  (2518), `mobile/src/screens/GroupChat.tsx` (1905), `mobile/src/screens/Chat.tsx` (1530).
+- **Status of the remaining 4: ACCEPTED — will NOT be refactored (owner decision 2026-07-01).**
+  Rationale: they work, are tested, and are scalable. Splitting already-built, functioning code
+  purely to satisfy an 800-line guideline is exactly the YAGNI/KISS anti-pattern our own coding-style
+  rules warn against — it risks the working encrypted core (esp. the two `socket/client.ts`) for a
+  cosmetic gain. The <800-line rule is a **guideline, not a law**. The one non-cosmetic concern —
+  mobile↔desktop parity of the two socket clients — is NOT improved by splitting; it's protected by
+  parity tests + CI, which is the right lever if/when we invest there.
+  **Going-forward policy:** do NOT retro-shorten existing files. Write NEW files short from the start
+  (aim <800, extract cohesive modules as they grow). Revisit an existing god-file only if a concrete
+  maintenance pain appears (not a line count). This closes M4 as a conscious trade-off, not open debt.
 
 ### M5 — `any` density (type-safety holes): desktop 48, mobile 26 (server 0 ✓)
 - **Fix:** replace with `unknown` + narrowing at boundaries; enable `noImplicitAny` if not already. Effort M.
@@ -164,8 +173,9 @@ full outputs were lost to a session limit. Re-derived the high-value items direc
 3. **H3** (noble version alignment + cross-platform KAT) — S, careful (crypto parity)
 4. **M3** (logger sweep + lint banning `console.*` in `src/`) — S mechanical
 5. **M5** (`any` reduction) — M
-6. **M4** (god-file refactor, two `socket/client.ts` first) — L, scheduled
-7. **M1** (sealed-channel role) — decision/intent, then document or implement
+6. ~~**M4** (god-file refactor)~~ — **ACCEPTED, won't-do** (owner decision 2026-07-01): no retro-shortening
+   of working files; new files born short instead. See M4 status above.
+7. ✅ **M1** (sealed-channel role) — DONE, documented as client-side-by-design (PR #194)
 
 ### Deferred to the AegisLink **Work** repo (not actioned here)
 - **H1** — Work admin signatures don't bind payload
