@@ -8,12 +8,22 @@ on:
     branches: [main]
 permissions: read-all
 jobs:
+  # ── DISABLED pending an upstream OSS-Fuzz regression ──────────────────────
+  # clusterfuzzlite build_fuzzers@v1 validates SANITIZER against
+  # ['address','memory','undefined','coverage'] and rejects 'none' — yet the JS
+  # build layer rejects address/memory/undefined ("JavaScript projects cannot
+  # be fuzzed with sanitizers"). No value satisfies both layers, so cloud
+  # fuzzing cannot build for a JavaScript project right now. Flip `if` back to
+  # true once OSS-Fuzz restores 'none' for JS.
   Build:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # JS (Jazzer.js) targets: the only sanitizer CFLite accepts is 'none'.
+        # Semantically correct for a JS project (infra/oss-fuzz/project.yaml
+        # declares sanitizers: [none]). Retained so re-enabling the job needs
+        # no further edit once the upstream 'none' regression is resolved.
         sanitizer: [none]
     steps:
       - name: Build fuzzers (${{ matrix.sanitizer }})
