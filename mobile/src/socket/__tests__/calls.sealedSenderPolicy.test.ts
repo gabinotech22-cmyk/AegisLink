@@ -1,16 +1,16 @@
 /**
- * calls.sealedSenderPolicy.test.ts — sealed-sender (v2) call policy, Fase A.
+ * calls.sealedSenderPolicy.test.ts — sealed-sender (v2) call policy, Fase A+C.
  *
  * Golden rules #4 (sealed-sender in ALL signaling, incl. calls) + #6 (production
- * fails closed). Under the default SEALED_TRANSPORT_VERSION='v2' policy an
- * updated client must NEVER hand the relay a `from`-bearing v1 call event:
+ * fails closed). The client must NEVER hand the relay a `from`-bearing v1 call
+ * event:
  *
  *   1. startCall() to a peer whose static box key is unavailable FAILS CLOSED —
  *      it surfaces an error and never emits a legacy `call:invite` (v1). The only
  *      invite an updated client ever emits is the sealed `call:invite:v2` (no
  *      `from` on the wire).
- *   2. An inbound legacy `call:invite` (v1) is REFUSED under the v2 policy —
- *      answering it would emit our own `from`-bearing v1 answer/ICE to the relay.
+ *   2. (Fase C) The v1 call:invite handler is no longer wired — the relay no
+ *      longer routes v1 events, and the client does not listen for them.
  *
  * See docs/FASE4-SEALED-CALL-SIGNALING-DESIGN.md and the parity suite in
  * desktop/src/renderer/socket/__tests__/calls.sealedSenderPolicy.test.ts.
@@ -198,25 +198,20 @@ describe('calls.ts — sealed-sender (v2) policy', () => {
     expect(useCall.getState().status).toBe('ended');
   });
 
-  it('refuses an inbound legacy v1 call:invite under the v2 policy', async () => {
-    // Make the v1 sealed offer fully DECRYPTABLE so that, absent the policy
-    // guard, the invite WOULD be accepted (status → incoming-ringing). This is
-    // what makes the test exercise the guard rather than the decrypt-fail drop.
-    (nacl.box.open as unknown as jest.Mock).mockReturnValue(
-      new TextEncoder().encode(JSON.stringify({ v: 1, from: 'peer-C', payload: 'sdp-offer' })),
-    );
-
+  it('v1 call:invite handler is not wired (Fase C: v1 removed entirely)', () => {
     attachCallHandlers();
-    const inviteEntry = (mockOn.mock.calls as [string, (m: unknown) => void][]).find(([ev]) => ev === 'call:invite');
-    expect(inviteEntry).toBeDefined();
-    const v1InviteHandler = inviteEntry![1] as (m: unknown) => Promise<void>;
-
-    // A not-yet-upgraded caller sends a v1 invite (relay-stamped `from`).
-    await v1InviteHandler({ callId: 'call-x', from: 'peer-C', media: 'audio', ciphertext: 'c', nonce: 'n' });
-
-    // Refused BEFORE ringing: we never enter a call state, so we never answer
-    // (and thus never emit a `from`-bearing v1 answer/ICE to the relay).
-    expect(useCall.getState().status).toBe('idle');
-    expect(emittedEvents()).toHaveLength(0);
+    // After Fase C the client no longer registers a handler for the v1
+    // `call:invite` event at all — the relay does not route it, and neither
+    // should the client listen. The `call:invite:v2` handler IS wired.
+    const registeredEvents = (mockOn.mock.calls as [string, unknown][]).map(([ev]) => ev);
+    expect(registeredEvents).not.toContain('call:invite');
+    expect(registeredEvents).not.toContain('call:answer');
+    expect(registeredEvents).not.toContain('call:ice');
+    expect(registeredEvents).not.toContain('call:hangup');
+    // v2 handlers ARE wired
+    expect(registeredEvents).toContain('call:invite:v2');
+    expect(registeredEvents).toContain('call:answer:v2');
+    expect(registeredEvents).toContain('call:ice:v2');
+    expect(registeredEvents).toContain('call:hangup:v2');
   });
 });

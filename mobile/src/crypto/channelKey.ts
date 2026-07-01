@@ -49,6 +49,33 @@ export function ratchetSenderKey(sk: SenderKey): SenderKey {
   return { chainKey: nextChainKey, iteration: sk.iteration + 1 };
 }
 
+/**
+ * Hard cap on how far a receiver may fast-forward a SenderKey chain to reach a
+ * message's `iteration` (parity with the Double Ratchet's MAX_SKIPPED_KEYS).
+ * Without a cap, a single group message carrying a huge `iteration` would force
+ * an unbounded HMAC loop on the JS thread (DoS). Messages beyond this gap are
+ * dropped rather than processed.
+ */
+export const MAX_SENDERKEY_SKIP = 2000;
+
+/**
+ * Advance a SenderKey forward to `targetIteration`, refusing jumps larger than
+ * MAX_SENDERKEY_SKIP. Returns the advanced key, or null if the target is in the
+ * past or too far ahead. Intermediate chain keys are zeroized as the chain moves
+ * (golden rule #9 — zeroize key intermediates).
+ */
+export function advanceSenderKeyTo(sk: SenderKey, targetIteration: number): SenderKey | null {
+  if (!Number.isInteger(targetIteration) || targetIteration < sk.iteration) return null;
+  if (targetIteration - sk.iteration > MAX_SENDERKEY_SKIP) return null;
+  let cur = sk;
+  while (cur.iteration < targetIteration) {
+    const next = ratchetSenderKey(cur);
+    if (cur !== sk) cur.chainKey.fill(0); // wipe the evicted intermediate
+    cur = next;
+  }
+  return cur;
+}
+
 /** Derive the 32-byte message encryption key from the current chain key. */
 export function deriveMessageKey(sk: SenderKey): Uint8Array {
   return hkdfSHA256(sk.chainKey, undefined, MESSAGE_KEY_LABEL, 32);
@@ -64,13 +91,17 @@ export function encryptChannelMessage(
   senderKey: SenderKey
 ): { ciphertextB64: string; nonceB64: string; newSenderKey: SenderKey } {
   const messageKey = deriveMessageKey(senderKey);
-  const nonce = nacl.randomBytes(24);
-  const ciphertext = nacl.secretbox(decodeUTF8(body), nonce, messageKey);
-  return {
-    ciphertextB64: encodeBase64(ciphertext),
-    nonceB64: encodeBase64(nonce),
-    newSenderKey: ratchetSenderKey(senderKey),
-  };
+  try {
+    const nonce = nacl.randomBytes(24);
+    const ciphertext = nacl.secretbox(decodeUTF8(body), nonce, messageKey);
+    return {
+      ciphertextB64: encodeBase64(ciphertext),
+      nonceB64: encodeBase64(nonce),
+      newSenderKey: ratchetSenderKey(senderKey),
+    };
+  } finally {
+    messageKey.fill(0); // zeroize the per-message key (golden rule #9)
+  }
 }
 
 /**
@@ -82,14 +113,23 @@ export function decryptChannelMessage(
   nonceB64: string,
   senderKey: SenderKey
 ): string {
-  const messageKey = deriveMessageKey(senderKey);
   const ciphertext = decodeBase64(ciphertextB64);
   const nonce = decodeBase64(nonceB64);
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, messageKey);
-  if (!plaintext) {
-    throw new Error('decryptChannelMessage: MAC verification failed');
+  // Validate nonce length before use — parity with openWithCallKey/openEnvelope,
+  // so a malformed wire field fails with a domain error, never degrades silently.
+  if (nonce.length !== nacl.secretbox.nonceLength) {
+    throw new Error('decryptChannelMessage: invalid nonce length');
   }
-  return encodeUTF8(plaintext);
+  const messageKey = deriveMessageKey(senderKey);
+  try {
+    const plaintext = nacl.secretbox.open(ciphertext, nonce, messageKey);
+    if (!plaintext) {
+      throw new Error('decryptChannelMessage: MAC verification failed');
+    }
+    return encodeUTF8(plaintext);
+  } finally {
+    messageKey.fill(0); // zeroize the per-message key (golden rule #9)
+  }
 }
 
 /**
