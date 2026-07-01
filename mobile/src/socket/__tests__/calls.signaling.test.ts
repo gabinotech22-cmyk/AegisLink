@@ -21,17 +21,10 @@
  * history (saveCall) + appended chat message (useMessages.append) + Alert.
  */
 
-// ── config — pin these finalization tests to the legacy v1 transport policy. ──
-// They predate the sealed-sender-only (v2) call policy and assert ONLY on
-// transport-agnostic finalization behavior (alerts, saved history, chat rows).
-// Under the default v2 policy startCall fails closed unless a full sealed-sender
-// identity is mocked; pinning to v1 keeps them exercising the still-supported
-// legacy path without that scaffolding. The v2-policy behavior (fail-closed,
-// v1-invite refusal) is covered by calls.sealedSenderPolicy.test.ts.
-jest.mock('../../config', () => ({
-  ...jest.requireActual('../../config'),
-  SEALED_TRANSPORT_VERSION: 'v1',
-}));
+// ── config — Fase C removed v1 entirely; no SEALED_TRANSPORT_VERSION guard. ──
+// These finalization tests assert on transport-agnostic behavior (alerts, saved
+// history, chat rows). startCall requires sealed-sender (v2) — the mocks below
+// provide the required identity + peer keys + callSession stubs.
 
 // ── react-native-webrtc ────────────────────────────────────────────────────
 jest.mock('react-native-webrtc', () => ({
@@ -52,17 +45,34 @@ jest.mock('expo-av', () => ({ Audio: { setAudioModeAsync: jest.fn().mockResolved
 
 // ── tweetnacl / tweetnacl-util (sealed signaling helpers) ──────────────────
 jest.mock('tweetnacl', () => ({
-  randomBytes: jest.fn().mockReturnValue(new Uint8Array(24)),
+  randomBytes: jest.fn().mockReturnValue(new Uint8Array(32)),
   box: Object.assign(jest.fn().mockReturnValue(new Uint8Array(32)), {
     open: jest.fn().mockReturnValue(null),
     publicKeyLength: 32,
     secretKeyLength: 32,
     nonceLength: 24,
   }),
+  secretbox: Object.assign(jest.fn().mockReturnValue(new Uint8Array(32)), {
+    keyLength: 32,
+    nonceLength: 24,
+  }),
+  sign: { publicKeyLength: 32 },
 }));
 jest.mock('tweetnacl-util', () => ({
   encodeBase64: jest.fn().mockReturnValue('base64string=='),
   decodeBase64: jest.fn().mockReturnValue(new Uint8Array(32)),
+}));
+
+// ── crypto/callSession — stub the sealed-sender primitives ─────────────────
+jest.mock('../../crypto/callSession', () => ({
+  CALL_SESSION_VERSION: 1,
+  sealCallInvite: jest.fn().mockReturnValue({
+    wire: { ciphertext: 'ct', nonce: 'n', epk: 'epk' },
+    callKey: new Uint8Array(32),
+  }),
+  sealWithCallKey: jest.fn().mockReturnValue({ ciphertext: 'ct', nonce: 'n' }),
+  openCallInvite: jest.fn().mockReturnValue(null),
+  openWithCallKey: jest.fn().mockReturnValue(null),
 }));
 
 // ── webrtc/ice ─────────────────────────────────────────────────────────────
@@ -89,16 +99,16 @@ jest.mock('../../webrtc/peer', () => ({
   addRemoteIce: jest.fn().mockResolvedValue(undefined),
 }));
 
-// ── store/contacts — return a valid peer so sealSignal() succeeds in startCall ─
+// ── store/contacts — return a valid peer so sealed-sender succeeds in startCall ─
 jest.mock('../../store/contacts', () => ({
   useContacts: {
-    getState: () => ({ get: jest.fn().mockReturnValue({ publicKeyB64: 'pk', name: 'Peer One' }) }),
+    getState: () => ({ get: jest.fn().mockReturnValue({ publicKeyB64: 'pk', signingPublicKeyB64: 'spk', name: 'Peer One' }) }),
   },
 }));
 
-// ── store/identity (ownKeys + append guard) ────────────────────────────────
+// ── store/identity (sealed-sender identity + append guard) ─────────────────
 jest.mock('../../store/identity', () => ({
-  useIdentity: { getState: () => ({ identity: { aegisId: 'self-aegis-id', secretKey: new Uint8Array(32) } }) },
+  useIdentity: { getState: () => ({ identity: { aegisId: 'self-aegis-id', secretKey: new Uint8Array(32), signingSecretKey: new Uint8Array(64) } }) },
 }));
 
 // ── store/messages — capture appended chat rows ([call:…] system messages) ──
@@ -249,17 +259,17 @@ describe('calls.ts — 1:1 finalization', () => {
   });
 
   // ── BUG 2 (receiver side): remote hang-up of a connected call → 'answered' ─
-  it('remote call:hangup of a connected call logs "answered" (not "missed"), no alert', () => {
+  it('remote call:hangup:v2 of a connected call logs "answered" (not "missed"), no alert', () => {
     enterConnectedCall('peer-E', 'call-E', 'in');
 
     attachCallHandlers();
-    const hangupEntry = (mockOn.mock.calls as [string, (m: unknown) => void][]).find(([ev]) => ev === 'call:hangup');
+    const hangupEntry = (mockOn.mock.calls as [string, (m: unknown) => void][]).find(([ev]) => ev === 'call:hangup:v2');
     expect(hangupEntry).toBeDefined();
     const hangupHandler = hangupEntry![1];
 
-    hangupHandler({ callId: 'call-E', from: 'peer-E', reason: 'hangup' });
+    hangupHandler({ callId: 'call-E', reason: 'hangup' });
     // Duplicate teardown events that used to mis-log it as missed:
-    hangupHandler({ callId: 'call-E', from: 'peer-E', reason: 'hangup' });
+    hangupHandler({ callId: 'call-E', reason: 'hangup' });
     endCall('rtc_failure');
 
     expect(mockSaveCall).toHaveBeenCalledTimes(1);

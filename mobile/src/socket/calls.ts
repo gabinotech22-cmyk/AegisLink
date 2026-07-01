@@ -1,7 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { logger } from '../utils/logger';
 import nacl from 'tweetnacl';
-import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
+import { decodeBase64 } from 'tweetnacl-util';
 ;
 import { getSocket, isConnected } from './client';
 import { useCall } from '../store/call';
@@ -20,7 +20,6 @@ import { fetchTurnConfig } from '../webrtc/ice';
 import { startInCallAudio, stopInCallAudio } from '../webrtc/inCall';
 import { startCallService, stopCallService } from '../webrtc/callForegroundService';
 import { themedAlert } from '../components/AlertHost';
-import { SEALED_TRANSPORT_VERSION } from '../config';
 import {
   sealCallInvite,
   openCallInvite,
@@ -30,35 +29,19 @@ import {
 } from '../crypto/callSession';
 
 // ---------------------------------------------------------------------------
-// Sealed WebRTC signaling
+// Sealed WebRTC signaling (v2-only, sealed-sender)
 // ---------------------------------------------------------------------------
 // SDP offers/answers and ICE candidates leak DTLS fingerprints, codecs, and —
 // critically — both peers' real IP addresses. To honour the zero-metadata
-// principle they are E2EE-sealed with NaCl box (the same XSalsa20-Poly1305
-// authenticated box used for 1:1 chat) addressed to the peer's static X25519
-// public key BEFORE being handed to the relay. The relay only ever forwards an
-// opaque { ciphertext, nonce } pair; it can neither read nor tamper with the
-// payload (Poly1305 MAC verified on open). The signed inner JSON also carries
-// `from` (sealed-sender) so the receiver can bind the payload to a known peer.
+// principle they are E2EE-sealed before being handed to the relay. The relay
+// only ever forwards opaque { ciphertext, nonce } pairs; it can neither read
+// nor tamper with the payload (Poly1305 MAC verified on open).
 //
-// Privacy note: signaling here is NOT yet sealed-sender at the routing layer —
-// the relay still sees who calls whom (it routes by `to` and stamps `from`).
-// What this change guarantees is that the relay can no longer observe SDP/ICE
-// content, i.e. real IPs, DTLS fingerprints, and media capabilities.
-
-const SIGNAL_VERSION = 1;
-
-interface SealedSignalWire {
-  ciphertext: string; // Base64 NaCl box output
-  nonce: string;      // Base64, 24 random bytes
-}
-
-interface SignalInner {
-  v: number;
-  from: string;
-  /** The original signaling payload (SDP JSON or ICE candidate JSON). */
-  payload: string;
-}
+// The caller's identity is sealed inside the invite ciphertext (ephemeral box +
+// Ed25519 signature) and recovered only by the callee. The relay NEVER sees
+// who calls whom — it routes by `to` but never stamps `from`. Post-handshake
+// signaling (answer, ICE) is sealed symmetrically under a per-call `callKey`
+// established by the invite handshake.
 
 /** Resolve a peer's static X25519 public key from the local contacts store. */
 function peerPublicKey(aegisId: string): Uint8Array | null {
@@ -75,81 +58,14 @@ function peerPublicKey(aegisId: string): Uint8Array | null {
   }
 }
 
-/** Our long-term X25519 secret + public keys and aegisId, loaded from the in-memory identity. */
-function ownKeys(): { secretKey: Uint8Array; aegisId: string } | null {
-  try {
-    const { useIdentity } = require('../store/identity') as {
-      useIdentity: { getState: () => { identity: { secretKey: Uint8Array; aegisId: string } | null } };
-    };
-    const id = useIdentity.getState().identity;
-    if (!id) return null;
-    return { secretKey: id.secretKey, aegisId: id.aegisId };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Seal a signaling payload for `recipientAegisId`. Returns null if we cannot
- * resolve the peer's public key or our own identity (caller must abort the
- * emit — never fall back to plaintext).
- */
-function sealSignal(recipientAegisId: string, payload: string): SealedSignalWire | null {
-  const recipientPub = peerPublicKey(recipientAegisId);
-  const me = ownKeys();
-  if (!recipientPub || !me) return null;
-
-  const inner: SignalInner = { v: SIGNAL_VERSION, from: me.aegisId, payload };
-  const innerBytes = new TextEncoder().encode(JSON.stringify(inner));
-  const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  const ciphertext = nacl.box(innerBytes, nonce, recipientPub, me.secretKey);
-  return { ciphertext: encodeBase64(ciphertext), nonce: encodeBase64(nonce) };
-}
-
-/**
- * Open a sealed signaling envelope. Verifies the Poly1305 MAC (open returns
- * null on tamper), the protocol version, and that the embedded `from` matches
- * the expected sender. Returns the inner payload string or null on any failure.
- */
-function openSignal(senderAegisId: string, wire: SealedSignalWire): string | null {
-  const senderPub = peerPublicKey(senderAegisId);
-  const me = ownKeys();
-  if (!senderPub || !me) return null;
-
-  let ciphertext: Uint8Array;
-  let nonce: Uint8Array;
-  try {
-    ciphertext = decodeBase64(wire.ciphertext);
-    nonce = decodeBase64(wire.nonce);
-  } catch {
-    return null;
-  }
-  if (nonce.length !== nacl.box.nonceLength) return null;
-
-  const opened = nacl.box.open(ciphertext, nonce, senderPub, me.secretKey);
-  if (!opened) return null;
-
-  let inner: SignalInner;
-  try {
-    inner = JSON.parse(new TextDecoder().decode(opened)) as SignalInner;
-  } catch {
-    return null;
-  }
-  if (inner.v !== SIGNAL_VERSION) return null;
-  if (inner.from !== senderAegisId) return null;
-  if (typeof inner.payload !== 'string') return null;
-  return inner.payload;
-}
 
 // ---------------------------------------------------------------------------
-// Sealed-sender v2 call signaling (Phase 2)
+// Per-call symmetric key management (v2)
 // ---------------------------------------------------------------------------
-// v2 hides the caller's identity from the relay: the call:invite carries a
-// sealed-sender handshake (ephemeral box + signature) embedding a random
-// `callKey`; answer/ICE are then sealed symmetrically under callKey (cheap, for
-// the ICE trickle). The relay never stamps `from`. We hold the callKey for the
-// lifetime of the call, keyed by callId. v2 SEND is flag-gated; v2 RECEIVE is
-// always wired so a v2 caller reaches a v1-flagged callee.
+// The call:invite carries a sealed-sender handshake (ephemeral box + signature)
+// embedding a random `callKey`; answer/ICE are then sealed symmetrically under
+// callKey (cheap, for the ICE trickle). The relay never stamps `from`. We hold
+// the callKey for the lifetime of the call, keyed by callId.
 const callKeys = new Map<string, Uint8Array>();
 
 function rememberCallKey(callId: string, key: Uint8Array): void {
@@ -191,9 +107,8 @@ function peerSigningKey(aegisId: string): Uint8Array | null {
 
 /**
  * Emit a post-handshake signaling message (ICE candidate or SDP answer). Uses
- * the v2 symmetric channel when we hold a callKey for this call, else the v1
- * sealed channel. Returns false if sealing failed (caller must abort, never
- * fall back to plaintext).
+ * the v2 symmetric channel (callKey). Returns false if the callKey is missing
+ * (caller must abort — fail-closed, never fall back to plaintext or v1).
  */
 function emitSealedSignal(
   socket: ReturnType<typeof getSocket>,
@@ -204,14 +119,9 @@ function emitSealedSignal(
 ): boolean {
   if (!socket) return false;
   const key = callKeys.get(callId);
-  if (key) {
-    const wire: CallKeyWire = sealWithCallKey(key, payload);
-    socket.emit(`call:${kind}:v2`, { callId, to: toAegisId, ...wire });
-    return true;
-  }
-  const sealed = sealSignal(toAegisId, payload);
-  if (!sealed) return false;
-  socket.emit(`call:${kind}`, { callId, to: toAegisId, ...sealed });
+  if (!key) return false; // fail-closed: no callKey → cannot seal (golden rule #6)
+  const wire: CallKeyWire = sealWithCallKey(key, payload);
+  socket.emit(`call:${kind}:v2`, { callId, to: toAegisId, ...wire });
   return true;
 }
 
@@ -263,38 +173,11 @@ function clearRingTimeout(): void {
 // Keyed by callId so a brand-new call (always a fresh UUID) is never blocked.
 let _finalizedCallId: string | null = null;
 
-interface CallInvitePayload extends SealedSignalWire {
-  callId: string;
-  from: string;
-  media: CallMedia;
-  // `ciphertext`/`nonce` seal the SDP offer (see SealedSignalWire).
-}
-
-interface CallAnswerPayload extends SealedSignalWire {
-  callId: string;
-  from: string;
-  // `ciphertext`/`nonce` seal the SDP answer.
-}
-
-interface CallIcePayload extends SealedSignalWire {
-  callId: string;
-  from: string;
-  // `ciphertext`/`nonce` seal the ICE candidate JSON.
-}
-
-interface CallHangupPayload {
-  callId: string;
-  from: string;
-  reason?: string;
-}
-
 /**
- * Subscribes to incoming-call signaling events. Must be called after the
- * socket is connected and authenticated.
- *
- * NOTE: signaling is NOT sealed-sender — the server sees who is calling whom.
- * Media itself is E2EE via DTLS-SRTP (built into WebRTC). Sealed signaling
- * is Fase 4+ hardening.
+ * Subscribes to incoming-call signaling events (v2-only, sealed-sender).
+ * Must be called after the socket is connected and authenticated.
+ * The relay NEVER sees who is calling whom — the caller's identity is sealed
+ * inside the invite ciphertext and recovered only by the callee.
  */
 export function attachCallHandlers(): void {
   const socket = getSocket();
@@ -303,36 +186,11 @@ export function attachCallHandlers(): void {
   // Idempotent: a fresh connect() builds a NEW socket.io instance (disconnect()
   // nulls the old one), so the previous listeners are gone — and re-running this
   // on reconnect must not stack duplicate handlers that would fire startIncoming
-  // twice. Clear our four call events first, then (re)register.
-  socket.off('call:invite');
-  socket.off('call:answer');
-  socket.off('call:ice');
-  socket.off('call:hangup');
-  // v2 (sealed-sender) channels — always wired so a v2 caller reaches us.
+  // twice. Clear v2 call events first, then (re)register.
   socket.off('call:invite:v2');
   socket.off('call:answer:v2');
   socket.off('call:ice:v2');
   socket.off('call:hangup:v2');
-
-  socket.on('call:invite', async (msg: CallInvitePayload) => {
-    // Under the default sealed-sender (v2) policy we never PARTICIPATE in a v1
-    // call: answering one would emit our own `from`-bearing v1 answer/ICE to the
-    // relay (golden rule #4). Refuse the invite so the call fails closed — the
-    // caller must update to a v2 client. v1 receive stays wired only when the
-    // user explicitly opted out via SEALED_TRANSPORT_VERSION=v1.
-    if (SEALED_TRANSPORT_VERSION === 'v2') {
-      if (__DEV__) logger.warn('[calls] refusing legacy v1 invite under sealed-sender policy');
-      return;
-    }
-    // Decrypt the sealed SDP offer before doing anything else. A failed open
-    // (unknown sender, tampered ciphertext, missing identity) drops the invite.
-    const offer = openSignal(msg.from, msg);
-    if (!offer) {
-      if (__DEV__) logger.warn('[calls] call:invite signal decrypt failed — dropping');
-      return;
-    }
-    await processIncomingInvite(socket, msg.from, msg.callId, msg.media, offer);
-  });
 
   // Sealed-sender v2 invite: no `from` on the wire; openCallInvite recovers and
   // authenticates the caller and yields the per-call symmetric key.
@@ -353,15 +211,6 @@ export function attachCallHandlers(): void {
     await processIncomingInvite(socket, opened.from, msg.callId, msg.media, opened.offer);
   });
 
-  socket.on('call:answer', async (msg: CallAnswerPayload) => {
-    const answer = openSignal(msg.from, msg);
-    if (!answer) {
-      if (__DEV__) logger.warn('[calls] call:answer signal decrypt failed — dropping');
-      return;
-    }
-    await processIncomingAnswer(msg.callId, answer);
-  });
-
   socket.on('call:answer:v2', async (msg: SealedKeyWire) => {
     const key = callKeys.get(msg.callId);
     if (!key) return;
@@ -373,15 +222,6 @@ export function attachCallHandlers(): void {
     await processIncomingAnswer(msg.callId, answer);
   });
 
-  socket.on('call:ice', async (msg: CallIcePayload) => {
-    const candidate = openSignal(msg.from, msg);
-    if (!candidate) {
-      if (__DEV__) logger.warn('[calls] call:ice signal decrypt failed — dropping');
-      return;
-    }
-    processIncomingIce(msg.callId, candidate);
-  });
-
   socket.on('call:ice:v2', async (msg: SealedKeyWire) => {
     const key = callKeys.get(msg.callId);
     if (!key) return;
@@ -391,12 +231,6 @@ export function attachCallHandlers(): void {
       return;
     }
     processIncomingIce(msg.callId, candidate);
-  });
-
-  socket.on('call:hangup', (msg: CallHangupPayload) => {
-    const { callId } = useCall.getState();
-    if (callId !== msg.callId) return;
-    finalizeCall(msg.reason ?? 'remote_hangup', { emitHangup: false });
   });
 
   socket.on('call:hangup:v2', (msg: { callId: string; reason?: string }) => {
@@ -422,10 +256,9 @@ interface SealedKeyWire {
 }
 
 /**
- * Shared incoming-invite handling (busy check, ring UI, notification). Used by
- * both the v1 (`from` from the relay) and v2 (`from` recovered from the sealed
- * box) invite handlers — the only difference is how the offer + sender were
- * obtained and authenticated upstream.
+ * Shared incoming-invite handling (busy check, ring UI, notification). The
+ * caller's identity (`from`) is recovered from the sealed invite ciphertext —
+ * the relay never sees it.
  */
 async function processIncomingInvite(
   socket: NonNullable<ReturnType<typeof getSocket>>,
@@ -436,13 +269,8 @@ async function processIncomingInvite(
 ): Promise<void> {
   const state = useCall.getState();
   if (state.status !== 'idle' && state.status !== 'ended') {
-    // Busy — auto-reject; log as declined. Mirror the inbound transport: if this
-    // call arrived sealed (we hold a callKey), reject on the v2 channel too.
-    if (callKeys.has(callId)) {
-      socket.emit('call:hangup:v2', { callId, to: from, reason: 'busy' });
-    } else {
-      socket.emit('call:hangup', { callId, to: from, reason: 'busy' });
-    }
+    // Busy — auto-reject via the sealed v2 channel (the only channel).
+    socket.emit('call:hangup:v2', { callId, to: from, reason: 'busy' });
     saveCall({ id: callId, contactId: from, direction: 'in', media, status: 'declined', startedAt: Date.now(), durationS: 0 }).catch(() => {});
     const { useMessages } = require('../store/messages');
     const { useIdentity } = require('../store/identity');
@@ -479,7 +307,7 @@ async function processIncomingInvite(
   }
 }
 
-/** Shared answer handling — used by both v1 and v2 answer handlers. */
+/** Handle an incoming v2 answer (decrypted upstream via callKey). */
 async function processIncomingAnswer(msgCallId: string, answer: string): Promise<void> {
   clearRingTimeout(); // callee answered — cancel the no-answer timeout
   const { activePeer, callId } = useCall.getState();
@@ -489,7 +317,7 @@ async function processIncomingAnswer(msgCallId: string, answer: string): Promise
   useCall.getState().setStatus('connecting');
 }
 
-/** Shared ICE handling — used by both v1 and v2 ICE handlers. */
+/** Handle an incoming v2 ICE candidate (decrypted upstream via callKey). */
 function processIncomingIce(msgCallId: string, candidate: string): void {
   // Gate on callId only — NOT on activePeer (the callee is still ringing while
   // the caller trickles). Buffer until the peer exists + remote offer is applied.
@@ -513,12 +341,11 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   _finalizedCallId = null; // re-arm the finalize-once guard for this new call
   useCall.getState().startOutgoing(toAegisId, callId, media);
 
-  // Decide sealed-sender v2 for this call: flag on, and we can resolve the peer's
-  // box key + our own signing identity. Generate the callKey UP FRONT so ICE
-  // candidates trickling out during createOffer are already sealed under it
-  // (emitSealedSignal picks v2 whenever callKeys holds this callId).
-  const useV2Call = SEALED_TRANSPORT_VERSION === 'v2' && !!peerPublicKey(toAegisId) && !!ownSealedKeys();
-  if (useV2Call) rememberCallKey(callId, nacl.randomBytes(nacl.secretbox.keyLength));
+  // Sealed-sender v2: resolve the peer's box key + our own signing identity.
+  // Generate the callKey UP FRONT so ICE candidates trickling out during
+  // createOffer are already sealed under it.
+  const canSeal = !!peerPublicKey(toAegisId) && !!ownSealedKeys();
+  if (canSeal) rememberCallKey(callId, nacl.randomBytes(nacl.secretbox.keyLength));
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
@@ -596,7 +423,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
 
   const offer = await createOffer(peer.pc);
-  if (useV2Call) {
+  if (canSeal) {
     // Sealed-sender v2: the invite carries the handshake (no `from`); reuse the
     // callKey generated up front so it matches the one already securing ICE.
     const me = ownSealedKeys();
@@ -609,26 +436,11 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     }
     const sealed = sealCallInvite(recipientPub, me.aegisId, me.signingSecretKey, offer, Date.now(), callKey);
     socket.emit('call:invite:v2', { callId, to: toAegisId, media, ...sealed.wire });
-  } else if (SEALED_TRANSPORT_VERSION === 'v1') {
-    // Legacy escape hatch (EXPO_PUBLIC_SEALED_VERSION=v1): the user opted OUT of
-    // sealed-sender for ALL transport. SDP content is still NaCl-box sealed, but
-    // the relay stamps `from`. Not reachable under the default v2 policy.
-    const sealedOffer = sealSignal(toAegisId, offer);
-    if (!sealedOffer) {
-      // Cannot encrypt the offer — abort rather than leak plaintext SDP to the relay.
-      endCall('encrypt_failure');
-      themedAlert(
-        'Call failed',
-        'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
-      );
-      return; // don't throw — call is already ended cleanly
-    }
-    socket.emit('call:invite', { callId, to: toAegisId, media, ...sealedOffer });
   } else {
-    // v2 policy (default) but sealed-sender is impossible — the peer's box key or
-    // our own signing identity is unavailable. Fail CLOSED: never fall back to a
-    // `from`-leaking v1 invite (golden rules #4 sealed-sender-in-calls + #6
-    // fail-closed). The call ends cleanly with a clear, actionable message.
+    // Sealed-sender impossible — the peer's box key or our own signing identity
+    // is unavailable. Fail CLOSED: never fall back to a `from`-leaking v1 invite
+    // (golden rules #4 sealed-sender-in-calls + #6 fail-closed). The call ends
+    // cleanly with a clear, actionable message.
     endCall('encrypt_failure');
     themedAlert(
       'Call failed',
@@ -737,8 +549,7 @@ export async function acceptCall(): Promise<void> {
   // Flush ICE candidates that arrived while we were still ringing
   await flushPendingIce(peer.pc);
   const answer = await createAnswer(peer.pc);
-  // Uses the v2 symmetric channel if this call arrived sealed (we hold a
-  // callKey), else the v1 sealed channel. Abort on seal failure (never plaintext).
+  // Seal the answer with the per-call key. Abort on seal failure (never plaintext).
   if (!emitSealedSignal(socket, 'answer', callId, peerId, answer)) {
     endCall('encrypt_failure');
     themedAlert(
@@ -775,13 +586,8 @@ function finalizeCall(reason: string, opts: { emitHangup: boolean }): void {
 
   const socket = getSocket();
   if (opts.emitHangup && socket && peerId && callId) {
-    // Mirror the call's transport: a sealed (v2) call hangs up on the v2 channel
-    // so the relay still never sees `from`.
-    if (callId && callKeys.has(callId)) {
-      socket.emit('call:hangup:v2', { callId, to: peerId, reason });
-    } else {
-      socket.emit('call:hangup', { callId, to: peerId, reason });
-    }
+    // Always v2 — the relay never sees `from` (sealed-sender).
+    socket.emit('call:hangup:v2', { callId, to: peerId, reason });
   }
   // Drop the per-call session key (zeroized) now the call is over.
   if (callId) forgetCallKey(callId);

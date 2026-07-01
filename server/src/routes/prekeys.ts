@@ -176,7 +176,9 @@ router.post('/', uploadLimiter, async (req, res) => {
 
     res.status(201).json({ uploaded });
   } catch (err) {
-    console.error('[prekeys] upload db_error:', (err as Error).message);
+    // Log only the error name, never the message — an interpolated SQLite error
+    // can echo malformed input (pubkeys, aegisIds) into logs (cero-metadatos).
+    console.error('[prekeys] upload db_error:', (err as Error).name);
     res.status(500).json({ error: 'db_error' });
   }
 });
