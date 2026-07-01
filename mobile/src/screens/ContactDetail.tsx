@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator, Modal, Animated, Easing } from 'react-native';
+import { View, Text, Pressable, ScrollView, ActivityIndicator, Modal, Animated, Easing, Linking } from 'react-native';
 import { WallpaperPicker, loadWallpaper, WALLPAPER_NAMES, type WallpaperOption } from '../components/WallpaperPicker';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,6 +15,11 @@ import { useContacts } from '../store/contacts';
 import { usePreferences } from '../store/preferences';
 import type { StoredContact } from '../db/local';
 import { themedAlert } from '../components/AlertHost';
+
+// Abuse reports are delivered by the reporter's own mail client — nothing touches
+// the relay, so this stays compatible with the zero-metadata guarantee. Reporting
+// + blocking together satisfy App Store Guideline 1.2 (UGC moderation).
+const ABUSE_REPORT_EMAIL = 'abuse@aegislink.app';
 
 interface Props {
   contact: StoredContact;
@@ -130,6 +135,37 @@ export function ContactDetailScreen({
         { text: i18nT('contactDetail.block'), style: 'destructive', onPress: () => void setBlocked(contact.aegisId, true) },
       ]);
     }
+  }
+
+  function handleReport() {
+    themedAlert(
+      i18nT('contactDetail.reportTitle'),
+      i18nT('contactDetail.reportDesc', { name: contact.name }),
+      [
+        { text: i18nT('common.cancel'), style: 'cancel' },
+        {
+          text: i18nT('contactDetail.report'),
+          style: 'destructive',
+          onPress: async () => {
+            // Block first so the report also takes effect even if no mail client exists.
+            await setBlocked(contact.aegisId, true);
+            const subject = i18nT('contactDetail.reportSubject', { id: contact.aegisId });
+            const body = i18nT('contactDetail.reportBody', { id: contact.aegisId, name: contact.name });
+            const url = `mailto:${ABUSE_REPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+            try {
+              const canOpen = await Linking.canOpenURL(url);
+              if (!canOpen) throw new Error('no-mail-client');
+              await Linking.openURL(url);
+            } catch {
+              themedAlert(
+                i18nT('contactDetail.reportNoMailTitle'),
+                i18nT('contactDetail.reportNoMailDesc', { email: ABUSE_REPORT_EMAIL })
+              );
+            }
+          },
+        },
+      ]
+    );
   }
 
   async function handleZeroTrust(enabled: boolean) {
@@ -427,6 +463,14 @@ export function ContactDetailScreen({
               sub={blocked ? i18nT('contactDetail.unblock') : i18nT('contactDetail.blockDesc')}
               danger
               onPress={handleBlock}
+            />
+            <Row
+              t={t}
+              icon={<I.Shield size={18} color={t.danger} />}
+              label={i18nT('contactDetail.report')}
+              sub={i18nT('contactDetail.reportSub')}
+              danger
+              onPress={handleReport}
             />
             <Row
               t={t}
