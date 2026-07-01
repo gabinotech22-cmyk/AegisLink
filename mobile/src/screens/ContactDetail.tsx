@@ -19,7 +19,7 @@ import { themedAlert } from '../components/AlertHost';
 // Abuse reports are delivered by the reporter's own mail client — nothing touches
 // the relay, so this stays compatible with the zero-metadata guarantee. Reporting
 // + blocking together satisfy App Store Guideline 1.2 (UGC moderation).
-const ABUSE_REPORT_EMAIL = 'abuse@aegislink.app';
+const ABUSE_REPORT_EMAIL = 'aegislink.report@gmail.com';
 
 interface Props {
   contact: StoredContact;

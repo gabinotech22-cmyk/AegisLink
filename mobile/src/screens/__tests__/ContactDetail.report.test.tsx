@@ -166,7 +166,7 @@ describe('ContactDetailScreen — report abuse', () => {
       expect(mockSetBlocked).toHaveBeenCalledWith('AAA-BBBB-CCCC', true);
     });
     expect(Linking.openURL).toHaveBeenCalledWith(
-      expect.stringContaining('mailto:abuse@aegislink.app')
+      expect.stringContaining('mailto:aegislink.report@gmail.com')
     );
   });
 
