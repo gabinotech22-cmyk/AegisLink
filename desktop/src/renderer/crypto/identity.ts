@@ -30,10 +30,6 @@ export function generateKeyPair(): KeyPair {
   return nacl.box.keyPair();
 }
 
-export function generateSigningKeyPair(): KeyPair {
-  return nacl.sign.keyPair();
-}
-
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 function encodeBase32(bytes: Uint8Array, charsOut: number): string {
@@ -114,12 +110,19 @@ export function identityFromStored(opts: {
 }): Identity {
   const publicKey = decodeBase64(opts.publicKeyB64);
   const secretKey = decodeBase64(opts.secretKeyB64);
+  // Missing signing material (pre-multi-key DBs): DERIVE it deterministically
+  // from the box secret key, exactly as createIdentity does
+  // (nacl.sign.keyPair.fromSeed). A throwaway RANDOM pair would produce
+  // signatures no contact can verify (sealed-sender rejects everything) AND would
+  // mask a corrupted/half-written identity as valid. Deterministic derivation
+  // restores the user's REAL signing identity instead (golden rule #1/#3).
+  // Mobile parity: mobile/src/crypto/identity.ts:identityFromStored.
   const signKeys = (opts.signingPublicKeyB64 && opts.signingSecretKeyB64)
     ? {
         publicKey: decodeBase64(opts.signingPublicKeyB64),
         secretKey: decodeBase64(opts.signingSecretKeyB64),
       }
-    : generateSigningKeyPair();
+    : nacl.sign.keyPair.fromSeed(secretKey);
 
   return {
     aegisId: deriveAegisId(publicKey),

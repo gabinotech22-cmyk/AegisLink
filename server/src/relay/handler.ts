@@ -27,6 +27,7 @@ export type { PreKeyBundle, SealedEnvelope, QueuedEnvelope, SealedEnvelopeV2 } f
 
 
 import { attachCallSignaling, attachGroupCallSignaling, takePendingCallInvite } from './callSignaling.js';
+import { checkDeviceLinkRateLimit, RATE_LIMIT_MAP_MAX } from './rateLimits.js';
 import { attachPrekeys } from './handlers/prekeys.js';
 import { attachMessagingEphemeral } from './handlers/messaging.js';
 import { attachChannels } from './handlers/channels.js';
@@ -185,6 +186,17 @@ export function attachRelay(io: SocketServer) {
         return;
       }
       const { targetAegisId, desktopPubKey } = parsed.data;
+
+      // Throttle per target identity so an unauthenticated socket can't spam
+      // link requests at a victim. Silent drop — no oracle signal on excess.
+      if (!checkDeviceLinkRateLimit(targetAegisId)) {
+        return;
+      }
+      // Bound the pending-link map independently of the rate-limit maps: refuse
+      // new entries past the cap rather than evicting a live pending link.
+      if (!linkingSockets.has(desktopPubKey) && linkingSockets.size >= RATE_LIMIT_MAP_MAX) {
+        return;
+      }
 
       if (linkingSockets.has(desktopPubKey)) {
         clearTimeout(linkingSockets.get(desktopPubKey)!.timer);

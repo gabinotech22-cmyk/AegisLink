@@ -67,3 +67,49 @@ export function checkRekeyRateLimit(aegisId: string): boolean {
   evictExpired(rekeyRateLimit);
   return entry.count <= 30;
 }
+
+// ── PreKey rate limits (audit 2026-06) ────────────────────────────────────────
+// The HTTP path (routes/prekeys.ts) already throttles uploads, but the SOCKET
+// path was unprotected — an authenticated socket could flood SQLite with SPK/OPK
+// upserts or hammer prekeys:fetch against any identity. Two routes to the same
+// resource; both must be rate-limited. Keyed by aegisId (authenticated), no IP.
+const prekeysUploadRateLimit = new Map<string, { count: number; reset: number }>();
+const prekeysFetchRateLimit  = new Map<string, { count: number; reset: number }>();
+
+export function checkPrekeysUploadRateLimit(aegisId: string): boolean {
+  const now = Date.now();
+  const entry = prekeysUploadRateLimit.get(aegisId) ?? { count: 0, reset: now + 600_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 600_000; }
+  entry.count++;
+  prekeysUploadRateLimit.set(aegisId, entry);
+  evictExpired(prekeysUploadRateLimit);
+  return entry.count <= 20; // parity with HTTP uploadLimiter: 20 / 10 min
+}
+
+export function checkPrekeysFetchRateLimit(aegisId: string): boolean {
+  const now = Date.now();
+  const entry = prekeysFetchRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
+  entry.count++;
+  prekeysFetchRateLimit.set(aegisId, entry);
+  evictExpired(prekeysFetchRateLimit);
+  return entry.count <= 60; // first-contact fan-out headroom: 60 / min
+}
+
+// ── device:link rate limit (audit 2026-06, roadmap Ola 3 MED) ─────────────────
+// device:link is accepted from UNAUTHENTICATED sockets (the desktop hasn't
+// completed challenge-response yet during pairing), so there is no `me` to key
+// on. Key by the requested `targetAegisId`: an attacker spamming link requests
+// against a victim can't exceed 3 / 15 min for that victim. Excess is dropped
+// silently to avoid handing back any signal.
+const deviceLinkRateLimit = new Map<string, { count: number; reset: number }>();
+
+export function checkDeviceLinkRateLimit(targetAegisId: string): boolean {
+  const now = Date.now();
+  const entry = deviceLinkRateLimit.get(targetAegisId) ?? { count: 0, reset: now + 900_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 900_000; }
+  entry.count++;
+  deviceLinkRateLimit.set(targetAegisId, entry);
+  evictExpired(deviceLinkRateLimit);
+  return entry.count <= 3; // 3 / 15 min per target identity
+}
