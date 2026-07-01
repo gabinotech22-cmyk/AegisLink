@@ -64,10 +64,21 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "aegislink.duckdns.org", "path": "/g" },
-            { "scheme": "https", "host": "aegislink.duckdns.org", "path": "/a" }
+            {
+              "scheme": "https",
+              "host": "aegislink.duckdns.org",
+              "path": "/g"
+            },
+            {
+              "scheme": "https",
+              "host": "aegislink.duckdns.org",
+              "path": "/a"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
       "compileSdkVersion": 35,
@@ -121,7 +132,10 @@
             "enableProguardInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": false,
             "enableMinifyInReleaseBuilds": true,
-            "buildArchs": ["arm64-v8a", "x86_64"]
+            "buildArchs": [
+              "arm64-v8a",
+              "x86_64"
+            ]
           }
         }
       ],
@@ -191,20 +205,15 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "f658c210-cfa9-482e-85ae-610cc76152af"
+        "projectId": "b7622ace-13a1-4bd0-84de-550bfdfe14d2"
       }
     },
-    "owner": "crowfn",
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/f658c210-cfa9-482e-85ae-610cc76152af",
-      "codeSigningCertificate": "./certs/certificate.pem",
-      "codeSigningMetadata": {
-        "keyid": "main",
-        "alg": "rsa-v1_5-sha256"
-      }
-    }
+      "url": "https://u.expo.dev/b7622ace-13a1-4bd0-84de-550bfdfe14d2"
+    },
+    "owner": "aegislink"
   }
 }

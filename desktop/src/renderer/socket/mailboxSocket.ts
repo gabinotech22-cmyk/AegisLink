@@ -26,6 +26,7 @@
  * Live re-derivation on an epoch boundary is Slice 5 — noted, not handled here.
  */
 
+import { logger } from '../utils/logger';
 import { io, type Socket } from 'socket.io-client';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { ONION_URL, MAILBOX_ENABLED } from '../config';
@@ -132,12 +133,12 @@ export async function connectMailboxSocket(
 
   sock.on('connect', () => {
     authed = false;
-    if (DEV) console.debug('[mailbox] connected, awaiting challenge');
+    if (DEV) logger.debug('[mailbox] connected, awaiting challenge');
   });
 
   sock.on('disconnect', (reason) => {
     authed = false;
-    if (DEV) console.debug('[mailbox] disconnected:', reason);
+    if (DEV) logger.debug('[mailbox] disconnected:', reason);
   });
 
   // Possession proof: sign the relay's random challenge with the mailbox secret.
@@ -160,7 +161,7 @@ export async function connectMailboxSocket(
       }
       sock.emit('mailbox:auth:response', resp);
     } catch (e) {
-      if (DEV) console.warn('[mailbox] auth failure:', (e as Error).message);
+      if (DEV) logger.warn('[mailbox] auth failure:', (e as Error).message);
       sock.disconnect();
     }
   });
@@ -169,11 +170,11 @@ export async function connectMailboxSocket(
     authed = true;
     void setLastMailboxConnectEpoch(E);
     scheduleEpochRotation();
-    if (DEV) console.debug('[mailbox] authenticated');
+    if (DEV) logger.debug('[mailbox] authenticated');
   });
 
   sock.on('error_msg', (e: { code?: string }) => {
-    if (DEV) console.warn('[mailbox] server error:', e?.code);
+    if (DEV) logger.warn('[mailbox] server error:', e?.code);
   });
 
   sock.on('envelope:mb', (raw: unknown) => {
@@ -182,7 +183,7 @@ export async function connectMailboxSocket(
     try {
       onEnvelope(env);
     } catch (e) {
-      if (DEV) console.warn('[mailbox] onEnvelope handler threw:', e);
+      if (DEV) logger.warn('[mailbox] onEnvelope handler threw:', e);
     }
   });
 

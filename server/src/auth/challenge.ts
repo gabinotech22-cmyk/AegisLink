@@ -73,8 +73,11 @@ export function verifyResponse(challenge: Challenge, responseB64: unknown): bool
 }
 
 function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return mismatch === 0;
+  // No early-return on length mismatch (golden rule #8): a short-circuit here is
+  // itself a timing oracle. Fold the length difference into the accumulator and
+  // always iterate over a fixed-length view, matching crypto/deliveryToken.ts.
+  let mismatch = a.length ^ b.length;
+  const bLen = b.length || 1; // avoid modulo-by-zero; empty b still fails on length
+  for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i % bLen);
+  return mismatch === 0 && a.length === b.length;
 }
