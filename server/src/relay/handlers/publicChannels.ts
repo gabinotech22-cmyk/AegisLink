@@ -142,6 +142,19 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
   });
 
   // ── pubchannel:msg ──────────────────────────────────────────────────────
+  //
+  // Channel role/type enforcement (readonly / moderated / approval) is CLIENT-SIDE
+  // by design, NOT server-enforced — this is intentional, not a gap (audit 2026-06-30
+  // M1). A single per-channel delivery token gates posting; the relay verifies only
+  // "holds a valid token for this channel", never *who* is posting or their role.
+  // Enforcing roles server-side would require the relay to (a) know each channel's
+  // role table and (b) bind a poster identity to each message — both are metadata the
+  // sealed-sender / zero-metadata model deliberately refuses to hold. The manifest
+  // (signed by the owner, verified by clients) is the source of truth for who may
+  // post; a misbehaving client can be dropped by peers on manifest-signature grounds,
+  // not by the blind relay. If server-enforced write roles are ever required, mint a
+  // SEPARATE write-capability token distinct from the read/delivery token rather than
+  // teaching the relay about identities. See docs/SEALED-PUBLIC-CHANNELS.md.
   socket.on('pubchannel:msg', (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
     if (!PUBCHANNEL_FLAG()) { ack?.({ ok: false, error: 'feature_disabled' }); return; }
     const parsed = PubChannelMsgSchema.safeParse(raw);

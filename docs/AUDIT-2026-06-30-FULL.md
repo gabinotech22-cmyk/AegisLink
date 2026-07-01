@@ -68,7 +68,12 @@
   concept of `readonly`/`moderated`/`approval` for sealed public channels (unlike Work `can_send`).
 - Posting restriction is client/manifest-advisory only. **Fix:** separate write-capability token from read
   token if server enforcement is intended, OR document explicitly that channel-type enforcement is client-side.
-- Status: OPEN (confirm intent vs SEALED-PUBLIC-CHANNELS design)
+- Status: **RESOLVED (documented intent)** — channel-type/role enforcement is CLIENT-SIDE by
+  design (manifest-advisory), not server-enforced: the relay holds a single per-channel delivery
+  token and never learns poster identity or role, per the sealed-sender / zero-metadata model.
+  Documented in code (`handlers/publicChannels.ts` `pubchannel:msg` comment) + design doc
+  (`SEALED-PUBLIC-CHANNELS.md` §3.4). Server-side write roles, if ever needed, = a separate
+  write-capability token, never teaching the relay identities.
 
 ### M2 — CSV audit export lacks formula-injection escaping
 - `server/src/routes/work.ts:259-282`. `escape()` quotes `,"\n` but not leading `= + - @` →
@@ -138,7 +143,7 @@
 
 ## 🔵 LOW
 - L1 — `uploads/*.png` (2 screenshots) tracked in git; `uploads/` not gitignored → structure-rule violation. Remove + ignore.
-- L2 — `mintDownloadToken` truncates HMAC to 128 bits (`blob.ts:36`) — adequate; add a comment confirming intent.
+- L2 — `mintDownloadToken` truncates HMAC to 128 bits (`blob.ts:36`) — adequate. **FIXED** — added a doc comment on `mintDownloadToken` confirming the 128-bit truncation is intentional (unguessable capability, server-only HMAC key, 24h blob TTL).
 - L3 — In-memory rate-limiters reset on relay restart (A-1, ACCEPTED/deferred — single-instance).
 
 ---
