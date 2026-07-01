@@ -7,7 +7,7 @@ Sprint: Store submission (App Store + Google Play)
 
 ## 1. EAS Secrets — Must be set in EAS Dashboard
 
-Go to: https://expo.dev/accounts/crowfn/projects/aegislink/secrets
+Go to: https://expo.dev/accounts/aegislink/projects/aegislink/secrets
 
 | Secret name        | Used in                          | Status          | How to obtain |
 |--------------------|----------------------------------|-----------------|---------------|
@@ -45,8 +45,8 @@ Then add the key JSON content as an EAS secret. This avoids the file needing to 
 |----------|--------------------|---------------------|--------|
 | iOS      | bundleIdentifier   | `com.aegislink.app` | CONFIGURED in app.json |
 | Android  | package            | `com.aegislink.app` | CONFIGURED in app.json |
-| EAS      | projectId          | `f658c210-cfa9-482e-85ae-610cc76152af` | CONFIGURED in app.json extra.eas |
-| EAS      | owner              | `crowfn`            | CONFIGURED in app.json |
+| EAS      | projectId          | `b7622ace-13a1-4bd0-84de-550bfdfe14d2` | CONFIGURED in app.json extra.eas |
+| EAS      | owner              | `aegislink`         | CONFIGURED in app.json |
 
 Both platforms share the same bundle ID — this is intentional and valid. No action required.
 
