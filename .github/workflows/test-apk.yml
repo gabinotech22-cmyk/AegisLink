@@ -1,0 +1,78 @@
+# Test APK — on-demand installable release APK for emulator/device testing.
+#
+# Why this exists: local Windows release builds are currently blocked (corrupt
+# NDK 27.1 sysroot + MAX_PATH 260-char limit), and the EAS cloud path is blocked
+# by an EXPO_TOKEN tied to the wrong Expo account. This workflow builds a normal
+# debug-signed release APK on a clean Ubuntu runner — no NDK corruption, no path
+# limit, no Expo account needed — and uploads it as a downloadable artifact.
+#
+# The release buildType signs with the debug keystore (see android/app/build.gradle),
+# so the APK is installable via `adb install` on both the x86_64 emulators and
+# arm64 phones (reactNativeArchitectures = arm64-v8a,x86_64 → both ABIs bundled).
+# JS is bundled at build time, so NO Metro is required to run it.
+#
+# Trigger: Actions tab → "Test APK" → Run workflow, or `gh workflow run test-apk.yml`.
+name: Test APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-test-apk:
+    name: Build debug-signed release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      # Bake the PRODUCTION relay into the bundle (hard testing rule: emulators
+      # hit prod, never a local relay). Read by the Expo config at prebuild and
+      # by bundleReleaseJsAndAssets during assembleRelease.
+      EXPO_PUBLIC_SERVER_URL: https://aegislink.duckdns.org
+      EXPO_PUBLIC_RELAY_URL: https://aegislink.duckdns.org
+      EXPO_PUBLIC_TURN_URL: turn:aegislink.duckdns.org:3478
+      AEGIS_EXPO_GO: '0'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # Gradle dependency cache (the *.gradle files don't exist until prebuild,
+      # so setup-java's built-in gradle cache can't key off them).
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: test-apk-gradle-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: test-apk-gradle-
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Prebuild Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Assemble debug-signed release APK
+        run: cd android && ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Report APK info
+        run: |
+          ls -lh android/app/build/outputs/apk/release/*.apk
+          echo "sha256:"; sha256sum android/app/build/outputs/apk/release/*.apk
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aegislink-test-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
