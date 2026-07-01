@@ -14,7 +14,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
-import { decodeBase64 } from 'tweetnacl-util';
+import naclUtil from 'tweetnacl-util';
 import fs from 'node:fs';
 import path from 'node:path';
 import { publicChannelRepo } from '../db/client.js';
@@ -25,6 +25,13 @@ import {
   verifyAvatarDelete,
   type ChannelManifestData,
 } from '../crypto/publicChannelKey.js';
+
+// tweetnacl-util is a CommonJS module: import the default export and destructure,
+// so the binding resolves under Node's native ESM loader. Production runs via
+// `node --import tsx` (ESM), where `import { decodeBase64 } from 'tweetnacl-util'`
+// is NOT a valid named export and crashes boot. Every other server module
+// (challenge.ts, relay/handler.ts, publicChannelKey.ts) uses this default import.
+const { decodeBase64 } = naclUtil;
 
 // ── Feature flag ─────────────────────────────────────────────────────────────
 
