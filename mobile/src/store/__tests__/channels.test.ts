@@ -28,17 +28,29 @@ jest.mock('../../socket/publicChannels', () => ({
   pubchannelPost: jest.fn(),
   pubchannelPull: jest.fn(async () => ({ ok: true, posts: [] })),
   pubchannelTombstone: jest.fn(async () => ({ ok: true })),
+  pubchannelApply: jest.fn(async () => ({ ok: true })),
+  pubchannelPending: jest.fn(async () => ({ ok: true, pending: [] })),
+  pubchannelApprove: jest.fn(async () => ({ ok: true })),
+  pubchannelCheckApproval: jest.fn(async () => ({ ok: true, status: 'pending' })),
+  pubchannelDelete: jest.fn(async () => ({ ok: true })),
   onPubchannelMsg: jest.fn(() => () => {}),
+  onPubchannelDelete: jest.fn(() => () => {}),
   onPubchannelTombstone: jest.fn(() => () => {}),
 }));
 jest.mock('../../crypto/publicChannelStore', () => ({
   saveChannelSecrets: jest.fn(async () => {}),
   saveChannelSigningKey: jest.fn(async () => {}),
   getChannelCEK: jest.fn(),
+  getChannelCapability: jest.fn(async () => null),
+  getChannelSigningKey: jest.fn(async () => null),
   getChannelDeliveryToken: jest.fn(async () => 'tok'),
   isChannelOwned: jest.fn(async () => false),
   listChannelIds: jest.fn(async () => []),
   deleteChannel: jest.fn(async () => {}),
+  saveJoinRequest: jest.fn(async () => {}),
+  getJoinRequest: jest.fn(async () => null),
+  listJoinRequests: jest.fn(async () => []),
+  deleteJoinRequest: jest.fn(async () => {}),
 }));
 jest.mock('../contacts', () => ({
   useContacts: { getState: () => ({ contacts: [] }) },
@@ -97,7 +109,7 @@ function signedManifestBlob(name = 'My Channel', tamper = false): string {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  useChannels.setState({ directory: [], loadingDirectory: false, subscribed: [], hydrated: false, feeds: {}, heads: {} });
+  useChannels.setState({ directory: [], loadingDirectory: false, subscribed: [], hydrated: false, feeds: {}, heads: {}, pendingApplications: [] });
   (store.getChannelCEK as jest.Mock).mockResolvedValue(cek);
   (store.getChannelDeliveryToken as jest.Mock).mockResolvedValue('tok');
 });
@@ -263,13 +275,41 @@ describe('joinViaInvite (gap D)', () => {
     expect(res).toEqual({ ok: false, error: 'bad_invite' });
   });
 
-  it('rejects an approval-gated invite (capability not in link)', async () => {
+  it('applies to an approval-gated invite (capability not in link) instead of joining', async () => {
     const created = await useChannels.getState().createChannel(
       { name: 'Gated', description: 'd', channelType: 'approval' },
       identity,
     );
+    const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: regArg.signedManifestBlob });
+
     const res = await useChannels.getState().joinViaInvite(created.invite!, identity);
-    expect(res).toEqual({ ok: false, error: 'approval_required' });
+
+    // Phase 4: the client applies with a fresh ephemeral key and waits for the
+    // owner's approval — it must NOT be subscribed yet.
+    expect(res).toEqual({ ok: true, applied: true, channelId: created.channelId });
+    expect(socket.pubchannelApply).toHaveBeenCalledWith(created.channelId, expect.any(String));
+    expect(store.saveJoinRequest).toHaveBeenCalledWith(expect.objectContaining({ channelId: created.channelId, name: 'Gated' }));
+    expect(useChannels.getState().pendingApplications).toEqual([
+      expect.objectContaining({ channelId: created.channelId, name: 'Gated' }),
+    ]);
+    expect(useChannels.getState().subscribed.find((c) => c.channelId === created.channelId)).toBeUndefined();
+  });
+
+  it('a failed apply rolls back the stored join request', async () => {
+    const created = await useChannels.getState().createChannel(
+      { name: 'GatedFail', description: 'd', channelType: 'approval' },
+      identity,
+    );
+    const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: regArg.signedManifestBlob });
+    (socket.pubchannelApply as jest.Mock).mockResolvedValueOnce({ ok: false, error: 'pending_full' });
+
+    const res = await useChannels.getState().joinViaInvite(created.invite!, identity);
+
+    expect(res).toEqual({ ok: false, error: 'pending_full' });
+    expect(store.deleteJoinRequest).toHaveBeenCalledWith(created.channelId);
+    expect(useChannels.getState().pendingApplications).toEqual([]);
   });
 
   it('rejects when the unwrapped CEK does not match the manifest contentKeyHash', async () => {
