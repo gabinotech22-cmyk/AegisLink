@@ -283,6 +283,8 @@ describe('joinViaInvite (gap D)', () => {
     const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
     (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: regArg.signedManifestBlob });
 
+    // A different user (not the owner) opens the invite link.
+    useChannels.setState({ subscribed: [] });
     const res = await useChannels.getState().joinViaInvite(created.invite!, identity);
 
     // Phase 4: the client applies with a fresh ephemeral key and waits for the
