@@ -1313,6 +1313,7 @@
     "encryptNote": "I post sono sempre cifrati (CEK). Il relay non vede mai il contenuto né chi pubblica.",
     "create": "Crea canale",
     "createFailed": "Impossibile creare",
+    "duplicateName": "Hai già un canale con questo nome.",
     "shareTitle": "Condividi il tuo canale",
     "shareMessage": "Unisciti al mio canale \"{{name}}\" su AegisLink",
     "sealed": "sigillato",

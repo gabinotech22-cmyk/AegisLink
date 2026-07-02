@@ -31,6 +31,7 @@ import {
   pubchannelJoin,
   pubchannelPost,
   pubchannelPull,
+  pubchannelTombstone,
   onPubchannelMsg,
   onPubchannelTombstone,
 } from '../socket/publicChannels';
@@ -47,6 +48,7 @@ import {
   generateChannelIdentity,
   generateCEK,
   signManifest,
+  signTombstone,
   signAvatarSet,
   deriveChannelId,
   deriveChannelDeliveryToken,
@@ -185,6 +187,15 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   },
 
   async createChannel(params, identity) {
+    // 0. Duplicate guard — a second OWNED channel with the same name is almost
+    //    always an accidental re-submit (double-tap / retry after a silent
+    //    failure). The relay can't dedupe: it never links channels to an owner
+    //    (zero metadata), so the guard has to live client-side.
+    const wantedName = params.name.trim().toLowerCase();
+    if (get().subscribed.some((c) => c.owned && c.name.trim().toLowerCase() === wantedName)) {
+      return { ok: false, error: 'duplicate_name' };
+    }
+
     // 1. Fresh channel identity + content key + access capability.
     const id = generateChannelIdentity();
     const cek = generateCEK();
@@ -231,8 +242,24 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     }
 
     // 4. Persist OUR secrets (we own this channel → also the signing key).
-    await saveChannelSecrets(id.channelId, { cek, capability });
-    await saveChannelSigningKey(id.channelId, id.channelEd25519Secret);
+    //    If this fails the channel exists on the relay but is unusable here —
+    //    best-effort tombstone so the orphan doesn't linger in the public
+    //    directory, and return an error the UI can show (previously this threw
+    //    past the screen's try/finally: silent failure → users re-tapped and
+    //    created duplicates).
+    try {
+      await saveChannelSecrets(id.channelId, { cek, capability });
+      await saveChannelSigningKey(id.channelId, id.channelEd25519Secret);
+    } catch (e) {
+      try {
+        const ts = Date.now();
+        const sig = signTombstone(id.channelId, ts, id.channelEd25519Secret);
+        await pubchannelTombstone(id.channelId, ts, encodeBase64(sig));
+      } catch (rollbackErr) {
+        logger.warn(`[channels] orphan-channel tombstone failed: ${(rollbackErr as Error).message}`);
+      }
+      return { ok: false, error: e instanceof Error ? e.message : 'local_save_failed' };
+    }
 
     set((s) => ({
       subscribed: [...s.subscribed, {

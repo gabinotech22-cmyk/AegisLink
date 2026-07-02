@@ -27,6 +27,7 @@ jest.mock('../../socket/publicChannels', () => ({
   pubchannelJoin: jest.fn(),
   pubchannelPost: jest.fn(),
   pubchannelPull: jest.fn(async () => ({ ok: true, posts: [] })),
+  pubchannelTombstone: jest.fn(async () => ({ ok: true })),
   onPubchannelMsg: jest.fn(() => () => {}),
   onPubchannelTombstone: jest.fn(() => () => {}),
 }));
@@ -385,5 +386,53 @@ describe('createChannel with avatar (Slice 2)', () => {
     expect(res.ok).toBe(true);
     expect(res.channelId).toBeDefined();
     expect(useChannels.getState().subscribed.find((c) => c.channelId === res.channelId)).toBeDefined();
+  });
+});
+
+describe('createChannel — duplicate guard + failure feedback (prod dupes 2026-07-02)', () => {
+  it('refuses to create a second owned channel with the same name', async () => {
+    const first = await useChannels.getState().createChannel(
+      { name: 'testers', description: 'd', channelType: 'open' },
+      identity,
+    );
+    expect(first.ok).toBe(true);
+    (api.registerPublicChannel as jest.Mock).mockClear();
+
+    // Same name modulo whitespace/case — the classic re-tap after a silent failure.
+    const second = await useChannels.getState().createChannel(
+      { name: '  Testers ', description: 'd', channelType: 'open' },
+      identity,
+    );
+    expect(second).toEqual({ ok: false, error: 'duplicate_name' });
+    expect(api.registerPublicChannel).not.toHaveBeenCalled();
+  });
+
+  it('does not block joined (non-owned) channels with the same name', async () => {
+    useChannels.setState({
+      subscribed: [{ channelId: 'other', name: 'testers', channelType: 'open', owned: false, avatarHash: null }],
+    });
+    const res = await useChannels.getState().createChannel(
+      { name: 'testers', description: 'd', channelType: 'open' },
+      identity,
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it('returns an error (never throws) and tombstones the orphan when local persistence fails after registration', async () => {
+    (store.saveChannelSecrets as jest.Mock).mockRejectedValueOnce(new Error('secure_store_unavailable'));
+
+    const res = await useChannels.getState().createChannel(
+      { name: 'orphan', description: 'd', channelType: 'open' },
+      identity,
+    );
+
+    // The relay call happened, but the result is a UI-visible error, not a throw.
+    expect(api.registerPublicChannel).toHaveBeenCalledTimes(1);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('secure_store_unavailable');
+    // Best-effort rollback: the half-created channel is tombstoned off the directory.
+    expect(socket.pubchannelTombstone).toHaveBeenCalledTimes(1);
+    // And it never enters the local subscribed list.
+    expect(useChannels.getState().subscribed).toHaveLength(0);
   });
 });

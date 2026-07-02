@@ -1362,6 +1362,7 @@
     "encryptNote": "Los posts se cifran siempre (CEK). El relay nunca ve el contenido ni quién publica.",
     "create": "Crear canal",
     "createFailed": "No se pudo crear",
+    "duplicateName": "Ya tienes un canal con este nombre.",
     "shareTitle": "Comparte tu canal",
     "shareMessage": "Únete a mi canal \"{{name}}\" en AegisLink",
     "sealed": "sellado",

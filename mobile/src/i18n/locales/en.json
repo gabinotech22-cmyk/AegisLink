@@ -1362,6 +1362,7 @@
     "encryptNote": "Posts are always encrypted (CEK). The relay never sees the content or who posts.",
     "create": "Create channel",
     "createFailed": "Couldn't create",
+    "duplicateName": "You already own a channel with this name.",
     "shareTitle": "Share your channel",
     "shareMessage": "Join my channel \"{{name}}\" on AegisLink",
     "sealed": "sealed",
