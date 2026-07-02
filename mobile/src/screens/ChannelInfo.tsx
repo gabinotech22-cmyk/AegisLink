@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, Pressable, ScrollView, Image, Modal, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, Image, Modal, TextInput, ActivityIndicator, Switch } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
@@ -31,6 +31,8 @@ import { useChannelAvatar } from '../channels/useChannelAvatar';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
+import { usePreferences } from '../store/preferences';
+import { setChannelMuted } from '../notifications/channelNotifications';
 import { buildInviteLink } from '../channels/inviteLink';
 import {
   getChannelSigningKey,
@@ -53,6 +55,7 @@ import {
 } from '../channels/channelAvatarCache';
 import { pubchannelTombstone } from '../socket/publicChannels';
 import { logger } from '../utils/logger';
+import type { PublicChannelType } from '../api/publicChannels';
 
 // Channel type display labels (i18n keys)
 const TYPE_LABELS: Record<string, string> = {
@@ -61,6 +64,14 @@ const TYPE_LABELS: Record<string, string> = {
   moderated: 'channels.typeModerated',
   approval: 'channels.typeApproval',
 };
+
+// Same 4 types + copy as ChannelCreate.tsx — kept in sync with that screen.
+const TYPE_IDS: Array<{ id: PublicChannelType; labelKey: string; descKey: string }> = [
+  { id: 'open', labelKey: 'channels.typeOpen', descKey: 'channels.typeOpenDesc' },
+  { id: 'readonly', labelKey: 'channels.typeReadonly', descKey: 'channels.typeReadonlyDesc' },
+  { id: 'moderated', labelKey: 'channels.typeModerated', descKey: 'channels.typeModeratedDesc' },
+  { id: 'approval', labelKey: 'channels.typeApproval', descKey: 'channels.typeApprovalDesc' },
+];
 
 interface Props {
   channelId: string;
@@ -95,6 +106,7 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
+  const [editType, setEditType] = useState<PublicChannelType>('open');
   const [savingEdit, setSavingEdit] = useState(false);
   const [pendingJoins, setPendingJoins] = useState<Array<{ joinEpk: string; createdAt: number }>>([]);
   const [loadingJoins, setLoadingJoins] = useState(false);
@@ -124,6 +136,14 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
     // Self first, then by name for a stable list.
     return out.sort((a, b) => (a.isSelf === b.isSelf ? a.name.localeCompare(b.name) : a.isSelf ? -1 : 1));
   }, [feed, bannedList, contacts, identity?.aegisId]);
+
+  // Per-channel notification toggle — DEVICE-LOCAL preference (encrypted
+  // SecureStore blob); the mute state never travels to the relay (#206).
+  const mutedChannels = usePreferences((s) => s.mutedChannels);
+  const notificationsEnabled = !mutedChannels.includes(channelId);
+  const handleToggleNotifications = useCallback((enabled: boolean) => {
+    void setChannelMuted(channelId, !enabled);
+  }, [channelId]);
 
   // Load signing key + capability on mount (async SecureStore)
   useEffect(() => {
@@ -294,22 +314,53 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
     if (!summary) return;
     setEditName(summary.name);
     setEditDesc(summary.description);
+    setEditType(summary.channelType);
     setEditOpen(true);
   }
 
-  async function handleSaveEdit() {
-    if (savingEdit || !editName.trim()) return;
+  function applyEdit() {
     setSavingEdit(true);
-    try {
-      const res = await updateChannelInfo(channelId, { name: editName, description: editDesc });
-      if (res.ok) {
-        setEditOpen(false);
-      } else {
-        themedAlert(i18nT('common.error', 'Error'), res.error ?? i18nT('channels.unknownError'));
+    void (async () => {
+      try {
+        const res = await updateChannelInfo(channelId, {
+          name: editName,
+          description: editDesc,
+          channelType: editType,
+        });
+        if (res.ok) {
+          setEditOpen(false);
+        } else {
+          themedAlert(i18nT('common.error', 'Error'), res.error ?? i18nT('channels.unknownError'));
+        }
+      } finally {
+        setSavingEdit(false);
       }
-    } finally {
-      setSavingEdit(false);
+    })();
+  }
+
+  function handleSaveEdit() {
+    if (savingEdit || !editName.trim() || !summary) return;
+    // private → (open|readonly|moderated) makes the channel visible/joinable
+    // under the new type's rules — warn before re-signing. The reverse
+    // (anything → private/approval) needs no special warning.
+    const wasPrivate = summary.channelType === 'approval';
+    const becomingPublic = editType !== 'approval';
+    if (wasPrivate && becomingPublic && editType !== summary.channelType) {
+      themedAlert(
+        i18nT('channelInfo.typeChangeConfirmTitle', 'Change channel type'),
+        i18nT('channelInfo.typeChangeConfirmDesc', {
+          type: i18nT(TYPE_LABELS[editType] ?? 'channels.typeOpen'),
+          defaultValue:
+            "Changing from private to {{type}} will make this channel visible or joinable to others per the new type's rules. Continue?",
+        }),
+        [
+          { text: i18nT('common.cancel', 'Cancel'), style: 'cancel' },
+          { text: i18nT('common.confirm', 'Confirm'), onPress: applyEdit },
+        ],
+      );
+      return;
     }
+    applyEdit();
   }
 
   // ── Approve / reject a join request (owner, approval channels) ────────────
@@ -540,6 +591,28 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
               </Text>
             </View>
           </Pressable>
+        </Section>
+
+        {/* Notifications (per-channel mute, device-local) */}
+        <Section t={t} label={i18nT('channelInfo.notificationsSection', 'Notifications').toUpperCase()}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14 }}>
+            <I.Bell size={18} color={notificationsEnabled ? t.accent : t.textDim} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text }}>
+                {i18nT('channelInfo.notificationsToggle', 'New post notifications')}
+              </Text>
+              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
+                {i18nT('channelInfo.notificationsToggleSub', 'Only on this device — never shared with the server')}
+              </Text>
+            </View>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={handleToggleNotifications}
+              trackColor={{ false: t.surface2, true: t.accent }}
+              thumbColor={t.bg}
+              accessibilityLabel={i18nT('channelInfo.notificationsToggle', 'New post notifications')}
+            />
+          </View>
         </Section>
 
         {/* Owner: edit name / description (re-signed manifest) */}
@@ -854,8 +927,37 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
               maxLength={280}
               style={{ backgroundColor: t.surface2, color: t.text, borderRadius: t.radiusS, paddingVertical: 12, paddingHorizontal: 14, fontFamily: t.font, fontSize: 14, marginTop: 10, minHeight: 72, textAlignVertical: 'top' }}
             />
+
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, marginTop: 14, marginBottom: 6, letterSpacing: 0.5 }}>
+              {i18nT('channelInfo.editChannelType', 'Channel type').toUpperCase()}
+            </Text>
+            <View style={{ gap: 8 }}>
+              {TYPE_IDS.map((ty) => {
+                const on = editType === ty.id;
+                return (
+                  <Pressable
+                    key={ty.id}
+                    onPress={() => setEditType(ty.id)}
+                    accessibilityLabel={i18nT(ty.labelKey)}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 10,
+                      paddingVertical: 11, paddingHorizontal: 13,
+                      borderWidth: 1, borderColor: on ? t.accent : t.border,
+                      borderRadius: t.radius, backgroundColor: on ? t.surface2 : t.surface,
+                    }}
+                  >
+                    <View style={{ width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: on ? t.accent : t.borderStrong, backgroundColor: on ? t.accent : 'transparent' }} />
+                    <View>
+                      <Text style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: t.text }}>{i18nT(ty.labelKey)}</Text>
+                      <Text style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 1 }}>{i18nT(ty.descKey)}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+
             <Pressable
-              onPress={() => void handleSaveEdit()}
+              onPress={handleSaveEdit}
               disabled={!editName.trim() || savingEdit}
               accessibilityLabel={i18nT('common.save', 'Save')}
               style={{ marginTop: 14, backgroundColor: editName.trim() ? t.accent : t.surface2, borderRadius: t.radius, paddingVertical: 13, alignItems: 'center' }}

@@ -1322,6 +1322,7 @@
     "postFailed": "Impossibile pubblicare",
     "you": "tu",
     "unknownError": "Errore sconosciuto",
+    "newPostGeneric": "Nuovo post",
     "sendOrSchedule": "Invia — tieni premuto per programmare",
     "postScheduledTitle": "Post programmato",
     "postScheduledDesc": "Verrà pubblicato automaticamente nel canale all'ora scelta.",
@@ -1368,6 +1369,9 @@
     "idCopiedDesc": "ID del canale copiato negli appunti.",
     "editSection": "Modifica",
     "editChannel": "Modifica nome e descrizione",
+    "editChannelType": "Tipo di canale",
+    "typeChangeConfirmTitle": "Cambia tipo di canale",
+    "typeChangeConfirmDesc": "Cambiare da privato a {{type}} renderà questo canale visibile o accessibile secondo le regole del nuovo tipo. Continuare?",
     "joinRequestsSection": "Richieste di accesso",
     "noJoinRequests": "Nessuna richiesta in sospeso.",
     "approve": "Approva",
@@ -1382,6 +1386,9 @@
     "banTitle": "Espelli membro",
     "banDesc": "Espellere {{name}}? I suoi post verranno nascosti e verrà rimosso dal canale.",
     "banConfirm": "Espelli",
-    "bannedBadge": "Espulso"
+    "bannedBadge": "Espulso",
+    "notificationsSection": "Notifiche",
+    "notificationsToggle": "Notifiche dei nuovi post",
+    "notificationsToggleSub": "Solo su questo dispositivo — mai condiviso con il server"
   }
 }

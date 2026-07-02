@@ -1371,6 +1371,7 @@
     "postFailed": "Couldn't post",
     "you": "you",
     "unknownError": "Unknown error",
+    "newPostGeneric": "New post",
     "sendOrSchedule": "Send — long-press to schedule",
     "postScheduledTitle": "Post scheduled",
     "postScheduledDesc": "It will be posted to the channel automatically at the chosen time.",
@@ -1417,6 +1418,9 @@
     "idCopiedDesc": "Channel ID copied to clipboard.",
     "editSection": "Edit",
     "editChannel": "Edit name & description",
+    "editChannelType": "Channel type",
+    "typeChangeConfirmTitle": "Change channel type",
+    "typeChangeConfirmDesc": "Changing from private to {{type}} will make this channel visible or joinable to others per the new type's rules. Continue?",
     "joinRequestsSection": "Join requests",
     "noJoinRequests": "No pending requests.",
     "approve": "Approve",
@@ -1431,6 +1435,9 @@
     "banTitle": "Ban member",
     "banDesc": "Ban {{name}}? Their posts will be hidden and they will be removed from the channel.",
     "banConfirm": "Ban",
-    "bannedBadge": "Banned"
+    "bannedBadge": "Banned",
+    "notificationsSection": "Notifications",
+    "notificationsToggle": "New post notifications",
+    "notificationsToggleSub": "Only on this device — never shared with the server"
   }
 }

@@ -112,7 +112,10 @@
       "Bash(sed -i 's/Ports 80 and 443 are open in Oracle Cloud security list and/Ports 80 and 443 are open in the AWS security group and/' infra/ssl/setup-ssl.sh)",
       "Bash(sed -i 's/# 1\\\\. SSH into the Oracle Cloud VM/# 1. SSH into the AWS EC2 instance/' infra/ssl/README.md)",
       "Bash(sed -i 's/relay Node\\\\.js en Oracle Cloud VM/relay Node.js en AWS EC2/' .github/SECRETS.md)",
-      "Bash(sed -i 's/IP pública de la VM Oracle/IP pública de la instancia AWS EC2/' .github/SECRETS.md)"
+      "Bash(sed -i 's/IP pública de la VM Oracle/IP pública de la instancia AWS EC2/' .github/SECRETS.md)",
+      "Bash(ls -la \"C:\\\\Users\\\\gabin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--progectos-APPS-AegisLink\\\\73449629-6254-4c9a-a203-563996209152\\\\scratchpad\" 2>/dev/null; ls -la \"C:\\\\Users\\\\gabin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--progectos-APPS-AegisLink\" 2>/dev/null | head -30)",
+      "PowerShell(gh pr checks 200)",
+      "PowerShell(gh pr view 200 --json state,mergeable,title,headRefName)"
     ]
   }
 }

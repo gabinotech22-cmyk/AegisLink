@@ -14,6 +14,8 @@ import {
   ingestChannelPosts,
   buildAndSealPost,
   normalizePullRow,
+  encodePostBody,
+  openPostBody,
   type ChainHead,
   type SealedWirePost,
 } from '../channelService';
@@ -188,6 +190,86 @@ describe('parseAndVerifyManifest', () => {
   it('rejects malformed JSON and missing fields', () => {
     expect(parseAndVerifyManifest('not json')).toBeNull();
     expect(parseAndVerifyManifest('{}')).toBeNull();
+  });
+});
+
+describe('post body senderName envelope (issue #204)', () => {
+  it('round-trips text + senderName through encode/open', () => {
+    const wire = encodePostBody('hello channel', 'Alice');
+    expect(openPostBody(wire)).toEqual({ text: 'hello channel', senderName: 'Alice' });
+  });
+
+  it('round-trips with no senderName provided', () => {
+    const wire = encodePostBody('hello channel');
+    expect(openPostBody(wire)).toEqual({ text: 'hello channel', senderName: null });
+  });
+
+  it('falls back to raw text for legacy (pre-#204) plain-text bodies', () => {
+    expect(openPostBody('an old plain-text post')).toEqual({
+      text: 'an old plain-text post',
+      senderName: null,
+    });
+  });
+
+  it('falls back gracefully for bodies that happen to be unrelated JSON', () => {
+    const body = JSON.stringify({ foo: 'bar' });
+    expect(openPostBody(body)).toEqual({ text: body, senderName: null });
+  });
+
+  it('sanitizes control characters and caps sender name length', () => {
+    const evil = 'A'.repeat(100) + ' ';
+    const wire = encodePostBody('hi', evil);
+    const opened = openPostBody(wire);
+    expect(opened.senderName).toHaveLength(64);
+    expect(opened.senderName).toBe('A'.repeat(64));
+  });
+
+  it('drops a whitespace-only / empty sender name instead of storing garbage', () => {
+    const wire = encodePostBody('hi', '   ');
+    expect(openPostBody(wire).senderName).toBeNull();
+  });
+
+  it('full pipeline: seal with senderName, ingest, and open the body downstream', () => {
+    const wireBody = encodePostBody('post with name', 'Bob');
+    const sealed = buildAndSealPost(
+      CHANNEL_ID,
+      { from: SENDER_FROM, body: wireBody, ts: 1750000000123 },
+      null,
+      senderKp.secretKey,
+      cek,
+    );
+    const result = ingestChannelPosts(
+      CHANNEL_ID,
+      [{ seqNum: sealed.seqNum, ciphertext: sealed.wire.ciphertext, nonce: sealed.wire.nonce }],
+      cek,
+      resolver,
+      null,
+    );
+    expect(result.rejected).toBe(0);
+    expect(result.posts).toHaveLength(1);
+    const opened = openPostBody(result.posts[0].post.body);
+    expect(opened).toEqual({ text: 'post with name', senderName: 'Bob' });
+  });
+
+  it('a legacy plain-text post still chain-verifies and opens with senderName=null', () => {
+    // Simulates a post sealed by a pre-#204 client (body = plain text, not JSON).
+    const sealed = buildAndSealPost(
+      CHANNEL_ID,
+      { from: SENDER_FROM, body: 'legacy plain body', ts: 1750000000456 },
+      null,
+      senderKp.secretKey,
+      cek,
+    );
+    const result = ingestChannelPosts(
+      CHANNEL_ID,
+      [{ seqNum: sealed.seqNum, ciphertext: sealed.wire.ciphertext, nonce: sealed.wire.nonce }],
+      cek,
+      resolver,
+      null,
+    );
+    expect(result.rejected).toBe(0);
+    const opened = openPostBody(result.posts[0].post.body);
+    expect(opened).toEqual({ text: 'legacy plain body', senderName: null });
   });
 });
 

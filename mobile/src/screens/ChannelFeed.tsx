@@ -64,6 +64,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const identity = useIdentity((s) => s.identity);
+  const myDisplayName = useIdentity((s) => s.displayName);
 
   const summary = useChannels((s) => s.subscribed.find((c) => c.channelId === channelId));
   const posts = useChannels((s) => s.feeds[channelId]);
@@ -92,6 +93,16 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     return off;
   }, [channelId, identity, loadFeed, attachLive]);
 
+  // While this feed is focused, suppress local notifications for its own posts
+  // (same activeChatId guard Chat/GroupChat use). Reset on unmount.
+  useEffect(() => {
+    const { setActiveChatNotificationId } = require('../notifications/push') as typeof import('../notifications/push');
+    setActiveChatNotificationId(channelId);
+    return () => {
+      setActiveChatNotificationId(null);
+    };
+  }, [channelId]);
+
   const canPost = !!identity && (summary?.channelType === 'open' || summary?.owned === true);
   const canSchedule = canScheduleChannelPost(summary, !!identity);
 
@@ -103,7 +114,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     if (!identity || !draft.trim() || sending) return;
     setSending(true);
     try {
-      const res = await sendPost(channelId, draft.trim(), identity);
+      const res = await sendPost(channelId, draft.trim(), identity, myDisplayName);
       if (res.ok) setDraft('');
       else themedAlert(i18nT('channels.postFailed'), res.error ?? i18nT('channels.unknownError'));
     } finally {
@@ -179,6 +190,12 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
 
   const renderPost = ({ item }: { item: FeedPost }) => {
     const mine = item.from === identity?.aegisId;
+    // Prefer the sender's profile name carried inside the encrypted post body
+    // (issue #204 — never render the raw aegisId to other members). Falls back
+    // to the aegisId only for legacy posts sealed before this fix existed.
+    const senderLabel = mine
+      ? i18nT('channels.you')
+      : (item.senderName ?? item.from);
     return (
       <Pressable
         onLongPress={isOwner ? () => handleDeletePost(item) : undefined}
@@ -187,8 +204,8 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
         style={{ paddingVertical: 12, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-          <Avatar t={t} name={mine ? (summary?.name ?? '?') : item.from} seed={item.from} size={24} />
-          <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>{mine ? i18nT('channels.you') : item.from}</Text>
+          <Avatar t={t} name={mine ? (summary?.name ?? '?') : senderLabel} seed={item.from} size={24} />
+          <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>{senderLabel}</Text>
           <Text style={{ marginLeft: 'auto', fontFamily: t.fontMono, fontSize: 9, color: t.textFaint }}>#{item.seqNum}</Text>
         </View>
         <Text style={{ fontFamily: t.font, fontSize: 13, lineHeight: 20, color: t.text }}>{item.body}</Text>

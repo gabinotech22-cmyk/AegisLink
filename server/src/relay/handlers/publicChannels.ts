@@ -220,7 +220,15 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
         expires_at: 0,
       });
 
-      // Fan-out to all room members — NO `from` field (sealed sender)
+      // Fan-out to all room members — NO `from` field (sealed sender).
+      //
+      // NOTE (#206): there is deliberately NO offline push wake-up for channel
+      // posts. The relay does not know which identities subscribe to a channel
+      // (room membership is per-socket and token-gated, never linked to an
+      // aegisId/push token), and building a channel→push-token table would be
+      // exactly the subscriber-list metadata leak the zero-metadata rule bans.
+      // Clients notify locally from this live fan-out / their next delta pull;
+      // an offline wake-up needs a dedicated leak-free design slice first.
       io.to(`pubchannel:${channelId}`).emit('pubchannel:msg', {
         channelId,
         seqNum,

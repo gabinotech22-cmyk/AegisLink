@@ -49,6 +49,8 @@ import {
   buildAndSealPost,
   normalizePullRow,
   serializeSignedManifest,
+  encodePostBody,
+  openPostBody,
   type ChainHead,
   type SignerResolver,
 } from '../channels/channelService';
@@ -136,6 +138,8 @@ export interface FeedPost {
   id: string;
   from: string;
   body: string;
+  /** Sender's profile display name, if the post carries one (v1 body envelope). Null for legacy plain-text posts. */
+  senderName: string | null;
   ts: number;
   seqNum: number;
 }
@@ -178,7 +182,7 @@ interface ChannelsState {
   joinViaInvite: (inviteUrl: string, identity: Identity) => Promise<{ ok: boolean; channelId?: string; applied?: boolean; error?: string }>;
   joinChannel: (channelId: string, capability: Uint8Array, cek: Uint8Array) => Promise<{ ok: boolean; error?: string }>;
   loadFeed: (channelId: string, identity: Identity) => Promise<void>;
-  sendPost: (channelId: string, body: string, identity: Identity) => Promise<{ ok: boolean; error?: string }>;
+  sendPost: (channelId: string, body: string, identity: Identity, senderName?: string) => Promise<{ ok: boolean; error?: string }>;
   attachLive: (identity: Identity) => () => void;
   removeChannel: (channelId: string) => Promise<void>;
 
@@ -186,7 +190,7 @@ interface ChannelsState {
   /** Waiting-for-approval applications (approval-gated channels). */
   pendingApplications: Array<{ channelId: string; name: string; epkB64: string }>;
   /** Owner: rename / edit description (re-signs the manifest, seq+1). */
-  updateChannelInfo: (channelId: string, updates: { name?: string; description?: string }) => Promise<{ ok: boolean; error?: string }>;
+  updateChannelInfo: (channelId: string, updates: { name?: string; description?: string; channelType?: PublicChannelType }) => Promise<{ ok: boolean; error?: string }>;
   /** Owner: delete a post for everyone (signed; relay fans out). */
   deletePost: (channelId: string, seqNum: number) => Promise<{ ok: boolean; error?: string }>;
   /**
@@ -246,7 +250,34 @@ function parseBanRecord(recordStr: string, expectedChannelId: string): BanRecord
 }
 
 function postToFeed(p: { post: { from: string; body: string; ts: number; seqNum: number } }, channelId: string): FeedPost {
-  return { id: `${channelId}:${p.post.seqNum}`, from: p.post.from, body: p.post.body, ts: p.post.ts, seqNum: p.post.seqNum };
+  const { text, senderName } = openPostBody(p.post.body);
+  return { id: `${channelId}:${p.post.seqNum}`, from: p.post.from, body: text, senderName, ts: p.post.ts, seqNum: p.post.seqNum };
+}
+
+/**
+ * Fire local notifications for freshly ingested (decrypted + verified) posts
+ * that were not written by us. Built entirely on-device (issue #206): the
+ * relay never learns the mute state nor when a notification is shown.
+ */
+function notifyNewPosts(
+  channelId: string,
+  channelName: string,
+  posts: FeedPost[],
+  ownAegisId: string,
+): void {
+  const fresh = posts.filter((p) => p.from !== ownAegisId);
+  if (fresh.length === 0) return;
+  try {
+    // Lazy require (same pattern as socket/client → notifications/push): keeps
+    // expo-notifications out of this store's static import graph.
+    const { showChannelPostNotification } =
+      require('../notifications/channelNotifications') as typeof import('../notifications/channelNotifications');
+    for (const p of fresh) {
+      void showChannelPostNotification(channelId, channelName, p.body);
+    }
+  } catch (e) {
+    logger.warn(`[channels] post notification failed: ${(e as Error).message}`);
+  }
 }
 
 export const useChannels = create<ChannelsState>((set, get) => ({
@@ -600,18 +631,26 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), ...fresh] },
       heads: { ...s.heads, [channelId]: result.head },
     }));
+
+    // Notify only on DELTA refreshes (since >= 0): the initial history pull of
+    // a just-joined/just-opened channel must not fire a burst of notifications.
+    if (since >= 0) {
+      const name = get().subscribed.find((c) => c.channelId === channelId)?.name ?? channelId;
+      notifyNewPosts(channelId, name, fresh, identity.aegisId);
+    }
   },
 
-  async sendPost(channelId, body, identity) {
+  async sendPost(channelId, body, identity, senderName) {
     const cek = await getChannelCEK(channelId);
     if (!cek) return { ok: false, error: 'not_subscribed' };
     const deliveryToken = await getChannelDeliveryToken(channelId);
     if (!deliveryToken) return { ok: false, error: 'no_delivery_token' };
 
     const head = get().heads[channelId] ?? null;
+    const wireBody = encodePostBody(body, senderName);
     const sealed = buildAndSealPost(
       channelId,
-      { from: identity.aegisId, body, ts: Date.now() },
+      { from: identity.aegisId, body: wireBody, ts: Date.now() },
       head,
       identity.signingSecretKey,
       cek,
@@ -620,7 +659,14 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     const ack = await pubchannelPost(channelId, sealed.wire.ciphertext, sealed.wire.nonce, deliveryToken);
     if (!ack.ok) return { ok: false, error: ack.error };
 
-    const optimistic: FeedPost = { id: `${channelId}:${sealed.seqNum}`, from: identity.aegisId, body, ts: Date.now(), seqNum: sealed.seqNum };
+    const optimistic: FeedPost = {
+      id: `${channelId}:${sealed.seqNum}`,
+      from: identity.aegisId,
+      body,
+      senderName: senderName ?? null,
+      ts: Date.now(),
+      seqNum: sealed.seqNum,
+    };
     set((s) => ({
       feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), optimistic] },
       heads: { ...s.heads, [channelId]: sealed.newHead },
@@ -651,6 +697,8 @@ export const useChannels = create<ChannelsState>((set, get) => ({
           feeds: { ...s.feeds, [e.channelId]: [...(s.feeds[e.channelId] ?? []), ...fresh] },
           heads: { ...s.heads, [e.channelId]: result.head },
         }));
+        const name = get().subscribed.find((c) => c.channelId === e.channelId)?.name ?? e.channelId;
+        notifyNewPosts(e.channelId, name, fresh, identity.aegisId);
       })();
     });
     const offDelete = onPubchannelDelete((e) => {
@@ -744,7 +792,14 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     const description = (updates.description ?? current.description).trim();
     if (!name) return { ok: false, error: 'empty_name' };
 
-    const next = { ...current, name, description, manifestSeq: current.manifestSeq + 1 };
+    let channelType = current.channelType;
+    if (updates.channelType !== undefined) {
+      const idx = CHANNEL_TYPE_NAMES.indexOf(updates.channelType);
+      if (idx < 0) return { ok: false, error: 'bad_channel_type' };
+      channelType = idx as 0 | 1 | 2 | 3;
+    }
+
+    const next = { ...current, name, description, channelType, manifestSeq: current.manifestSeq + 1 };
     const sig = signManifest(next, sk);
     try {
       await updatePublicChannelManifest(channelId, serializeSignedManifest(next, sig));
@@ -753,7 +808,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     }
     set((s) => ({
       subscribed: s.subscribed.map((c) =>
-        c.channelId === channelId ? { ...c, name, description } : c,
+        c.channelId === channelId ? { ...c, name, description, channelType: manifestType(channelType) } : c,
       ),
     }));
     return { ok: true };

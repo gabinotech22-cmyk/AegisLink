@@ -152,6 +152,7 @@ interface FakeSocket {
   emit: jest.Mock;
   disconnect: jest.Mock;
   connect: jest.Mock;
+  timeout: (ms: number) => { emit: (event: string, payload: unknown, cb: (err: Error | null, ack?: unknown) => void) => void };
   auth: Record<string, unknown>;
 }
 
@@ -168,6 +169,16 @@ jest.mock('socket.io-client', () => ({
       emit: jest.fn(),
       disconnect: jest.fn(),
       connect: jest.fn(),
+      // socket.io v4 `.timeout(ms).emit(...)`: adapt the (err, ack) callback
+      // to this mock's plain ack-style emit.
+      timeout(ms: number) {
+        void ms;
+        return {
+          emit: (event: string, payload: unknown, cb: (err: Error | null, ack?: unknown) => void) => {
+            this.emit(event, payload, (ack: unknown) => cb(null, ack));
+          },
+        };
+      },
     };
     return mockFakeSocket;
   },

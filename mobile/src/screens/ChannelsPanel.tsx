@@ -14,14 +14,33 @@ import { Avatar } from '../components/Avatar';
 import { ChannelsEmptyVisual } from '../components/ChannelsEmptyVisual';
 import { themedAlert } from '../components/AlertHost';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
-import { useChannels, type ChannelSummary } from '../store/channels';
+import { useChannels, type ChannelSummary, type FeedPost } from '../store/channels';
 import { useIdentity } from '../store/identity';
 import { logger } from '../utils/logger';
+import { previewLabel } from '../utils/messagePreview';
 import type { Theme } from '../theme/vault';
+
+/**
+ * Last-post preview for a subscribed channel row. Reads from the ALREADY
+ * decrypted `feeds[channelId]` slice (ingestChannelPosts verified + opened it
+ * locally) -- never asks the relay for plaintext, never persists anything new.
+ * Falls back to the channel type label when no post has been fetched yet.
+ */
+function lastPost(feed: FeedPost[] | undefined): FeedPost | null {
+  if (!feed || feed.length === 0) return null;
+  return feed[feed.length - 1];
+}
 
 /** Extracts each row into its own component so useChannelAvatar runs per-item. */
 function ChannelRow({ item, t, onPress }: { item: ChannelSummary; t: Theme; onPress: () => void }) {
+  const { t: i18nT } = useTranslation();
   const photoUri = useChannelAvatar(item.channelId, item.avatarHash);
+  const feed = useChannels((s) => s.feeds[item.channelId]);
+  const post = lastPost(feed);
+
+  const subtitle = post ? previewLabel(post.body, i18nT) : item.channelType;
+  const time = post ? new Date(post.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+
   return (
     <Pressable
       onPress={onPress}
@@ -31,12 +50,21 @@ function ChannelRow({ item, t, onPress }: { item: ChannelSummary; t: Theme; onPr
       <Avatar t={t} name={item.name} seed={item.channelId} size={42} photoUri={photoUri} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Text numberOfLines={1} style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}>{item.name}</Text>
+          <Text numberOfLines={1} style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text, flex: 1 }}>{item.name}</Text>
           {item.owned && <I.Key size={12} color={t.accent} />}
         </View>
-        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, marginTop: 2 }}>{item.channelType}</Text>
+        <Text
+          numberOfLines={1}
+          style={{ fontFamily: post ? t.font : t.fontMono, fontSize: post ? 13 : 10, color: t.textDim, marginTop: 2 }}
+        >
+          {subtitle}
+        </Text>
       </View>
-      <I.ChevronL size={16} color={t.textFaint} style={{ transform: [{ rotate: '180deg' }] }} />
+      {time ? (
+        <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint }}>{time}</Text>
+      ) : (
+        <I.ChevronL size={16} color={t.textFaint} style={{ transform: [{ rotate: '180deg' }] }} />
+      )}
     </Pressable>
   );
 }
@@ -58,6 +86,7 @@ export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate
   const hydrateSubscribed = useChannels((s) => s.hydrateSubscribed);
   const pendingApplications = useChannels((s) => s.pendingApplications);
   const checkApprovals = useChannels((s) => s.checkApprovals);
+  const loadFeed = useChannels((s) => s.loadFeed);
 
   // Restore the subscribed list after an app restart (secrets survive in
   // SecureStore but this store is memory-only). Best-effort: offline channels
@@ -69,6 +98,19 @@ export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate
       });
     }
   }, [hydrated, hydrateSubscribed]);
+
+  // Best-effort background refresh so the last-post preview (#205) has
+  // something to show without requiring the user to open every channel
+  // first. This pulls SEALED posts and decrypts them locally with the CEK
+  // (loadFeed) -- no plaintext ever touches the relay or a new at-rest field.
+  useEffect(() => {
+    if (!identity || !hydrated || subscribed.length === 0) return;
+    for (const c of subscribed) {
+      loadFeed(c.channelId, identity).catch((e: unknown) => {
+        logger.warn(`[ChannelsPanel] preview loadFeed failed for ${c.channelId.slice(0, 8)}…: ${(e as Error).message}`);
+      });
+    }
+  }, [identity, hydrated, subscribed, loadFeed]);
 
   const [joinOpen, setJoinOpen] = useState(false);
   const [inviteText, setInviteText] = useState('');

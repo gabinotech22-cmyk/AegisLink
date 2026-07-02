@@ -1371,6 +1371,7 @@
     "postFailed": "No se pudo publicar",
     "you": "tú",
     "unknownError": "Error desconocido",
+    "newPostGeneric": "Nueva publicación",
     "sendOrSchedule": "Enviar — mantén pulsado para programar",
     "postScheduledTitle": "Post programado",
     "postScheduledDesc": "Se publicará automáticamente en el canal a la hora elegida.",
@@ -1417,6 +1418,9 @@
     "idCopiedDesc": "ID del canal copiado al portapapeles.",
     "editSection": "Editar",
     "editChannel": "Editar nombre y descripción",
+    "editChannelType": "Tipo de canal",
+    "typeChangeConfirmTitle": "Cambiar tipo de canal",
+    "typeChangeConfirmDesc": "Cambiar de privado a {{type}} hará que este canal sea visible o unible según las reglas del nuevo tipo. ¿Continuar?",
     "joinRequestsSection": "Solicitudes de acceso",
     "noJoinRequests": "No hay solicitudes pendientes.",
     "approve": "Aprobar",
@@ -1431,6 +1435,9 @@
     "banTitle": "Banear miembro",
     "banDesc": "¿Banear a {{name}}? Sus publicaciones se ocultarán y será expulsado del canal.",
     "banConfirm": "Banear",
-    "bannedBadge": "Baneado"
+    "bannedBadge": "Baneado",
+    "notificationsSection": "Notificaciones",
+    "notificationsToggle": "Notificaciones de publicaciones",
+    "notificationsToggleSub": "Solo en este dispositivo — nunca se comparte con el servidor"
   }
 }

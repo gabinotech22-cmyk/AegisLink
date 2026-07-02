@@ -197,6 +197,29 @@ let authenticated = false;
 let opkSecretsCache: Map<number, Uint8Array> = new Map();
 let mySpkSecretCache: Uint8Array | null = null;
 
+// ── Auth watchdog (mirrors mobile/src/socket/client.ts) ─────────────────────
+// The server disconnects unauthenticated sockets after AUTH_TIMEOUT_MS=5s
+// (server/src/relay/schemas.ts). If the relay restarts mid-handshake or the
+// challenge/response frame is dropped, `connect` can fire with no subsequent
+// `auth:ok` and no `disconnect` either. 7000ms (> server's 5s) lets the
+// server-side timeout fire first on the clean path; this is the fallback for
+// a wedged transport where that timer never runs.
+const AUTH_WATCHDOG_MS = 7000;
+let authWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearAuthWatchdog(): void {
+  if (authWatchdogTimer) {
+    clearTimeout(authWatchdogTimer);
+    authWatchdogTimer = null;
+  }
+}
+
+// ── Emit-ack timeout (mirrors mobile/src/socket/client.ts) ──────────────────
+// A zombie socket (transport dead, `disconnect` not yet fired) accepts an
+// emit() call but the server never sees it — without a timeout the ack
+// callback hangs forever. Socket.IO v4's `.timeout(ms)` rejects on no-ack.
+const EMIT_ACK_TIMEOUT_MS = 10000;
+
 // ── Offline message queue ─────────────────────────────────────────────────────
 interface QueuedSend {
   msgId: string;
@@ -333,16 +356,23 @@ async function flushOfflineQueue(identity: Identity) {
       );
       await saveSessionState(item.recipientAegisId, newState);
       await new Promise<void>((resolve, reject) => {
-        socket!.emit(
-          event,
-          { id: item.msgId, to: item.recipientAegisId, ...wire },
-          (ack: { ok: boolean; error?: string } | undefined) => {
-            if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
-            else resolve();
-          },
-        );
+        socket!
+          .timeout(EMIT_ACK_TIMEOUT_MS)
+          .emit(
+            event,
+            { id: item.msgId, to: item.recipientAegisId, ...wire },
+            (err: Error | null, ack?: { ok: boolean; error?: string }) => {
+              // `.timeout()` switches the ack callback to (err, ack): err is set
+              // when the server never responds (zombie transport / dropped frame).
+              if (err) { reject(err); return; }
+              if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
+              else resolve();
+            },
+          );
       });
     } catch (e) {
+      // Includes ack-timeout failures — the item is re-queued (NOT dropped) so
+      // it retries on the next reconnect instead of being silently lost.
       if (DEV) logger.warn('[socket] offline queue flush error', e);
       offlineQueue.push(item);
     }
@@ -542,11 +572,24 @@ export function connect(identity: Identity): Socket {
     authenticated = false;
     useConnection.getState().setOnline(true);
     if (DEV) logger.debug('[socket] connected, awaiting auth challenge');
+
+    // Arm the watchdog: if auth:ok never arrives (lost handshake during a
+    // relay restart), force a fresh transport instead of sitting on a socket
+    // that is connected but permanently unauthenticated.
+    clearAuthWatchdog();
+    authWatchdogTimer = setTimeout(() => {
+      authWatchdogTimer = null;
+      if (authenticated) return; // race: auth:ok landed just before the timer fired
+      if (DEV) logger.warn('[socket] auth watchdog fired — no auth:ok, forcing reconnect');
+      socket?.disconnect();
+      socket?.connect();
+    }, AUTH_WATCHDOG_MS);
   });
 
   socket.on('disconnect', (reason) => {
     connected = false;
     authenticated = false;
+    clearAuthWatchdog();
     useConnection.getState().setOnline(false);
     if (DEV) logger.debug('[socket] disconnected:', reason);
   });
@@ -614,6 +657,7 @@ export function connect(identity: Identity): Socket {
 
   socket.on('auth:ok', async (res?: { opkCount?: number }) => {
     authenticated = true;
+    clearAuthWatchdog();
     if (DEV) logger.debug('[socket] authenticated');
     void flushOfflineQueue(identity);
     void flushGroupOfflineQueue(identity);
@@ -2018,6 +2062,7 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
 }
 
 export function disconnect(): void {
+  clearAuthWatchdog();
   if (socket) {
     socket.disconnect();
     socket = null;
@@ -2174,14 +2219,19 @@ export async function sendMessage(opts: {
   }
 
   await new Promise<void>((resolve, reject) => {
-    socket!.emit(
-      emitEvent,
-      emitPayload,
-      (ack: { ok: boolean; queued?: boolean; error?: string } | undefined) => {
-        if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
-        else resolve();
-      },
-    );
+    socket!
+      .timeout(EMIT_ACK_TIMEOUT_MS)
+      .emit(
+        emitEvent,
+        emitPayload,
+        (err: Error | null, ack?: { ok: boolean; queued?: boolean; error?: string }) => {
+          // `.timeout()` switches the ack callback to (err, ack): err is set
+          // when the server never responds (zombie transport / dropped frame).
+          if (err) { reject(err); return; }
+          if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
+          else resolve();
+        },
+      );
   });
 
   // Multi-device sync — best-effort self-encrypted copy.
