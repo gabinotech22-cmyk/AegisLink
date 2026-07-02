@@ -33,6 +33,8 @@ import {
   deleteJoinRequest,
   saveChannelHead,
   getChannelHead,
+  saveChannelMeta,
+  getChannelMeta,
 } from '../publicChannelStore';
 import { deriveChannelDeliveryToken, generateChannelIdentity } from '../publicChannelKey';
 
@@ -217,5 +219,45 @@ describe('channel chain head (delta-detection cache for background sync)', () =>
 
     expect(await getChannelHead(CHANNEL_A)).toBeNull();
     expect(mockStore.size).toBe(0);
+  });
+});
+
+describe('channel display metadata (name survives an offline restart)', () => {
+  const META = {
+    name: 'TESTERS',
+    description: 'private testing channel',
+    channelType: 'approval',
+    avatarHash: 'abc123',
+    channelEd25519PubB64: 'cHVia2V5',
+  };
+
+  it('round-trips the display metadata through SecureStore', async () => {
+    await saveChannelMeta(CHANNEL_A, META);
+    expect(await getChannelMeta(CHANNEL_A)).toEqual(META);
+  });
+
+  it('tolerates missing optional fields', async () => {
+    mockStore.set('aegis.pubchannel.meta.v1.' + CHANNEL_A.replace(/=+$/, ''), JSON.stringify({ name: 'X', channelType: 'open' }));
+    expect(await getChannelMeta(CHANNEL_A)).toEqual({
+      name: 'X', description: '', channelType: 'open', avatarHash: null, channelEd25519PubB64: null,
+    });
+  });
+
+  it('returns null for unknown or malformed metadata', async () => {
+    expect(await getChannelMeta(CHANNEL_B)).toBeNull();
+    mockStore.set('aegis.pubchannel.meta.v1.' + CHANNEL_B.replace(/=+$/, ''), '{bad json');
+    expect(await getChannelMeta(CHANNEL_B)).toBeNull();
+  });
+
+  it('deleteChannel and deleteAllChannels wipe the metadata', async () => {
+    await saveChannelSecrets(CHANNEL_A, { cek: fixedKey(1), capability: fixedKey(2) });
+    await saveChannelMeta(CHANNEL_A, META);
+    await deleteChannel(CHANNEL_A);
+    expect(await getChannelMeta(CHANNEL_A)).toBeNull();
+
+    await saveChannelSecrets(CHANNEL_B, { cek: fixedKey(3), capability: fixedKey(4) });
+    await saveChannelMeta(CHANNEL_B, META);
+    await deleteAllChannels();
+    expect(await getChannelMeta(CHANNEL_B)).toBeNull();
   });
 });
