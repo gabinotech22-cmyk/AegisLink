@@ -150,6 +150,32 @@ let authenticated = false;
 // the app returns to the foreground, since Android routinely kills the
 // WebSocket while the app is suspended in the background.
 let foregroundReconnectArmed = false;
+
+// ── Auth watchdog ────────────────────────────────────────────────────────────
+// The server disconnects unauthenticated sockets after AUTH_TIMEOUT_MS=5s
+// (server/src/relay/schemas.ts). If the relay restarts mid-handshake or the
+// challenge/response frame is dropped, `connect` can fire with no subsequent
+// `auth:ok` and no `disconnect` either — the socket looks "connected" forever
+// while never becoming usable. 7000ms (> server's 5s) gives the server timeout
+// a chance to fire first (clean path); this watchdog is the fallback for cases
+// where the transport itself is wedged and the server-side timer never runs.
+const AUTH_WATCHDOG_MS = 7000;
+let authWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+// ── Emit-ack timeout ─────────────────────────────────────────────────────────
+// A zombie socket (transport dead, `disconnect` not yet fired) accepts an
+// `emit()` call but the server never sees it — the ack callback then hangs
+// forever, silently stalling flushOutbox's FIFO drain / sendMessage. Socket.IO
+// v4's `.timeout(ms)` rejects with an error if no ack arrives in time so the
+// caller can retain the job in the outbox instead of losing it.
+const EMIT_ACK_TIMEOUT_MS = 10000;
+
+function clearAuthWatchdog(): void {
+  if (authWatchdogTimer) {
+    clearTimeout(authWatchdogTimer);
+    authWatchdogTimer = null;
+  }
+}
 let opkSecretsCache: Map<number, Uint8Array> = new Map();
 let mySpkSecretCache: Uint8Array | null = null;
 
@@ -287,17 +313,26 @@ async function flushOutbox(identity: Identity): Promise<void> {
       );
       await saveSessionState(job.recipientAegisId, newState);
       await new Promise<void>((resolve, reject) => {
-        socket!.emit(
-          event,
-          { id: job.msgId, to: job.recipientAegisId, ...wire, ...(isInit && event === 'envelope' ? { init: true } : {}) },
-          (ack: { ok: boolean; error?: string } | undefined) => {
-            if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
-            else resolve();
-          },
-        );
+        socket!
+          .timeout(EMIT_ACK_TIMEOUT_MS)
+          .emit(
+            event,
+            { id: job.msgId, to: job.recipientAegisId, ...wire, ...(isInit && event === 'envelope' ? { init: true } : {}) },
+            (err: Error | null, ack?: { ok: boolean; error?: string }) => {
+              // With `.timeout()`, socket.io always calls back with (err, ack):
+              // `err` is set on ack timeout (server never responded — dropped
+              // frame / zombie transport), `ack` carries the app-level response.
+              if (err) { reject(err); return; }
+              if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
+              else resolve();
+            },
+          );
       });
       await deleteOutboxJob(job.jobId);
     } catch (e) {
+      // Includes ack-timeout failures: the job is left in the outbox (NOT
+      // deleted) so it retries on the next reconnect/drain instead of being
+      // silently lost when the server never acked.
       if (__DEV__) logger.warn('[socket] flushOutbox: job failed, will retry on next reconnect', job.jobId, e);
       try { await incrementOutboxAttempts(job.jobId); } catch { /* non-fatal */ }
     }
@@ -677,11 +712,24 @@ export function connect(identity: Identity): Socket {
     authenticated = false;
     useConnection.getState().setOnline(true);
     if (__DEV__) logger.warn('[socket] connected, awaiting auth challenge');
+
+    // Arm the watchdog: if auth:ok never arrives (lost handshake during a
+    // relay restart), force a fresh transport instead of sitting on a socket
+    // that is connected but permanently unauthenticated.
+    clearAuthWatchdog();
+    authWatchdogTimer = setTimeout(() => {
+      authWatchdogTimer = null;
+      if (authenticated) return; // race: auth:ok landed just before the timer fired
+      if (__DEV__) logger.warn('[socket] auth watchdog fired — no auth:ok, forcing reconnect');
+      socket?.disconnect();
+      socket?.connect();
+    }, AUTH_WATCHDOG_MS);
   });
 
   socket.on('disconnect', (reason) => {
     connected = false;
     authenticated = false;
+    clearAuthWatchdog();
     useConnection.getState().setOnline(false);
     if (__DEV__) logger.warn('[socket] disconnected:', reason);
   });
@@ -753,6 +801,7 @@ export function connect(identity: Identity): Socket {
 
   socket.on('auth:ok', async (res?: { opkCount?: number }) => {
     authenticated = true;
+    clearAuthWatchdog();
     if (__DEV__) logger.debug('[socket] authenticated');
 
     // Warm the TURN credential cache (50-min TTL) so the first call doesn't pay
@@ -3397,6 +3446,7 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
 }
 
 export function disconnect(): void {
+  clearAuthWatchdog();
   if (socket) {
     socket.disconnect();
     socket = null;
@@ -3600,14 +3650,20 @@ export async function sendMessage(opts: {
 
   try {
     await new Promise<void>((resolve, reject) => {
-      socket!.emit(
-        emitEvent,
-        emitPayload,
-        (ack: { ok: boolean; queued?: boolean; error?: string } | undefined) => {
-          if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
-          else resolve();
-        },
-      );
+      socket!
+        .timeout(EMIT_ACK_TIMEOUT_MS)
+        .emit(
+          emitEvent,
+          emitPayload,
+          (err: Error | null, ack?: { ok: boolean; queued?: boolean; error?: string }) => {
+            // `.timeout()` changes the ack callback to (err, ack): err is set
+            // when the server never responds in time (zombie transport / lost
+            // frame) — treat identically to an explicit !ok failure below.
+            if (err) { reject(err); return; }
+            if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
+            else resolve();
+          },
+        );
     });
     // ACK received — remove from outbox
     try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }

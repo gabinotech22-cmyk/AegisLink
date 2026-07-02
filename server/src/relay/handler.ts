@@ -73,13 +73,30 @@ export function attachRelay(io: SocketServer) {
   // desktopPubKey -> { socket, timer }
   const linkingSockets = new Map<string, { socket: Socket; timer: ReturnType<typeof setTimeout> }>();
 
+  // Returns only the sockets in `set` whose transport is actually connected,
+  // pruning any zombie entries (transport dead, `disconnect` not fired yet) from
+  // the Set in place. A zombie socket that stays registered makes callers treat
+  // a message as "delivered" when nothing was ever received — silent loss.
+  function liveSockets(set: Set<Socket>): Socket[] {
+    const live: Socket[] = [];
+    for (const s of set) {
+      if (s.connected) {
+        live.push(s);
+      } else {
+        set.delete(s);
+      }
+    }
+    return live;
+  }
+
   function deliver(env: SealedEnvelope, recipientSockets: Set<Socket>): boolean {
-    if (recipientSockets.size === 0) return false;
-    for (const s of recipientSockets) s.emit('envelope', env);
+    const live = liveSockets(recipientSockets);
+    if (live.length === 0) return false;
+    for (const s of live) s.emit('envelope', env);
     // Notify the sender that delivery succeeded (if they are still online)
     const senderSockets = sockets.get(env.from);
     if (senderSockets) {
-      for (const s of senderSockets) s.emit('msg:delivered', { msgId: env.id, to: env.to });
+      for (const s of liveSockets(senderSockets)) s.emit('msg:delivered', { msgId: env.id, to: env.to });
     }
     return true;
   }
@@ -350,8 +367,9 @@ export function attachRelay(io: SocketServer) {
         // The relay never stamps a sender — the source mailbox is sealed inside.
         const env = { id: d.id, to: d.to, ciphertext: d.ciphertext, nonce: d.nonce, epk: d.epk, createdAt: Date.now() };
         const recipients = mailboxSockets.get(d.to);
-        if (recipients && recipients.size > 0) {
-          for (const s of recipients) if (s !== socket) s.emit('envelope:mb', env);
+        const liveRecipients = recipients ? liveSockets(recipients).filter((s) => s !== socket) : [];
+        if (liveRecipients.length > 0) {
+          for (const s of liveRecipients) s.emit('envelope:mb', env);
           ack?.({ ok: true, delivered: true });
           return;
         }
@@ -675,9 +693,9 @@ export function attachRelay(io: SocketServer) {
             return;
           }
 
-          const delivered = recipientSockets && recipientSockets.size > 0;
-          if (delivered) {
-            for (const s of recipientSockets) s.emit('envelope:v2', env);
+          const liveRecipients = recipientSockets ? liveSockets(recipientSockets) : [];
+          if (liveRecipients.length > 0) {
+            for (const s of liveRecipients) s.emit('envelope:v2', env);
             // Confirm delivery to the sender's own (authenticated) socket — this
             // is the sender's own device, not a social-graph leak.
             socket.emit('msg:delivered', { msgId: env.id, to: env.to });
