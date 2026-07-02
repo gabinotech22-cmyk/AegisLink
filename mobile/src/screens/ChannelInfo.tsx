@@ -9,7 +9,7 @@
  * Subscriber actions: share invite link, leave channel.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, Image, Modal, TextInput, ActivityIndicator } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -30,6 +30,7 @@ import { themedAlert } from '../components/AlertHost';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
+import { useContacts } from '../store/contacts';
 import { buildInviteLink } from '../channels/inviteLink';
 import {
   getChannelSigningKey,
@@ -78,6 +79,10 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
   const updateChannelInfo = useChannels((s) => s.updateChannelInfo);
   const listPendingJoins = useChannels((s) => s.listPendingJoins);
   const answerJoinRequest = useChannels((s) => s.answerJoinRequest);
+  const banMember = useChannels((s) => s.banMember);
+  const feed = useChannels((s) => s.feeds[channelId]);
+  const bannedList = useChannels((s) => s.banned[channelId]);
+  const contacts = useContacts((s) => s.contacts);
 
   const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
 
@@ -97,6 +102,28 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
 
   const isOwner = summary?.owned === true;
   const isApprovalChannel = summary?.channelType === 'approval';
+  const [banningId, setBanningId] = useState<string | null>(null);
+
+  // Member view (docs §10.5 — client-side roster only). Derived from data the
+  // owner already possesses: authors seen in the decrypted feed. The relay
+  // never stores or serves a member list.
+  const members = useMemo(() => {
+    const banned = new Set(bannedList ?? []);
+    const byId = new Map(contacts.map((c) => [c.aegisId, c.name] as const));
+    const seen = new Set<string>();
+    const out: Array<{ aegisId: string; name: string; isSelf: boolean }> = [];
+    for (const post of feed ?? []) {
+      if (seen.has(post.from) || banned.has(post.from)) continue;
+      seen.add(post.from);
+      out.push({
+        aegisId: post.from,
+        name: byId.get(post.from) ?? post.from,
+        isSelf: post.from === identity?.aegisId,
+      });
+    }
+    // Self first, then by name for a stable list.
+    return out.sort((a, b) => (a.isSelf === b.isSelf ? a.name.localeCompare(b.name) : a.isSelf ? -1 : 1));
+  }, [feed, bannedList, contacts, identity?.aegisId]);
 
   // Load signing key + capability on mount (async SecureStore)
   useEffect(() => {
@@ -302,6 +329,36 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
         setAnsweringEpk(null);
       }
     })();
+  }
+
+  // ── Ban a member (owner — signed ban record, docs §10.4) ──────────────────
+
+  function handleBanMember(memberAegisId: string, displayName: string) {
+    if (banningId) return;
+    themedAlert(
+      i18nT('channelInfo.banTitle', 'Ban member'),
+      i18nT('channelInfo.banDesc', { name: displayName }),
+      [
+        { text: i18nT('common.cancel', 'Cancel'), style: 'cancel' },
+        {
+          text: i18nT('channelInfo.banConfirm', 'Ban'),
+          style: 'destructive',
+          onPress: () => {
+            setBanningId(memberAegisId);
+            void (async () => {
+              try {
+                const res = await banMember(channelId, memberAegisId);
+                if (!res.ok) {
+                  themedAlert(i18nT('common.error', 'Error'), res.error ?? i18nT('channels.unknownError'));
+                }
+              } finally {
+                setBanningId(null);
+              }
+            })();
+          },
+        },
+      ],
+    );
   }
 
   // ── Build invite link ──────────────────────────────────────────────────────
@@ -586,6 +643,78 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
                 {i18nT('channelInfo.refreshRequests', 'Refresh requests').toUpperCase()}
               </Text>
             </Pressable>
+          </Section>
+        )}
+
+        {/* Owner: member view + ban (roster is client-side only — docs §10.5) */}
+        {isOwner && signingKey && (
+          <Section t={t} label={`${i18nT('channelInfo.membersSection', 'MEMBERS').toUpperCase()}${members.length > 0 ? ` · ${members.length}` : ''}`}>
+            {members.length === 0 ? (
+              <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
+                <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>
+                  {i18nT('channelInfo.noMembersYet', 'No members seen yet. Members appear here once they post.')}
+                </Text>
+              </View>
+            ) : (
+              members.map((m, idx) => (
+                <View
+                  key={m.aegisId}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 10,
+                    paddingHorizontal: 16, paddingVertical: 12,
+                    borderTopWidth: idx === 0 ? 0 : 1, borderTopColor: t.divider,
+                  }}
+                >
+                  <Avatar t={t} name={m.name} color={t.accent} size={34} seed={m.aegisId} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text numberOfLines={1} style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>
+                      {m.isSelf ? i18nT('channelInfo.you', 'You') : m.name}
+                    </Text>
+                    <Text numberOfLines={1} style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, marginTop: 2 }}>
+                      {m.aegisId}
+                    </Text>
+                  </View>
+                  {!m.isSelf && (banningId === m.aegisId ? (
+                    <ActivityIndicator color={t.danger} />
+                  ) : (
+                    <Pressable
+                      onPress={() => handleBanMember(m.aegisId, m.name)}
+                      accessibilityLabel={i18nT('channelInfo.banMember', 'Ban member')}
+                      hitSlop={6}
+                      style={({ pressed }) => ({
+                        paddingHorizontal: 12, paddingVertical: 7, borderRadius: 99,
+                        borderWidth: 1, borderColor: `${t.danger}66`,
+                        opacity: pressed ? 0.7 : 1,
+                      })}
+                    >
+                      <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.danger }}>
+                        {i18nT('channelInfo.banConfirm', 'Ban')}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ))
+            )}
+            {(bannedList ?? []).map((b) => (
+              <View
+                key={b}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 10,
+                  paddingHorizontal: 16, paddingVertical: 12,
+                  borderTopWidth: 1, borderTopColor: t.divider,
+                  opacity: 0.6,
+                }}
+              >
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim }}>
+                    {b}
+                  </Text>
+                </View>
+                <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.danger, letterSpacing: 0.8, textTransform: 'uppercase' }}>
+                  {i18nT('channelInfo.bannedBadge', 'Banned')}
+                </Text>
+              </View>
+            ))}
           </Section>
         )}
 

@@ -1423,6 +1423,14 @@
     "reject": "Reject",
     "approveRequest": "Approve request",
     "rejectRequest": "Reject request",
-    "refreshRequests": "Refresh requests"
+    "refreshRequests": "Refresh requests",
+    "membersSection": "Members",
+    "noMembersYet": "No members seen yet. Members appear here once they post.",
+    "you": "You",
+    "banMember": "Ban member",
+    "banTitle": "Ban member",
+    "banDesc": "Ban {{name}}? Their posts will be hidden and they will be removed from the channel.",
+    "banConfirm": "Ban",
+    "bannedBadge": "Banned"
   }
 }

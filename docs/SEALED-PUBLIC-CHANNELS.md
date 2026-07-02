@@ -634,10 +634,21 @@ esté online.
 > `server/src/__tests__/publicChannelsModeration.test.ts`,
 > `mobile/src/crypto/__tests__/publicChannelApproval.test.ts`.
 > Ya hechos antes: `pubchannel:ban`, `pubchannel:tombstone` (server+mobile).
+> Member view + kick/ban de dueños (issue #207, rama `feat/channel-member-management`):
+> roster client-side derivado de autores del feed descifrado (§10.5 — el relay
+> nunca almacena roster ni ban list), acción "Banear" en ChannelInfo que firma
+> `{banned, ts, channelId}` con la clave del canal (§10.4 pasos 1–2), fan-out
+> relay-verificado contra el manifiesto ALMACENADO, filtrado/purga de posts de
+> autores baneados en el cliente y auto-kick del baneado al recibir un ban
+> válido que lo nombra. Tests: `server/src/__tests__/publicChannels.relay.test.ts`
+> (describe `pubchannel:ban`), `mobile/src/store/__tests__/channels.test.ts`
+> (describe `member ban`).
 
 Pendientes diferidos (no bloquean lanzamiento):
 - Editor delegations con DelegationCert (`pubchannel:delegation`).
-- CEK rotation (`pubchannel:rekey`).
+- CEK rotation (`pubchannel:rekey`) — incluye la rotación post-ban de §10.4
+  pasos 4–6: hoy un baneado conserva la CEK vieja y puede seguir LEYENDO hasta
+  esa rotación; publicar/ser leído ya se corta con el registro firmado + filtrado.
 
 ### Phase 5 — Comments, reactions, attachments (1-2 semanas) — ⏳ PENDIENTE
 > Sin implementar (no existen eventos `comment`/`reaction`/`announce`/`get_attachment`).

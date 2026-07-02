@@ -210,6 +210,32 @@ export async function deleteJoinRequest(channelId: string): Promise<void> {
   }
 }
 
+// ── banned members (owner moderation + received ban records) ────────────────
+// The roster/ban list is client-side only (docs §10.5): the relay never stores
+// or learns it. Persisted here (not SQLite) so the list survives restarts
+// without adding a new plaintext at-rest surface.
+
+const BAN_PREFIX = 'aegis.pubchannel.banned.v1.';
+
+function banKey(channelId: string): string { return BAN_PREFIX + safeId(channelId); }
+
+/** Persist the full banned-aegisId list for a channel (overwrites). */
+export async function saveBannedMembers(channelId: string, bannedAegisIds: string[]): Promise<void> {
+  await ss.set(banKey(channelId), JSON.stringify(bannedAegisIds));
+}
+
+/** The banned-aegisId list for a channel ([] when none / malformed). */
+export async function getBannedMembers(channelId: string): Promise<string[]> {
+  const raw = await ss.get(banKey(channelId));
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 // ── lifecycle ────────────────────────────────────────────────────────────────
 
 /** Every channel we hold any secret for. */
@@ -222,6 +248,7 @@ export async function deleteChannel(channelId: string): Promise<void> {
   await ss.delete(cekKey(channelId));
   await ss.delete(capKey(channelId));
   await ss.delete(signKey(channelId));
+  await ss.delete(banKey(channelId));
   await removeFromIndex(channelId);
 }
 
@@ -232,6 +259,7 @@ export async function deleteAllChannels(): Promise<void> {
     await ss.delete(cekKey(channelId));
     await ss.delete(capKey(channelId));
     await ss.delete(signKey(channelId));
+    await ss.delete(banKey(channelId));
   }
   await ss.delete(INDEX_KEY);
   // Panic also drops any in-flight approval join requests.

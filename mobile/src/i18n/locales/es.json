@@ -1423,6 +1423,14 @@
     "reject": "Rechazar",
     "approveRequest": "Aprobar solicitud",
     "rejectRequest": "Rechazar solicitud",
-    "refreshRequests": "Actualizar solicitudes"
+    "refreshRequests": "Actualizar solicitudes",
+    "membersSection": "Miembros",
+    "noMembersYet": "Aún no se han visto miembros. Aparecerán aquí cuando publiquen.",
+    "you": "Tú",
+    "banMember": "Banear miembro",
+    "banTitle": "Banear miembro",
+    "banDesc": "¿Banear a {{name}}? Sus publicaciones se ocultarán y será expulsado del canal.",
+    "banConfirm": "Banear",
+    "bannedBadge": "Baneado"
   }
 }
