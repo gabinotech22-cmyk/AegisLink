@@ -240,15 +240,21 @@ describe('R1 — hybrid PQ ratchet', () => {
     expect(dec(bobState, out)).toBe('hola pq');
   });
 
-  it('intra-chain messages do NOT re-carry PQ material (mixed once per turn)', () => {
+  it('intra-chain messages re-carry the SAME PQ material (lost-chain-head tolerance)', () => {
+    // Policy inverted 2026-07: pqPub/pqCt used to ride only on n=0, which made
+    // the whole chain undecryptable if that one message was lost. Now every
+    // message of the chain repeats the identical material so a receiver can
+    // turn the chain from any of them.
     const { aliceState } = newHybridSession();
     const m0 = enc(aliceState, 'm0');
     const m1 = enc(aliceState, 'm1');
     expect(m0.header.pqPub).toBeDefined();
     expect(m0.header.pqCt).toBeDefined();
-    // n>0 in the same sending chain omits the (identical) PQ material.
-    expect(m1.header.pqPub).toBeUndefined();
-    expect(m1.header.pqCt).toBeUndefined();
+    expect(m1.header.pqPub).toBeDefined();
+    expect(m1.header.pqCt).toBeDefined();
+    // Identical, not re-encapsulated: PQ mixing still happens once per turn.
+    expect(m1.header.pqCt).toEqual(m0.header.pqCt);
+    expect(m1.header.pqPub).toEqual(m0.header.pqPub);
   });
 
   it('full bidirectional turn: bob replies, alice decrypts (PQ rotates both ways)', () => {
