@@ -580,8 +580,8 @@ describe('member ban (issue #207 — owner moderation, docs §10.4)', () => {
       }],
       feeds: {
         [CHANNEL_ID]: [
-          { id: `${CHANNEL_ID}:0`, from: identity.aegisId, body: 'mine', ts: 1, seqNum: 0 },
-          { id: `${CHANNEL_ID}:1`, from: eve, body: 'spam', ts: 2, seqNum: 1 },
+          { id: `${CHANNEL_ID}:0`, from: identity.aegisId, body: 'mine', senderName: null, ts: 1, seqNum: 0 },
+          { id: `${CHANNEL_ID}:1`, from: eve, body: 'spam', senderName: null, ts: 2, seqNum: 1 },
         ],
       },
     });

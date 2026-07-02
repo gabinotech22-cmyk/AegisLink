@@ -107,7 +107,7 @@ describe('ChannelsPanel last-post preview (#205)', () => {
       subscribed: [CHANNEL_A],
       feeds: {
         'chan-a': [
-          { id: 'chan-a:1', from: 'AEGIS-X', body: 'Hello channel members', ts: Date.now(), seqNum: 1 },
+          { id: 'chan-a:1', from: 'AEGIS-X', body: 'Hello channel members', senderName: null, ts: Date.now(), seqNum: 1 },
         ],
       },
     });
