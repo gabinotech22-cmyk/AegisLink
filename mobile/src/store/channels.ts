@@ -97,6 +97,7 @@ import {
   getChannelHead,
   saveChannelMeta,
   getChannelMeta,
+  type ChannelMeta,
 } from '../crypto/publicChannelStore';
 
 const CHANNEL_TYPE_NAMES: PublicChannelType[] = ['open', 'readonly', 'moderated', 'approval'];
@@ -236,6 +237,32 @@ function manifestType(n: 0 | 1 | 2 | 3): PublicChannelType {
   return CHANNEL_TYPE_NAMES[n] ?? 'open';
 }
 
+/** ChannelMeta stores JSON-safe strings; the summary uses typed values. */
+function toChannelMeta(m: {
+  name: string;
+  description: string;
+  channelType: PublicChannelType;
+  avatarHash: Uint8Array | null;
+  channelEd25519PubB64: string | null;
+}): ChannelMeta {
+  return {
+    name: m.name,
+    description: m.description,
+    channelType: m.channelType,
+    avatarHash: m.avatarHash ? encodeBase64(m.avatarHash) : null,
+    channelEd25519PubB64: m.channelEd25519PubB64,
+  };
+}
+
+function metaChannelType(s: string): PublicChannelType {
+  return (CHANNEL_TYPE_NAMES as string[]).includes(s) ? (s as PublicChannelType) : 'open';
+}
+
+function metaAvatarHash(b64: string | null): Uint8Array | null {
+  if (!b64) return null;
+  try { return decodeBase64(b64); } catch { return null; }
+}
+
 /** Wire/at-rest shape of a ban record (docs §10.4 step 1). */
 interface BanRecord {
   banned: string;
@@ -327,9 +354,9 @@ export const useChannels = create<ChannelsState>((set, get) => ({
             channelId,
             name: cached.name,
             description: cached.description,
-            channelType: manifestType(cached.channelType),
+            channelType: metaChannelType(cached.channelType),
             owned: await isChannelOwned(channelId),
-            avatarHash: cached.avatarHash,
+            avatarHash: metaAvatarHash(cached.avatarHash),
             channelEd25519PubB64: cached.channelEd25519PubB64,
           });
         }
@@ -349,13 +376,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       };
       restored.push(summary);
       // Refresh the local display cache from the verified manifest.
-      void saveChannelMeta(channelId, {
-        name: summary.name,
-        description: summary.description,
-        channelType: summary.channelType,
-        avatarHash: summary.avatarHash,
-        channelEd25519PubB64: summary.channelEd25519PubB64,
-      }).catch(() => {});
+      void saveChannelMeta(channelId, toChannelMeta(summary)).catch(() => {});
     }
     // Restore in-flight approval applications too (they survive restarts in
     // SecureStore alongside their ephemeral secrets).
@@ -498,13 +519,13 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     }));
     // Cache display metadata so the channel keeps its name across restarts even
     // when the manifest re-fetch fails offline.
-    void saveChannelMeta(id.channelId, {
+    void saveChannelMeta(id.channelId, toChannelMeta({
       name: params.name,
       description: params.description,
       channelType: params.channelType,
       avatarHash: params.avatarHash ?? null,
       channelEd25519PubB64,
-    }).catch(() => {});
+    })).catch(() => {});
 
     // 5. Avatar upload (best-effort -- the channel is already created; the
     //    avatar can be retried later). ORDER: upload bytes to blob store, then
@@ -624,13 +645,13 @@ export const useChannels = create<ChannelsState>((set, get) => ({
             channelEd25519PubB64: joinedPubB64,
           }],
     }));
-    void saveChannelMeta(parsed.channelId, {
+    void saveChannelMeta(parsed.channelId, toChannelMeta({
       name: manifest.name,
       description: manifest.description,
       channelType: joinedType,
       avatarHash: manifest.avatarHash,
       channelEd25519PubB64: joinedPubB64,
-    }).catch(() => {});
+    })).catch(() => {});
     await get().loadFeed(parsed.channelId, identity);
     return { ok: true, channelId: parsed.channelId };
   },
@@ -665,13 +686,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
         ? s.subscribed
         : [...s.subscribed, summary],
     }));
-    void saveChannelMeta(channelId, {
-      name: summary.name,
-      description: summary.description,
-      channelType: summary.channelType,
-      avatarHash: summary.avatarHash,
-      channelEd25519PubB64: summary.channelEd25519PubB64,
-    }).catch(() => {});
+    void saveChannelMeta(channelId, toChannelMeta(summary)).catch(() => {});
     return { ok: true };
   },
 
@@ -907,13 +922,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     // Keep the display cache in step with the renamed manifest.
     const updated = get().subscribed.find((c) => c.channelId === channelId);
     if (updated) {
-      void saveChannelMeta(channelId, {
-        name: updated.name,
-        description: updated.description,
-        channelType: updated.channelType,
-        avatarHash: updated.avatarHash,
-        channelEd25519PubB64: updated.channelEd25519PubB64,
-      }).catch(() => {});
+      void saveChannelMeta(channelId, toChannelMeta(updated)).catch(() => {});
     }
     return { ok: true };
   },
