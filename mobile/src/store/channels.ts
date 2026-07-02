@@ -93,6 +93,8 @@ import {
   deleteJoinRequest,
   saveBannedMembers,
   getBannedMembers,
+  saveChannelHead,
+  getChannelHead,
 } from '../crypto/publicChannelStore';
 
 const CHANNEL_TYPE_NAMES: PublicChannelType[] = ['open', 'readonly', 'moderated', 'approval'];
@@ -182,6 +184,12 @@ interface ChannelsState {
   joinViaInvite: (inviteUrl: string, identity: Identity) => Promise<{ ok: boolean; channelId?: string; applied?: boolean; error?: string }>;
   joinChannel: (channelId: string, capability: Uint8Array, cek: Uint8Array) => Promise<{ ok: boolean; error?: string }>;
   loadFeed: (channelId: string, identity: Identity) => Promise<void>;
+  /**
+   * Delta-pull every subscribed channel once and locally notify on new posts.
+   * Used by the background-sync task (leak-free channel notifications — no relay
+   * subscriber list). Returns the number of fresh posts surfaced.
+   */
+  syncSubscribedForBackground: (identity: Identity) => Promise<number>;
   sendPost: (channelId: string, body: string, identity: Identity, senderName?: string) => Promise<{ ok: boolean; error?: string }>;
   attachLive: (identity: Identity) => () => void;
   removeChannel: (channelId: string) => Promise<void>;
@@ -327,9 +335,17 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     // Restore in-flight approval applications too (they survive restarts in
     // SecureStore alongside their ephemeral secrets).
     const requests = await listJoinRequests();
+    // Restore persisted chain heads so a cold launch resumes with a DELTA pull
+    // (and can detect + notify new posts) instead of re-pulling full history.
+    const restoredHeads: Record<string, ChainHead | null> = {};
+    for (const channelId of ids) {
+      const h = await getChannelHead(channelId);
+      if (h) restoredHeads[channelId] = h;
+    }
     set((s) => ({
       hydrated: true,
       banned: { ...restoredBans, ...s.banned },
+      heads: { ...restoredHeads, ...s.heads },
       // Re-check against current state: a join may have landed while we fetched.
       subscribed: [
         ...s.subscribed,
@@ -631,6 +647,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), ...fresh] },
       heads: { ...s.heads, [channelId]: result.head },
     }));
+    if (result.head) void saveChannelHead(channelId, result.head).catch(() => {});
 
     // Notify only on DELTA refreshes (since >= 0): the initial history pull of
     // a just-joined/just-opened channel must not fire a burst of notifications.
@@ -638,6 +655,29 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       const name = get().subscribed.find((c) => c.channelId === channelId)?.name ?? channelId;
       notifyNewPosts(channelId, name, fresh, identity.aegisId);
     }
+  },
+
+  async syncSubscribedForBackground(identity) {
+    // Ensure the subscribed list + persisted heads are hydrated (headless cold
+    // launch runs no React effects). Idempotent when already hydrated.
+    if (!get().hydrated) {
+      try { await get().hydrateSubscribed(); } catch { /* offline manifest fetch — sync what we can */ }
+    }
+    const channels = get().subscribed;
+    let fresh = 0;
+    for (const c of channels) {
+      const before = get().heads[c.channelId]?.seqNum ?? -1;
+      try {
+        // loadFeed pulls the delta (since = persisted head) and, when since >= 0,
+        // fires the same mute-aware local notification as a live post. A cold
+        // launch with a restored head therefore notifies; a first-ever pull
+        // (no head) stays silent, exactly like the foreground behavior.
+        await get().loadFeed(c.channelId, identity);
+      } catch { /* one channel failing must not abort the others */ }
+      const after = get().heads[c.channelId]?.seqNum ?? -1;
+      if (after > before) fresh += after - before;
+    }
+    return fresh;
   },
 
   async sendPost(channelId, body, identity, senderName) {
@@ -671,6 +711,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), optimistic] },
       heads: { ...s.heads, [channelId]: sealed.newHead },
     }));
+    void saveChannelHead(channelId, sealed.newHead).catch(() => {});
     return { ok: true };
   },
 
@@ -697,6 +738,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
           feeds: { ...s.feeds, [e.channelId]: [...(s.feeds[e.channelId] ?? []), ...fresh] },
           heads: { ...s.heads, [e.channelId]: result.head },
         }));
+        if (result.head) void saveChannelHead(e.channelId, result.head).catch(() => {});
         const name = get().subscribed.find((c) => c.channelId === e.channelId)?.name ?? e.channelId;
         notifyNewPosts(e.channelId, name, fresh, identity.aegisId);
       })();

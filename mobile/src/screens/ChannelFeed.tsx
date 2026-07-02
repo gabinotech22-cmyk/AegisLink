@@ -325,6 +325,16 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
             multiline
             style={{ flex: 1, maxHeight: 120, backgroundColor: t.surface2, borderRadius: t.radius, paddingHorizontal: 14, paddingVertical: 10, color: t.text, fontFamily: t.font, fontSize: 15 }}
           />
+          {canSchedule && (
+            <Pressable
+              onPress={() => { if (draft.trim()) setShowPicker(true); }}
+              disabled={!draft.trim()}
+              accessibilityLabel={i18nT('channels.schedulePost', 'Schedule post')}
+              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: draft.trim() ? 1 : 0.5 }}
+            >
+              <I.Timer size={18} color={draft.trim() ? t.accent : t.textFaint} />
+            </Pressable>
+          )}
           <Pressable
             onPress={() => void handleSend()}
             onLongPress={() => { if (canSchedule && draft.trim()) setShowPicker(true); }}

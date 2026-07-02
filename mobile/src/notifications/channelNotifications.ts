@@ -6,10 +6,13 @@
  *    post body (the relay only ever saw the opaque ciphertext fan-out).
  *  - The per-channel mute state lives in the encrypted local preferences blob
  *    (store/preferences → SecureStore) and NEVER travels to the relay.
- *  - There is no offline push for channel posts: the relay does not know who
+ *  - There is no SERVER push for channel posts: the relay does not know who
  *    subscribes to a channel and building a channel→push-token table would be
- *    a metadata leak. Notifications fire only while the socket is live (or on
- *    a delta feed refresh) — see server/src/relay/handlers/publicChannels.ts.
+ *    a metadata leak. Instead the device polls on its OWN schedule via a
+ *    background-fetch task (notifications/channelBackgroundSync.ts) that
+ *    delta-pulls subscribed channels and calls this function — leak-free,
+ *    best-effort catch-up rather than a real-time banner. Live posts still
+ *    notify immediately while the socket is up (store/channels attachLive).
  */
 
 import * as Notifications from 'expo-notifications';

@@ -31,6 +31,8 @@ import {
   saveJoinRequest,
   getJoinRequest,
   deleteJoinRequest,
+  saveChannelHead,
+  getChannelHead,
 } from '../publicChannelStore';
 import { deriveChannelDeliveryToken, generateChannelIdentity } from '../publicChannelKey';
 
@@ -177,6 +179,43 @@ describe('index + lifecycle', () => {
     expect(await listChannelIds()).toEqual([]);
     expect(await getChannelCEK(CHANNEL_A)).toBeNull();
     expect(await getChannelCEK(CHANNEL_B)).toBeNull();
+    expect(mockStore.size).toBe(0);
+  });
+});
+
+describe('channel chain head (delta-detection cache for background sync)', () => {
+  it('round-trips { seqNum, postHash } through SecureStore', async () => {
+    const postHash = fixedKey(42);
+    await saveChannelHead(CHANNEL_A, { seqNum: 7, postHash });
+
+    const head = await getChannelHead(CHANNEL_A);
+    expect(head).not.toBeNull();
+    expect(head!.seqNum).toBe(7);
+    expect(toHex(head!.postHash)).toBe(toHex(postHash));
+  });
+
+  it('returns null for an unknown or malformed head', async () => {
+    expect(await getChannelHead(CHANNEL_B)).toBeNull();
+    mockStore.set('aegis.pubchannel.head.v1.' + CHANNEL_B.replace(/=+$/, ''), 'not json');
+    expect(await getChannelHead(CHANNEL_B)).toBeNull();
+  });
+
+  it('deleteChannel wipes the persisted head', async () => {
+    await saveChannelSecrets(CHANNEL_A, { cek: fixedKey(1), capability: fixedKey(2) });
+    await saveChannelHead(CHANNEL_A, { seqNum: 3, postHash: fixedKey(9) });
+
+    await deleteChannel(CHANNEL_A);
+
+    expect(await getChannelHead(CHANNEL_A)).toBeNull();
+  });
+
+  it('deleteAllChannels wipes persisted heads', async () => {
+    await saveChannelSecrets(CHANNEL_A, { cek: fixedKey(1), capability: fixedKey(2) });
+    await saveChannelHead(CHANNEL_A, { seqNum: 5, postHash: fixedKey(5) });
+
+    await deleteAllChannels();
+
+    expect(await getChannelHead(CHANNEL_A)).toBeNull();
     expect(mockStore.size).toBe(0);
   });
 });

@@ -351,6 +351,14 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
       await registerBackgroundReconnect();
     } catch { /* task module unavailable — fall back to tap-to-wake */ }
 
+    // Channels have NO server push (the relay can't hold a subscriber list
+    // without leaking metadata). Register a device-scheduled background-fetch
+    // that delta-pulls subscribed channels and fires local notifications.
+    try {
+      const { registerChannelBackgroundSync } = require('./channelBackgroundSync') as typeof import('./channelBackgroundSync');
+      await registerChannelBackgroundSync();
+    } catch { /* task module unavailable (Expo Go) — foreground live notify still works */ }
+
     const tokenResponse = await Notifications.getExpoPushTokenAsync();
     const expoToken = tokenResponse.data;
 
