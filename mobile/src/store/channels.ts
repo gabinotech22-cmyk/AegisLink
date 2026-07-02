@@ -174,7 +174,7 @@ interface ChannelsState {
   /** Waiting-for-approval applications (approval-gated channels). */
   pendingApplications: Array<{ channelId: string; name: string; epkB64: string }>;
   /** Owner: rename / edit description (re-signs the manifest, seq+1). */
-  updateChannelInfo: (channelId: string, updates: { name?: string; description?: string }) => Promise<{ ok: boolean; error?: string }>;
+  updateChannelInfo: (channelId: string, updates: { name?: string; description?: string; channelType?: PublicChannelType }) => Promise<{ ok: boolean; error?: string }>;
   /** Owner: delete a post for everyone (signed; relay fans out). */
   deletePost: (channelId: string, seqNum: number) => Promise<{ ok: boolean; error?: string }>;
   /** Owner: list pending join requests for an approval-gated channel. */
@@ -645,7 +645,14 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     const description = (updates.description ?? current.description).trim();
     if (!name) return { ok: false, error: 'empty_name' };
 
-    const next = { ...current, name, description, manifestSeq: current.manifestSeq + 1 };
+    let channelType = current.channelType;
+    if (updates.channelType !== undefined) {
+      const idx = CHANNEL_TYPE_NAMES.indexOf(updates.channelType);
+      if (idx < 0) return { ok: false, error: 'bad_channel_type' };
+      channelType = idx as 0 | 1 | 2 | 3;
+    }
+
+    const next = { ...current, name, description, channelType, manifestSeq: current.manifestSeq + 1 };
     const sig = signManifest(next, sk);
     try {
       await updatePublicChannelManifest(channelId, serializeSignedManifest(next, sig));
@@ -654,7 +661,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     }
     set((s) => ({
       subscribed: s.subscribed.map((c) =>
-        c.channelId === channelId ? { ...c, name, description } : c,
+        c.channelId === channelId ? { ...c, name, description, channelType: manifestType(channelType) } : c,
       ),
     }));
     return { ok: true };

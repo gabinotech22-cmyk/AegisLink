@@ -768,11 +768,16 @@ export const publicChannelRepo = {
     );
   },
 
-  async updateManifest(channelId: string, signedManifestBlob: string): Promise<boolean> {
-    const result = await dbRun(
-      `UPDATE public_channels SET signed_manifest_blob = ? WHERE channel_id = ?`,
-      [signedManifestBlob, channelId]
-    );
+  async updateManifest(channelId: string, signedManifestBlob: string, channelType?: string): Promise<boolean> {
+    const result = channelType !== undefined
+      ? await dbRun(
+          `UPDATE public_channels SET signed_manifest_blob = ?, channel_type = ? WHERE channel_id = ?`,
+          [signedManifestBlob, channelType, channelId]
+        )
+      : await dbRun(
+          `UPDATE public_channels SET signed_manifest_blob = ? WHERE channel_id = ?`,
+          [signedManifestBlob, channelId]
+        );
     return result.changes > 0;
   },
 

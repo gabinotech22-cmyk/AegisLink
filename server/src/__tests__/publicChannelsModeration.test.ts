@@ -284,6 +284,25 @@ describe('PUT /public-channels/:id/manifest', () => {
     });
     expect(res.status).toBe(403);
   });
+
+  test('owner type change re-syncs the informational channel_type column', async () => {
+    const identity = generateChannelIdentity();
+    const cek = generateCEK();
+    await seedChannel(identity, cek, nacl.randomBytes(32)); // seeded as approval (type 3)
+
+    const next = makeManifest(identity, cek, { channelType: 0, manifestSeq: 2 }); // → open
+    const blob = manifestToBlob(next, signManifest(next, identity.channelEd25519Secret));
+    const res = await fetch(`${serverUrl}/public-channels/${encodeURIComponent(identity.channelId)}/manifest`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signedManifestBlob: blob }),
+    });
+    expect(res.status).toBe(200);
+
+    const stored = await publicChannelRepo.get(identity.channelId);
+    expect(stored!.signed_manifest_blob).toBe(blob);
+    expect(stored!.channel_type).toBe('open');
+  });
 });
 
 // ── pubchannel:pending — owner lists un-answered join requests ───────────────
