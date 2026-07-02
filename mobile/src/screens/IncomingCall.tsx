@@ -15,6 +15,7 @@ import Animated, {
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
+import { Avatar } from '../components/Avatar';
 import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
@@ -39,7 +40,6 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
   const media = useCall((s) => s.media);
   const peer = useContacts((s) => (peerId ? s.get(peerId) : undefined));
   const name = peer?.name ?? peerId ?? 'unknown';
-  const initial = name.trim()[0]?.toUpperCase() ?? '?';
 
   const { identity } = useIdentity();
   const [showReplies, setShowReplies] = useState(false);
@@ -189,20 +189,14 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
             ringStyle,
           ]}
         >
-          <View
-            style={{
-              width: 132,
-              height: 132,
-              borderRadius: 66,
-              backgroundColor: peerColor,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Text style={{ color: '#fff', fontFamily: t.font, fontWeight: '600', fontSize: 48, letterSpacing: -0.6 }}>
-              {initial}
-            </Text>
-          </View>
+          {/* Same avatar resolution as the chat list: photo → identicon → initial */}
+          <Avatar
+            t={t}
+            name={peer?.avatarImage || name}
+            color={peerColor}
+            size={132}
+            seed={peer?.publicKeyB64 || peerId || name}
+          />
         </Animated.View>
 
         <Text
