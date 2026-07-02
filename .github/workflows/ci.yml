@@ -215,6 +215,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The hosted runner ships with ~14 GB free; debug APK build + emulator
+      # system image no longer fit ("No space left on device" while sdkmanager
+      # installs the x86_64 image — recurring since 2026-07-02). Drop the big
+      # preinstalled toolchains we never use here (keep Android SDK + Java).
+      - name: Free runner disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/.ghcup /usr/share/swift \
+            /opt/az /usr/local/lib/node_modules /opt/google/chrome \
+            /usr/local/share/powershell /opt/microsoft || true
+          sudo docker image prune --all --force || true
+          df -h /
+        working-directory: /
+
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
