@@ -39,6 +39,7 @@ import {
   hashChannelDeliveryToken,
   signTombstone,
   signDelete,
+  signBan,
   wrapCEK,
   unwrapCEK,
   type ChannelManifestData,
@@ -422,6 +423,78 @@ describe('pubchannel:apply — approval-gated join', () => {
       sock.emit('pubchannel:apply', { channelId: identity.channelId, joinEpk }, (res: { ok: boolean; error?: string }) => resolve(res));
     });
     expect(ack.ok).toBe(true);
+
+    sock.disconnect();
+  });
+});
+
+describe('pubchannel:ban — signed member ban (issue #207)', () => {
+  test('valid channel-key-signed ban is accepted and fanned out to room members', async () => {
+    const alice = makeAgentKeys(96001);
+    const bob = makeAgentKeys(96002);
+    await registerAgent(alice);
+    await registerAgent(bob);
+
+    const identity = generateChannelIdentity();
+    const cek = generateCEK();
+    const capability = nacl.randomBytes(32);
+    const { deliveryToken } = await seedChannel(identity, cek, capability);
+
+    const aliceSock = await connectAgent(alice);
+    const bobSock = await connectAgent(bob);
+    await new Promise<void>((resolve) => {
+      bobSock.emit('pubchannel:join', { channelId: identity.channelId, deliveryToken }, () => resolve());
+    });
+
+    const banRecord = JSON.stringify({ banned: bob.aegisId, ts: Date.now(), channelId: identity.channelId });
+    const banSig = signBan(identity.channelId, banRecord, identity.channelEd25519Secret);
+
+    const fanout = new Promise<{ channelId: string; banRecord: string; banSig: string }>((resolve) => {
+      bobSock.on('pubchannel:ban', (e: { channelId: string; banRecord: string; banSig: string }) => resolve(e));
+    });
+
+    const ack = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      aliceSock.emit('pubchannel:ban', {
+        channelId: identity.channelId,
+        banRecord,
+        banSig: encodeBase64(banSig),
+      }, (res: { ok: boolean; error?: string }) => resolve(res));
+    });
+    expect(ack.ok).toBe(true);
+
+    // Room members receive the signed record verbatim (relay forwards opaquely).
+    const received = await fanout;
+    expect(received.channelId).toBe(identity.channelId);
+    expect(received.banRecord).toBe(banRecord);
+    expect(received.banSig).toBe(encodeBase64(banSig));
+
+    aliceSock.disconnect();
+    bobSock.disconnect();
+  });
+
+  test('ban signed with a non-channel key is rejected against the STORED manifest key', async () => {
+    const alice = makeAgentKeys(96003);
+    await registerAgent(alice);
+
+    const identity = generateChannelIdentity();
+    const cek = generateCEK();
+    const capability = nacl.randomBytes(32);
+    await seedChannel(identity, cek, capability);
+
+    const sock = await connectAgent(alice);
+    const mallory = nacl.sign.keyPair();
+    const banRecord = JSON.stringify({ banned: alice.aegisId, ts: Date.now(), channelId: identity.channelId });
+    const badSig = signBan(identity.channelId, banRecord, mallory.secretKey);
+
+    const ack = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      sock.emit('pubchannel:ban', {
+        channelId: identity.channelId,
+        banRecord,
+        banSig: encodeBase64(badSig),
+      }, (res: { ok: boolean; error?: string }) => resolve(res));
+    });
+    expect(ack.ok).toBe(false);
+    expect(ack.error).toBe('invalid_signature');
 
     sock.disconnect();
   });
