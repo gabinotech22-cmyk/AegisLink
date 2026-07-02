@@ -300,7 +300,14 @@ export function createPublicChannelsRouter(): Router {
         return;
       }
 
-      await publicChannelRepo.updateManifest(channelId, bodyParsed.data.signedManifestBlob);
+      // Keep the informational channel_type column in sync with the manifest
+      // (the manifest stays the source of truth; the column mirrors it).
+      const TYPE_NAMES = ['open', 'readonly', 'moderated', 'approval'] as const;
+      await publicChannelRepo.updateManifest(
+        channelId,
+        bodyParsed.data.signedManifestBlob,
+        TYPE_NAMES[next.channelType] ?? 'open',
+      );
       res.json({ ok: true, manifestSeq: next.manifestSeq });
     } catch {
       res.status(500).json({ error: 'SERVER_ERROR' });
