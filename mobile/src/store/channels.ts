@@ -47,6 +47,8 @@ import {
   buildAndSealPost,
   normalizePullRow,
   serializeSignedManifest,
+  encodePostBody,
+  openPostBody,
   type ChainHead,
   type SignerResolver,
 } from '../channels/channelService';
@@ -130,6 +132,8 @@ export interface FeedPost {
   id: string;
   from: string;
   body: string;
+  /** Sender's profile display name, if the post carries one (v1 body envelope). Null for legacy plain-text posts. */
+  senderName: string | null;
   ts: number;
   seqNum: number;
 }
@@ -166,7 +170,7 @@ interface ChannelsState {
   joinViaInvite: (inviteUrl: string, identity: Identity) => Promise<{ ok: boolean; channelId?: string; applied?: boolean; error?: string }>;
   joinChannel: (channelId: string, capability: Uint8Array, cek: Uint8Array) => Promise<{ ok: boolean; error?: string }>;
   loadFeed: (channelId: string, identity: Identity) => Promise<void>;
-  sendPost: (channelId: string, body: string, identity: Identity) => Promise<{ ok: boolean; error?: string }>;
+  sendPost: (channelId: string, body: string, identity: Identity, senderName?: string) => Promise<{ ok: boolean; error?: string }>;
   attachLive: (identity: Identity) => () => void;
   removeChannel: (channelId: string) => Promise<void>;
 
@@ -203,7 +207,8 @@ function manifestType(n: 0 | 1 | 2 | 3): PublicChannelType {
 }
 
 function postToFeed(p: { post: { from: string; body: string; ts: number; seqNum: number } }, channelId: string): FeedPost {
-  return { id: `${channelId}:${p.post.seqNum}`, from: p.post.from, body: p.post.body, ts: p.post.ts, seqNum: p.post.seqNum };
+  const { text, senderName } = openPostBody(p.post.body);
+  return { id: `${channelId}:${p.post.seqNum}`, from: p.post.from, body: text, senderName, ts: p.post.ts, seqNum: p.post.seqNum };
 }
 
 export const useChannels = create<ChannelsState>((set, get) => ({
@@ -547,16 +552,17 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     }));
   },
 
-  async sendPost(channelId, body, identity) {
+  async sendPost(channelId, body, identity, senderName) {
     const cek = await getChannelCEK(channelId);
     if (!cek) return { ok: false, error: 'not_subscribed' };
     const deliveryToken = await getChannelDeliveryToken(channelId);
     if (!deliveryToken) return { ok: false, error: 'no_delivery_token' };
 
     const head = get().heads[channelId] ?? null;
+    const wireBody = encodePostBody(body, senderName);
     const sealed = buildAndSealPost(
       channelId,
-      { from: identity.aegisId, body, ts: Date.now() },
+      { from: identity.aegisId, body: wireBody, ts: Date.now() },
       head,
       identity.signingSecretKey,
       cek,
@@ -565,7 +571,14 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     const ack = await pubchannelPost(channelId, sealed.wire.ciphertext, sealed.wire.nonce, deliveryToken);
     if (!ack.ok) return { ok: false, error: ack.error };
 
-    const optimistic: FeedPost = { id: `${channelId}:${sealed.seqNum}`, from: identity.aegisId, body, ts: Date.now(), seqNum: sealed.seqNum };
+    const optimistic: FeedPost = {
+      id: `${channelId}:${sealed.seqNum}`,
+      from: identity.aegisId,
+      body,
+      senderName: senderName ?? null,
+      ts: Date.now(),
+      seqNum: sealed.seqNum,
+    };
     set((s) => ({
       feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), optimistic] },
       heads: { ...s.heads, [channelId]: sealed.newHead },

@@ -36,6 +36,74 @@ import {
 /** Genesis prevHash: 32 zero bytes (the first post in a channel). */
 const GENESIS_PREV = new Uint8Array(32);
 
+// ── Post body envelope (senderName privacy fix, issue #204) ─────────────────
+//
+// The sender's profile display name must never leak in the clear — it can only
+// travel inside the already-CEK-encrypted `body` string of a post. `body` is
+// hashed as one opaque blob by buildPostSignedInput/computePostHash, so wrapping
+// it in a small versioned JSON envelope does NOT touch the signed layout (only
+// the *content* of body changes, which is expected/normal per post). Posts
+// sealed before this change carry plain text in `body` — openPostBody falls
+// back to treating the whole string as `text` with no sender name, so legacy
+// posts keep rendering exactly as before (short aegisId fallback in the UI).
+
+/** Hard cap on a displayed sender name — it's untrusted input from another member. */
+const MAX_SENDER_NAME_LEN = 64;
+
+interface PostBodyEnvelopeV1 {
+  v: 1;
+  text: string;
+  senderName?: string;
+}
+
+/** Sanitize an untrusted sender name for display: trim, strip control chars, cap length. */
+function sanitizeSenderName(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  // eslint-disable-next-line no-control-regex
+  const cleaned = raw.replace(new RegExp('[\\u0000-\\u001F\\u007F]', 'g'), '').trim();
+  if (!cleaned) return undefined;
+  return cleaned.slice(0, MAX_SENDER_NAME_LEN);
+}
+
+/**
+ * Build the wire `body` string for an outgoing post: versioned JSON envelope
+ * carrying the plaintext + (optional) sender display name. Both are sealed by
+ * the CEK exactly like plain text was before — no new wire-level metadata.
+ */
+export function encodePostBody(text: string, senderName?: string): string {
+  const clean = sanitizeSenderName(senderName);
+  const envelope: PostBodyEnvelopeV1 = clean ? { v: 1, text, senderName: clean } : { v: 1, text };
+  return JSON.stringify(envelope);
+}
+
+export interface DecodedPostBody {
+  text: string;
+  senderName: string | null;
+}
+
+/**
+ * Open a post's `body` into { text, senderName }. Accepts both the new v1
+ * envelope and legacy plain-text bodies (pre-#204 posts, or a sender running
+ * an older client) — legacy bodies pass through as text with senderName=null,
+ * so old posts keep rendering with the aegisId fallback in the UI.
+ */
+export function openPostBody(body: string): DecodedPostBody {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (
+      parsed && typeof parsed === 'object' &&
+      (parsed as Record<string, unknown>).v === 1 &&
+      typeof (parsed as Record<string, unknown>).text === 'string'
+    ) {
+      const p = parsed as PostBodyEnvelopeV1;
+      return { text: p.text, senderName: sanitizeSenderName(p.senderName) ?? null };
+    }
+  } catch {
+    // not JSON — legacy plain-text body, fall through
+  }
+  return { text: body, senderName: null };
+}
+
 /** The verified tip of a channel's hash chain. */
 export interface ChainHead {
   seqNum: number;
