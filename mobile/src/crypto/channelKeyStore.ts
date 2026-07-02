@@ -12,12 +12,19 @@ const PREFIX = 'aegis.channelKey.v1';
 // key enumeration API.
 const INDEX_PREFIX = 'aegis.channelKeyIndex.v1';
 
+// SecureStore only allows [A-Za-z0-9._-] in item keys; ids may be standard
+// base64 ('+', '/', trailing '='). Map to base64url without padding —
+// injective for fixed-length ids and identity for already-safe strings.
+function safeId(id: string): string {
+  return id.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 function keyFor(channelId: string, senderAegisId: string): string {
-  return `${PREFIX}.${channelId}.${senderAegisId}`;
+  return `${PREFIX}.${safeId(channelId)}.${safeId(senderAegisId)}`;
 }
 
 function indexKeyFor(channelId: string): string {
-  return `${INDEX_PREFIX}.${channelId}`;
+  return `${INDEX_PREFIX}.${safeId(channelId)}`;
 }
 
 interface StoredSenderKey {

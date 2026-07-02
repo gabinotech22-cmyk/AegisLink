@@ -43,9 +43,20 @@ export interface ChannelSecrets {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function cekKey(channelId: string): string { return CEK_PREFIX + channelId; }
-function capKey(channelId: string): string { return CAP_PREFIX + channelId; }
-function signKey(channelId: string): string { return SIGN_PREFIX + channelId; }
+/**
+ * SecureStore only allows [A-Za-z0-9._-] in item keys, but channelIds are
+ * STANDARD base64 (may contain '+', '/' and trailing '='). Map them to the
+ * base64url alphabet without padding — injective for fixed-length ids, so no
+ * two channels can collide. The channelId itself (wire, manifests, HKDF
+ * inputs) is untouched.
+ */
+function safeId(channelId: string): string {
+  return channelId.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function cekKey(channelId: string): string { return CEK_PREFIX + safeId(channelId); }
+function capKey(channelId: string): string { return CAP_PREFIX + safeId(channelId); }
+function signKey(channelId: string): string { return SIGN_PREFIX + safeId(channelId); }
 
 /** Decode a base64 secret and enforce its exact byte length, else null. */
 function decodeFixed(b64: string | null, expectedLen: number): Uint8Array | null {
@@ -163,7 +174,7 @@ async function loadApplyIndex(): Promise<string[]> {
 }
 
 export async function saveJoinRequest(req: StoredJoinRequest): Promise<void> {
-  await ss.set(APPLY_PREFIX + req.channelId, JSON.stringify(req));
+  await ss.set(APPLY_PREFIX + safeId(req.channelId), JSON.stringify(req));
   const index = await loadApplyIndex();
   if (!index.includes(req.channelId)) {
     await ss.set(APPLY_INDEX_KEY, JSON.stringify([...index, req.channelId]));
@@ -171,7 +182,7 @@ export async function saveJoinRequest(req: StoredJoinRequest): Promise<void> {
 }
 
 export async function getJoinRequest(channelId: string): Promise<StoredJoinRequest | null> {
-  const raw = await ss.get(APPLY_PREFIX + channelId);
+  const raw = await ss.get(APPLY_PREFIX + safeId(channelId));
   if (!raw) return null;
   try {
     return JSON.parse(raw) as StoredJoinRequest;
@@ -191,7 +202,7 @@ export async function listJoinRequests(): Promise<StoredJoinRequest[]> {
 }
 
 export async function deleteJoinRequest(channelId: string): Promise<void> {
-  await ss.delete(APPLY_PREFIX + channelId);
+  await ss.delete(APPLY_PREFIX + safeId(channelId));
   const index = await loadApplyIndex();
   const next = index.filter((c) => c !== channelId);
   if (next.length !== index.length) {
@@ -226,7 +237,7 @@ export async function deleteAllChannels(): Promise<void> {
   // Panic also drops any in-flight approval join requests.
   const applyIndex = await loadApplyIndex();
   for (const channelId of applyIndex) {
-    await ss.delete(APPLY_PREFIX + channelId);
+    await ss.delete(APPLY_PREFIX + safeId(channelId));
   }
   await ss.delete(APPLY_INDEX_KEY);
 }
