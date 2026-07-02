@@ -28,6 +28,9 @@ import {
   listChannelIds,
   deleteChannel,
   deleteAllChannels,
+  saveJoinRequest,
+  getJoinRequest,
+  deleteJoinRequest,
 } from '../publicChannelStore';
 import { deriveChannelDeliveryToken, generateChannelIdentity } from '../publicChannelKey';
 
@@ -101,6 +104,36 @@ describe('owned-channel signing key', () => {
   it('rejects a signing secret of the wrong length', async () => {
     await expect(saveChannelSigningKey(CHANNEL_A, new Uint8Array(32)))
       .rejects.toThrow('signing secret must be 64 bytes');
+  });
+});
+
+describe('SecureStore key charset (regression)', () => {
+  // expo-secure-store rejects keys outside [A-Za-z0-9._-]; channelIds are
+  // STANDARD base64 (contain '+', '/', trailing '='), which made channel
+  // creation throw "Invalid key provided to SecureStore" on device.
+  const VALID_KEY = /^[A-Za-z0-9._-]+$/;
+  const UGLY_ID = 'a+b/c3vgfTWu1MxRtJYw==';
+
+  it('never writes a key with characters SecureStore rejects, and still round-trips', async () => {
+    await saveChannelSecrets(UGLY_ID, { cek: fixedKey(1), capability: fixedKey(2) });
+    await saveChannelSigningKey(UGLY_ID, new Uint8Array(64).fill(7));
+    await saveJoinRequest({ channelId: UGLY_ID, name: 'x', epkB64: 'e', eskB64: 's' });
+
+    for (const k of mockStore.keys()) {
+      expect(k).toMatch(VALID_KEY);
+    }
+
+    // Reads/deletes resolve through the same sanitized keys.
+    expect(toHex((await getChannelCEK(UGLY_ID))!)).toBe(toHex(fixedKey(1)));
+    expect(await isChannelOwned(UGLY_ID)).toBe(true);
+    expect((await getJoinRequest(UGLY_ID))?.name).toBe('x');
+    expect(await listChannelIds()).toContain(UGLY_ID); // index keeps the REAL id
+
+    await deleteJoinRequest(UGLY_ID);
+    expect(await getJoinRequest(UGLY_ID)).toBeNull();
+    await deleteChannel(UGLY_ID);
+    expect(await getChannelCEK(UGLY_ID)).toBeNull();
+    expect(await listChannelIds()).not.toContain(UGLY_ID);
   });
 });
 
