@@ -1497,6 +1497,36 @@ const inRecoveryUntilMs = new Map<string, number>();
 /** Pending recovery fallback-flush timers, keyed by peer — see disconnect(). */
 const recoveryFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const RECOVERY_WINDOW_MS = 90_000;
+
+// ── One-sided desync escalation (non-initiator → explicit session-reset req) ────
+//
+// The plain NUDGE assumes desync is SYMMETRIC: the nudge fails to decrypt on the
+// higher peer, so the higher peer's own tryRecoverDesync fires and it re-keys.
+// But desync can be ONE-SIDED: only the lower peer's RECEIVE chain is broken
+// (e.g. its session state was rolled back / partially persisted). The lower
+// peer's SEND chain still matches the higher peer's RECEIVE chain, so the nudge
+// decrypts FINE on the higher peer — it never detects desync, never re-keys, and
+// the lower peer is wedged forever (inbound undecryptable, outbox never flushes;
+// the initiator has RECOVERY_FALLBACK_MS but the non-initiator had NO fallback).
+//
+// Fix (mirrors Session's / SimpleX's in-band session-reset message): after a
+// bounded number of plain nudges that did not converge, the non-initiator sends
+// a nudge that additionally carries an AUTHENTICATED `sessionReset` flag inside
+// the encrypted payload. Because it rides inside a ratchet message that the
+// higher peer successfully decrypts (MAC-verified) AND inside the outer
+// sealed-sender box (sender-authenticated), it cannot be forged or replayed by
+// the relay or a third party (REGLA DE ORO #3/#7 — an unauthenticated re-key
+// request would be a DoS/downgrade vector). On seeing it, the higher peer runs
+// its INITIATE branch (delete session + fresh X3DH) EVEN THOUGH its own decrypt
+// succeeded, and the lower peer adopts that init → convergence.
+//
+// Reference: Session (github.com/oxen-io/session-android — "session reset" /
+// libsignal SessionResetMessage) and SimpleX Chat both send an in-encrypted-
+// channel control message to force a fresh handshake rather than trusting an
+// unauthenticated wire signal.
+const NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST = 2;
+/** Per-contact count of plain nudges emitted in the current recovery episode. */
+const nudgeAttemptsThisEpisode = new Map<string, number>();
 /**
  * After detecting a desync we send a recovery X3DH-init and a lower-aegisId peer
  * defers its outbound messages (glare avoidance). In the ASYMMETRIC case the
@@ -1530,6 +1560,10 @@ function isInRecovery(aegisId: string): boolean {
 async function sendNudgeOverExistingSession(
   contact: { aegisId: string; publicKeyB64: string },
   identity: Identity,
+  // When true, embed an authenticated `sessionReset` flag in the nudge payload so
+  // the higher peer force-re-keys even if its own decrypt succeeds (one-sided
+  // desync escalation — see NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST).
+  requestSessionReset = false,
 ): Promise<boolean> {
   if (!socket || !connected || !authenticated) return false;
   const existingJson = await loadRatchetSession(contact.aegisId);
@@ -1569,6 +1603,10 @@ async function sendNudgeOverExistingSession(
       senderName: idState.displayName,
       senderColor: idState.avatarColor,
       senderStatus: idState.profileStatus,
+      // One-sided desync escalation: this rides INSIDE the E2EE ratchet payload,
+      // so the higher peer only ever sees it after a MAC-verified decrypt — it is
+      // cryptographically authenticated, never a wire-level (forgeable) field.
+      ...(requestSessionReset ? { sessionReset: true } : {}),
     });
     const recipientPub = decodeBase64(contact.publicKeyB64);
     const { envelope, newState } = encryptMessage(payload, identity.aegisId, recipientPub, identity.secretKey, session);
@@ -1579,7 +1617,7 @@ async function sendNudgeOverExistingSession(
       ciphertext: envelope.ciphertextB64,
       nonce: envelope.nonceB64,
     });
-    rdiag(`[RDIAG] nudge sent me=${identity.aegisId} -> peer=${contact.aegisId}`);
+    rdiag(`[RDIAG] nudge sent me=${identity.aegisId} -> peer=${contact.aegisId} reset=${requestSessionReset}`);
     return true;
   } catch (e) {
     if (__DEV__) logger.warn('[socket] desync nudge send failed:', (e as Error).message);
@@ -1640,7 +1678,22 @@ async function tryRecoverDesync(
     // in decryptAndAppend (replacing our desynced session) → converge. Because
     // we never deleted or rebuilt our session here, there is nothing to clobber
     // the adopted init. We hold in-recovery until adoption clears it.
-    const nudged = await sendNudgeOverExistingSession(contact, identity);
+    // One-sided desync escalation: track how many nudges this recovery episode
+    // has already emitted. After NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST plain nudges
+    // that did NOT converge (we are still in recovery — a genuine glare/adoption
+    // would have cleared the marker and reset this counter via convergence in
+    // decryptAndAppend), the desync is almost certainly ONE-SIDED: our nudge
+    // decrypts fine on the higher peer so it never re-keys on its own. Escalate to
+    // an AUTHENTICATED session-reset request that force-re-keys the higher peer.
+    const priorAttempts = nudgeAttemptsThisEpisode.get(contact.aegisId) ?? 0;
+    const requestReset = priorAttempts >= NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST;
+    if (requestReset) {
+      rdiag(`[RDIAG] one-sided desync escalation: requesting session-reset me=${identity.aegisId} peer=${contact.aegisId} attempts=${priorAttempts}`);
+    }
+    const nudged = await sendNudgeOverExistingSession(contact, identity, requestReset);
+    if (nudged) {
+      nudgeAttemptsThisEpisode.set(contact.aegisId, priorAttempts + 1);
+    }
     if (!nudged) {
       // No existing session to nudge over (rare): we cannot provoke the higher
       // peer this way. Leave the recovery marker set so any inbound init from
@@ -1992,6 +2045,9 @@ async function decryptAndAppendLocked(
     // session (now within grace via createdAtMs) don't re-trigger recovery.
     const wasInRecovery = isInRecovery(contact.aegisId);
     inRecoveryUntilMs.delete(contact.aegisId);
+    // Converged: reset the one-sided-desync escalation counter so a future,
+    // unrelated desync episode starts again with plain nudges before escalating.
+    nudgeAttemptsThisEpisode.delete(contact.aegisId);
     // Bidirectional profile sync: as the responder we just adopted the initiator's
     // session and (if their init carried a profile_update) applied THEIR profile.
     // But the initiator ignored OUR init (glare rule), so it never got our profile.
@@ -2075,6 +2131,27 @@ async function decryptAndAppendLocked(
       // Profile-only broadcast: peer renamed/recolored/status — apply silently, do
       // NOT append a chat message. Still persist ratchet state.
       if (parsedPayload.type === 'profile_update') {
+        // One-sided desync escalation (mirrors Session/SimpleX in-band session
+        // reset): the peer's RECEIVE chain is broken but its SEND chain still
+        // matches ours, so THIS message decrypted fine and our own desync detector
+        // never fired. The `sessionReset` flag — authenticated by this successful
+        // MAC-verified decrypt AND the outer sealed-sender box, never a forgeable
+        // wire field — explicitly asks us to re-key. Only the canonical initiator
+        // (higher aegisId) may mint the winning init; if WE are the higher peer we
+        // force-run the INITIATE branch (delete + fresh X3DH) even though decrypt
+        // succeeded. If we are the lower peer we ignore it (the requester should be
+        // adopting OUR init, not the reverse) to avoid a re-key ping-pong.
+        if (parsedPayload.sessionReset === true) {
+          if (amInitiatorFor(identity.aegisId, contact.aegisId)) {
+            rdiag(`[RDIAG] honoring authenticated session-reset request me=${identity.aegisId} peer=${contact.aegisId}`);
+            // Persist the current (still-working) state first so the pre-reset
+            // profile update above isn't lost, then force a fresh handshake.
+            await saveSessionState(contact.aegisId, ratchetState);
+            await tryRecoverDesync(contact, ratchetState, identity, true, lockCtx);
+            return true;
+          }
+          rdiag(`[RDIAG] ignoring session-reset request (we are non-initiator) me=${identity.aegisId} peer=${contact.aegisId}`);
+        }
         if (parsedPayload.senderName) {
           await useContacts.getState().updateContactProfile(
             contact.aegisId,
@@ -3464,6 +3541,7 @@ export function disconnect(): void {
   // socket and keep the JS runtime (and Jest workers) alive via open handles.
   for (const t of recoveryFallbackTimers.values()) clearTimeout(t);
   recoveryFallbackTimers.clear();
+  nudgeAttemptsThisEpisode.clear();
 }
 
 export async function sendMessage(opts: {

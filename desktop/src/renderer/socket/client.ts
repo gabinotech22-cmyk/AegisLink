@@ -1013,6 +1013,18 @@ const inRecoveryUntilMs = new Map<string, number>();
 /** Pending recovery fallback-flush timers, keyed by peer — see disconnect(). */
 const recoveryFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// ── One-sided desync escalation (parity with mobile/src/socket/client.ts) ───────
+// The plain NUDGE assumes desync is SYMMETRIC. When it is ONE-SIDED (only the
+// lower peer's RECEIVE chain is broken), the nudge decrypts fine on the higher
+// peer, which therefore never re-keys and the lower peer wedges forever. After a
+// bounded number of nudges the non-initiator escalates to an AUTHENTICATED
+// `sessionReset` flag inside the encrypted payload (MAC + sealed-sender verified,
+// never a wire field). The higher peer then force-runs its INITIATE branch even
+// though its own decrypt succeeded. Mirrors Session/SimpleX in-band session reset.
+const NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST = 2;
+/** Per-contact count of plain nudges emitted in the current recovery episode. */
+const nudgeAttemptsThisEpisode = new Map<string, number>();
+
 function amInitiatorFor(myAegisId: string, peerAegisId: string): boolean {
   return myAegisId > peerAegisId;
 }
@@ -1031,6 +1043,9 @@ function isInRecovery(aegisId: string): boolean {
 async function sendNudgeOverExistingSession(
   contact: { aegisId: string; publicKeyB64: string },
   identity: Identity,
+  // When true, embed an authenticated `sessionReset` flag so the higher peer
+  // force-re-keys even if its own decrypt succeeds (one-sided desync escalation).
+  requestSessionReset = false,
 ): Promise<boolean> {
   if (!socket || !connected || !authenticated) return false;
   const existingJson = await loadRatchetSession(contact.aegisId);
@@ -1069,6 +1084,9 @@ async function sendNudgeOverExistingSession(
       senderName: idState.displayName,
       senderColor: idState.avatarColor,
       senderStatus: idState.profileStatus,
+      // Rides INSIDE the E2EE ratchet payload — only visible to the higher peer
+      // after a MAC-verified decrypt, so it is cryptographically authenticated.
+      ...(requestSessionReset ? { sessionReset: true } : {}),
     });
     const recipientPub = decodeBase64(contact.publicKeyB64);
     const { envelope, newState } = encryptMessage(
@@ -1101,23 +1119,28 @@ async function tryRecoverDesync(
   // the SAME aegisId; threading the context lets that nested acquire pass
   // through the reentrant fast-path instead of deadlocking on our own gate.
   lockCtx?: LockCtx,
+  // Bypass grace/cooldown — used by the authenticated session-reset path, where
+  // our OWN decrypt succeeded so those guards would otherwise suppress the re-key.
+  force = false,
 ): Promise<boolean> {
   const now = Date.now();
 
-  // Grace: never tear down a session negotiated < grace ago — a stale,
-  // in-flight message from the previous session must not kill the new one.
-  if (
-    existingState &&
-    typeof existingState.createdAtMs === 'number' &&
-    now - existingState.createdAtMs < SESSION_GRACE_MS
-  ) {
-    return false;
-  }
+  if (!force) {
+    // Grace: never tear down a session negotiated < grace ago — a stale,
+    // in-flight message from the previous session must not kill the new one.
+    if (
+      existingState &&
+      typeof existingState.createdAtMs === 'number' &&
+      now - existingState.createdAtMs < SESSION_GRACE_MS
+    ) {
+      return false;
+    }
 
-  // Cooldown: collapse a burst of failing stale messages into one attempt.
-  const last = lastRecoveryAttemptMs.get(contact.aegisId);
-  if (typeof last === 'number' && now - last < RECOVERY_COOLDOWN_MS) {
-    return false;
+    // Cooldown: collapse a burst of failing stale messages into one attempt.
+    const last = lastRecoveryAttemptMs.get(contact.aegisId);
+    if (typeof last === 'number' && now - last < RECOVERY_COOLDOWN_MS) {
+      return false;
+    }
   }
   lastRecoveryAttemptMs.set(contact.aegisId, now);
 
@@ -1131,8 +1154,14 @@ async function tryRecoverDesync(
 
   if (!initiator) {
     // Lower aegisId: keep the (desynced) session, nudge the higher peer, and
-    // wait to adopt its fresh init in decryptAndAppend.
-    await sendNudgeOverExistingSession(contact, identity);
+    // wait to adopt its fresh init in decryptAndAppend. One-sided desync
+    // escalation: after NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST plain nudges without
+    // convergence, escalate to an authenticated sessionReset request so the
+    // higher peer re-keys even though our nudge decrypts fine on its side.
+    const priorAttempts = nudgeAttemptsThisEpisode.get(contact.aegisId) ?? 0;
+    const requestReset = priorAttempts >= NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST;
+    const nudged = await sendNudgeOverExistingSession(contact, identity, requestReset);
+    if (nudged) nudgeAttemptsThisEpisode.set(contact.aegisId, priorAttempts + 1);
     return true;
   }
 
@@ -1325,6 +1354,9 @@ async function decryptAndAppendLocked(
     // reply with OUR profile under the now-converged session (the initiator
     // ignored our init under the glare rule, so it never got our profile).
     inRecoveryUntilMs.delete(contact.aegisId);
+    // Converged: reset the one-sided-desync escalation counter so a future,
+    // unrelated desync starts again with plain nudges before escalating.
+    nudgeAttemptsThisEpisode.delete(contact.aegisId);
     setTimeout(() => {
       void sendProfileTo(contact, identity).catch(() => {});
     }, 300);
@@ -1389,6 +1421,20 @@ async function decryptAndAppendLocked(
       parsedPayload = JSON.parse(body);
 
       if (parsedPayload.type === 'profile_update') {
+        // One-sided desync escalation (mirrors Session/SimpleX in-band session
+        // reset): this message decrypted fine (the peer's SEND chain still
+        // matches ours) so our own desync detector never fired. The authenticated
+        // `sessionReset` flag — verified by this MAC-checked decrypt AND the outer
+        // sealed-sender box, never a forgeable wire field — asks us to re-key.
+        // Only the canonical initiator (higher aegisId) may mint the winning init;
+        // if we are the lower peer we ignore it to avoid a re-key ping-pong.
+        if (parsedPayload.sessionReset === true) {
+          if (amInitiatorFor(identity.aegisId, contact.aegisId)) {
+            await saveSessionState(contact.aegisId, ratchetState);
+            await tryRecoverDesync(contact, ratchetState, identity, lockCtx, true);
+            return true;
+          }
+        }
         if (parsedPayload.senderName) {
           await useContacts.getState().updateContactProfile(
             contact.aegisId,
@@ -2076,6 +2122,7 @@ export function disconnect(): void {
   // socket and leak timer handles.
   for (const t of recoveryFallbackTimers.values()) clearTimeout(t);
   recoveryFallbackTimers.clear();
+  nudgeAttemptsThisEpisode.clear();
 }
 
 export async function sendMessage(opts: {
