@@ -1322,6 +1322,7 @@
     "postFailed": "Impossibile pubblicare",
     "you": "tu",
     "unknownError": "Errore sconosciuto",
+    "newPostGeneric": "Nuovo post",
     "sendOrSchedule": "Invia — tieni premuto per programmare",
     "postScheduledTitle": "Post programmato",
     "postScheduledDesc": "Verrà pubblicato automaticamente nel canale all'ora scelta.",
@@ -1377,6 +1378,9 @@
     "reject": "Rifiuta",
     "approveRequest": "Approva richiesta",
     "rejectRequest": "Rifiuta richiesta",
-    "refreshRequests": "Aggiorna richieste"
+    "refreshRequests": "Aggiorna richieste",
+    "notificationsSection": "Notifiche",
+    "notificationsToggle": "Notifiche dei nuovi post",
+    "notificationsToggleSub": "Solo su questo dispositivo — mai condiviso con il server"
   }
 }

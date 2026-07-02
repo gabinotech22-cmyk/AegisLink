@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, Pressable, ScrollView, Image, Modal, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, Image, Modal, TextInput, ActivityIndicator, Switch } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
@@ -30,6 +30,8 @@ import { themedAlert } from '../components/AlertHost';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
+import { usePreferences } from '../store/preferences';
+import { setChannelMuted } from '../notifications/channelNotifications';
 import { buildInviteLink } from '../channels/inviteLink';
 import {
   getChannelSigningKey,
@@ -107,6 +109,14 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
 
   const isOwner = summary?.owned === true;
   const isApprovalChannel = summary?.channelType === 'approval';
+
+  // Per-channel notification toggle — DEVICE-LOCAL preference (encrypted
+  // SecureStore blob); the mute state never travels to the relay (#206).
+  const mutedChannels = usePreferences((s) => s.mutedChannels);
+  const notificationsEnabled = !mutedChannels.includes(channelId);
+  const handleToggleNotifications = useCallback((enabled: boolean) => {
+    void setChannelMuted(channelId, !enabled);
+  }, [channelId]);
 
   // Load signing key + capability on mount (async SecureStore)
   useEffect(() => {
@@ -524,6 +534,28 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
               </Text>
             </View>
           </Pressable>
+        </Section>
+
+        {/* Notifications (per-channel mute, device-local) */}
+        <Section t={t} label={i18nT('channelInfo.notificationsSection', 'Notifications').toUpperCase()}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14 }}>
+            <I.Bell size={18} color={notificationsEnabled ? t.accent : t.textDim} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text }}>
+                {i18nT('channelInfo.notificationsToggle', 'New post notifications')}
+              </Text>
+              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
+                {i18nT('channelInfo.notificationsToggleSub', 'Only on this device — never shared with the server')}
+              </Text>
+            </View>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={handleToggleNotifications}
+              trackColor={{ false: t.surface2, true: t.accent }}
+              thumbColor={t.bg}
+              accessibilityLabel={i18nT('channelInfo.notificationsToggle', 'New post notifications')}
+            />
+          </View>
         </Section>
 
         {/* Owner: edit name / description (re-signed manifest) */}

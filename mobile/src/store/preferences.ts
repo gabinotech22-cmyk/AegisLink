@@ -35,6 +35,12 @@ export interface Preferences {
   notifKeywords: string[];
   mutedChats: string[]; // aegisIds or group ids
   mentionsOnlyChats: string[]; // aegisIds/group ids that only alert on a keyword/mention match
+  /**
+   * Public channel ids whose post notifications are muted. Device-local only:
+   * this list never leaves the encrypted SecureStore blob (the relay must not
+   * learn which channels a user follows or mutes).
+   */
+  mutedChannels: string[];
 
   // App lock
   appLockEnabled: boolean;
@@ -65,6 +71,7 @@ const DEFAULTS: Preferences = {
   notifKeywords: ['urgente', 'multisig', 'audit'],
   mutedChats: [],
   mentionsOnlyChats: [],
+  mutedChannels: [],
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
@@ -105,6 +112,7 @@ function snapshot(get: () => PrefsState): Preferences {
     notifKeywords: s.notifKeywords,
     mutedChats: s.mutedChats,
     mentionsOnlyChats: s.mentionsOnlyChats,
+    mutedChannels: s.mutedChannels,
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,

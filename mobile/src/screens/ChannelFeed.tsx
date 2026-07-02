@@ -93,6 +93,16 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     return off;
   }, [channelId, identity, loadFeed, attachLive]);
 
+  // While this feed is focused, suppress local notifications for its own posts
+  // (same activeChatId guard Chat/GroupChat use). Reset on unmount.
+  useEffect(() => {
+    const { setActiveChatNotificationId } = require('../notifications/push') as typeof import('../notifications/push');
+    setActiveChatNotificationId(channelId);
+    return () => {
+      setActiveChatNotificationId(null);
+    };
+  }, [channelId]);
+
   const canPost = !!identity && (summary?.channelType === 'open' || summary?.owned === true);
   const canSchedule = canScheduleChannelPost(summary, !!identity);
 

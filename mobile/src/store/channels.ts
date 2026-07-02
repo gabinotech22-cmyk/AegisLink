@@ -211,6 +211,32 @@ function postToFeed(p: { post: { from: string; body: string; ts: number; seqNum:
   return { id: `${channelId}:${p.post.seqNum}`, from: p.post.from, body: text, senderName, ts: p.post.ts, seqNum: p.post.seqNum };
 }
 
+/**
+ * Fire local notifications for freshly ingested (decrypted + verified) posts
+ * that were not written by us. Built entirely on-device (issue #206): the
+ * relay never learns the mute state nor when a notification is shown.
+ */
+function notifyNewPosts(
+  channelId: string,
+  channelName: string,
+  posts: FeedPost[],
+  ownAegisId: string,
+): void {
+  const fresh = posts.filter((p) => p.from !== ownAegisId);
+  if (fresh.length === 0) return;
+  try {
+    // Lazy require (same pattern as socket/client → notifications/push): keeps
+    // expo-notifications out of this store's static import graph.
+    const { showChannelPostNotification } =
+      require('../notifications/channelNotifications') as typeof import('../notifications/channelNotifications');
+    for (const p of fresh) {
+      void showChannelPostNotification(channelId, channelName, p.body);
+    }
+  } catch (e) {
+    logger.warn(`[channels] post notification failed: ${(e as Error).message}`);
+  }
+}
+
 export const useChannels = create<ChannelsState>((set, get) => ({
   directory: [],
   loadingDirectory: false,
@@ -550,6 +576,13 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), ...fresh] },
       heads: { ...s.heads, [channelId]: result.head },
     }));
+
+    // Notify only on DELTA refreshes (since >= 0): the initial history pull of
+    // a just-joined/just-opened channel must not fire a burst of notifications.
+    if (since >= 0) {
+      const name = get().subscribed.find((c) => c.channelId === channelId)?.name ?? channelId;
+      notifyNewPosts(channelId, name, fresh, identity.aegisId);
+    }
   },
 
   async sendPost(channelId, body, identity, senderName) {
@@ -606,6 +639,8 @@ export const useChannels = create<ChannelsState>((set, get) => ({
           feeds: { ...s.feeds, [e.channelId]: [...(s.feeds[e.channelId] ?? []), ...fresh] },
           heads: { ...s.heads, [e.channelId]: result.head },
         }));
+        const name = get().subscribed.find((c) => c.channelId === e.channelId)?.name ?? e.channelId;
+        notifyNewPosts(e.channelId, name, fresh, identity.aegisId);
       })();
     });
     const offDelete = onPubchannelDelete((e) => {

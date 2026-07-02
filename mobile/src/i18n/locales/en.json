@@ -1371,6 +1371,7 @@
     "postFailed": "Couldn't post",
     "you": "you",
     "unknownError": "Unknown error",
+    "newPostGeneric": "New post",
     "sendOrSchedule": "Send — long-press to schedule",
     "postScheduledTitle": "Post scheduled",
     "postScheduledDesc": "It will be posted to the channel automatically at the chosen time.",
@@ -1426,6 +1427,9 @@
     "reject": "Reject",
     "approveRequest": "Approve request",
     "rejectRequest": "Reject request",
-    "refreshRequests": "Refresh requests"
+    "refreshRequests": "Refresh requests",
+    "notificationsSection": "Notifications",
+    "notificationsToggle": "New post notifications",
+    "notificationsToggleSub": "Only on this device — never shared with the server"
   }
 }
