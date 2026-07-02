@@ -5,7 +5,7 @@
  * New + Join-by-link. All crypto lives in useChannels; this is pure UI.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, FlatList, Modal, TextInput, ActivityIndicator, ScrollView } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -16,6 +16,7 @@ import { themedAlert } from '../components/AlertHost';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
+import { logger } from '../utils/logger';
 import type { Theme } from '../theme/vault';
 
 /** Extracts each row into its own component so useChannelAvatar runs per-item. */
@@ -53,6 +54,19 @@ export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate
   const identity = useIdentity((s) => s.identity);
   const subscribed = useChannels((s) => s.subscribed);
   const joinViaInvite = useChannels((s) => s.joinViaInvite);
+  const hydrated = useChannels((s) => s.hydrated);
+  const hydrateSubscribed = useChannels((s) => s.hydrateSubscribed);
+
+  // Restore the subscribed list after an app restart (secrets survive in
+  // SecureStore but this store is memory-only). Best-effort: offline channels
+  // reappear on the next mount.
+  useEffect(() => {
+    if (!hydrated) {
+      hydrateSubscribed().catch((e: unknown) => {
+        logger.warn(`[ChannelsPanel] hydrate failed: ${(e as Error).message}`);
+      });
+    }
+  }, [hydrated, hydrateSubscribed]);
 
   const [joinOpen, setJoinOpen] = useState(false);
   const [inviteText, setInviteText] = useState('');

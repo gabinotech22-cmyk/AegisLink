@@ -1401,6 +1401,12 @@
     "leaveChannel": "Leave channel",
     "leaveTitle": "Leave channel",
     "leaveDesc": "You will stop receiving posts and your keys will be deleted.",
-    "leaveConfirm": "Leave"
+    "leaveConfirm": "Leave",
+    "detailsSection": "Details",
+    "typeLabel": "Channel type",
+    "channelId": "Channel ID",
+    "copyId": "Copy channel ID",
+    "idCopiedTitle": "Copied",
+    "idCopiedDesc": "Channel ID copied to clipboard."
   }
 }

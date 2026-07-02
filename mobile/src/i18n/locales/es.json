@@ -1401,6 +1401,12 @@
     "leaveChannel": "Salir del canal",
     "leaveTitle": "Salir del canal",
     "leaveDesc": "Dejarás de recibir posts y tus claves serán eliminadas.",
-    "leaveConfirm": "Salir"
+    "leaveConfirm": "Salir",
+    "detailsSection": "Detalles",
+    "typeLabel": "Tipo de canal",
+    "channelId": "ID del canal",
+    "copyId": "Copiar ID del canal",
+    "idCopiedTitle": "Copiado",
+    "idCopiedDesc": "ID del canal copiado al portapapeles."
   }
 }

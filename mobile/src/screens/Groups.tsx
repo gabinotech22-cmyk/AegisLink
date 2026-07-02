@@ -34,6 +34,13 @@ interface Props {
   onOpenChannel?: (channelId: string) => void;
   onDiscoverChannels?: () => void;
   onCreateChannel?: () => void;
+  /**
+   * Which segment to show on mount. The host (App) remembers the last segment
+   * so that coming back from a pushed channel screen (which unmounts this
+   * screen) lands on Channels again instead of resetting to Groups.
+   */
+  initialSeg?: 'groups' | 'channels';
+  onSegChange?: (seg: 'groups' | 'channels') => void;
 }
 
 const GROUP_COLORS = [
@@ -59,7 +66,7 @@ const GROUP_EMOJIS = [
   { label: 'Cubo', val: '🧊' },
 ];
 
-export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChannel, onDiscoverChannels, onCreateChannel }: Props) {
+export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChannel, onDiscoverChannels, onCreateChannel, initialSeg, onSegChange }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -74,13 +81,27 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
 
   const { width: screenWidth } = useWindowDimensions();
   const swipeRef = useRef<ScrollView>(null);
-  const [seg, setSeg] = useState<'groups' | 'channels'>('groups');
+  const [seg, setSegState] = useState<'groups' | 'channels'>(initialSeg ?? 'groups');
+  const setSeg = useCallback((s: 'groups' | 'channels') => {
+    setSegState(s);
+    onSegChange?.(s);
+  }, [onSegChange]);
+
+  // Restore the pager position when mounting straight onto Channels (e.g.
+  // returning from a pushed channel screen). No animation: it's the initial state.
+  useEffect(() => {
+    if ((initialSeg ?? 'groups') === 'channels') {
+      swipeRef.current?.scrollTo({ x: screenWidth, animated: false });
+    }
+    // Mount-only: later seg changes are driven by taps/swipes below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Tap on segment control -> scroll the horizontal pager. */
   const handleSegTap = useCallback((s: 'groups' | 'channels') => {
     setSeg(s);
     swipeRef.current?.scrollTo({ x: s === 'channels' ? screenWidth : 0, animated: true });
-  }, [screenWidth]);
+  }, [screenWidth, setSeg]);
   const [isCreating, setIsCreating] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
@@ -511,6 +532,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
           pagingEnabled
           showsHorizontalScrollIndicator={false}
           scrollEventThrottle={16}
+          contentOffset={{ x: (initialSeg ?? 'groups') === 'channels' ? screenWidth : 0, y: 0 }}
           onMomentumScrollEnd={(e) => {
             const page = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
             setSeg(page === 1 ? 'channels' : 'groups');

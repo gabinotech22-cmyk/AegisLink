@@ -64,6 +64,7 @@ import {
   getChannelCEK,
   getChannelDeliveryToken,
   isChannelOwned,
+  listChannelIds,
   deleteChannel as deleteChannelSecrets,
 } from '../crypto/publicChannelStore';
 
@@ -91,10 +92,18 @@ export interface DirectoryEntry {
 export interface ChannelSummary {
   channelId: string;
   name: string;
+  /** From the signature-verified manifest ('' when joined before it was stored). */
+  description: string;
   channelType: PublicChannelType;
   owned: boolean;
   /** SHA-256 committed in the signed manifest, or null if no avatar. */
   avatarHash: Uint8Array | null;
+  /**
+   * Channel Ed25519 public key (base64) from the verified manifest. Lets
+   * subscribers rebuild the invite link (owners can derive it from the signing
+   * secret instead). Null for channels joined before this field existed.
+   */
+  channelEd25519PubB64: string | null;
 }
 
 /** A UI-facing, already-authenticated post. */
@@ -110,10 +119,19 @@ interface ChannelsState {
   directory: DirectoryEntry[];
   loadingDirectory: boolean;
   subscribed: ChannelSummary[];
+  /** True once hydrateSubscribed has completed at least once this session. */
+  hydrated: boolean;
   feeds: Record<string, FeedPost[]>;
   heads: Record<string, ChainHead | null>;
 
   loadDirectory: () => Promise<void>;
+  /**
+   * Rebuild `subscribed` after an app restart from the SecureStore channel
+   * index + the relay's signed manifests. Nothing beyond the secrets is kept
+   * at rest (metadata minimization): names/types are re-verified on-device
+   * from each manifest signature, never trusted from the relay.
+   */
+  hydrateSubscribed: () => Promise<void>;
   createChannel: (
     params: {
       name: string;
@@ -159,8 +177,48 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   directory: [],
   loadingDirectory: false,
   subscribed: [],
+  hydrated: false,
   feeds: {},
   heads: {},
+
+  async hydrateSubscribed() {
+    const ids = await listChannelIds();
+    const known = new Set(get().subscribed.map((c) => c.channelId));
+    const restored: ChannelSummary[] = [];
+    for (const channelId of ids) {
+      if (known.has(channelId)) continue;
+      let blob: string;
+      try {
+        ({ signed_manifest_blob: blob } = await getPublicChannelManifest(channelId));
+      } catch (e) {
+        // Offline or tombstoned: keep the secrets, just skip listing for now —
+        // the next hydrate retries. Deleting secrets on a fetch error would
+        // destroy access on a flaky network.
+        logger.warn(`[channels] hydrate: manifest fetch failed for ${channelId.slice(0, 8)}…: ${(e as Error).message}`);
+        continue;
+      }
+      const manifest = parseAndVerifyManifest(blob);
+      if (!manifest || manifest.channelId !== channelId) continue; // forged/corrupt → never trust
+      if (deriveChannelId(manifest.channelEd25519Pub, manifest.salt) !== channelId) continue;
+      restored.push({
+        channelId,
+        name: manifest.name,
+        description: manifest.description,
+        channelType: manifestType(manifest.channelType),
+        owned: await isChannelOwned(channelId),
+        avatarHash: manifest.avatarHash,
+        channelEd25519PubB64: encodeBase64(manifest.channelEd25519Pub),
+      });
+    }
+    set((s) => ({
+      hydrated: true,
+      // Re-check against current state: a join may have landed while we fetched.
+      subscribed: [
+        ...s.subscribed,
+        ...restored.filter((r) => !s.subscribed.some((c) => c.channelId === r.channelId)),
+      ],
+    }));
+  },
 
   async loadDirectory() {
     set({ loadingDirectory: true });
@@ -265,9 +323,11 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       subscribed: [...s.subscribed, {
         channelId: id.channelId,
         name: params.name,
+        description: params.description,
         channelType: params.channelType,
         owned: true,
         avatarHash: params.avatarHash ?? null,
+        channelEd25519PubB64: encodeBase64(id.channelEd25519Pub),
       }],
     }));
 
@@ -344,9 +404,11 @@ export const useChannels = create<ChannelsState>((set, get) => ({
         : [...s.subscribed, {
             channelId: parsed.channelId,
             name: manifest.name,
+            description: manifest.description,
             channelType: CHANNEL_TYPE_NAMES[manifest.channelType] ?? 'open',
             owned: false,
             avatarHash: manifest.avatarHash,
+            channelEd25519PubB64: encodeBase64(manifest.channelEd25519Pub),
           }],
     }));
     await get().loadFeed(parsed.channelId, identity);
@@ -372,9 +434,11 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     const summary: ChannelSummary = {
       channelId,
       name: manifest?.name ?? channelId,
+      description: manifest?.description ?? '',
       channelType: manifest ? manifestType(manifest.channelType) : 'open',
       owned: await isChannelOwned(channelId),
       avatarHash: manifest?.avatarHash ?? null,
+      channelEd25519PubB64: manifest ? encodeBase64(manifest.channelEd25519Pub) : null,
     };
     set((s) => ({
       subscribed: s.subscribed.some((c) => c.channelId === channelId)

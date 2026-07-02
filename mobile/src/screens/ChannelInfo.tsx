@@ -13,7 +13,8 @@ import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { encodeBase64 } from 'tweetnacl-util';
+import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import * as Clipboard from 'expo-clipboard';
 import { withPickingGuard } from '../utils/pickingGuard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -236,26 +237,26 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
 
   function getInviteLink(): string {
     if (!capability || !summary) return '';
-    // We need the channel public key to build the link. For owned channels we
-    // could derive it from the signing secret, but for subscribers we don't
-    // have the pubkey directly. The invite link requires the channelEd25519Pub.
-    // Since we don't store it separately, we derive it from the signingKey
-    // (for owners) or skip (subscribers still share the channelId-based link).
-    // For now, build with the signing key's public half if available.
+    // The link needs the channel's Ed25519 pubkey: owners derive it from the
+    // signing secret (bytes 32..64); subscribers use the copy persisted in the
+    // summary from the verified manifest at join/hydrate time.
+    let pub: Uint8Array | null = null;
     if (signingKey) {
-      // Ed25519 secret key is 64 bytes: first 32 are seed, last 32 are public key
-      const pub = signingKey.subarray(32);
-      return buildInviteLink({
-        channelId,
-        channelEd25519Pub: pub,
-        capability: summary.channelType === 'approval' ? null : capability,
-        approvalGated: summary.channelType === 'approval',
-      });
+      pub = signingKey.subarray(32);
+    } else if (summary.channelEd25519PubB64) {
+      try {
+        pub = decodeBase64(summary.channelEd25519PubB64);
+      } catch {
+        pub = null;
+      }
     }
-    // Subscriber: we cannot build a full invite link without the channel pubkey.
-    // Fall back to a minimal scheme link. In a future iteration the pubkey would
-    // be persisted at join time.
-    return '';
+    if (!pub) return ''; // legacy subscription without a stored pubkey
+    return buildInviteLink({
+      channelId,
+      channelEd25519Pub: pub,
+      capability: summary.channelType === 'approval' ? null : capability,
+      approvalGated: summary.channelType === 'approval',
+    });
   }
 
   if (!summary) {
@@ -364,7 +365,54 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
               </View>
             )}
           </View>
+
+          {/* Description (from the signature-verified manifest) */}
+          {summary.description.length > 0 && (
+            <Text style={{ fontFamily: t.font, fontSize: 13, lineHeight: 19, color: t.textDim, marginTop: 10, textAlign: 'center', paddingHorizontal: 8 }}>
+              {summary.description}
+            </Text>
+          )}
         </View>
+
+        {/* Details */}
+        <Section t={t} label={i18nT('channelInfo.detailsSection', 'DETAILS').toUpperCase()}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14 }}>
+            <I.Users size={18} color={t.textDim} />
+            <Text style={{ flex: 1, fontFamily: t.font, fontSize: 15, color: t.text }}>
+              {i18nT('channelInfo.typeLabel', 'Channel type')}
+            </Text>
+            <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim }}>
+              {i18nT(typeLabelKey)}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => {
+              void Clipboard.setStringAsync(channelId).then(() => {
+                themedAlert(
+                  i18nT('channelInfo.idCopiedTitle', 'Copied'),
+                  i18nT('channelInfo.idCopiedDesc', 'Channel ID copied to clipboard.'),
+                );
+              });
+            }}
+            accessibilityLabel={i18nT('channelInfo.copyId', 'Copy channel ID')}
+            style={({ pressed }) => ({
+              flexDirection: 'row', alignItems: 'center', gap: 14,
+              paddingHorizontal: 16, paddingVertical: 14,
+              opacity: pressed ? 0.7 : 1,
+              borderTopWidth: 1, borderTopColor: t.divider,
+            })}
+          >
+            <I.Key size={18} color={t.textDim} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 15, color: t.text }}>
+                {i18nT('channelInfo.channelId', 'Channel ID')}
+              </Text>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, marginTop: 2 }} numberOfLines={1}>
+                {channelId}
+              </Text>
+            </View>
+          </Pressable>
+        </Section>
 
         {/* Owner avatar actions */}
         {isOwner && signingKey && (
