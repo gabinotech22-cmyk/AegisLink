@@ -56,6 +56,12 @@ const RegisterChannelBody = z.object({
   contentKeyEnvelope: z.string().max(4096).optional(),
 });
 
+/** Phase 4 — manifest update body (owner rename/edit-description/pin). */
+const UpdateManifestBody = z.object({
+  /** The full replacement signed manifest blob (same shape as registration). */
+  signedManifestBlob: z.string().min(1).max(65536),
+});
+
 /** Slice 2 — avatar association request body. Owner-authenticated via Ed25519 sig. */
 const SetAvatarBody = z.object({
   /** Blob store ID returned by POST /blob/upload. */
@@ -233,6 +239,69 @@ export function createPublicChannelsRouter(): Router {
         avatar_blob_id: null,
       });
       res.status(201).json({ channelId: manifest.channelId });
+    } catch {
+      res.status(500).json({ error: 'SERVER_ERROR' });
+    }
+  });
+
+  // PUT /:channelId/manifest — replace the signed manifest (owner rename/edit).
+  // Owner-authenticated cryptographically: the NEW blob must verify against the
+  // signing key extracted from the STORED manifest (never from the wire, golden
+  // rules #3/#7), bind to the same channelId/salt/pubkey, and strictly increase
+  // manifestSeq (replay/rollback guard).
+  router.put('/:channelId/manifest', avatarWriteLimiter, async (req, res) => {
+    const bodyParsed = UpdateManifestBody.safeParse(req.body);
+    if (!bodyParsed.success) {
+      res.status(400).json({ error: 'INVALID_PAYLOAD' });
+      return;
+    }
+    const channelId = req.params['channelId'] as string;
+
+    try {
+      const channel = await publicChannelRepo.get(channelId);
+      if (!channel) {
+        res.status(404).json({ error: 'NOT_FOUND' });
+        return;
+      }
+      const oldParsed = parseManifestBlob(channel.signed_manifest_blob);
+      if (!oldParsed) {
+        res.status(500).json({ error: 'SERVER_ERROR' });
+        return;
+      }
+
+      const newParsed = parseManifestBlob(bodyParsed.data.signedManifestBlob);
+      if (!newParsed) {
+        res.status(400).json({ error: 'INVALID_MANIFEST' });
+        return;
+      }
+      const { manifest: next, sig } = newParsed;
+      const prev = oldParsed.manifest;
+
+      // Identity binding: same channel, same key, same salt — an update can
+      // change name/description/type/pins, never the channel identity.
+      if (
+        next.channelId !== channelId ||
+        Buffer.compare(Buffer.from(next.channelEd25519Pub), Buffer.from(prev.channelEd25519Pub)) !== 0 ||
+        Buffer.compare(Buffer.from(next.salt), Buffer.from(prev.salt)) !== 0
+      ) {
+        res.status(403).json({ error: 'CHANNEL_IDENTITY_MISMATCH' });
+        return;
+      }
+
+      // Signature check against the AUTHORITATIVE (stored) key.
+      if (!verifyManifest(next, sig)) {
+        res.status(403).json({ error: 'INVALID_MANIFEST_SIGNATURE' });
+        return;
+      }
+
+      // Rollback guard: seq must strictly increase.
+      if (!(next.manifestSeq > prev.manifestSeq)) {
+        res.status(409).json({ error: 'STALE_MANIFEST_SEQ' });
+        return;
+      }
+
+      await publicChannelRepo.updateManifest(channelId, bodyParsed.data.signedManifestBlob);
+      res.json({ ok: true, manifestSeq: next.manifestSeq });
     } catch {
       res.status(500).json({ error: 'SERVER_ERROR' });
     }

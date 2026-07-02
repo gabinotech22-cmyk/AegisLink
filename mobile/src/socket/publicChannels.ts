@@ -112,6 +112,40 @@ export function pubchannelBan(channelId: string, banRecord: string, banSig: stri
   return emitWithAck<PubChannelAck>('pubchannel:ban', { channelId, banRecord, banSig });
 }
 
+// ── Phase 4: approval-gated join ─────────────────────────────────────────────
+
+export interface PubChannelPendingAck extends PubChannelAck {
+  pending?: Array<{ joinEpk: string; createdAt: number }>;
+}
+export interface PubChannelCheckApprovalAck extends PubChannelAck {
+  status?: 'pending' | 'approved' | 'not_found';
+  envelope?: string;
+}
+
+/** Owner: list pending join requests. `sig` = signPendingList(channelId, ts). */
+export function pubchannelPending(channelId: string, ts: number, sig: string): Promise<PubChannelPendingAck> {
+  return emitWithAck<PubChannelPendingAck>('pubchannel:pending', { channelId, ts, sig });
+}
+
+/**
+ * Owner: answer a pending request. `envelope` is the sealed capability
+ * (JSON ApprovalEnvelope) or '' to reject. `sig` = signApprove(channelId, joinEpk, ts).
+ */
+export function pubchannelApprove(
+  channelId: string,
+  joinEpk: string,
+  envelope: string,
+  ts: number,
+  sig: string,
+): Promise<PubChannelAck> {
+  return emitWithAck<PubChannelAck>('pubchannel:approve', { channelId, joinEpk, envelope, ts, sig });
+}
+
+/** Applicant: poll the request status (relay throttles to 1/30s). */
+export function pubchannelCheckApproval(channelId: string, joinEpk: string): Promise<PubChannelCheckApprovalAck> {
+  return emitWithAck<PubChannelCheckApprovalAck>('pubchannel:check_approval', { channelId, joinEpk });
+}
+
 /** Tombstone (signed) — permanently destroys the channel. */
 export function pubchannelTombstone(channelId: string, ts: number, sig: string): Promise<PubChannelAck> {
   return emitWithAck<PubChannelAck>('pubchannel:tombstone', { channelId, ts, sig });

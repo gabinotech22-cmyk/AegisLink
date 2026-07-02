@@ -24,14 +24,21 @@ import type { Identity } from '../crypto/identity';
 import { useContacts } from './contacts';
 import nacl from 'tweetnacl';
 import { sha256 } from '@noble/hashes/sha2';
-import { listPublicChannels, registerPublicChannel, getPublicChannelManifest, setChannelAvatar, type PublicChannelType } from '../api/publicChannels';
+import { listPublicChannels, registerPublicChannel, getPublicChannelManifest, updatePublicChannelManifest, setChannelAvatar, type PublicChannelType } from '../api/publicChannels';
 import { uploadAvatarBlob, cacheLocalAvatar } from '../channels/channelAvatarCache';
 import { logger } from '../utils/logger';
 import {
   pubchannelJoin,
   pubchannelPost,
   pubchannelPull,
+  pubchannelTombstone,
+  pubchannelApply,
+  pubchannelPending,
+  pubchannelApprove,
+  pubchannelCheckApproval,
+  pubchannelDelete,
   onPubchannelMsg,
+  onPubchannelDelete,
   onPubchannelTombstone,
 } from '../socket/publicChannels';
 import {
@@ -47,7 +54,15 @@ import {
   generateChannelIdentity,
   generateCEK,
   signManifest,
+  signTombstone,
   signAvatarSet,
+  signDelete,
+  signPendingList,
+  signApprove,
+  generateJoinEphemeral,
+  sealApprovalCapability,
+  openApprovalCapability,
+  type ApprovalEnvelope,
   deriveChannelId,
   deriveChannelDeliveryToken,
   hashChannelDeliveryToken,
@@ -60,9 +75,16 @@ import {
   saveChannelSecrets,
   saveChannelSigningKey,
   getChannelCEK,
+  getChannelCapability,
+  getChannelSigningKey,
   getChannelDeliveryToken,
   isChannelOwned,
+  listChannelIds,
   deleteChannel as deleteChannelSecrets,
+  saveJoinRequest,
+  getJoinRequest,
+  listJoinRequests,
+  deleteJoinRequest,
 } from '../crypto/publicChannelStore';
 
 const CHANNEL_TYPE_NAMES: PublicChannelType[] = ['open', 'readonly', 'moderated', 'approval'];
@@ -89,10 +111,18 @@ export interface DirectoryEntry {
 export interface ChannelSummary {
   channelId: string;
   name: string;
+  /** From the signature-verified manifest ('' when joined before it was stored). */
+  description: string;
   channelType: PublicChannelType;
   owned: boolean;
   /** SHA-256 committed in the signed manifest, or null if no avatar. */
   avatarHash: Uint8Array | null;
+  /**
+   * Channel Ed25519 public key (base64) from the verified manifest. Lets
+   * subscribers rebuild the invite link (owners can derive it from the signing
+   * secret instead). Null for channels joined before this field existed.
+   */
+  channelEd25519PubB64: string | null;
 }
 
 /** A UI-facing, already-authenticated post. */
@@ -108,10 +138,19 @@ interface ChannelsState {
   directory: DirectoryEntry[];
   loadingDirectory: boolean;
   subscribed: ChannelSummary[];
+  /** True once hydrateSubscribed has completed at least once this session. */
+  hydrated: boolean;
   feeds: Record<string, FeedPost[]>;
   heads: Record<string, ChainHead | null>;
 
   loadDirectory: () => Promise<void>;
+  /**
+   * Rebuild `subscribed` after an app restart from the SecureStore channel
+   * index + the relay's signed manifests. Nothing beyond the secrets is kept
+   * at rest (metadata minimization): names/types are re-verified on-device
+   * from each manifest signature, never trusted from the relay.
+   */
+  hydrateSubscribed: () => Promise<void>;
   createChannel: (
     params: {
       name: string;
@@ -124,12 +163,26 @@ interface ChannelsState {
     },
     identity: Identity,
   ) => Promise<{ ok: boolean; channelId?: string; invite?: string; error?: string }>;
-  joinViaInvite: (inviteUrl: string, identity: Identity) => Promise<{ ok: boolean; channelId?: string; error?: string }>;
+  joinViaInvite: (inviteUrl: string, identity: Identity) => Promise<{ ok: boolean; channelId?: string; applied?: boolean; error?: string }>;
   joinChannel: (channelId: string, capability: Uint8Array, cek: Uint8Array) => Promise<{ ok: boolean; error?: string }>;
   loadFeed: (channelId: string, identity: Identity) => Promise<void>;
   sendPost: (channelId: string, body: string, identity: Identity) => Promise<{ ok: boolean; error?: string }>;
   attachLive: (identity: Identity) => () => void;
   removeChannel: (channelId: string) => Promise<void>;
+
+  // ── Phase 4: owner admin + approval-gated joins ────────────────────────────
+  /** Waiting-for-approval applications (approval-gated channels). */
+  pendingApplications: Array<{ channelId: string; name: string; epkB64: string }>;
+  /** Owner: rename / edit description (re-signs the manifest, seq+1). */
+  updateChannelInfo: (channelId: string, updates: { name?: string; description?: string }) => Promise<{ ok: boolean; error?: string }>;
+  /** Owner: delete a post for everyone (signed; relay fans out). */
+  deletePost: (channelId: string, seqNum: number) => Promise<{ ok: boolean; error?: string }>;
+  /** Owner: list pending join requests for an approval-gated channel. */
+  listPendingJoins: (channelId: string) => Promise<{ ok: boolean; pending?: Array<{ joinEpk: string; createdAt: number }>; error?: string }>;
+  /** Owner: approve (seal capability to the applicant) or reject a request. */
+  answerJoinRequest: (channelId: string, joinEpkB64: string, approve: boolean) => Promise<{ ok: boolean; error?: string }>;
+  /** Applicant: poll all in-flight applications; completes the join on approval. */
+  checkApprovals: (identity: Identity) => Promise<void>;
 }
 
 /** Build the from→Ed25519-signing-pubkey resolver from contacts + our own identity. */
@@ -157,8 +210,58 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   directory: [],
   loadingDirectory: false,
   subscribed: [],
+  hydrated: false,
+  pendingApplications: [],
   feeds: {},
   heads: {},
+
+  async hydrateSubscribed() {
+    const ids = await listChannelIds();
+    const known = new Set(get().subscribed.map((c) => c.channelId));
+    const restored: ChannelSummary[] = [];
+    for (const channelId of ids) {
+      if (known.has(channelId)) continue;
+      let blob: string;
+      try {
+        ({ signed_manifest_blob: blob } = await getPublicChannelManifest(channelId));
+      } catch (e) {
+        // Offline or tombstoned: keep the secrets, just skip listing for now —
+        // the next hydrate retries. Deleting secrets on a fetch error would
+        // destroy access on a flaky network.
+        logger.warn(`[channels] hydrate: manifest fetch failed for ${channelId.slice(0, 8)}…: ${(e as Error).message}`);
+        continue;
+      }
+      const manifest = parseAndVerifyManifest(blob);
+      if (!manifest || manifest.channelId !== channelId) continue; // forged/corrupt → never trust
+      if (deriveChannelId(manifest.channelEd25519Pub, manifest.salt) !== channelId) continue;
+      restored.push({
+        channelId,
+        name: manifest.name,
+        description: manifest.description,
+        channelType: manifestType(manifest.channelType),
+        owned: await isChannelOwned(channelId),
+        avatarHash: manifest.avatarHash,
+        channelEd25519PubB64: encodeBase64(manifest.channelEd25519Pub),
+      });
+    }
+    // Restore in-flight approval applications too (they survive restarts in
+    // SecureStore alongside their ephemeral secrets).
+    const requests = await listJoinRequests();
+    set((s) => ({
+      hydrated: true,
+      // Re-check against current state: a join may have landed while we fetched.
+      subscribed: [
+        ...s.subscribed,
+        ...restored.filter((r) => !s.subscribed.some((c) => c.channelId === r.channelId)),
+      ],
+      pendingApplications: [
+        ...s.pendingApplications,
+        ...requests
+          .filter((r) => !s.pendingApplications.some((a) => a.channelId === r.channelId))
+          .map((r) => ({ channelId: r.channelId, name: r.name, epkB64: r.epkB64 })),
+      ],
+    }));
+  },
 
   async loadDirectory() {
     set({ loadingDirectory: true });
@@ -185,6 +288,15 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   },
 
   async createChannel(params, identity) {
+    // 0. Duplicate guard — a second OWNED channel with the same name is almost
+    //    always an accidental re-submit (double-tap / retry after a silent
+    //    failure). The relay can't dedupe: it never links channels to an owner
+    //    (zero metadata), so the guard has to live client-side.
+    const wantedName = params.name.trim().toLowerCase();
+    if (get().subscribed.some((c) => c.owned && c.name.trim().toLowerCase() === wantedName)) {
+      return { ok: false, error: 'duplicate_name' };
+    }
+
     // 1. Fresh channel identity + content key + access capability.
     const id = generateChannelIdentity();
     const cek = generateCEK();
@@ -231,16 +343,34 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     }
 
     // 4. Persist OUR secrets (we own this channel → also the signing key).
-    await saveChannelSecrets(id.channelId, { cek, capability });
-    await saveChannelSigningKey(id.channelId, id.channelEd25519Secret);
+    //    If this fails the channel exists on the relay but is unusable here —
+    //    best-effort tombstone so the orphan doesn't linger in the public
+    //    directory, and return an error the UI can show (previously this threw
+    //    past the screen's try/finally: silent failure → users re-tapped and
+    //    created duplicates).
+    try {
+      await saveChannelSecrets(id.channelId, { cek, capability });
+      await saveChannelSigningKey(id.channelId, id.channelEd25519Secret);
+    } catch (e) {
+      try {
+        const ts = Date.now();
+        const sig = signTombstone(id.channelId, ts, id.channelEd25519Secret);
+        await pubchannelTombstone(id.channelId, ts, encodeBase64(sig));
+      } catch (rollbackErr) {
+        logger.warn(`[channels] orphan-channel tombstone failed: ${(rollbackErr as Error).message}`);
+      }
+      return { ok: false, error: e instanceof Error ? e.message : 'local_save_failed' };
+    }
 
     set((s) => ({
       subscribed: [...s.subscribed, {
         channelId: id.channelId,
         name: params.name,
+        description: params.description,
         channelType: params.channelType,
         owned: true,
         avatarHash: params.avatarHash ?? null,
+        channelEd25519PubB64: encodeBase64(id.channelEd25519Pub),
       }],
     }));
 
@@ -273,8 +403,44 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   async joinViaInvite(inviteUrl, identity) {
     const parsed = parseInviteLink(inviteUrl);
     if (!parsed) return { ok: false, error: 'bad_invite' };
-    // Approval-gated joins need the admin to deliver the capability (gap E / Phase 4).
-    if (!parsed.capability) return { ok: false, error: 'approval_required' };
+
+    // Approval-gated invite (no capability): apply with a fresh ephemeral
+    // X25519 key (docs §10.2) and wait for the owner to seal the capability.
+    if (!parsed.capability) {
+      if (get().pendingApplications.some((a) => a.channelId === parsed.channelId)) {
+        return { ok: true, applied: true, channelId: parsed.channelId };
+      }
+      // Fetch + verify the manifest so we can show the channel name while waiting.
+      let name = parsed.channelId;
+      try {
+        const { signed_manifest_blob } = await getPublicChannelManifest(parsed.channelId);
+        const m = parseAndVerifyManifest(signed_manifest_blob);
+        if (!m || m.channelId !== parsed.channelId) return { ok: false, error: 'bad_manifest' };
+        if (!bytesEqual(m.channelEd25519Pub, parsed.channelEd25519Pub)) return { ok: false, error: 'pubkey_mismatch' };
+        name = m.name;
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'manifest_fetch_failed' };
+      }
+
+      const eph = generateJoinEphemeral();
+      const epkB64 = encodeBase64(eph.publicKey);
+      try {
+        // Persist the ephemeral secret FIRST — an approval that lands after a
+        // restart must still be claimable.
+        await saveJoinRequest({ channelId: parsed.channelId, name, epkB64, eskB64: encodeBase64(eph.secretKey) });
+        const ack = await pubchannelApply(parsed.channelId, epkB64);
+        if (!ack.ok) {
+          await deleteJoinRequest(parsed.channelId);
+          return { ok: false, error: ack.error };
+        }
+      } finally {
+        eph.secretKey.fill(0); // the SecureStore copy is now the only one
+      }
+      set((s) => ({
+        pendingApplications: [...s.pendingApplications, { channelId: parsed.channelId, name, epkB64 }],
+      }));
+      return { ok: true, applied: true, channelId: parsed.channelId };
+    }
 
     // Fetch + verify the manifest, and bind it to the invite's channelId/pubkey.
     let blob: string;
@@ -317,9 +483,11 @@ export const useChannels = create<ChannelsState>((set, get) => ({
         : [...s.subscribed, {
             channelId: parsed.channelId,
             name: manifest.name,
+            description: manifest.description,
             channelType: CHANNEL_TYPE_NAMES[manifest.channelType] ?? 'open',
             owned: false,
             avatarHash: manifest.avatarHash,
+            channelEd25519PubB64: encodeBase64(manifest.channelEd25519Pub),
           }],
     }));
     await get().loadFeed(parsed.channelId, identity);
@@ -345,9 +513,11 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     const summary: ChannelSummary = {
       channelId,
       name: manifest?.name ?? channelId,
+      description: manifest?.description ?? '',
       channelType: manifest ? manifestType(manifest.channelType) : 'open',
       owned: await isChannelOwned(channelId),
       avatarHash: manifest?.avatarHash ?? null,
+      channelEd25519PubB64: manifest ? encodeBase64(manifest.channelEd25519Pub) : null,
     };
     set((s) => ({
       subscribed: s.subscribed.some((c) => c.channelId === channelId)
@@ -425,10 +595,20 @@ export const useChannels = create<ChannelsState>((set, get) => ({
         }));
       })();
     });
+    const offDelete = onPubchannelDelete((e) => {
+      // Owner-signed deletion (relay-verified). Drop the post locally; the
+      // chain head is NOT rewound — later posts still link past the gap.
+      set((s) => ({
+        feeds: {
+          ...s.feeds,
+          [e.channelId]: (s.feeds[e.channelId] ?? []).filter((p) => p.seqNum !== e.seqNum),
+        },
+      }));
+    });
     const offTomb = onPubchannelTombstone((e) => {
       void get().removeChannel(e.channelId);
     });
-    return () => { offMsg(); offTomb(); };
+    return () => { offMsg(); offDelete(); offTomb(); };
   },
 
   async removeChannel(channelId) {
@@ -442,5 +622,163 @@ export const useChannels = create<ChannelsState>((set, get) => ({
         heads,
       };
     });
+  },
+
+  // ── Phase 4: owner admin + approval-gated joins ────────────────────────────
+
+  async updateChannelInfo(channelId, updates) {
+    const sk = await getChannelSigningKey(channelId);
+    if (!sk) return { ok: false, error: 'not_owner' };
+
+    // Rebuild from the CURRENT manifest so unrelated fields (avatar, pins,
+    // contentKeyHash) survive the edit; bump manifestSeq (relay enforces >).
+    let blob: string;
+    try {
+      ({ signed_manifest_blob: blob } = await getPublicChannelManifest(channelId));
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'manifest_fetch_failed' };
+    }
+    const current = parseAndVerifyManifest(blob);
+    if (!current || current.channelId !== channelId) return { ok: false, error: 'bad_manifest' };
+
+    const name = (updates.name ?? current.name).trim();
+    const description = (updates.description ?? current.description).trim();
+    if (!name) return { ok: false, error: 'empty_name' };
+
+    const next = { ...current, name, description, manifestSeq: current.manifestSeq + 1 };
+    const sig = signManifest(next, sk);
+    try {
+      await updatePublicChannelManifest(channelId, serializeSignedManifest(next, sig));
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'update_failed' };
+    }
+    set((s) => ({
+      subscribed: s.subscribed.map((c) =>
+        c.channelId === channelId ? { ...c, name, description } : c,
+      ),
+    }));
+    return { ok: true };
+  },
+
+  async deletePost(channelId, seqNum) {
+    const sk = await getChannelSigningKey(channelId);
+    if (!sk) return { ok: false, error: 'not_owner' };
+    const sig = signDelete(channelId, seqNum, sk);
+    const ack = await pubchannelDelete(channelId, seqNum, encodeBase64(sig));
+    if (!ack.ok) return { ok: false, error: ack.error };
+    set((s) => ({
+      feeds: {
+        ...s.feeds,
+        [channelId]: (s.feeds[channelId] ?? []).filter((p) => p.seqNum !== seqNum),
+      },
+    }));
+    return { ok: true };
+  },
+
+  async listPendingJoins(channelId) {
+    const sk = await getChannelSigningKey(channelId);
+    if (!sk) return { ok: false, error: 'not_owner' };
+    const ts = Date.now();
+    const sig = signPendingList(channelId, ts, sk);
+    try {
+      const ack = await pubchannelPending(channelId, ts, encodeBase64(sig));
+      if (!ack.ok) return { ok: false, error: ack.error };
+      return { ok: true, pending: ack.pending ?? [] };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'pending_failed' };
+    }
+  },
+
+  async answerJoinRequest(channelId, joinEpkB64, approve) {
+    const sk = await getChannelSigningKey(channelId);
+    if (!sk) return { ok: false, error: 'not_owner' };
+
+    let envelope = '';
+    if (approve) {
+      const capability = await getChannelCapability(channelId);
+      if (!capability) return { ok: false, error: 'no_capability' };
+      try {
+        envelope = JSON.stringify(sealApprovalCapability(capability, joinEpkB64, channelId));
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'seal_failed' };
+      }
+    }
+    const ts = Date.now();
+    const sig = signApprove(channelId, joinEpkB64, ts, sk);
+    try {
+      const ack = await pubchannelApprove(channelId, joinEpkB64, envelope, ts, encodeBase64(sig));
+      return ack.ok ? { ok: true } : { ok: false, error: ack.error };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'approve_failed' };
+    }
+  },
+
+  async checkApprovals(identity) {
+    for (const app of get().pendingApplications) {
+      let status: string | undefined;
+      let envelopeStr: string | undefined;
+      try {
+        const ack = await pubchannelCheckApproval(app.channelId, app.epkB64);
+        if (!ack.ok) continue; // rate_limited / transient — retry next tick
+        status = ack.status;
+        envelopeStr = ack.envelope;
+      } catch {
+        continue;
+      }
+
+      if (status === 'not_found') {
+        // Rejected or expired: drop the application (fail closed, no retry loop).
+        await deleteJoinRequest(app.channelId);
+        set((s) => ({ pendingApplications: s.pendingApplications.filter((a) => a.channelId !== app.channelId) }));
+        continue;
+      }
+      if (status !== 'approved' || !envelopeStr) continue;
+
+      const stored = await getJoinRequest(app.channelId);
+      if (!stored) continue;
+      let capability: Uint8Array | null = null;
+      try {
+        const envelope = JSON.parse(envelopeStr) as ApprovalEnvelope;
+        capability = openApprovalCapability(envelope, decodeBase64(stored.eskB64), app.channelId);
+      } catch {
+        capability = null;
+      }
+      if (!capability) {
+        logger.warn(`[channels] approval envelope failed to open for ${app.channelId.slice(0, 8)}…`);
+        continue; // never join with an unverified capability
+      }
+
+      // Complete the join exactly like a capability-carrying invite (§10.1).
+      const deliveryToken = deriveChannelDeliveryToken(capability, app.channelId);
+      const ack = await pubchannelJoin(app.channelId, deliveryToken);
+      if (!ack.ok || !ack.contentKeyEnvelope) continue;
+      let env: { ivB64: string; wrappedB64: string };
+      try {
+        env = JSON.parse(ack.contentKeyEnvelope) as { ivB64: string; wrappedB64: string };
+      } catch { continue; }
+      const cek = unwrapCEK(env.ivB64, env.wrappedB64, capability, app.channelId);
+      if (!cek) continue;
+      const manifest = ack.manifest ? parseAndVerifyManifest(ack.manifest) : null;
+      if (!manifest || manifest.channelId !== app.channelId) continue;
+      if (manifest.contentKeyHash && !bytesEqual(sha256(cek), manifest.contentKeyHash)) continue;
+
+      await saveChannelSecrets(app.channelId, { cek, capability });
+      await deleteJoinRequest(app.channelId);
+      set((s) => ({
+        pendingApplications: s.pendingApplications.filter((a) => a.channelId !== app.channelId),
+        subscribed: s.subscribed.some((c) => c.channelId === app.channelId)
+          ? s.subscribed
+          : [...s.subscribed, {
+              channelId: app.channelId,
+              name: manifest.name,
+              description: manifest.description,
+              channelType: manifestType(manifest.channelType),
+              owned: false,
+              avatarHash: manifest.avatarHash,
+              channelEd25519PubB64: encodeBase64(manifest.channelEd25519Pub),
+            }],
+      }));
+      await get().loadFeed(app.channelId, identity);
+    }
   },
 }));

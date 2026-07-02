@@ -373,6 +373,43 @@ export function verifyBan(channelId: string, banRecord: string, sig: Uint8Array,
 }
 
 // ---------------------------------------------------------------------------
+// §10.2 — Approval-gated join: owner-signed pending-list / approve actions
+// ---------------------------------------------------------------------------
+
+const PENDING_LIST_LABEL = encoder.encode('aegislink/CHANNEL_PENDING_LIST');
+const APPROVE_LABEL = encoder.encode('aegislink/CHANNEL_APPROVE');
+
+function pendingListSignedInput(channelId: string, ts: number): Uint8Array {
+  return concat([PENDING_LIST_LABEL, decodeBase64(channelId), u64be(ts)]);
+}
+
+/** Sign a pending-joins listing request (owner-only read). */
+export function signPendingList(channelId: string, ts: number, channelEd25519Secret: Uint8Array): Uint8Array {
+  return nacl.sign.detached(pendingListSignedInput(channelId, ts), channelEd25519Secret);
+}
+
+/** Verify a pending-joins listing request signature. */
+export function verifyPendingList(channelId: string, ts: number, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
+  if (sig.length !== nacl.sign.signatureLength) return false;
+  return nacl.sign.detached.verify(pendingListSignedInput(channelId, ts), sig, channelEd25519Pub);
+}
+
+function approveSignedInput(channelId: string, joinEpkB64: string, ts: number): Uint8Array {
+  return concat([APPROVE_LABEL, decodeBase64(channelId), encoder.encode(joinEpkB64), u64be(ts)]);
+}
+
+/** Sign an approve/reject decision for a pending joinEpk. */
+export function signApprove(channelId: string, joinEpkB64: string, ts: number, channelEd25519Secret: Uint8Array): Uint8Array {
+  return nacl.sign.detached(approveSignedInput(channelId, joinEpkB64, ts), channelEd25519Secret);
+}
+
+/** Verify an approve/reject decision signature. */
+export function verifyApprove(channelId: string, joinEpkB64: string, ts: number, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
+  if (sig.length !== nacl.sign.signatureLength) return false;
+  return nacl.sign.detached.verify(approveSignedInput(channelId, joinEpkB64, ts), sig, channelEd25519Pub);
+}
+
+// ---------------------------------------------------------------------------
 // §6 — Post encryption + hash chain
 // ---------------------------------------------------------------------------
 

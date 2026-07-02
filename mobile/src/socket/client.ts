@@ -676,14 +676,14 @@ export function connect(identity: Identity): Socket {
     connected = true;
     authenticated = false;
     useConnection.getState().setOnline(true);
-    if (__DEV__) logger.debug('[socket] connected, awaiting auth challenge');
+    if (__DEV__) logger.warn('[socket] connected, awaiting auth challenge');
   });
 
   socket.on('disconnect', (reason) => {
     connected = false;
     authenticated = false;
     useConnection.getState().setOnline(false);
-    if (__DEV__) logger.debug('[socket] disconnected:', reason);
+    if (__DEV__) logger.warn('[socket] disconnected:', reason);
   });
 
   socket.on('error_msg', async (e: { code?: string; for?: string }) => {
@@ -754,6 +754,14 @@ export function connect(identity: Identity): Socket {
   socket.on('auth:ok', async (res?: { opkCount?: number }) => {
     authenticated = true;
     if (__DEV__) logger.debug('[socket] authenticated');
+
+    // Warm the TURN credential cache (50-min TTL) so the first call doesn't pay
+    // the up-to-3s credential fetch during setup. Fire-and-forget; on failure
+    // call setup simply fetches (or falls back to STUN-only) as before.
+    try {
+      const { fetchTurnConfig } = require('../webrtc/ice') as typeof import('../webrtc/ice');
+      void fetchTurnConfig(identity.aegisId, false).catch(() => {});
+    } catch { /* webrtc module unavailable (tests/Expo Go) */ }
 
     // Ensure deviceId is resolved before using it below
     const deviceId = resolvedDeviceId || await deviceIdReady;

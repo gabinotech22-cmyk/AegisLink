@@ -211,6 +211,10 @@ function Shell() {
   const [tab, setTab] = useState<Tab>('home');
   const [isBackgroundShieldActive, setIsBackgroundShieldActive] = useState(false);
   const [stack, setStack] = useState<PushRoute[]>([]);
+  // Remembered Groups|Channels segment: GroupsScreen unmounts while a pushed
+  // screen (channel feed/create/discover) is on top, so its local segment
+  // state resets on pop — this keeps "back" landing on Channels, not Groups.
+  const [groupsSeg, setGroupsSeg] = useState<'groups' | 'channels'>('groups');
   const [netError, setNetError] = useState(false);
   // null = not yet determined (loading), true = new user needs onboarding, false = returning user or done
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
@@ -1629,6 +1633,8 @@ function Shell() {
           onOpenChannel={(channelId) => push({ name: 'channelFeed', channelId })}
           onDiscoverChannels={() => push({ name: 'channelDiscover' })}
           onCreateChannel={() => push({ name: 'channelCreate' })}
+          initialSeg={groupsSeg}
+          onSegChange={setGroupsSeg}
         />
       );
     case 'settings':

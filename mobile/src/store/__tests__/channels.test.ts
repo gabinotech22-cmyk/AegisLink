@@ -27,16 +27,30 @@ jest.mock('../../socket/publicChannels', () => ({
   pubchannelJoin: jest.fn(),
   pubchannelPost: jest.fn(),
   pubchannelPull: jest.fn(async () => ({ ok: true, posts: [] })),
+  pubchannelTombstone: jest.fn(async () => ({ ok: true })),
+  pubchannelApply: jest.fn(async () => ({ ok: true })),
+  pubchannelPending: jest.fn(async () => ({ ok: true, pending: [] })),
+  pubchannelApprove: jest.fn(async () => ({ ok: true })),
+  pubchannelCheckApproval: jest.fn(async () => ({ ok: true, status: 'pending' })),
+  pubchannelDelete: jest.fn(async () => ({ ok: true })),
   onPubchannelMsg: jest.fn(() => () => {}),
+  onPubchannelDelete: jest.fn(() => () => {}),
   onPubchannelTombstone: jest.fn(() => () => {}),
 }));
 jest.mock('../../crypto/publicChannelStore', () => ({
   saveChannelSecrets: jest.fn(async () => {}),
   saveChannelSigningKey: jest.fn(async () => {}),
   getChannelCEK: jest.fn(),
+  getChannelCapability: jest.fn(async () => null),
+  getChannelSigningKey: jest.fn(async () => null),
   getChannelDeliveryToken: jest.fn(async () => 'tok'),
   isChannelOwned: jest.fn(async () => false),
+  listChannelIds: jest.fn(async () => []),
   deleteChannel: jest.fn(async () => {}),
+  saveJoinRequest: jest.fn(async () => {}),
+  getJoinRequest: jest.fn(async () => null),
+  listJoinRequests: jest.fn(async () => []),
+  deleteJoinRequest: jest.fn(async () => {}),
 }));
 jest.mock('../contacts', () => ({
   useContacts: { getState: () => ({ contacts: [] }) },
@@ -95,7 +109,7 @@ function signedManifestBlob(name = 'My Channel', tamper = false): string {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  useChannels.setState({ directory: [], loadingDirectory: false, subscribed: [], feeds: {}, heads: {} });
+  useChannels.setState({ directory: [], loadingDirectory: false, subscribed: [], hydrated: false, feeds: {}, heads: {}, pendingApplications: [] });
   (store.getChannelCEK as jest.Mock).mockResolvedValue(cek);
   (store.getChannelDeliveryToken as jest.Mock).mockResolvedValue('tok');
 });
@@ -261,13 +275,43 @@ describe('joinViaInvite (gap D)', () => {
     expect(res).toEqual({ ok: false, error: 'bad_invite' });
   });
 
-  it('rejects an approval-gated invite (capability not in link)', async () => {
+  it('applies to an approval-gated invite (capability not in link) instead of joining', async () => {
     const created = await useChannels.getState().createChannel(
       { name: 'Gated', description: 'd', channelType: 'approval' },
       identity,
     );
+    const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: regArg.signedManifestBlob });
+
+    // A different user (not the owner) opens the invite link.
+    useChannels.setState({ subscribed: [] });
     const res = await useChannels.getState().joinViaInvite(created.invite!, identity);
-    expect(res).toEqual({ ok: false, error: 'approval_required' });
+
+    // Phase 4: the client applies with a fresh ephemeral key and waits for the
+    // owner's approval — it must NOT be subscribed yet.
+    expect(res).toEqual({ ok: true, applied: true, channelId: created.channelId });
+    expect(socket.pubchannelApply).toHaveBeenCalledWith(created.channelId, expect.any(String));
+    expect(store.saveJoinRequest).toHaveBeenCalledWith(expect.objectContaining({ channelId: created.channelId, name: 'Gated' }));
+    expect(useChannels.getState().pendingApplications).toEqual([
+      expect.objectContaining({ channelId: created.channelId, name: 'Gated' }),
+    ]);
+    expect(useChannels.getState().subscribed.find((c) => c.channelId === created.channelId)).toBeUndefined();
+  });
+
+  it('a failed apply rolls back the stored join request', async () => {
+    const created = await useChannels.getState().createChannel(
+      { name: 'GatedFail', description: 'd', channelType: 'approval' },
+      identity,
+    );
+    const regArg = (api.registerPublicChannel as jest.Mock).mock.calls[0][0];
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: regArg.signedManifestBlob });
+    (socket.pubchannelApply as jest.Mock).mockResolvedValueOnce({ ok: false, error: 'pending_full' });
+
+    const res = await useChannels.getState().joinViaInvite(created.invite!, identity);
+
+    expect(res).toEqual({ ok: false, error: 'pending_full' });
+    expect(store.deleteJoinRequest).toHaveBeenCalledWith(created.channelId);
+    expect(useChannels.getState().pendingApplications).toEqual([]);
   });
 
   it('rejects when the unwrapped CEK does not match the manifest contentKeyHash', async () => {
@@ -293,7 +337,7 @@ describe('removeChannel (leave)', () => {
   it('removes the channel from subscribed, feeds, heads and wipes secrets', async () => {
     // Seed state with a subscribed channel + feed + head.
     useChannels.setState({
-      subscribed: [{ channelId: CHANNEL_ID, name: 'Leaving', channelType: 'open', owned: false, avatarHash: null }],
+      subscribed: [{ channelId: CHANNEL_ID, name: 'Leaving', description: '', channelType: 'open', owned: false, avatarHash: null, channelEd25519PubB64: null }],
       feeds: { [CHANNEL_ID]: [{ id: `${CHANNEL_ID}:0`, from: 'A', body: 'hi', ts: 1, seqNum: 0 }] },
       heads: { [CHANNEL_ID]: { seqNum: 0, postHash: new Uint8Array(32) } },
     });
@@ -385,5 +429,131 @@ describe('createChannel with avatar (Slice 2)', () => {
     expect(res.ok).toBe(true);
     expect(res.channelId).toBeDefined();
     expect(useChannels.getState().subscribed.find((c) => c.channelId === res.channelId)).toBeDefined();
+  });
+});
+
+describe('createChannel — duplicate guard + failure feedback (prod dupes 2026-07-02)', () => {
+  it('refuses to create a second owned channel with the same name', async () => {
+    const first = await useChannels.getState().createChannel(
+      { name: 'testers', description: 'd', channelType: 'open' },
+      identity,
+    );
+    expect(first.ok).toBe(true);
+    (api.registerPublicChannel as jest.Mock).mockClear();
+
+    // Same name modulo whitespace/case — the classic re-tap after a silent failure.
+    const second = await useChannels.getState().createChannel(
+      { name: '  Testers ', description: 'd', channelType: 'open' },
+      identity,
+    );
+    expect(second).toEqual({ ok: false, error: 'duplicate_name' });
+    expect(api.registerPublicChannel).not.toHaveBeenCalled();
+  });
+
+  it('does not block joined (non-owned) channels with the same name', async () => {
+    useChannels.setState({
+      subscribed: [{ channelId: 'other', name: 'testers', description: '', channelType: 'open', owned: false, avatarHash: null, channelEd25519PubB64: null }],
+    });
+    const res = await useChannels.getState().createChannel(
+      { name: 'testers', description: 'd', channelType: 'open' },
+      identity,
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it('returns an error (never throws) and tombstones the orphan when local persistence fails after registration', async () => {
+    (store.saveChannelSecrets as jest.Mock).mockRejectedValueOnce(new Error('secure_store_unavailable'));
+
+    const res = await useChannels.getState().createChannel(
+      { name: 'orphan', description: 'd', channelType: 'open' },
+      identity,
+    );
+
+    // The relay call happened, but the result is a UI-visible error, not a throw.
+    expect(api.registerPublicChannel).toHaveBeenCalledTimes(1);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe('secure_store_unavailable');
+    // Best-effort rollback: the half-created channel is tombstoned off the directory.
+    expect(socket.pubchannelTombstone).toHaveBeenCalledTimes(1);
+    // And it never enters the local subscribed list.
+    expect(useChannels.getState().subscribed).toHaveLength(0);
+  });
+});
+
+describe('hydrateSubscribed (restore after app restart)', () => {
+  /** A real signed manifest whose channelId we can feed into the mocked index. */
+  function makeChannel(name: string) {
+    const id = generateChannelIdentity();
+    const manifest: ChannelManifestData = {
+      channelId: id.channelId, salt: id.salt, channelEd25519Pub: id.channelEd25519Pub,
+      name, description: 'restored desc', avatarHash: null, channelType: 0, createdAtHourMs: 1750000000000,
+      manifestSeq: 1, contentKeyHash: null, delegationsHash: new Uint8Array(32),
+      revokedHash: new Uint8Array(32), pinnedPostSeq: -1, discussionsEnabled: true,
+    };
+    const sig = signManifest(manifest, id.channelEd25519Secret);
+    const { encodeBase64 } = require('tweetnacl-util');
+    const blob = JSON.stringify({
+      channelId: id.channelId, salt: encodeBase64(id.salt), channelEd25519Pub: encodeBase64(id.channelEd25519Pub),
+      sig: encodeBase64(sig), name, description: 'restored desc', avatarHash: null,
+      channelType: 0, createdAtHourMs: 1750000000000, manifestSeq: 1, contentKeyHash: null,
+      delegationsHash: encodeBase64(new Uint8Array(32)), revokedHash: encodeBase64(new Uint8Array(32)),
+      pinnedPostSeq: -1, discussionsEnabled: true,
+    });
+    return { channelId: id.channelId, blob, pubB64: encodeBase64(id.channelEd25519Pub) as string };
+  }
+
+  it('rebuilds subscribed from the secret index + verified manifests (with pubkey + description)', async () => {
+    const ch = makeChannel('Restored');
+    (store.listChannelIds as jest.Mock).mockResolvedValue([ch.channelId]);
+    (store.isChannelOwned as jest.Mock).mockResolvedValue(true);
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: ch.blob });
+
+    await useChannels.getState().hydrateSubscribed();
+
+    const subs = useChannels.getState().subscribed;
+    expect(subs).toHaveLength(1);
+    expect(subs[0]).toMatchObject({
+      channelId: ch.channelId,
+      name: 'Restored',
+      description: 'restored desc',
+      owned: true,
+      channelEd25519PubB64: ch.pubB64,
+    });
+    expect(useChannels.getState().hydrated).toBe(true);
+  });
+
+  it('never trusts a manifest that fails signature verification', async () => {
+    const ch = makeChannel('Legit');
+    const tampered = ch.blob.replace('Legit', 'Fake!'); // breaks the signature
+    (store.listChannelIds as jest.Mock).mockResolvedValue([ch.channelId]);
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: tampered });
+
+    await useChannels.getState().hydrateSubscribed();
+
+    expect(useChannels.getState().subscribed).toHaveLength(0);
+    expect(useChannels.getState().hydrated).toBe(true);
+  });
+
+  it('keeps secrets and skips the channel when the manifest fetch fails (offline)', async () => {
+    (store.listChannelIds as jest.Mock).mockResolvedValue(['some-channel']);
+    (api.getPublicChannelManifest as jest.Mock).mockRejectedValue(new Error('network'));
+
+    await expect(useChannels.getState().hydrateSubscribed()).resolves.toBeUndefined();
+
+    expect(useChannels.getState().subscribed).toHaveLength(0);
+    expect(store.deleteChannel).not.toHaveBeenCalled(); // NEVER wipe keys on a flaky network
+  });
+
+  it('does not duplicate channels already in the subscribed list', async () => {
+    const ch = makeChannel('Dup');
+    useChannels.setState({
+      subscribed: [{ channelId: ch.channelId, name: 'Dup', description: '', channelType: 'open', owned: false, avatarHash: null, channelEd25519PubB64: null }],
+    });
+    (store.listChannelIds as jest.Mock).mockResolvedValue([ch.channelId]);
+
+    await useChannels.getState().hydrateSubscribed();
+
+    expect(useChannels.getState().subscribed).toHaveLength(1);
+    expect(api.getPublicChannelManifest).not.toHaveBeenCalled();
   });
 });

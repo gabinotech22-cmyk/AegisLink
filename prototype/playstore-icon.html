@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Play Store Icon</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; }
+    * { box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    // Reproduces the "hero icon" primary mark from prototype/App Icons.html
+    // (§01 · Marca principal) at Play Store's required 512x512, 32-bit PNG w/ alpha.
+    // Source treatment: radius 22.2% (iOS-style continuous corner), radial-gradient
+    // bg #1a2326 -> #06090a, hexagon mark gradient #7fffd0 -> #3dd098.
+    function Icon() {
+      const SIZE = 512;
+      const RADIUS = Math.round(SIZE * 0.222); // 114px
+      const MARK = Math.round(SIZE * (200 / 360)); // 284px, same proportion as prototype
+
+      return (
+        <div style={{
+          width: SIZE, height: SIZE, position: 'relative', overflow: 'hidden',
+          borderRadius: RADIUS,
+          background: 'radial-gradient(140% 110% at 30% 20%, #1a2326 0%, #06090a 70%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0, mixBlendMode: 'overlay',
+            background: `radial-gradient(120% 80% at 100% 100%, rgba(91,242,185,0.18), transparent 60%),
+                         radial-gradient(60% 40% at 0% 0%, rgba(255,255,255,0.05), transparent 70%)`,
+          }}/>
+          <svg width={MARK} height={MARK} viewBox="0 0 40 40" fill="none"
+               style={{ position: 'relative', filter: 'drop-shadow(0 0 34px rgba(91,242,185,0.4))' }}>
+            <defs>
+              <linearGradient id="hg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#7fffd0"/>
+                <stop offset="100%" stopColor="#3dd098"/>
+              </linearGradient>
+            </defs>
+            <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z"
+                  stroke="url(#hg)" strokeWidth="2.4" strokeLinejoin="round"/>
+            <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="url(#hg)"/>
+            <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="url(#hg)" opacity="0.6"/>
+          </svg>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<Icon/>);
+  </script>
+</body>
+</html>

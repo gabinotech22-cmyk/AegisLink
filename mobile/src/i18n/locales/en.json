@@ -1362,6 +1362,7 @@
     "encryptNote": "Posts are always encrypted (CEK). The relay never sees the content or who posts.",
     "create": "Create channel",
     "createFailed": "Couldn't create",
+    "duplicateName": "You already own a channel with this name.",
     "shareTitle": "Share your channel",
     "shareMessage": "Join my channel \"{{name}}\" on AegisLink",
     "sealed": "sealed",
@@ -1377,7 +1378,14 @@
     "scheduledQueueTitle": "SCHEDULED POSTS",
     "deleteScheduledTitle": "Delete scheduled post",
     "deleteScheduledDesc": "Delete this scheduled post? This cannot be undone.",
-    "draftChip": "DRAFT"
+    "draftChip": "DRAFT",
+    "applySentTitle": "Request sent",
+    "applySentDesc": "This channel requires approval. You will join automatically when the owner approves your request.",
+    "pendingApplications": "WAITING FOR APPROVAL",
+    "awaitingApproval": "awaiting approval",
+    "deletePostTitle": "Delete post",
+    "deletePostDesc": "Delete this post for everyone in the channel? This cannot be undone.",
+    "deletePostHint": "Long-press to delete post"
   },
   "channelInfo": {
     "title": "Channel info",
@@ -1400,6 +1408,21 @@
     "leaveChannel": "Leave channel",
     "leaveTitle": "Leave channel",
     "leaveDesc": "You will stop receiving posts and your keys will be deleted.",
-    "leaveConfirm": "Leave"
+    "leaveConfirm": "Leave",
+    "detailsSection": "Details",
+    "typeLabel": "Channel type",
+    "channelId": "Channel ID",
+    "copyId": "Copy channel ID",
+    "idCopiedTitle": "Copied",
+    "idCopiedDesc": "Channel ID copied to clipboard.",
+    "editSection": "Edit",
+    "editChannel": "Edit name & description",
+    "joinRequestsSection": "Join requests",
+    "noJoinRequests": "No pending requests.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approveRequest": "Approve request",
+    "rejectRequest": "Reject request",
+    "refreshRequests": "Refresh requests"
   }
 }

@@ -1362,6 +1362,7 @@
     "encryptNote": "Los posts se cifran siempre (CEK). El relay nunca ve el contenido ni quién publica.",
     "create": "Crear canal",
     "createFailed": "No se pudo crear",
+    "duplicateName": "Ya tienes un canal con este nombre.",
     "shareTitle": "Comparte tu canal",
     "shareMessage": "Únete a mi canal \"{{name}}\" en AegisLink",
     "sealed": "sellado",
@@ -1377,7 +1378,14 @@
     "scheduledQueueTitle": "POSTS PROGRAMADOS",
     "deleteScheduledTitle": "Eliminar post programado",
     "deleteScheduledDesc": "¿Eliminar este post programado? No se podrá deshacer.",
-    "draftChip": "BORRADOR"
+    "draftChip": "BORRADOR",
+    "applySentTitle": "Solicitud enviada",
+    "applySentDesc": "Este canal requiere aprobación. Te unirás automáticamente cuando el dueño apruebe tu solicitud.",
+    "pendingApplications": "ESPERANDO APROBACIÓN",
+    "awaitingApproval": "esperando aprobación",
+    "deletePostTitle": "Eliminar publicación",
+    "deletePostDesc": "¿Eliminar esta publicación para todos en el canal? No se puede deshacer.",
+    "deletePostHint": "Mantén pulsado para eliminar la publicación"
   },
   "channelInfo": {
     "title": "Info del canal",
@@ -1400,6 +1408,21 @@
     "leaveChannel": "Salir del canal",
     "leaveTitle": "Salir del canal",
     "leaveDesc": "Dejarás de recibir posts y tus claves serán eliminadas.",
-    "leaveConfirm": "Salir"
+    "leaveConfirm": "Salir",
+    "detailsSection": "Detalles",
+    "typeLabel": "Tipo de canal",
+    "channelId": "ID del canal",
+    "copyId": "Copiar ID del canal",
+    "idCopiedTitle": "Copiado",
+    "idCopiedDesc": "ID del canal copiado al portapapeles.",
+    "editSection": "Editar",
+    "editChannel": "Editar nombre y descripción",
+    "joinRequestsSection": "Solicitudes de acceso",
+    "noJoinRequests": "No hay solicitudes pendientes.",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "approveRequest": "Aprobar solicitud",
+    "rejectRequest": "Rechazar solicitud",
+    "refreshRequests": "Actualizar solicitudes"
   }
 }

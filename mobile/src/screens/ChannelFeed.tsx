@@ -70,6 +70,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
   const loadFeed = useChannels((s) => s.loadFeed);
   const sendPost = useChannels((s) => s.sendPost);
   const attachLive = useChannels((s) => s.attachLive);
+  const deletePost = useChannels((s) => s.deletePost);
 
   const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
 
@@ -153,17 +154,45 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheduled, channelId]);
 
+  // Owner moderation: long-press a post → signed pubchannel:delete, the relay
+  // fans it out so every subscriber drops the post (Phase 4).
+  const handleDeletePost = useCallback((post: FeedPost) => {
+    themedAlert(
+      i18nT('channels.deletePostTitle', 'Delete post'),
+      i18nT('channels.deletePostDesc', 'Delete this post for everyone in the channel? This cannot be undone.'),
+      [
+        { text: i18nT('common.cancel', 'Cancel'), style: 'cancel' },
+        {
+          text: i18nT('common.delete', 'Delete'),
+          style: 'destructive',
+          onPress: () => {
+            void deletePost(channelId, post.seqNum).then((res) => {
+              if (!res.ok) themedAlert(i18nT('common.error', 'Error'), res.error ?? i18nT('channels.unknownError'));
+            });
+          },
+        },
+      ],
+    );
+  }, [channelId, deletePost, i18nT]);
+
+  const isOwner = summary?.owned === true;
+
   const renderPost = ({ item }: { item: FeedPost }) => {
     const mine = item.from === identity?.aegisId;
     return (
-      <View style={{ paddingVertical: 12, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}>
+      <Pressable
+        onLongPress={isOwner ? () => handleDeletePost(item) : undefined}
+        delayLongPress={350}
+        accessibilityLabel={isOwner ? i18nT('channels.deletePostHint', 'Long-press to delete post') : undefined}
+        style={{ paddingVertical: 12, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}
+      >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 7 }}>
           <Avatar t={t} name={mine ? (summary?.name ?? '?') : item.from} seed={item.from} size={24} />
           <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>{mine ? i18nT('channels.you') : item.from}</Text>
           <Text style={{ marginLeft: 'auto', fontFamily: t.fontMono, fontSize: 9, color: t.textFaint }}>#{item.seqNum}</Text>
         </View>
         <Text style={{ fontFamily: t.font, fontSize: 13, lineHeight: 20, color: t.text }}>{item.body}</Text>
-      </View>
+      </Pressable>
     );
   };
 

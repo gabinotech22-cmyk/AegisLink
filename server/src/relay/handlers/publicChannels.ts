@@ -17,6 +17,8 @@ import {
   verifyTombstone,
   verifyDelete,
   verifyBan,
+  verifyPendingList,
+  verifyApprove,
   extractChannelSignerPub,
 } from '../../crypto/publicChannelKey.js';
 
@@ -35,6 +37,19 @@ function checkPubchannelMsgRateLimit(tokenHash: string): boolean {
   pubchannelMsgRateLimit.set(tokenHash, entry);
   evictExpired(pubchannelMsgRateLimit);
   return entry.count <= 120;
+}
+
+// Throttle for pubchannel:check_approval — 1 poll / 30s per (channelId:joinEpk)
+const approvalPollRateLimit = new Map<string, { count: number; reset: number }>();
+
+function checkApprovalPollRateLimit(key: string): boolean {
+  const now = Date.now();
+  const entry = approvalPollRateLimit.get(key) ?? { count: 0, reset: now + 30_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 30_000; }
+  entry.count++;
+  approvalPollRateLimit.set(key, entry);
+  evictExpired(approvalPollRateLimit);
+  return entry.count <= 1;
 }
 
 // Rate limit for pubchannel:join — keyed by token hash, 10/min
@@ -88,6 +103,32 @@ const PubChannelBanSchema = z.object({
   banRecord: z.string().min(1).max(4096),
   banSig: z.string().min(1).max(256),
 });
+
+// Phase 4 approval flow. Owner actions are signed with the channel key and
+// carry a timestamp (freshness window) — the relay verifies against the pubkey
+// extracted from the STORED manifest, never from the wire.
+const PubChannelPendingSchema = z.object({
+  channelId: z.string().min(1).max(64),
+  ts: z.number().int().positive(),
+  sig: z.string().min(1).max(256),
+});
+
+const PubChannelApproveSchema = z.object({
+  channelId: z.string().min(1).max(64),
+  joinEpk: z.string().min(1).max(128),
+  /** Owner-sealed capability envelope (opaque JSON). Empty string = reject. */
+  envelope: z.string().max(4096),
+  ts: z.number().int().positive(),
+  sig: z.string().min(1).max(256),
+});
+
+const PubChannelCheckApprovalSchema = z.object({
+  channelId: z.string().min(1).max(64),
+  joinEpk: z.string().min(1).max(128),
+});
+
+/** Freshness window for signed owner actions (anti-replay). */
+const OWNER_ACTION_MAX_SKEW_MS = 5 * 60_000;
 
 const PubChannelTombstoneSchema = z.object({
   channelId: z.string().min(1).max(64),
@@ -263,6 +304,92 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
       // Fan-out ban to room members
       io.to(`pubchannel:${channelId}`).emit('pubchannel:ban', { channelId, banRecord, banSig: banSigB64 });
       ack?.({ ok: true });
+    })();
+  });
+
+  // ── pubchannel:pending (Phase 4) — owner lists pending join requests ─────
+  socket.on('pubchannel:pending', (raw: unknown, ack?: (res: { ok: boolean; pending?: Array<{ joinEpk: string; createdAt: number }>; error?: string }) => void) => {
+    if (!PUBCHANNEL_FLAG()) { ack?.({ ok: false, error: 'feature_disabled' }); return; }
+    const parsed = PubChannelPendingSchema.safeParse(raw);
+    if (!parsed.success) { ack?.({ ok: false, error: 'invalid_payload' }); return; }
+    const { channelId, ts, sig: sigB64 } = parsed.data;
+
+    void (async () => {
+      if (Math.abs(Date.now() - ts) > OWNER_ACTION_MAX_SKEW_MS) { ack?.({ ok: false, error: 'stale_timestamp' }); return; }
+      const channel = await publicChannelRepo.get(channelId);
+      if (!channel) { ack?.({ ok: false, error: 'channel_not_found' }); return; }
+      const channelPub = extractChannelSignerPub(channel.signed_manifest_blob);
+      if (!channelPub) { ack?.({ ok: false, error: 'invalid_channel' }); return; }
+
+      let sig: Uint8Array;
+      try { sig = decodeBase64(sigB64); } catch { ack?.({ ok: false, error: 'invalid_payload' }); return; }
+      if (!verifyPendingList(channelId, ts, sig, channelPub)) {
+        ack?.({ ok: false, error: 'invalid_signature' });
+        return;
+      }
+
+      const rows = await publicChannelJoinRepo.listForChannel(channelId);
+      // Only un-answered requests are the owner's queue.
+      ack?.({
+        ok: true,
+        pending: rows
+          .filter((r) => !r.approval_envelope)
+          .map((r) => ({ joinEpk: r.join_pubkey_b64, createdAt: r.created_at })),
+      });
+    })();
+  });
+
+  // ── pubchannel:approve (Phase 4) — owner answers a pending request ───────
+  socket.on('pubchannel:approve', (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+    if (!PUBCHANNEL_FLAG()) { ack?.({ ok: false, error: 'feature_disabled' }); return; }
+    const parsed = PubChannelApproveSchema.safeParse(raw);
+    if (!parsed.success) { ack?.({ ok: false, error: 'invalid_payload' }); return; }
+    const { channelId, joinEpk, envelope, ts, sig: sigB64 } = parsed.data;
+
+    void (async () => {
+      if (Math.abs(Date.now() - ts) > OWNER_ACTION_MAX_SKEW_MS) { ack?.({ ok: false, error: 'stale_timestamp' }); return; }
+      const channel = await publicChannelRepo.get(channelId);
+      if (!channel) { ack?.({ ok: false, error: 'channel_not_found' }); return; }
+      const channelPub = extractChannelSignerPub(channel.signed_manifest_blob);
+      if (!channelPub) { ack?.({ ok: false, error: 'invalid_channel' }); return; }
+
+      let sig: Uint8Array;
+      try { sig = decodeBase64(sigB64); } catch { ack?.({ ok: false, error: 'invalid_payload' }); return; }
+      if (!verifyApprove(channelId, joinEpk, ts, sig, channelPub)) {
+        ack?.({ ok: false, error: 'invalid_signature' });
+        return;
+      }
+
+      if (envelope.length === 0) {
+        // Reject: drop the request. The applicant's poll returns not_found.
+        await publicChannelJoinRepo.remove(joinEpk, channelId);
+        ack?.({ ok: true });
+        return;
+      }
+      const updated = await publicChannelJoinRepo.setApprovalEnvelope(joinEpk, channelId, envelope);
+      ack?.(updated ? { ok: true } : { ok: false, error: 'request_not_found' });
+    })();
+  });
+
+  // ── pubchannel:check_approval (Phase 4) — applicant polls their request ──
+  socket.on('pubchannel:check_approval', (raw: unknown, ack?: (res: { ok: boolean; status?: 'pending' | 'approved' | 'not_found'; envelope?: string; error?: string }) => void) => {
+    if (!PUBCHANNEL_FLAG()) { ack?.({ ok: false, error: 'feature_disabled' }); return; }
+    const parsed = PubChannelCheckApprovalSchema.safeParse(raw);
+    if (!parsed.success) { ack?.({ ok: false, error: 'invalid_payload' }); return; }
+    const { channelId, joinEpk } = parsed.data;
+
+    void (async () => {
+      // Throttle: 1 poll / 30s per joinEpk (docs §10.2).
+      if (!checkApprovalPollRateLimit(`${channelId}:${joinEpk}`)) { ack?.({ ok: false, error: 'rate_limited' }); return; }
+
+      const row = await publicChannelJoinRepo.get(joinEpk, channelId);
+      if (!row) { ack?.({ ok: true, status: 'not_found' }); return; }
+      if (!row.approval_envelope) { ack?.({ ok: true, status: 'pending' }); return; }
+
+      // Claimed: hand out the sealed envelope once, then delete the row so the
+      // relay retains nothing about the (already anonymous) request.
+      await publicChannelJoinRepo.remove(joinEpk, channelId);
+      ack?.({ ok: true, status: 'approved', envelope: row.approval_envelope });
     })();
   });
 

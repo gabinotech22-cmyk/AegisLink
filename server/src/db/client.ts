@@ -730,6 +730,8 @@ export interface PublicChannelPendingJoinRow {
   channel_id: string;
   created_at: number;
   expires_at: number;
+  /** Phase 4: owner-sealed capability envelope (opaque). Null until approved. */
+  approval_envelope?: string | null;
 }
 
 /** Maximum pending join requests per channel (approval-gated). */
@@ -893,7 +895,7 @@ export const publicChannelJoinRepo = {
 
   async listForChannel(channelId: string): Promise<PublicChannelPendingJoinRow[]> {
     return dbAll<PublicChannelPendingJoinRow>(
-      `SELECT join_pubkey_b64, channel_id, created_at, expires_at
+      `SELECT join_pubkey_b64, channel_id, created_at, expires_at, approval_envelope
        FROM public_channel_pending_joins
        WHERE channel_id = ? AND expires_at > ?
        ORDER BY created_at ASC`,
@@ -907,6 +909,25 @@ export const publicChannelJoinRepo = {
       [joinPubkeyB64, channelId]
     );
     return result.changes > 0;
+  },
+
+  /** Phase 4: attach the owner-sealed capability envelope to a pending join. */
+  async setApprovalEnvelope(joinPubkeyB64: string, channelId: string, envelope: string): Promise<boolean> {
+    const result = await dbRun(
+      `UPDATE public_channel_pending_joins SET approval_envelope = ? WHERE join_pubkey_b64 = ? AND channel_id = ?`,
+      [envelope, joinPubkeyB64, channelId]
+    );
+    return result.changes > 0;
+  },
+
+  /** Phase 4: one pending row (applicant poll). */
+  async get(joinPubkeyB64: string, channelId: string): Promise<(PublicChannelPendingJoinRow & { approval_envelope?: string | null }) | undefined> {
+    return dbGet<PublicChannelPendingJoinRow & { approval_envelope?: string | null }>(
+      `SELECT join_pubkey_b64, channel_id, created_at, expires_at, approval_envelope
+       FROM public_channel_pending_joins
+       WHERE join_pubkey_b64 = ? AND channel_id = ? AND expires_at > ?`,
+      [joinPubkeyB64, channelId, Date.now()]
+    );
   },
 
   async pruneExpired(): Promise<number> {

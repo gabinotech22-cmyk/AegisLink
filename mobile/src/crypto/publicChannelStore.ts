@@ -136,6 +136,69 @@ export async function isChannelOwned(channelId: string): Promise<boolean> {
   return (await getChannelSigningKey(channelId)) !== null;
 }
 
+// ── approval-gated join requests (Phase 4) ──────────────────────────────────
+// The applicant's ephemeral X25519 secret must survive an app restart between
+// apply and approval; it is a key, so it lives here (never SQLite/AsyncStorage).
+
+const APPLY_PREFIX = 'aegis.pubchannel.applyesk.v1.';
+const APPLY_INDEX_KEY = 'aegis.pubchannel.applyindex.v1';
+
+export interface StoredJoinRequest {
+  channelId: string;
+  /** Channel name at apply time — display only. */
+  name: string;
+  epkB64: string;
+  eskB64: string;
+}
+
+async function loadApplyIndex(): Promise<string[]> {
+  const raw = await ss.get(APPLY_INDEX_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveJoinRequest(req: StoredJoinRequest): Promise<void> {
+  await ss.set(APPLY_PREFIX + req.channelId, JSON.stringify(req));
+  const index = await loadApplyIndex();
+  if (!index.includes(req.channelId)) {
+    await ss.set(APPLY_INDEX_KEY, JSON.stringify([...index, req.channelId]));
+  }
+}
+
+export async function getJoinRequest(channelId: string): Promise<StoredJoinRequest | null> {
+  const raw = await ss.get(APPLY_PREFIX + channelId);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as StoredJoinRequest;
+  } catch {
+    return null;
+  }
+}
+
+export async function listJoinRequests(): Promise<StoredJoinRequest[]> {
+  const index = await loadApplyIndex();
+  const out: StoredJoinRequest[] = [];
+  for (const channelId of index) {
+    const req = await getJoinRequest(channelId);
+    if (req) out.push(req);
+  }
+  return out;
+}
+
+export async function deleteJoinRequest(channelId: string): Promise<void> {
+  await ss.delete(APPLY_PREFIX + channelId);
+  const index = await loadApplyIndex();
+  const next = index.filter((c) => c !== channelId);
+  if (next.length !== index.length) {
+    await ss.set(APPLY_INDEX_KEY, JSON.stringify(next));
+  }
+}
+
 // ── lifecycle ────────────────────────────────────────────────────────────────
 
 /** Every channel we hold any secret for. */
@@ -160,4 +223,10 @@ export async function deleteAllChannels(): Promise<void> {
     await ss.delete(signKey(channelId));
   }
   await ss.delete(INDEX_KEY);
+  // Panic also drops any in-flight approval join requests.
+  const applyIndex = await loadApplyIndex();
+  for (const channelId of applyIndex) {
+    await ss.delete(APPLY_PREFIX + channelId);
+  }
+  await ss.delete(APPLY_INDEX_KEY);
 }

@@ -5,7 +5,7 @@
  * New + Join-by-link. All crypto lives in useChannels; this is pure UI.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, FlatList, Modal, TextInput, ActivityIndicator, ScrollView } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -16,6 +16,7 @@ import { themedAlert } from '../components/AlertHost';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
+import { logger } from '../utils/logger';
 import type { Theme } from '../theme/vault';
 
 /** Extracts each row into its own component so useChannelAvatar runs per-item. */
@@ -53,17 +54,56 @@ export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate
   const identity = useIdentity((s) => s.identity);
   const subscribed = useChannels((s) => s.subscribed);
   const joinViaInvite = useChannels((s) => s.joinViaInvite);
+  const hydrated = useChannels((s) => s.hydrated);
+  const hydrateSubscribed = useChannels((s) => s.hydrateSubscribed);
+  const pendingApplications = useChannels((s) => s.pendingApplications);
+  const checkApprovals = useChannels((s) => s.checkApprovals);
+
+  // Restore the subscribed list after an app restart (secrets survive in
+  // SecureStore but this store is memory-only). Best-effort: offline channels
+  // reappear on the next mount.
+  useEffect(() => {
+    if (!hydrated) {
+      hydrateSubscribed().catch((e: unknown) => {
+        logger.warn(`[ChannelsPanel] hydrate failed: ${(e as Error).message}`);
+      });
+    }
+  }, [hydrated, hydrateSubscribed]);
 
   const [joinOpen, setJoinOpen] = useState(false);
   const [inviteText, setInviteText] = useState('');
   const [joining, setJoining] = useState(false);
+
+  // Poll in-flight approval applications: once on mount and then every 35s
+  // (the relay throttles pubchannel:check_approval to 1/30s per request).
+  const pollBusy = useRef(false);
+  useEffect(() => {
+    if (!identity || pendingApplications.length === 0) return;
+    const tick = () => {
+      if (pollBusy.current) return;
+      pollBusy.current = true;
+      checkApprovals(identity)
+        .catch((e: unknown) => logger.warn(`[ChannelsPanel] approval poll failed: ${(e as Error).message}`))
+        .finally(() => { pollBusy.current = false; });
+    };
+    tick();
+    const id = setInterval(tick, 35_000);
+    return () => clearInterval(id);
+  }, [identity, pendingApplications.length, checkApprovals]);
 
   const handleJoin = async () => {
     if (!identity || !inviteText.trim() || joining) return;
     setJoining(true);
     try {
       const res = await joinViaInvite(inviteText.trim(), identity);
-      if (res.ok && res.channelId) {
+      if (res.ok && res.applied) {
+        setJoinOpen(false);
+        setInviteText('');
+        themedAlert(
+          i18nT('channels.applySentTitle', 'Request sent'),
+          i18nT('channels.applySentDesc', 'This channel requires approval. You will join automatically when the owner approves your request.'),
+        );
+      } else if (res.ok && res.channelId) {
         setJoinOpen(false);
         setInviteText('');
         onOpenChannel(res.channelId);
@@ -79,8 +119,35 @@ export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate
     <ChannelRow item={item} t={t} onPress={() => onOpenChannel(item.channelId)} />
   );
 
+  /* ---- Waiting-for-approval applications (shared between both views) ---- */
+  function renderPendingApplications() {
+    if (pendingApplications.length === 0) return null;
+    return (
+      <View>
+        <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1, paddingHorizontal: 15, paddingTop: 14, paddingBottom: 6 }}>
+          {i18nT('channels.pendingApplications', 'WAITING FOR APPROVAL')}
+        </Text>
+        {pendingApplications.map((a) => (
+          <View
+            key={a.channelId}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider, opacity: 0.75 }}
+          >
+            <Avatar t={t} name={a.name} seed={a.channelId} size={42} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text numberOfLines={1} style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}>{a.name}</Text>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, marginTop: 2 }}>
+                {i18nT('channels.awaitingApproval', 'awaiting approval')}
+              </Text>
+            </View>
+            <I.Timer size={16} color={t.textFaint} />
+          </View>
+        ))}
+      </View>
+    );
+  }
+
   /* ---- Empty state — channel-specific visual (Globe), same family as Chats/Groups ---- */
-  if (subscribed.length === 0) {
+  if (subscribed.length === 0 && pendingApplications.length === 0) {
     return (
       <View style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
@@ -197,6 +264,7 @@ export function ChannelsPanel({ bottomInset, onOpenChannel, onDiscover, onCreate
         keyExtractor={(c) => c.channelId}
         renderItem={renderRow}
         contentContainerStyle={{ paddingBottom: bottomInset + 16 }}
+        ListHeaderComponent={renderPendingApplications()}
         ListFooterComponent={
           <View style={{ marginTop: 16, gap: 8, paddingHorizontal: 15, paddingBottom: 8 }}>
             <Pressable

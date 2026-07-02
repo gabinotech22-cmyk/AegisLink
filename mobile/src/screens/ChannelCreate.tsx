@@ -13,7 +13,7 @@
  *           + Groups.tsx (pickAvatar + AvatarCropModal + groupImage).
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -56,6 +56,9 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
   const [type, setType] = useState<PublicChannelType>('open');
   const [busy, setBusy] = useState(false);
   const [invite, setInvite] = useState<string | null>(null);
+  // Synchronous re-entry guard: `busy` only blocks taps after the next render,
+  // so a fast double-tap fires handleCreate twice and creates two channels.
+  const inFlight = useRef(false);
 
   // Avatar state -- same pattern as Groups.tsx
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
@@ -116,7 +119,8 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
   }
 
   const handleCreate = async () => {
-    if (!identity || !canCreate) return;
+    if (!identity || !canCreate || inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       // Compute SHA-256 of the avatar file BEFORE passing to createChannel
@@ -139,9 +143,18 @@ export function ChannelCreateScreen({ onBack, onCreated }: Props) {
       if (res.ok && res.invite) {
         setInvite(res.invite);
       } else {
-        themedAlert(i18nT('channels.createFailed'), res.error ?? i18nT('channels.unknownError'));
+        const msg = res.error === 'duplicate_name'
+          ? i18nT('channels.duplicateName')
+          : res.error ?? i18nT('channels.unknownError');
+        themedAlert(i18nT('channels.createFailed'), msg);
       }
+    } catch (e) {
+      // Without this catch a thrown error is an unhandled rejection: the user
+      // sees nothing and re-taps — the exact bug that produced duplicate
+      // channels in the public directory.
+      themedAlert(i18nT('channels.createFailed'), e instanceof Error ? e.message : i18nT('channels.unknownError'));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };

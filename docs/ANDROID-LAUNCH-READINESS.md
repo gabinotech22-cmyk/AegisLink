@@ -55,8 +55,12 @@ Console y honestidad de claims.
       no se puede actualizar la app nunca más). Considerar Play App Signing.
 - [ ] **Data Safety form**: declarar honestamente la postura cero-metadatos (es una FORTALEZA —
       "no data collected"/"no data shared"). No exagerar.
-- [ ] **Store listing**: título, descripción corta/larga, **screenshots** (faltan — no hay assets
-      en el repo), **feature graphic**, ícono. Crear carpeta de assets.
+- [x] **Store listing — título/descripciones/screenshots/assets**: borrador
+      completo en `docs/PLAY-STORE-LISTING.md` (2026-07-01). 8 screenshots
+      (`promo-video/play-store/screenshots/*.png`), feature graphic 1024×500 y
+      ícono 512×512 con alpha, todos en `promo-video/play-store/`. **Falta
+      todavía**: hostear `privacy-policy.md` en URL pública (ver checklist en
+      ese doc).
 - [ ] **Privacy Policy URL pública**: `docs/privacy-policy.md` debe estar **hosteada** en una URL
       accesible (landing duckdns / GitHub Pages / dominio). Play exige URL, no un .md del repo.
 - [ ] Content rating questionnaire.

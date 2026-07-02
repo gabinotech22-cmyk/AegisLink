@@ -195,6 +195,7 @@ export function attachCallHandlers(): void {
   // Sealed-sender v2 invite: no `from` on the wire; openCallInvite recovers and
   // authenticates the caller and yields the per-call symmetric key.
   socket.on('call:invite:v2', async (msg: SealedInviteWire) => {
+    if (__DEV__) logger.warn('[calls] call:invite:v2 received callId=', msg.callId);
     const me = ownSealedKeys();
     if (!me) return;
     const opened = openCallInvite(
@@ -354,7 +355,9 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   // (hairpinning asymmetry). Direct/STUN connects bidirectionally; TURN stays as
   // fallback. Trade-off: peer IPs may be visible to each other on a direct path —
   // acceptable for a working first release; can re-tighten to relay-only later.
-  const turnConfig = await fetchTurnConfig(ownAegisId, false);
+  // Kicked off BEFORE the audio-mode setup so the network round-trip (up to 3s
+  // uncached) overlaps with it instead of adding to the pre-ring latency.
+  const turnConfigPromise = fetchTurnConfig(ownAegisId, false);
 
   // Set audio mode for call — earpiece for audio, speakerphone for video
   try {
@@ -367,6 +370,8 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
       playThroughEarpieceAndroid: media !== 'video',
     });
   } catch { /* expo-av not available in this context */ }
+
+  const turnConfig = await turnConfigPromise;
 
   // Reset the ICE queue for this new call
   resetIceQueue();
@@ -436,6 +441,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     }
     const sealed = sealCallInvite(recipientPub, me.aegisId, me.signingSecretKey, offer, Date.now(), callKey);
     socket.emit('call:invite:v2', { callId, to: toAegisId, media, ...sealed.wire });
+    if (__DEV__) logger.warn('[calls] call:invite:v2 emitted callId=', callId, 'socketConnected=', socket.connected);
   } else {
     // Sealed-sender impossible — the peer's box key or our own signing identity
     // is unavailable. Fail CLOSED: never fall back to a `from`-leaking v1 invite
@@ -473,7 +479,9 @@ export async function acceptCall(): Promise<void> {
   // (hairpinning asymmetry). Direct/STUN connects bidirectionally; TURN stays as
   // fallback. Trade-off: peer IPs may be visible to each other on a direct path —
   // acceptable for a working first release; can re-tighten to relay-only later.
-  const turnConfig = await fetchTurnConfig(ownAegisId, false);
+  // Kicked off BEFORE the audio-mode setup so the network round-trip overlaps
+  // with it instead of delaying the answer.
+  const turnConfigPromise = fetchTurnConfig(ownAegisId, false);
 
   // NOTE: do NOT resetIceQueue() here — the buffer was armed in the call:invite
   // handler and has been collecting the caller's trickled candidates during the
@@ -494,6 +502,8 @@ export async function acceptCall(): Promise<void> {
       playThroughEarpieceAndroid: media !== 'video',
     });
   } catch { /* expo-av not available in this context */ }
+
+  const turnConfig = await turnConfigPromise;
 
   // createPeer triggers getUserMedia, which is what actually requests/grants the
   // RECORD_AUDIO (and CAMERA) runtime permission on Android. The foreground
