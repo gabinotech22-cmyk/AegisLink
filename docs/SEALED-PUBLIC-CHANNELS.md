@@ -1,9 +1,10 @@
 # AegisLink — Canales Públicos Sellados (Sealed Public Channels)
 
-> Estado (2026-06-29): **EN CURSO.** Phase 0 (crypto), Phase 1 (server) y Phase 2
-> (mobile) ✅ hechas; Phase 3 (paridad desktop), Phase 4 (delegations + approval +
-> rekey), Phase 5 (comments/reactions/attachments) y Phase 6 (Tor) ⏳ pendientes.
-> Estado verificable por fase en §18. Flag `PUBLIC_CHANNELS=off` (feature dormida).
+> Estado (2026-07-02): **EN CURSO.** Phase 0 (crypto), Phase 1 (server), Phase 2
+> (mobile) y Phase 4 core (moderación + approval-gated joins) ✅ hechas; Phase 3
+> (paridad desktop), delegations/rekey (resto de Phase 4), Phase 5
+> (comments/reactions/attachments) y Phase 6 (Tor) ⏳ pendientes.
+> Estado verificable por fase en §18. Flag `PUBLIC_CHANNELS=on` en prod (PR #198).
 > Origen: feature request — canales públicos descubribles manteniendo sealed-sender.
 > Referencia primaria: **Zerion Channels Wire Protocol** (topología STAR sobre Tor,
 > hash chain, manifest firmado, editor delegations, HMAC challenge, approval-gated).
@@ -622,14 +623,21 @@ esté online.
 - Port verbatim de `channelKey.ts` (known-answer vectors).
 - Socket events desktop.
 
-### Phase 4 — Moderation + delegations (1 semana) — ⏳ PARCIAL
-> Hechos: `pubchannel:ban`, `pubchannel:delete`, `pubchannel:tombstone` (server+mobile).
-> Pendientes: editor delegations (`pubchannel:delegation`), flujo approval-gated completo
-> (`apply`/`check_approval`/`approval_response`), CEK rotation (`pubchannel:rekey`).
+### Phase 4 — Moderation + approval-gated joins — ✅ HECHO (core)
+> Evidencia (rama `feat/channels-phase4-moderation`): flujo approval completo
+> `pubchannel:apply` → `pubchannel:pending` → `pubchannel:approve` (capability
+> sellada a la joinEpk efímera vía box.before+HKDF+secretbox) → `pubchannel:check_approval`
+> (claim único, el relay borra la fila al entregarla); borrado de posts owner-firmado
+> con fan-out (`pubchannel:delete` + UI long-press); rename/edición de descripción
+> vía `PUT /public-channels/:id/manifest` (re-firma con seq estrictamente creciente,
+> binding de identidad channelId/salt/pubkey). Tests:
+> `server/src/__tests__/publicChannelsModeration.test.ts`,
+> `mobile/src/crypto/__tests__/publicChannelApproval.test.ts`.
+> Ya hechos antes: `pubchannel:ban`, `pubchannel:tombstone` (server+mobile).
 
-- Ban + CEK rotation.
-- Read-only, moderated, approval-gated.
-- Editor delegations con DelegationCert.
+Pendientes diferidos (no bloquean lanzamiento):
+- Editor delegations con DelegationCert (`pubchannel:delegation`).
+- CEK rotation (`pubchannel:rekey`).
 
 ### Phase 5 — Comments, reactions, attachments (1-2 semanas) — ⏳ PENDIENTE
 > Sin implementar (no existen eventos `comment`/`reaction`/`announce`/`get_attachment`).

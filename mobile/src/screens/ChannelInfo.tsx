@@ -9,8 +9,8 @@
  * Subscriber actions: share invite link, leave channel.
  */
 
-import { useState, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, Image } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import { View, Text, Pressable, ScrollView, Image, Modal, TextInput, ActivityIndicator } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
@@ -75,6 +75,9 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
   // Live summary from store
   const summary = useChannels((s) => s.subscribed.find((c) => c.channelId === channelId));
   const removeChannel = useChannels((s) => s.removeChannel);
+  const updateChannelInfo = useChannels((s) => s.updateChannelInfo);
+  const listPendingJoins = useChannels((s) => s.listPendingJoins);
+  const answerJoinRequest = useChannels((s) => s.answerJoinRequest);
 
   const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
 
@@ -83,7 +86,17 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
   const [signingKey, setSigningKey] = useState<Uint8Array | null>(null);
   const [capability, setCapability] = useState<Uint8Array | null>(null);
 
+  // Phase 4: owner edit + approval-gated join queue
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [pendingJoins, setPendingJoins] = useState<Array<{ joinEpk: string; createdAt: number }>>([]);
+  const [loadingJoins, setLoadingJoins] = useState(false);
+  const [answeringEpk, setAnsweringEpk] = useState<string | null>(null);
+
   const isOwner = summary?.owned === true;
+  const isApprovalChannel = summary?.channelType === 'approval';
 
   // Load signing key + capability on mount (async SecureStore)
   useEffect(() => {
@@ -94,6 +107,21 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
       setCapability(cap);
     })();
   }, [channelId]);
+
+  // Owner of an approval-gated channel: load the pending join queue.
+  const refreshPendingJoins = useCallback(async () => {
+    setLoadingJoins(true);
+    try {
+      const res = await listPendingJoins(channelId);
+      if (res.ok) setPendingJoins(res.pending ?? []);
+    } finally {
+      setLoadingJoins(false);
+    }
+  }, [channelId, listPendingJoins]);
+
+  useEffect(() => {
+    if (isOwner && isApprovalChannel && signingKey) void refreshPendingJoins();
+  }, [isOwner, isApprovalChannel, signingKey, refreshPendingJoins]);
 
   // ── Avatar pick (owner only) ───────────────────────────────────────────────
 
@@ -231,6 +259,49 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
         },
       ],
     );
+  }
+
+  // ── Edit name / description (owner — re-signs the manifest, Phase 4) ──────
+
+  function openEdit() {
+    if (!summary) return;
+    setEditName(summary.name);
+    setEditDesc(summary.description);
+    setEditOpen(true);
+  }
+
+  async function handleSaveEdit() {
+    if (savingEdit || !editName.trim()) return;
+    setSavingEdit(true);
+    try {
+      const res = await updateChannelInfo(channelId, { name: editName, description: editDesc });
+      if (res.ok) {
+        setEditOpen(false);
+      } else {
+        themedAlert(i18nT('common.error', 'Error'), res.error ?? i18nT('channels.unknownError'));
+      }
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  // ── Approve / reject a join request (owner, approval channels) ────────────
+
+  function handleAnswerJoin(joinEpk: string, approve: boolean) {
+    if (answeringEpk) return;
+    setAnsweringEpk(joinEpk);
+    void (async () => {
+      try {
+        const res = await answerJoinRequest(channelId, joinEpk, approve);
+        if (res.ok) {
+          setPendingJoins((prev) => prev.filter((p) => p.joinEpk !== joinEpk));
+        } else {
+          themedAlert(i18nT('common.error', 'Error'), res.error ?? i18nT('channels.unknownError'));
+        }
+      } finally {
+        setAnsweringEpk(null);
+      }
+    })();
   }
 
   // ── Build invite link ──────────────────────────────────────────────────────
@@ -414,6 +485,110 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
           </Pressable>
         </Section>
 
+        {/* Owner: edit name / description (re-signed manifest) */}
+        {isOwner && signingKey && (
+          <Section t={t} label={i18nT('channelInfo.editSection', 'EDIT').toUpperCase()}>
+            <Pressable
+              onPress={openEdit}
+              accessibilityLabel={i18nT('channelInfo.editChannel', 'Edit name & description')}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 14,
+                paddingHorizontal: 16, paddingVertical: 14,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <I.Type size={18} color={t.accent} />
+              <Text style={{ flex: 1, fontFamily: t.font, fontSize: 15, color: t.accent, fontWeight: '500' }}>
+                {i18nT('channelInfo.editChannel', 'Edit name & description')}
+              </Text>
+            </Pressable>
+          </Section>
+        )}
+
+        {/* Owner of an approval channel: pending join requests queue */}
+        {isOwner && signingKey && isApprovalChannel && (
+          <Section t={t} label={`${i18nT('channelInfo.joinRequestsSection', 'JOIN REQUESTS').toUpperCase()}${pendingJoins.length > 0 ? ` · ${pendingJoins.length}` : ''}`}>
+            {loadingJoins && pendingJoins.length === 0 ? (
+              <View style={{ padding: 16, alignItems: 'center' }}>
+                <ActivityIndicator color={t.accent} />
+              </View>
+            ) : pendingJoins.length === 0 ? (
+              <View style={{ paddingHorizontal: 16, paddingVertical: 14 }}>
+                <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>
+                  {i18nT('channelInfo.noJoinRequests', 'No pending requests.')}
+                </Text>
+              </View>
+            ) : (
+              pendingJoins.map((p, idx) => (
+                <View
+                  key={p.joinEpk}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 10,
+                    paddingHorizontal: 16, paddingVertical: 12,
+                    borderTopWidth: idx === 0 ? 0 : 1, borderTopColor: t.divider,
+                  }}
+                >
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text numberOfLines={1} style={{ fontFamily: t.fontMono, fontSize: 11, color: t.text }}>
+                      {p.joinEpk.slice(0, 16)}…
+                    </Text>
+                    <Text style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 2 }}>
+                      {new Date(p.createdAt).toLocaleString()}
+                    </Text>
+                  </View>
+                  {answeringEpk === p.joinEpk ? (
+                    <ActivityIndicator color={t.accent} />
+                  ) : (
+                    <>
+                      <Pressable
+                        onPress={() => handleAnswerJoin(p.joinEpk, false)}
+                        accessibilityLabel={i18nT('channelInfo.rejectRequest', 'Reject request')}
+                        hitSlop={6}
+                        style={({ pressed }) => ({
+                          paddingHorizontal: 12, paddingVertical: 7, borderRadius: 99,
+                          borderWidth: 1, borderColor: `${t.danger}66`,
+                          opacity: pressed ? 0.7 : 1,
+                        })}
+                      >
+                        <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.danger }}>
+                          {i18nT('channelInfo.reject', 'Reject')}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleAnswerJoin(p.joinEpk, true)}
+                        accessibilityLabel={i18nT('channelInfo.approveRequest', 'Approve request')}
+                        hitSlop={6}
+                        style={({ pressed }) => ({
+                          paddingHorizontal: 12, paddingVertical: 7, borderRadius: 99,
+                          backgroundColor: t.accent,
+                          opacity: pressed ? 0.85 : 1,
+                        })}
+                      >
+                        <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.accentInk }}>
+                          {i18nT('channelInfo.approve', 'Approve')}
+                        </Text>
+                      </Pressable>
+                    </>
+                  )}
+                </View>
+              ))
+            )}
+            <Pressable
+              onPress={() => void refreshPendingJoins()}
+              accessibilityLabel={i18nT('channelInfo.refreshRequests', 'Refresh requests')}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                paddingVertical: 11, borderTopWidth: 1, borderTopColor: t.divider,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 0.5 }}>
+                {i18nT('channelInfo.refreshRequests', 'Refresh requests').toUpperCase()}
+              </Text>
+            </Pressable>
+          </Section>
+        )}
+
         {/* Owner avatar actions */}
         {isOwner && signingKey && (
           <Section t={t} label={i18nT('channelInfo.avatarSection', 'AVATAR').toUpperCase()}>
@@ -525,6 +700,46 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
         onCancel={() => setCropSource(null)}
         onConfirm={(uri) => { void handleConfirmAvatar(uri); }}
       />
+
+      {/* Edit name/description modal (owner) */}
+      <Modal visible={editOpen} transparent animationType="fade" onRequestClose={() => setEditOpen(false)}>
+        <Pressable onPress={() => setEditOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 }}>
+          <Pressable onPress={() => {}} style={{ backgroundColor: t.surface, borderRadius: t.radius, padding: 18, borderWidth: 1, borderColor: t.border }}>
+            <Text style={{ fontFamily: t.fontDisplay, fontSize: 18, color: t.text, marginBottom: 12 }}>
+              {i18nT('channelInfo.editChannel', 'Edit name & description')}
+            </Text>
+            <TextInput
+              value={editName}
+              onChangeText={setEditName}
+              placeholder={i18nT('channels.namePlaceholder', 'Channel name')}
+              placeholderTextColor={t.textFaint}
+              maxLength={64}
+              style={{ backgroundColor: t.surface2, color: t.text, borderRadius: t.radiusS, paddingVertical: 12, paddingHorizontal: 14, fontFamily: t.font, fontSize: 15 }}
+            />
+            <TextInput
+              value={editDesc}
+              onChangeText={setEditDesc}
+              placeholder={i18nT('channels.descPlaceholder', 'Description (optional)')}
+              placeholderTextColor={t.textFaint}
+              multiline
+              maxLength={280}
+              style={{ backgroundColor: t.surface2, color: t.text, borderRadius: t.radiusS, paddingVertical: 12, paddingHorizontal: 14, fontFamily: t.font, fontSize: 14, marginTop: 10, minHeight: 72, textAlignVertical: 'top' }}
+            />
+            <Pressable
+              onPress={() => void handleSaveEdit()}
+              disabled={!editName.trim() || savingEdit}
+              accessibilityLabel={i18nT('common.save', 'Save')}
+              style={{ marginTop: 14, backgroundColor: editName.trim() ? t.accent : t.surface2, borderRadius: t.radius, paddingVertical: 13, alignItems: 'center' }}
+            >
+              {savingEdit ? <ActivityIndicator color={t.accentInk} /> : (
+                <Text style={{ fontFamily: t.font, fontWeight: '700', color: editName.trim() ? t.accentInk : t.textFaint }}>
+                  {i18nT('common.save', 'Save')}
+                </Text>
+              )}
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Share link sheet */}
       <ShareLinkSheet

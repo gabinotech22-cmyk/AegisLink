@@ -302,6 +302,102 @@ export function verifyBan(channelId: string, banRecord: string, sig: Uint8Array,
 }
 
 // ---------------------------------------------------------------------------
+// §10.2 — Approval-gated join (Phase 4)
+//
+// Owner-signed relay actions (pending list / approve) + the capability
+// envelope: the owner seals the 32-byte capability to the applicant's
+// ephemeral X25519 pubkey via box.before + HKDF + secretbox (same primitive
+// family as wrapCEK — the doc's AES-GCM is realized as XSalsa20-Poly1305,
+// matching every other envelope in the app).
+// ---------------------------------------------------------------------------
+
+const PENDING_LIST_LABEL = encoder.encode('aegislink/CHANNEL_PENDING_LIST');
+const APPROVE_LABEL = encoder.encode('aegislink/CHANNEL_APPROVE');
+const APPROVAL_WRAP_LABEL = 'aegislink/APPROVAL_WRAP';
+
+function pendingListSignedInput(channelId: string, ts: number): Uint8Array {
+  return concat([PENDING_LIST_LABEL, decodeBase64(channelId), u64be(ts)]);
+}
+
+/** Sign a pending-joins listing request (owner-only read). */
+export function signPendingList(channelId: string, ts: number, channelEd25519Secret: Uint8Array): Uint8Array {
+  return nacl.sign.detached(pendingListSignedInput(channelId, ts), channelEd25519Secret);
+}
+
+function approveSignedInput(channelId: string, joinEpkB64: string, ts: number): Uint8Array {
+  return concat([APPROVE_LABEL, decodeBase64(channelId), encoder.encode(joinEpkB64), u64be(ts)]);
+}
+
+/** Sign an approve/reject decision for a pending joinEpk. */
+export function signApprove(channelId: string, joinEpkB64: string, ts: number, channelEd25519Secret: Uint8Array): Uint8Array {
+  return nacl.sign.detached(approveSignedInput(channelId, joinEpkB64, ts), channelEd25519Secret);
+}
+
+/** Applicant side: fresh ephemeral X25519 keypair for one join request. */
+export function generateJoinEphemeral(): nacl.BoxKeyPair {
+  return nacl.box.keyPair();
+}
+
+export interface ApprovalEnvelope {
+  adminEpkB64: string;
+  ivB64: string;
+  wrappedB64: string;
+}
+
+/** Derive the approval wrap key from an X25519 shared secret (zeroize after). */
+function deriveApprovalWrapKey(shared: Uint8Array, channelId: string): Uint8Array {
+  return hkdf(sha256, shared, decodeBase64(channelId), encoder.encode(APPROVAL_WRAP_LABEL), 32);
+}
+
+/** Owner: seal the capability to the applicant's joinEpk (docs §10.2 step 6). */
+export function sealApprovalCapability(
+  capability: Uint8Array,
+  joinEpkB64: string,
+  channelId: string,
+): ApprovalEnvelope {
+  if (capability.length !== 32) throw new Error('sealApprovalCapability: capability must be 32 bytes');
+  const joinEpk = decodeBase64(joinEpkB64);
+  if (joinEpk.length !== nacl.box.publicKeyLength) throw new Error('sealApprovalCapability: bad joinEpk');
+  const adminEph = nacl.box.keyPair();
+  const shared = nacl.box.before(joinEpk, adminEph.secretKey);
+  const wrapKey = deriveApprovalWrapKey(shared, channelId);
+  try {
+    const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+    const wrapped = nacl.secretbox(capability, nonce, wrapKey);
+    return { adminEpkB64: encodeBase64(adminEph.publicKey), ivB64: encodeBase64(nonce), wrappedB64: encodeBase64(wrapped) };
+  } finally {
+    // golden rule #9 — zeroize DH output + derived key + ephemeral secret
+    shared.fill(0);
+    wrapKey.fill(0);
+    adminEph.secretKey.fill(0);
+  }
+}
+
+/** Applicant: open the sealed capability with the join ephemeral secret. */
+export function openApprovalCapability(
+  envelope: ApprovalEnvelope,
+  joinEskSecret: Uint8Array,
+  channelId: string,
+): Uint8Array | null {
+  let shared: Uint8Array | null = null;
+  let wrapKey: Uint8Array | null = null;
+  try {
+    const adminEpk = decodeBase64(envelope.adminEpkB64);
+    if (adminEpk.length !== nacl.box.publicKeyLength) return null;
+    shared = nacl.box.before(adminEpk, joinEskSecret);
+    wrapKey = deriveApprovalWrapKey(shared, channelId);
+    const capability = nacl.secretbox.open(decodeBase64(envelope.wrappedB64), decodeBase64(envelope.ivB64), wrapKey);
+    if (!capability || capability.length !== 32) return null;
+    return capability;
+  } catch {
+    return null;
+  } finally {
+    shared?.fill(0);
+    wrapKey?.fill(0);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // §6 — Post encryption + hash chain
 // ---------------------------------------------------------------------------
 

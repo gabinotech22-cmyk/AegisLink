@@ -327,6 +327,8 @@ export async function initPgSchema(): Promise<void> {
   // is wrapped in a DO block so it's a no-op when the column already exists.
   const pgMigrations = [
     `ALTER TABLE public_channels ADD COLUMN content_key_envelope TEXT NOT NULL DEFAULT ''`, // sealed channels CEK envelope
+    `ALTER TABLE public_channel_pending_joins ADD COLUMN approval_envelope TEXT`, // Phase 4 approval flow: owner-sealed capability
+
     `ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`,
     `ALTER TABLE prekeys_onetime ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default'`, // M-2
 

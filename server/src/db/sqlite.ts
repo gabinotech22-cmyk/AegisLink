@@ -382,6 +382,9 @@ export function initSqliteSchema(db: DatabaseSync) {
   // Sealed public channels: the wrapped CEK envelope a joiner unwraps with the
   // capability (docs §4.2/§10.1). Added after Phase 1 shipped the table.
   try { db.exec(`ALTER TABLE public_channels ADD COLUMN content_key_envelope TEXT NOT NULL DEFAULT '';`); } catch { /* exists */ }
+  // Phase 4 approval flow: the owner-sealed capability envelope the applicant
+  // claims via pubchannel:check_approval. Opaque to the relay.
+  try { db.exec(`ALTER TABLE public_channel_pending_joins ADD COLUMN approval_envelope TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages DROP COLUMN sender;`); } catch { /* absent */ }
   // C-3 (security roadmap Ola 2): the SenderKey chain key must never be persisted

@@ -1329,7 +1329,14 @@
     "scheduledQueueTitle": "POST PROGRAMMATI",
     "deleteScheduledTitle": "Elimina post programmato",
     "deleteScheduledDesc": "Eliminare questo post programmato? Non si potrà annullare.",
-    "draftChip": "BOZZA"
+    "draftChip": "BOZZA",
+    "applySentTitle": "Richiesta inviata",
+    "applySentDesc": "Questo canale richiede approvazione. Ti unirai automaticamente quando il proprietario approverà la tua richiesta.",
+    "pendingApplications": "IN ATTESA DI APPROVAZIONE",
+    "awaitingApproval": "in attesa di approvazione",
+    "deletePostTitle": "Elimina post",
+    "deletePostDesc": "Eliminare questo post per tutti nel canale? Non può essere annullato.",
+    "deletePostHint": "Tieni premuto per eliminare il post"
   },
   "channelInfo": {
     "title": "Info canale",
@@ -1358,6 +1365,15 @@
     "channelId": "ID del canale",
     "copyId": "Copia ID del canale",
     "idCopiedTitle": "Copiato",
-    "idCopiedDesc": "ID del canale copiato negli appunti."
+    "idCopiedDesc": "ID del canale copiato negli appunti.",
+    "editSection": "Modifica",
+    "editChannel": "Modifica nome e descrizione",
+    "joinRequestsSection": "Richieste di accesso",
+    "noJoinRequests": "Nessuna richiesta in sospeso.",
+    "approve": "Approva",
+    "reject": "Rifiuta",
+    "approveRequest": "Approva richiesta",
+    "rejectRequest": "Rifiuta richiesta",
+    "refreshRequests": "Aggiorna richieste"
   }
 }

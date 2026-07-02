@@ -110,6 +110,21 @@ export function getPublicChannelManifest(channelId: string): Promise<{ signed_ma
   );
 }
 
+/**
+ * Replace a channel's signed manifest (owner rename/edit). The relay verifies
+ * the new blob against the STORED channel key and requires manifestSeq to
+ * strictly increase.
+ */
+export function updatePublicChannelManifest(
+  channelId: string,
+  signedManifestBlob: string,
+): Promise<{ ok: boolean; manifestSeq: number }> {
+  return request<{ ok: boolean; manifestSeq: number }>(
+    `/public-channels/${encodeURIComponent(channelId)}/manifest`,
+    { method: 'PUT', body: JSON.stringify({ signedManifestBlob }) },
+  );
+}
+
 /** Register a new channel (manifest signature is re-verified server-side). */
 export function registerPublicChannel(body: RegisterChannelRequest): Promise<{ channelId: string }> {
   return request<{ channelId: string }>('/public-channels', {

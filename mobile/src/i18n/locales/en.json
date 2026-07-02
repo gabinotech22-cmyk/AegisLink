@@ -1378,7 +1378,14 @@
     "scheduledQueueTitle": "SCHEDULED POSTS",
     "deleteScheduledTitle": "Delete scheduled post",
     "deleteScheduledDesc": "Delete this scheduled post? This cannot be undone.",
-    "draftChip": "DRAFT"
+    "draftChip": "DRAFT",
+    "applySentTitle": "Request sent",
+    "applySentDesc": "This channel requires approval. You will join automatically when the owner approves your request.",
+    "pendingApplications": "WAITING FOR APPROVAL",
+    "awaitingApproval": "awaiting approval",
+    "deletePostTitle": "Delete post",
+    "deletePostDesc": "Delete this post for everyone in the channel? This cannot be undone.",
+    "deletePostHint": "Long-press to delete post"
   },
   "channelInfo": {
     "title": "Channel info",
@@ -1407,6 +1414,15 @@
     "channelId": "Channel ID",
     "copyId": "Copy channel ID",
     "idCopiedTitle": "Copied",
-    "idCopiedDesc": "Channel ID copied to clipboard."
+    "idCopiedDesc": "Channel ID copied to clipboard.",
+    "editSection": "Edit",
+    "editChannel": "Edit name & description",
+    "joinRequestsSection": "Join requests",
+    "noJoinRequests": "No pending requests.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approveRequest": "Approve request",
+    "rejectRequest": "Reject request",
+    "refreshRequests": "Refresh requests"
   }
 }
