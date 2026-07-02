@@ -114,6 +114,7 @@ interface FakeSocket {
   on: (event: string, cb: Function) => FakeSocket;
   off: () => FakeSocket;
   disconnect: jest.Mock;
+  timeout: (ms: number) => { emit: (event: string, payload: unknown, cb: (err: Error | null, ack?: unknown) => void) => void };
   auth: { aegisId: string };
   pendingPrekeyAck?: AckCb;
 }
@@ -134,6 +135,16 @@ jest.mock('socket.io-client', () => ({
         return this;
       },
       disconnect: jest.fn(),
+      // socket.io v4 `.timeout(ms).emit(...)`: adapt the (err, ack) callback
+      // to this mock's plain ack-style emit.
+      timeout(ms: number) {
+        void ms;
+        return {
+          emit: (event: string, payload: unknown, cb: (err: Error | null, ack?: unknown) => void) => {
+            this.emit(event, payload, (ack: unknown) => cb(null, ack));
+          },
+        };
+      },
       emit: jest.fn((event: string, _payload: unknown, ack?: AckCb) => {
         if (event === 'prekeys:fetch' && typeof ack === 'function') {
           const bundle = (mockFakeSocket as unknown as { nextBundle?: unknown }).nextBundle;
