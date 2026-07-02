@@ -18,6 +18,8 @@
  * in the plain-Node vitest environment. Twin of mobile/src/socket/ratchetSerde.ts.
  */
 
+import type { RatchetState } from '../crypto/signal/ratchet';
+
 export function isBufferShape(o: unknown): o is { type: 'Buffer'; data: number[] } {
   return (
     typeof o === 'object' &&
@@ -71,4 +73,56 @@ export function reviveMkSkipped(raw: unknown): Map<string, Uint8Array> {
     if (bytes) out.set(k, bytes);
   }
   return out;
+}
+
+// ─── Whole-state (de)serialization — SINGLE point of truth ───────────────────
+//
+// Every save/load of a ratchet session MUST go through these two functions.
+// Hand-rolled copies have burned us twice: a save whitelist that omitted the
+// hybrid PQ fields (PQs/PQr/pqSendCt) silently degraded every reloaded hybrid
+// session to classic — the next inbound chain turn derived the root WITHOUT
+// the PQ secret (permanent one-way desync), and our own chain turns stopped
+// advertising PQ material (rejected by the peer as a downgrade attack).
+
+/** Serialize the minimal next-state of a ratchet session for persistence. */
+export function serializeRatchetState(state: RatchetState): string {
+  return JSON.stringify({
+    RK: state.RK,
+    DHs: state.DHs,
+    DHr: state.DHr,
+    CKs: state.CKs,
+    CKr: state.CKr,
+    Ns: state.Ns,
+    Nr: state.Nr,
+    PN: state.PN,
+    // Hybrid PQ ratchet (R1) material — REQUIRED for hybrid sessions.
+    PQs: state.PQs,
+    PQr: state.PQr,
+    pqSendCt: state.pqSendCt,
+    MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
+    x3dhInit: state.x3dhInit,
+    createdAtMs: state.createdAtMs,
+  });
+}
+
+/** Parse persisted JSON back into a live RatchetState (bytes revived). */
+export function reviveRatchetState(json: string): RatchetState {
+  const s = JSON.parse(json);
+  s.RK = reviveBytes(s.RK);
+  s.CKs = reviveBytes(s.CKs);
+  s.CKr = reviveBytes(s.CKr);
+  s.DHr = reviveBytes(s.DHr);
+  s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
+  s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
+  // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
+  // DHs/DHr — without this, a reloaded hybrid session has plain JSON
+  // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
+  if (s.PQs) {
+    s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
+    s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
+  }
+  s.PQr = reviveBytes(s.PQr);
+  s.pqSendCt = reviveBytes(s.pqSendCt);
+  s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+  return s as RatchetState;
 }

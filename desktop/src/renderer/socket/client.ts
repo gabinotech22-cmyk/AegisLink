@@ -25,7 +25,7 @@ import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailbo
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { spkRotationDecision, spkPruneTargetKeyId } from './spkRotation';
-import { reviveBytes, reviveMkSkipped } from './ratchetSerde';
+import { serializeRatchetState, reviveRatchetState } from './ratchetSerde';
 import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
@@ -832,23 +832,7 @@ async function getOrCreateSessionLocked(
 ): Promise<RatchetState> {
   const existingJson = await loadRatchetSession(contactAegisId);
   if (existingJson) {
-    const s = JSON.parse(existingJson);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(existingJson);
     return s as RatchetState;
   }
 
@@ -931,20 +915,9 @@ async function getOrCreateSessionLocked(
 
 async function saveSessionState(aegisId: string, state: RatchetState) {
   trimOldSkippedKeys(state, MAX_SKIPPED_KEYS);
-  const s = {
-    RK: state.RK,
-    DHs: state.DHs,
-    DHr: state.DHr,
-    CKs: state.CKs,
-    CKr: state.CKr,
-    Ns: state.Ns,
-    Nr: state.Nr,
-    PN: state.PN,
-    MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
-    x3dhInit: state.x3dhInit,
-    createdAtMs: state.createdAtMs,
-  };
-  await saveRatchetSession(aegisId, JSON.stringify(s));
+  // serializeRatchetState is the single point of truth for the field list
+  // (hand-rolled copies dropped the PQ fields once already — see ratchetSerde.ts).
+  await saveRatchetSession(aegisId, serializeRatchetState(state));
 }
 
 // ─── Ratchet desync auto-recovery (ported from mobile/src/socket/client.ts) ──
@@ -993,23 +966,7 @@ async function sendNudgeOverExistingSession(
   if (!existingJson) return false;
   let session: RatchetState;
   try {
-    const s = JSON.parse(existingJson);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(existingJson);
     session = s as RatchetState;
   } catch {
     return false;
@@ -1175,23 +1132,7 @@ async function decryptAndAppendLocked(
   }
 
   if (existingJson && !parsed.x3dh) {
-    const s = JSON.parse(existingJson);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(existingJson);
     ratchetState = s;
   } else {
     if (!parsed.x3dh) {
@@ -1737,23 +1678,7 @@ async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
   try {
     const raw = await SecureStore.getItemAsync(SECURE_SELF_RATCHET_KEY(myAegisId));
     if (!raw) return null;
-    const s = JSON.parse(raw);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(raw);
     return s as RatchetState;
   } catch (e) {
     if (DEV) logger.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
