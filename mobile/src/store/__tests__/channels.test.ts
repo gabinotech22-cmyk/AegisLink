@@ -338,7 +338,7 @@ describe('removeChannel (leave)', () => {
     // Seed state with a subscribed channel + feed + head.
     useChannels.setState({
       subscribed: [{ channelId: CHANNEL_ID, name: 'Leaving', description: '', channelType: 'open', owned: false, avatarHash: null, channelEd25519PubB64: null }],
-      feeds: { [CHANNEL_ID]: [{ id: `${CHANNEL_ID}:0`, from: 'A', body: 'hi', ts: 1, seqNum: 0 }] },
+      feeds: { [CHANNEL_ID]: [{ id: `${CHANNEL_ID}:0`, from: 'A', body: 'hi', senderName: null, ts: 1, seqNum: 0 }] },
       heads: { [CHANNEL_ID]: { seqNum: 0, postHash: new Uint8Array(32) } },
     });
 
