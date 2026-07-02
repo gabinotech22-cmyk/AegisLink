@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — Feature Graphic</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=EB+Garamond:ital,wght@0,500;1,500&display=swap"/>
+  <style>
+    html, body { margin: 0; padding: 0; background: #0a0e0d; }
+    * { box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
+
+  <script type="text/babel" src="theme.jsx"></script>
+  <script type="text/babel" src="logo.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { VAULT, AegisMark, AegisWord } = window;
+
+    // Play Store feature graphic — fixed spec: 1024x500, no alpha channel.
+    function FeatureGraphic() {
+      const t = VAULT;
+      const chip = (label) => (
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 7,
+          fontFamily: t.fontMono, fontSize: 13, fontWeight: 600,
+          color: t.accent, letterSpacing: '0.08em',
+          padding: '5px 12px', borderRadius: 999,
+          border: `1px solid ${t.accent}55`, background: `${t.accent}0f`,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: t.accent }}/>
+          {label}
+        </div>
+      );
+
+      return (
+        <div style={{
+          width: 1024, height: 500, position: 'relative', overflow: 'hidden',
+          background: `linear-gradient(120deg, ${t.bg} 0%, #0d1513 45%, #0a1210 100%)`,
+          fontFamily: t.font,
+        }}>
+          {/* ambient glows */}
+          <div style={{
+            position: 'absolute', top: -220, right: -120, width: 620, height: 620, borderRadius: '50%',
+            background: `radial-gradient(circle, ${t.accent}26 0%, transparent 68%)`,
+          }}/>
+          <div style={{
+            position: 'absolute', bottom: -260, left: -140, width: 560, height: 560, borderRadius: '50%',
+            background: `radial-gradient(circle, ${t.accent}14 0%, transparent 70%)`,
+          }}/>
+
+          {/* faint hex mark watermark, right side */}
+          <svg width="440" height="440" viewBox="0 0 40 40" fill="none"
+               style={{ position: 'absolute', right: -70, top: '50%', transform: 'translateY(-50%)', opacity: 0.06 }}>
+            <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" stroke={t.text} strokeWidth="1"/>
+            <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill={t.text}/>
+            <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill={t.text} opacity="0.6"/>
+          </svg>
+
+          {/* content */}
+          <div style={{
+            position: 'relative', zIndex: 2, height: '100%',
+            display: 'flex', flexDirection: 'column', justifyContent: 'center',
+            padding: '0 64px', maxWidth: 760,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
+              <AegisMark t={t} size={54}/>
+              <AegisWord t={t} size={40}/>
+            </div>
+
+            <div style={{
+              fontFamily: '"EB Garamond", serif', fontStyle: 'italic', fontWeight: 500,
+              fontSize: 42, lineHeight: 1.14, letterSpacing: '-0.01em',
+              color: t.text, marginBottom: 26,
+            }}>
+              Mensajería cifrada,<br/>anónima por defecto.
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {chip('CERO METADATOS')}
+              {chip('E2EE · DOUBLE RATCHET')}
+              {chip('CÓDIGO ABIERTO')}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<FeatureGraphic/>);
+  </script>
+</body>
+</html>
