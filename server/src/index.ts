@@ -143,10 +143,28 @@ const io = new SocketServer(httpServer, {
   // the server notices, the recipient still counts as "online" so messages are
   // delivered to a dead socket instead of triggering an FCM push wake-up (the
   // "ghost socket" — messages/notifications go missing after backgrounding).
-  // 15s ping + 10s timeout shrinks that window to ~25s while staying generous
-  // for mobile/carrier jitter (a healthy client pongs in well under a second).
+  // pingInterval stays at 15s so a backgrounded/suspended phone is still caught
+  // within roughly the same ~35s window as before (see pingTimeout below).
+  //
+  // pingTimeout was widened 10s -> 20s (fix/call-heartbeat-during-signaling):
+  // live 1:1 calls on a DEBUG build were observed reconnecting ~20s into every
+  // call. Root cause is heartbeat starvation, not a dead transport: WebRTC call
+  // setup drives a burst of JS-thread work on the client (ICE gathering
+  // callbacks, RTCPeerConnection event bridging, per-candidate secretbox seal —
+  // see mobile/src/crypto/callSession.ts — JSON stringify/parse of SDP/ICE),
+  // which is heavier under Hermes-debug/dev-bridge overhead. socket.io-client's
+  // engine answers `ping` from its own event loop turn; if that turn is briefly
+  // starved, the pong misses the old 10s pingTimeout and the server closes a
+  // perfectly healthy socket. 20s gives a busy JS thread real headroom to catch
+  // up before we tear down an active session, while pingInterval unchanged
+  // means a genuinely backgrounded phone is still detected in ~35s (still much
+  // tighter than socket.io's stock 45s default — the ghost-socket fix above is
+  // not weakened). This is the same "generous heartbeat, don't punish a live
+  // signaling session for jitter" posture Signal/Session-style clients take —
+  // detecting a truly dead peer a few seconds later is far cheaper than
+  // dropping a healthy call's signaling channel mid-negotiation.
   pingInterval: 15000,
-  pingTimeout: 10000,
+  pingTimeout: 20000,
   // Bind to all interfaces so phones on LAN can reach the dev server.
 });
 
