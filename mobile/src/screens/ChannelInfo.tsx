@@ -86,6 +86,8 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
 
   // Live summary from store
   const summary = useChannels((s) => s.subscribed.find((c) => c.channelId === channelId));
+  const hydrated = useChannels((s) => s.hydrated);
+  const hydrateSubscribed = useChannels((s) => s.hydrateSubscribed);
   const removeChannel = useChannels((s) => s.removeChannel);
   const updateChannelInfo = useChannels((s) => s.updateChannelInfo);
   const listPendingJoins = useChannels((s) => s.listPendingJoins);
@@ -94,6 +96,17 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
   const feed = useChannels((s) => s.feeds[channelId]);
   const bannedList = useChannels((s) => s.banned[channelId]);
   const contacts = useContacts((s) => s.contacts);
+
+  // Defense in depth: the app-level rehydrate (App.tsx) normally hydrates
+  // `subscribed` from SecureStore-persisted channel secrets before any screen
+  // can be reached, but a screen opened via a fast deep link/notification tap
+  // could still land here before that effect resolves. Self-hydrate (once,
+  // idempotent) rather than trust a possibly-still-empty `subscribed` and
+  // falsely render "channel not found".
+  useEffect(() => {
+    if (hydrated || summary) return;
+    void hydrateSubscribed().catch(() => {});
+  }, [hydrated, summary, hydrateSubscribed]);
 
   const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
 

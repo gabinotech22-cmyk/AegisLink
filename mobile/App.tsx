@@ -337,7 +337,7 @@ function Shell() {
     void (msgStore.getState().loadAllEphemeralTimers as () => Promise<void>)();
   }, [hydrate, hydratePrefs]);
 
-  // Eventual-consistency hydration for groups + contacts.
+  // Eventual-consistency hydration for groups + contacts + subscribed channels.
   //
   // The Home/Groups screens hydrate their stores on mount, but that is a
   // one-shot: if a load ever returns empty (DB slot not ready on first mount,
@@ -347,13 +347,23 @@ function Shell() {
   // symptom. Re-hydrating once the identity/DB slot is guaranteed ready, and
   // again every time the app returns to foreground, makes the lists
   // self-correct without relying on which screen happens to be mounted.
+  //
+  // channels.subscribed is memory-only and is otherwise repopulated from
+  // SecureStore-persisted channel secrets ONLY by ChannelsPanel's own mount
+  // effect (Groups → Channels tab). A user who reaches ChannelFeed/ChannelInfo
+  // via a deep link or a channel-post notification without ever mounting that
+  // tab this session would see subscribed=[] and a false "channel not found"
+  // — hydrating it here too (idempotent; see hydrateSubscribed's `known`
+  // dedup) closes that gap regardless of navigation path.
   useEffect(() => {
     if (!hydrated || !identity) return;
     const rehydrate = () => {
       const { useGroups } = require('./src/store/groups');
       const { useContacts } = require('./src/store/contacts');
+      const { useChannels } = require('./src/store/channels');
       void useGroups.getState().hydrate().catch(() => {});
       void useContacts.getState().hydrate().catch(() => {});
+      void useChannels.getState().hydrateSubscribed().catch(() => {});
     };
     rehydrate();
     const sub = AppState.addEventListener('change', (s: AppStateStatus) => {
@@ -459,6 +469,15 @@ function Shell() {
         attachGroupCallHandlers();
       }
       setNotificationOpenChatHandler((target) => {
+        // Channel post tap → open the channel feed by id. No lookup needed
+        // (unlike group/contact) — ChannelFeedScreen resolves the channel from
+        // its own hydrated `subscribed` list, and self-hydrates if it hasn't
+        // run yet (see ChannelFeed.tsx).
+        if (target.channelId) {
+          setStack([]);
+          push({ name: 'channelFeed', channelId: target.channelId });
+          return;
+        }
         // Group tap → open the group chat by id.
         if (target.groupId) {
           const { useGroups } = require('./src/store/groups');
