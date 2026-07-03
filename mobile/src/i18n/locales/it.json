@@ -284,6 +284,8 @@
     "securityAuditSub": "Open source · verificabile",
     "jurisdiction": "Giurisdizione",
     "jurisdictionSub": "Italia",
+    "privacyPolicy": "Informativa sulla privacy",
+    "termsOfService": "Termini di servizio",
     "auditAlert": "Open source",
     "auditAlertDesc": "AegisLink è completamente open source. Tutto il codice crittografico può essere esaminato e verificato in modo indipendente.",
     "pqStatus": "Stato post-quantistico",

@@ -11,6 +11,7 @@
  *  7.  Theme mode picker calls setDark / setAutoMode
  *  8.  Language picker calls setLocale
  *  9.  Security-audit and PQ-status rows raise an informational alert
+ * 10.  Privacy-policy and terms rows open the public legal URLs
  */
 
 import React from 'react';
@@ -18,6 +19,7 @@ import React from 'react';
 jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
 import { themedAlert } from '../../components/AlertHost';
 import { render, fireEvent } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -218,5 +220,19 @@ describe('PrivacyScreen', () => {
     expect(alertSpy).toHaveBeenCalledWith('privacy.auditAlert', 'privacy.auditAlertDesc');
     fireEvent.press(getByText('privacy.pqStatus'));
     expect(alertSpy).toHaveBeenCalledWith('privacy.pqStatusAlert', 'privacy.pqStatusAlertOk');
+  });
+
+  it('opens the public privacy-policy and terms URLs', () => {
+    const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as never);
+    const { getByText } = render(<PrivacyScreen {...makeProps()} />);
+    fireEvent.press(getByText('privacy.privacyPolicy'));
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/privacy-policy.md',
+    );
+    fireEvent.press(getByText('privacy.termsOfService'));
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/terms-of-service.md',
+    );
+    openSpy.mockRestore();
   });
 });
