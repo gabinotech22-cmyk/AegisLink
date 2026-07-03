@@ -172,6 +172,27 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
 
   // ── Avatar pick (owner only) ───────────────────────────────────────────────
 
+  // Tapping the header avatar (owner only) is the single entry point for avatar
+  // edits — mirrors the group-info flow. When a photo already exists it offers
+  // Replace/Remove; otherwise it picks straight away. (The old duplicate
+  // "AVATAR" section below was removed.)
+  function handleAvatarPress() {
+    if (!isOwner || !signingKey) return;
+    if (channelAvatarUri) {
+      themedAlert(
+        i18nT('channelInfo.avatarActionsTitle', 'Channel photo'),
+        i18nT('channelInfo.avatarActionsDesc', 'Replace or remove the channel photo.'),
+        [
+          { text: i18nT('common.cancel', 'Cancel'), style: 'cancel' },
+          { text: i18nT('channelInfo.removePhoto', 'Remove photo'), style: 'destructive', onPress: () => void handleRemoveAvatar() },
+          { text: i18nT('channelInfo.replacePhoto', 'Replace photo'), onPress: () => void handlePickAvatar() },
+        ],
+      );
+    } else {
+      void handlePickAvatar();
+    }
+  }
+
   async function handlePickAvatar() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -478,7 +499,7 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
         {/* Header */}
         <View style={{ alignItems: 'center', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 18 }}>
           <Pressable
-            onPress={isOwner && signingKey ? () => void handlePickAvatar() : undefined}
+            onPress={isOwner && signingKey ? handleAvatarPress : undefined}
             disabled={!isOwner || !signingKey}
             accessibilityLabel={i18nT('channelInfo.changeAvatar', 'Change channel photo')}
           >
@@ -791,42 +812,8 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
           </Section>
         )}
 
-        {/* Owner avatar actions */}
-        {isOwner && signingKey && (
-          <Section t={t} label={i18nT('channelInfo.avatarSection', 'AVATAR').toUpperCase()}>
-            <Pressable
-              onPress={() => void handlePickAvatar()}
-              accessibilityLabel={i18nT('channelInfo.replacePhoto', 'Replace photo')}
-              style={({ pressed }) => ({
-                flexDirection: 'row', alignItems: 'center', gap: 14,
-                paddingHorizontal: 16, paddingVertical: 14,
-                opacity: pressed ? 0.7 : 1,
-              })}
-            >
-              <I.Image size={18} color={t.accent} />
-              <Text style={{ flex: 1, fontFamily: t.font, fontSize: 15, color: t.accent, fontWeight: '500' }}>
-                {i18nT('channelInfo.replacePhoto', 'Replace photo')}
-              </Text>
-            </Pressable>
-            {channelAvatarUri && (
-              <Pressable
-                onPress={() => void handleRemoveAvatar()}
-                accessibilityLabel={i18nT('channelInfo.removePhoto', 'Remove photo')}
-                style={({ pressed }) => ({
-                  flexDirection: 'row', alignItems: 'center', gap: 14,
-                  paddingHorizontal: 16, paddingVertical: 14,
-                  opacity: pressed ? 0.7 : 1,
-                  borderTopWidth: 1, borderTopColor: t.divider,
-                })}
-              >
-                <I.X size={18} color={t.danger} />
-                <Text style={{ flex: 1, fontFamily: t.font, fontSize: 15, color: t.danger, fontWeight: '500' }}>
-                  {i18nT('channelInfo.removePhoto', 'Remove photo')}
-                </Text>
-              </Pressable>
-            )}
-          </Section>
-        )}
+        {/* Avatar edits live on the header avatar tap (see handleAvatarPress) —
+            the old duplicate "AVATAR" section was removed. */}
 
         {/* Invite link */}
         {inviteLink.length > 0 && (

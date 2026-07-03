@@ -31,6 +31,10 @@ import {
   saveJoinRequest,
   getJoinRequest,
   deleteJoinRequest,
+  saveChannelHead,
+  getChannelHead,
+  saveChannelMeta,
+  getChannelMeta,
 } from '../publicChannelStore';
 import { deriveChannelDeliveryToken, generateChannelIdentity } from '../publicChannelKey';
 
@@ -178,5 +182,82 @@ describe('index + lifecycle', () => {
     expect(await getChannelCEK(CHANNEL_A)).toBeNull();
     expect(await getChannelCEK(CHANNEL_B)).toBeNull();
     expect(mockStore.size).toBe(0);
+  });
+});
+
+describe('channel chain head (delta-detection cache for background sync)', () => {
+  it('round-trips { seqNum, postHash } through SecureStore', async () => {
+    const postHash = fixedKey(42);
+    await saveChannelHead(CHANNEL_A, { seqNum: 7, postHash });
+
+    const head = await getChannelHead(CHANNEL_A);
+    expect(head).not.toBeNull();
+    expect(head!.seqNum).toBe(7);
+    expect(toHex(head!.postHash)).toBe(toHex(postHash));
+  });
+
+  it('returns null for an unknown or malformed head', async () => {
+    expect(await getChannelHead(CHANNEL_B)).toBeNull();
+    mockStore.set('aegis.pubchannel.head.v1.' + CHANNEL_B.replace(/=+$/, ''), 'not json');
+    expect(await getChannelHead(CHANNEL_B)).toBeNull();
+  });
+
+  it('deleteChannel wipes the persisted head', async () => {
+    await saveChannelSecrets(CHANNEL_A, { cek: fixedKey(1), capability: fixedKey(2) });
+    await saveChannelHead(CHANNEL_A, { seqNum: 3, postHash: fixedKey(9) });
+
+    await deleteChannel(CHANNEL_A);
+
+    expect(await getChannelHead(CHANNEL_A)).toBeNull();
+  });
+
+  it('deleteAllChannels wipes persisted heads', async () => {
+    await saveChannelSecrets(CHANNEL_A, { cek: fixedKey(1), capability: fixedKey(2) });
+    await saveChannelHead(CHANNEL_A, { seqNum: 5, postHash: fixedKey(5) });
+
+    await deleteAllChannels();
+
+    expect(await getChannelHead(CHANNEL_A)).toBeNull();
+    expect(mockStore.size).toBe(0);
+  });
+});
+
+describe('channel display metadata (name survives an offline restart)', () => {
+  const META = {
+    name: 'TESTERS',
+    description: 'private testing channel',
+    channelType: 'approval',
+    avatarHash: 'abc123',
+    channelEd25519PubB64: 'cHVia2V5',
+  };
+
+  it('round-trips the display metadata through SecureStore', async () => {
+    await saveChannelMeta(CHANNEL_A, META);
+    expect(await getChannelMeta(CHANNEL_A)).toEqual(META);
+  });
+
+  it('tolerates missing optional fields', async () => {
+    mockStore.set('aegis.pubchannel.meta.v1.' + CHANNEL_A.replace(/=+$/, ''), JSON.stringify({ name: 'X', channelType: 'open' }));
+    expect(await getChannelMeta(CHANNEL_A)).toEqual({
+      name: 'X', description: '', channelType: 'open', avatarHash: null, channelEd25519PubB64: null,
+    });
+  });
+
+  it('returns null for unknown or malformed metadata', async () => {
+    expect(await getChannelMeta(CHANNEL_B)).toBeNull();
+    mockStore.set('aegis.pubchannel.meta.v1.' + CHANNEL_B.replace(/=+$/, ''), '{bad json');
+    expect(await getChannelMeta(CHANNEL_B)).toBeNull();
+  });
+
+  it('deleteChannel and deleteAllChannels wipe the metadata', async () => {
+    await saveChannelSecrets(CHANNEL_A, { cek: fixedKey(1), capability: fixedKey(2) });
+    await saveChannelMeta(CHANNEL_A, META);
+    await deleteChannel(CHANNEL_A);
+    expect(await getChannelMeta(CHANNEL_A)).toBeNull();
+
+    await saveChannelSecrets(CHANNEL_B, { cek: fixedKey(3), capability: fixedKey(4) });
+    await saveChannelMeta(CHANNEL_B, META);
+    await deleteAllChannels();
+    expect(await getChannelMeta(CHANNEL_B)).toBeNull();
   });
 });

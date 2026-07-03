@@ -55,6 +55,10 @@ jest.mock('../../crypto/publicChannelStore', () => ({
   deleteJoinRequest: jest.fn(async () => {}),
   saveBannedMembers: jest.fn(async () => {}),
   getBannedMembers: jest.fn(async () => []),
+  saveChannelHead: jest.fn(async () => {}),
+  getChannelHead: jest.fn(async () => null),
+  saveChannelMeta: jest.fn(async () => {}),
+  getChannelMeta: jest.fn(async () => null),
 }));
 const mockContacts: Array<{ aegisId: string; signingPublicKeyB64: string }> = [];
 jest.mock('../contacts', () => ({
@@ -548,6 +552,28 @@ describe('hydrateSubscribed (restore after app restart)', () => {
 
     expect(useChannels.getState().subscribed).toHaveLength(0);
     expect(store.deleteChannel).not.toHaveBeenCalled(); // NEVER wipe keys on a flaky network
+  });
+
+  it('restores the channel from cached meta (keeping its name) when the manifest fetch fails offline', async () => {
+    (store.listChannelIds as jest.Mock).mockResolvedValue(['some-channel']);
+    (api.getPublicChannelManifest as jest.Mock).mockRejectedValue(new Error('network'));
+    (store.isChannelOwned as jest.Mock).mockResolvedValue(true);
+    (store.getChannelMeta as jest.Mock).mockResolvedValue({
+      name: 'TESTERS',
+      description: 'private',
+      channelType: 'approval',
+      avatarHash: null,
+      channelEd25519PubB64: 'cHVia2V5',
+    });
+
+    await useChannels.getState().hydrateSubscribed();
+
+    const restored = useChannels.getState().subscribed;
+    expect(restored).toHaveLength(1);
+    expect(restored[0].name).toBe('TESTERS'); // real name, not the generic fallback
+    expect(restored[0].channelType).toBe('approval');
+    expect(restored[0].owned).toBe(true);
+    expect(store.deleteChannel).not.toHaveBeenCalled();
   });
 
   it('does not duplicate channels already in the subscribed list', async () => {

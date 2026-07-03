@@ -31,6 +31,8 @@ import { deriveChannelDeliveryToken } from './publicChannelKey';
 const CEK_PREFIX = 'aegis.pubchannel.cek.v1.';
 const CAP_PREFIX = 'aegis.pubchannel.cap.v1.';
 const SIGN_PREFIX = 'aegis.pubchannel.sign.v1.';
+const HEAD_PREFIX = 'aegis.pubchannel.head.v1.';
+const META_PREFIX = 'aegis.pubchannel.meta.v1.';
 const INDEX_KEY = 'aegis.pubchannel.index.v1';
 
 const KEY_BYTES = 32;
@@ -57,6 +59,8 @@ function safeId(channelId: string): string {
 function cekKey(channelId: string): string { return CEK_PREFIX + safeId(channelId); }
 function capKey(channelId: string): string { return CAP_PREFIX + safeId(channelId); }
 function signKey(channelId: string): string { return SIGN_PREFIX + safeId(channelId); }
+function headKey(channelId: string): string { return HEAD_PREFIX + safeId(channelId); }
+function metaKey(channelId: string): string { return META_PREFIX + safeId(channelId); }
 
 /** Decode a base64 secret and enforce its exact byte length, else null. */
 function decodeFixed(b64: string | null, expectedLen: number): Uint8Array | null {
@@ -243,12 +247,78 @@ export async function listChannelIds(): Promise<string[]> {
   return loadIndex();
 }
 
+// ── chain head (NON-secret, cached for delta detection) ──────────────────────
+// The verified chain head { seqNum, postHash } is not key material — postHash is
+// a hash of already-public ciphertext. It is persisted this-device-only so a
+// cold launch (foreground OR a background-sync task) can resume with a DELTA
+// pull (`since = head.seqNum`) instead of re-pulling the whole history, and so
+// new posts can be detected + notified. Losing it only costs a full re-pull.
+
+/** Persist the verified chain head for a channel. */
+export async function saveChannelHead(channelId: string, head: { seqNum: number; postHash: Uint8Array }): Promise<void> {
+  await ss.set(headKey(channelId), JSON.stringify({ seqNum: head.seqNum, postHashB64: encodeBase64(head.postHash) }));
+}
+
+/** The persisted chain head for a channel, or null if none/malformed. */
+export async function getChannelHead(channelId: string): Promise<{ seqNum: number; postHash: Uint8Array } | null> {
+  const raw = await ss.get(headKey(channelId));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { seqNum?: unknown; postHashB64?: unknown };
+    if (typeof parsed.seqNum !== 'number' || typeof parsed.postHashB64 !== 'string') return null;
+    return { seqNum: parsed.seqNum, postHash: decodeBase64(parsed.postHashB64) };
+  } catch {
+    return null;
+  }
+}
+
+// ── channel metadata (NON-secret, cached display info) ───────────────────────
+// name/type/avatarHash come from the signed manifest, which the relay serves.
+// Caching them this-device-only lets us keep LISTING a channel (with its real
+// name) after a restart even when the manifest re-fetch fails on a flaky network
+// — instead of dropping it to a nameless "Channels" fallback. Refreshed from the
+// verified manifest whenever a fetch DOES succeed.
+
+export interface ChannelMeta {
+  name: string;
+  description: string;
+  channelType: string;
+  avatarHash: string | null;
+  channelEd25519PubB64: string | null;
+}
+
+/** Cache a channel's display metadata (from a verified manifest). */
+export async function saveChannelMeta(channelId: string, meta: ChannelMeta): Promise<void> {
+  await ss.set(metaKey(channelId), JSON.stringify(meta));
+}
+
+/** The cached display metadata for a channel, or null if none/malformed. */
+export async function getChannelMeta(channelId: string): Promise<ChannelMeta | null> {
+  const raw = await ss.get(metaKey(channelId));
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as Partial<ChannelMeta>;
+    if (typeof p.name !== 'string' || typeof p.channelType !== 'string') return null;
+    return {
+      name: p.name,
+      description: typeof p.description === 'string' ? p.description : '',
+      channelType: p.channelType,
+      avatarHash: typeof p.avatarHash === 'string' ? p.avatarHash : null,
+      channelEd25519PubB64: typeof p.channelEd25519PubB64 === 'string' ? p.channelEd25519PubB64 : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Wipe ALL secrets for a channel (leave/tombstone/panic) and drop it from the index. */
 export async function deleteChannel(channelId: string): Promise<void> {
   await ss.delete(cekKey(channelId));
   await ss.delete(capKey(channelId));
   await ss.delete(signKey(channelId));
   await ss.delete(banKey(channelId));
+  await ss.delete(headKey(channelId));
+  await ss.delete(metaKey(channelId));
   await removeFromIndex(channelId);
 }
 
@@ -260,6 +330,8 @@ export async function deleteAllChannels(): Promise<void> {
     await ss.delete(capKey(channelId));
     await ss.delete(signKey(channelId));
     await ss.delete(banKey(channelId));
+    await ss.delete(headKey(channelId));
+    await ss.delete(metaKey(channelId));
   }
   await ss.delete(INDEX_KEY);
   // Panic also drops any in-flight approval join requests.
