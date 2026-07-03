@@ -503,7 +503,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
   }
 
   // View-once bubble (image or audio)
-  if (m.body === '[viewonce]' || (m.body && m.body.startsWith('[viewonce:'))) {
+  if (m.body && (m.body.startsWith('[viewonce]') || m.body.startsWith('[viewonce:'))) {
     const hasMedia = !!m.mediaUri;
     const isReceived = m.direction === 'in';
     const isAudio = m.body.startsWith('[viewonce:audio:');
