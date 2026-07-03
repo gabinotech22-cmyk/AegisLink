@@ -429,20 +429,36 @@ function Shell() {
     // residue from old builds rather than leaving plaintext at rest.
     void SecureStore.deleteItemAsync('aegis.scheduled.v1').catch(() => {});
 
-    // Foreground runner: fire due scheduled messages (1:1 + group posts) from
-    // the SQLite-backed store. processDue() is cheap when nothing is due (one
-    // indexed SELECT), and offline ticks leave messages pending without
-    // burning retries.
-    const interval = setInterval(() => {
+    // Foreground runner: fire due scheduled messages (1:1 + group posts +
+    // channel posts) from the SQLite-backed store. processDue() is cheap when
+    // nothing is due (one indexed SELECT), and offline ticks leave messages
+    // pending without burning retries.
+    const runDue = () => {
       try {
         const { useScheduledMessages } = require('./src/store/scheduledMessages') as typeof import('./src/store/scheduledMessages');
         void useScheduledMessages.getState().processDue();
       } catch (err) {
         if (__DEV__) console.warn('[global-scheduler] error in runner:', err);
       }
-    }, 10_000);
+    };
 
-    return () => clearInterval(interval);
+    // Run immediately on identity-ready/launch instead of waiting for the
+    // first 10s tick — a post scheduled while the app was backgrounded/closed
+    // must fire the instant the app reopens, not up to 10s later. The
+    // BackgroundFetch task above is the real fallback while backgrounded; this
+    // catch-up run covers the (common) case where the OS never actually woke
+    // the background task before the user reopened the app themselves.
+    runDue();
+    const foregroundSub = AppState.addEventListener('change', (s: AppStateStatus) => {
+      if (s === 'active') runDue();
+    });
+
+    const interval = setInterval(runDue, 10_000);
+
+    return () => {
+      clearInterval(interval);
+      foregroundSub.remove();
+    };
   }, [identity, status]);
 
   // Show NetworkErrorScreen after 5s of being offline (only when authenticated).

@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, Modal } from 'react-native';
+import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, Modal, AppState, type AppStateStatus } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Crypto from 'expo-crypto';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -143,6 +143,18 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     const off = attachLive(identity);
     return off;
   }, [channelId, identity, loadFeed, attachLive]);
+
+  // Pull-on-foreground: if the user backgrounds the app while this screen is
+  // mounted (e.g. a scheduled post fired while backgrounded, or the socket
+  // dropped and attachLive's fan-out was missed), re-pull the delta on return
+  // to foreground rather than waiting for the next unrelated re-mount/navigation.
+  useEffect(() => {
+    if (!identity) return;
+    const sub = AppState.addEventListener('change', (s: AppStateStatus) => {
+      if (s === 'active') void loadFeed(channelId, identity);
+    });
+    return () => sub.remove();
+  }, [channelId, identity, loadFeed]);
 
   // While this feed is focused, suppress local notifications for its own posts
   // (same activeChatId guard Chat/GroupChat use). Reset on unmount.
