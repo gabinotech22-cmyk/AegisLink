@@ -336,6 +336,14 @@ function notifyNewPosts(
   }
 }
 
+// Module-scope in-flight guard: hydrateSubscribed() is now called independently
+// from App.tsx's rehydrate effect, useChannelSelfHydrate (ChannelFeed/ChannelInfo),
+// and scheduledMessages.processDue(). Without this, two near-simultaneous callers
+// (e.g. a deep link opening ChannelFeed while App.tsx is still hydrating) would
+// each kick off their own manifest-fetch loop in parallel. Sharing the in-flight
+// promise collapses concurrent calls into a single fetch.
+let hydrateInFlight: Promise<void> | null = null;
+
 export const useChannels = create<ChannelsState>((set, get) => ({
   directory: [],
   loadingDirectory: false,
@@ -347,82 +355,90 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   banned: {},
 
   async hydrateSubscribed() {
-    const ids = await listChannelIds();
-    const known = new Set(get().subscribed.map((c) => c.channelId));
-    const restored: ChannelSummary[] = [];
-    const restoredBans: Record<string, string[]> = {};
-    for (const channelId of ids) {
-      // Ban lists are local-only (never re-fetchable) — restore them even when
-      // the manifest fetch below fails or the channel is already listed.
-      const bans = await getBannedMembers(channelId);
-      if (bans.length > 0) restoredBans[channelId] = bans;
-      if (known.has(channelId)) continue;
-      let blob: string;
-      try {
-        ({ signed_manifest_blob: blob } = await getPublicChannelManifest(channelId));
-      } catch (e) {
-        // Offline or relay hiccup: fall back to the this-device-only cached
-        // metadata so the channel still LISTS with its real name (instead of a
-        // nameless "Channels" fallback) and the feed title stays correct. The
-        // next successful hydrate refreshes it. Only a truly first-seen channel
-        // with no cache is skipped.
-        logger.warn(`[channels] hydrate: manifest fetch failed for ${channelId.slice(0, 8)}…: ${(e as Error).message}`);
-        const cached = await getChannelMeta(channelId);
-        if (cached) {
-          restored.push({
-            channelId,
-            name: cached.name,
-            description: cached.description,
-            channelType: metaChannelType(cached.channelType),
-            owned: await isChannelOwned(channelId),
-            avatarHash: metaAvatarHash(cached.avatarHash),
-            channelEd25519PubB64: cached.channelEd25519PubB64,
-          });
+    if (hydrateInFlight) return hydrateInFlight;
+    hydrateInFlight = (async () => {
+      const ids = await listChannelIds();
+      const known = new Set(get().subscribed.map((c) => c.channelId));
+      const restored: ChannelSummary[] = [];
+      const restoredBans: Record<string, string[]> = {};
+      for (const channelId of ids) {
+        // Ban lists are local-only (never re-fetchable) — restore them even when
+        // the manifest fetch below fails or the channel is already listed.
+        const bans = await getBannedMembers(channelId);
+        if (bans.length > 0) restoredBans[channelId] = bans;
+        if (known.has(channelId)) continue;
+        let blob: string;
+        try {
+          ({ signed_manifest_blob: blob } = await getPublicChannelManifest(channelId));
+        } catch (e) {
+          // Offline or relay hiccup: fall back to the this-device-only cached
+          // metadata so the channel still LISTS with its real name (instead of a
+          // nameless "Channels" fallback) and the feed title stays correct. The
+          // next successful hydrate refreshes it. Only a truly first-seen channel
+          // with no cache is skipped.
+          logger.warn(`[channels] hydrate: manifest fetch failed for ${channelId.slice(0, 8)}…: ${(e as Error).message}`);
+          const cached = await getChannelMeta(channelId);
+          if (cached) {
+            restored.push({
+              channelId,
+              name: cached.name,
+              description: cached.description,
+              channelType: metaChannelType(cached.channelType),
+              owned: await isChannelOwned(channelId),
+              avatarHash: metaAvatarHash(cached.avatarHash),
+              channelEd25519PubB64: cached.channelEd25519PubB64,
+            });
+          }
+          continue;
         }
-        continue;
+        const manifest = parseAndVerifyManifest(blob);
+        if (!manifest || manifest.channelId !== channelId) continue; // forged/corrupt → never trust
+        if (deriveChannelId(manifest.channelEd25519Pub, manifest.salt) !== channelId) continue;
+        const summary: ChannelSummary = {
+          channelId,
+          name: manifest.name,
+          description: manifest.description,
+          channelType: manifestType(manifest.channelType),
+          owned: await isChannelOwned(channelId),
+          avatarHash: manifest.avatarHash,
+          channelEd25519PubB64: encodeBase64(manifest.channelEd25519Pub),
+        };
+        restored.push(summary);
+        // Refresh the local display cache from the verified manifest.
+        void saveChannelMeta(channelId, toChannelMeta(summary)).catch(() => {});
       }
-      const manifest = parseAndVerifyManifest(blob);
-      if (!manifest || manifest.channelId !== channelId) continue; // forged/corrupt → never trust
-      if (deriveChannelId(manifest.channelEd25519Pub, manifest.salt) !== channelId) continue;
-      const summary: ChannelSummary = {
-        channelId,
-        name: manifest.name,
-        description: manifest.description,
-        channelType: manifestType(manifest.channelType),
-        owned: await isChannelOwned(channelId),
-        avatarHash: manifest.avatarHash,
-        channelEd25519PubB64: encodeBase64(manifest.channelEd25519Pub),
-      };
-      restored.push(summary);
-      // Refresh the local display cache from the verified manifest.
-      void saveChannelMeta(channelId, toChannelMeta(summary)).catch(() => {});
+      // Restore in-flight approval applications too (they survive restarts in
+      // SecureStore alongside their ephemeral secrets).
+      const requests = await listJoinRequests();
+      // Restore persisted chain heads so a cold launch resumes with a DELTA pull
+      // (and can detect + notify new posts) instead of re-pulling full history.
+      const restoredHeads: Record<string, ChainHead | null> = {};
+      for (const channelId of ids) {
+        const h = await getChannelHead(channelId);
+        if (h) restoredHeads[channelId] = h;
+      }
+      set((s) => ({
+        hydrated: true,
+        banned: { ...restoredBans, ...s.banned },
+        heads: { ...restoredHeads, ...s.heads },
+        // Re-check against current state: a join may have landed while we fetched.
+        subscribed: [
+          ...s.subscribed,
+          ...restored.filter((r) => !s.subscribed.some((c) => c.channelId === r.channelId)),
+        ],
+        pendingApplications: [
+          ...s.pendingApplications,
+          ...requests
+            .filter((r) => !s.pendingApplications.some((a) => a.channelId === r.channelId))
+            .map((r) => ({ channelId: r.channelId, name: r.name, epkB64: r.epkB64 })),
+        ],
+      }));
+    })();
+    try {
+      await hydrateInFlight;
+    } finally {
+      hydrateInFlight = null;
     }
-    // Restore in-flight approval applications too (they survive restarts in
-    // SecureStore alongside their ephemeral secrets).
-    const requests = await listJoinRequests();
-    // Restore persisted chain heads so a cold launch resumes with a DELTA pull
-    // (and can detect + notify new posts) instead of re-pulling full history.
-    const restoredHeads: Record<string, ChainHead | null> = {};
-    for (const channelId of ids) {
-      const h = await getChannelHead(channelId);
-      if (h) restoredHeads[channelId] = h;
-    }
-    set((s) => ({
-      hydrated: true,
-      banned: { ...restoredBans, ...s.banned },
-      heads: { ...restoredHeads, ...s.heads },
-      // Re-check against current state: a join may have landed while we fetched.
-      subscribed: [
-        ...s.subscribed,
-        ...restored.filter((r) => !s.subscribed.some((c) => c.channelId === r.channelId)),
-      ],
-      pendingApplications: [
-        ...s.pendingApplications,
-        ...requests
-          .filter((r) => !s.pendingApplications.some((a) => a.channelId === r.channelId))
-          .map((r) => ({ channelId: r.channelId, name: r.name, epkB64: r.epkB64 })),
-      ],
-    }));
   },
 
   async loadDirectory() {

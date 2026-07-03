@@ -10,13 +10,15 @@ import { useEffect } from 'react';
  *
  * Shared by ChannelFeed.tsx and ChannelInfo.tsx (previously duplicated).
  */
-export function useChannelSelfHydrate(
+export function useChannelSelfHydrate<T>(
   hydrated: boolean,
-  summary: unknown,
+  summary: T,
   hydrateSubscribed: () => Promise<void>,
 ): void {
   useEffect(() => {
     if (hydrated || summary) return;
-    void hydrateSubscribed().catch(() => {});
+    void hydrateSubscribed().catch((err: unknown) => {
+      if (__DEV__) console.warn('[useChannelSelfHydrate] hydrate failed:', err);
+    });
   }, [hydrated, summary, hydrateSubscribed]);
 }
