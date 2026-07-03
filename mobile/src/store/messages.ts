@@ -310,8 +310,12 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async remoteDelete(chatId, id) {
-    const { setMessageDeleted } = require('../db/local');
-    await setMessageDeleted(id);
+    const { setRemoteMessageDeleted } = require('../db/local');
+    // Authorization-scoped: a peer may only retract a message they sent to us
+    // in our chat with them. If nothing matched, do NOT touch in-memory state —
+    // otherwise a peer naming an arbitrary msgId could blank an unrelated bubble.
+    const deleted: boolean = await setRemoteMessageDeleted(id, chatId);
+    if (!deleted) return;
     const list = get().byChat[chatId] ?? [];
     set((s) => ({
       byChat: {

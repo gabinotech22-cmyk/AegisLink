@@ -194,6 +194,10 @@ export async function setMessageDeleted(id: string): Promise<void> {
   await db().setMessageDeleted(activeSlot, id);
 }
 
+export async function setRemoteMessageDeleted(id: string, chatId: string): Promise<boolean> {
+  return await db().setRemoteMessageDeleted(activeSlot, id, chatId);
+}
+
 export async function setMessageReactions(id: string, reactions: MessageReactions): Promise<void> {
   await db().setMessageReactions(id, reactions);
 }

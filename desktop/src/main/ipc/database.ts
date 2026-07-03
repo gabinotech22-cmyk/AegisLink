@@ -853,6 +853,27 @@ export function registerDatabaseHandlers(): void {
     )
   })
 
+  // Authorization-scoped delete-for-everyone applied on the RECEIVER from a
+  // peer's E2EE retraction. Unlike db:set-message-deleted (local "delete for
+  // me", may target the user's OWN messages), a peer may only retract a message
+  // that lives in OUR chat with them (chat_id = peerAegisId) and was sent BY
+  // them (direction = 'in'). Knowing a msgId does not grant the right to delete
+  // it. Returns true iff a row was actually deleted.
+  ipcMain.handle(
+    'db:set-remote-message-deleted',
+    (event, activeSlot: string, id: string, chatId: string): boolean => {
+      assertTrustedSender(event)
+      const empty = encryptBody('', activeSlot)
+      const res = db
+        .prepare(
+          `UPDATE messages SET deleted = 1, body = ?, media_uri = NULL
+             WHERE id = ? AND chat_id = ? AND direction = 'in'`
+        )
+        .run(empty, id, chatId)
+      return res.changes > 0
+    }
+  )
+
   ipcMain.handle('db:set-message-reactions', (event, id: string, reactions: unknown): void => {
     assertTrustedSender(event)
     db.prepare('UPDATE messages SET reactions = ? WHERE id = ?').run(JSON.stringify(reactions), id)

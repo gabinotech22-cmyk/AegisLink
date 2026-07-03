@@ -78,11 +78,6 @@ export const MsgRead = z.object({
   msgIds: z.array(z.string().min(1).max(64)).max(500),
 });
 
-export const MsgDelete = z.object({
-  to: z.string().regex(AEGIS_ID_RE),
-  msgId: z.string().min(1).max(64),
-});
-
 export const PushRegister = z.object({
   token: z.string().min(1).max(256),
   platform: z.enum(['ios', 'android', 'unknown']).default('unknown'),
