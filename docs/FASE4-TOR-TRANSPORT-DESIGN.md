@@ -16,15 +16,16 @@
 >   `MAILBOX_ENABLED`, cae al transporte aegisId. El `io(ONION_URL)` "a pelo" que
 >   describía la versión previa de este párrafo **ya no existe**.
 >
-> Por qué `MAILBOX_ENABLED` SIGUE OFF por defecto — bloqueadores REALES para
-> el flip a ON (ninguno es "tocar un flag"):
-> 1. **El relay NO expone un hidden service de Tor** (`docker-compose.yml` solo
->    tiene `relay` + `coturn`). No hay `.onion` a la que apuntar. → ops en el
->    servidor (contenedor/daemon tor con `HiddenServicePort` → relay:3001).
-> 2. **`EXPO_PUBLIC_ONION_URL`** debe apuntar a esa `.onion`; sin ella
->    `ONION_URL === null` → `MAILBOX_ENABLED === false` (fail-closed, `config.ts`).
-> 3. **APK nativo prebuilt** con el módulo `AegisTor` (nunca en Expo Go).
-> 4. **Validación 2-dispositivos** (ambos en mailbox mode, roots intercambiados).
+> Por qué `MAILBOX_ENABLED` SIGUE OFF por defecto — bloqueadores para el flip
+> a ON (estado canónico y dirección .onion: `docs/RELAY-ONION-SERVICE.md`):
+> 1. ✅ **RESUELTO 2026-07-03** — el relay expone un onion service v3 (PR #230:
+>    sidecar `tor` en docker-compose + `infra/tor/`; desplegado en prod el
+>    mismo día). Ver runbook para la dirección y el backup de la clave.
+> 2. ☐ **`EXPO_PUBLIC_ONION_URL`** debe apuntar a esa `.onion` en el build;
+>    sin ella `ONION_URL === null` → `MAILBOX_ENABLED === false` (fail-closed,
+>    `config.ts`).
+> 3. ☐ **APK nativo prebuilt** con el módulo `AegisTor` (nunca en Expo Go).
+> 4. ☐ **Validación 2-dispositivos** (ambos en mailbox mode, roots intercambiados).
 
 ## 1. La restricción que lo decide todo
 
