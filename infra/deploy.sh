@@ -92,6 +92,40 @@ for i in $(seq 1 $MAX_RETRIES); do
   sleep "$RETRY_INTERVAL"
 done
 
+# ── Tor onion service (Fase 4 · mailbox mode) ───────────────────────────────
+# tor resolves the HiddenServicePort target ("relay") when it (re)starts, so
+# this runs AFTER the relay is up and healthy — a recreated relay container can
+# get a new IP on aegis_internal, and a stale tor would keep dialing the old
+# one. Restarting tor is cheap: the onion key persists in the tor_keys volume,
+# so the .onion address never changes across restarts.
+echo "[deploy] Building Tor onion-service image..."
+docker compose -f "$PROJECT_ROOT/docker-compose.yml" build tor
+
+echo "[deploy] Restarting Tor onion service..."
+if docker compose -f "$PROJECT_ROOT/docker-compose.yml" ps tor 2>/dev/null | grep -q "running"; then
+  docker compose -f "$PROJECT_ROOT/docker-compose.yml" restart tor
+else
+  docker compose -f "$PROJECT_ROOT/docker-compose.yml" up -d tor
+fi
+
+# Surface the onion hostname (generated on first boot, persisted in tor_keys).
+# The address itself is public client config (EXPO_PUBLIC_ONION_URL), not a
+# secret — printing it here leaks nothing.
+ONION_HOST=""
+for i in $(seq 1 15); do
+  ONION_HOST="$(docker compose -f "$PROJECT_ROOT/docker-compose.yml" exec -T tor \
+    cat /var/lib/tor/aegislink_relay/hostname 2>/dev/null | tr -d '[:space:]' || true)"
+  [[ -n "$ONION_HOST" ]] && break
+  sleep 2
+done
+
+if [[ -n "$ONION_HOST" ]]; then
+  echo "[deploy] Relay onion service: http://$ONION_HOST"
+  echo "[deploy]   -> mobile mailbox builds need EXPO_PUBLIC_ONION_URL=http://$ONION_HOST"
+else
+  echo "[deploy] WARNING: onion hostname not ready — check: docker compose logs tor" >&2
+fi
+
 echo "[deploy] Deploy complete."
 
 # ── Rotate TURN_SECRET reminder ─────────────────────────────────────────────

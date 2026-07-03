@@ -1,0 +1,44 @@
+# AegisLink relay — Tor onion service (Fase 4 · mailbox mode)
+#
+# This tor instance does exactly ONE thing: publish the relay as a v3 onion
+# service so mailbox-mode clients (embedded Tor, mobile/src/net/tor.ts) can
+# reach it without the relay ever seeing their IP. It is NOT a Tor relay or
+# exit, and it serves no client SOCKS traffic.
+#
+# Zero-metadata guarantees at this layer:
+#   - Onion-client IPs are invisible to us by protocol design (rendezvous).
+#   - Log level stays at notice: tor logs no per-connection data there.
+#   - The onion identity key lives ONLY in the tor_keys docker volume
+#     (/var/lib/tor). Treat it like a private key: losing it rotates the
+#     .onion address and every client build must update EXPO_PUBLIC_ONION_URL.
+
+# No client SOCKS — also required by HiddenServiceNonAnonymousMode below.
+SocksPort 0
+
+DataDirectory /var/lib/tor
+Log notice stdout
+
+# ── Single Onion Service ─────────────────────────────────────────────────────
+# The relay's location is already public (clearnet https://aegislink.duckdns.org
+# on a known host), so server-side location anonymity buys nothing. Single-onion
+# mode drops the service-side 3 hops (6-hop circuit → 3-hop), roughly halving
+# onion latency for messages. CLIENTS keep their full 3-hop anonymity — this
+# setting only affects the server's half of the circuit. Dual clearnet/onion
+# operators (e.g. SimpleX SMP servers) run their .onion the same way.
+HiddenServiceNonAnonymousMode 1
+HiddenServiceSingleHopMode 1
+
+# ── The relay onion service ──────────────────────────────────────────────────
+# v3 onion (ed25519). Virtual port 80 → relay:3001 over the aegis_internal
+# docker network. Clients use http://<addr>.onion — the Tor rendezvous already
+# provides E2E encryption and endpoint authentication, so TLS on top is
+# redundant (mobile/src/config.ts exempts .onion from the https guard for
+# exactly this reason).
+#
+# NOTE: tor resolves the "relay" hostname when it (re)starts. infra/deploy.sh
+# therefore restarts this container AFTER the relay container is up, so a
+# recreated relay (new IP on aegis_internal) never leaves tor dialing a stale
+# address.
+HiddenServiceDir /var/lib/tor/aegislink_relay
+HiddenServiceVersion 3
+HiddenServicePort 80 relay:3001
