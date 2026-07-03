@@ -99,13 +99,23 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
   const myDisplayName = useIdentity((s) => s.displayName);
 
   const summary = useChannels((s) => s.subscribed.find((c) => c.channelId === channelId));
+  // Verified directory entry — the fallback name/avatar source for a channel
+  // opened from Discover before it's in `subscribed` (see channelName below).
+  const dirEntry = useChannels((s) => s.directory.find((c) => c.channelId === channelId));
   const posts = useChannels((s) => s.feeds[channelId]);
   const loadFeed = useChannels((s) => s.loadFeed);
   const sendPost = useChannels((s) => s.sendPost);
   const attachLive = useChannels((s) => s.attachLive);
   const deletePost = useChannels((s) => s.deletePost);
 
-  const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
+  // Prefer the subscribed summary; fall back to the verified directory entry so a
+  // channel opened from Discover (not yet subscribed) still shows its real name +
+  // avatar in the header — parity with the group header, which always carries the
+  // group name. Only when neither is known do we show the generic "Channels" label.
+  const channelName = summary?.name ?? dirEntry?.name ?? null;
+  const channelAvatarHash = summary?.avatarHash ?? dirEntry?.avatarHash ?? null;
+
+  const channelAvatarUri = useChannelAvatar(channelId, channelAvatarHash);
 
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -367,7 +377,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
         style={{ paddingVertical: 12, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-          <Avatar t={t} name={mine ? (summary?.name ?? '?') : senderLabel} seed={item.from} size={24} />
+          <Avatar t={t} name={mine ? (channelName ?? '?') : senderLabel} seed={item.from} size={24} />
           <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>{senderLabel}</Text>
           <Text style={{ marginLeft: 'auto', fontFamily: t.fontMono, fontSize: 9, color: t.textFaint }}>#{item.seqNum}</Text>
         </View>
@@ -404,11 +414,11 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <TopBar
         t={t}
-        title={summary?.name ?? i18nT('channels.title')}
+        title={channelName ?? i18nT('channels.title')}
         left={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Pressable onPress={onBack} hitSlop={8} accessibilityLabel={i18nT('common.back', 'Back')}><I.ChevronL size={22} color={t.text} /></Pressable>
-            <Avatar t={t} name={summary?.name ?? '?'} seed={channelId} size={28} photoUri={channelAvatarUri} />
+            <Avatar t={t} name={channelName ?? '?'} seed={channelId} size={28} photoUri={channelAvatarUri} />
           </View>
         }
         right={
