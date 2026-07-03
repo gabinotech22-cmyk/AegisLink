@@ -1,8 +1,16 @@
 # Relay Onion Service — runbook (Fase 4 · mailbox mode)
 
-> Estado: **infra en repo, PENDIENTE de deploy en prod.** Este doc es la fuente
-> canónica del estado del onion service del relay. Cuando se despliegue y se
-> valide, actualizar AQUÍ (los demás docs enlazan, no duplican).
+> Estado: **✅ DESPLEGADO EN PROD (2026-07-03).** Deploy ejecutado por el owner
+> vía el wrapper de escritorio: prod en `47c060d`, contenedor `aegislink-tor`
+> corriendo, volumen `aegislink_tor_keys` creado. Dirección onion publicada:
+>
+> `http://fhxnal5jmuuqsbtzz7avos4drhqmuy4c7ffd35gi3hw2uwbe5iqshfyd.onion`
+>
+> (Fuente canónica de la dirección: `/var/lib/tor/aegislink_relay/hostname`
+> dentro del volumen `tor_keys` — ante cualquier duda, leerla de ahí.)
+> Este doc es la fuente canónica del estado del onion service del relay
+> (los demás docs enlazan, no duplican). Pendiente del checklist: backup de
+> clave + verificación por Tor (§checklist 2-3), y el flip de cliente (§4-6).
 >
 > Código: `infra/tor/` (Dockerfile + torrc), servicio `tor` en
 > `docker-compose.yml`, wiring en `infra/deploy.sh`.
@@ -70,8 +78,9 @@ privada.
 
 ## Checklist para encender mailbox mode (en orden)
 
-1. ☐ Deploy del onion service en prod (`bash infra/deploy.sh`) y anotar la
-   `.onion` que imprime.
+1. ✅ Deploy del onion service en prod — HECHO 2026-07-03 (prod `47c060d`,
+   dirección arriba; deploy vía wrapper del owner, sección Tor añadida al
+   wrapper el mismo día).
 2. ☐ Backup de `tor_keys` (arriba).
 3. ☐ Probar reachability desde un cliente Tor cualquiera:
    `curl --socks5-hostname 127.0.0.1:9050 http://<addr>.onion/health` → `"ok"`.
