@@ -1401,6 +1401,19 @@ async function decryptAndAppendLocked(
         return true;
       }
 
+      // E2EE delete-for-everyone: the peer retracts one of their messages
+      // (payload.text = the target msgId). Arrives over the normal ratchet
+      // channel — durable (outbox + mailbox), sealed, zero relay metadata —
+      // unlike the old plaintext fire-and-forget `msg:delete` event. Apply
+      // silently; do NOT append a chat row. Still persist ratchet state.
+      if (parsedPayload.type === 'msg_delete') {
+        if (typeof parsedPayload.text === 'string' && parsedPayload.text) {
+          await useMessages.getState().remoteDelete(contact.aegisId, parsedPayload.text);
+        }
+        await saveSessionState(contact.aegisId, ratchetState);
+        return true;
+      }
+
       if (parsedPayload.type === 'group_msg') {
         const groupId: string = parsedPayload.groupId;
         const claimedName: string = parsedPayload.groupName;
@@ -2336,8 +2349,30 @@ export function sendReadReceipts(to: string, msgIds: string[]): void {
 }
 
 export function sendDeleteForEveryone(to: string, msgId: string): void {
-  if (!socket || !authenticated) return;
-  socket.emit('msg:delete', { to, msgId });
+  // E2EE + durable: rides the normal sealed message path (Double Ratchet,
+  // outbox retry, mailbox delivery). The old plaintext `msg:delete` event
+  // leaked the sender↔recipient pair to the relay and was silently dropped
+  // whenever the peer had no live socket — mailbox-mode peers almost never do.
+  void (async () => {
+    const { useIdentity } = await import('../store/identity');
+    const identity = useIdentity.getState().identity;
+    const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+    if (!identity || !contact?.publicKeyB64) {
+      if (DEV) logger.warn('[socket] sendDeleteForEveryone: missing identity or peer key — not sent');
+      return;
+    }
+    await sendMessage({
+      identity,
+      recipientAegisId: to,
+      recipientPublicKey: decodeBase64(contact.publicKeyB64),
+      plaintext: msgId,
+      type: 'msg_delete',
+      expiresAt: null,
+      skipLocalAppend: true,
+    });
+  })().catch((e) => {
+    if (DEV) logger.warn('[socket] sendDeleteForEveryone failed:', (e as Error).message);
+  });
 }
 
 export async function sendGroupMessage(opts: {
