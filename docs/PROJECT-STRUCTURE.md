@@ -41,13 +41,20 @@ Cualquier otro archivo en la raíz es deuda: muévelo a su carpeta o a `_scratch
 1. **Código de producto** → siempre dentro de `mobile/`, `desktop/`, `server/` o `web/`.
    Nunca un `.ts`/`.tsx` de producto suelto en la raíz.
 2. **Documentación** → `docs/`. Un `.md` nuevo va a `docs/` salvo los 4 canónicos de raíz.
-3. **Scripts operativos** → `scripts/`. No `.ps1`/`.sh` sueltos en raíz.
+3. **Scripts operativos** → `scripts/`. No `.ps1`/`.sh` sueltos en raíz. Pero
+   ojo: `scripts/` es solo para lo idempotente/versionado que pasa por rutas
+   autenticadas — cirugía directa de prod (SSH + `DELETE`/`DROP` crudo,
+   limpieza de un incidente puntual) es **operador-local**, nunca `scripts/`
+   (ver REGLA DE ORO — Herramientas destructivas y operador-local en `CLAUDE.md`).
 4. **Prototipos de diseño** → `prototype/`. Son referencia histórica; no se importan desde el build.
 5. **Cualquier cosa transitoria** (capturas, logs, dumps, APKs de test, `_powtest.mjs`,
    experimentos de un solo uso) → `_scratch/`, que está gitignored. **Nunca** se commitea.
 6. **Binarios pesados** (APK, mp4, zip, bugreports) no se versionan; van a `_scratch/`
    o a release artifacts, nunca a git. Ver patrones en `.gitignore`.
-7. **Paridad mobile↔desktop**: un cambio de crypto/sesión/ratchet vive en la misma rama
+7. **Artefactos de build/test** (`coverage/`, `lcov-report/`, `dist/`) tampoco se
+   versionan — son regenerables por `npm test`/`npm run build`. Si aparecen en
+   `git ls-files`, es una fuga: destrackear + añadir el patrón a `.gitignore`.
+8. **Paridad mobile↔desktop**: un cambio de crypto/sesión/ratchet vive en la misma rama
    y toca ambas carpetas. No se reparte una feature entre varias ramas (ver REGLA DE ORO de ramas).
 
 ## Organización interna de cada paquete
