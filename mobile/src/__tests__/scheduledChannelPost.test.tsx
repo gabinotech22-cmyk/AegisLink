@@ -148,7 +148,8 @@ describe('processDue — channel post', () => {
     });
 
     expect(mockDecryptBody).toHaveBeenCalledWith('enc:Scheduled text');
-    expect(mockSendPost).toHaveBeenCalledWith('ch-1', 'Scheduled text', expect.objectContaining({ aegisId: 'me-123' }));
+    // senderName is undefined and media null for a plain text-only scheduled post.
+    expect(mockSendPost).toHaveBeenCalledWith('ch-1', 'Scheduled text', expect.objectContaining({ aegisId: 'me-123' }), undefined, null);
     expect(mockMarkScheduledSent).toHaveBeenCalledWith('sched-1');
   });
 
