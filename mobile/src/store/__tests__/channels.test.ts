@@ -60,6 +60,11 @@ jest.mock('../../crypto/publicChannelStore', () => ({
   saveChannelMeta: jest.fn(async () => {}),
   getChannelMeta: jest.fn(async () => null),
 }));
+jest.mock('../../db/local', () => ({
+  saveChannelFeed: jest.fn(async () => {}),
+  loadChannelFeed: jest.fn(async () => []),
+  deleteChannelFeed: jest.fn(async () => {}),
+}));
 const mockContacts: Array<{ aegisId: string; signingPublicKeyB64: string }> = [];
 jest.mock('../contacts', () => ({
   useContacts: { getState: () => ({ contacts: mockContacts }) },
@@ -208,6 +213,36 @@ describe('loadFeed', () => {
     const feed = useChannels.getState().feeds[CHANNEL_ID];
     expect(feed.map((p) => p.body)).toEqual(['post 0', 'post 1']);
     expect(useChannels.getState().heads[CHANNEL_ID]!.seqNum).toBe(1);
+  });
+
+  it('restores the persisted feed on a cold load when the relay serves no history', async () => {
+    // Cold restart: head persisted, in-memory feed empty, relay retains nothing.
+    const dbLocal = require('../../db/local') as { loadChannelFeed: jest.Mock; saveChannelFeed: jest.Mock };
+    dbLocal.loadChannelFeed.mockResolvedValueOnce([
+      { id: `${CHANNEL_ID}:0`, from: 'A', body: 'old post', senderName: null, media: null, ts: 1, seqNum: 0 },
+    ]);
+    useChannels.setState({ heads: { [CHANNEL_ID]: { seqNum: 0, postHash: new Uint8Array(32) } } });
+    (socket.pubchannelPull as jest.Mock).mockResolvedValue({ ok: true, posts: [] });
+
+    await useChannels.getState().loadFeed(CHANNEL_ID, identity);
+
+    // The cached post is restored even though the relay returned nothing.
+    expect(useChannels.getState().feeds[CHANNEL_ID].map((p) => p.body)).toEqual(['old post']);
+  });
+
+  it('persists the feed to the at-rest cache after ingesting fresh posts', async () => {
+    const dbLocal = require('../../db/local') as { saveChannelFeed: jest.Mock };
+    dbLocal.saveChannelFeed.mockClear();
+    const p0 = sealAs('cached me', null);
+    (socket.pubchannelPull as jest.Mock).mockResolvedValue({
+      ok: true, posts: [{ seq_num: 0, ciphertext_b64: p0.wire.ciphertext, nonce_b64: p0.wire.nonce }],
+    });
+
+    await useChannels.getState().loadFeed(CHANNEL_ID, identity);
+
+    expect(dbLocal.saveChannelFeed).toHaveBeenCalledWith(CHANNEL_ID, expect.arrayContaining([
+      expect.objectContaining({ body: 'cached me', seqNum: 0 }),
+    ]));
   });
 });
 

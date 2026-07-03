@@ -196,7 +196,7 @@ describe('parseAndVerifyManifest', () => {
 describe('post body senderName envelope (issue #204)', () => {
   it('round-trips text + senderName through encode/open', () => {
     const wire = encodePostBody('hello channel', 'Alice');
-    expect(openPostBody(wire)).toEqual({ text: 'hello channel', senderName: 'Alice' });
+    expect(openPostBody(wire)).toEqual({ text: 'hello channel', senderName: 'Alice', media: null });
   });
 
   it('round-trips with no senderName provided', () => {

@@ -294,6 +294,22 @@ function postToFeed(p: { post: { from: string; body: string; ts: number; seqNum:
   return { id: `${channelId}:${p.post.seqNum}`, from: p.post.from, body: text, senderName, media, ts: p.post.ts, seqNum: p.post.seqNum };
 }
 
+/** Merge two feed slices, de-duplicating by seqNum and keeping chain order. */
+function mergeFeedPosts(existing: FeedPost[], incoming: FeedPost[]): FeedPost[] {
+  const bySeq = new Map<number, FeedPost>();
+  for (const p of existing) bySeq.set(p.seqNum, p);
+  for (const p of incoming) bySeq.set(p.seqNum, p);
+  return [...bySeq.values()].sort((a, b) => a.seqNum - b.seqNum);
+}
+
+/** Persist a channel's current in-memory feed to the at-rest cache (best-effort). */
+function persistFeed(channelId: string, get: () => { feeds: Record<string, FeedPost[]> }): void {
+  const posts = get().feeds[channelId];
+  if (!posts) return;
+  const { saveChannelFeed } = require('../db/local') as typeof import('../db/local');
+  void saveChannelFeed(channelId, posts).catch(() => {});
+}
+
 /**
  * Fire local notifications for freshly ingested (decrypted + verified) posts
  * that were not written by us. Built entirely on-device (issue #206): the
@@ -696,6 +712,17 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   async loadFeed(channelId, identity) {
     const cek = await getChannelCEK(channelId);
     if (!cek) return; // not subscribed / no key
+    const { saveChannelFeed, loadChannelFeed } = require('../db/local') as typeof import('../db/local');
+
+    // Restore the persisted feed once per session BEFORE the delta pull. The
+    // verified head is persisted, so a cold restart delta-pulls (since = head)
+    // and the relay — which doesn't retain broadcast history forever — returns
+    // nothing, leaving the feed empty. The local cache is the source of history.
+    if (get().feeds[channelId] === undefined) {
+      const cached = await loadChannelFeed(channelId);
+      set((s) => ({ feeds: { ...s.feeds, [channelId]: s.feeds[channelId] ?? cached } }));
+    }
+
     const head = get().heads[channelId] ?? null;
     const since = head ? head.seqNum : -1;
 
@@ -713,10 +740,11 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       .filter((p) => !bannedHere.has(p.post.from))
       .map((p) => postToFeed(p, channelId));
     set((s) => ({
-      feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), ...fresh] },
+      feeds: { ...s.feeds, [channelId]: mergeFeedPosts(s.feeds[channelId] ?? [], fresh) },
       heads: { ...s.heads, [channelId]: result.head },
     }));
     if (result.head) void saveChannelHead(channelId, result.head).catch(() => {});
+    void saveChannelFeed(channelId, get().feeds[channelId] ?? []).catch(() => {});
 
     // Notify only on DELTA refreshes (since >= 0): the initial history pull of
     // a just-joined/just-opened channel must not fire a burst of notifications.
@@ -782,6 +810,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       heads: { ...s.heads, [channelId]: sealed.newHead },
     }));
     void saveChannelHead(channelId, sealed.newHead).catch(() => {});
+    void persistFeed(channelId, get);
     return { ok: true };
   },
 
@@ -805,10 +834,11 @@ export const useChannels = create<ChannelsState>((set, get) => ({
           .filter((p) => !bannedHere.has(p.post.from))
           .map((p) => postToFeed(p, e.channelId));
         set((s) => ({
-          feeds: { ...s.feeds, [e.channelId]: [...(s.feeds[e.channelId] ?? []), ...fresh] },
+          feeds: { ...s.feeds, [e.channelId]: mergeFeedPosts(s.feeds[e.channelId] ?? [], fresh) },
           heads: { ...s.heads, [e.channelId]: result.head },
         }));
         if (result.head) void saveChannelHead(e.channelId, result.head).catch(() => {});
+        void persistFeed(e.channelId, get);
         const name = get().subscribed.find((c) => c.channelId === e.channelId)?.name ?? e.channelId;
         notifyNewPosts(e.channelId, name, fresh, identity.aegisId);
       })();
@@ -822,6 +852,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
           [e.channelId]: (s.feeds[e.channelId] ?? []).filter((p) => p.seqNum !== e.seqNum),
         },
       }));
+      void persistFeed(e.channelId, get);
     });
     const offBan = onPubchannelBan((e) => {
       void (async () => {
@@ -860,6 +891,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
             [e.channelId]: (s.feeds[e.channelId] ?? []).filter((p) => p.from !== record.banned),
           },
         }));
+        void persistFeed(e.channelId, get);
       })();
     });
     const offTomb = onPubchannelTombstone((e) => {
@@ -870,6 +902,10 @@ export const useChannels = create<ChannelsState>((set, get) => ({
 
   async removeChannel(channelId) {
     await deleteChannelSecrets(channelId);
+    try {
+      const { deleteChannelFeed } = require('../db/local') as typeof import('../db/local');
+      await deleteChannelFeed(channelId);
+    } catch { /* best-effort cache cleanup */ }
     set((s) => {
       const feeds = { ...s.feeds }; delete feeds[channelId];
       const heads = { ...s.heads }; delete heads[channelId];
