@@ -28,6 +28,7 @@ import { TopBar } from '../components/TopBar';
 import { Section } from '../components/Section';
 import { themedAlert } from '../components/AlertHost';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
+import { useChannelSelfHydrate } from '../hooks/useChannelSelfHydrate';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
@@ -86,6 +87,8 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
 
   // Live summary from store
   const summary = useChannels((s) => s.subscribed.find((c) => c.channelId === channelId));
+  const hydrated = useChannels((s) => s.hydrated);
+  const hydrateSubscribed = useChannels((s) => s.hydrateSubscribed);
   const removeChannel = useChannels((s) => s.removeChannel);
   const updateChannelInfo = useChannels((s) => s.updateChannelInfo);
   const listPendingJoins = useChannels((s) => s.listPendingJoins);
@@ -94,6 +97,8 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
   const feed = useChannels((s) => s.feeds[channelId]);
   const bannedList = useChannels((s) => s.banned[channelId]);
   const contacts = useContacts((s) => s.contacts);
+
+  useChannelSelfHydrate(hydrated, summary, hydrateSubscribed);
 
   const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
 

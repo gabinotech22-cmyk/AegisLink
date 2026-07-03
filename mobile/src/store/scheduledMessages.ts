@@ -669,6 +669,26 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
         if (!identity) continue; // locked — skip without burning retry
         try {
           const { useChannels } = require('./channels') as typeof import('./channels');
+          // `subscribed` is memory-only and may still be empty this early in a
+          // cold launch / background wake (App.tsx's rehydrate effect races
+          // this runner). Hydrate before trusting an absence — otherwise a
+          // perfectly valid scheduled post is permanently failed just because
+          // hydrateSubscribed() hadn't resolved yet.
+          if (!useChannels.getState().hydrated) {
+            const hydrateOk = await useChannels
+              .getState()
+              .hydrateSubscribed()
+              .then(() => true)
+              .catch(() => false);
+            // Hydration failed (e.g. offline, manifest fetch error) AND still
+            // isn't hydrated — `subscribed` may be empty/stale, so an absence
+            // here is not trustworthy. Retry later instead of permanently
+            // failing a post whose channel might genuinely still be there.
+            if (!hydrateOk && !useChannels.getState().hydrated) {
+              await bumpRetry(msg);
+              continue;
+            }
+          }
           const summary = useChannels.getState().subscribed.find(
             (c) => c.channelId === msg.channelId,
           );

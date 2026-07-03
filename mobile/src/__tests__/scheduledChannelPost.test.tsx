@@ -40,6 +40,8 @@ const mockSendPost = jest.fn().mockResolvedValue({ ok: true });
 jest.mock('../store/channels', () => ({
   useChannels: {
     getState: () => ({
+      hydrated: true,
+      hydrateSubscribed: jest.fn().mockResolvedValue(undefined),
       subscribed: [
         { channelId: 'ch-1', channelType: 'open', owned: false },
         { channelId: 'ch-owned', channelType: 'readonly', owned: true },
