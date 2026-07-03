@@ -53,6 +53,7 @@ import {
   openPostBody,
   type ChainHead,
   type SignerResolver,
+  type PostMedia,
 } from '../channels/channelService';
 import {
   generateChannelIdentity,
@@ -145,6 +146,8 @@ export interface FeedPost {
   body: string;
   /** Sender's profile display name, if the post carries one (v1 body envelope). Null for legacy plain-text posts. */
   senderName: string | null;
+  /** Attachment carried in the sealed body (image/audio/gif/sticker/…), or null. */
+  media: PostMedia | null;
   ts: number;
   seqNum: number;
 }
@@ -193,7 +196,7 @@ interface ChannelsState {
    * subscriber list). Returns the number of fresh posts surfaced.
    */
   syncSubscribedForBackground: (identity: Identity) => Promise<number>;
-  sendPost: (channelId: string, body: string, identity: Identity, senderName?: string) => Promise<{ ok: boolean; error?: string }>;
+  sendPost: (channelId: string, body: string, identity: Identity, senderName?: string, media?: PostMedia | null) => Promise<{ ok: boolean; error?: string }>;
   attachLive: (identity: Identity) => () => void;
   removeChannel: (channelId: string) => Promise<void>;
 
@@ -287,8 +290,8 @@ function parseBanRecord(recordStr: string, expectedChannelId: string): BanRecord
 }
 
 function postToFeed(p: { post: { from: string; body: string; ts: number; seqNum: number } }, channelId: string): FeedPost {
-  const { text, senderName } = openPostBody(p.post.body);
-  return { id: `${channelId}:${p.post.seqNum}`, from: p.post.from, body: text, senderName, ts: p.post.ts, seqNum: p.post.seqNum };
+  const { text, senderName, media } = openPostBody(p.post.body);
+  return { id: `${channelId}:${p.post.seqNum}`, from: p.post.from, body: text, senderName, media, ts: p.post.ts, seqNum: p.post.seqNum };
 }
 
 /**
@@ -746,14 +749,14 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     return fresh;
   },
 
-  async sendPost(channelId, body, identity, senderName) {
+  async sendPost(channelId, body, identity, senderName, media) {
     const cek = await getChannelCEK(channelId);
     if (!cek) return { ok: false, error: 'not_subscribed' };
     const deliveryToken = await getChannelDeliveryToken(channelId);
     if (!deliveryToken) return { ok: false, error: 'no_delivery_token' };
 
     const head = get().heads[channelId] ?? null;
-    const wireBody = encodePostBody(body, senderName);
+    const wireBody = encodePostBody(body, senderName, media);
     const sealed = buildAndSealPost(
       channelId,
       { from: identity.aegisId, body: wireBody, ts: Date.now() },
@@ -770,6 +773,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       from: identity.aegisId,
       body,
       senderName: senderName ?? null,
+      media: media ?? null,
       ts: Date.now(),
       seqNum: sealed.seqNum,
     };

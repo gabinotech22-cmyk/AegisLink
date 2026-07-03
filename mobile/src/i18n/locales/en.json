@@ -1368,6 +1368,8 @@
     "sealed": "sealed",
     "feedEmpty": "No posts in this channel yet.",
     "composePlaceholder": "Post to the channel…",
+    "attachImage": "Attach image",
+    "removeImage": "Remove image",
     "postFailed": "Couldn't post",
     "you": "you",
     "unknownError": "Unknown error",

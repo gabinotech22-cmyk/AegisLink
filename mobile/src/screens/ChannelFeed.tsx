@@ -11,18 +11,24 @@
  * store with channelId and fired by processDue.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { withPickingGuard } from '../utils/pickingGuard';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { MediaImage } from '../components/MediaImage';
 import { themedAlert } from '../components/AlertHost';
 import { SchedulePicker } from '../components/SchedulePicker';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
+import { encryptAndUploadMedia } from '../crypto/media';
 import { useChannels, type FeedPost } from '../store/channels';
+import type { PostMedia } from '../channels/channelService';
 import { useIdentity } from '../store/identity';
 import {
   useScheduledMessages,
@@ -34,6 +40,27 @@ interface Props {
   channelId: string;
   onBack: () => void;
   onOpenInfo?: () => void;
+}
+
+// ─── Image staging (mirrors GroupPosts: re-encode strips EXIF/GPS) ───────────
+
+/** Best-effort unlink of a staged file. Cleanup only — never throws. */
+async function deleteStagedFile(path: string): Promise<void> {
+  try {
+    const FS = await import('expo-file-system/legacy');
+    await FS.deleteAsync(path, { idempotent: true });
+  } catch { /* best-effort */ }
+}
+
+/** Copy a picked asset into the staging dir so it survives cache eviction. */
+async function stageChannelImage(fromUri: string): Promise<string> {
+  const FS = await import('expo-file-system/legacy');
+  const Crypto = await import('expo-crypto');
+  const dir = `${FS.documentDirectory}channelposts/`;
+  await FS.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+  const dest = `${dir}post_${Crypto.randomUUID()}.jpg`;
+  await FS.copyAsync({ from: fromUri, to: dest });
+  return dest;
 }
 
 // ─── Time helpers (mirrored from GroupPosts) ─────────────────────────────────
@@ -79,6 +106,10 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
   const [sending, setSending] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
+  // Staged, EXIF-stripped image awaiting send (local documentDirectory path).
+  const [attachedImage, setAttachedImage] = useState<{ path: string; w?: number; h?: number } | null>(null);
+  // Local staged paths picked this session but not yet uploaded — unlink on unmount.
+  const freshStagedPaths = useRef<Set<string>>(new Set());
 
   // Scheduled posts store
   const scheduled = useScheduledMessages((s) => s.scheduled);
@@ -110,13 +141,76 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     (m) => m.channelId === channelId && (m.status === 'pending' || m.status === 'draft'),
   );
 
+  // Unlink any staged image still pending on unmount (never sent).
+  useEffect(() => {
+    const fresh = freshStagedPaths.current;
+    return () => { for (const p of fresh) void deleteStagedFile(p); };
+  }, []);
+
+  const handlePickImage = useCallback(async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      themedAlert(
+        i18nT('groups.permissionDeniedTitle', 'Permission denied'),
+        i18nT('groups.permissionDeniedGallery', 'Gallery access is required.'),
+      );
+      return;
+    }
+    const result = await withPickingGuard(() =>
+      ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'] as ImagePicker.MediaType[], quality: 0.85 }),
+    );
+    if (!result || result.canceled || !result.assets?.[0]) return;
+    try {
+      // Re-encode → strips ALL EXIF/GPS metadata before it ever leaves the device.
+      const compressed = await manipulateAsync(
+        result.assets[0].uri,
+        [{ resize: { width: 1280 } }],
+        { compress: 0.75, format: SaveFormat.JPEG },
+      );
+      const dest = await stageChannelImage(compressed.uri);
+      freshStagedPaths.current.add(dest);
+      setAttachedImage((prev) => {
+        if (prev && freshStagedPaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
+        return { path: dest, w: compressed.width, h: compressed.height };
+      });
+    } catch (e) {
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
+    }
+  }, [i18nT]);
+
+  const handleRemoveImage = useCallback(() => {
+    setAttachedImage((prev) => {
+      if (prev && freshStagedPaths.current.delete(prev.path)) void deleteStagedFile(prev.path);
+      return null;
+    });
+  }, []);
+
   const handleSend = async () => {
-    if (!identity || !draft.trim() || sending) return;
+    if (!identity || sending) return;
+    const text = draft.trim();
+    if (!text && !attachedImage) return;
     setSending(true);
     try {
-      const res = await sendPost(channelId, draft.trim(), identity, myDisplayName);
-      if (res.ok) setDraft('');
-      else themedAlert(i18nT('channels.postFailed'), res.error ?? i18nT('channels.unknownError'));
+      let media: PostMedia | null = null;
+      if (attachedImage) {
+        // Encrypt + upload as an E2EE blob; the key rides inside the sealed body.
+        const blobUri = await encryptAndUploadMedia(attachedImage.path, 'image/jpeg');
+        media = { kind: 'image', uri: blobUri, mime: 'image/jpeg', w: attachedImage.w, h: attachedImage.h };
+      }
+      const res = await sendPost(channelId, text, identity, myDisplayName, media);
+      if (res.ok) {
+        setDraft('');
+        // Uploaded (blob persisted) — the staged plaintext is no longer needed.
+        if (attachedImage) {
+          freshStagedPaths.current.delete(attachedImage.path);
+          void deleteStagedFile(attachedImage.path);
+        }
+        setAttachedImage(null);
+      } else {
+        themedAlert(i18nT('channels.postFailed'), res.error ?? i18nT('channels.unknownError'));
+      }
+    } catch (e) {
+      themedAlert(i18nT('channels.postFailed'), (e as Error).message);
     } finally {
       setSending(false);
     }
@@ -124,10 +218,21 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
 
   const handleScheduleConfirm = useCallback(async (sendAt: number) => {
     const trimmed = draft.trim();
-    if (!trimmed) return;
+    if (!trimmed && !attachedImage) return;
     try {
-      await scheduleChannelPost({ channelId, body: trimmed, sendAt });
+      await scheduleChannelPost({
+        channelId,
+        body: trimmed,
+        sendAt,
+        options: attachedImage
+          ? { imagePath: attachedImage.path, imageW: attachedImage.w, imageH: attachedImage.h }
+          : undefined,
+      });
+      // The staged image is now owned by the store (uploaded at fire time), so
+      // hand off ownership: drop it from the unmount-cleanup set.
+      if (attachedImage) freshStagedPaths.current.delete(attachedImage.path);
       setDraft('');
+      setAttachedImage(null);
       themedAlert(
         i18nT('channels.postScheduledTitle', 'Post scheduled'),
         i18nT('channels.postScheduledDesc', 'It will be posted to the channel automatically at the chosen time.'),
@@ -135,7 +240,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     } catch (e) {
       themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
     }
-  }, [draft, channelId, scheduleChannelPost, i18nT]);
+  }, [draft, attachedImage, channelId, scheduleChannelPost, i18nT]);
 
   const handleDeleteScheduled = useCallback((m: ScheduledMessage) => {
     themedAlert(
@@ -208,10 +313,23 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
           <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>{senderLabel}</Text>
           <Text style={{ marginLeft: 'auto', fontFamily: t.fontMono, fontSize: 9, color: t.textFaint }}>#{item.seqNum}</Text>
         </View>
-        <Text style={{ fontFamily: t.font, fontSize: 13, lineHeight: 20, color: t.text }}>{item.body}</Text>
+        {item.media?.kind === 'image' && (
+          <View style={{ borderRadius: t.radius, overflow: 'hidden', backgroundColor: t.surface2, marginBottom: item.body ? 7 : 0, maxWidth: 280 }}>
+            <MediaImage
+              uri={item.media.uri}
+              ext="jpg"
+              accent={t.accent}
+              resizeMode="cover"
+              style={{ width: 280, aspectRatio: item.media.w && item.media.h ? item.media.w / item.media.h : 4 / 3 }}
+            />
+          </View>
+        )}
+        {!!item.body && <Text style={{ fontFamily: t.font, fontSize: 13, lineHeight: 20, color: t.text }}>{item.body}</Text>}
       </Pressable>
     );
   };
+
+  const hasContent = !!(draft.trim() || attachedImage);
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -316,34 +434,64 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
       />
 
       {canPost && (
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10, paddingBottom: insets.bottom + 10, borderTopWidth: 1, borderTopColor: t.divider, backgroundColor: t.surface }}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={i18nT('channels.composePlaceholder')}
-            placeholderTextColor={t.textFaint}
-            multiline
-            style={{ flex: 1, maxHeight: 120, backgroundColor: t.surface2, borderRadius: t.radius, paddingHorizontal: 14, paddingVertical: 10, color: t.text, fontFamily: t.font, fontSize: 15 }}
-          />
-          {canSchedule && (
-            <Pressable
-              onPress={() => { if (draft.trim()) setShowPicker(true); }}
-              disabled={!draft.trim()}
-              accessibilityLabel={i18nT('channels.schedulePost', 'Schedule post')}
-              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: draft.trim() ? 1 : 0.5 }}
-            >
-              <I.Timer size={18} color={draft.trim() ? t.accent : t.textFaint} />
-            </Pressable>
+        <View style={{ paddingBottom: insets.bottom + 10, borderTopWidth: 1, borderTopColor: t.divider, backgroundColor: t.surface }}>
+          {attachedImage && (
+            <View style={{ paddingHorizontal: 10, paddingTop: 10 }}>
+              <View style={{ alignSelf: 'flex-start', borderRadius: t.radius, overflow: 'hidden', borderWidth: 1, borderColor: `${t.accent}44` }}>
+                <Image source={{ uri: attachedImage.path }} style={{ width: 120, height: 120, backgroundColor: t.surface2 }} resizeMode="cover" />
+                <Pressable
+                  onPress={handleRemoveImage}
+                  accessibilityLabel={i18nT('channels.removeImage', 'Remove image')}
+                  style={{ position: 'absolute', top: 6, right: 6, width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <I.X size={14} color="#fff" />
+                </Pressable>
+                <View style={{ position: 'absolute', left: 6, bottom: 6, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 99 }}>
+                  <I.Check size={9} color={t.accent} />
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 8, color: t.accent, letterSpacing: 0.5 }}>
+                    {i18nT('groupPosts.exifStripped', 'EXIF STRIPPED')}
+                  </Text>
+                </View>
+              </View>
+            </View>
           )}
-          <Pressable
-            onPress={() => void handleSend()}
-            onLongPress={() => { if (canSchedule && draft.trim()) setShowPicker(true); }}
-            disabled={!draft.trim() || sending}
-            accessibilityLabel={canSchedule ? i18nT('channels.sendOrSchedule', 'Send — long-press to schedule') : i18nT('channels.composePlaceholder')}
-            style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: draft.trim() ? t.accent : t.surface2, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <I.Send size={18} color={draft.trim() ? t.accentInk : t.textFaint} />
-          </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10 }}>
+            <Pressable
+              onPress={() => void handlePickImage()}
+              disabled={sending}
+              accessibilityLabel={i18nT('channels.attachImage', 'Attach image')}
+              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.5 : 1 }}
+            >
+              <I.Attach size={18} color={t.accent} />
+            </Pressable>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={i18nT('channels.composePlaceholder')}
+              placeholderTextColor={t.textFaint}
+              multiline
+              style={{ flex: 1, maxHeight: 120, backgroundColor: t.surface2, borderRadius: t.radius, paddingHorizontal: 14, paddingVertical: 10, color: t.text, fontFamily: t.font, fontSize: 15 }}
+            />
+            {canSchedule && (
+              <Pressable
+                onPress={() => { if (hasContent) setShowPicker(true); }}
+                disabled={!hasContent}
+                accessibilityLabel={i18nT('channels.schedulePost', 'Schedule post')}
+                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: hasContent ? 1 : 0.5 }}
+              >
+                <I.Timer size={18} color={hasContent ? t.accent : t.textFaint} />
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => void handleSend()}
+              onLongPress={() => { if (canSchedule && hasContent) setShowPicker(true); }}
+              disabled={!hasContent || sending}
+              accessibilityLabel={canSchedule ? i18nT('channels.sendOrSchedule', 'Send — long-press to schedule') : i18nT('channels.composePlaceholder')}
+              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: hasContent ? t.accent : t.surface2, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.6 : 1 }}
+            >
+              <I.Send size={18} color={hasContent ? t.accentInk : t.textFaint} />
+            </Pressable>
+          </View>
         </View>
       )}
 

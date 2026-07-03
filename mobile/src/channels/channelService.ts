@@ -50,10 +50,57 @@ const GENESIS_PREV = new Uint8Array(32);
 /** Hard cap on a displayed sender name — it's untrusted input from another member. */
 const MAX_SENDER_NAME_LEN = 64;
 
+/** Media kinds a channel post can carry (image is the first shipped; the rest
+ *  follow the same envelope shape). */
+export type PostMediaKind = 'image' | 'audio' | 'gif' | 'sticker' | 'video' | 'file';
+
+const POST_MEDIA_KINDS: readonly PostMediaKind[] = ['image', 'audio', 'gif', 'sticker', 'video', 'file'];
+
+/**
+ * A media attachment reference carried INSIDE the CEK-sealed post body. For
+ * E2EE blobs `uri` is a `blob:id:key:nonce[:token]` string — the decryption key
+ * rides inside the sealed body, so the relay only ever sees an opaque blob. GIF
+ * and sticker refs may instead be a bare pack/asset id resolved client-side.
+ */
+export interface PostMedia {
+  kind: PostMediaKind;
+  uri: string;
+  mime?: string;
+  w?: number;
+  h?: number;
+  /** File display name, or a sticker/gif label. */
+  name?: string;
+  /** Audio/video length in milliseconds. */
+  durationMs?: number;
+}
+
+/** Hard caps on untrusted media fields from another member's post. */
+const MAX_MEDIA_URI_LEN = 2048;
+const MAX_MEDIA_NAME_LEN = 128;
+const MAX_MEDIA_MIME_LEN = 128;
+
+/** Narrow + bound an untrusted media object; returns null if it is not usable. */
+function sanitizeMedia(raw: unknown): PostMedia | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.kind !== 'string' || !POST_MEDIA_KINDS.includes(r.kind as PostMediaKind)) return null;
+  if (typeof r.uri !== 'string' || r.uri.length === 0 || r.uri.length > MAX_MEDIA_URI_LEN) return null;
+  const out: PostMedia = { kind: r.kind as PostMediaKind, uri: r.uri };
+  if (typeof r.mime === 'string' && r.mime.length <= MAX_MEDIA_MIME_LEN) out.mime = r.mime;
+  if (typeof r.w === 'number' && Number.isFinite(r.w) && r.w > 0) out.w = r.w;
+  if (typeof r.h === 'number' && Number.isFinite(r.h) && r.h > 0) out.h = r.h;
+  if (typeof r.name === 'string' && r.name.length <= MAX_MEDIA_NAME_LEN) out.name = r.name;
+  if (typeof r.durationMs === 'number' && Number.isFinite(r.durationMs) && r.durationMs >= 0) out.durationMs = r.durationMs;
+  return out;
+}
+
 interface PostBodyEnvelopeV1 {
   v: 1;
   text: string;
   senderName?: string;
+  /** Optional attachment. Older clients ignore this unknown field and render
+   *  the text (or an empty bubble for media-only posts) — no version bump. */
+  media?: PostMedia;
 }
 
 /** Sanitize an untrusted sender name for display: trim, strip control chars, cap length. */
@@ -70,15 +117,20 @@ function sanitizeSenderName(raw: unknown): string | undefined {
  * carrying the plaintext + (optional) sender display name. Both are sealed by
  * the CEK exactly like plain text was before — no new wire-level metadata.
  */
-export function encodePostBody(text: string, senderName?: string): string {
+export function encodePostBody(text: string, senderName?: string, media?: PostMedia | null): string {
   const clean = sanitizeSenderName(senderName);
-  const envelope: PostBodyEnvelopeV1 = clean ? { v: 1, text, senderName: clean } : { v: 1, text };
+  const envelope: PostBodyEnvelopeV1 = { v: 1, text };
+  if (clean) envelope.senderName = clean;
+  const safeMedia = media ? sanitizeMedia(media) : null;
+  if (safeMedia) envelope.media = safeMedia;
   return JSON.stringify(envelope);
 }
 
 export interface DecodedPostBody {
   text: string;
   senderName: string | null;
+  /** Attachment carried in the sealed body, or null for text-only/legacy posts. */
+  media: PostMedia | null;
 }
 
 /**
@@ -96,12 +148,16 @@ export function openPostBody(body: string): DecodedPostBody {
       typeof (parsed as Record<string, unknown>).text === 'string'
     ) {
       const p = parsed as PostBodyEnvelopeV1;
-      return { text: p.text, senderName: sanitizeSenderName(p.senderName) ?? null };
+      return {
+        text: p.text,
+        senderName: sanitizeSenderName(p.senderName) ?? null,
+        media: sanitizeMedia((parsed as Record<string, unknown>).media),
+      };
     }
   } catch {
     // not JSON — legacy plain-text body, fall through
   }
-  return { text: body, senderName: null };
+  return { text: body, senderName: null, media: null };
 }
 
 /** The verified tip of a channel's hash chain. */

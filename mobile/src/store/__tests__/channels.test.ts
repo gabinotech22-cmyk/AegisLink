@@ -162,6 +162,21 @@ describe('sendPost', () => {
     expect(useChannels.getState().heads[CHANNEL_ID]!.seqNum).toBe(0);
   });
 
+  it('carries an image media reference into the sealed body and optimistic feed', async () => {
+    (socket.pubchannelPost as jest.Mock).mockResolvedValue({ ok: true });
+    const media = { kind: 'image' as const, uri: 'blob:xyz:key:nonce', mime: 'image/jpeg', w: 800, h: 600 };
+
+    const res = await useChannels.getState().sendPost(CHANNEL_ID, 'caption', identity, 'Me', media);
+    expect(res.ok).toBe(true);
+
+    const feed = useChannels.getState().feeds[CHANNEL_ID];
+    expect(feed[0].media).toEqual(media);
+    expect(feed[0].body).toBe('caption');
+    // The blob ref (key material) must ride inside the sealed ciphertext, never in the clear.
+    const call = (socket.pubchannelPost as jest.Mock).mock.calls[0];
+    expect(JSON.stringify(call)).not.toContain('blob:xyz');
+  });
+
   it('returns an error and does not append when the relay rejects', async () => {
     (socket.pubchannelPost as jest.Mock).mockResolvedValue({ ok: false, error: 'rate_limited' });
     const res = await useChannels.getState().sendPost(CHANNEL_ID, 'hi', identity);
@@ -348,7 +363,7 @@ describe('removeChannel (leave)', () => {
     // Seed state with a subscribed channel + feed + head.
     useChannels.setState({
       subscribed: [{ channelId: CHANNEL_ID, name: 'Leaving', description: '', channelType: 'open', owned: false, avatarHash: null, channelEd25519PubB64: null }],
-      feeds: { [CHANNEL_ID]: [{ id: `${CHANNEL_ID}:0`, from: 'A', body: 'hi', senderName: null, ts: 1, seqNum: 0 }] },
+      feeds: { [CHANNEL_ID]: [{ id: `${CHANNEL_ID}:0`, from: 'A', body: 'hi', senderName: null, media: null, ts: 1, seqNum: 0 }] },
       heads: { [CHANNEL_ID]: { seqNum: 0, postHash: new Uint8Array(32) } },
     });
 
@@ -606,8 +621,8 @@ describe('member ban (issue #207 — owner moderation, docs §10.4)', () => {
       }],
       feeds: {
         [CHANNEL_ID]: [
-          { id: `${CHANNEL_ID}:0`, from: identity.aegisId, body: 'mine', senderName: null, ts: 1, seqNum: 0 },
-          { id: `${CHANNEL_ID}:1`, from: eve, body: 'spam', senderName: null, ts: 2, seqNum: 1 },
+          { id: `${CHANNEL_ID}:0`, from: identity.aegisId, body: 'mine', senderName: null, media: null, ts: 1, seqNum: 0 },
+          { id: `${CHANNEL_ID}:1`, from: eve, body: 'spam', senderName: null, media: null, ts: 2, seqNum: 1 },
         ],
       },
     });

@@ -1319,6 +1319,8 @@
     "sealed": "sigillato",
     "feedEmpty": "Ancora nessun post in questo canale.",
     "composePlaceholder": "Pubblica nel canale…",
+    "attachImage": "Allega immagine",
+    "removeImage": "Rimuovi immagine",
     "postFailed": "Impossibile pubblicare",
     "you": "tu",
     "unknownError": "Errore sconosciuto",
