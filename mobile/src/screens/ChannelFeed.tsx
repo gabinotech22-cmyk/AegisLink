@@ -12,8 +12,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
+import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, Modal } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Crypto from 'expo-crypto';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -23,8 +24,12 @@ import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { MediaImage } from '../components/MediaImage';
+import { ChannelAudioBubble } from '../components/ChannelAudioBubble';
+import { GifPicker } from '../components/GifPicker';
+import { VaultSticker } from '../components/stickers/VaultPack';
 import { themedAlert } from '../components/AlertHost';
 import { SchedulePicker } from '../components/SchedulePicker';
+import { VoiceRecorderScreen } from './VoiceRecorder';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
 import { encryptAndUploadMedia } from '../crypto/media';
 import { useChannels, type FeedPost } from '../store/channels';
@@ -108,6 +113,8 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
   const [showQueue, setShowQueue] = useState(false);
   // Staged, EXIF-stripped image awaiting send (local documentDirectory path).
   const [attachedImage, setAttachedImage] = useState<{ path: string; w?: number; h?: number } | null>(null);
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
+  const [showGifPicker, setShowGifPicker] = useState(false);
   // Local staged paths picked this session but not yet uploaded — unlink on unmount.
   const freshStagedPaths = useRef<Set<string>>(new Set());
 
@@ -185,6 +192,56 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     });
   }, []);
 
+  // ── Voice note: record → E2EE blob → post as audio media ──
+  const handleSendVoice = useCallback(async (uri: string, durationMs: number) => {
+    setShowVoiceRecorder(false);
+    if (!identity) return;
+    try {
+      const blobUri = await encryptAndUploadMedia(uri, 'audio/m4a');
+      const media: PostMedia = { kind: 'audio', uri: blobUri, mime: 'audio/m4a', durationMs };
+      const res = await sendPost(channelId, '', identity, myDisplayName, media);
+      if (!res.ok) themedAlert(i18nT('channels.postFailed'), res.error ?? i18nT('channels.unknownError'));
+    } catch (e) {
+      themedAlert(i18nT('channels.postFailed'), (e as Error).message);
+    }
+  }, [identity, channelId, sendPost, myDisplayName, i18nT]);
+
+  // ── GIF: download the remote GIF, encrypt it, and post as an image blob so the
+  //    channel never leaks a fetch to the GIF provider (mirrors Chat). ──
+  const handleGifSelect = useCallback(async (url: string) => {
+    setShowGifPicker(false);
+    if (!identity) return;
+    const FS = await import('expo-file-system/legacy');
+    const localPath = `${FS.cacheDirectory ?? ''}chgif_${Crypto.randomUUID()}.gif`;
+    try {
+      const dl = await FS.downloadAsync(url, localPath);
+      if (!dl.uri) throw new Error('gif_download_failed');
+      const info = await FS.getInfoAsync(dl.uri);
+      if (((info as { size?: number }).size ?? 0) > 10 * 1024 * 1024) {
+        await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+        themedAlert(i18nT('channels.postFailed'), i18nT('channels.gifTooBig', 'GIF too large (max 10 MB)'));
+        return;
+      }
+      const blobUri = await encryptAndUploadMedia(localPath, 'image/gif');
+      await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+      const media: PostMedia = { kind: 'image', uri: blobUri, mime: 'image/gif' };
+      const res = await sendPost(channelId, '', identity, myDisplayName, media);
+      if (!res.ok) themedAlert(i18nT('channels.postFailed'), res.error ?? i18nT('channels.unknownError'));
+    } catch (e) {
+      await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+      themedAlert(i18nT('channels.postFailed'), (e as Error).message);
+    }
+  }, [identity, channelId, sendPost, myDisplayName, i18nT]);
+
+  // Stickers post as a standalone `[sticker:vault_<key>]` marker (same wire form
+  // chats use), rendered as the bundled asset by the feed below.
+  const handleStickerSelect = useCallback(async (marker: string) => {
+    setShowGifPicker(false);
+    if (!identity) return;
+    const res = await sendPost(channelId, marker, identity, myDisplayName);
+    if (!res.ok) themedAlert(i18nT('channels.postFailed'), res.error ?? i18nT('channels.unknownError'));
+  }, [identity, channelId, sendPost, myDisplayName, i18nT]);
+
   const handleSend = async () => {
     if (!identity || sending) return;
     const text = draft.trim();
@@ -225,7 +282,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
         body: trimmed,
         sendAt,
         options: attachedImage
-          ? { imagePath: attachedImage.path, imageW: attachedImage.w, imageH: attachedImage.h }
+          ? { media: { kind: 'image', path: attachedImage.path, mime: 'image/jpeg', w: attachedImage.w, h: attachedImage.h } }
           : undefined,
       });
       // The staged image is now owned by the store (uploaded at fire time), so
@@ -301,6 +358,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     const senderLabel = mine
       ? i18nT('channels.you')
       : (item.senderName ?? item.from);
+    const stickerKey = item.body?.match(/^\[sticker:(vault_\w+)\]$/)?.[1];
     return (
       <Pressable
         onLongPress={isOwner ? () => handleDeletePost(item) : undefined}
@@ -317,14 +375,25 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
           <View style={{ borderRadius: t.radius, overflow: 'hidden', backgroundColor: t.surface2, marginBottom: item.body ? 7 : 0, maxWidth: 280 }}>
             <MediaImage
               uri={item.media.uri}
-              ext="jpg"
+              ext={item.media.mime === 'image/gif' ? 'gif' : 'jpg'}
               accent={t.accent}
               resizeMode="cover"
               style={{ width: 280, aspectRatio: item.media.w && item.media.h ? item.media.w / item.media.h : 4 / 3 }}
             />
           </View>
         )}
-        {!!item.body && <Text style={{ fontFamily: t.font, fontSize: 13, lineHeight: 20, color: t.text }}>{item.body}</Text>}
+        {item.media?.kind === 'audio' && (
+          <View style={{ marginBottom: item.body ? 7 : 0 }}>
+            <ChannelAudioBubble t={t} uri={item.media.uri} durationMs={item.media.durationMs} />
+          </View>
+        )}
+        {stickerKey ? (
+          <View style={{ width: 120, height: 120, borderRadius: t.radius, overflow: 'hidden', backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+            <VaultSticker stickerKey={stickerKey} size={112} />
+          </View>
+        ) : (
+          !!item.body && <Text style={{ fontFamily: t.font, fontSize: 13, lineHeight: 20, color: t.text }}>{item.body}</Text>
+        )}
       </Pressable>
     );
   };
@@ -455,14 +524,30 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
               </View>
             </View>
           )}
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, padding: 10 }}>
             <Pressable
               onPress={() => void handlePickImage()}
               disabled={sending}
               accessibilityLabel={i18nT('channels.attachImage', 'Attach image')}
-              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.5 : 1 }}
+              style={{ width: 40, height: 44, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.5 : 1 }}
             >
-              <I.Attach size={18} color={t.accent} />
+              <I.Attach size={20} color={t.accent} />
+            </Pressable>
+            <Pressable
+              onPress={() => { setShowGifPicker((v) => !v); }}
+              disabled={sending}
+              accessibilityLabel={i18nT('channels.attachGif', 'GIF / sticker')}
+              style={{ width: 40, height: 44, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.5 : 1 }}
+            >
+              <Text style={{ fontFamily: t.fontMono, fontSize: 12, fontWeight: '700', color: t.accent, letterSpacing: 0.5 }}>GIF</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setShowVoiceRecorder(true)}
+              disabled={sending}
+              accessibilityLabel={i18nT('channels.voiceNote', 'Record voice note')}
+              style={{ width: 40, height: 44, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.5 : 1 }}
+            >
+              <I.Mic size={20} color={t.accent} />
             </Pressable>
             <TextInput
               value={draft}
@@ -500,6 +585,27 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
         onClose={() => setShowPicker(false)}
         onConfirm={(ts) => { void handleScheduleConfirm(ts); }}
       />
+
+      {/* GIF / sticker panel — docked inline like the chat composer. */}
+      <GifPicker
+        visible={showGifPicker}
+        onClose={() => setShowGifPicker(false)}
+        onSelectGif={(url) => { void handleGifSelect(url); }}
+        onSelectSticker={handleStickerSelect}
+      />
+
+      {/* Voice note recorder (full-screen modal, same as chats/groups). */}
+      <Modal
+        visible={showVoiceRecorder}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowVoiceRecorder(false)}
+      >
+        <VoiceRecorderScreen
+          onBack={() => setShowVoiceRecorder(false)}
+          onSend={(uri, durationMs) => { void handleSendVoice(uri, durationMs); }}
+        />
+      </Modal>
     </KeyboardAvoidingView>
   );
 }

@@ -133,16 +133,28 @@ async function deleteStagedPostFiles(options: GroupPostOptions): Promise<void> {
 }
 
 /**
+ * A staged media attachment for a scheduled CHANNEL post: a local file kept in
+ * documentDirectory/channelposts/ until fire time, when it is uploaded as an
+ * E2EE blob and turned into a sealed PostMedia. Covers image/audio/gif alike.
+ */
+export interface ChannelPostStagedMedia {
+  kind: PostMedia['kind'];
+  /** Staged local file path (documentDirectory/channelposts/). */
+  path: string;
+  /** MIME used for the E2EE upload (e.g. 'image/jpeg', 'image/gif', 'audio/m4a'). */
+  mime: string;
+  w?: number;
+  h?: number;
+  durationMs?: number;
+}
+
+/**
  * Publish-time options for a scheduled CHANNEL post. Channels broadcast a single
- * sealed feed entry, so the option set is a subset of the group one: an optional
- * staged image (uploaded as an E2EE blob at fire time). Audio/gif/sticker follow
- * the same shape as they land. Persisted at-rest encrypted in post_meta.
+ * sealed feed entry, so the only option is an optional staged media attachment
+ * (uploaded as an E2EE blob at fire time). Persisted at-rest encrypted in post_meta.
  */
 export interface ChannelPostOptions {
-  /** Local file:// path of the staged, EXIF-stripped image (documentDirectory). */
-  imagePath?: string;
-  imageW?: number;
-  imageH?: number;
+  media?: ChannelPostStagedMedia;
 }
 
 /** Decrypt + parse the at-rest channel post options; defaults to none on any failure. */
@@ -158,7 +170,7 @@ async function decryptChannelPostOptions(postMeta: string | undefined): Promise<
   }
 }
 
-/** Unlink a staged channel-post file (image). Refuses paths outside the staging dir. */
+/** Unlink a staged channel-post file. Refuses paths outside the staging dir. */
 async function deleteStagedChannelFile(path: string | undefined): Promise<void> {
   if (!path || !path.includes('channelposts/')) return;
   try {
@@ -430,17 +442,17 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
   async scheduleChannelPost({ channelId, body, sendAt, id, status, options }) {
     const { encryptBody } = require('../db/local') as typeof import('../db/local');
     const encryptedPayload = await encryptBody(body);
-    // Editing an existing row: unlink a staged image being replaced/dropped.
+    // Editing an existing row: unlink a staged media file being replaced/dropped.
     if (id) {
       const prev = get().scheduled.find((m) => m.id === id);
       if (prev?.postMeta) {
-        const prevOpts = await decryptChannelPostOptions(prev.postMeta);
-        if (prevOpts.imagePath && prevOpts.imagePath !== options?.imagePath) {
-          await deleteStagedChannelFile(prevOpts.imagePath);
+        const prevPath = (await decryptChannelPostOptions(prev.postMeta)).media?.path;
+        if (prevPath && prevPath !== options?.media?.path) {
+          await deleteStagedChannelFile(prevPath);
         }
       }
     }
-    const hasOptions = !!(options && options.imagePath);
+    const hasOptions = !!options?.media;
     const postMeta = hasOptions ? await encryptBody(JSON.stringify(options)) : undefined;
     const stored: StoredScheduledMessage = {
       id: id ?? Crypto.randomUUID(),
@@ -474,7 +486,7 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
       await deleteStagedPostFiles(await decryptPostOptions(msg.postMeta));
     }
     if (msg?.channelId && msg.postMeta) {
-      await deleteStagedChannelFile((await decryptChannelPostOptions(msg.postMeta)).imagePath);
+      await deleteStagedChannelFile((await decryptChannelPostOptions(msg.postMeta)).media?.path);
     }
   },
 
@@ -674,15 +686,15 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
 
           // Media posts need the relay NOW for the E2EE blob upload — wait online
           // WITHOUT burning retries (mirrors the group-post/1:1 semantics).
-          const chOptions = await decryptChannelPostOptions(msg.postMeta);
-          if (chOptions.imagePath && !online) continue;
+          const staged = (await decryptChannelPostOptions(msg.postMeta)).media;
+          if (staged && !online) continue;
 
           let media: PostMedia | null = null;
-          if (chOptions.imagePath) {
+          if (staged) {
             try {
               const { encryptAndUploadMedia } = require('../crypto/media') as typeof import('../crypto/media');
-              const blobUri = await encryptAndUploadMedia(chOptions.imagePath, 'image/jpeg');
-              media = { kind: 'image', uri: blobUri, mime: 'image/jpeg', w: chOptions.imageW, h: chOptions.imageH };
+              const blobUri = await encryptAndUploadMedia(staged.path, staged.mime);
+              media = { kind: staged.kind, uri: blobUri, mime: staged.mime, w: staged.w, h: staged.h, durationMs: staged.durationMs };
             } catch {
               // Upload failed (offline mid-way / staged file lost). If there is no
               // text either, retry later rather than posting an empty entry.
@@ -696,8 +708,8 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
             continue;
           }
           await markScheduledSent(msg.id);
-          // Published — the staged plaintext image travelled up as an E2EE blob.
-          await deleteStagedChannelFile(chOptions.imagePath);
+          // Published — the staged plaintext media travelled up as an E2EE blob.
+          await deleteStagedChannelFile(staged?.path);
           set((s) => ({
             scheduled: s.scheduled.map((m) =>
               m.id === msg.id ? { ...m, status: 'sent' as const } : m,

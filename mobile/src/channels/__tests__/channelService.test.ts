@@ -230,6 +230,12 @@ describe('post body senderName envelope (issue #204)', () => {
     expect(opened.media).toEqual(media);
   });
 
+  it('round-trips an audio voice note with its duration', () => {
+    const media = { kind: 'audio' as const, uri: 'blob:v:k:n', mime: 'audio/m4a', durationMs: 4200 };
+    const opened = openPostBody(encodePostBody('', undefined, media));
+    expect(opened.media).toEqual(media);
+  });
+
   it('rejects an untrusted media object with an unknown kind or oversized uri', () => {
     const badKind = openPostBody(JSON.stringify({ v: 1, text: 'x', media: { kind: 'exe', uri: 'blob:a' } }));
     expect(badKind.media).toBeNull();
