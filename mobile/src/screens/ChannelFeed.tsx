@@ -524,31 +524,40 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
               </View>
             </View>
           )}
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, padding: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, padding: 10 }}>
+            {/* Attach stays put; GIF + mic collapse while typing (chat pattern) so
+                the bar never crowds on a narrow screen. */}
             <Pressable
               onPress={() => void handlePickImage()}
               disabled={sending}
+              hitSlop={8}
               accessibilityLabel={i18nT('channels.attachImage', 'Attach image')}
-              style={{ width: 40, height: 44, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.5 : 1 }}
+              style={{ padding: 7, opacity: sending ? 0.5 : 1 }}
             >
-              <I.Attach size={20} color={t.accent} />
+              <I.Attach size={22} color={t.accent} />
             </Pressable>
-            <Pressable
-              onPress={() => { setShowGifPicker((v) => !v); }}
-              disabled={sending}
-              accessibilityLabel={i18nT('channels.attachGif', 'GIF / sticker')}
-              style={{ width: 40, height: 44, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.5 : 1 }}
-            >
-              <Text style={{ fontFamily: t.fontMono, fontSize: 12, fontWeight: '700', color: t.accent, letterSpacing: 0.5 }}>GIF</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setShowVoiceRecorder(true)}
-              disabled={sending}
-              accessibilityLabel={i18nT('channels.voiceNote', 'Record voice note')}
-              style={{ width: 40, height: 44, alignItems: 'center', justifyContent: 'center', opacity: sending ? 0.5 : 1 }}
-            >
-              <I.Mic size={20} color={t.accent} />
-            </Pressable>
+            {!draft.trim() && !attachedImage && (
+              <>
+                <Pressable
+                  onPress={() => { setShowGifPicker((v) => !v); }}
+                  disabled={sending}
+                  hitSlop={8}
+                  accessibilityLabel={i18nT('channels.attachGif', 'GIF / sticker')}
+                  style={{ padding: 7, opacity: sending ? 0.5 : 1 }}
+                >
+                  <Text style={{ fontFamily: t.fontMono, fontSize: 12, fontWeight: '700', color: t.accent, letterSpacing: 0.5 }}>GIF</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setShowVoiceRecorder(true)}
+                  disabled={sending}
+                  hitSlop={8}
+                  accessibilityLabel={i18nT('channels.voiceNote', 'Record voice note')}
+                  style={{ padding: 7, opacity: sending ? 0.5 : 1 }}
+                >
+                  <I.Mic size={22} color={t.accent} />
+                </Pressable>
+              </>
+            )}
             <TextInput
               value={draft}
               onChangeText={setDraft}
@@ -557,14 +566,15 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
               multiline
               style={{ flex: 1, maxHeight: 120, backgroundColor: t.surface2, borderRadius: t.radius, paddingHorizontal: 14, paddingVertical: 10, color: t.text, fontFamily: t.font, fontSize: 15 }}
             />
-            {canSchedule && (
+            {/* Schedule surfaces only once there's something to schedule. */}
+            {canSchedule && hasContent && (
               <Pressable
-                onPress={() => { if (hasContent) setShowPicker(true); }}
-                disabled={!hasContent}
+                onPress={() => setShowPicker(true)}
+                hitSlop={6}
                 accessibilityLabel={i18nT('channels.schedulePost', 'Schedule post')}
-                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: hasContent ? 1 : 0.5 }}
+                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}
               >
-                <I.Timer size={18} color={hasContent ? t.accent : t.textFaint} />
+                <I.Timer size={18} color={t.accent} />
               </Pressable>
             )}
             <Pressable
