@@ -8,6 +8,7 @@ import {
   checkPrekeysUploadRateLimit,
   checkPrekeysFetchRateLimit,
   checkDeviceLinkRateLimit,
+  checkPubchannelApplyRateLimit,
 } from '../relay/rateLimits.js';
 
 describe('socket-path rate limiters (audit 2026-06)', () => {
@@ -27,6 +28,17 @@ describe('socket-path rate limiters (audit 2026-06)', () => {
     const id = 'rl-test-devicelink';
     for (let i = 0; i < 3; i++) expect(checkDeviceLinkRateLimit(id)).toBe(true);
     expect(checkDeviceLinkRateLimit(id)).toBe(false);
+  });
+
+  it('pubchannel:apply allows 20 per channel then blocks (20 / min) — audit delta 2026-07-03', () => {
+    // Regression: apply is anonymous (no signature) and was the only
+    // pubchannel event with NO limiter — a tight loop could fill a channel's
+    // 256-slot pending-join queue instantly, locking out legitimate applicants.
+    const channelId = 'rl-test-apply-channel';
+    for (let i = 0; i < 20; i++) expect(checkPubchannelApplyRateLimit(channelId)).toBe(true);
+    expect(checkPubchannelApplyRateLimit(channelId)).toBe(false);
+    // Independent bucket per channel — throttling one channel never starves another.
+    expect(checkPubchannelApplyRateLimit('rl-test-apply-other')).toBe(true);
   });
 
   it('buckets are independent per identity (no cross-victim reset)', () => {
