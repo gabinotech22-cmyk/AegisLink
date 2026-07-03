@@ -27,6 +27,7 @@ jest.mock('../../db/local', () => ({
   getAllChatEphemeralTimers: jest.fn().mockResolvedValue({}),
   setMessageStarred: jest.fn().mockResolvedValue(undefined),
   setMessageDeleted: jest.fn().mockResolvedValue(undefined),
+  setRemoteMessageDeleted: jest.fn().mockResolvedValue(true),
   setMessageReactions: jest.fn().mockResolvedValue(undefined),
   updateMessageDelivery: jest.fn().mockResolvedValue(undefined),
   setMessagePinned: jest.fn().mockResolvedValue(undefined),
@@ -149,13 +150,16 @@ describe('remoteDelete', () => {
     expect(updated.mediaUri).toBeNull();
   });
 
-  it('calls setMessageDeleted(id) on the db', async () => {
+  it('calls the authorization-scoped setRemoteMessageDeleted(id, chatId) on the db', async () => {
     const msg = makeMsg({ id: 'msg-1' });
     useMessages.setState({ byChat: { 'chat-alice': [msg] } });
 
     await useMessages.getState().remoteDelete('chat-alice', 'msg-1');
 
-    expect(dbLocal.setMessageDeleted).toHaveBeenCalledWith('msg-1');
+    // Must go through the scoped path (id + chatId), NOT the unscoped
+    // setMessageDeleted used by the local "delete for me" flow.
+    expect(dbLocal.setRemoteMessageDeleted).toHaveBeenCalledWith('msg-1', 'chat-alice');
+    expect(dbLocal.setMessageDeleted).not.toHaveBeenCalled();
   });
 
   it('does not affect sibling messages in the same chat', async () => {
@@ -168,6 +172,22 @@ describe('remoteDelete', () => {
     const list = useMessages.getState().byChat['chat-alice'];
     expect(list[1].body).toBe('two');
     expect(list[1].deleted).toBe(false);
+  });
+
+  it('does NOT blank the bubble when the db rejects the scope (peer named an unowned msgId)', async () => {
+    // Regression for the delete-for-everyone authorization gap: a peer may only
+    // retract a message they sent to us. When setRemoteMessageDeleted returns
+    // false (no row matched id + chat_id + direction='in'), in-memory state
+    // must stay untouched — otherwise a peer could blank an arbitrary bubble.
+    (dbLocal.setRemoteMessageDeleted as jest.Mock).mockResolvedValueOnce(false);
+    const victim = makeMsg({ id: 'msg-1', body: 'my own message', direction: 'out' });
+    useMessages.setState({ byChat: { 'chat-alice': [victim] } });
+
+    await useMessages.getState().remoteDelete('chat-alice', 'msg-1');
+
+    const after = useMessages.getState().byChat['chat-alice'][0];
+    expect(after.deleted).toBe(false);
+    expect(after.body).toBe('my own message');
   });
 });
 

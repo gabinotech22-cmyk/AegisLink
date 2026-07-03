@@ -1,12 +1,30 @@
 # Fase 4 · Transporte Tor para el path mailbox (documento de decisión)
 
-> Estado: **decisión de arquitectura, pre-implementación.** Desbloquea la
-> promesa de la Fase 4: el modo buzón oculta `to` al relay, pero **sin Tor el
-> relay ve nuestra IP junto al socket de control aegisId y nos re-vincula**. Hoy
-> el cliente hace `io(ONION_URL)` a pelo (`mobile/src/socket/mailboxSocket.ts:115`)
-> y **no embebe Tor** — la `.onion` no resuelve sin un proxy Tor en el device. Por
-> eso `MAILBOX_ENABLED` es fail-closed y el modo está OFF por defecto. Este doc
-> decide CÓMO llevamos el tráfico del mailbox por Tor de verdad.
+> Estado: **decisión tomada e IMPLEMENTADA — Tier 2 (Tor embebido), NO Orbot.**
+> Este doc registra el análisis que llevó a la decisión; la recomendación
+> original de "Tier 1 Orbot ahora" (§4) quedó **superada**: el código fue directo
+> al Tier 2. La fuente de verdad es el código, no este doc.
+>
+> Lo que YA está en el cliente (verificado 2026-07-03):
+> - Bridge de Tor embebido F1+F2 (`mobile/src/net/tor.ts`): lifecycle
+>   (start/status/stop/bootstrap) y transporte `TorSioSocket` (socket.io sobre el
+>   SOCKS nativo — cada byte va por Tor). Módulo nativo `AegisTor`
+>   (`plugins/withTorEmbedded.js`, C-Tor de Guardian Project). Detalle de impl:
+>   `docs/FASE4-TOR-EMBEDDED-IMPL.md`.
+> - `mailboxSocket.ts` usa `new TorSioSocket(ONION_URL, …)` y es fail-closed:
+>   sin módulo nativo (`isTorAvailable()`), sin bootstrap de Tor, o sin
+>   `MAILBOX_ENABLED`, cae al transporte aegisId. El `io(ONION_URL)` "a pelo" que
+>   describía la versión previa de este párrafo **ya no existe**.
+>
+> Por qué `MAILBOX_ENABLED` SIGUE OFF por defecto — bloqueadores REALES para
+> el flip a ON (ninguno es "tocar un flag"):
+> 1. **El relay NO expone un hidden service de Tor** (`docker-compose.yml` solo
+>    tiene `relay` + `coturn`). No hay `.onion` a la que apuntar. → ops en el
+>    servidor (contenedor/daemon tor con `HiddenServicePort` → relay:3001).
+> 2. **`EXPO_PUBLIC_ONION_URL`** debe apuntar a esa `.onion`; sin ella
+>    `ONION_URL === null` → `MAILBOX_ENABLED === false` (fail-closed, `config.ts`).
+> 3. **APK nativo prebuilt** con el módulo `AegisTor` (nunca en Expo Go).
+> 4. **Validación 2-dispositivos** (ambos en mailbox mode, roots intercambiados).
 
 ## 1. La restricción que lo decide todo
 

@@ -635,6 +635,36 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     expect(encodeBase64(bobOut2!)).toBe(encodeBase64(msg2Plaintext));
   });
 
+  it('decrypts a mid-chain message when the chain head is lost (PQ material on every message)', () => {
+    // Regression: pqPub/pqCt used to ride ONLY on Ns===0. If that first
+    // message of a new chain was lost (relay drop, mailbox drain failure),
+    // every later message of the chain threw "missing PQ material" with no
+    // recovery. Now every message carries the (constant per-chain) PQ
+    // material, so a receiver can turn the chain from ANY of its messages.
+    const { aliceState, bobState } = establishHybridSession();
+
+    // Bob turns the chain: msg0 (head) is LOST in transit, msg1 arrives.
+    const lost = ratchetEncrypt(bobState, new TextEncoder().encode('lost head'));
+    const arrived = ratchetEncrypt(bobState, new TextEncoder().encode('arrived'));
+
+    // Every message of the chain must now advertise the PQ material.
+    expect(lost.header.pqPub).toBeDefined();
+    expect(arrived.header.pqPub).toBeDefined();
+    expect(arrived.header.pqCt).toBeDefined();
+    expect(encodeBase64(arrived.header.pqCt!)).toBe(encodeBase64(lost.header.pqCt!));
+
+    // Alice never sees msg0 but must still decrypt msg1 (dhRatchet fed by
+    // msg1's own header) and stash a skipped key for the lost head.
+    const out = ratchetDecrypt(aliceState, arrived.header, arrived.ciphertext, arrived.nonce);
+    expect(out).not.toBeNull();
+    expect(new TextDecoder().decode(out!)).toBe('arrived');
+
+    // The lost head is later redelivered: decrypts from the skipped-key store.
+    const late = ratchetDecrypt(aliceState, lost.header, lost.ciphertext, lost.nonce);
+    expect(late).not.toBeNull();
+    expect(new TextDecoder().decode(late!)).toBe('lost head');
+  });
+
   it('rejects a chain-turn header stripped of PQ material (downgrade attack)', () => {
     const { aliceState, bobState } = establishHybridSession();
 

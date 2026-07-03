@@ -14,6 +14,7 @@ import {
   deleteContactRatchetSession,
   setMessageStarred,
   setMessageDeleted,
+  setRemoteMessageDeleted,
   setMessageReactions,
   setMessagePinned,
   updateMessageDelivery,
@@ -235,7 +236,10 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async remoteDelete(chatId, id) {
-    await setMessageDeleted(id);
+    // Authorization-scoped: a peer may only retract a message they sent to us
+    // in our chat with them. If nothing matched, do NOT touch in-memory state.
+    const deleted = await setRemoteMessageDeleted(id, chatId);
+    if (!deleted) return;
     const list = get().byChat[chatId] ?? [];
     set((s) => ({
       byChat: {

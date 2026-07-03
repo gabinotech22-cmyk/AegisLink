@@ -4,6 +4,7 @@ import { decodeBase64 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
+import { Avatar } from '../components/Avatar';
 import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
@@ -54,7 +55,6 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
   const media = useCall((s) => s.media);
   const peer = useContacts((s) => (peerId ? s.get(peerId) : undefined));
   const name = peer?.name ?? peerId ?? 'unknown';
-  const initial = name.trim()[0]?.toUpperCase() ?? '?';
   const { identity } = useIdentity();
   const [showReplies, setShowReplies] = useState(false);
 
@@ -89,11 +89,15 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
         {/* Avatar with CSS pulse animation */}
         <style>{`@keyframes aegis-ring-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}`}</style>
         <div style={{ width: 148, height: 148, borderRadius: 74, border: `2px solid ${t.accent}`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 28, marginBottom: 16, animation: 'aegis-ring-pulse 1.2s ease-in-out infinite' }}>
-          <div style={{ width: 132, height: 132, borderRadius: 66, backgroundColor: '#8b5cf6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ color: '#fff', fontFamily: isMonoId ? t.fontMono : t.font, fontWeight: '600', fontSize: 48, letterSpacing: -0.6 }}>
-              {initial}
-            </span>
-          </div>
+          {/* Same avatar resolution as the chat list: photo → identicon → initial */}
+          <Avatar
+            t={t}
+            name={peer?.avatarImage ?? name}
+            color={peer?.color ?? '#8b5cf6'}
+            size={132}
+            photoUri={peer?.avatarImage ?? undefined}
+            seed={peer?.publicKeyB64 ?? peerId ?? name}
+          />
         </div>
 
         <span style={{ fontFamily: isMonoId ? t.fontMono : t.fontDisplay, fontSize: 28, color: '#fff', fontWeight: '600', letterSpacing: -0.5 }}>

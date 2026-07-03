@@ -91,6 +91,35 @@ services:
     networks:
       - aegis_internal
 
+  # ── Tor onion service (Fase 4 · mailbox mode) ─────────────────────────────
+  # Publishes the relay as a v3 onion service so mailbox-mode clients reach it
+  # over Tor (embedded client, mobile/src/net/tor.ts) without the relay ever
+  # seeing their IP. Purely additive: the clearnet nginx/TLS path is untouched.
+  # The onion identity key persists in tor_keys — losing that volume ROTATES
+  # the .onion address (and EXPO_PUBLIC_ONION_URL in every client build), so
+  # back it up alongside the relay DB.
+  tor:
+    build:
+      context: ./infra/tor
+      dockerfile: Dockerfile
+    image: aegislink-tor:latest
+    container_name: aegislink-tor
+    restart: unless-stopped
+    depends_on:
+      - relay
+    volumes:
+      - tor_keys:/var/lib/tor
+    # No published ports: the onion service is reachable only through the Tor
+    # network, and this container only dials OUT (to relay:3001 and Tor).
+    networks:
+      - aegis_internal
+    logging:
+      driver: "json-file"
+      options:
+        # torrc pins Log to notice — no per-connection data reaches stdout.
+        max-size: "10m"
+        max-file: "3"
+
   # ── coturn TURN/STUN ──────────────────────────────────────────────────────
   # host network mode is required so coturn can advertise the correct public IP
   # in ICE candidates and open arbitrary UDP ports for media relay.
@@ -119,6 +148,9 @@ volumes:
   relay_data:
     driver: local
   relay_uploads:
+    driver: local
+  # Onion identity key (v3 ed25519). Backup-critical: see docs/RELAY-ONION-SERVICE.md
+  tor_keys:
     driver: local
 
 networks:

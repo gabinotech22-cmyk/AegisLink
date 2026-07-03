@@ -756,16 +756,21 @@ describe('Remote delete', () => {
     socketBob?.disconnect();
   });
 
-  it('Bob deletes a message → Alice receives msg:delete', async () => {
+  it('the legacy plaintext msg:delete relay event is NOT forwarded (path removed)', async () => {
+    // Regression: delete-for-everyone moved into the sealed E2EE channel. The
+    // relay must no longer forward a plaintext msg:delete — it leaked the
+    // sender↔recipient pair and carried no proof-of-key-possession.
     const msgId = 'msg-to-delete-001';
 
-    const [deleteEvent] = await Promise.all([
-      once<{ from: string; msgId: string }>(socketAlice, 'msg:delete'),
-      Promise.resolve(socketBob.emit('msg:delete', { to: alice.aegisId, msgId })),
-    ]);
+    const received = new Promise<'forwarded'>((resolve) => {
+      socketAlice.once('msg:delete', () => resolve('forwarded'));
+    });
+    const timedOut = new Promise<'no-event'>((resolve) => {
+      setTimeout(() => resolve('no-event'), 500);
+    });
+    socketBob.emit('msg:delete', { to: alice.aegisId, msgId });
 
-    expect(deleteEvent.from).toBe(bob.aegisId);
-    expect(deleteEvent.msgId).toBe(msgId);
+    await expect(Promise.race([received, timedOut])).resolves.toBe('no-event');
   });
 });
 

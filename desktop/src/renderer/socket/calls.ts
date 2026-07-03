@@ -347,10 +347,18 @@ function processIncomingInvite(
 /** Handle an incoming v2 answer (decrypted upstream via callKey). */
 async function processIncomingAnswer(msgCallId: string, answer: string): Promise<void> {
   clearRingTimeout();
-  const { activePeer, callId } = useCall.getState();
+  const { activePeer, callId, status } = useCall.getState();
   if (!activePeer || callId !== msgCallId) return;
+  // Transition to 'connecting' BEFORE the await, and only from
+  // 'outgoing-ringing'. On a fast network the peer connection reaches
+  // 'connected' (status 'in-call', timer running) while the answer is still
+  // being applied — an unconditional setStatus afterwards then DOWNGRADED the
+  // live call back to "Connecting…" and nothing re-fired 'connected' to
+  // repair it until a lucky ICE pair switch (or never).
+  if (status === 'outgoing-ringing') {
+    useCall.getState().setStatus('connecting');
+  }
   await setRemoteAnswer(activePeer.pc as RTCPeerConnection, answer);
-  useCall.getState().setStatus('connecting');
 }
 
 /** Handle an incoming v2 ICE candidate (decrypted upstream via callKey). */

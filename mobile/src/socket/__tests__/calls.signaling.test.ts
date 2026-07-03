@@ -154,6 +154,7 @@ jest.mock('react-native', () => ({
 jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
 
 import { themedAlert } from '../../components/AlertHost';
+import { openWithCallKey } from '../../crypto/callSession';
 import { useCall } from '../../store/call';
 import { useMessages } from '../../store/messages';
 import { saveCall } from '../../db/local';
@@ -276,6 +277,45 @@ describe('calls.ts — 1:1 finalization', () => {
     expect(mockSaveCall.mock.calls[0][0]).toMatchObject({ status: 'answered', direction: 'in' });
     expect(appendedBodies()).toEqual([expect.stringMatching(/^\[call:answered:/)]);
     expect(mockAlert).not.toHaveBeenCalled();
+  });
+
+  // ── Answer race: a late answer must never downgrade a live 'in-call' ───────
+  // Field bug: caller showed "connected" for milliseconds, then "Connecting…"
+  // for ~16s (until a lucky ICE pair switch re-fired 'connected'), both
+  // directions. Root cause: processIncomingAnswer set status to 'connecting'
+  // AFTER awaiting setRemoteAnswer/flushPendingIce — on a fast network the
+  // connection was already 'in-call' by then and got downgraded.
+  function capturedAnswerHandler(): (m: unknown) => Promise<void> {
+    attachCallHandlers();
+    const entry = (mockOn.mock.calls as [string, (m: unknown) => Promise<void>][])
+      .find(([ev]) => ev === 'call:answer:v2');
+    expect(entry).toBeDefined();
+    return entry![1];
+  }
+
+  it('an answer received while still ringing moves the call to "connecting"', async () => {
+    await startCall('peer-G', 'audio');
+    (openWithCallKey as jest.Mock).mockReturnValueOnce('sdp-answer');
+    const onAnswer = capturedAnswerHandler();
+    expect(useCall.getState().status).toBe('outgoing-ringing');
+
+    await onAnswer({ callId: useCall.getState().callId, ciphertext: 'ct', nonce: 'n' });
+
+    expect(useCall.getState().status).toBe('connecting');
+  });
+
+  it('an answer that lands after the call already connected leaves it "in-call"', async () => {
+    await startCall('peer-H', 'audio');
+    (openWithCallKey as jest.Mock).mockReturnValueOnce('sdp-answer');
+    const onAnswer = capturedAnswerHandler();
+
+    // Fast network: ICE reaches 'connected' before the answer finishes processing.
+    mockPeerState.handlers!.onConnectionStateChange('connected');
+    expect(useCall.getState().status).toBe('in-call');
+
+    await onAnswer({ callId: useCall.getState().callId, ciphertext: 'ct', nonce: 'n' });
+
+    expect(useCall.getState().status).toBe('in-call'); // NOT downgraded to 'connecting'
   });
 
   // ── Decline path still logs as 'declined' on both reasons ─────────────────

@@ -17,6 +17,13 @@ import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import type { Theme } from '../theme/vault';
 import { themedAlert } from '../components/AlertHost';
 
+// Public legal documents. GitHub-blob URLs are what the landing footer links to
+// and are accepted by the stores as the required public policy URL.
+const LEGAL_URLS = {
+  privacy: 'https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/privacy-policy.md',
+  terms: 'https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/terms-of-service.md',
+} as const;
+
 interface Props {
   onTab: (tab: Tab) => void;
   onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices') => void;
@@ -286,8 +293,20 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             icon={<I.Globe size={20} color={t.textDim} />}
             label={i18nT('privacy.jurisdiction')}
             sub={i18nT('privacy.jurisdictionSub')}
-            noBorder
             onPress={() => { themedAlert(i18nT('privacy.jurisdictionAlert'), i18nT('privacy.jurisdictionAlertDesc')); }}
+          />
+          <Row
+            t={t}
+            icon={<I.Shield size={20} color={t.textDim} />}
+            label={i18nT('privacy.privacyPolicy')}
+            onPress={() => { void Linking.openURL(LEGAL_URLS.privacy).catch(() => {}); }}
+          />
+          <Row
+            t={t}
+            icon={<I.Link size={20} color={t.textDim} />}
+            label={i18nT('privacy.termsOfService')}
+            onPress={() => { void Linking.openURL(LEGAL_URLS.terms).catch(() => {}); }}
+            noBorder
           />
         </Section>
 

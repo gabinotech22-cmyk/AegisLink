@@ -4,3 +4,5 @@
 *.sh text eol=lf
 Dockerfile text eol=lf
 *.Dockerfile text eol=lf
+# tor parses torrc on the Linux host after `git pull` — CRLF would break it.
+infra/tor/torrc text eol=lf

@@ -110,6 +110,22 @@ Label de firma: `"aegislink/CHANNEL_MANIFEST"`.
 3. Firma Ed25519 válida sobre signed-input.
 4. `manifestSeq > local.manifestSeq` (manifests obsoletos se ignoran silenciosamente).
 
+### 3.4 Aplicación de `channelType` — CLIENT-SIDE por diseño (audit 2026-06-30 M1)
+
+`channelType` (`open`/`readonly`/`moderated`/`approval`) va **firmado en el manifest**
+y su cumplimiento es **client-side, no server-side** — decisión deliberada, no un hueco.
+El relay usa **un único delivery token por canal** para gatear el posteo (`pubchannel:msg`):
+solo verifica "posee un token válido para este canal", nunca *quién* postea ni su rol.
+Aplicar roles en el relay exigiría que conociera (a) la tabla de roles del canal y (b) una
+identidad de emisor ligada a cada mensaje — ambos son metadatos que el modelo
+sealed-sender / cero-metadatos **rechaza por diseño** sostener. El manifest firmado por el
+owner (verificado por clientes) es la fuente de verdad de quién puede postear; un cliente
+que incumpla se descarta por firma de manifest entre pares, no por el relay ciego.
+
+Si en el futuro se requiere **aplicación server-side** de roles de escritura, la vía correcta
+es acuñar un **write-capability token separado** del token de lectura/entrega — nunca enseñar
+identidades al relay. Ref. código: `server/src/relay/handlers/publicChannels.ts` (`pubchannel:msg`).
+
 ---
 
 ## 4. Channel Encryption Key (CEK) y acceso

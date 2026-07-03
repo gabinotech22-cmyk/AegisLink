@@ -4,6 +4,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
+import { Avatar } from '../components/Avatar';
 import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
@@ -69,7 +70,6 @@ export function CallScreen({ onClose }: Props) {
   const peer = useContacts((s) => (peerId ? s.get(peerId) : undefined));
   const { identity } = useIdentity();
   const peerName = peer?.name ?? peerId ?? 'unknown';
-  const peerInitial = peerName.trim()[0]?.toUpperCase() ?? '?';
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -132,9 +132,17 @@ export function CallScreen({ onClose }: Props) {
 
       {/* Top content */}
       <div style={{ paddingTop: 48, display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, position: 'relative' }}>
+        {/* Same avatar resolution as the chat list: photo → identicon → initial */}
         {!isVideo && (
-          <div style={{ width: 100, height: 100, borderRadius: 50, backgroundColor: t.surface2, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 22 }}>
-            <span style={{ fontFamily: t.fontDisplay, fontSize: 42, color: t.accent, fontWeight: '600' }}>{peerInitial}</span>
+          <div style={{ marginBottom: 22 }}>
+            <Avatar
+              t={t}
+              name={peer?.avatarImage ?? peerName}
+              color={peer?.color ?? t.surface2}
+              size={100}
+              photoUri={peer?.avatarImage ?? undefined}
+              seed={peer?.publicKeyB64 ?? peerId ?? peerName}
+            />
           </div>
         )}
         <span style={{ fontFamily: t.fontDisplay, fontSize: 24, color: isVideo ? '#fff' : t.text, fontWeight: '600', letterSpacing: -0.4 }}>

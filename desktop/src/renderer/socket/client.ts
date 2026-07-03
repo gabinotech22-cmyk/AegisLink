@@ -18,14 +18,14 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { RELAY_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED } from '../config';
-import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2 } from '../crypto/messaging';
+import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed } from './mailboxSocket';
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { spkRotationDecision, spkPruneTargetKeyId } from './spkRotation';
-import { reviveBytes, reviveMkSkipped } from './ratchetSerde';
+import { serializeRatchetState, reviveRatchetState } from './ratchetSerde';
 import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
@@ -51,6 +51,7 @@ import { stripAndPad } from '../crypto/metadata';
 import { loadRatchetSession, saveRatchetSession, deleteContactRatchetSession } from '../db/local';
 import { showIncomingNotification } from '../notifications/push';
 import { useTyping } from '../store/typing';
+import { useCall } from '../store/call';
 
 const DEV = import.meta.env.DEV;
 
@@ -591,7 +592,21 @@ export function connect(identity: Identity): Socket {
     authenticated = false;
     clearAuthWatchdog();
     useConnection.getState().setOnline(false);
-    if (DEV) logger.debug('[socket] disconnected:', reason);
+    // Distinguish a disconnect that lands mid-call from an idle one — mirrors
+    // mobile/src/socket/client.ts. A call-time 'ping timeout' used to be the
+    // signature of heartbeat starvation during WebRTC setup (see
+    // server/src/index.ts pingTimeout comment). Diagnostic only: the reconnect
+    // path already recovers signaling safely (socket.io-client buffers emits
+    // made while disconnected and flushes on reconnect; App.tsx re-arms
+    // attachCallHandlers() after reconnect).
+    if (DEV) {
+      const callStatus = useCall.getState().status;
+      if (callStatus !== 'idle' && callStatus !== 'ended') {
+        logger.warn('[socket] disconnected DURING active call — reason:', reason, 'callStatus:', callStatus);
+      } else {
+        logger.debug('[socket] disconnected:', reason);
+      }
+    }
   });
 
   socket.on('error_msg', async (e: { code?: string }) => {
@@ -721,9 +736,12 @@ export function connect(identity: Identity): Socket {
     }
   });
 
-  socket.on('msg:delete', ({ from, msgId }: { from: string; msgId: string }) => {
-    void useMessages.getState().remoteDelete(from, msgId);
-  });
+  // NOTE: the legacy plaintext `msg:delete` relay event is intentionally NOT
+  // handled. Delete-for-everyone now travels inside the sealed E2EE ratchet
+  // channel (`{type:'msg_delete'}`), which authenticates the sender. Honoring
+  // an unauthenticated wire event would let a malicious relay erase arbitrary
+  // messages by supplying {from, msgId} (golden rule #3: sensitive actions
+  // require proof-of-key-possession, not just knowing an id).
 
   socket.on('typing', ({ from, isTyping }: { from: string; isTyping: boolean; channelId?: string }) => {
     useTyping.getState().setTyping(from, isTyping);
@@ -876,23 +894,7 @@ async function getOrCreateSessionLocked(
 ): Promise<RatchetState> {
   const existingJson = await loadRatchetSession(contactAegisId);
   if (existingJson) {
-    const s = JSON.parse(existingJson);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(existingJson);
     return s as RatchetState;
   }
 
@@ -975,20 +977,9 @@ async function getOrCreateSessionLocked(
 
 async function saveSessionState(aegisId: string, state: RatchetState) {
   trimOldSkippedKeys(state, MAX_SKIPPED_KEYS);
-  const s = {
-    RK: state.RK,
-    DHs: state.DHs,
-    DHr: state.DHr,
-    CKs: state.CKs,
-    CKr: state.CKr,
-    Ns: state.Ns,
-    Nr: state.Nr,
-    PN: state.PN,
-    MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
-    x3dhInit: state.x3dhInit,
-    createdAtMs: state.createdAtMs,
-  };
-  await saveRatchetSession(aegisId, JSON.stringify(s));
+  // serializeRatchetState is the single point of truth for the field list
+  // (hand-rolled copies dropped the PQ fields once already — see ratchetSerde.ts).
+  await saveRatchetSession(aegisId, serializeRatchetState(state));
 }
 
 // ─── Ratchet desync auto-recovery (ported from mobile/src/socket/client.ts) ──
@@ -1013,6 +1004,18 @@ const inRecoveryUntilMs = new Map<string, number>();
 /** Pending recovery fallback-flush timers, keyed by peer — see disconnect(). */
 const recoveryFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// ── One-sided desync escalation (parity with mobile/src/socket/client.ts) ───────
+// The plain NUDGE assumes desync is SYMMETRIC. When it is ONE-SIDED (only the
+// lower peer's RECEIVE chain is broken), the nudge decrypts fine on the higher
+// peer, which therefore never re-keys and the lower peer wedges forever. After a
+// bounded number of nudges the non-initiator escalates to an AUTHENTICATED
+// `sessionReset` flag inside the encrypted payload (MAC + sealed-sender verified,
+// never a wire field). The higher peer then force-runs its INITIATE branch even
+// though its own decrypt succeeded. Mirrors Session/SimpleX in-band session reset.
+const NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST = 2;
+/** Per-contact count of plain nudges emitted in the current recovery episode. */
+const nudgeAttemptsThisEpisode = new Map<string, number>();
+
 function amInitiatorFor(myAegisId: string, peerAegisId: string): boolean {
   return myAegisId > peerAegisId;
 }
@@ -1031,29 +1034,16 @@ function isInRecovery(aegisId: string): boolean {
 async function sendNudgeOverExistingSession(
   contact: { aegisId: string; publicKeyB64: string },
   identity: Identity,
+  // When true, embed an authenticated `sessionReset` flag so the higher peer
+  // force-re-keys even if its own decrypt succeeds (one-sided desync escalation).
+  requestSessionReset = false,
 ): Promise<boolean> {
   if (!socket || !connected || !authenticated) return false;
   const existingJson = await loadRatchetSession(contact.aegisId);
   if (!existingJson) return false;
   let session: RatchetState;
   try {
-    const s = JSON.parse(existingJson);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(existingJson);
     session = s as RatchetState;
   } catch {
     return false;
@@ -1069,6 +1059,9 @@ async function sendNudgeOverExistingSession(
       senderName: idState.displayName,
       senderColor: idState.avatarColor,
       senderStatus: idState.profileStatus,
+      // Rides INSIDE the E2EE ratchet payload — only visible to the higher peer
+      // after a MAC-verified decrypt, so it is cryptographically authenticated.
+      ...(requestSessionReset ? { sessionReset: true } : {}),
     });
     const recipientPub = decodeBase64(contact.publicKeyB64);
     const { envelope, newState } = encryptMessage(
@@ -1101,23 +1094,28 @@ async function tryRecoverDesync(
   // the SAME aegisId; threading the context lets that nested acquire pass
   // through the reentrant fast-path instead of deadlocking on our own gate.
   lockCtx?: LockCtx,
+  // Bypass grace/cooldown — used by the authenticated session-reset path, where
+  // our OWN decrypt succeeded so those guards would otherwise suppress the re-key.
+  force = false,
 ): Promise<boolean> {
   const now = Date.now();
 
-  // Grace: never tear down a session negotiated < grace ago — a stale,
-  // in-flight message from the previous session must not kill the new one.
-  if (
-    existingState &&
-    typeof existingState.createdAtMs === 'number' &&
-    now - existingState.createdAtMs < SESSION_GRACE_MS
-  ) {
-    return false;
-  }
+  if (!force) {
+    // Grace: never tear down a session negotiated < grace ago — a stale,
+    // in-flight message from the previous session must not kill the new one.
+    if (
+      existingState &&
+      typeof existingState.createdAtMs === 'number' &&
+      now - existingState.createdAtMs < SESSION_GRACE_MS
+    ) {
+      return false;
+    }
 
-  // Cooldown: collapse a burst of failing stale messages into one attempt.
-  const last = lastRecoveryAttemptMs.get(contact.aegisId);
-  if (typeof last === 'number' && now - last < RECOVERY_COOLDOWN_MS) {
-    return false;
+    // Cooldown: collapse a burst of failing stale messages into one attempt.
+    const last = lastRecoveryAttemptMs.get(contact.aegisId);
+    if (typeof last === 'number' && now - last < RECOVERY_COOLDOWN_MS) {
+      return false;
+    }
   }
   lastRecoveryAttemptMs.set(contact.aegisId, now);
 
@@ -1131,8 +1129,14 @@ async function tryRecoverDesync(
 
   if (!initiator) {
     // Lower aegisId: keep the (desynced) session, nudge the higher peer, and
-    // wait to adopt its fresh init in decryptAndAppend.
-    await sendNudgeOverExistingSession(contact, identity);
+    // wait to adopt its fresh init in decryptAndAppend. One-sided desync
+    // escalation: after NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST plain nudges without
+    // convergence, escalate to an authenticated sessionReset request so the
+    // higher peer re-keys even though our nudge decrypts fine on its side.
+    const priorAttempts = nudgeAttemptsThisEpisode.get(contact.aegisId) ?? 0;
+    const requestReset = priorAttempts >= NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST;
+    const nudged = await sendNudgeOverExistingSession(contact, identity, requestReset);
+    if (nudged) nudgeAttemptsThisEpisode.set(contact.aegisId, priorAttempts + 1);
     return true;
   }
 
@@ -1219,23 +1223,7 @@ async function decryptAndAppendLocked(
   }
 
   if (existingJson && !parsed.x3dh) {
-    const s = JSON.parse(existingJson);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(existingJson);
     ratchetState = s;
   } else {
     if (!parsed.x3dh) {
@@ -1325,16 +1313,20 @@ async function decryptAndAppendLocked(
     // reply with OUR profile under the now-converged session (the initiator
     // ignored our init under the glare rule, so it never got our profile).
     inRecoveryUntilMs.delete(contact.aegisId);
+    // Converged: reset the one-sided-desync escalation counter so a future,
+    // unrelated desync starts again with plain nudges before escalating.
+    nudgeAttemptsThisEpisode.delete(contact.aegisId);
     setTimeout(() => {
       void sendProfileTo(contact, identity).catch(() => {});
     }, 300);
   }
 
-  const rHeader = {
-    ratchetKey: decodeBase64(parsed.ratchet.ratchetKeyB64),
-    n: parsed.ratchet.n,
-    pn: parsed.ratchet.pn,
-  };
+  // Hybrid PQ ratchet (R1): parseRatchetHeader forwards pqPub/pqCt — a hybrid
+  // receiver treats their absence on a chain turn as a downgrade attack and
+  // rejects the message (see dhRatchet in signal/ratchet.ts). A hand-rolled
+  // header here that dropped them broke every fresh v2 handshake with
+  // "missing PQ material on hybrid session".
+  const rHeader = parseRatchetHeader(parsed.ratchet);
   const rCiphertext = decodeBase64(parsed.ratchet.ciphertextB64);
   const rNonce = decodeBase64(parsed.ratchet.nonceB64);
 
@@ -1389,6 +1381,20 @@ async function decryptAndAppendLocked(
       parsedPayload = JSON.parse(body);
 
       if (parsedPayload.type === 'profile_update') {
+        // One-sided desync escalation (mirrors Session/SimpleX in-band session
+        // reset): this message decrypted fine (the peer's SEND chain still
+        // matches ours) so our own desync detector never fired. The authenticated
+        // `sessionReset` flag — verified by this MAC-checked decrypt AND the outer
+        // sealed-sender box, never a forgeable wire field — asks us to re-key.
+        // Only the canonical initiator (higher aegisId) may mint the winning init;
+        // if we are the lower peer we ignore it to avoid a re-key ping-pong.
+        if (parsedPayload.sessionReset === true) {
+          if (amInitiatorFor(identity.aegisId, contact.aegisId)) {
+            await saveSessionState(contact.aegisId, ratchetState);
+            await tryRecoverDesync(contact, ratchetState, identity, lockCtx, true);
+            return true;
+          }
+        }
         if (parsedPayload.senderName) {
           await useContacts.getState().updateContactProfile(
             contact.aegisId,
@@ -1408,6 +1414,42 @@ async function decryptAndAppendLocked(
         // them. setContactMailboxRoot ignores malformed input.
         if (typeof parsedPayload.mailboxRoot === 'string' && parsedPayload.mailboxRoot) {
           try { await setContactMailboxRoot(contact.aegisId, parsedPayload.mailboxRoot); } catch { /* non-fatal */ }
+        }
+        await saveSessionState(contact.aegisId, ratchetState);
+        return true;
+      }
+
+      // E2EE delete-for-everyone: the peer retracts one of their messages
+      // (payload.text = the target msgId). Arrives over the normal ratchet
+      // channel — durable (outbox + mailbox), sealed, zero relay metadata —
+      // unlike the old plaintext fire-and-forget `msg:delete` event. Apply
+      // silently; do NOT append a chat row. Still persist ratchet state.
+      if (parsedPayload.type === 'msg_delete') {
+        if (typeof parsedPayload.text === 'string' && parsedPayload.text) {
+          await useMessages.getState().remoteDelete(contact.aegisId, parsedPayload.text);
+        }
+        await saveSessionState(contact.aegisId, ratchetState);
+        return true;
+      }
+
+      // E2EE read receipt (mailbox mode): the peer reports having read some of
+      // our messages. payload.text = JSON array of msgIds. Rides the sealed
+      // channel so the relay never sees the me↔to aegisId edge (which the old
+      // plaintext `msg:read` event handed over on the control-plane socket).
+      // Apply silently; do NOT append a chat row. Still persist ratchet state.
+      if (parsedPayload.type === 'read_receipt') {
+        if (typeof parsedPayload.text === 'string' && parsedPayload.text) {
+          try {
+            const ids: unknown = JSON.parse(parsedPayload.text);
+            if (Array.isArray(ids)) {
+              const msgs = useMessages.getState();
+              for (const id of ids) {
+                if (typeof id === 'string' && id) {
+                  void msgs.updateDelivery(contact.aegisId, id, 'read');
+                }
+              }
+            }
+          } catch { /* malformed receipt payload — ignore */ }
         }
         await saveSessionState(contact.aegisId, ratchetState);
         return true;
@@ -1780,23 +1822,7 @@ async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
   try {
     const raw = await SecureStore.getItemAsync(SECURE_SELF_RATCHET_KEY(myAegisId));
     if (!raw) return null;
-    const s = JSON.parse(raw);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(raw);
     return s as RatchetState;
   } catch (e) {
     if (DEV) logger.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
@@ -2076,6 +2102,7 @@ export function disconnect(): void {
   // socket and leak timer handles.
   for (const t of recoveryFallbackTimers.values()) clearTimeout(t);
   recoveryFallbackTimers.clear();
+  nudgeAttemptsThisEpisode.clear();
 }
 
 export async function sendMessage(opts: {
@@ -2354,17 +2381,68 @@ export async function sendProfileTo(
 
 export function emitTyping(to: string, isTyping: boolean): void {
   if (!socket || !authenticated) return;
+  // In mailbox mode the recipient (`to`) is hidden from the relay by design; the
+  // plaintext `typing` event would relink the me↔to edge on the control-plane
+  // socket. Typing is a best-effort ephemeral signal (durable sealed delivery
+  // would arrive stale), so suppress it under mailbox mode. Otherwise unchanged.
+  if (MAILBOX_ENABLED) return;
   socket.emit('typing', { to, isTyping });
 }
 
 export function sendReadReceipts(to: string, msgIds: string[]): void {
   if (!socket || !authenticated || msgIds.length === 0) return;
+  // Mailbox mode: send the receipt sealed through the E2EE channel so the relay
+  // never sees the me↔to aegisId edge on the plaintext control-plane socket.
+  // Outside mailbox mode, keep the lightweight plaintext event — it exposes no
+  // more than the v2 message transport already does (same aegisId routing).
+  if (MAILBOX_ENABLED) {
+    void (async () => {
+      const { useIdentity } = await import('../store/identity');
+      const identity = useIdentity.getState().identity;
+      const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+      if (!identity || !contact?.publicKeyB64) return;
+      await sendMessage({
+        identity,
+        recipientAegisId: to,
+        recipientPublicKey: decodeBase64(contact.publicKeyB64),
+        plaintext: JSON.stringify(msgIds),
+        type: 'read_receipt',
+        expiresAt: null,
+        skipLocalAppend: true,
+      });
+    })().catch((e) => {
+      if (DEV) logger.warn('[socket] sealed read receipt failed:', (e as Error).message);
+    });
+    return;
+  }
   socket.emit('msg:read', { to, msgIds });
 }
 
 export function sendDeleteForEveryone(to: string, msgId: string): void {
-  if (!socket || !authenticated) return;
-  socket.emit('msg:delete', { to, msgId });
+  // E2EE + durable: rides the normal sealed message path (Double Ratchet,
+  // outbox retry, mailbox delivery). The old plaintext `msg:delete` event
+  // leaked the sender↔recipient pair to the relay and was silently dropped
+  // whenever the peer had no live socket — mailbox-mode peers almost never do.
+  void (async () => {
+    const { useIdentity } = await import('../store/identity');
+    const identity = useIdentity.getState().identity;
+    const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+    if (!identity || !contact?.publicKeyB64) {
+      if (DEV) logger.warn('[socket] sendDeleteForEveryone: missing identity or peer key — not sent');
+      return;
+    }
+    await sendMessage({
+      identity,
+      recipientAegisId: to,
+      recipientPublicKey: decodeBase64(contact.publicKeyB64),
+      plaintext: msgId,
+      type: 'msg_delete',
+      expiresAt: null,
+      skipLocalAppend: true,
+    });
+  })().catch((e) => {
+    if (DEV) logger.warn('[socket] sendDeleteForEveryone failed:', (e as Error).message);
+  });
 }
 
 export async function sendGroupMessage(opts: {
