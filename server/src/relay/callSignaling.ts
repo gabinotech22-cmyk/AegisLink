@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 import { AEGIS_ID_RE } from './schemas.js';
 import { RATE_LIMIT_MAP_MAX } from './rateLimits.js';
+import { liveSockets } from './liveSockets.js';
 
 const CallTo = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().min(1).max(128) });
 // Sealed call signaling: SDP offers/answers and ICE candidates are E2EE-encrypted
@@ -193,11 +194,16 @@ export function attachCallSignaling(socket: Socket, me: string, sockets: Map<str
     const { to: _to, ...rest } = parsed;
     const payload = rest as Record<string, unknown>;
     const target = sockets.get(parsed.to);
-    if (!target || target.size === 0) {
+    // liveSockets: a zombie entry (transport dead, `disconnect` not fired yet,
+    // e.g. right after a relay restart) must NOT count as live delivery — it
+    // would report `delivered: true`, skip the push wake-up, and the callee
+    // would never ring. Same bug class the messaging paths fixed in PR #209.
+    const live = target ? liveSockets(target) : [];
+    if (live.length === 0) {
       if (!silent) socket.emit('error_msg', { code: 'peer_offline', for: eventOut });
       return { delivered: false, payload };
     }
-    for (const s of target) s.emit(eventOut, payload);
+    for (const s of live) s.emit(eventOut, payload);
     return { delivered: true, payload };
   }
 
@@ -284,7 +290,7 @@ export function attachGroupCallSignaling(socket: Socket, me: string, sockets: Ma
   function fwdSealed<T extends { to: string }>(event: string, parsed: T) {
     const { to: _to, ...rest } = parsed;
     const target = sockets.get(parsed.to);
-    if (target) for (const s of target) s.emit(event, rest);
+    if (target) for (const s of liveSockets(target)) s.emit(event, rest);
   }
 
   socket.on('group_call:accept',  (raw) => { const p = GroupCallAccept.safeParse(raw);  if (p.success) fwdSealed('group_call:accept',  p.data); });
@@ -305,7 +311,7 @@ export function attachGroupCallSignaling(socket: Socket, me: string, sockets: Ma
         const payload = reason === undefined
           ? { callId, ciphertext: it.ciphertext, nonce: it.nonce }
           : { callId, reason, ciphertext: it.ciphertext, nonce: it.nonce };
-        for (const s of target) s.emit('group_call:hangup', payload);
+        for (const s of liveSockets(target)) s.emit('group_call:hangup', payload);
       }
     }
   });
@@ -321,8 +327,11 @@ export function attachGroupCallSignaling(socket: Socket, me: string, sockets: Ma
     for (const it of items) {
       if (it.to === me) continue;
       const target = sockets.get(it.to);
-      if (target && target.size > 0) {
-        for (const s of target) s.emit('group_call:channel', { callId, groupId, media, ciphertext: it.ciphertext, nonce: it.nonce });
+      // liveSockets: a zombie entry must route the member to the offline
+      // wake-up push, not swallow the heartbeat as "delivered".
+      const live = target ? liveSockets(target) : [];
+      if (live.length > 0) {
+        for (const s of live) s.emit('group_call:channel', { callId, groupId, media, ciphertext: it.ciphertext, nonce: it.nonce });
       } else if (shouldPushGroupCallWake(callId, it.to)) {
         // Offline (no live socket): wake them. Best-effort, never blocks the loop.
         void sendGroupCallWakeUp(it.to);

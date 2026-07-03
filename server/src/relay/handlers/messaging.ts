@@ -1,5 +1,5 @@
 import type { Socket } from 'socket.io';
-import { TypingEvent, MsgRead, MsgDelete, PushRegister } from '../schemas.js';
+import { TypingEvent, MsgRead, PushRegister } from '../schemas.js';
 import { checkLowFreqRateLimit } from '../rateLimits.js';
 import { pushRepo } from '../../db/client.js';
 
@@ -53,17 +53,12 @@ export function attachMessagingEphemeral(socket: Socket, { me, sockets }: Messag
   });
 
   // ─── Remote delete ──────────────────────────────────────────────────────────
-  socket.on('msg:delete', (raw) => {
-    if (!checkLowFreqRateLimit(me)) {
-      socket.emit('error_msg', { code: 'rate_limited', for: 'msg:delete' });
-      return;
-    }
-    const parsed = MsgDelete.safeParse(raw);
-    if (!parsed.success) return;
-    const target = sockets.get(parsed.data.to);
-    if (!target) return;
-    for (const s of target) s.emit('msg:delete', { from: me, msgId: parsed.data.msgId });
-  });
+  // The legacy plaintext `msg:delete` relay event was REMOVED. It leaked the
+  // sender↔recipient pair to the relay (violating sealed-sender / zero-metadata)
+  // and carried no proof-of-key-possession, so anyone able to emit it could
+  // erase a peer's messages. Delete-for-everyone now travels sealed inside the
+  // E2EE ratchet channel (`{type:'msg_delete'}`); the relay only ever sees an
+  // opaque envelope. Do NOT reintroduce a plaintext delete event.
 
   // ─── Push token registration ─────────────────────────────────────────────
   socket.on('push:register', (raw) => {

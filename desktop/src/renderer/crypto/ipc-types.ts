@@ -40,6 +40,7 @@ export interface AegisIPC {
     getPinnedMessage(activeSlot: string, chatId: string): Promise<any>;
     setMessageStarred(id: string, starred: boolean): Promise<void>;
     setMessageDeleted(activeSlot: string, id: string): Promise<void>;
+    setRemoteMessageDeleted(activeSlot: string, id: string, chatId: string): Promise<boolean>;
     setMessageReactions(id: string, reactions: unknown): Promise<void>;
     lastMessageByChat(activeSlot: string, chatId: string): Promise<any>;
     saveRatchetSession(

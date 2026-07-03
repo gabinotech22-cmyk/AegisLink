@@ -28,6 +28,7 @@ export type { PreKeyBundle, SealedEnvelope, QueuedEnvelope, SealedEnvelopeV2 } f
 
 import { attachCallSignaling, attachGroupCallSignaling, takePendingCallInvite } from './callSignaling.js';
 import { checkDeviceLinkRateLimit, RATE_LIMIT_MAP_MAX } from './rateLimits.js';
+import { liveSockets } from './liveSockets.js';
 import { attachPrekeys } from './handlers/prekeys.js';
 import { attachMessagingEphemeral } from './handlers/messaging.js';
 import { attachChannels } from './handlers/channels.js';
@@ -72,22 +73,6 @@ export function attachRelay(io: SocketServer) {
   // Temporary map for sockets in device-linking flow (unauthenticated desktop sockets)
   // desktopPubKey -> { socket, timer }
   const linkingSockets = new Map<string, { socket: Socket; timer: ReturnType<typeof setTimeout> }>();
-
-  // Returns only the sockets in `set` whose transport is actually connected,
-  // pruning any zombie entries (transport dead, `disconnect` not fired yet) from
-  // the Set in place. A zombie socket that stays registered makes callers treat
-  // a message as "delivered" when nothing was ever received — silent loss.
-  function liveSockets(set: Set<Socket>): Socket[] {
-    const live: Socket[] = [];
-    for (const s of set) {
-      if (s.connected) {
-        live.push(s);
-      } else {
-        set.delete(s);
-      }
-    }
-    return live;
-  }
 
   function deliver(env: SealedEnvelope, recipientSockets: Set<Socket>): boolean {
     const live = liveSockets(recipientSockets);

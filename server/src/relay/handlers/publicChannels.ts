@@ -11,7 +11,7 @@ import {
   publicChannelPostRepo,
   publicChannelJoinRepo,
 } from '../../db/client.js';
-import { evictExpired } from '../rateLimits.js';
+import { evictExpired, checkPubchannelApplyRateLimit } from '../rateLimits.js';
 import {
   verifyChannelDeliveryToken,
   verifyTombstone,
@@ -171,6 +171,14 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
     const parsed = PubChannelApplySchema.safeParse(raw);
     if (!parsed.success) { ack?.({ ok: false, error: 'invalid_payload' }); return; }
     const { channelId, joinEpk } = parsed.data;
+
+    // apply is anonymous by design (no identity to key on) — throttle per
+    // TARGET channel so the pending-join queue can't be flooded to its cap
+    // (MAX_PENDING_JOINS_PER_CHANNEL) in a tight loop, locking out applicants.
+    if (!checkPubchannelApplyRateLimit(channelId)) {
+      ack?.({ ok: false, error: 'rate_limited' });
+      return;
+    }
 
     void (async () => {
       const channel = await publicChannelRepo.get(channelId);

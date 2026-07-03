@@ -36,7 +36,7 @@ export function checkChannelMsgRateLimit(aegisId: string): boolean {
 }
 
 // ── Shared low-frequency rate-limit (FIX D) ───────────────────────────────────
-// typing + msg:read + msg:delete share a single bucket: 30 ops / 10 s per socket.
+// typing + msg:read share a single bucket: 30 ops / 10 s per socket.
 // group:rekey has its own stricter bucket: 10 ops / 60 s per aegisId.
 // Keyed by aegisId — no IP involved.
 const lowFreqRateLimit = new Map<string, { count: number; reset: number }>();
@@ -94,6 +94,26 @@ export function checkPrekeysFetchRateLimit(aegisId: string): boolean {
   prekeysFetchRateLimit.set(aegisId, entry);
   evictExpired(prekeysFetchRateLimit);
   return entry.count <= 60; // first-contact fan-out headroom: 60 / min
+}
+
+// ── pubchannel:apply rate limit (audit delta 2026-07-03) ──────────────────────
+// pubchannel:apply is deliberately anonymous (no signature, no aegisId — the
+// applicant's identity stays sealed inside the join envelope), so there is no
+// per-identity key to throttle on. Key by the TARGET channelId instead: it
+// bounds how fast anyone can churn a channel's pending-join queue toward the
+// MAX_PENDING_JOINS_PER_CHANNEL cap (previously an attacker who knew a public
+// channelId could fill all 256 slots in one tight loop, locking out legitimate
+// applicants). 20/min leaves ample headroom for organic join bursts.
+const pubchannelApplyRateLimit = new Map<string, { count: number; reset: number }>();
+
+export function checkPubchannelApplyRateLimit(channelId: string): boolean {
+  const now = Date.now();
+  const entry = pubchannelApplyRateLimit.get(channelId) ?? { count: 0, reset: now + 60_000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
+  entry.count++;
+  pubchannelApplyRateLimit.set(channelId, entry);
+  evictExpired(pubchannelApplyRateLimit);
+  return entry.count <= 20;
 }
 
 // ── device:link rate limit (audit 2026-06, roadmap Ola 3 MED) ─────────────────
