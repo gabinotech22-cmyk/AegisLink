@@ -76,6 +76,7 @@ jest.mock('../../store/connection', () => ({
 // observe the same mocks.
 const mockRemoteDelete = jest.fn(async () => undefined);
 const mockAppend = jest.fn(async () => undefined);
+const mockUpdateDelivery = jest.fn(async () => undefined);
 jest.mock('../../store/messages', () => ({
   __esModule: true,
   useMessages: {
@@ -84,7 +85,7 @@ jest.mock('../../store/messages', () => ({
       byChat: {},
       getEphemeralTimer: jest.fn(() => 0),
       append: mockAppend,
-      updateDelivery: jest.fn(async () => undefined),
+      updateDelivery: mockUpdateDelivery,
       remoteDelete: mockRemoteDelete,
     }),
   },
@@ -234,6 +235,7 @@ describe('delete-for-everyone over the E2EE channel', () => {
     mockIdentityState.identity = null;
     mockRemoteDelete.mockClear();
     mockAppend.mockClear();
+    mockUpdateDelivery.mockClear();
     client = require('../client') as typeof import('../client');
   });
 
@@ -294,6 +296,35 @@ describe('delete-for-everyone over the E2EE channel', () => {
     expect(typeof wire.ciphertext).toBe('string');
     // The retracted msgId must not be readable on the wire.
     expect(JSON.stringify(wire)).not.toContain('msg-to-retract');
+  });
+
+  it('an incoming {type:"read_receipt"} payload marks messages read via the sealed channel (no chat row)', async () => {
+    const me = buildIdentity();
+    const peer = buildIdentity();
+
+    client.connect(me);
+    bringOnline();
+    await flush();
+
+    mockContactsState.contacts = [{ aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64 }];
+    const senderState = establishSyncedSession(me, peer);
+
+    const payload = JSON.stringify({ type: 'read_receipt', text: JSON.stringify(['m-1', 'm-2']) });
+    const { envelope } = encryptMessage(payload, peer.aegisId, me.publicKey, peer.secretKey, senderState);
+
+    await mockFakeSocket.handlers.get('envelope')!({
+      id: 'env-read-1',
+      from: peer.aegisId,
+      to: me.aegisId,
+      ciphertext: envelope.ciphertextB64,
+      nonce: envelope.nonceB64,
+    });
+    await flush();
+
+    // Sealed read receipt updates delivery status for each id, no chat row.
+    expect(mockUpdateDelivery).toHaveBeenCalledWith(peer.aegisId, 'm-1', 'read');
+    expect(mockUpdateDelivery).toHaveBeenCalledWith(peer.aegisId, 'm-2', 'read');
+    expect(mockAppend).not.toHaveBeenCalled();
   });
 
   it('does NOT register the legacy plaintext msg:delete listener (unauthenticated remote delete)', () => {

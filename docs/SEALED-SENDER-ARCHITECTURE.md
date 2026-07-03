@@ -277,6 +277,31 @@ con ese mismo límite; cerrarlo del todo requiere cover traffic (Fase 4) u onion
 routing (Session, fuera de alcance). Es una mejora enorme sobre el estado actual
 (arista explícita en cada mensaje) sin sacrificar la marca.
 
+### 6.1 Señales efímeras en el socket de control-plane (receipts / typing)
+
+Los acuses de lectura (`msg:read`) y el indicador de "escribiendo…" (`typing`)
+viajan por el socket aegisId (control-plane), NO por el transporte de mensajes.
+Con Fase 4 (mailbox) **off** esto es inocuo: el propio transporte v2 enruta por
+el aegisId `to`, así que estos eventos no revelan nada que un mensaje normal no
+revele ya (el "límite temporal" de §6). Con Fase 4 **on**, en cambio, `envelope:mb`
+oculta la arista me↔to, pero un `msg:read`/`typing` en claro con el aegisId del
+destinatario la **re-expondría** — relinkando justo las dos identidades que el
+modo mailbox separa (ni Tor lo evita: anonimiza la IP, no el payload).
+
+Por eso, **bajo `MAILBOX_ENABLED`**:
+- El **read receipt** se envía **sellado** por el canal E2EE (`{type:'read_receipt'}`
+  vía `sendMessage`), igual que delete-for-everyone — el relay solo ve un blob
+  opaco. Fuera de mailbox mode se mantiene el evento plaintext ligero (no expone
+  más que el propio mensaje v2).
+- El **typing** se **suprime** en mailbox mode (es best-effort/efímero; sellarlo
+  de forma durable mostraría un "escribiendo…" rancio). Fuera de mailbox mode,
+  sin cambios.
+
+Regla operativa: cualquier señal nueva dirigida a un aegisId por el control-plane
+debe pasar por este mismo filtro antes de flipear `MAILBOX_ENABLED` a ON, o
+reintroduce la arista. Prueba: `client.deleteForEveryone.test.ts` (caso
+`read_receipt`).
+
 ## 7. Referencias
 - Signal sealed sender: <https://signal.org/blog/sealed-sender/>
 - Mejoras al sealed sender (delivery tokens, NDSS'21): <https://www.cs.umd.edu/~kaptchuk/publications/ndss21.pdf>

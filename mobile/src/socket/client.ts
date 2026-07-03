@@ -2156,6 +2156,30 @@ async function decryptAndAppendLocked(
         return true;
       }
 
+      // E2EE read receipt (mailbox mode): the peer reports having read some of
+      // our messages. payload.text = JSON array of msgIds. Rides the sealed
+      // channel so the relay never sees the me↔to aegisId edge (which the old
+      // plaintext `msg:read` event handed over on the control-plane socket,
+      // relinking the two identities mailbox mode exists to separate). Apply
+      // silently; do NOT append a chat row. Still persist ratchet state.
+      if (parsedPayload.type === 'read_receipt') {
+        if (typeof parsedPayload.text === 'string' && parsedPayload.text) {
+          try {
+            const ids: unknown = JSON.parse(parsedPayload.text);
+            if (Array.isArray(ids)) {
+              const msgs = useMessages.getState();
+              for (const id of ids) {
+                if (typeof id === 'string' && id) {
+                  void msgs.updateDelivery(contact.aegisId, id, 'read');
+                }
+              }
+            }
+          } catch { /* malformed receipt payload — ignore */ }
+        }
+        await saveSessionState(contact.aegisId, ratchetState);
+        return true;
+      }
+
       if (parsedPayload.type === 'group_msg') {
         const groupId: string = parsedPayload.groupId;
         const claimedName: string = parsedPayload.groupName;
@@ -3915,11 +3939,40 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
 
 export function emitTyping(to: string, isTyping: boolean): void {
   if (!socket || !authenticated) return;
+  // In mailbox mode the recipient (`to`) is hidden from the relay by design.
+  // The plaintext `typing` event carries the peer's aegisId on the control-plane
+  // socket, which would relink the me↔to edge mailbox mode just sealed. Typing
+  // is a best-effort, ephemeral UX signal (durable sealed delivery would show a
+  // stale "typing…" late), so we simply suppress it under mailbox mode rather
+  // than leak the edge. Outside mailbox mode, behaviour is unchanged.
+  if (MAILBOX_ENABLED) return;
   socket.emit('typing', { to, isTyping });
 }
 
 export function sendReadReceipts(to: string, msgIds: string[]): void {
   if (!socket || !authenticated || msgIds.length === 0) return;
+  // Mailbox mode: send the receipt sealed through the E2EE channel so the relay
+  // never sees the me↔to aegisId edge on the plaintext control-plane socket.
+  // Outside mailbox mode, keep the lightweight plaintext event — it exposes no
+  // more than the v2 message transport already does (same aegisId routing).
+  if (MAILBOX_ENABLED) {
+    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+    const identity = useIdentity.getState().identity;
+    const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+    if (!identity || !contact?.publicKeyB64) return;
+    void sendMessage({
+      identity,
+      recipientAegisId: to,
+      recipientPublicKey: decodeBase64(contact.publicKeyB64),
+      plaintext: JSON.stringify(msgIds),
+      type: 'read_receipt',
+      expiresAt: null,
+      skipLocalAppend: true,
+    }).catch((e) => {
+      if (__DEV__) logger.warn('[socket] sealed read receipt failed:', (e as Error).message);
+    });
+    return;
+  }
   socket.emit('msg:read', { to, msgIds });
 }
 
