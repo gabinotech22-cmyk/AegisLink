@@ -731,7 +731,26 @@ export function connect(identity: Identity): Socket {
     authenticated = false;
     clearAuthWatchdog();
     useConnection.getState().setOnline(false);
-    if (__DEV__) logger.warn('[socket] disconnected:', reason);
+    // Distinguish a disconnect that lands mid-call from an idle one — a call-time
+    // 'ping timeout' used to be the signature of heartbeat starvation during
+    // WebRTC setup (see server/src/index.ts pingTimeout comment). The reconnect
+    // path already recovers signaling safely (socket.io-client buffers emits
+    // made while disconnected and flushes on reconnect; App.tsx re-arms
+    // attachCallHandlers() on every `online` transition), so this is diagnostic
+    // only — it does not change call behavior.
+    if (__DEV__) {
+      try {
+        const { useCall } = require('../store/call') as typeof import('../store/call');
+        const callStatus = useCall.getState().status;
+        if (callStatus !== 'idle' && callStatus !== 'ended') {
+          logger.warn('[socket] disconnected DURING active call — reason:', reason, 'callStatus:', callStatus);
+        } else {
+          logger.warn('[socket] disconnected:', reason);
+        }
+      } catch {
+        logger.warn('[socket] disconnected:', reason);
+      }
+    }
   });
 
   socket.on('error_msg', async (e: { code?: string; for?: string }) => {
