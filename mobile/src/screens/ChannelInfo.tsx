@@ -28,6 +28,7 @@ import { TopBar } from '../components/TopBar';
 import { Section } from '../components/Section';
 import { themedAlert } from '../components/AlertHost';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
+import { useChannelSelfHydrate } from '../hooks/useChannelSelfHydrate';
 import { useChannels, type ChannelSummary } from '../store/channels';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
@@ -97,16 +98,7 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
   const bannedList = useChannels((s) => s.banned[channelId]);
   const contacts = useContacts((s) => s.contacts);
 
-  // Defense in depth: the app-level rehydrate (App.tsx) normally hydrates
-  // `subscribed` from SecureStore-persisted channel secrets before any screen
-  // can be reached, but a screen opened via a fast deep link/notification tap
-  // could still land here before that effect resolves. Self-hydrate (once,
-  // idempotent) rather than trust a possibly-still-empty `subscribed` and
-  // falsely render "channel not found".
-  useEffect(() => {
-    if (hydrated || summary) return;
-    void hydrateSubscribed().catch(() => {});
-  }, [hydrated, summary, hydrateSubscribed]);
+  useChannelSelfHydrate(hydrated, summary, hydrateSubscribed);
 
   const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
 

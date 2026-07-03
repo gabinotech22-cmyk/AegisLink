@@ -433,11 +433,29 @@ function Shell() {
     // channel posts) from the SQLite-backed store. processDue() is cheap when
     // nothing is due (one indexed SELECT), and offline ticks leave messages
     // pending without burning retries.
+    //
+    // `running` guards against overlap: runDue() is triggered from 3 sources
+    // (immediate mount, AppState → active, 10s interval) and processDue() is
+    // async — without this guard a slow run (or an `active` event firing
+    // mid-interval) could kick off a second processDue() in parallel.
+    let running = false;
     const runDue = () => {
+      if (running) return;
+      running = true;
       try {
         const { useScheduledMessages } = require('./src/store/scheduledMessages') as typeof import('./src/store/scheduledMessages');
-        void useScheduledMessages.getState().processDue();
+        useScheduledMessages
+          .getState()
+          .processDue()
+          .catch((err: unknown) => {
+            if (__DEV__) console.warn('[global-scheduler] error in runner:', err);
+          })
+          .finally(() => {
+            running = false;
+          });
       } catch (err) {
+        // Synchronous throw (e.g. from require()) — processDue() never ran.
+        running = false;
         if (__DEV__) console.warn('[global-scheduler] error in runner:', err);
       }
     };

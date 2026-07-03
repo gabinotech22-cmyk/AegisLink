@@ -31,6 +31,7 @@ import { themedAlert } from '../components/AlertHost';
 import { SchedulePicker } from '../components/SchedulePicker';
 import { VoiceRecorderScreen } from './VoiceRecorder';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
+import { useChannelSelfHydrate } from '../hooks/useChannelSelfHydrate';
 import { encryptAndUploadMedia } from '../crypto/media';
 import { useChannels, type FeedPost } from '../store/channels';
 import type { PostMedia } from '../channels/channelService';
@@ -126,16 +127,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
 
   useEffect(() => { void loadPending(); }, [loadPending]);
 
-  // Defense in depth: the app-level rehydrate (App.tsx) normally hydrates
-  // `subscribed` from SecureStore-persisted channel secrets before any screen
-  // can be reached, but a screen opened via a fast deep link/notification tap
-  // could still land here before that effect resolves. Self-hydrate (once,
-  // idempotent) rather than render a degraded header/compose bar off a
-  // possibly-still-empty `subscribed`.
-  useEffect(() => {
-    if (hydrated || summary) return;
-    void hydrateSubscribed().catch(() => {});
-  }, [hydrated, summary, hydrateSubscribed]);
+  useChannelSelfHydrate(hydrated, summary, hydrateSubscribed);
 
   useEffect(() => {
     if (!identity) return;

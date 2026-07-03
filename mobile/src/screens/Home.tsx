@@ -10,6 +10,7 @@ import { Avatar } from '../components/Avatar';
 import { FloatingMenu } from '../components/FloatingMenu';
 import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
+import { normalizeAegisId } from '../crypto/aegisId';
 import { wipeDatabase } from '../db/local';
 import { usePanicGesture } from '../hooks/usePanicGesture';
 import { useContacts } from '../store/contacts';
@@ -144,7 +145,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
     // resolution) — it hides the row immediately without requiring a DB
     // migration or a fresh contact-add attempt.
     const filtered = identity?.aegisId
-      ? contacts.filter((c) => c.aegisId !== identity.aegisId)
+      ? contacts.filter((c) => normalizeAegisId(c.aegisId) !== normalizeAegisId(identity.aegisId))
       : contacts;
     return [...filtered].sort((a, b) => {
       // Pinned chats always first
