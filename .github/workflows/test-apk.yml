@@ -16,6 +16,12 @@ name: Test APK
 
 on:
   workflow_dispatch:
+    inputs:
+      variant:
+        description: 'Build variant (release = installable test build, debug = debuggable build with readable JS logs in logcat; debug needs Metro via adb reverse)'
+        type: choice
+        options: [release, debug]
+        default: release
 
 jobs:
   build-test-apk:
@@ -63,16 +69,26 @@ jobs:
       - name: Prebuild Android project
         run: npx expo prebuild --platform android --no-install
 
-      - name: Assemble debug-signed release APK
-        run: cd android && ./gradlew :app:assembleRelease --no-daemon
+      - name: Assemble APK
+        env:
+          VARIANT: ${{ inputs.variant || 'release' }}
+        run: |
+          cd android
+          if [ "$VARIANT" = "debug" ]; then
+            ./gradlew :app:assembleDebug --no-daemon
+          else
+            ./gradlew :app:assembleRelease --no-daemon
+          fi
 
       - name: Report APK info
+        env:
+          VARIANT: ${{ inputs.variant || 'release' }}
         run: |
-          ls -lh android/app/build/outputs/apk/release/*.apk
-          echo "sha256:"; sha256sum android/app/build/outputs/apk/release/*.apk
+          ls -lh android/app/build/outputs/apk/$VARIANT/*.apk
+          echo "sha256:"; sha256sum android/app/build/outputs/apk/$VARIANT/*.apk
 
       - uses: actions/upload-artifact@v7
         with:
-          name: aegislink-test-apk
-          path: mobile/android/app/build/outputs/apk/release/*.apk
+          name: aegislink-test-apk-${{ inputs.variant || 'release' }}
+          path: mobile/android/app/build/outputs/apk/${{ inputs.variant || 'release' }}/*.apk
           if-no-files-found: error
