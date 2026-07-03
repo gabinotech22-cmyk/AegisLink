@@ -6,7 +6,7 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED } from '../config';
 import { usePreferences } from '../store/preferences';
-import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2 } from '../crypto/messaging';
+import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed } from './mailboxSocket';
@@ -47,7 +47,7 @@ import {
   type OutboxJob,
 } from '../db/local';
 import { decideV2GroupMetadata, decideGovernanceUpdate } from './groupMetadataDecision';
-import { reviveBytes, reviveMkSkipped } from './ratchetSerde';
+import { serializeRatchetState, reviveRatchetState } from './ratchetSerde';
 import {
   computeRosterHash,
   signGroupMetadata,
@@ -1279,23 +1279,7 @@ async function getOrCreateSession(
 async function getOrCreateSessionLocked(contactAegisId: string, contactPublicKeyB64: string, identity: Identity): Promise<RatchetState> {
   const existingJson = await loadRatchetSession(contactAegisId);
   if (existingJson) {
-    const s = JSON.parse(existingJson);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(existingJson);
     return s as RatchetState;
   }
 
@@ -1497,6 +1481,36 @@ const inRecoveryUntilMs = new Map<string, number>();
 /** Pending recovery fallback-flush timers, keyed by peer — see disconnect(). */
 const recoveryFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const RECOVERY_WINDOW_MS = 90_000;
+
+// ── One-sided desync escalation (non-initiator → explicit session-reset req) ────
+//
+// The plain NUDGE assumes desync is SYMMETRIC: the nudge fails to decrypt on the
+// higher peer, so the higher peer's own tryRecoverDesync fires and it re-keys.
+// But desync can be ONE-SIDED: only the lower peer's RECEIVE chain is broken
+// (e.g. its session state was rolled back / partially persisted). The lower
+// peer's SEND chain still matches the higher peer's RECEIVE chain, so the nudge
+// decrypts FINE on the higher peer — it never detects desync, never re-keys, and
+// the lower peer is wedged forever (inbound undecryptable, outbox never flushes;
+// the initiator has RECOVERY_FALLBACK_MS but the non-initiator had NO fallback).
+//
+// Fix (mirrors Session's / SimpleX's in-band session-reset message): after a
+// bounded number of plain nudges that did not converge, the non-initiator sends
+// a nudge that additionally carries an AUTHENTICATED `sessionReset` flag inside
+// the encrypted payload. Because it rides inside a ratchet message that the
+// higher peer successfully decrypts (MAC-verified) AND inside the outer
+// sealed-sender box (sender-authenticated), it cannot be forged or replayed by
+// the relay or a third party (REGLA DE ORO #3/#7 — an unauthenticated re-key
+// request would be a DoS/downgrade vector). On seeing it, the higher peer runs
+// its INITIATE branch (delete session + fresh X3DH) EVEN THOUGH its own decrypt
+// succeeded, and the lower peer adopts that init → convergence.
+//
+// Reference: Session (github.com/oxen-io/session-android — "session reset" /
+// libsignal SessionResetMessage) and SimpleX Chat both send an in-encrypted-
+// channel control message to force a fresh handshake rather than trusting an
+// unauthenticated wire signal.
+const NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST = 2;
+/** Per-contact count of plain nudges emitted in the current recovery episode. */
+const nudgeAttemptsThisEpisode = new Map<string, number>();
 /**
  * After detecting a desync we send a recovery X3DH-init and a lower-aegisId peer
  * defers its outbound messages (glare avoidance). In the ASYMMETRIC case the
@@ -1530,29 +1544,17 @@ function isInRecovery(aegisId: string): boolean {
 async function sendNudgeOverExistingSession(
   contact: { aegisId: string; publicKeyB64: string },
   identity: Identity,
+  // When true, embed an authenticated `sessionReset` flag in the nudge payload so
+  // the higher peer force-re-keys even if its own decrypt succeeds (one-sided
+  // desync escalation — see NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST).
+  requestSessionReset = false,
 ): Promise<boolean> {
   if (!socket || !connected || !authenticated) return false;
   const existingJson = await loadRatchetSession(contact.aegisId);
   if (!existingJson) return false; // nothing to nudge over — just wait/adopt
   let session: RatchetState;
   try {
-    const s = JSON.parse(existingJson);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(existingJson);
     session = s as RatchetState;
   } catch {
     return false;
@@ -1569,6 +1571,10 @@ async function sendNudgeOverExistingSession(
       senderName: idState.displayName,
       senderColor: idState.avatarColor,
       senderStatus: idState.profileStatus,
+      // One-sided desync escalation: this rides INSIDE the E2EE ratchet payload,
+      // so the higher peer only ever sees it after a MAC-verified decrypt — it is
+      // cryptographically authenticated, never a wire-level (forgeable) field.
+      ...(requestSessionReset ? { sessionReset: true } : {}),
     });
     const recipientPub = decodeBase64(contact.publicKeyB64);
     const { envelope, newState } = encryptMessage(payload, identity.aegisId, recipientPub, identity.secretKey, session);
@@ -1579,7 +1585,7 @@ async function sendNudgeOverExistingSession(
       ciphertext: envelope.ciphertextB64,
       nonce: envelope.nonceB64,
     });
-    rdiag(`[RDIAG] nudge sent me=${identity.aegisId} -> peer=${contact.aegisId}`);
+    rdiag(`[RDIAG] nudge sent me=${identity.aegisId} -> peer=${contact.aegisId} reset=${requestSessionReset}`);
     return true;
   } catch (e) {
     if (__DEV__) logger.warn('[socket] desync nudge send failed:', (e as Error).message);
@@ -1640,7 +1646,22 @@ async function tryRecoverDesync(
     // in decryptAndAppend (replacing our desynced session) → converge. Because
     // we never deleted or rebuilt our session here, there is nothing to clobber
     // the adopted init. We hold in-recovery until adoption clears it.
-    const nudged = await sendNudgeOverExistingSession(contact, identity);
+    // One-sided desync escalation: track how many nudges this recovery episode
+    // has already emitted. After NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST plain nudges
+    // that did NOT converge (we are still in recovery — a genuine glare/adoption
+    // would have cleared the marker and reset this counter via convergence in
+    // decryptAndAppend), the desync is almost certainly ONE-SIDED: our nudge
+    // decrypts fine on the higher peer so it never re-keys on its own. Escalate to
+    // an AUTHENTICATED session-reset request that force-re-keys the higher peer.
+    const priorAttempts = nudgeAttemptsThisEpisode.get(contact.aegisId) ?? 0;
+    const requestReset = priorAttempts >= NUDGE_ATTEMPTS_BEFORE_RESET_REQUEST;
+    if (requestReset) {
+      rdiag(`[RDIAG] one-sided desync escalation: requesting session-reset me=${identity.aegisId} peer=${contact.aegisId} attempts=${priorAttempts}`);
+    }
+    const nudged = await sendNudgeOverExistingSession(contact, identity, requestReset);
+    if (nudged) {
+      nudgeAttemptsThisEpisode.set(contact.aegisId, priorAttempts + 1);
+    }
     if (!nudged) {
       // No existing session to nudge over (rare): we cannot provoke the higher
       // peer this way. Leave the recovery marker set so any inbound init from
@@ -1715,22 +1736,10 @@ async function saveSessionState(aegisId: string, state: RatchetState) {
 
   // Persist only the minimal next-state. Previously-consumed CKs/CKr have
   // already been overwritten by their successor via kdfChain in
-  // ratchetEncrypt/ratchetDecrypt, so what remains is the smallest state
-  // needed to continue the session: RK, DHs, DHr, Ns, Nr, PN, MKSKIPPED.
-  const s = {
-    RK: state.RK,
-    DHs: state.DHs,
-    DHr: state.DHr,
-    CKs: state.CKs,
-    CKr: state.CKr,
-    Ns: state.Ns,
-    Nr: state.Nr,
-    PN: state.PN,
-    MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
-    x3dhInit: state.x3dhInit,
-    createdAtMs: state.createdAtMs,
-  };
-  await saveRatchetSession(aegisId, JSON.stringify(s));
+  // ratchetEncrypt/ratchetDecrypt. serializeRatchetState is the single point
+  // of truth for the field list (hand-rolled copies dropped the PQ fields once
+  // already — see ratchetSerde.ts).
+  await saveRatchetSession(aegisId, serializeRatchetState(state));
 }
 
 /**
@@ -1815,23 +1824,7 @@ async function decryptAndAppendLocked(
   }
 
   if (existingJson && !parsed.x3dh) {
-    const s = JSON.parse(existingJson);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(existingJson);
     ratchetState = s;
   } else {
     // Bob doesn't have a session, or the sender is re-keying/starting a fresh session via X3DH setup!
@@ -1992,6 +1985,9 @@ async function decryptAndAppendLocked(
     // session (now within grace via createdAtMs) don't re-trigger recovery.
     const wasInRecovery = isInRecovery(contact.aegisId);
     inRecoveryUntilMs.delete(contact.aegisId);
+    // Converged: reset the one-sided-desync escalation counter so a future,
+    // unrelated desync episode starts again with plain nudges before escalating.
+    nudgeAttemptsThisEpisode.delete(contact.aegisId);
     // Bidirectional profile sync: as the responder we just adopted the initiator's
     // session and (if their init carried a profile_update) applied THEIR profile.
     // But the initiator ignored OUR init (glare rule), so it never got our profile.
@@ -2008,12 +2004,13 @@ async function decryptAndAppendLocked(
     }
   }
 
-  // Now decrypt the message body using the Double Ratchet session
-  const rHeader = {
-    ratchetKey: decodeBase64(parsed.ratchet.ratchetKeyB64),
-    n: parsed.ratchet.n,
-    pn: parsed.ratchet.pn
-  };
+  // Now decrypt the message body using the Double Ratchet session.
+  // Hybrid PQ ratchet (R1): parseRatchetHeader forwards pqPub/pqCt — a hybrid
+  // receiver treats their absence on a chain turn as a downgrade attack and
+  // rejects the message (see dhRatchet in signal/ratchet.ts). A hand-rolled
+  // header here that dropped them broke every fresh v2 handshake with
+  // "missing PQ material on hybrid session".
+  const rHeader = parseRatchetHeader(parsed.ratchet);
   const rCiphertext = decodeBase64(parsed.ratchet.ciphertextB64);
   const rNonce = decodeBase64(parsed.ratchet.nonceB64);
 
@@ -2035,6 +2032,10 @@ async function decryptAndAppendLocked(
     return false;
   }
   if (!plaintextBytes) {
+    // [RDIAG] MAC-failure forensics: which session state rejected which header.
+    rdiag(
+      `[RDIAG] ratchet-null me=${identity.aegisId} peer=${contact.aegisId} hdr(n=${rHeader.n} pn=${rHeader.pn} pq=${!!rHeader.pqPub}) st(Ns=${ratchetState.Ns} Nr=${ratchetState.Nr} hasCKr=${!!ratchetState.CKr} hybrid=${!!ratchetState.PQs} ageMs=${ratchetState.createdAtMs ? Date.now() - ratchetState.createdAtMs : -1}) x3dh=${!!parsed.x3dh} existing=${!!existingJson}`,
+    );
     // Desync auto-recovery: we get here only because the OUTER sealed-sender box
     // already authenticated this as a genuine message from `contact` (the caller
     // path opened it with the contact's identity key). If we were decrypting
@@ -2075,6 +2076,27 @@ async function decryptAndAppendLocked(
       // Profile-only broadcast: peer renamed/recolored/status — apply silently, do
       // NOT append a chat message. Still persist ratchet state.
       if (parsedPayload.type === 'profile_update') {
+        // One-sided desync escalation (mirrors Session/SimpleX in-band session
+        // reset): the peer's RECEIVE chain is broken but its SEND chain still
+        // matches ours, so THIS message decrypted fine and our own desync detector
+        // never fired. The `sessionReset` flag — authenticated by this successful
+        // MAC-verified decrypt AND the outer sealed-sender box, never a forgeable
+        // wire field — explicitly asks us to re-key. Only the canonical initiator
+        // (higher aegisId) may mint the winning init; if WE are the higher peer we
+        // force-run the INITIATE branch (delete + fresh X3DH) even though decrypt
+        // succeeded. If we are the lower peer we ignore it (the requester should be
+        // adopting OUR init, not the reverse) to avoid a re-key ping-pong.
+        if (parsedPayload.sessionReset === true) {
+          if (amInitiatorFor(identity.aegisId, contact.aegisId)) {
+            rdiag(`[RDIAG] honoring authenticated session-reset request me=${identity.aegisId} peer=${contact.aegisId}`);
+            // Persist the current (still-working) state first so the pre-reset
+            // profile update above isn't lost, then force a fresh handshake.
+            await saveSessionState(contact.aegisId, ratchetState);
+            await tryRecoverDesync(contact, ratchetState, identity, true, lockCtx);
+            return true;
+          }
+          rdiag(`[RDIAG] ignoring session-reset request (we are non-initiator) me=${identity.aegisId} peer=${contact.aegisId}`);
+        }
         if (parsedPayload.senderName) {
           await useContacts.getState().updateContactProfile(
             contact.aegisId,
@@ -3040,6 +3062,13 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
     if (parsed) {
       const success = await decryptAndAppend(env, parsed, matchedContact, identity);
       if (success) return;
+    } else {
+      // [RDIAG] Outer box failed against the CONTACT-RECORD key. Compare its
+      // prefix with the relay-attached sender key (init envelopes) — a mismatch
+      // means our contact record holds a stale/wrong identity key for the peer.
+      rdiag(
+        `[RDIAG] outer-open FAILED for=${env.from} contactKey8=${matchedContact.publicKeyB64.slice(0, 8)} attachedKey8=${env.senderPublicKeyB64 ? env.senderPublicKeyB64.slice(0, 8) : '(none)'} keysEqual=${env.senderPublicKeyB64 ? env.senderPublicKeyB64 === matchedContact.publicKeyB64 : 'n/a'}`,
+      );
     }
   }
 
@@ -3101,23 +3130,7 @@ async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
   try {
     const raw = await SecureStore.getItemAsync(SECURE_SELF_RATCHET_KEY(myAegisId));
     if (!raw) return null;
-    const s = JSON.parse(raw);
-    s.RK = reviveBytes(s.RK);
-    s.CKs = reviveBytes(s.CKs);
-    s.CKr = reviveBytes(s.CKr);
-    s.DHr = reviveBytes(s.DHr);
-    s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-    s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-    // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-    // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-    // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-    if (s.PQs) {
-      s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-      s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
-    }
-    s.PQr = reviveBytes(s.PQr);
-    s.pqSendCt = reviveBytes(s.pqSendCt);
-    s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
+    const s = reviveRatchetState(raw);
     return s as RatchetState;
   } catch (e) {
     if (__DEV__) logger.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
@@ -3464,6 +3477,7 @@ export function disconnect(): void {
   // socket and keep the JS runtime (and Jest workers) alive via open handles.
   for (const t of recoveryFallbackTimers.values()) clearTimeout(t);
   recoveryFallbackTimers.clear();
+  nudgeAttemptsThisEpisode.clear();
 }
 
 export async function sendMessage(opts: {

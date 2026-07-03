@@ -300,11 +300,15 @@ export function ratchetEncrypt(state: RatchetState, plaintext: Uint8Array): {
     n: state.Ns,
     pn: state.PN,
   };
-  // Advertise the PQ material for THIS sending chain only on its first
-  // message (Ns === 0) — mirrors how `pn` carries the previous chain's
-  // length. The peer needs pqPub+pqCt exactly once per chain turn to
-  // decapsulate and mix the same shared secret into its receiving root.
-  if (state.Ns === 0 && state.PQs && state.pqSendCt) {
+  // Advertise the PQ material for THIS sending chain on EVERY message, not
+  // just the first (pqPub/pqCt are constant for the whole chain). The peer
+  // only consumes them when it turns the chain (dhRatchet), but if the
+  // chain's first message is lost or dropped, a later message must still be
+  // able to supply the pqCt — otherwise the entire chain becomes permanently
+  // undecryptable ("missing PQ material on hybrid session" with no recovery
+  // short of a session reset). Classic DR survives a lost chain head via
+  // skipped keys; hybrid PQ needs the material replicated to match that.
+  if (state.PQs && state.pqSendCt) {
     header.pqPub = state.PQs.publicKey;
     header.pqCt = state.pqSendCt;
   }
