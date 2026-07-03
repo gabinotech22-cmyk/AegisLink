@@ -11,6 +11,7 @@ const RTCView: React.ComponentType<{ streamURL: string; style?: object; objectFi
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
+import { Avatar } from '../components/Avatar';
 import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
 import { acceptCall, endCall, toggleMute, toggleCamera } from '../socket/calls';
@@ -41,7 +42,6 @@ export function CallScreen({ onClose, onMinimize }: Props) {
 
   const peer = useContacts((s) => (peerId ? s.get(peerId) : undefined));
   const peerName = peer?.name ?? peerId ?? 'unknown';
-  const peerInitial = peerName.trim()[0]?.toUpperCase() ?? '?';
 
   // Per-second tick so the in-call duration label re-renders every second.
   // Without it, labelFor() computes Date.now()-startedAt only on unrelated
@@ -229,22 +229,17 @@ export function CallScreen({ onClose, onMinimize }: Props) {
       >
         {/* Left: badge + name + timer + avatar (audio only) */}
         <View style={{ flex: 1, paddingRight: 16 }}>
-          {/* Avatar: only for AUDIO calls */}
+          {/* Avatar: only for AUDIO calls. Same resolution as the chat list:
+              photo → identicon → initial. */}
           {!isVideo && (
-            <View
-              style={{
-                width: 80,
-                height: 80,
-                borderRadius: 40,
-                backgroundColor: peerColor,
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: 16,
-              }}
-            >
-              <Text style={{ fontFamily: t.fontDisplay, fontSize: 34, color: '#fff', fontWeight: '600' }}>
-                {peerInitial}
-              </Text>
+            <View style={{ marginBottom: 16, alignSelf: 'flex-start' }}>
+              <Avatar
+                t={t}
+                name={peer?.avatarImage || peerName}
+                color={peerColor}
+                size={80}
+                seed={peer?.publicKeyB64 || peerId || peerName}
+              />
             </View>
           )}
 
