@@ -2,7 +2,25 @@ import { create } from 'zustand';
 import { logger } from '../utils/logger';
 import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, pinContact as dbPinContact, type StoredContact } from '../db/local';
 import { lookupIdentity, ApiError } from '../api';
-import { keyMatchesAegisId } from '../crypto/aegisId';
+import { keyMatchesAegisId, normalizeAegisId } from '../crypto/aegisId';
+
+/**
+ * Guard against ever adding the local user's own identity as a contact.
+ *
+ * Root cause of a real bug: a buggy/adversarial group could claim the local
+ * user as its own admin/member id, and the group-metadata resolver in
+ * socket/client.ts would call addByAegisId() for that claimed id with no
+ * self-check — silently creating a "contact" row for yourself that then
+ * showed up in the Home chat list as "No messages yet". This is the
+ * store-level layer of defense; socket/client.ts also skips the call sites
+ * before ever reaching here (defense in depth).
+ */
+function isSelfAegisId(aegisId: string): boolean {
+  // Lazy require to avoid a require-cycle with store/identity at module init.
+  const { useIdentity } = require('./identity') as typeof import('./identity');
+  const selfId = useIdentity.getState().identity?.aegisId;
+  return typeof selfId === 'string' && normalizeAegisId(selfId) === normalizeAegisId(aegisId);
+}
 
 export type AddResult =
   | { kind: 'added'; contact: StoredContact }
@@ -62,6 +80,9 @@ export const useContacts = create<ContactsState>((set, get) => ({
 
   async addByAegisId(aegisId, displayName, opts) {
     set({ error: null });
+    if (isSelfAegisId(aegisId)) {
+      throw new Error('Cannot add your own Aegis ID as a contact.');
+    }
     const existing = await getContact(aegisId);
     if (existing) {
       // A user-initiated add (pending !== true) of a contact that is still a
@@ -131,6 +152,10 @@ export const useContacts = create<ContactsState>((set, get) => ({
 
   async addFromQR(aegisId, publicKeyB64, displayName) {
     set({ error: null });
+
+    if (isSelfAegisId(aegisId)) {
+      throw new Error('Cannot add your own Aegis ID as a contact.');
+    }
 
     // Defense in depth: parseIdentityQR already binds ID↔key, but addFromQR is a
     // public store action that stores contacts as verified:true (the strong,

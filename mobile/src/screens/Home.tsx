@@ -137,7 +137,16 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   }, [contacts, loadChat]);
 
   const allSorted = useMemo(() => {
-    return [...contacts].sort((a, b) => {
+    // Defensive filter: the local user's own aegisId must never appear as a
+    // contact row. This is a belt-and-suspenders check against a bad row that
+    // may already sit in a user's DB from before the store/socket guards were
+    // added (see store/contacts.ts addByAegisId + socket/client.ts admin
+    // resolution) — it hides the row immediately without requiring a DB
+    // migration or a fresh contact-add attempt.
+    const filtered = identity?.aegisId
+      ? contacts.filter((c) => c.aegisId !== identity.aegisId)
+      : contacts;
+    return [...filtered].sort((a, b) => {
       // Pinned chats always first
       const aPinned = a.pinned ? 1 : 0;
       const bPinned = b.pinned ? 1 : 0;
@@ -147,7 +156,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
       const bTs = previews[b.aegisId]?.createdAt ?? b.addedAt;
       return bTs - aTs;
     });
-  }, [contacts, previews]);
+  }, [contacts, previews, identity?.aegisId]);
 
   // Hidden chats ("deleted from list" but contact kept) are excluded from both
   // the main and archived lists; they reappear when a new message arrives.
