@@ -33,7 +33,7 @@ const confirm = argv.includes('--confirm');
 const listOnly = argv.includes('--list');
 const idIdx = argv.indexOf('--id');
 const wantId = idIdx >= 0 ? argv[idIdx + 1] : null;
-const wantName = argv.find((a, i) => !a.startsWith('--') && i !== idIdx + 1) ?? null;
+const wantName = argv.find((a, i) => !a.startsWith('--') && !(idIdx >= 0 && i === idIdx + 1)) ?? null;
 
 const DB_PATH = process.env.AEGIS_DB_PATH ?? '/data/aegislink.db';
 
