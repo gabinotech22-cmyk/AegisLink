@@ -154,6 +154,18 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_scheduled_send_at ON scheduled_messages(send_at, status);
 
+    -- Sealed-channel feed cache: the projected post list per channel, stored as
+    -- posts_enc = encryptBody(JSON FeedPost[]). The relay does NOT retain channel
+    -- broadcast history forever, and the verified chain head IS persisted, so a
+    -- cold launch would delta-pull (since = head) into an empty in-memory feed and
+    -- show nothing. This local cache restores the feed on restart; the delta pull
+    -- then appends only newer posts. Zero-metadata: only opaque ciphertext at rest.
+    CREATE TABLE IF NOT EXISTS channel_feed (
+      channel_id TEXT PRIMARY KEY,
+      posts_enc  TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     -- Persistent outbox: jobs survive app close / crash (Signal-style outbox pattern).
     -- payload is the plaintext JSON to be ratchet-encrypted at drain time, stored
     -- encrypted at rest via encryptBody so plaintext never lands unprotected on disk.

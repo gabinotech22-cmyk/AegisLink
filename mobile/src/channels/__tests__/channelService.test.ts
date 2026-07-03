@@ -196,24 +196,51 @@ describe('parseAndVerifyManifest', () => {
 describe('post body senderName envelope (issue #204)', () => {
   it('round-trips text + senderName through encode/open', () => {
     const wire = encodePostBody('hello channel', 'Alice');
-    expect(openPostBody(wire)).toEqual({ text: 'hello channel', senderName: 'Alice' });
+    expect(openPostBody(wire)).toEqual({ text: 'hello channel', senderName: 'Alice', media: null });
   });
 
   it('round-trips with no senderName provided', () => {
     const wire = encodePostBody('hello channel');
-    expect(openPostBody(wire)).toEqual({ text: 'hello channel', senderName: null });
+    expect(openPostBody(wire)).toEqual({ text: 'hello channel', senderName: null, media: null });
   });
 
   it('falls back to raw text for legacy (pre-#204) plain-text bodies', () => {
     expect(openPostBody('an old plain-text post')).toEqual({
       text: 'an old plain-text post',
       senderName: null,
+      media: null,
     });
   });
 
   it('falls back gracefully for bodies that happen to be unrelated JSON', () => {
     const body = JSON.stringify({ foo: 'bar' });
-    expect(openPostBody(body)).toEqual({ text: body, senderName: null });
+    expect(openPostBody(body)).toEqual({ text: body, senderName: null, media: null });
+  });
+
+  it('round-trips an image media reference inside the sealed body', () => {
+    const media = { kind: 'image' as const, uri: 'blob:abc:key:nonce', mime: 'image/jpeg', w: 1280, h: 720 };
+    const wire = encodePostBody('caption', 'Bob', media);
+    expect(openPostBody(wire)).toEqual({ text: 'caption', senderName: 'Bob', media });
+  });
+
+  it('carries a media-only post (empty text) without dropping the attachment', () => {
+    const media = { kind: 'image' as const, uri: 'blob:abc:key:nonce' };
+    const opened = openPostBody(encodePostBody('', undefined, media));
+    expect(opened.text).toBe('');
+    expect(opened.media).toEqual(media);
+  });
+
+  it('round-trips an audio voice note with its duration', () => {
+    const media = { kind: 'audio' as const, uri: 'blob:v:k:n', mime: 'audio/m4a', durationMs: 4200 };
+    const opened = openPostBody(encodePostBody('', undefined, media));
+    expect(opened.media).toEqual(media);
+  });
+
+  it('rejects an untrusted media object with an unknown kind or oversized uri', () => {
+    const badKind = openPostBody(JSON.stringify({ v: 1, text: 'x', media: { kind: 'exe', uri: 'blob:a' } }));
+    expect(badKind.media).toBeNull();
+    const hugeUri = openPostBody(JSON.stringify({ v: 1, text: 'x', media: { kind: 'image', uri: 'b'.repeat(5000) } }));
+    expect(hugeUri.media).toBeNull();
   });
 
   it('sanitizes control characters and caps sender name length', () => {
@@ -248,7 +275,7 @@ describe('post body senderName envelope (issue #204)', () => {
     expect(result.rejected).toBe(0);
     expect(result.posts).toHaveLength(1);
     const opened = openPostBody(result.posts[0].post.body);
-    expect(opened).toEqual({ text: 'post with name', senderName: 'Bob' });
+    expect(opened).toEqual({ text: 'post with name', senderName: 'Bob', media: null });
   });
 
   it('a legacy plain-text post still chain-verifies and opens with senderName=null', () => {
@@ -269,7 +296,7 @@ describe('post body senderName envelope (issue #204)', () => {
     );
     expect(result.rejected).toBe(0);
     const opened = openPostBody(result.posts[0].post.body);
-    expect(opened).toEqual({ text: 'legacy plain body', senderName: null });
+    expect(opened).toEqual({ text: 'legacy plain body', senderName: null, media: null });
   });
 });
 

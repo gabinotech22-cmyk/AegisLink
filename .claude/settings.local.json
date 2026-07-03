@@ -115,7 +115,11 @@
       "Bash(sed -i 's/IP pública de la VM Oracle/IP pública de la instancia AWS EC2/' .github/SECRETS.md)",
       "Bash(ls -la \"C:\\\\Users\\\\gabin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--progectos-APPS-AegisLink\\\\73449629-6254-4c9a-a203-563996209152\\\\scratchpad\" 2>/dev/null; ls -la \"C:\\\\Users\\\\gabin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--progectos-APPS-AegisLink\" 2>/dev/null | head -30)",
       "PowerShell(gh pr checks 200)",
-      "PowerShell(gh pr view 200 --json state,mergeable,title,headRefName)"
+      "PowerShell(gh pr view 200 --json state,mergeable,title,headRefName)",
+      "PowerShell(gh pr checks 221)",
+      "PowerShell(gh pr view 221 --json headRefOid,commits --jq '.headRefOid')",
+      "PowerShell(gh run view 28628021044 --job 84898765478 --log-failed 2>$null)",
+      "PowerShell(gh run view --job 84898765478 --log-failed)"
     ]
   }
 }

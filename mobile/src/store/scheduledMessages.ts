@@ -21,6 +21,7 @@ import {
   type StoredScheduledMessage,
 } from '../db/local';
 import type { Identity } from '../crypto/identity';
+import type { PostMedia } from '../channels/channelService';
 
 const MAX_RETRIES = 3;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -131,6 +132,53 @@ async function deleteStagedPostFiles(options: GroupPostOptions): Promise<void> {
   await deleteStagedPostFile(options.filePath);
 }
 
+/**
+ * A staged media attachment for a scheduled CHANNEL post: a local file kept in
+ * documentDirectory/channelposts/ until fire time, when it is uploaded as an
+ * E2EE blob and turned into a sealed PostMedia. Covers image/audio/gif alike.
+ */
+export interface ChannelPostStagedMedia {
+  kind: PostMedia['kind'];
+  /** Staged local file path (documentDirectory/channelposts/). */
+  path: string;
+  /** MIME used for the E2EE upload (e.g. 'image/jpeg', 'image/gif', 'audio/m4a'). */
+  mime: string;
+  w?: number;
+  h?: number;
+  durationMs?: number;
+}
+
+/**
+ * Publish-time options for a scheduled CHANNEL post. Channels broadcast a single
+ * sealed feed entry, so the only option is an optional staged media attachment
+ * (uploaded as an E2EE blob at fire time). Persisted at-rest encrypted in post_meta.
+ */
+export interface ChannelPostOptions {
+  media?: ChannelPostStagedMedia;
+}
+
+/** Decrypt + parse the at-rest channel post options; defaults to none on any failure. */
+async function decryptChannelPostOptions(postMeta: string | undefined): Promise<ChannelPostOptions> {
+  if (!postMeta) return {};
+  const { decryptBody } = require('../db/local') as typeof import('../db/local');
+  const metaJson = await decryptBody(postMeta);
+  if (!metaJson || metaJson === '[DECRYPTION_ERROR]') return {};
+  try {
+    return JSON.parse(metaJson) as ChannelPostOptions;
+  } catch {
+    return {};
+  }
+}
+
+/** Unlink a staged channel-post file. Refuses paths outside the staging dir. */
+async function deleteStagedChannelFile(path: string | undefined): Promise<void> {
+  if (!path || !path.includes('channelposts/')) return;
+  try {
+    const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+    await FS.deleteAsync(path, { idempotent: true });
+  } catch { /* best-effort */ }
+}
+
 /** Revive JSON-deserialized byte fields back into Uint8Array. Mirrors client.ts logic. */
 function reviveBytes(o: unknown): Uint8Array | null {
   if (o === null || o === undefined) return null;
@@ -210,6 +258,8 @@ interface ScheduledState {
     sendAt: number;
     id?: string;
     status?: 'pending' | 'draft';
+    /** Optional media (staged image path). Uploaded as an E2EE blob at fire time. */
+    options?: ChannelPostOptions;
   }): Promise<void>;
 
   /** Cancel (delete) a pending scheduled message. */
@@ -389,9 +439,21 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
     });
   },
 
-  async scheduleChannelPost({ channelId, body, sendAt, id, status }) {
+  async scheduleChannelPost({ channelId, body, sendAt, id, status, options }) {
     const { encryptBody } = require('../db/local') as typeof import('../db/local');
     const encryptedPayload = await encryptBody(body);
+    // Editing an existing row: unlink a staged media file being replaced/dropped.
+    if (id) {
+      const prev = get().scheduled.find((m) => m.id === id);
+      if (prev?.postMeta) {
+        const prevPath = (await decryptChannelPostOptions(prev.postMeta)).media?.path;
+        if (prevPath && prevPath !== options?.media?.path) {
+          await deleteStagedChannelFile(prevPath);
+        }
+      }
+    }
+    const hasOptions = !!options?.media;
+    const postMeta = hasOptions ? await encryptBody(JSON.stringify(options)) : undefined;
     const stored: StoredScheduledMessage = {
       id: id ?? Crypto.randomUUID(),
       recipientAegisId: channelId,
@@ -401,6 +463,7 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
       createdAt: Date.now(),
       status: status ?? 'pending',
       retryCount: 0,
+      postMeta,
     };
     await saveScheduled(stored);
     set((s) => {
@@ -417,10 +480,13 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
     const msg = get().scheduled.find((m) => m.id === id);
     await deleteScheduled(id);
     set((s) => ({ scheduled: s.scheduled.filter((m) => m.id !== id) }));
-    // Group post: also unlink its staged files — the row no longer exists, so
-    // they would otherwise be orphaned plaintext on disk forever.
+    // Group/channel post: also unlink its staged files — the row no longer
+    // exists, so they would otherwise be orphaned plaintext on disk forever.
     if (msg?.groupId && msg.postMeta) {
       await deleteStagedPostFiles(await decryptPostOptions(msg.postMeta));
+    }
+    if (msg?.channelId && msg.postMeta) {
+      await deleteStagedChannelFile((await decryptChannelPostOptions(msg.postMeta)).media?.path);
     }
   },
 
@@ -617,12 +683,33 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
             await failNow(msg, msg.retryCount);
             continue;
           }
-          const res = await useChannels.getState().sendPost(msg.channelId, plaintext, identity);
+
+          // Media posts need the relay NOW for the E2EE blob upload — wait online
+          // WITHOUT burning retries (mirrors the group-post/1:1 semantics).
+          const staged = (await decryptChannelPostOptions(msg.postMeta)).media;
+          if (staged && !online) continue;
+
+          let media: PostMedia | null = null;
+          if (staged) {
+            try {
+              const { encryptAndUploadMedia } = require('../crypto/media') as typeof import('../crypto/media');
+              const blobUri = await encryptAndUploadMedia(staged.path, staged.mime);
+              media = { kind: staged.kind, uri: blobUri, mime: staged.mime, w: staged.w, h: staged.h, durationMs: staged.durationMs };
+            } catch {
+              // Upload failed (offline mid-way / staged file lost). If there is no
+              // text either, retry later rather than posting an empty entry.
+              if (!plaintext.trim()) { await bumpRetry(msg); continue; }
+            }
+          }
+
+          const res = await useChannels.getState().sendPost(msg.channelId, plaintext, identity, undefined, media);
           if (!res.ok) {
             await bumpRetry(msg);
             continue;
           }
           await markScheduledSent(msg.id);
+          // Published — the staged plaintext media travelled up as an E2EE blob.
+          await deleteStagedChannelFile(staged?.path);
           set((s) => ({
             scheduled: s.scheduled.map((m) =>
               m.id === msg.id ? { ...m, status: 'sent' as const } : m,

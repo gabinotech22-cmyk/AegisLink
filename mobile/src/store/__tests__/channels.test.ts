@@ -60,6 +60,11 @@ jest.mock('../../crypto/publicChannelStore', () => ({
   saveChannelMeta: jest.fn(async () => {}),
   getChannelMeta: jest.fn(async () => null),
 }));
+jest.mock('../../db/local', () => ({
+  saveChannelFeed: jest.fn(async () => {}),
+  loadChannelFeed: jest.fn(async () => []),
+  deleteChannelFeed: jest.fn(async () => {}),
+}));
 const mockContacts: Array<{ aegisId: string; signingPublicKeyB64: string }> = [];
 jest.mock('../contacts', () => ({
   useContacts: { getState: () => ({ contacts: mockContacts }) },
@@ -162,6 +167,21 @@ describe('sendPost', () => {
     expect(useChannels.getState().heads[CHANNEL_ID]!.seqNum).toBe(0);
   });
 
+  it('carries an image media reference into the sealed body and optimistic feed', async () => {
+    (socket.pubchannelPost as jest.Mock).mockResolvedValue({ ok: true });
+    const media = { kind: 'image' as const, uri: 'blob:xyz:key:nonce', mime: 'image/jpeg', w: 800, h: 600 };
+
+    const res = await useChannels.getState().sendPost(CHANNEL_ID, 'caption', identity, 'Me', media);
+    expect(res.ok).toBe(true);
+
+    const feed = useChannels.getState().feeds[CHANNEL_ID];
+    expect(feed[0].media).toEqual(media);
+    expect(feed[0].body).toBe('caption');
+    // The blob ref (key material) must ride inside the sealed ciphertext, never in the clear.
+    const call = (socket.pubchannelPost as jest.Mock).mock.calls[0];
+    expect(JSON.stringify(call)).not.toContain('blob:xyz');
+  });
+
   it('returns an error and does not append when the relay rejects', async () => {
     (socket.pubchannelPost as jest.Mock).mockResolvedValue({ ok: false, error: 'rate_limited' });
     const res = await useChannels.getState().sendPost(CHANNEL_ID, 'hi', identity);
@@ -193,6 +213,36 @@ describe('loadFeed', () => {
     const feed = useChannels.getState().feeds[CHANNEL_ID];
     expect(feed.map((p) => p.body)).toEqual(['post 0', 'post 1']);
     expect(useChannels.getState().heads[CHANNEL_ID]!.seqNum).toBe(1);
+  });
+
+  it('restores the persisted feed on a cold load when the relay serves no history', async () => {
+    // Cold restart: head persisted, in-memory feed empty, relay retains nothing.
+    const dbLocal = require('../../db/local') as { loadChannelFeed: jest.Mock; saveChannelFeed: jest.Mock };
+    dbLocal.loadChannelFeed.mockResolvedValueOnce([
+      { id: `${CHANNEL_ID}:0`, from: 'A', body: 'old post', senderName: null, media: null, ts: 1, seqNum: 0 },
+    ]);
+    useChannels.setState({ heads: { [CHANNEL_ID]: { seqNum: 0, postHash: new Uint8Array(32) } } });
+    (socket.pubchannelPull as jest.Mock).mockResolvedValue({ ok: true, posts: [] });
+
+    await useChannels.getState().loadFeed(CHANNEL_ID, identity);
+
+    // The cached post is restored even though the relay returned nothing.
+    expect(useChannels.getState().feeds[CHANNEL_ID].map((p) => p.body)).toEqual(['old post']);
+  });
+
+  it('persists the feed to the at-rest cache after ingesting fresh posts', async () => {
+    const dbLocal = require('../../db/local') as { saveChannelFeed: jest.Mock };
+    dbLocal.saveChannelFeed.mockClear();
+    const p0 = sealAs('cached me', null);
+    (socket.pubchannelPull as jest.Mock).mockResolvedValue({
+      ok: true, posts: [{ seq_num: 0, ciphertext_b64: p0.wire.ciphertext, nonce_b64: p0.wire.nonce }],
+    });
+
+    await useChannels.getState().loadFeed(CHANNEL_ID, identity);
+
+    expect(dbLocal.saveChannelFeed).toHaveBeenCalledWith(CHANNEL_ID, expect.arrayContaining([
+      expect.objectContaining({ body: 'cached me', seqNum: 0 }),
+    ]));
   });
 });
 
@@ -348,7 +398,7 @@ describe('removeChannel (leave)', () => {
     // Seed state with a subscribed channel + feed + head.
     useChannels.setState({
       subscribed: [{ channelId: CHANNEL_ID, name: 'Leaving', description: '', channelType: 'open', owned: false, avatarHash: null, channelEd25519PubB64: null }],
-      feeds: { [CHANNEL_ID]: [{ id: `${CHANNEL_ID}:0`, from: 'A', body: 'hi', senderName: null, ts: 1, seqNum: 0 }] },
+      feeds: { [CHANNEL_ID]: [{ id: `${CHANNEL_ID}:0`, from: 'A', body: 'hi', senderName: null, media: null, ts: 1, seqNum: 0 }] },
       heads: { [CHANNEL_ID]: { seqNum: 0, postHash: new Uint8Array(32) } },
     });
 
@@ -606,8 +656,8 @@ describe('member ban (issue #207 — owner moderation, docs §10.4)', () => {
       }],
       feeds: {
         [CHANNEL_ID]: [
-          { id: `${CHANNEL_ID}:0`, from: identity.aegisId, body: 'mine', senderName: null, ts: 1, seqNum: 0 },
-          { id: `${CHANNEL_ID}:1`, from: eve, body: 'spam', senderName: null, ts: 2, seqNum: 1 },
+          { id: `${CHANNEL_ID}:0`, from: identity.aegisId, body: 'mine', senderName: null, media: null, ts: 1, seqNum: 0 },
+          { id: `${CHANNEL_ID}:1`, from: eve, body: 'spam', senderName: null, media: null, ts: 2, seqNum: 1 },
         ],
       },
     });
