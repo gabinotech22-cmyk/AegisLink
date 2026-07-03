@@ -295,4 +295,16 @@ describe('delete-for-everyone over the E2EE channel', () => {
     // The retracted msgId must not be readable on the wire.
     expect(JSON.stringify(wire)).not.toContain('msg-to-retract');
   });
+
+  it('does NOT register the legacy plaintext msg:delete listener (unauthenticated remote delete)', () => {
+    // Regression: the old plaintext `msg:delete` relay event let anyone able to
+    // emit it (a malicious relay) erase arbitrary messages by supplying
+    // {from, msgId}, with zero proof-of-key-possession. Delete-for-everyone now
+    // rides the sealed E2EE channel only; the plaintext listener must be gone.
+    const me = buildIdentity();
+    client.connect(me);
+    bringOnline();
+
+    expect(mockFakeSocket.handlers.has('msg:delete')).toBe(false);
+  });
 });

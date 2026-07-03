@@ -188,6 +188,30 @@ export async function setMessageDeleted(id: string): Promise<void> {
   });
 }
 
+/**
+ * Delete-for-everyone applied on the RECEIVER from a peer's E2EE retraction.
+ * Unlike {@link setMessageDeleted} (used by the local "delete for me" path,
+ * which may target the user's OWN messages), this is authorization-scoped: a
+ * peer may only retract a message that (a) lives in OUR chat with them
+ * (`chat_id = peerAegisId`) and (b) was sent BY them (`direction = 'in'`).
+ * Knowing a msgId is not the same as owning the right to delete it — a peer
+ * must not be able to erase the user's own messages or messages from other
+ * chats by supplying an arbitrary id. Returns true iff a row was deleted.
+ */
+export async function setRemoteMessageDeleted(id: string, chatId: string): Promise<boolean> {
+  return withDb(async (d) => {
+    const empty = await encryptBody('');
+    const res = await d.runAsync(
+      `UPDATE messages SET deleted = 1, body = ?, media_uri = NULL
+         WHERE id = ? AND chat_id = ? AND direction = 'in'`,
+      empty,
+      id,
+      chatId
+    );
+    return res.changes > 0;
+  });
+}
+
 export async function setMessageReactions(id: string, reactions: MessageReactions): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(`UPDATE messages SET reactions = ? WHERE id = ?`, JSON.stringify(reactions), id);

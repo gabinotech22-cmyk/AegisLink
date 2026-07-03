@@ -36,7 +36,7 @@ export function checkChannelMsgRateLimit(aegisId: string): boolean {
 }
 
 // ── Shared low-frequency rate-limit (FIX D) ───────────────────────────────────
-// typing + msg:read + msg:delete share a single bucket: 30 ops / 10 s per socket.
+// typing + msg:read share a single bucket: 30 ops / 10 s per socket.
 // group:rekey has its own stricter bucket: 10 ops / 60 s per aegisId.
 // Keyed by aegisId — no IP involved.
 const lowFreqRateLimit = new Map<string, { count: number; reset: number }>();

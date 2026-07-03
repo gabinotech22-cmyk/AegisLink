@@ -736,9 +736,12 @@ export function connect(identity: Identity): Socket {
     }
   });
 
-  socket.on('msg:delete', ({ from, msgId }: { from: string; msgId: string }) => {
-    void useMessages.getState().remoteDelete(from, msgId);
-  });
+  // NOTE: the legacy plaintext `msg:delete` relay event is intentionally NOT
+  // handled. Delete-for-everyone now travels inside the sealed E2EE ratchet
+  // channel (`{type:'msg_delete'}`), which authenticates the sender. Honoring
+  // an unauthenticated wire event would let a malicious relay erase arbitrary
+  // messages by supplying {from, msgId} (golden rule #3: sensitive actions
+  // require proof-of-key-possession, not just knowing an id).
 
   socket.on('typing', ({ from, isTyping }: { from: string; isTyping: boolean; channelId?: string }) => {
     useTyping.getState().setTyping(from, isTyping);

@@ -60,6 +60,8 @@ contextBridge.exposeInMainWorld('aegis', {
       ipcRenderer.invoke('db:set-message-starred', id, starred),
     setMessageDeleted: (activeSlot: string, id: string): Promise<void> =>
       ipcRenderer.invoke('db:set-message-deleted', activeSlot, id),
+    setRemoteMessageDeleted: (activeSlot: string, id: string, chatId: string): Promise<boolean> =>
+      ipcRenderer.invoke('db:set-remote-message-deleted', activeSlot, id, chatId),
     setMessageReactions: (id: string, reactions: any): Promise<void> =>
       ipcRenderer.invoke('db:set-message-reactions', id, reactions),
     lastMessageByChat: (activeSlot: string, chatId: string): Promise<any> =>
