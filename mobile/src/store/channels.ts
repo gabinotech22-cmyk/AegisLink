@@ -37,8 +37,10 @@ import {
   pubchannelApprove,
   pubchannelCheckApproval,
   pubchannelDelete,
+  pubchannelBan,
   onPubchannelMsg,
   onPubchannelDelete,
+  onPubchannelBan,
   onPubchannelTombstone,
 } from '../socket/publicChannels';
 import {
@@ -59,6 +61,8 @@ import {
   signTombstone,
   signAvatarSet,
   signDelete,
+  signBan,
+  verifyBan,
   signPendingList,
   signApprove,
   generateJoinEphemeral,
@@ -87,6 +91,8 @@ import {
   getJoinRequest,
   listJoinRequests,
   deleteJoinRequest,
+  saveBannedMembers,
+  getBannedMembers,
 } from '../crypto/publicChannelStore';
 
 const CHANNEL_TYPE_NAMES: PublicChannelType[] = ['open', 'readonly', 'moderated', 'approval'];
@@ -146,6 +152,12 @@ interface ChannelsState {
   hydrated: boolean;
   feeds: Record<string, FeedPost[]>;
   heads: Record<string, ChainHead | null>;
+  /**
+   * Banned member aegisIds per channel (client-side only — docs §10.5: the
+   * relay never stores a roster or ban list). Posts from banned authors are
+   * filtered on ingest and purged retroactively.
+   */
+  banned: Record<string, string[]>;
 
   loadDirectory: () => Promise<void>;
   /**
@@ -181,6 +193,14 @@ interface ChannelsState {
   updateChannelInfo: (channelId: string, updates: { name?: string; description?: string; channelType?: PublicChannelType }) => Promise<{ ok: boolean; error?: string }>;
   /** Owner: delete a post for everyone (signed; relay fans out). */
   deletePost: (channelId: string, seqNum: number) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Owner: ban a member (docs §10.4). Signs `{banned, ts, channelId}` with the
+   * channel key, fans it out via `pubchannel:ban` (relay verifies the signature
+   * against the STORED manifest key but learns nothing beyond the pseudonymous
+   * aegisId already inside the record), persists the ban locally and purges the
+   * member's posts from the feed.
+   */
+  banMember: (channelId: string, memberAegisId: string) => Promise<{ ok: boolean; error?: string }>;
   /** Owner: list pending join requests for an approval-gated channel. */
   listPendingJoins: (channelId: string) => Promise<{ ok: boolean; pending?: Array<{ joinEpk: string; createdAt: number }>; error?: string }>;
   /** Owner: approve (seal capability to the applicant) or reject a request. */
@@ -204,6 +224,29 @@ function makeSignerResolver(identity: Identity): SignerResolver {
 
 function manifestType(n: 0 | 1 | 2 | 3): PublicChannelType {
   return CHANNEL_TYPE_NAMES[n] ?? 'open';
+}
+
+/** Wire/at-rest shape of a ban record (docs §10.4 step 1). */
+interface BanRecord {
+  banned: string;
+  ts: number;
+  channelId: string;
+}
+
+/** Parse + shape-check a ban record string. Null on any mismatch. */
+function parseBanRecord(recordStr: string, expectedChannelId: string): BanRecord | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(recordStr);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const r = parsed as Record<string, unknown>;
+  if (typeof r['banned'] !== 'string' || r['banned'].length === 0) return null;
+  if (typeof r['ts'] !== 'number' || typeof r['channelId'] !== 'string') return null;
+  if (r['channelId'] !== expectedChannelId) return null;
+  return { banned: r['banned'], ts: r['ts'], channelId: r['channelId'] };
 }
 
 function postToFeed(p: { post: { from: string; body: string; ts: number; seqNum: number } }, channelId: string): FeedPost {
@@ -245,12 +288,18 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   pendingApplications: [],
   feeds: {},
   heads: {},
+  banned: {},
 
   async hydrateSubscribed() {
     const ids = await listChannelIds();
     const known = new Set(get().subscribed.map((c) => c.channelId));
     const restored: ChannelSummary[] = [];
+    const restoredBans: Record<string, string[]> = {};
     for (const channelId of ids) {
+      // Ban lists are local-only (never re-fetchable) — restore them even when
+      // the manifest fetch below fails or the channel is already listed.
+      const bans = await getBannedMembers(channelId);
+      if (bans.length > 0) restoredBans[channelId] = bans;
       if (known.has(channelId)) continue;
       let blob: string;
       try {
@@ -280,6 +329,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     const requests = await listJoinRequests();
     set((s) => ({
       hydrated: true,
+      banned: { ...restoredBans, ...s.banned },
       // Re-check against current state: a join may have landed while we fetched.
       subscribed: [
         ...s.subscribed,
@@ -571,7 +621,12 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     const result = ingestChannelPosts(channelId, sealed, cek, makeSignerResolver(identity), head);
     if (result.posts.length === 0) return;
 
-    const fresh = result.posts.map((p) => postToFeed(p, channelId));
+    // Chain verification runs over ALL posts (the head must advance past a
+    // banned author's links); only the feed projection drops them.
+    const bannedHere = new Set(get().banned[channelId] ?? []);
+    const fresh = result.posts
+      .filter((p) => !bannedHere.has(p.post.from))
+      .map((p) => postToFeed(p, channelId));
     set((s) => ({
       feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), ...fresh] },
       heads: { ...s.heads, [channelId]: result.head },
@@ -634,7 +689,10 @@ export const useChannels = create<ChannelsState>((set, get) => ({
           head,
         );
         if (result.posts.length === 0) return; // failed auth/chain — dropped
-        const fresh = result.posts.map((p) => postToFeed(p, e.channelId));
+        const bannedHere = new Set(get().banned[e.channelId] ?? []);
+        const fresh = result.posts
+          .filter((p) => !bannedHere.has(p.post.from))
+          .map((p) => postToFeed(p, e.channelId));
         set((s) => ({
           feeds: { ...s.feeds, [e.channelId]: [...(s.feeds[e.channelId] ?? []), ...fresh] },
           heads: { ...s.heads, [e.channelId]: result.head },
@@ -653,10 +711,49 @@ export const useChannels = create<ChannelsState>((set, get) => ({
         },
       }));
     });
+    const offBan = onPubchannelBan((e) => {
+      void (async () => {
+        // Trust only a signature-verified ban record: the signing key is the
+        // channel pubkey pinned from the VERIFIED manifest at join/hydrate time
+        // — never anything relay-supplied (golden rule #7).
+        const summary = get().subscribed.find((c) => c.channelId === e.channelId);
+        if (!summary?.channelEd25519PubB64) return;
+        let channelPub: Uint8Array;
+        let sig: Uint8Array;
+        try {
+          channelPub = decodeBase64(summary.channelEd25519PubB64);
+          sig = decodeBase64(e.banSig);
+        } catch {
+          return;
+        }
+        if (!verifyBan(e.channelId, e.banRecord, sig, channelPub)) return;
+        const record = parseBanRecord(e.banRecord, e.channelId);
+        if (!record) return;
+
+        if (record.banned === identity.aegisId) {
+          // We were banned: drop keys + local state (kick).
+          await get().removeChannel(e.channelId);
+          return;
+        }
+        const next = Array.from(new Set([...(get().banned[e.channelId] ?? []), record.banned]));
+        try {
+          await saveBannedMembers(e.channelId, next);
+        } catch (err) {
+          logger.warn(`[channels] ban persist failed: ${(err as Error).message}`);
+        }
+        set((s) => ({
+          banned: { ...s.banned, [e.channelId]: next },
+          feeds: {
+            ...s.feeds,
+            [e.channelId]: (s.feeds[e.channelId] ?? []).filter((p) => p.from !== record.banned),
+          },
+        }));
+      })();
+    });
     const offTomb = onPubchannelTombstone((e) => {
       void get().removeChannel(e.channelId);
     });
-    return () => { offMsg(); offDelete(); offTomb(); };
+    return () => { offMsg(); offDelete(); offBan(); offTomb(); };
   },
 
   async removeChannel(channelId) {
@@ -664,10 +761,12 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     set((s) => {
       const feeds = { ...s.feeds }; delete feeds[channelId];
       const heads = { ...s.heads }; delete heads[channelId];
+      const banned = { ...s.banned }; delete banned[channelId];
       return {
         subscribed: s.subscribed.filter((c) => c.channelId !== channelId),
         feeds,
         heads,
+        banned,
       };
     });
   },
@@ -725,6 +824,41 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       feeds: {
         ...s.feeds,
         [channelId]: (s.feeds[channelId] ?? []).filter((p) => p.seqNum !== seqNum),
+      },
+    }));
+    return { ok: true };
+  },
+
+  async banMember(channelId, memberAegisId) {
+    const sk = await getChannelSigningKey(channelId);
+    if (!sk) return { ok: false, error: 'not_owner' };
+    if (!memberAegisId) return { ok: false, error: 'bad_member' };
+
+    // Ban record per docs §10.4 step 1 — signed with the channel key; the relay
+    // verifies against the stored manifest and fans the record out opaquely.
+    const record: BanRecord = { banned: memberAegisId, ts: Date.now(), channelId };
+    const recordStr = JSON.stringify(record);
+    const sig = signBan(channelId, recordStr, sk);
+    try {
+      const ack = await pubchannelBan(channelId, recordStr, encodeBase64(sig));
+      if (!ack.ok) return { ok: false, error: ack.error };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'ban_failed' };
+    }
+
+    // Apply locally: persist the list + purge the member's posts. (The owner's
+    // own fan-out echo is a no-op re-add thanks to the Set.)
+    const next = Array.from(new Set([...(get().banned[channelId] ?? []), memberAegisId]));
+    try {
+      await saveBannedMembers(channelId, next);
+    } catch (e) {
+      logger.warn(`[channels] ban persist failed: ${(e as Error).message}`);
+    }
+    set((s) => ({
+      banned: { ...s.banned, [channelId]: next },
+      feeds: {
+        ...s.feeds,
+        [channelId]: (s.feeds[channelId] ?? []).filter((p) => p.from !== memberAegisId),
       },
     }));
     return { ok: true };

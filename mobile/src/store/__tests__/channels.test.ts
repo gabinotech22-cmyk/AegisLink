@@ -33,8 +33,10 @@ jest.mock('../../socket/publicChannels', () => ({
   pubchannelApprove: jest.fn(async () => ({ ok: true })),
   pubchannelCheckApproval: jest.fn(async () => ({ ok: true, status: 'pending' })),
   pubchannelDelete: jest.fn(async () => ({ ok: true })),
+  pubchannelBan: jest.fn(async () => ({ ok: true })),
   onPubchannelMsg: jest.fn(() => () => {}),
   onPubchannelDelete: jest.fn(() => () => {}),
+  onPubchannelBan: jest.fn(() => () => {}),
   onPubchannelTombstone: jest.fn(() => () => {}),
 }));
 jest.mock('../../crypto/publicChannelStore', () => ({
@@ -51,9 +53,12 @@ jest.mock('../../crypto/publicChannelStore', () => ({
   getJoinRequest: jest.fn(async () => null),
   listJoinRequests: jest.fn(async () => []),
   deleteJoinRequest: jest.fn(async () => {}),
+  saveBannedMembers: jest.fn(async () => {}),
+  getBannedMembers: jest.fn(async () => []),
 }));
+const mockContacts: Array<{ aegisId: string; signingPublicKeyB64: string }> = [];
 jest.mock('../contacts', () => ({
-  useContacts: { getState: () => ({ contacts: [] }) },
+  useContacts: { getState: () => ({ contacts: mockContacts }) },
 }));
 
 import { useChannels } from '../channels';
@@ -109,7 +114,8 @@ function signedManifestBlob(name = 'My Channel', tamper = false): string {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  useChannels.setState({ directory: [], loadingDirectory: false, subscribed: [], hydrated: false, feeds: {}, heads: {}, pendingApplications: [] });
+  mockContacts.length = 0;
+  useChannels.setState({ directory: [], loadingDirectory: false, subscribed: [], hydrated: false, feeds: {}, heads: {}, pendingApplications: [], banned: {} });
   (store.getChannelCEK as jest.Mock).mockResolvedValue(cek);
   (store.getChannelDeliveryToken as jest.Mock).mockResolvedValue('tok');
 });
@@ -555,5 +561,128 @@ describe('hydrateSubscribed (restore after app restart)', () => {
 
     expect(useChannels.getState().subscribed).toHaveLength(1);
     expect(api.getPublicChannelManifest).not.toHaveBeenCalled();
+  });
+});
+
+describe('member ban (issue #207 — owner moderation, docs §10.4)', () => {
+  const { encodeBase64 } = require('tweetnacl-util') as typeof import('tweetnacl-util');
+  const { verifyBan } = require('../../crypto/publicChannelKey') as typeof import('../../crypto/publicChannelKey');
+
+  const eveKp = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(11));
+  const eve = 'AEGIS-EVE';
+
+  function seedOwnedChannel(channelSecret: Uint8Array, channelPub: Uint8Array) {
+    (store.getChannelSigningKey as jest.Mock).mockResolvedValue(channelSecret);
+    useChannels.setState({
+      subscribed: [{
+        channelId: CHANNEL_ID, name: 'Mine', description: '', channelType: 'open',
+        owned: true, avatarHash: null, channelEd25519PubB64: encodeBase64(channelPub),
+      }],
+      feeds: {
+        [CHANNEL_ID]: [
+          { id: `${CHANNEL_ID}:0`, from: identity.aegisId, body: 'mine', senderName: null, ts: 1, seqNum: 0 },
+          { id: `${CHANNEL_ID}:1`, from: eve, body: 'spam', senderName: null, ts: 2, seqNum: 1 },
+        ],
+      },
+    });
+  }
+
+  it('banMember signs a verifiable ban record, emits it and purges the member from the feed', async () => {
+    const ch = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(3));
+    seedOwnedChannel(ch.secretKey, ch.publicKey);
+
+    const res = await useChannels.getState().banMember(CHANNEL_ID, eve);
+    expect(res).toEqual({ ok: true });
+
+    // Wire: signed record the relay can verify against the stored manifest key.
+    const [chanArg, recordStr, sigB64] = (socket.pubchannelBan as jest.Mock).mock.calls[0] as [string, string, string];
+    expect(chanArg).toBe(CHANNEL_ID);
+    const record = JSON.parse(recordStr) as { banned: string; ts: number; channelId: string };
+    expect(record).toMatchObject({ banned: eve, channelId: CHANNEL_ID });
+    const { decodeBase64 } = require('tweetnacl-util') as typeof import('tweetnacl-util');
+    expect(verifyBan(CHANNEL_ID, recordStr, decodeBase64(sigB64), ch.publicKey)).toBe(true);
+
+    // Local enforcement: banned member disappears from the feed, list persisted.
+    expect(useChannels.getState().banned[CHANNEL_ID]).toEqual([eve]);
+    expect(useChannels.getState().feeds[CHANNEL_ID].map((p) => p.from)).toEqual([identity.aegisId]);
+    expect(store.saveBannedMembers).toHaveBeenCalledWith(CHANNEL_ID, [eve]);
+  });
+
+  it('banMember refuses when we do not hold the channel signing key', async () => {
+    (store.getChannelSigningKey as jest.Mock).mockResolvedValue(null);
+    const res = await useChannels.getState().banMember(CHANNEL_ID, eve);
+    expect(res).toEqual({ ok: false, error: 'not_owner' });
+    expect(socket.pubchannelBan).not.toHaveBeenCalled();
+  });
+
+  it('a received ban with a valid signature filters the member; a forged one is ignored', async () => {
+    const ch = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(3));
+    seedOwnedChannel(new Uint8Array(64), ch.publicKey); // signing key irrelevant here
+
+    let banCb: ((e: { channelId: string; banRecord: string; banSig: string }) => void) | null = null;
+    (socket.onPubchannelBan as jest.Mock).mockImplementation((cb: typeof banCb) => { banCb = cb; return () => {}; });
+    const off = useChannels.getState().attachLive(identity);
+    expect(banCb).not.toBeNull();
+
+    const { signBan } = require('../../crypto/publicChannelKey') as typeof import('../../crypto/publicChannelKey');
+
+    // Forged: signed with Eve's key, not the channel key → dropped.
+    const forgedRecord = JSON.stringify({ banned: identity.aegisId, ts: Date.now(), channelId: CHANNEL_ID });
+    const forgedSig = signBan(CHANNEL_ID, forgedRecord, eveKp.secretKey);
+    banCb!({ channelId: CHANNEL_ID, banRecord: forgedRecord, banSig: encodeBase64(forgedSig) });
+    await flush();
+    expect(useChannels.getState().subscribed).toHaveLength(1); // NOT kicked by a forged ban
+    expect(useChannels.getState().feeds[CHANNEL_ID]).toHaveLength(2);
+
+    // Valid: signed with the channel key → Eve's posts purged + list updated.
+    const validRecord = JSON.stringify({ banned: eve, ts: Date.now(), channelId: CHANNEL_ID });
+    const validSig = signBan(CHANNEL_ID, validRecord, ch.secretKey);
+    banCb!({ channelId: CHANNEL_ID, banRecord: validRecord, banSig: encodeBase64(validSig) });
+    await flush();
+    expect(useChannels.getState().banned[CHANNEL_ID]).toEqual([eve]);
+    expect(useChannels.getState().feeds[CHANNEL_ID].map((p) => p.from)).toEqual([identity.aegisId]);
+
+    off();
+  });
+
+  it('a valid ban naming ME drops the channel locally (kick)', async () => {
+    const ch = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(3));
+    seedOwnedChannel(new Uint8Array(64), ch.publicKey);
+
+    let banCb: ((e: { channelId: string; banRecord: string; banSig: string }) => void) | null = null;
+    (socket.onPubchannelBan as jest.Mock).mockImplementation((cb: typeof banCb) => { banCb = cb; return () => {}; });
+    const off = useChannels.getState().attachLive(identity);
+
+    const { signBan } = require('../../crypto/publicChannelKey') as typeof import('../../crypto/publicChannelKey');
+    const record = JSON.stringify({ banned: identity.aegisId, ts: Date.now(), channelId: CHANNEL_ID });
+    const sig = signBan(CHANNEL_ID, record, ch.secretKey);
+    banCb!({ channelId: CHANNEL_ID, banRecord: record, banSig: encodeBase64(sig) });
+    await flush();
+
+    expect(useChannels.getState().subscribed).toHaveLength(0);
+    expect(store.deleteChannel).toHaveBeenCalledWith(CHANNEL_ID);
+    off();
+  });
+
+  it('loadFeed drops posts from banned authors but still advances the chain head', async () => {
+    // Eve is a known contact so her post signature verifies — the drop must be
+    // the ban filter, not a failed signature.
+    mockContacts.push({ aegisId: eve, signingPublicKeyB64: encodeBase64(eveKp.publicKey) });
+    useChannels.setState({ banned: { [CHANNEL_ID]: [eve] } });
+
+    const p0 = sealAs('mine', null);
+    const p1 = buildAndSealPost(CHANNEL_ID, { from: eve, body: 'banned post', ts: 1750000000001 }, p0.newHead, eveKp.secretKey, cek);
+    (socket.pubchannelPull as jest.Mock).mockResolvedValue({
+      ok: true,
+      posts: [
+        { seq_num: 0, ciphertext_b64: p0.wire.ciphertext, nonce_b64: p0.wire.nonce },
+        { seq_num: 1, ciphertext_b64: p1.wire.ciphertext, nonce_b64: p1.wire.nonce },
+      ],
+    });
+
+    await useChannels.getState().loadFeed(CHANNEL_ID, identity);
+
+    expect(useChannels.getState().feeds[CHANNEL_ID].map((p) => p.body)).toEqual(['mine']);
+    expect(useChannels.getState().heads[CHANNEL_ID]!.seqNum).toBe(1); // head past the filtered post
   });
 });
