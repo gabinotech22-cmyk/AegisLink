@@ -32,7 +32,15 @@ const BLOB_SECRET: Buffer = (() => {
   return crypto.randomBytes(32);
 })();
 
-/** Mint the download token bound to a blob id: base64url(HMAC-SHA256)[:22] (~16 bytes). */
+/**
+ * Mint the download token bound to a blob id: base64url(HMAC-SHA256)[:22].
+ *
+ * Truncating the 256-bit HMAC to 22 base64url chars (~128 bits) is intentional and
+ * adequate: the token is an unguessable capability, not a long-term secret. 128 bits is
+ * beyond brute-force, the HMAC key is server-only (never leaves the relay), and blobs
+ * expire in 24h — so even a hypothetical forgery has a one-day window against a single
+ * id. Keeping it short also keeps download URLs compact. (Audit 2026-06-30 L2.)
+ */
 function mintDownloadToken(id: string): string {
   return crypto.createHmac('sha256', BLOB_SECRET).update(id).digest('base64url').slice(0, 22);
 }
