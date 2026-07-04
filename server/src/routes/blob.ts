@@ -142,8 +142,15 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
     return;
   }
 
+  const uploadBuffer: Buffer = req.body;
+  const uploadLength = uploadBuffer instanceof Buffer ? uploadBuffer.length : 0;
+  if (uploadLength === 0) {
+    res.status(400).json({ error: 'body_must_be_binary' });
+    return;
+  }
+
   // ── Global quota check (FIX A) ────────────────────────────────────────────
-  if (currentTotalBytes + req.body.length > MAX_TOTAL_UPLOAD_BYTES) {
+  if (currentTotalBytes + uploadLength > MAX_TOTAL_UPLOAD_BYTES) {
     res.status(507).json({ error: 'storage_full' });
     return;
   }
@@ -151,12 +158,12 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
   const id = crypto.randomUUID();
   const filePath = path.join(UPLOADS_DIR, id);
 
-  fs.writeFile(filePath, req.body, (err) => {
+  fs.writeFile(filePath, uploadBuffer, (err) => {
     if (err) {
       res.status(500).json({ error: 'SERVER_ERROR' });
       return;
     }
-    currentTotalBytes += req.body.length;
+    currentTotalBytes += uploadLength;
     // Return the download token bound to this id. It travels inside the E2EE
     // envelope; the relay never needs to persist it (it is recomputed on GET).
     res.json({ id, token: mintDownloadToken(id) });
@@ -182,7 +189,12 @@ router.get('/download/:id', (req, res) => {
     return;
   }
 
-  const filePath = path.join(UPLOADS_DIR, id);
+  const filePath = path.resolve(UPLOADS_DIR, id);
+  if (!filePath.startsWith(UPLOADS_DIR)) {
+    res.status(403).json({ error: 'forbidden' });
+    return;
+  }
+
   if (!fs.existsSync(filePath)) {
     res.status(404).json({ error: 'not_found' });
     return;
