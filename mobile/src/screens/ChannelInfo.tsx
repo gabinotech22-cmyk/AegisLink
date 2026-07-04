@@ -14,7 +14,7 @@ import { View, Text, Pressable, ScrollView, Image, Modal, TextInput, ActivityInd
 import * as ImagePicker from 'expo-image-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import { withPickingGuard } from '../utils/pickingGuard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -592,7 +592,7 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
           </View>
           <Pressable
             onPress={() => {
-              void Clipboard.setStringAsync(channelId).then(() => {
+              void copySensitiveText(channelId).then(() => {
                 themedAlert(
                   i18nT('channelInfo.idCopiedTitle', 'Copied'),
                   i18nT('channelInfo.idCopiedDesc', 'Channel ID copied to clipboard.'),

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { FloatingMenu, type FloatingMenuItem } from './FloatingMenu';
 import { I } from './icons';
-import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
@@ -47,7 +47,7 @@ export function MessageActionsSheet({
 
   async function handleCopy() {
     try {
-      await Clipboard.setStringAsync(body);
+      await copySensitiveText(body);
     } catch {/* ignore */}
     onCopy?.();
   }

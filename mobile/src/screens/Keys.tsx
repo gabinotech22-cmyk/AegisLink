@@ -7,7 +7,7 @@ import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { Section, Row } from '../components/Section';
 import { useIdentity } from '../store/identity';
-import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import { themedAlert } from '../components/AlertHost';
 
 interface Props {
@@ -31,7 +31,7 @@ export function KeysScreen({ onBack }: Props) {
   const { identity } = useIdentity();
 
   const handleCopy = async (text: string, label: string) => {
-    await Clipboard.setStringAsync(text);
+    await copySensitiveText(text);
     themedAlert(i18nT('keys.copied'), i18nT('keys.copiedDesc'));
   };
 

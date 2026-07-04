@@ -731,8 +731,8 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
                   themedAlert(i18nT('chat.contactAdded', 'Contacto añadido'), cardName);
                 } catch {
                   // Fallback: copy ID to clipboard
-                  const Clipboard = require('expo-clipboard');
-                  await Clipboard.setStringAsync(cardAegisId).catch(() => {});
+                  const { copySensitiveText } = require('../../utils/secureClipboard');
+                  await copySensitiveText(cardAegisId).catch(() => {});
                   themedAlert(i18nT('chat.contactAddFailed', 'No se pudo añadir'), i18nT('chat.idCopied', 'ID copiado al portapapeles'));
                 }
               }}

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ss } from '../utils/secureStore';
-import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
@@ -98,7 +98,7 @@ export function PanicScreen({ onBack }: Props) {
   const copyLink = useCallback(async () => {
     if (!remoteToken || !remoteTokenSig) return;
     // Both halves are required — the deep-link handler rejects unsigned tokens.
-    await Clipboard.setStringAsync(
+    await copySensitiveText(
       `aegislink://panic?token=${remoteToken}&sig=${encodeURIComponent(remoteTokenSig)}`,
     );
     setCopied(true);

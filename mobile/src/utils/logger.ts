@@ -31,8 +31,8 @@ const ORDER: Record<LogLevel, number> = {
 // `__DEV__` is the React Native / Expo global — `false` in release bundles.
 const IS_DEV = typeof __DEV__ !== 'undefined' && __DEV__;
 
-/** Default: everything in dev, errors-only in production. */
-const DEFAULT_LEVEL: LogLevel = IS_DEV ? 'debug' : 'error';
+/** Default: everything in dev, silent in production to prevent metadata leakage. */
+const DEFAULT_LEVEL: LogLevel = IS_DEV ? 'debug' : 'silent';
 
 let currentLevel: LogLevel = DEFAULT_LEVEL;
 

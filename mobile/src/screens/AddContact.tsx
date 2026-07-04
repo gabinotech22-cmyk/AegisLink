@@ -3,6 +3,7 @@ import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, ActivityIndic
 import { BrandedQR } from '../components/BrandedQR';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -430,7 +431,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    await Clipboard.setStringAsync(link);
+    await copySensitiveText(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

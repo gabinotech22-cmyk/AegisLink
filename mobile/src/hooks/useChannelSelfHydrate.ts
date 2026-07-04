@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { logger } from '../utils/logger';
 
 /**
  * Defense in depth: the app-level rehydrate (App.tsx) normally hydrates
@@ -18,7 +19,7 @@ export function useChannelSelfHydrate<T>(
   useEffect(() => {
     if (hydrated || summary) return;
     void hydrateSubscribed().catch((err: unknown) => {
-      if (__DEV__) console.warn('[useChannelSelfHydrate] hydrate failed:', err);
+      logger.warn('[useChannelSelfHydrate] hydrate failed:', err);
     });
   }, [hydrated, summary, hydrateSubscribed]);
 }
