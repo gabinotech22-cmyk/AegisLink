@@ -65,7 +65,7 @@ const UpdateManifestBody = z.object({
 /** Slice 2 — avatar association request body. Owner-authenticated via Ed25519 sig. */
 const SetAvatarBody = z.object({
   /** Blob store ID returned by POST /blob/upload. */
-  blobId: z.string().min(1).max(128),
+  blobId: z.string().uuid(),
   /** base64-encoded Ed25519 signature over domain-separated (channelId ‖ blobId). */
   sigB64: z.string().min(1).max(256),
 });
