@@ -37,6 +37,8 @@ export function LockSettingsScreen({ onBack }: Props) {
   const [autoLockMinutes, setAutoLockMinutes] = useState(5);
   const [lockOnBackground, setLockOnBackground] = useState(true);
 
+  const [bioAvailable, setBioAvailable] = useState(false);
+
   useEffect(() => {
     ss.get(LOCK_SETTINGS_KEY)
       .then((raw) => {
@@ -49,6 +51,17 @@ export function LockSettingsScreen({ onBack }: Props) {
         } catch { /* corrupt */ }
       })
       .catch(() => {});
+
+    void (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean> };
+        const hasHw = await LA.hasHardwareAsync();
+        setBioAvailable(hasHw);
+      } catch {
+        setBioAvailable(false);
+      }
+    })();
   }, []);
 
   async function save(patch: Partial<LockSettingsData>) {
@@ -96,31 +109,33 @@ export function LockSettingsScreen({ onBack }: Props) {
 
       <ScrollView contentContainerStyle={{ paddingTop: 8, paddingBottom: 32 }}>
         <Section t={t} label={i18nT('lockSettings.security', 'SECURITY')}>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingHorizontal: 16,
-              paddingVertical: 12,
-              borderBottomWidth: 1,
-              borderBottomColor: t.divider,
-            }}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>
-                {i18nT('lockSettings.requireBiometrics', 'Require biometrics')}
-              </Text>
-              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
-                {i18nT('lockSettings.bioUnlockDesc', 'Face ID / fingerprint unlock')}
-              </Text>
+          {bioAvailable && (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingHorizontal: 16,
+                paddingVertical: 12,
+                borderBottomWidth: 1,
+                borderBottomColor: t.divider,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>
+                  {i18nT('lockSettings.requireBiometrics', 'Require biometrics')}
+                </Text>
+                <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
+                  {i18nT('lockSettings.bioUnlockDesc', 'Face ID / fingerprint unlock')}
+                </Text>
+              </View>
+              <Switch
+                value={biometrics}
+                onValueChange={handleBiometrics}
+                trackColor={{ false: t.surface3, true: t.accent }}
+                thumbColor={biometrics ? t.accentInk : t.textFaint}
+              />
             </View>
-            <Switch
-              value={biometrics}
-              onValueChange={handleBiometrics}
-              trackColor={{ false: t.surface3, true: t.accent }}
-              thumbColor={biometrics ? t.accentInk : t.textFaint}
-            />
-          </View>
+          )}
 
           <View
             style={{

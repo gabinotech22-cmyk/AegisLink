@@ -12,6 +12,7 @@ import { usePreferences } from '../store/preferences';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
 import { usePanicGesture } from '../hooks/usePanicGesture';
+import { AegisMark } from '../components/AegisMark';
 
 const MAX_ATTEMPTS = 5;
 
@@ -344,7 +345,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
               borderWidth: 1, borderColor: `${t.accent}33`,
               alignItems: 'center', justifyContent: 'center',
             }}>
-              <I.Shield size={28} stroke={1.6} color={t.accent} />
+              <AegisMark t={t} size={28} />
             </View>
             <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.4 }}>
               AEGISLINK
@@ -407,7 +408,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   return (
     <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}>
       {/* Logo — triple tap triggers panic gesture */}
-      <Pressable onPress={registerTap} accessibilityElementsHidden importantForAccessibility="no">
+      <Pressable onPress={registerTap} onLongPress={registerLongPress} delayLongPress={3000} accessibilityElementsHidden importantForAccessibility="no">
         <View style={{ alignItems: 'center', gap: 6 }}>
           <View style={{
             width: 52, height: 52, borderRadius: 26,
@@ -415,7 +416,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
             borderWidth: 1, borderColor: `${t.accent}33`,
             alignItems: 'center', justifyContent: 'center',
           }}>
-            <I.Shield size={28} stroke={1.6} color={t.accent} />
+            <AegisMark t={t} size={28} />
           </View>
           <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.4 }}>
             AEGISLINK

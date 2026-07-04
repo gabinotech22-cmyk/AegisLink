@@ -118,8 +118,20 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   // Pending enable: if user triggers enable but has no PIN, we wait for PIN setup
   const pendingEnable = useRef(false);
 
+  const [bioAvailable, setBioAvailable] = useState(false);
+
   useEffect(() => {
     hasStoredPIN().then(setPinStored);
+    void (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean> };
+        const hasHw = await LA.hasHardwareAsync();
+        setBioAvailable(hasHw);
+      } catch {
+        setBioAvailable(false);
+      }
+    })();
   }, []);
 
   function shake() {
@@ -244,13 +256,15 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
 
           {appLockEnabled && (
             <>
-              <Toggle
-                t={t}
-                label={i18nT('lockConfig.biometrics', 'Face ID / Fingerprint')}
-                sub={i18nT('lockConfig.biometricsSub', 'Use biometrics as primary method')}
-                value={biometricsEnabled}
-                onChange={(v) => void setPref('biometricsEnabled', v)}
-              />
+              {bioAvailable && (
+                <Toggle
+                  t={t}
+                  label={i18nT('lockConfig.biometrics', 'Face ID / Fingerprint')}
+                  sub={i18nT('lockConfig.biometricsSub', 'Use biometrics as primary method')}
+                  value={biometricsEnabled}
+                  onChange={(v) => void setPref('biometricsEnabled', v)}
+                />
+              )}
 
               {/* Timeout picker row */}
               <Pressable
