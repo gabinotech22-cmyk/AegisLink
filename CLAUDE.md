@@ -121,6 +121,44 @@ completo están en `docs/PROJECT-STRUCTURE.md`; lo obligatorio es esto:
 6. **Una feature no se reparte entre carpetas en ramas distintas** (refuerza la regla de ramas):
    mobile+server+infra de un mismo cambio van juntos en una sola rama.
 
+## REGLA DE ORO — Herramientas destructivas y operador-local (NO NEGOCIABLE)
+
+Nace de PR #234 (script de borrado de canal huérfano, cerrado sin mergear) y de
+su gemelo que sí llevaba tiempo colado en `main` (`scripts/cleanup-test-channels.sh`,
+desde PR #202) — ambos hacían cirugía directa (SSH + `DELETE`/`DROP` crudo) sobre
+la base de datos de producción. Un script así en el repo es superficie de ataque
+y tienta a "borrar por nombre" sin auditoría ni prueba de posesión de clave. No
+pertenece a git, ni siquiera "de paso".
+
+1. **Cirugía directa de prod es SIEMPRE operador-local.** Si un script se conecta
+   por SSH a producción y ejecuta `DELETE`/`DROP`/UPDATE crudo contra la DB, o
+   borra/edita datos de un usuario sin pasar por la autenticación criptográfica
+   del relay (regla de oro de seguridad #3) — vive solo en la máquina del
+   operador (p. ej. `C:\Users\<usuario>\`, un `.cmd`/`.sh` de escritorio). Nunca
+   en `scripts/`, nunca en `_scratch/` (que sigue siendo parte del working tree
+   y se puede `git add -A` por error). Nunca se commitea.
+2. **Cómo distinguir destructivo de operativo legítimo.** ¿El script hace
+   `DELETE`/`DROP` crudo, se salta la autenticación del relay, o su único
+   propósito es limpiar UN incidente puntual (canal duplicado, dato huérfano
+   de un bug concreto)? → destructivo y operador-local (regla #1). ¿Es
+   idempotente, versionado, y pasa por las mismas rutas autenticadas que usa
+   la app (endpoints oficiales, CLI del relay)? → puede vivir en `scripts/`
+   o `infra/`.
+3. **Cero paths de máquina personal en el repo.** Ningún script commiteado
+   referencia `C:\Users\<nombre>\...` ni `/home/<usuario>/...` de una máquina
+   de desarrollador concreta. Si solo funciona con el path de una persona
+   específica, o es operador-local por la regla #1, o está roto y se arregla
+   antes de commitear (`$PSScriptRoot`, rutas relativas, variables de entorno).
+4. **Artefactos de build/test nunca se commitean.** Coverage reports
+   (`coverage/`, `lcov-report/`, `clover.xml`), `dist/`, y cualquier output
+   regenerable por `npm test`/`npm run build` van al `.gitignore`. Si aparecen
+   trackeados en `git ls-files`, es una fuga: se destrackean (`git rm --cached`)
+   y se añade el patrón al `.gitignore`.
+5. **Ante la duda, no se commitea.** Si un archivo nuevo es un script que toca
+   producción, contiene un path de una máquina personal, o es un output de
+   build/test — la respuesta por defecto es que NO va en el repo. Se pregunta
+   antes de `git add`, no después.
+
 ## REGLA DE ORO — La doc no miente: sincronía doc↔código (NO NEGOCIABLE)
 
 Existe porque YA pasó: `SEALED-SENDER-ARCHITECTURE.md` decía "Fase 4 🟡 EN CURSO /

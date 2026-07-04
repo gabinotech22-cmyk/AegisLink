@@ -2,6 +2,10 @@ node_modules
 dist
 dev-dist
 *.log
+
+# Test/build artifacts — always regenerable, never commit
+coverage/
+.nyc_output/
 # Ignore all .env files with real secrets — NEVER commit these
 .env
 .env.local
