@@ -29,7 +29,7 @@ const TIMEOUT_OPTIONS = [
 function PinDots({ count, t }: { count: number; t: Theme }) {
   return (
     <View style={{ flexDirection: 'row', gap: 16, justifyContent: 'center', marginVertical: 28 }}>
-      {[0, 1, 2, 3].map((i) => (
+      {[0, 1, 2, 3, 4, 5].map((i) => (
         <View
           key={i}
           style={{

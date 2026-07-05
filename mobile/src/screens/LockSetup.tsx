@@ -25,7 +25,7 @@ interface Props {
 function PinDots({ count, error, t }: { count: number; error: boolean; t: Theme }) {
   return (
     <View style={{ flexDirection: 'row', gap: 18, justifyContent: 'center', marginVertical: 28 }}>
-      {[0, 1, 2, 3].map((i) => (
+      {[0, 1, 2, 3, 4, 5].map((i) => (
         <View
           key={i}
           style={{
