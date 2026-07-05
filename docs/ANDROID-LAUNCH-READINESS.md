@@ -86,7 +86,56 @@ Console y honestidad de claims.
       crashes **respetando cero-metadatos** (opt-in o ninguno; nunca telemetría silenciosa).
 - [ ] **Monitoreo/alertas del relay** + runbook de incidentes (hoy = 1 mantenedor, single-region
       Hetzner Helsinki → riesgo de disponibilidad). Backup/restore probado.
+      Nota cero-metadatos: el monitoreo es **server-side del relay** (health check, error rate,
+      disco, uptime) — nunca telemetría de cliente ni métricas ligadas a usuarios.
 - [ ] Plan de respuesta a vulnerabilidades (ya hay `SECURITY.md`; falta capacidad operativa).
+
+---
+
+## 🔙 Plan de rollback (documentado ANTES del soft-launch)
+
+En una app de tienda no se puede "revertir" un APK ya instalado; el rollback tiene tres
+palancas, cada una con su tiempo:
+
+### Condiciones de disparo
+- Crash rate en Play Console vitals > 1% de sesiones, o cualquier crash en el flujo
+  cripto/onboarding (pérdida de identidad = irrecuperable para el usuario).
+- Relay caído o degradado > 15 min sin causa conocida.
+- Bug de integridad de datos (mensajes que no descifran, sesiones ratchet corruptas).
+- Vulnerabilidad de seguridad reportada que afecte a la versión publicada.
+
+### Palancas y tiempos
+1. **Halt del rollout en Play Console** (Closed/Open Testing → "Pause rollout"): detiene
+   nuevas instalaciones/updates. **< 5 min.** No arregla a quien ya instaló.
+2. **Rollback del relay**: redeploy de la imagen/commit anterior en Hetzner.
+   **< 15 min** (requiere runbook de Fase 2; hasta entonces, procedimiento manual del
+   mantenedor).
+3. **Release de emergencia**: nuevo AAB con el fix o con la feature desactivada, subido al
+   mismo track. **Horas** (build EAS + review de Play). Es la palanca lenta — por eso las
+   dos primeras existen.
+
+### Consideraciones de datos
+- Los datos del usuario viven **solo en su dispositivo** (SQLCipher); un rollback de relay
+  no puede corromperlos, pero un bug de cliente sí. Prioridad absoluta: nunca publicar una
+  migración de esquema local sin camino de vuelta o sin gate de versión.
+- El relay no guarda mensajes descifrables → el rollback del server no tiene
+  consideraciones de privacidad adicionales.
+
+### Comunicación
+- Incidente + acción tomada se publican en el canal de testers (Closed Testing) y, si
+  aplica seguridad, se sigue `SECURITY.md`.
+
+---
+
+## ✅ Verificación post-launch (primera hora tras publicar en Closed Testing)
+
+- [ ] Health check del relay responde (endpoint + socket handshake).
+- [ ] Instalar desde Play (no sideload) en 1 dispositivo real: onboarding → chat 1:1 →
+      push wake-up con app cerrada.
+- [ ] Play Console vitals: 0 crashes/ANRs nuevos.
+- [ ] Logs del relay fluyen y sin errores nuevos (sin datos de usuario, como siempre).
+- [ ] Verificar que "Pause rollout" está accesible y entendido (dry-run mental del rollback).
+- [ ] Ventana de observación: revisar vitals + relay a las 24h antes de ampliar testers.
 
 ---
 
@@ -117,6 +166,11 @@ Console y honestidad de claims.
   tiendas suban el target-SDK mínimo, queramos features nuevas, o 54 se acerque a EOL.
 - **@vitejs/plugin-react 6 / vite 8**: imposibles hasta que `electron-vite` soporte vite 8
   (upstream). Ya shipeamos vite 7 como máximo (#149).
+- **Feature flags remotos / kill switch**: NO. Un flag controlado por el server es
+  superficie de ataque (el relay podría alterar el comportamiento del cliente) y contradice
+  el modelo de confianza cero-metadatos. El "kill switch" de AegisLink es el halt del
+  rollout en Play + release de emergencia (ver Plan de rollback). Flags locales de build
+  (compile-time) sí son aceptables.
 
 ---
 
