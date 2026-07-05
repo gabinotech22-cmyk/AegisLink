@@ -156,9 +156,9 @@ describe('remoteDelete', () => {
 
     await useMessages.getState().remoteDelete('chat-alice', 'msg-1', 'chat-alice');
 
-    // Must go through the scoped path (id + chatId), NOT the unscoped
-    // setMessageDeleted used by the local "delete for me" flow.
-    expect(dbLocal.setRemoteMessageDeleted).toHaveBeenCalledWith('msg-1', 'chat-alice');
+    // Must go through the authorization-scoped path (id + chatId + senderId),
+    // NOT the unscoped setMessageDeleted used by the local "delete for me" flow.
+    expect(dbLocal.setRemoteMessageDeleted).toHaveBeenCalledWith('msg-1', 'chat-alice', 'chat-alice');
     expect(dbLocal.setMessageDeleted).not.toHaveBeenCalled();
   });
 

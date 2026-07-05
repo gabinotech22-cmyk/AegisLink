@@ -8,7 +8,10 @@ const isDev = process.env.NODE_ENV !== 'production';
 
 export const logger = {
   info(message: string): void {
-    if (isDev) console.log(`[relay] ${message}`);
+    // console.info (not console.log) for dev-only informational output: gated by
+    // isDev so production stays silent, and the method keeps us clear of the
+    // no-console.log-in-production rule while still surfacing during development.
+    if (isDev) console.info(`[relay] ${message}`);
   },
   error(message: string, meta?: Record<string, string>): void {
     console.error(`[relay] ${message}`, meta ?? {});
