@@ -183,8 +183,12 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
       });
 
     } catch (err) {
+      // Synchronous failure (e.g. io() throwing) after the ephemeral keypair was
+      // assigned to ephemeralKeyRef but before any socket handler could wipe it:
+      // zeroize here too so the secret never lingers until unmount.
       setError('Connection error: ' + (err as Error).message);
       setLoading(false);
+      wipeEphemeralKey();
     }
   }
 
