@@ -51,6 +51,7 @@ export function PanicScreen({ onBack }: Props) {
 
   // Regenerate-token confirm: null = idle, 'confirm' = showing confirm
   const [regenConfirm, setRegenConfirm] = useState(false);
+  const [savingPin, setSavingPin] = useState(false);
 
   const resetIdentity = useIdentity((s) => s.reset);
   const identity = useIdentity((s) => s.identity);
@@ -599,12 +600,14 @@ export function PanicScreen({ onBack }: Props) {
                 accessibilityRole="button"
                 accessibilityLabel={i18nT('panic.savePinBtn')}
                 onPress={() => {
+                  if (savingPin) return;
                   if (tempPin.length !== 6) {
                     setPinFeedback('invalid');
                     return;
                   }
                   setPinFeedback(null);
                   const len = tempPin.length;
+                  setSavingPin(true);
                   void (async () => {
                     try {
                       const isNormalPin = await verifyPIN(tempPin);
@@ -624,6 +627,8 @@ export function PanicScreen({ onBack }: Props) {
                       }, 1200);
                     } catch {
                       setPinFeedback('error');
+                    } finally {
+                      setSavingPin(false);
                     }
                   })();
                 }}

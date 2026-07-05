@@ -125,9 +125,10 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
     void (async () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean> };
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
         const hasHw = await LA.hasHardwareAsync();
-        setBioAvailable(hasHw);
+        const enrolled = await LA.isEnrolledAsync();
+        setBioAvailable(hasHw && enrolled);
       } catch {
         setBioAvailable(false);
       }
@@ -182,6 +183,25 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
         setPinStep('enter');
         setFirstPin('');
       } else {
+        const { ss } = require('../utils/secureStore');
+        const raw = await ss.get('aegis.panic.v1');
+        if (raw) {
+          try {
+            const panicState = JSON.parse(raw);
+            if (panicState.duressPin && panicState.pinHash) {
+              const { verifyPinWithSalt, DURESS_PIN_SALT } = require('../lock/pin');
+              const isDuress = await verifyPinWithSalt(pin, DURESS_PIN_SALT, panicState.pinHash);
+              if (isDuress) {
+                setPinError(i18nT('lockConfig.sameAsDecoy', 'PIN cannot be the same as decoy PIN.'));
+                shake();
+                setPinEntry('');
+                setPinStep('enter');
+                setFirstPin('');
+                return;
+              }
+            }
+          } catch {}
+        }
         await setPIN(pin);
         setPinStored(true);
         if (pendingEnable.current) {

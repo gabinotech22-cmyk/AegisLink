@@ -76,6 +76,13 @@ jest.mock('../../lock/pin', () => ({
   setPIN: (...a: unknown[]) => mockSetPIN(...a),
   clearPIN: (...a: unknown[]) => mockClearPIN(...a),
   hasStoredPIN: () => mockHasStoredPIN(),
+  verifyPinWithSalt: jest.fn().mockResolvedValue(false),
+  DURESS_PIN_SALT: 'test-salt',
+}));
+
+const mockSsGet = jest.fn().mockResolvedValue(null);
+jest.mock('../../utils/secureStore', () => ({
+  ss: { get: (...a: unknown[]) => mockSsGet(...a), set: jest.fn(), delete: jest.fn() },
 }));
 
 // ── preferences store ───────────────────────────────────────────────────────
@@ -144,6 +151,30 @@ describe('LockConfigScreen', () => {
 
       expect(mockSetPIN).toHaveBeenCalledWith('123456');
       expect(mockSetPref).toHaveBeenCalledWith('appLockEnabled', true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('rejects setting a PIN that matches the decoy PIN', async () => {
+    jest.useFakeTimers();
+    try {
+      mockSsGet.mockResolvedValue(JSON.stringify({ duressPin: true, pinHash: 'fake-hash' }));
+      const { verifyPinWithSalt } = require('../../lock/pin');
+      (verifyPinWithSalt as jest.Mock).mockResolvedValue(true); // simulate match
+
+      const { getByText } = render(<LockConfigScreen {...makeProps()} />);
+      await act(async () => {});
+      fireEvent.press(getByText('App lock'));
+
+      enterPin(getByText, '654321');
+      await act(async () => { jest.advanceTimersByTime(200); }); // → confirm step
+      enterPin(getByText, '654321');
+      await act(async () => { jest.advanceTimersByTime(200); }); // → processPin
+      await act(async () => {}); // flush promises
+
+      expect(mockSetPIN).not.toHaveBeenCalled();
+      expect(getByText('PIN cannot be the same as decoy PIN.')).toBeTruthy();
     } finally {
       jest.useRealTimers();
     }

@@ -55,9 +55,10 @@ export function LockSettingsScreen({ onBack }: Props) {
     void (async () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean> };
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
         const hasHw = await LA.hasHardwareAsync();
-        setBioAvailable(hasHw);
+        const enrolled = await LA.isEnrolledAsync();
+        setBioAvailable(hasHw && enrolled);
       } catch {
         setBioAvailable(false);
       }

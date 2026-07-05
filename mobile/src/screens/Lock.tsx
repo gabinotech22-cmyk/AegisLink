@@ -275,6 +275,9 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
               useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
             } catch (err) {
               if (__DEV__) logger.warn('[lock-panic] failed to load decoy state:', err);
+              usePreferences.setState({ duressActive: false });
+              setPinError(i18nT('lock.pinError'));
+              return;
             }
             setPinCode('');
             onUnlock();
@@ -293,6 +296,10 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       if (wasDecoy) {
         // Reload real identity and data now that decoy mode is off
         await useIdentity.getState().hydrate();
+        const { useContacts } = require('../store/contacts');
+        const { useMessages } = require('../store/messages');
+        await useContacts.getState().hydrate();
+        useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
       }
       setPinCode('');
       onUnlock();
