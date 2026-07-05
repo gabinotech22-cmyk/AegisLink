@@ -16,6 +16,10 @@ import {
   BACKUP_MIN_PASSPHRASE_LEN,
   type PassphraseStrength,
 } from '../crypto/backup';
+import { WORDLIST_256 } from '../crypto/wordlist';
+import nacl from 'tweetnacl';
+import { encodeBase64 } from 'tweetnacl-util';
+import { identityFromStored } from '../store/identity';
 
 interface Props {
   onBack: () => void;
@@ -285,9 +289,51 @@ export function BackupScreen({ onBack, onRestored }: Props) {
             />
             <div style={{ display: 'flex', gap: 8 }}>
               <button
-                onClick={() => {
-                  window.alert('Mnemonic restore not implemented in desktop stub.');
-                  setRestoring(false);
+                onClick={async () => {
+                  const words = mnemonicInput.trim().toLowerCase().split(/\s+/);
+                  if (words.length !== 32) {
+                    window.alert('Frase de recuperación inválida. Debe contener exactamente 32 palabras.');
+                    return;
+                  }
+                  try {
+                    const bytes = words.map((w) => {
+                      const idx = WORDLIST_256.indexOf(w);
+                      if (idx === -1) throw new Error(`Palabra no encontrada en el diccionario: ${w}`);
+                      return idx;
+                    });
+                    const secretKeyBytes = new Uint8Array(bytes);
+                    const keypair = nacl.box.keyPair.fromSecretKey(secretKeyBytes);
+                    const signKeys = nacl.sign.keyPair.fromSeed(secretKeyBytes);
+
+                    const restored = identityFromStored({
+                      publicKeyB64: encodeBase64(keypair.publicKey),
+                      secretKeyB64: encodeBase64(keypair.secretKey),
+                      signingPublicKeyB64: encodeBase64(signKeys.publicKey),
+                      signingSecretKeyB64: encodeBase64(signKeys.secretKey),
+                      createdAt: Date.now(),
+                    });
+
+                    await useIdentity.getState().saveIdentity({
+                      aegisId: restored.aegisId,
+                      publicKeyB64: restored.publicKeyB64,
+                      secretKeyB64: restored.secretKeyB64,
+                      signingPublicKeyB64: restored.signingPublicKeyB64,
+                      signingSecretKeyB64: restored.signingSecretKeyB64,
+                      createdAt: restored.createdAt,
+                    });
+
+                    await useIdentity.getState().hydrate();
+                    setRestoring(false);
+                    setMnemonicInput('');
+                    if (onRestored) {
+                      window.alert(`Identidad recuperada exitosamente:\n${restored.aegisId}`);
+                      onRestored();
+                    } else {
+                      window.alert(`Identidad recuperada exitosamente:\n${restored.aegisId}`);
+                    }
+                  } catch (e) {
+                    window.alert(`Error al recuperar identidad: ${(e as Error).message}`);
+                  }
                 }}
                 style={{ flex: 1, padding: '10px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', color: t.accentInk, fontSize: 13 }}
               >

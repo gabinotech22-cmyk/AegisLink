@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 import { AEGIS_ID_RE } from './schemas.js';
 import { RATE_LIMIT_MAP_MAX } from './rateLimits.js';
+import { redis } from './redisClient.js';
 import { liveSockets } from './liveSockets.js';
 
 const CallTo = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().min(1).max(128) });
@@ -70,7 +71,13 @@ const GroupCallChannel = z.object({
 // Rate-limit buckets for call:offer — keyed by aegisId, max 5 per minute
 const callOfferRateLimit = new Map<string, { count: number; reset: number }>();
 
-function checkCallOfferRateLimit(aegisId: string): boolean {
+async function checkCallOfferRateLimit(aegisId: string): Promise<boolean> {
+  if (redis) {
+    const key = `ratelimit:callOffer:${aegisId}`;
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, 60);
+    return count <= 5;
+  }
   const now = Date.now();
   const entry = callOfferRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -91,7 +98,13 @@ function checkCallOfferRateLimit(aegisId: string): boolean {
 // headroom than the one-shot invite: 20 per minute.
 const groupCallChannelRateLimit = new Map<string, { count: number; reset: number }>();
 
-function checkGroupCallChannelRateLimit(aegisId: string): boolean {
+async function checkGroupCallChannelRateLimit(aegisId: string): Promise<boolean> {
+  if (redis) {
+    const key = `ratelimit:groupCallChannel:${aegisId}`;
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, 60);
+    return count <= 20;
+  }
   const now = Date.now();
   const entry = groupCallChannelRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -212,10 +225,10 @@ export function attachCallSignaling(socket: Socket, me: string, sockets: Map<str
   // invite and recovered only by the callee. The offline queue re-delivers on
   // the matching v2 events. Legacy v1 handlers (call:invite/:answer/:ice/:hangup,
   // which stamped `from`) were removed in Fase C — no client emits them.
-  socket.on('call:invite:v2', (raw) => {
+  socket.on('call:invite:v2', async (raw) => {
     const parsed = CallInviteV2.safeParse(raw);
     if (!parsed.success) return;
-    if (!checkCallOfferRateLimit(me)) {
+    if (!(await checkCallOfferRateLimit(me))) {
       socket.emit('error_msg', { code: 'rate_limited', for: 'call:invite' });
       return;
     }
@@ -319,10 +332,10 @@ export function attachGroupCallSignaling(socket: Socket, me: string, sockets: Ma
   // Voice-channel heartbeat: per-recipient sealed roster, no `from`. ONLINE
   // members get the sealed banner; OFFLINE members get a deduped zero-metadata
   // wake-up push so a backgrounded/killed app reconnects and re-receives it.
-  socket.on('group_call:channel', (raw) => {
+  socket.on('group_call:channel', async (raw) => {
     const parsed = GroupCallChannel.safeParse(raw);
     if (!parsed.success) return;
-    if (!checkGroupCallChannelRateLimit(me)) return;
+    if (!(await checkGroupCallChannelRateLimit(me))) return;
     const { callId, groupId, media, items } = parsed.data;
     for (const it of items) {
       if (it.to === me) continue;

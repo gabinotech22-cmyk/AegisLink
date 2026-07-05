@@ -51,14 +51,6 @@ export interface RatchetState {
     // PQXDH (v2) ONLY: base64 of the 1088-byte ML-KEM-768 ciphertext Alice
     // encapsulated to Bob's PQSPK. Bob decapsulates it (with his PQSPK secret)
     // to recover the PQ shared secret and derive the v2 root key. Absent ⇒ v1.
-    //
-    // INTEGRATION TODO (coordinated with backend-lead — NOT in this deliverable):
-    // the transport layer (socket/client.ts) must (a) copy
-    // performX3DH().pqCiphertextB64 into this field on the initiator side and
-    // include it in SealedInner.x3dh, and (b) on the responder side feed it to
-    // performX3DHReceiver({ cipherText, pqSpkSecret }) after the
-    // shouldUsePqReceiver() anti-downgrade gate. This rides INSIDE the sealed
-    // message, so the relay needs no change.
     pqCtB64?: string;
   };
 
@@ -414,7 +406,7 @@ function dhRatchet(
  * committed if the message authenticates. Copies every Uint8Array and the
  * skipped-key Map so mutations on the clone never touch the live state.
  */
-function cloneState(state: RatchetState): RatchetState {
+export function cloneState(state: RatchetState): RatchetState {
   const skipped = new Map<string, Uint8Array>();
   for (const [k, v] of state.MKSKIPPED) skipped.set(k, new Uint8Array(v));
   return {

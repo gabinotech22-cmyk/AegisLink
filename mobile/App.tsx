@@ -17,6 +17,7 @@ import { I } from './src/components/icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { OnboardingScreen } from './src/screens/Onboarding';
 import { HomeScreen } from './src/screens/Home';
 import { GroupsScreen } from './src/screens/Groups';
@@ -1294,7 +1295,6 @@ function Shell() {
             onKeys={() => push({ name: 'keys' })}
             onDevices={() => push({ name: 'devices' })}
             onAppIcon={() => push({ name: 'appIcon' })}
-            onNotifications={() => push({ name: 'notifs' })}
             onExport={() => push({ name: 'export' })}
             onProfileSwitcher={() => push({ name: 'profileSwitcher' })}
           />
@@ -1764,14 +1764,16 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <StatusBar style="auto" />
-        <Shell />
-        {/* FloatingCallBar overlays any screen for minimized 1:1 calls */}
-        <FloatingCallBarRoot />
-        {/* FloatingGroupCallBar overlays any screen for minimized group calls */}
-        <FloatingGroupCallBarRoot />
-        {/* AlertHost mounts once inside ThemeProvider so themedAlert() has theme access */}
-        <AlertHost />
+        <ErrorBoundary>
+          <StatusBar style="auto" />
+          <Shell />
+          {/* FloatingCallBar overlays any screen for minimized 1:1 calls */}
+          <FloatingCallBarRoot />
+          {/* FloatingGroupCallBar overlays any screen for minimized group calls */}
+          <FloatingGroupCallBarRoot />
+          {/* AlertHost mounts once inside ThemeProvider so themedAlert() has theme access */}
+          <AlertHost />
+        </ErrorBoundary>
       </ThemeProvider>
     </SafeAreaProvider>
   );

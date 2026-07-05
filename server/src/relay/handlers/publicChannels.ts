@@ -12,6 +12,7 @@ import {
   publicChannelJoinRepo,
 } from '../../db/client.js';
 import { evictExpired, checkPubchannelApplyRateLimit } from '../rateLimits.js';
+import { redis } from '../redisClient.js';
 import {
   verifyChannelDeliveryToken,
   verifyTombstone,
@@ -29,7 +30,13 @@ const PUBCHANNEL_FLAG = () => (process.env['PUBLIC_CHANNELS'] ?? 'off').toLowerC
 // Rate limit for pubchannel:msg — keyed by delivery token hash, 120/min
 const pubchannelMsgRateLimit = new Map<string, { count: number; reset: number }>();
 
-function checkPubchannelMsgRateLimit(tokenHash: string): boolean {
+async function checkPubchannelMsgRateLimit(tokenHash: string): Promise<boolean> {
+  if (redis) {
+    const key = `ratelimit:pubchannelMsg:${tokenHash}`;
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, 60);
+    return count <= 120;
+  }
   const now = Date.now();
   const entry = pubchannelMsgRateLimit.get(tokenHash) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -42,7 +49,13 @@ function checkPubchannelMsgRateLimit(tokenHash: string): boolean {
 // Throttle for pubchannel:check_approval — 1 poll / 30s per (channelId:joinEpk)
 const approvalPollRateLimit = new Map<string, { count: number; reset: number }>();
 
-function checkApprovalPollRateLimit(key: string): boolean {
+async function checkApprovalPollRateLimit(key: string): Promise<boolean> {
+  if (redis) {
+    const redisKey = `ratelimit:approvalPoll:${key}`;
+    const count = await redis.incr(redisKey);
+    if (count === 1) await redis.expire(redisKey, 30);
+    return count <= 1;
+  }
   const now = Date.now();
   const entry = approvalPollRateLimit.get(key) ?? { count: 0, reset: now + 30_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 30_000; }
@@ -55,7 +68,13 @@ function checkApprovalPollRateLimit(key: string): boolean {
 // Rate limit for pubchannel:join — keyed by token hash, 10/min
 const pubchannelJoinRateLimit = new Map<string, { count: number; reset: number }>();
 
-function checkPubchannelJoinRateLimit(tokenHash: string): boolean {
+async function checkPubchannelJoinRateLimit(tokenHash: string): Promise<boolean> {
+  if (redis) {
+    const key = `ratelimit:pubchannelJoin:${tokenHash}`;
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, 60);
+    return count <= 10;
+  }
   const now = Date.now();
   const entry = pubchannelJoinRateLimit.get(tokenHash) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -150,7 +169,7 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
 
       // Rate limit by token hash (anonymous — not by aegisId)
       const tokenHash = channel.delivery_token_hash_b64;
-      if (!checkPubchannelJoinRateLimit(tokenHash)) { ack?.({ ok: false, error: 'rate_limited' }); return; }
+      if (!(await checkPubchannelJoinRateLimit(tokenHash))) { ack?.({ ok: false, error: 'rate_limited' }); return; }
 
       // Constant-time delivery token verification (golden rule #5)
       if (!verifyChannelDeliveryToken(deliveryToken, channel.delivery_token_hash_b64)) {
@@ -166,7 +185,7 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
   });
 
   // ── pubchannel:apply ────────────────────────────────────────────────────
-  socket.on('pubchannel:apply', (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+  socket.on('pubchannel:apply', async (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
     if (!PUBCHANNEL_FLAG()) { ack?.({ ok: false, error: 'feature_disabled' }); return; }
     const parsed = PubChannelApplySchema.safeParse(raw);
     if (!parsed.success) { ack?.({ ok: false, error: 'invalid_payload' }); return; }
@@ -175,7 +194,7 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
     // apply is anonymous by design (no identity to key on) — throttle per
     // TARGET channel so the pending-join queue can't be flooded to its cap
     // (MAX_PENDING_JOINS_PER_CHANNEL) in a tight loop, locking out applicants.
-    if (!checkPubchannelApplyRateLimit(channelId)) {
+    if (!(await checkPubchannelApplyRateLimit(channelId))) {
       ack?.({ ok: false, error: 'rate_limited' });
       return;
     }
@@ -216,7 +235,7 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
 
       // Rate limit by token hash (preserves sender anonymity)
       const tokenHash = channel.delivery_token_hash_b64;
-      if (!checkPubchannelMsgRateLimit(tokenHash)) { ack?.({ ok: false, error: 'rate_limited' }); return; }
+      if (!(await checkPubchannelMsgRateLimit(tokenHash))) { ack?.({ ok: false, error: 'rate_limited' }); return; }
 
       // Constant-time delivery token verification (golden rule #5)
       if (!verifyChannelDeliveryToken(deliveryToken, channel.delivery_token_hash_b64)) {
@@ -409,7 +428,7 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
 
     void (async () => {
       // Throttle: 1 poll / 30s per joinEpk (docs §10.2).
-      if (!checkApprovalPollRateLimit(`${channelId}:${joinEpk}`)) { ack?.({ ok: false, error: 'rate_limited' }); return; }
+      if (!(await checkApprovalPollRateLimit(`${channelId}:${joinEpk}`))) { ack?.({ ok: false, error: 'rate_limited' }); return; }
 
       const row = await publicChannelJoinRepo.get(joinEpk, channelId);
       if (!row) { ack?.({ ok: true, status: 'not_found' }); return; }

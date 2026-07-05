@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { logger } from '../utils/logger';
-;
 import { ss } from '../utils/secureStore';
 import { themedAlert } from '../components/AlertHost';
+import { useTranslation } from 'react-i18next';
 
 const PANIC_KEY = 'aegis.panic.v1';
 const SHAKE_THRESHOLD = 2.8; // g-force magnitude
@@ -57,6 +57,7 @@ export interface UsePanicGestureReturn {
  * ref stable and avoid unnecessary re-registrations.
  */
 export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
+  const { t: i18nT } = useTranslation();
   const tapCountRef = useRef(0);
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastShakeRef = useRef(0);
@@ -100,12 +101,12 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
               ) {
                 lastShakeRef.current = now;
                 themedAlert(
-                  '¿Borrar todo?',
-                  'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.',
+                  i18nT('panic.confirmTitle', '¿Borrar todo?'),
+                  i18nT('panic.confirmMsg', 'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.'),
                   [
-                    { text: 'Cancelar', style: 'cancel' },
+                    { text: i18nT('common.cancel', 'Cancelar'), style: 'cancel' },
                     {
-                      text: 'Borrar',
+                      text: i18nT('common.delete', 'Borrar'),
                       style: 'destructive',
                       onPress: () => onTriggerRef.current(),
                     },
@@ -157,12 +158,12 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
         tapTimerRef.current = null;
       }
       themedAlert(
-        '¿Borrar todo?',
-        'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.',
+        i18nT('panic.confirmTitle', '¿Borrar todo?'),
+        i18nT('panic.confirmMsg', 'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.'),
         [
-          { text: 'Cancelar', style: 'cancel' },
+          { text: i18nT('common.cancel', 'Cancelar'), style: 'cancel' },
           {
-            text: 'Borrar',
+            text: i18nT('common.delete', 'Borrar'),
             style: 'destructive',
             onPress: () => onTriggerRef.current(),
           },

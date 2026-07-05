@@ -27,7 +27,7 @@ jest.mock('../../db/local', () => ({
   getAllChatEphemeralTimers: jest.fn().mockResolvedValue({}),
   setMessageStarred: jest.fn().mockResolvedValue(undefined),
   setMessageDeleted: jest.fn().mockResolvedValue(undefined),
-  setRemoteMessageDeleted: jest.fn().mockResolvedValue(true),
+  setRemoteMessageDeleted: jest.fn().mockImplementation((id: string, chatId: string, senderId: string) => Promise.resolve(true)),
   setMessageReactions: jest.fn().mockResolvedValue(undefined),
   updateMessageDelivery: jest.fn().mockResolvedValue(undefined),
   setMessagePinned: jest.fn().mockResolvedValue(undefined),
@@ -142,7 +142,7 @@ describe('remoteDelete', () => {
     const msg = makeMsg({ id: 'msg-1', body: 'remote content', mediaUri: 'file://r.jpg' });
     useMessages.setState({ byChat: { 'chat-alice': [msg] } });
 
-    await useMessages.getState().remoteDelete('chat-alice', 'msg-1');
+    await useMessages.getState().remoteDelete('chat-alice', 'msg-1', 'chat-alice');
 
     const updated = useMessages.getState().byChat['chat-alice'][0];
     expect(updated.deleted).toBe(true);
@@ -154,7 +154,7 @@ describe('remoteDelete', () => {
     const msg = makeMsg({ id: 'msg-1' });
     useMessages.setState({ byChat: { 'chat-alice': [msg] } });
 
-    await useMessages.getState().remoteDelete('chat-alice', 'msg-1');
+    await useMessages.getState().remoteDelete('chat-alice', 'msg-1', 'chat-alice');
 
     // Must go through the scoped path (id + chatId), NOT the unscoped
     // setMessageDeleted used by the local "delete for me" flow.
@@ -167,7 +167,7 @@ describe('remoteDelete', () => {
     const msg2 = makeMsg({ id: 'msg-2', body: 'two' });
     useMessages.setState({ byChat: { 'chat-alice': [msg1, msg2] } });
 
-    await useMessages.getState().remoteDelete('chat-alice', 'msg-1');
+    await useMessages.getState().remoteDelete('chat-alice', 'msg-1', 'chat-alice');
 
     const list = useMessages.getState().byChat['chat-alice'];
     expect(list[1].body).toBe('two');
@@ -183,7 +183,7 @@ describe('remoteDelete', () => {
     const victim = makeMsg({ id: 'msg-1', body: 'my own message', direction: 'out' });
     useMessages.setState({ byChat: { 'chat-alice': [victim] } });
 
-    await useMessages.getState().remoteDelete('chat-alice', 'msg-1');
+    await useMessages.getState().remoteDelete('chat-alice', 'msg-1', 'chat-alice');
 
     const after = useMessages.getState().byChat['chat-alice'][0];
     expect(after.deleted).toBe(false);

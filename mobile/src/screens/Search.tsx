@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +10,7 @@ import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
 import { useGroups } from '../store/groups';
 import type { StoredContact, StoredMessage, StoredGroup } from '../db/local';
+import { ss } from '../utils/secureStore';
 
 interface Props {
   onBack: () => void;
@@ -27,16 +28,9 @@ type Result =
   | { type: 'group'; group: StoredGroup };
 
 const RECENTS_KEY = '__aegis_search_recents__';
-function loadRecents(): string[] {
-  try {
-    const v = (globalThis as any)[RECENTS_KEY] as string[] | undefined;
-    return Array.isArray(v) ? v : [];
-  } catch {
-    return [];
-  }
-}
-function saveRecents(items: string[]) {
-  (globalThis as any)[RECENTS_KEY] = items;
+
+async function saveRecents(items: string[]) {
+  await ss.set(RECENTS_KEY, JSON.stringify(items));
 }
 
 function formatTime(ts: number): string {
@@ -61,7 +55,18 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
   const insets = useSafeAreaInsets();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  const [recents, setRecents] = useState<string[]>(loadRecents());
+  const [recents, setRecents] = useState<string[]>([]);
+
+  useEffect(() => {
+    ss.get(RECENTS_KEY).then((v) => {
+      if (v) {
+        try {
+          const parsed = JSON.parse(v);
+          if (Array.isArray(parsed)) setRecents(parsed);
+        } catch {}
+      }
+    });
+  }, []);
 
   const { contacts } = useContacts();
   const byChat = useMessages((s) => s.byChat);

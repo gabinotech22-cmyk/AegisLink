@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
 import { VAULT_DARK, VAULT_LIGHT, type Theme } from './vault';
+import { usePreferences } from '../store/preferences';
 
 interface ThemeCtx {
   t: Theme;
@@ -15,10 +16,23 @@ const ThemeContext = createContext<ThemeCtx | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const scheme = useColorScheme();
-  // Default: dark mode always — dark is the primary design language of AegisLink.
-  // autoMode follows the system only after the user explicitly enables it.
+  const hydrated = usePreferences((s) => s.hydrated);
+  const prefDark = usePreferences((s) => s.themeDark);
+  const prefAuto = usePreferences((s) => s.themeAutoMode);
+  const setPref = usePreferences((s) => s.set);
+
+  // Seed in-memory state from the persisted preferences once hydrated.
   const [autoMode, setAutoModeState] = useState(false);
   const [dark, setDarkState] = useState(true);
+  const [seeded, setSeeded] = useState(false);
+
+  useEffect(() => {
+    if (hydrated && !seeded) {
+      setAutoModeState(prefAuto);
+      setDarkState(prefAuto ? scheme !== 'light' : prefDark);
+      setSeeded(true);
+    }
+  }, [hydrated, seeded, prefAuto, prefDark, scheme]);
 
   // When auto mode is on, follow the system
   useEffect(() => {
@@ -28,11 +42,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const setDark = (d: boolean) => {
     setAutoModeState(false);
     setDarkState(d);
+    void setPref('themeDark', d);
+    void setPref('themeAutoMode', false);
   };
 
   const setAutoMode = (auto: boolean) => {
     setAutoModeState(auto);
     if (auto) setDarkState(scheme !== 'light');
+    void setPref('themeAutoMode', auto);
   };
 
   const value = useMemo<ThemeCtx>(

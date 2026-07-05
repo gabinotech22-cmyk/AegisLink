@@ -106,13 +106,13 @@ export function attachChannels(socket: Socket, deps: ChannelsDeps): void {
   });
 
   // channel:msg — send a message to a channel
-  socket.on('channel:msg', (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+  socket.on('channel:msg', async (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
     const parsed = ChannelMsg.safeParse(raw);
     if (!parsed.success) {
       ack?.({ ok: false, error: 'invalid_payload' });
       return;
     }
-    if (!checkChannelMsgRateLimit(me)) {
+    if (!(await checkChannelMsgRateLimit(me))) {
       ack?.({ ok: false, error: 'rate_limited' });
       return;
     }
@@ -371,8 +371,8 @@ export function attachChannels(socket: Socket, deps: ChannelsDeps): void {
   // recipient additionally verifies the sealed box opens against the
   // distributor's identity key, and the signed group metadata (group_msg
   // path) governs who is recognised as admin client-side.
-  socket.on('group:rekey', (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
-    if (!checkRekeyRateLimit(me)) {
+  socket.on('group:rekey', async (raw: unknown, ack?: (res: { ok: boolean; error?: string }) => void) => {
+    if (!(await checkRekeyRateLimit(me))) {
       ack?.({ ok: false, error: 'rate_limited' });
       return;
     }
