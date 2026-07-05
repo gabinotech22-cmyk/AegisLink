@@ -48,7 +48,7 @@ export function PanicScreen({ onBack }: Props) {
   const [saving, setSaving] = useState(false);
 
   // PIN modal inline feedback: null = no msg, 'invalid' | 'saved' | 'error'
-  const [pinFeedback, setPinFeedback] = useState<null | 'invalid' | 'saved' | 'error'>(null);
+  const [pinFeedback, setPinFeedback] = useState<null | 'invalid' | 'sameAsNormal' | 'saved' | 'error'>(null);
 
   // Regenerate-token confirm: null = idle, 'confirm' = showing confirm
   const [regenConfirm, setRegenConfirm] = useState(false);
@@ -587,9 +587,11 @@ export function PanicScreen({ onBack }: Props) {
                 }}>
                   {pinFeedback === 'invalid'
                     ? i18nT('panic.invalidPinDesc')
-                    : pinFeedback === 'saved'
-                      ? i18nT('panic.pinSavedDesc')
-                      : i18nT('panic.pinSaveErrorDesc')}
+                    : pinFeedback === 'sameAsNormal'
+                      ? i18nT('panic.decoyPinSameAsNormal', 'The decoy PIN cannot be the same as the lock PIN.')
+                      : pinFeedback === 'saved'
+                        ? i18nT('panic.pinSavedDesc')
+                        : i18nT('panic.pinSaveErrorDesc')}
                 </Text>
               </View>
             )}
@@ -598,7 +600,7 @@ export function PanicScreen({ onBack }: Props) {
                 accessibilityRole="button"
                 accessibilityLabel={i18nT('panic.savePinBtn')}
                 onPress={() => {
-                  if (tempPin.length < 4 || tempPin.length > 6) {
+                  if (tempPin.length !== 6) {
                     setPinFeedback('invalid');
                     return;
                   }
@@ -608,12 +610,11 @@ export function PanicScreen({ onBack }: Props) {
                   setSaving(true);
                   void (async () => {
                     try {
-                      const sameAsNormal = await verifyPIN(tempPin);
-                      if (sameAsNormal) {
-                        setPinFeedback('invalid');
+                      const isNormalPin = await verifyPIN(tempPin);
+                      if (isNormalPin) {
+                        setPinFeedback('sameAsNormal');
                         return;
                       }
-
                       const pinHash = await hashPinWithSalt(tempPin, DURESS_PIN_SALT);
                       setPinLength(len);
                       await persist({ pinHash, pinLength: len, pinValue: undefined });

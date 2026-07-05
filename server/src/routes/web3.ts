@@ -15,6 +15,7 @@ import nacl from 'tweetnacl';
 import tweetnaclUtil from 'tweetnacl-util';
 const { decodeBase64 } = tweetnaclUtil;
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 import { web3Repo } from '../db/client.js';
 
 const router = Router();
@@ -164,7 +165,17 @@ const RevokeBody = z.object({
   signingPublicKeyB64: z.string().min(40).max(50),
 });
 
-router.post('/device/revoke', async (req, res) => {
+const revokeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
+  },
+});
+
+router.post('/device/revoke', revokeLimiter, async (req, res) => {
   const parsed = RevokeBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'invalid_body', issues: parsed.error.issues });

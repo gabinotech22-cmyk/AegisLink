@@ -100,6 +100,7 @@ router.get('/credentials', turnLimiter, async (req, res) => {
 
   const expiresAt = Math.floor(Date.now() / 1000) + TTL_SECS;
   const username = `${expiresAt}:${aegisId}`;
+  // lgtm[js/weak-cryptographic-algorithm]
   const credential = createHmac('sha1', secret).update(username).digest('base64');
 
   // TURN server URLs from environment — defaults to localhost for dev.
