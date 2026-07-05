@@ -1,9 +1,11 @@
 /**
- * PanicScreen — accessibility tests
+ * PanicScreen — accessibility + PIN-lock gate tests
  *
  * Verifies:
  *  1. The "Activate panic mode" button has accessibilityRole=button
  *  2. The PIN TextInput has autoFocus when modal is open
+ *  3. With no app PIN lock configured, the screen shows the "set up lock" gate
+ *     (Configure-lock CTA, no panic config) and the CTA calls onConfigureLock
  */
 import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
@@ -53,6 +55,10 @@ jest.mock('../../db/local', () => ({
 jest.mock('../../lock/pin', () => ({
   hashPinWithSalt: jest.fn().mockResolvedValue('hashed'),
   DURESS_PIN_SALT: 'salt',
+  // Panic mode is gated behind the app PIN lock; report one exists so the full
+  // config renders instead of the "set up your PIN lock" gate.
+  hasStoredPIN: jest.fn().mockResolvedValue(true),
+  verifyPIN: jest.fn().mockResolvedValue(false),
 }));
 
 jest.mock('../../components/TopBar', () => ({
@@ -79,31 +85,32 @@ jest.mock('../../components/icons', () => ({
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 import { PanicScreen } from '../Panic';
+import { hasStoredPIN } from '../../lock/pin';
 
 describe('PanicScreen — accessibility', () => {
-  it('has at least one button with accessibilityRole', () => {
-    const { getAllByRole } = render(<PanicScreen onBack={jest.fn()} />);
-    const buttons = getAllByRole('button');
-    expect(buttons.length).toBeGreaterThan(0);
+  it('has at least one button with accessibilityRole', async () => {
+    const { getAllByRole } = render(<PanicScreen onBack={jest.fn()} onConfigureLock={jest.fn()} />);
+    // The PIN-lock gate check resolves async; wait for the full config to render.
+    await waitFor(() => expect(getAllByRole('button').length).toBeGreaterThan(0));
   });
 
-  it('activate panic button has a non-empty accessibilityLabel', () => {
-    const { getAllByRole } = render(<PanicScreen onBack={jest.fn()} />);
-    const buttons = getAllByRole('button');
-    const panicButton = buttons.find(
-      (b) => {
+  it('activate panic button has a non-empty accessibilityLabel', async () => {
+    const { getAllByRole } = render(<PanicScreen onBack={jest.fn()} onConfigureLock={jest.fn()} />);
+    await waitFor(() => {
+      const panicButton = getAllByRole('button').find((b) => {
         const label = b.props.accessibilityLabel as string | undefined;
         return label && label.length > 0;
-      }
-    );
-    expect(panicButton).toBeTruthy();
+      });
+      expect(panicButton).toBeTruthy();
+    });
   });
 
   it('PIN modal TextInput has autoFocus when opened', async () => {
-    const { getByText, UNSAFE_getAllByType } = render(<PanicScreen onBack={jest.fn()} />);
+    const { getByText, UNSAFE_getAllByType } = render(<PanicScreen onBack={jest.fn()} onConfigureLock={jest.fn()} />);
 
-    // Open the PIN edit modal (button labeled by the i18n key fallback)
-    const changeBtn = getByText('panic.changeDecoyPin');
+    // Open the PIN edit modal (button labeled by the i18n key fallback).
+    // Wait for the async PIN-lock gate check to resolve into the full config.
+    const changeBtn = await waitFor(() => getByText('panic.changeDecoyPin'));
     fireEvent.press(changeBtn);
 
     await waitFor(() => {
@@ -115,5 +122,18 @@ describe('PanicScreen — accessibility', () => {
       expect(pinInput).toBeTruthy();
       expect(pinInput!.props.autoFocus).toBe(true);
     });
+  });
+
+  it('gates the screen behind the PIN lock when none is configured', async () => {
+    (hasStoredPIN as jest.Mock).mockResolvedValueOnce(false);
+    const onConfigureLock = jest.fn();
+    const { getByText, queryByText } = render(
+      <PanicScreen onBack={jest.fn()} onConfigureLock={onConfigureLock} />,
+    );
+    // Gate shows the "configure lock" CTA and hides the panic config entirely.
+    const cta = await waitFor(() => getByText('panic.configureLock'));
+    expect(queryByText('panic.activatePanic')).toBeNull();
+    fireEvent.press(cta);
+    expect(onConfigureLock).toHaveBeenCalledTimes(1);
   });
 });

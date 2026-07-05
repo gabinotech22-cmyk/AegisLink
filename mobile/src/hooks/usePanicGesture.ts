@@ -47,8 +47,11 @@ export interface UsePanicGestureReturn {
  * gesture listener. When the gesture fires, `onTrigger` is called.
  *
  * Supported gestures:
- *   - 'shake'  → Accelerometer magnitude > SHAKE_THRESHOLD (shows confirmation)
- *   - 'tap'    → call registerTap() 3 times within 800ms (shows confirmation)
+ *   - 'shake'  → Accelerometer magnitude > SHAKE_THRESHOLD (shows confirmation —
+ *                accident-prone, so a dialog guards it)
+ *   - 'tap'    → call registerTap() 3 times within 800ms (fires directly, no
+ *                dialog — the trigger lives only on the lock-screen logo, which
+ *                is never a normal-use control, so 3 deliberate taps are intent)
  *   - 'hold'   → call registerLongPress() after onLongPress fires (3s, no dialog)
  *   - 'volume' → legacy value; silently no-op (removed from UI in v2)
  *   - 'off'    → no listeners registered
@@ -162,7 +165,12 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
         clearTimeout(tapTimerRef.current);
         tapTimerRef.current = null;
       }
-      showPanicConfirm();
+      // Fire directly — no confirmation. The tap trigger is wired ONLY on the
+      // lock-screen logo (a non-interactive element you never tap in normal
+      // use), so three deliberate taps are unambiguous intent, exactly like a
+      // 3s hold. Only shake (accident-prone sensor) still routes through
+      // showPanicConfirm().
+      onTriggerRef.current();
     }
   }
 

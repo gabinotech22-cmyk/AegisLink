@@ -12,12 +12,14 @@ import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
-import { hashPinWithSalt, DURESS_PIN_SALT, verifyPIN } from '../lock/pin';
+import { hashPinWithSalt, DURESS_PIN_SALT, verifyPIN, hasStoredPIN } from '../lock/pin';
 
 const PANIC_KEY = 'aegis.panic.v1';
 
 interface Props {
   onBack: () => void;
+  /** Navigate to the app-lock (PIN) configuration. Required to gate panic mode. */
+  onConfigureLock?: () => void;
 }
 
 const GESTURES = [
@@ -26,10 +28,14 @@ const GESTURES = [
   { id: 'hold', l: 'HOLD 3s', s: 'Hold logo for 3 seconds', icon: 'Timer' as const },
 ] as const;
 
-export function PanicScreen({ onBack }: Props) {
+export function PanicScreen({ onBack, onConfigureLock }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
+  // Panic mode requires the app PIN lock — the decoy PIN, the lock-screen
+  // gestures and auto-wipe all live on the lock screen. null = still checking;
+  // false = gate the whole screen behind "set up your PIN lock first".
+  const [hasLockPin, setHasLockPin] = useState<boolean | null>(null);
   const [gesture, setGesture] = useState<string>('off');
   const [duressPin, setDuressPin] = useState(true);
   const [hidePin, setHidePin] = useState(false);
@@ -107,6 +113,15 @@ export function PanicScreen({ onBack }: Props) {
   }, [remoteToken, remoteTokenSig]);
 
   useEffect(() => {
+    let alive = true;
+    // Fail closed: if we cannot confirm a PIN lock exists, gate the screen.
+    hasStoredPIN()
+      .then((has) => { if (alive) setHasLockPin(has); })
+      .catch(() => { if (alive) setHasLockPin(false); });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
     ss.get(PANIC_KEY).then((raw) => {
       if (!raw) {
         void generateAndSaveToken();
@@ -131,6 +146,62 @@ export function PanicScreen({ onBack }: Props) {
   // generateAndSaveToken is stable (useCallback with stable dep)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Gate: panic mode requires the app PIN lock ─────────────────────────────
+  if (hasLockPin === null) {
+    // Still checking — empty shell avoids a flash of either state.
+    return <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }} />;
+  }
+  if (!hasLockPin) {
+    return (
+      <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
+        <TopBar
+          t={t}
+          title={i18nT('panic.title')}
+          left={
+            <Pressable onPress={onBack} hitSlop={8} style={{ padding: 4 }}>
+              <I.ChevronL size={22} color={t.textDim} />
+            </Pressable>
+          }
+        />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 16 }}>
+          <View
+            style={{
+              width: 76, height: 76, borderRadius: 38,
+              backgroundColor: t.dark ? 'rgba(255,107,107,0.12)' : 'rgba(184,68,42,0.08)',
+              borderWidth: 1, borderColor: `${t.danger}55`,
+              alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <I.Lock size={32} stroke={1.8} color={t.danger} />
+          </View>
+          <Text style={{ fontFamily: t.fontDisplay, fontSize: 20, fontWeight: '600', letterSpacing: -0.3, color: t.text, textAlign: 'center' }}>
+            {i18nT('panic.lockRequiredTitle')}
+          </Text>
+          <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19, textAlign: 'center', maxWidth: 300 }}>
+            {i18nT('panic.lockRequiredDesc')}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={i18nT('panic.configureLock')}
+            onPress={() => onConfigureLock?.()}
+            style={({ pressed }) => ({
+              marginTop: 4,
+              backgroundColor: t.accent,
+              paddingVertical: 13,
+              paddingHorizontal: 28,
+              borderRadius: t.radius,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
+              {i18nT('panic.configureLock')}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>

@@ -132,10 +132,6 @@ jest.mock('../../socket/calls', () => ({ startCall: jest.fn() }));
 // not RN's Alert.alert. Mock it so tests can drive the confirm button.
 jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
 
-jest.mock('../../hooks/usePanicGesture', () => ({
-  usePanicGesture: jest.fn(),
-}));
-
 jest.mock('../../hooks/useSoundFX', () => ({
   SoundFX: {
     msgSent: jest.fn().mockResolvedValue(undefined),
