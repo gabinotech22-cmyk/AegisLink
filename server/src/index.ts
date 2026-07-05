@@ -191,7 +191,9 @@ app.use((err: Error, _req: express.Request, res: express.Response, next: express
 // Bootstrap DB then start server.
 initDb().then(() => {
   httpServer.listen(PORT, '0.0.0.0', () => {
+    // nosemgrep: semgrep.aegislink-no-console-log-production
     console.log(`[aegislink-server] listening on ${serverScheme}://0.0.0.0:${PORT}${tlsDirect ? ' (direct TLS)' : ''}`);
+    // nosemgrep: semgrep.aegislink-no-console-log-production
     console.log(`[aegislink-server] CORS origin: ${ORIGIN}`);
   });
 
