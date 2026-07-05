@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../theme/ThemeContext';
@@ -19,15 +19,13 @@ import { themedAlert } from '../components/AlertHost';
 import { copySensitiveText } from '../utils/secureClipboard';
 import { getOrCreateDID } from '../web3/did/DIDManager';
 
-// expo-file-system v19 removed EncodingType from the main index — use legacy subpath
-const FileSystem = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
+
 
 interface Props {
   onBack: () => void;
   onDevices: () => void;
   onAppIcon: () => void;
   onKeys: () => void;
-  onNotifications?: () => void;
   onExport?: () => void;
   onProfileSwitcher?: () => void;
 }
@@ -49,7 +47,6 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
   const insets = useSafeAreaInsets();
   const { identity, displayName, avatarColor, avatarImage, profileStatus, updateProfile, updateStatus, reset } = useIdentity();
 
-  const [isSwappingSlot, setIsSwappingSlot] = useState(false);
   const [showShareLink, setShowShareLink] = useState(false);
   const [did, setDid] = useState<string | null>(null);
 
@@ -85,8 +82,7 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
   const [isEditingStatus, setIsEditingStatus] = useState(false);
   const [statusDraft, setStatusDraft] = useState('');
 
-  // Image processing state
-  const [isProcessingImage, setIsProcessingImage] = useState(false);
+
 
   // In-app avatar cropper: holds the freshly-picked image until the user frames
   // and confirms it. Null when the cropper is closed.
@@ -509,17 +505,44 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
               </View>
 
               {/* Photo picking buttons */}
-              {isProcessingImage ? (
-                <View style={{ alignItems: 'center', paddingVertical: 18, marginBottom: 20 }}>
-                  <ActivityIndicator color={t.accent} size="small" />
-                  <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, marginTop: 8, letterSpacing: 0.5 }}>
-                    {i18nT('common.processingImage')}
-                  </Text>
-                </View>
-              ) : (
-                <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'center', marginBottom: 20 }}>
+              <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'center', marginBottom: 20 }}>
+                <Pressable
+                  onPress={handlePickImage}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: t.radiusS,
+                    backgroundColor: t.surface2,
+                    borderWidth: 1,
+                    borderColor: t.borderStrong,
+                  }}
+                >
+                  <I.Plus size={14} color={t.text} />
+                  <Text style={{ fontFamily: t.font, fontSize: 12, color: t.text }}>{i18nT('common.gallery')}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleTakePhoto}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: t.radiusS,
+                    backgroundColor: t.surface2,
+                    borderWidth: 1,
+                    borderColor: t.borderStrong,
+                  }}
+                >
+                  <I.Video size={14} color={t.text} />
+                  <Text style={{ fontFamily: t.font, fontSize: 12, color: t.text }}>{i18nT('common.camera')}</Text>
+                </Pressable>
+                {editImage && (
                   <Pressable
-                    onPress={handlePickImage}
+                    onPress={() => setEditImage(null)}
                     style={{
                       flexDirection: 'row',
                       alignItems: 'center',
@@ -527,52 +550,16 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
                       paddingHorizontal: 12,
                       paddingVertical: 8,
                       borderRadius: t.radiusS,
-                      backgroundColor: t.surface2,
+                      backgroundColor: `${t.danger}15`,
                       borderWidth: 1,
-                      borderColor: t.borderStrong,
+                      borderColor: t.danger,
                     }}
                   >
-                    <I.Plus size={14} color={t.text} />
-                    <Text style={{ fontFamily: t.font, fontSize: 12, color: t.text }}>{i18nT('common.gallery')}</Text>
+                    <I.Trash size={14} color={t.danger} />
+                    <Text style={{ fontFamily: t.font, fontSize: 12, color: t.danger }}>{i18nT('common.remove')}</Text>
                   </Pressable>
-                  <Pressable
-                    onPress={handleTakePhoto}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderRadius: t.radiusS,
-                      backgroundColor: t.surface2,
-                      borderWidth: 1,
-                      borderColor: t.borderStrong,
-                    }}
-                  >
-                    <I.Video size={14} color={t.text} />
-                    <Text style={{ fontFamily: t.font, fontSize: 12, color: t.text }}>{i18nT('common.camera')}</Text>
-                  </Pressable>
-                  {editImage && (
-                    <Pressable
-                      onPress={() => setEditImage(null)}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 6,
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: t.radiusS,
-                        backgroundColor: `${t.danger}15`,
-                        borderWidth: 1,
-                        borderColor: t.danger,
-                      }}
-                    >
-                      <I.Trash size={14} color={t.danger} />
-                      <Text style={{ fontFamily: t.font, fontSize: 12, color: t.danger }}>{i18nT('common.remove')}</Text>
-                    </Pressable>
-                  )}
-                </View>
-              )}
+                )}
+              </View>
 
               <Text style={{ color: t.textDim, fontFamily: t.font, fontSize: 12, marginBottom: 6 }}>
                 {i18nT('profile.visibleName')}

@@ -40,6 +40,7 @@ export function generateTurnCredentials(
 ): { username: string; credential: string; ttl: number } {
   const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
   const username = `${expiresAt}:${sessionHandle}`;
+  // lgtm[js/weak-cryptographic-algorithm]
   const credential = createHmac('sha1', secret)
     .update(username)
     .digest('base64');

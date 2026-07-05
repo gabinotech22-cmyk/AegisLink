@@ -15,6 +15,10 @@
 import React from 'react';
 
 jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
+jest.mock('expo-local-authentication', () => ({
+  hasHardwareAsync: jest.fn().mockResolvedValue(true),
+  isEnrolledAsync: jest.fn().mockResolvedValue(true),
+}), { virtual: true });
 import { themedAlert } from '../../components/AlertHost';
 import { render, fireEvent, act, waitFor } from '@testing-library/react-native';
 
@@ -122,7 +126,7 @@ describe('LockConfigScreen', () => {
     await act(async () => {});
     fireEvent.press(getByText('App lock')); // off → on
     // PIN modal prompt appears, preference NOT yet enabled
-    expect(getByText('Enter a 4-digit PIN')).toBeTruthy();
+    expect(getByText('Enter a 6-digit PIN')).toBeTruthy();
     expect(mockSetPref).not.toHaveBeenCalledWith('appLockEnabled', true);
   });
 
@@ -133,13 +137,13 @@ describe('LockConfigScreen', () => {
       await act(async () => {});
       fireEvent.press(getByText('App lock'));
 
-      enterPin(getByText, '1234');
+      enterPin(getByText, '123456');
       await act(async () => { jest.advanceTimersByTime(200); }); // → confirm step
-      enterPin(getByText, '1234');
+      enterPin(getByText, '123456');
       await act(async () => { jest.advanceTimersByTime(200); }); // → processPin
       await act(async () => {}); // flush setPIN promise
 
-      expect(mockSetPIN).toHaveBeenCalledWith('1234');
+      expect(mockSetPIN).toHaveBeenCalledWith('123456');
       expect(mockSetPref).toHaveBeenCalledWith('appLockEnabled', true);
     } finally {
       jest.useRealTimers();

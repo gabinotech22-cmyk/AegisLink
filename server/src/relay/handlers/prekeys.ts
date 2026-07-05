@@ -13,8 +13,8 @@ export interface PrekeysDeps {
 }
 
 export function attachPrekeys(socket: Socket, { me, deviceId }: PrekeysDeps): void {
-  socket.on('prekeys:upload', (raw, ack?: (res: { ok: boolean; error?: string }) => void) => {
-    if (!checkPrekeysUploadRateLimit(me)) {
+  socket.on('prekeys:upload', async (raw, ack?: (res: { ok: boolean; error?: string }) => void) => {
+    if (!(await checkPrekeysUploadRateLimit(me))) {
       ack?.({ ok: false, error: 'rate_limited' });
       return;
     }
@@ -84,8 +84,8 @@ export function attachPrekeys(socket: Socket, { me, deviceId }: PrekeysDeps): vo
     });
   });
 
-  socket.on('prekeys:fetch', (raw, ack?: (res: { ok: boolean; bundle?: PreKeyBundle; error?: string }) => void) => {
-    if (!checkPrekeysFetchRateLimit(me)) {
+  socket.on('prekeys:fetch', async (raw, ack?: (res: { ok: boolean; bundle?: PreKeyBundle; error?: string }) => void) => {
+    if (!(await checkPrekeysFetchRateLimit(me))) {
       ack?.({ ok: false, error: 'rate_limited' });
       return;
     }

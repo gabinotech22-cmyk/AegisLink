@@ -903,26 +903,37 @@ function GroupBubble({
   const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const reactions = m.reactions ? Object.entries(m.reactions).filter(([, ids]) => ids.length > 0) : [];
 
-  // Parse "SenderName: text" format for incoming group messages.
-  // senderId is only considered verified when it resolves to a known memberNames
-  // aegisId — if the name is not found in the map the id is unverifiable
-  // (spoofable by body content) and badges are suppressed.
-  // TODO: usar senderAegisId del sobre cifrado cuando el protocolo lo exponga.
+  // senderId is natively verified from the E2EE envelope (m.senderId).
+  // For backwards compatibility with older messages in the DB, we fall back
+  // to parsing the "SenderName: text" prefix if m.senderId is missing.
   let sender = '';
   let body = m.body;
-  let senderId = '';
+  let senderId = m.senderId || '';
   let senderVerified = false;
-  if (!me && body.includes(': ')) {
-    const colonIdx = body.indexOf(': ');
-    sender = body.substring(0, colonIdx);
-    body = body.substring(colonIdx + 2);
-    const found = Object.entries(memberNames).find(([, n]) => n === sender);
-    if (found) {
-      senderId = found[0];
+
+  if (!me) {
+    if (m.senderId) {
+      // Native sender attribution from E2EE envelope (tamper-proof)
       senderVerified = true;
-    } else {
-      senderId = sender;
-      senderVerified = false;
+      sender = memberNames[m.senderId] || m.senderId.substring(0, 8);
+      // Strip the compatibility prefix embedded by client.ts
+      const prefix = `${sender}: `;
+      if (body.startsWith(prefix)) {
+        body = body.substring(prefix.length);
+      }
+    } else if (body.includes(': ')) {
+      // Legacy fallback for old messages stored before senderId was available
+      const colonIdx = body.indexOf(': ');
+      sender = body.substring(0, colonIdx);
+      body = body.substring(colonIdx + 2);
+      const found = Object.entries(memberNames).find(([, n]) => n === sender);
+      if (found) {
+        senderId = found[0];
+        senderVerified = true;
+      } else {
+        senderId = sender;
+        senderVerified = false;
+      }
     }
   }
 

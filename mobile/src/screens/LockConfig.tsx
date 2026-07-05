@@ -29,7 +29,7 @@ const TIMEOUT_OPTIONS = [
 function PinDots({ count, t }: { count: number; t: Theme }) {
   return (
     <View style={{ flexDirection: 'row', gap: 16, justifyContent: 'center', marginVertical: 28 }}>
-      {[0, 1, 2, 3].map((i) => (
+      {[0, 1, 2, 3, 4, 5].map((i) => (
         <View
           key={i}
           style={{
@@ -107,6 +107,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   const hideRecents = usePreferences((s) => s.hideRecents);
   const setPref = usePreferences((s) => s.set);
 
+  const [bioAvailable, setBioAvailable] = useState(false);
   const [pinStored, setPinStored] = useState(false);
   const [pinModal, setPinModal] = useState(false);
   const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
@@ -118,8 +119,20 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   // Pending enable: if user triggers enable but has no PIN, we wait for PIN setup
   const pendingEnable = useRef(false);
 
+
   useEffect(() => {
     hasStoredPIN().then(setPinStored);
+    void (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
+        const hasHw = await LA.hasHardwareAsync();
+        const enrolled = await LA.isEnrolledAsync();
+        setBioAvailable(hasHw && enrolled);
+      } catch {
+        setBioAvailable(false);
+      }
+    })();
   }, []);
 
   function shake() {
@@ -143,11 +156,11 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   }
 
   function handleDigit(d: string) {
-    if (pinEntry.length >= 4) return;
+    if (pinEntry.length >= 6) return;
     const next = pinEntry + d;
     setPinEntry(next);
     setPinError('');
-    if (next.length === 4) {
+    if (next.length === 6) {
       setTimeout(() => processPin(next), 180);
     }
   }
@@ -244,13 +257,15 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
 
           {appLockEnabled && (
             <>
-              <Toggle
-                t={t}
-                label={i18nT('lockConfig.biometrics', 'Face ID / Fingerprint')}
-                sub={i18nT('lockConfig.biometricsSub', 'Use biometrics as primary method')}
-                value={biometricsEnabled}
-                onChange={(v) => void setPref('biometricsEnabled', v)}
-              />
+              {bioAvailable && (
+                <Toggle
+                  t={t}
+                  label={i18nT('lockConfig.biometrics', 'Face ID / Fingerprint')}
+                  sub={i18nT('lockConfig.biometricsSub', 'Use biometrics as primary method')}
+                  value={biometricsEnabled}
+                  onChange={(v) => void setPref('biometricsEnabled', v)}
+                />
+              )}
 
               {/* Timeout picker row */}
               <Pressable
@@ -419,7 +434,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
 
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 40 }}>
             <Text style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, marginBottom: 4 }}>
-              {pinStep === 'enter' ? i18nT('lockConfig.enterPinPrompt', 'Enter a 4-digit PIN') : i18nT('lockConfig.confirmPinPrompt', 'Confirm your PIN')}
+              {pinStep === 'enter' ? i18nT('lockConfig.enterPinPrompt', 'Enter a 6-digit PIN') : i18nT('lockConfig.confirmPinPrompt', 'Confirm your PIN')}
             </Text>
 
             <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>

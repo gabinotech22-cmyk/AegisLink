@@ -98,6 +98,20 @@ const spkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}spkSecret.${key
 const pqSpkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}pqSpkSecret.${keyId}`;
 const SECURE_PQSPK_KEYID_KEY = () => `aegis.${getSlotPrefix()}pqSpk.keyId`;
 
+export async function saveSpkSecret(keyId: number, b64: string): Promise<void> {
+  // Keep the per-keyId archive slot (used for older SPKs still referenced by
+  // in-flight X3DH inits)…
+  await SecureStore.setItemAsync(spkSecretKey(keyId), b64);
+  // …but ALSO populate the "current SPK" slots that the inbound decrypt paths
+  // actually read (SECURE_SPK_SECRET_KEY / SECURE_SPK_KEYID_KEY). Without this a
+  // freshly linked/synced device holds the secret in an archive slot nobody
+  // reads and fails every SPK decrypt with "no-spk".
+  await SecureStore.setItemAsync(SECURE_SPK_SECRET_KEY(), b64);
+  await SecureStore.setItemAsync(SECURE_SPK_KEYID_KEY(), String(keyId));
+  try { await SecureStore.setItemAsync(SECURE_SPK_CREATED_KEY(), String(Date.now())); }
+  catch { /* best-effort age marker */ }
+}
+
 /** Durably persist a PQSPK secret with the SAME write-then-readback invariant
  * as the SPK: never advertise a PQ prekey whose 2400-byte secret we cannot
  * recover (that would silently break every inbound v2 handshake). Returns true
@@ -521,8 +535,31 @@ async function uploadPreKeys(identity: Identity) {
           : {}),
       },
       (ack: { ok: boolean; error?: string }) => {
-        if (ack?.ok) resolve();
-        else reject(new Error(ack?.error || 'failed to upload prekeys'));
+        if (ack?.ok) {
+          // Multi-device: sync the new SPK secret to our other linked devices.
+          try {
+            const innerPayload = {
+              v: 2,
+              from: identity.aegisId,
+              selfCopy: true,
+              deviceSync: { type: 'spk', spkId: nextSpkKeyId, spkSecretB64: encodeBase64(mySpkSecretCache!) }
+            };
+            const { stripAndPad } = require('../crypto/metadata') as typeof import('../crypto/metadata');
+            const innerBytes = stripAndPad(innerPayload);
+            const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
+            const outerCiphertext = nacl.box(innerBytes, outerNonce, identity.publicKey, identity.secretKey);
+            socket!.emit('envelope', {
+              id: crypto.randomUUID(),
+              to: identity.aegisId,
+              ciphertext: encodeBase64(outerCiphertext),
+              nonce: encodeBase64(outerNonce),
+              selfCopy: true,
+            });
+          } catch (e) {
+            if (DEV) logger.warn('[socket] deviceSync broadcast failed:', (e as Error).message);
+          }
+          resolve();
+        } else reject(new Error(ack?.error || 'failed to upload prekeys'));
       },
     );
   });
@@ -1967,6 +2004,25 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
   }
   if ((parsed as { selfCopy?: unknown }).selfCopy !== true) {
     if (DEV) logger.warn('[socket] self-copy inner flag missing — dropping');
+    return;
+  }
+
+  const deviceSync = (parsed as { deviceSync?: unknown }).deviceSync;
+  if (deviceSync !== undefined) {
+    // Validate the SPK-sync shape at runtime before trusting it — a malformed
+    // self-copy must be dropped, not passed through with unchecked casts.
+    if (
+      typeof deviceSync === 'object' && deviceSync !== null &&
+      (deviceSync as { type?: unknown }).type === 'spk' &&
+      typeof (deviceSync as { spkId?: unknown }).spkId === 'number' &&
+      typeof (deviceSync as { spkSecretB64?: unknown }).spkSecretB64 === 'string'
+    ) {
+      const spkSync = deviceSync as { spkId: number; spkSecretB64: string };
+      await saveSpkSecret(spkSync.spkId, spkSync.spkSecretB64);
+      if (DEV) logger.debug(`[socket] Synced SPK secret for keyId ${spkSync.spkId} from other device`);
+      return;
+    }
+    if (DEV) logger.warn('[socket] self-copy: malformed deviceSync payload — dropping');
     return;
   }
 

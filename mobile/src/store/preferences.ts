@@ -55,6 +55,10 @@ export interface Preferences {
 
   // Internationalisation
   language: SupportedLocale;
+
+  // Theme
+  themeDark: boolean;
+  themeAutoMode: boolean;
 }
 
 const DEFAULTS: Preferences = {
@@ -80,6 +84,8 @@ const DEFAULTS: Preferences = {
   lastSeenVisible: false,
   typingVisible: true,
   language: 'en',
+  themeDark: true,
+  themeAutoMode: false,
 };
 
 interface PrefsState extends Preferences {
@@ -121,6 +127,8 @@ function snapshot(get: () => PrefsState): Preferences {
     lastSeenVisible: s.lastSeenVisible,
     typingVisible: s.typingVisible,
     language: s.language,
+    themeDark: s.themeDark,
+    themeAutoMode: s.themeAutoMode,
   };
 }
 

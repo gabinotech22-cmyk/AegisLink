@@ -15,8 +15,8 @@ export interface MessagingEphemeralDeps {
  */
 export function attachMessagingEphemeral(socket: Socket, { me, sockets }: MessagingEphemeralDeps): void {
   // ─── Typing indicators ──────────────────────────────────────────────────────
-  socket.on('typing', (raw) => {
-    if (!checkLowFreqRateLimit(me)) {
+  socket.on('typing', async (raw) => {
+    if (!(await checkLowFreqRateLimit(me))) {
       socket.emit('error_msg', { code: 'rate_limited', for: 'typing' });
       return;
     }
@@ -40,8 +40,8 @@ export function attachMessagingEphemeral(socket: Socket, { me, sockets }: Messag
   });
 
   // ─── Read receipts ──────────────────────────────────────────────────────────
-  socket.on('msg:read', (raw) => {
-    if (!checkLowFreqRateLimit(me)) {
+  socket.on('msg:read', async (raw) => {
+    if (!(await checkLowFreqRateLimit(me))) {
       socket.emit('error_msg', { code: 'rate_limited', for: 'msg:read' });
       return;
     }
@@ -61,7 +61,11 @@ export function attachMessagingEphemeral(socket: Socket, { me, sockets }: Messag
   // opaque envelope. Do NOT reintroduce a plaintext delete event.
 
   // ─── Push token registration ─────────────────────────────────────────────
-  socket.on('push:register', (raw) => {
+  socket.on('push:register', async (raw) => {
+    if (!(await checkLowFreqRateLimit(me))) {
+      socket.emit('error_msg', { code: 'rate_limited', for: 'push:register' });
+      return;
+    }
     const parsed = PushRegister.safeParse(raw);
     if (!parsed.success) return;
     void pushRepo.upsert({

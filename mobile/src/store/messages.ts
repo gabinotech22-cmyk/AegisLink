@@ -60,7 +60,7 @@ interface MessagesState {
   setMediaUri: (chatId: string, id: string, mediaUri: string) => Promise<void>;
   /** Replace a message's attachments array in place (local URIs → blob refs after upload). */
   setAttachments: (chatId: string, id: string, attachments: Attachment[]) => Promise<void>;
-  remoteDelete: (chatId: string, id: string) => Promise<void>;
+  remoteDelete: (chatId: string, id: string, senderId: string) => Promise<void>;
   togglePin: (chatId: string, id: string) => Promise<void>;
   clearChat: (chatId: string) => Promise<void>;
 }
@@ -309,12 +309,12 @@ export const useMessages = create<MessagesState>((set, get) => ({
     }));
   },
 
-  async remoteDelete(chatId, id) {
+  async remoteDelete(chatId, id, senderId) {
     const { setRemoteMessageDeleted } = require('../db/local');
-    // Authorization-scoped: a peer may only retract a message they sent to us
-    // in our chat with them. If nothing matched, do NOT touch in-memory state —
-    // otherwise a peer naming an arbitrary msgId could blank an unrelated bubble.
-    const deleted: boolean = await setRemoteMessageDeleted(id, chatId);
+    // Authorization-scoped: a peer may only retract a message they sent.
+    // We enforce both chatId (so it belongs to the current context) and
+    // senderId (so they can only delete their OWN messages).
+    const deleted: boolean = await setRemoteMessageDeleted(id, chatId, senderId);
     if (!deleted) return;
     const list = get().byChat[chatId] ?? [];
     set((s) => ({

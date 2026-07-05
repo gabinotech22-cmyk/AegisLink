@@ -10,8 +10,11 @@ import { ss } from '../utils/secureStore';
 import { verifyPIN, hasStoredPIN, verifyPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
 import { usePreferences } from '../store/preferences';
 import { useIdentity } from '../store/identity';
+import { useContacts } from '../store/contacts';
+import { useMessages } from '../store/messages';
 import { wipeDatabase } from '../db/local';
 import { usePanicGesture } from '../hooks/usePanicGesture';
+import { AegisMark } from '../components/AegisMark';
 
 const MAX_ATTEMPTS = 5;
 
@@ -24,7 +27,7 @@ interface Props {
 function PinDots({ count, error, t }: { count: number; error: boolean; t: Theme }) {
   return (
     <View style={{ flexDirection: 'row', gap: 18, justifyContent: 'center', marginVertical: 32 }}>
-      {[0, 1, 2, 3].map((i) => (
+      {[0, 1, 2, 3, 4, 5].map((i) => (
         <View
           key={i}
           style={{
@@ -242,11 +245,16 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
   // ── PIN entry ──────────────────────────────────────────────────────────────
   function handleDigit(d: string) {
-    if (pinCode.length >= 4) return;
+    if (pinCode.length >= 6) return;
     const next = pinCode + d;
     setPinCode(next);
     setPinError('');
-    if (next.length === 4) setTimeout(() => validatePin(next), 180);
+    if (next.length === 4) {
+      // Background silent check for legacy 4-digit PINs.
+      setTimeout(() => validatePin(next, true), 10);
+    } else if (next.length === 6) {
+      setTimeout(() => validatePin(next, false), 180);
+    }
   }
 
   function handleDelete() {
@@ -254,7 +262,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     setPinError('');
   }
 
-  async function validatePin(pin: string) {
+  async function validatePin(pin: string, silent = false) {
     try {
       const panicRaw = await ss.get('aegis.panic.v1');
       if (panicRaw) {
@@ -269,8 +277,30 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
             try {
               await wipeDatabase();
               await useIdentity.getState().reset();
-            } catch { /* wipe failure is non-recoverable; decoy still shown */ }
+              await useContacts.getState().hydrate();
+              useMessages.setState({
+                byChat: {},
+                previews: {},
+                pinnedMsg: {},
+                ephemeralTimers: {},
+                unreadCounts: {},
+                drafts: {},
+              });
+            } catch (e) {
+              setPinError('');
+              setPinCode('');
+              return;
+            }
             usePreferences.setState({ duressActive: true });
+            try {
+              await useIdentity.getState().hydrate();
+              const { useContacts } = require('../store/contacts');
+              const { useMessages } = require('../store/messages');
+              await useContacts.getState().hydrate();
+              useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
+            } catch (err) {
+              if (__DEV__) logger.warn('[lock-panic] failed to load decoy state:', err);
+            }
             setPinCode('');
             onUnlock();
             return;
@@ -287,12 +317,30 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       usePreferences.setState({ duressActive: false });
       if (wasDecoy) {
         // Reload real identity and data now that decoy mode is off
-        await useIdentity.getState().hydrate();
+        try {
+          await useIdentity.getState().hydrate();
+          await useContacts.getState().hydrate();
+          useMessages.setState({
+            byChat: {},
+            previews: {},
+            pinnedMsg: {},
+            drafts: {},
+          });
+          await useMessages.getState().loadAllUnreads();
+          await useMessages.getState().loadAllEphemeralTimers();
+        } catch {
+          setPinError('');
+          setPinCode('');
+          return;
+        }
       }
       setPinCode('');
       onUnlock();
       return;
     }
+    
+    if (silent) return;
+
     const newAttempts = attempts + 1;
     setAttempts(newAttempts);
     shake();
@@ -344,7 +392,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
               borderWidth: 1, borderColor: `${t.accent}33`,
               alignItems: 'center', justifyContent: 'center',
             }}>
-              <I.Shield size={28} stroke={1.6} color={t.accent} />
+              <AegisMark t={t} size={28} />
             </View>
             <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.4 }}>
               AEGISLINK
@@ -407,7 +455,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   return (
     <View style={[styles.root, { backgroundColor: t.bg, paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}>
       {/* Logo — triple tap triggers panic gesture */}
-      <Pressable onPress={registerTap} accessibilityElementsHidden importantForAccessibility="no">
+      <Pressable onPress={registerTap} onLongPress={registerLongPress} delayLongPress={3000} accessibilityElementsHidden importantForAccessibility="no">
         <View style={{ alignItems: 'center', gap: 6 }}>
           <View style={{
             width: 52, height: 52, borderRadius: 26,
@@ -415,7 +463,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
             borderWidth: 1, borderColor: `${t.accent}33`,
             alignItems: 'center', justifyContent: 'center',
           }}>
-            <I.Shield size={28} stroke={1.6} color={t.accent} />
+            <AegisMark t={t} size={28} />
           </View>
           <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.4 }}>
             AEGISLINK
