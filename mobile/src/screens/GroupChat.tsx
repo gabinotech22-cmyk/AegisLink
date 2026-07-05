@@ -917,9 +917,9 @@ function GroupBubble({
       senderVerified = true;
       sender = memberNames[m.senderId] || m.senderId.substring(0, 8);
       // Strip the compatibility prefix embedded by client.ts
-      const colonIdx = body.indexOf(': ');
-      if (colonIdx !== -1 && colonIdx < 50) {
-        body = body.substring(colonIdx + 2);
+      const prefix = `${sender}: `;
+      if (body.startsWith(prefix)) {
+        body = body.substring(prefix.length);
       }
     } else if (body.includes(': ')) {
       // Legacy fallback for old messages stored before senderId was available

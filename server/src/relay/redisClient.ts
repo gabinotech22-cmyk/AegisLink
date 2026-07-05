@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { logger } from './logger.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 
@@ -6,11 +7,11 @@ export const redis = REDIS_URL ? new Redis(REDIS_URL) : null;
 
 if (redis) {
   redis.on('error', (err) => {
-    console.error('[Redis] Connection error:', err);
+    logger.error('Redis connection error', { error: err instanceof Error ? err.message : String(err) });
   });
   redis.on('connect', () => {
-    console.log('[Redis] Connected to Redis for rate limiting');
+    logger.info('Connected to Redis for rate limiting');
   });
 } else {
-  console.log('[Redis] No REDIS_URL found. Using fallback in-memory rate limiting.');
+  logger.info('No REDIS_URL found. Using fallback in-memory rate limiting.');
 }

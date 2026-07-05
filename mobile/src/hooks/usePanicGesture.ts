@@ -62,10 +62,26 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastShakeRef = useRef(0);
   const gestureRef = useRef<string>('off');
-  // Capture onTrigger in a ref so the Accelerometer listener always calls the
-  // latest version without needing to re-subscribe.
+  // Capture the latest trigger callback to avoid effect deps cycle
   const onTriggerRef = useRef(onTrigger);
-  onTriggerRef.current = onTrigger;
+  useEffect(() => {
+    onTriggerRef.current = onTrigger;
+  }, [onTrigger]);
+
+  const showPanicConfirm = useCallback(() => {
+    themedAlert(
+      i18nT('panic.confirmTitle', '¿Borrar todo?'),
+      i18nT('panic.confirmMsg', 'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.'),
+      [
+        { text: i18nT('common.cancel', 'Cancelar'), style: 'cancel' },
+        {
+          text: i18nT('common.delete', 'Borrar'),
+          style: 'destructive',
+          onPress: () => onTriggerRef.current(),
+        },
+      ],
+    );
+  }, [i18nT]);
 
   useEffect(() => {
     let subAccel: SensorSubscription | null = null;
@@ -100,18 +116,7 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
                 now - lastShakeRef.current > SHAKE_DEBOUNCE_MS
               ) {
                 lastShakeRef.current = now;
-                themedAlert(
-                  i18nT('panic.confirmTitle', '¿Borrar todo?'),
-                  i18nT('panic.confirmMsg', 'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.'),
-                  [
-                    { text: i18nT('common.cancel', 'Cancelar'), style: 'cancel' },
-                    {
-                      text: i18nT('common.delete', 'Borrar'),
-                      style: 'destructive',
-                      onPress: () => onTriggerRef.current(),
-                    },
-                  ],
-                );
+                showPanicConfirm();
               }
             }
           );
@@ -157,18 +162,7 @@ export function usePanicGesture(onTrigger: () => void): UsePanicGestureReturn {
         clearTimeout(tapTimerRef.current);
         tapTimerRef.current = null;
       }
-      themedAlert(
-        i18nT('panic.confirmTitle', '¿Borrar todo?'),
-        i18nT('panic.confirmMsg', 'Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.'),
-        [
-          { text: i18nT('common.cancel', 'Cancelar'), style: 'cancel' },
-          {
-            text: i18nT('common.delete', 'Borrar'),
-            style: 'destructive',
-            onPress: () => onTriggerRef.current(),
-          },
-        ],
-      );
+      showPanicConfirm();
     }
   }
 

@@ -396,7 +396,9 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
       // Reset so the next call retries cleanly instead of re-returning
       // this permanently-rejected promise (which causes infinite NPE crashes).
       dbPromise = null;
-      dbFatalError = err instanceof Error ? err : new Error(String(err));
+      if (!isRecoverableDbError(err)) {
+        dbFatalError = err instanceof Error ? err : new Error(String(err));
+      }
       throw err;
     });
   }

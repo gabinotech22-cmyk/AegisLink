@@ -1,5 +1,6 @@
 // Initialise i18n before anything else renders
 import './src/i18n';
+import { logger } from './src/utils/logger';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking } from 'react-native';
 import { View, Text, ActivityIndicator, AppState, Pressable, type AppStateStatus, Dimensions } from 'react-native';
@@ -1764,7 +1765,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <ErrorBoundary>
+        <ErrorBoundary onError={(e) => logger.error('Uncaught React boundary error:', e)}>
           <StatusBar style="auto" />
           <Shell />
           {/* FloatingCallBar overlays any screen for minimized 1:1 calls */}

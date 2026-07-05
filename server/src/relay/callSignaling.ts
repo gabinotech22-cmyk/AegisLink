@@ -2,7 +2,7 @@ import type { Socket } from 'socket.io';
 import { z } from 'zod';
 import { sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 import { AEGIS_ID_RE } from './schemas.js';
-import { RATE_LIMIT_MAP_MAX } from './rateLimits.js';
+import { redisIncrAtomic, RATE_LIMIT_MAP_MAX } from './rateLimits.js';
 import { redis } from './redisClient.js';
 import { liveSockets } from './liveSockets.js';
 
@@ -72,12 +72,8 @@ const GroupCallChannel = z.object({
 const callOfferRateLimit = new Map<string, { count: number; reset: number }>();
 
 async function checkCallOfferRateLimit(aegisId: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:callOffer:${aegisId}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60);
-    return count <= 5;
-  }
+  const count = await redisIncrAtomic(`ratelimit:callOffer:${aegisId}`, 60);
+  if (count !== null) return count <= 5;
   const now = Date.now();
   const entry = callOfferRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -99,12 +95,8 @@ async function checkCallOfferRateLimit(aegisId: string): Promise<boolean> {
 const groupCallChannelRateLimit = new Map<string, { count: number; reset: number }>();
 
 async function checkGroupCallChannelRateLimit(aegisId: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:groupCallChannel:${aegisId}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60);
-    return count <= 20;
-  }
+  const count = await redisIncrAtomic(`ratelimit:groupCallChannel:${aegisId}`, 60);
+  if (count !== null) return count <= 20;
   const now = Date.now();
   const entry = groupCallChannelRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }

@@ -3,8 +3,8 @@ import * as SQLite from 'expo-sqlite';
 async function addColumn(d: SQLite.SQLiteDatabase, table: string, colDef: string) {
   try {
     await d.execAsync(`ALTER TABLE ${table} ADD COLUMN ${colDef};`);
-  } catch (e: any) {
-    if (e.message && e.message.includes('duplicate column name')) return;
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.includes('duplicate column name')) return;
     throw e;
   }
 }

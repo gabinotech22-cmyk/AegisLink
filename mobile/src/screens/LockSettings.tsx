@@ -57,9 +57,12 @@ export function LockSettingsScreen({ onBack }: Props) {
         i18nT('lockSettings.biometricsAlertMsg', 'Face ID / fingerprint will be used to unlock the app.')
       );
     }
-    setBusy(true);
-    await setPref('biometricsEnabled', v);
-    setBusy(false);
+    try {
+      setBusy(true);
+      await setPref('biometricsEnabled', v);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleAutoLock(minutes: number) {

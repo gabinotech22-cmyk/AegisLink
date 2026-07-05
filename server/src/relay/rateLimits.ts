@@ -1,8 +1,27 @@
 import { redis } from './redisClient.js';
+import { logger } from './logger.js';
 
 // TODO (A-1, deferred): migrate to Redis ONLY when running >1 relay instance.
 // Single-instance today, so in-memory is correct; the cap below bounds memory.
 export const RATE_LIMIT_MAP_MAX = 10_000;
+
+const INCR_EXPIRE_LUA = `
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+  redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`;
+
+export async function redisIncrAtomic(key: string, ttlSeconds: number): Promise<number | null> {
+  if (!redis) return null;
+  try {
+    return await redis.eval(INCR_EXPIRE_LUA, 1, key, ttlSeconds) as number;
+  } catch (err) {
+    logger.error('Redis atomic incr failed', { error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
 
 /**
  * Bound the size of an in-memory rate-limit map WITHOUT letting an attacker reset
@@ -28,12 +47,8 @@ export function evictExpired(map: Map<string, { count: number; reset: number }>)
 const channelMsgRateLimit = new Map<string, { count: number; reset: number }>();
 
 export async function checkChannelMsgRateLimit(aegisId: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:channelMsg:${aegisId}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60);
-    return count <= 120;
-  }
+  const count = await redisIncrAtomic(`ratelimit:channelMsg:${aegisId}`, 60);
+  if (count !== null) return count <= 120;
   const now = Date.now();
   const entry = channelMsgRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -51,12 +66,8 @@ const lowFreqRateLimit = new Map<string, { count: number; reset: number }>();
 const rekeyRateLimit   = new Map<string, { count: number; reset: number }>();
 
 export async function checkLowFreqRateLimit(aegisId: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:lowFreq:${aegisId}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 10);
-    return count <= 30;
-  }
+  const count = await redisIncrAtomic(`ratelimit:lowFreq:${aegisId}`, 10);
+  if (count !== null) return count <= 30;
   const now = Date.now();
   const entry = lowFreqRateLimit.get(aegisId) ?? { count: 0, reset: now + 10_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 10_000; }
@@ -73,12 +84,8 @@ export async function checkLowFreqRateLimit(aegisId: string): Promise<boolean> {
 // meaningful DoS vector — sustained abuse would only exhaust the attacker's own
 // per-identity bucket, not others'.
 export async function checkRekeyRateLimit(aegisId: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:rekey:${aegisId}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60);
-    return count <= 30;
-  }
+  const count = await redisIncrAtomic(`ratelimit:rekey:${aegisId}`, 60);
+  if (count !== null) return count <= 30;
   const now = Date.now();
   const entry = rekeyRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -97,12 +104,8 @@ const prekeysUploadRateLimit = new Map<string, { count: number; reset: number }>
 const prekeysFetchRateLimit  = new Map<string, { count: number; reset: number }>();
 
 export async function checkPrekeysUploadRateLimit(aegisId: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:prekeysUpload:${aegisId}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 600);
-    return count <= 20;
-  }
+  const count = await redisIncrAtomic(`ratelimit:prekeysUpload:${aegisId}`, 600);
+  if (count !== null) return count <= 20;
   const now = Date.now();
   const entry = prekeysUploadRateLimit.get(aegisId) ?? { count: 0, reset: now + 600_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 600_000; }
@@ -113,12 +116,8 @@ export async function checkPrekeysUploadRateLimit(aegisId: string): Promise<bool
 }
 
 export async function checkPrekeysFetchRateLimit(aegisId: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:prekeysFetch:${aegisId}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60);
-    return count <= 60;
-  }
+  const count = await redisIncrAtomic(`ratelimit:prekeysFetch:${aegisId}`, 60);
+  if (count !== null) return count <= 60;
   const now = Date.now();
   const entry = prekeysFetchRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -139,12 +138,8 @@ export async function checkPrekeysFetchRateLimit(aegisId: string): Promise<boole
 const pubchannelApplyRateLimit = new Map<string, { count: number; reset: number }>();
 
 export async function checkPubchannelApplyRateLimit(channelId: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:pubchannelApply:${channelId}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60);
-    return count <= 20;
-  }
+  const count = await redisIncrAtomic(`ratelimit:pubchannelApply:${channelId}`, 60);
+  if (count !== null) return count <= 20;
   const now = Date.now();
   const entry = pubchannelApplyRateLimit.get(channelId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -163,12 +158,8 @@ export async function checkPubchannelApplyRateLimit(channelId: string): Promise<
 const deviceLinkRateLimit = new Map<string, { count: number; reset: number }>();
 
 export async function checkDeviceLinkRateLimit(targetAegisId: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:deviceLink:${targetAegisId}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 900);
-    return count <= 3;
-  }
+  const count = await redisIncrAtomic(`ratelimit:deviceLink:${targetAegisId}`, 900);
+  if (count !== null) return count <= 3;
   const now = Date.now();
   const entry = deviceLinkRateLimit.get(targetAegisId) ?? { count: 0, reset: now + 900_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 900_000; }

@@ -283,7 +283,12 @@ export function ratchetEncrypt(state: RatchetState, plaintext: Uint8Array): {
   // Encrypt with messageKey (XSalsa20-Poly1305 via tweetnacl.secretbox)
   // Message key is 32 bytes
   const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-  const ciphertext = nacl.secretbox(plaintext, nonce, messageKey);
+  let ciphertext: Uint8Array;
+  try {
+    ciphertext = nacl.secretbox(plaintext, nonce, messageKey);
+  } finally {
+    zeroize(messageKey);
+  }
 
   const header: {
     ratchetKey: Uint8Array; n: number; pn: number; pqPub?: Uint8Array; pqCt?: Uint8Array;

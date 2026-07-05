@@ -109,8 +109,28 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
             return;
           }
           
-          const json = JSON.parse(decodeUTF8(dec));
+          const parsed = JSON.parse(decodeUTF8(dec));
+          if (
+            typeof parsed !== 'object' || parsed === null ||
+            typeof parsed.publicKeyB64 !== 'string' ||
+            typeof parsed.secretKeyB64 !== 'string' ||
+            typeof parsed.signingPublicKeyB64 !== 'string' ||
+            typeof parsed.signingSecretKeyB64 !== 'string' ||
+            typeof parsed.aegisId !== 'string'
+          ) {
+            setError('Received malformed identity data');
+            return;
+          }
           
+          const json = parsed as {
+            publicKeyB64: string;
+            secretKeyB64: string;
+            signingPublicKeyB64: string;
+            signingSecretKeyB64: string;
+            aegisId: string;
+            spkId?: number;
+            spkSecretB64?: string;
+          };
           const newIdentity = identityFromStored({
             publicKeyB64: json.publicKeyB64,
             secretKeyB64: json.secretKeyB64,
