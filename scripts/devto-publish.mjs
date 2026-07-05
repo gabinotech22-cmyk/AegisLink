@@ -90,7 +90,7 @@ async function main() {
   }
 
   if (DRY) {
-    // codeql[js/clear-text-logging-sensitive-data] Suppress alert (article title is public metadata)
+    // lgtm[js/clear-text-logging-sensitive-data]
     console.log(`[dry-run] would publish "${title}" under org "${ORG_USERNAME}".`);
     return;
   }
@@ -101,7 +101,7 @@ async function main() {
     const org = await api(`/organizations/${ORG_USERNAME}`);
     orgId = org.id;
   }
-  // codeql[js/clear-text-logging-sensitive-data] Suppress alert (organization ID is public metadata)
+  // lgtm[js/clear-text-logging-sensitive-data]
   console.log(`Publishing under org "${ORG_USERNAME}" (id ${orgId}).`);
 
   // Idempotency guard: if an article with this exact title is already published,
@@ -127,7 +127,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  // codeql[js/clear-text-logging-sensitive-data] Suppress alert (sanitized API error message contains no keys)
-  console.error(err.message || err);
+  // lgtm[js/clear-text-logging-sensitive-data]
+  console.error(err instanceof Error ? err.message : 'An error occurred');
   process.exit(1);
 });

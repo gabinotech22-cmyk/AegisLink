@@ -103,7 +103,7 @@ app.whenReady().then(() => {
     // so it sends no CORS headers back — inject them here so the renderer's
     // fetch() can read the response. Chromium still enforces the CSP above,
     // which limits connect targets to the relay itself.
-    if (details.url.startsWith('https://aegislink.duckdns.org')) {
+    if (details.url.startsWith('https://aegislink.duckdns.org/') || details.url === 'https://aegislink.duckdns.org') {
       responseHeaders['Access-Control-Allow-Origin'] = [rendererOrigin]
       responseHeaders['Access-Control-Allow-Methods'] = ['GET, POST, PUT, PATCH, DELETE, OPTIONS']
       responseHeaders['Access-Control-Allow-Headers'] = ['Content-Type, Accept']
