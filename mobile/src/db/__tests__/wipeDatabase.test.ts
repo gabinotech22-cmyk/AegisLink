@@ -126,6 +126,8 @@ describe('wipeDatabase — SecureStore key material', () => {
     const { deletedKeys } = await runWipe({ opkIds: [3, 17] });
     expect(deletedKeys).toContain('aegis.opkSecret.3');
     expect(deletedKeys).toContain('aegis.opkSecret.17');
+    expect(deletedKeys).toContain('aegis.spkSecret.3');
+    expect(deletedKeys).toContain('aegis.spkSecret.17');
     expect(deletedKeys).toContain('aegis.opkIds.json');
     expect(deletedKeys).toContain('aegis.spkSecret.b64');
     expect(deletedKeys).toContain('aegis.spk.keyId');
