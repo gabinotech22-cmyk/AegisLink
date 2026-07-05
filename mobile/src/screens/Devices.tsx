@@ -169,6 +169,8 @@ export function DevicesScreen({ onBack }: Props) {
     setLinking(true);
     setLinkError(null);
 
+    let myKeypair: nacl.BoxKeyPair | null = null;
+
     try {
       const theirPubKey = decodeBase64(scannedPayload.pubKey);
       if (theirPubKey.length !== nacl.box.publicKeyLength) {
@@ -176,7 +178,7 @@ export function DevicesScreen({ onBack }: Props) {
       }
 
       // Use an ephemeral keypair for this single approval — never stored.
-      const myKeypair = nacl.box.keyPair();
+      myKeypair = nacl.box.keyPair();
 
       const { loadLatestSpkSecret } = require('../db/prekeys');
       const latestSpk = await loadLatestSpkSecret();
@@ -222,14 +224,13 @@ export function DevicesScreen({ onBack }: Props) {
         throw new Error('Socket not connected');
       }
 
-      // Zero out ephemeral secret key bytes immediately — never stored.
-      myKeypair.secretKey.fill(0);
-
       // Optimistically add the new device and refresh from server.
       await loadDevices();
     } catch (e) {
       setLinkError((e as Error).message);
     } finally {
+      // Zero out ephemeral secret key bytes on every path — never stored.
+      if (myKeypair) myKeypair.secretKey.fill(0);
       setLinking(false);
       setConfirmVisible(false);
       setScannedPayload(null);

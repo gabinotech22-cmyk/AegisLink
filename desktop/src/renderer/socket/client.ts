@@ -98,6 +98,10 @@ const spkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}spkSecret.${key
 const pqSpkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}pqSpkSecret.${keyId}`;
 const SECURE_PQSPK_KEYID_KEY = () => `aegis.${getSlotPrefix()}pqSpk.keyId`;
 
+export async function saveSpkSecret(keyId: number, b64: string): Promise<void> {
+  await SecureStore.setItemAsync(spkSecretKey(keyId), b64);
+}
+
 /** Durably persist a PQSPK secret with the SAME write-then-readback invariant
  * as the SPK: never advertise a PQ prekey whose 2400-byte secret we cannot
  * recover (that would silently break every inbound v2 handshake). Returns true
@@ -1993,9 +1997,10 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     return;
   }
 
-  if ((parsed as any).deviceSync?.type === 'spk') {
-    const spkSync = (parsed as any).deviceSync;
-    const { saveSpkSecret } = require('../db/local') as typeof import('../db/local');
+  type SPKSyncPayload = { deviceSync?: { type: string; spkId: number; spkSecretB64: string } };
+  const syncPayload = parsed as SPKSyncPayload;
+  if (syncPayload.deviceSync?.type === 'spk') {
+    const spkSync = syncPayload.deviceSync;
     await saveSpkSecret(spkSync.spkId, spkSync.spkSecretB64);
     if (DEV) logger.debug(`[socket] Synced SPK secret for keyId ${spkSync.spkId} from other device`);
     return;

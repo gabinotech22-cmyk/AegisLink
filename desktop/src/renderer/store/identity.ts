@@ -276,7 +276,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         displayName: defaultName,
         avatarColor: defaultColor,
         avatarImage: null,
-        status: 'idle',
+        status: 'ready',
       });
       return identity;
     } catch (e) {

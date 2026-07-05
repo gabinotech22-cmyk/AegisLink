@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
 import { SERVER_URL } from '../config';
 import { identityFromStored } from '../crypto/identity';
+import { saveSpkSecret } from '../socket/client';
 import { useIdentity } from '../store/identity';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
@@ -51,13 +52,16 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
       if (socketRef.current) {
         socketRef.current.disconnect();
       }
+      if (ephemeralKeyRef.current) {
+        ephemeralKeyRef.current.secretKey.fill(0);
+      }
     };
   }, []);
 
   async function handleNext() {
     const trimmed = aegisId.trim();
     if (!trimmed) {
-      setError('Por favor, ingresa un Aegis ID válido.');
+      setError('Please enter a valid Aegis ID.');
       return;
     }
     setError('');
@@ -72,6 +76,13 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
       // 2. Connect temp socket to relay
       const socket = io(SERVER_URL, { transports: ['websocket'] });
       socketRef.current = socket;
+
+      socket.on('connect_error', (err: Error) => {
+        setError('Connection error: ' + err.message);
+        setStep('input');
+        setLoading(false);
+        socket.disconnect();
+      });
 
       socket.on('connect', () => {
         // 3. Emit device:link
@@ -94,7 +105,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
             ephemeralKeyRef.current.secretKey
           );
           if (!dec) {
-            setError('Error al descifrar la identidad');
+            setError('Error decrypting identity');
             return;
           }
           
@@ -113,7 +124,6 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
           await useIdentity.getState().linkDevice(newIdentity);
           
           if (json.spkId != null && json.spkSecretB64) {
-            const { saveSpkSecret } = await import('../../db/local');
             await saveSpkSecret(json.spkId, json.spkSecretB64);
           }
           
@@ -121,19 +131,21 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
           
           onLinked();
         } catch (err) {
-          setError('Error al procesar la aprobación: ' + (err as Error).message);
+          setError('Error processing approval: ' + (err as Error).message);
+        } finally {
+          ephemeralKeyRef.current.secretKey.fill(0);
         }
       });
 
-      socket.on('error_msg', (e: any) => {
-        setError('Error del servidor: ' + (e?.code || 'Desconocido'));
+      socket.on('error_msg', (e: { code?: string }) => {
+        setError('Server error: ' + (e?.code || 'Unknown'));
         setStep('input');
         setLoading(false);
         socket.disconnect();
       });
 
     } catch (err) {
-      setError('Error de conexión: ' + (err as Error).message);
+      setError('Connection error: ' + (err as Error).message);
       setLoading(false);
     }
   }
@@ -146,8 +158,8 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Vincular Dispositivo" left={
-        <button onClick={onBack} aria-label="Volver" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title="Link Device" left={
+        <button onClick={onBack} aria-label="Back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.text} />
         </button>
       } />
@@ -156,10 +168,10 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
         {step === 'input' && (
           <div style={{ width: '100%', maxWidth: 400 }}>
             <p style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, marginBottom: 24, lineHeight: 1.5 }}>
-              Para vincular este escritorio, primero debes ingresar tu Aegis ID. Puedes encontrarlo en tu perfil dentro de la aplicación móvil.
+              To link this desktop, you must first enter your Aegis ID. You can find it in your profile within the mobile app.
             </p>
             <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>
-              TU AEGIS ID
+              YOUR AEGIS ID
             </span>
             <input
               type="text"
@@ -173,20 +185,20 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
                 <span style={{ fontFamily: t.font, fontSize: 13, color: t.danger }}>{error}</span>
               </div>
             )}
-            <PrimaryButton t={t} label={loading ? 'Conectando...' : 'Siguiente'} onPress={handleNext} />
+            <PrimaryButton t={t} label={loading ? 'Connecting...' : 'Next'} onPress={handleNext} disabled={loading} />
           </div>
         )}
 
         {step === 'qr' && (
           <div style={{ width: '100%', maxWidth: 400, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <p style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, marginBottom: 32, lineHeight: 1.5, textAlign: 'center' }}>
-              Abre AegisLink en tu móvil, ve a <strong>Ajustes &gt; Dispositivos Vinculados</strong> y escanea este código QR.
+              Open AegisLink on your mobile, go to <strong>Settings &gt; Linked Devices</strong> and scan this QR code.
             </p>
             
             <QRCanvas payload={qrPayload} t={t} />
             
             <p style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 32, textAlign: 'center' }}>
-              Esperando aprobación del móvil...
+              Waiting for mobile approval...
             </p>
 
             {error && (
