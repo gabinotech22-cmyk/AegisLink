@@ -31,6 +31,7 @@ interface IdentityState {
 
   hydrate: () => Promise<void>;
   generate: () => Promise<Identity>;
+  linkDevice: (identity: Identity) => Promise<void>;
   reset: () => Promise<void>;
   updateProfile: (
     displayName: string,
@@ -249,33 +250,73 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
   async generate() {
     set({ status: 'generating', error: null });
-    const identity = createIdentity();
-    await saveIdentity({
-      aegisId: identity.aegisId,
-      publicKeyB64: identity.publicKeyB64,
-      secretKeyB64: identity.secretKeyB64,
-      signingPublicKeyB64: identity.signingPublicKeyB64,
-      signingSecretKeyB64: identity.signingSecretKeyB64,
-      createdAt: identity.createdAt,
-    });
+    try {
+      const identity = createIdentity();
+      await saveIdentity({
+        aegisId: identity.aegisId,
+        publicKeyB64: identity.publicKeyB64,
+        secretKeyB64: identity.secretKeyB64,
+        signingPublicKeyB64: identity.signingPublicKeyB64,
+        signingSecretKeyB64: identity.signingSecretKeyB64,
+        createdAt: identity.createdAt,
+      });
 
-    const activeSlotId = get().activeSlotId || 'self';
-    const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
-    const defaultColor = '#05b875';
-    await secureStorage().set(getPrefKey('aegis.displayName', activeSlotId), defaultName);
-    await secureStorage().set(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor);
-    await secureStorage().delete(getPrefKey('aegis.avatarImage', activeSlotId));
+      await publishToServer(identity);
 
-    await publishToServer(identity);
-    set({
-      identity,
-      displayName: defaultName,
-      avatarColor: defaultColor,
-      avatarImage: null,
-      profileStatus: '',
-      status: 'ready',
-    });
-    return identity;
+      const activeSlotId = get().activeSlotId || 'self';
+      const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
+      const defaultColor = '#05b875';
+
+      await secureStorage().set(getPrefKey('aegis.displayName', activeSlotId), defaultName);
+      await secureStorage().set(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor);
+      await secureStorage().delete(getPrefKey('aegis.avatarImage', activeSlotId));
+
+      set({
+        identity,
+        displayName: defaultName,
+        avatarColor: defaultColor,
+        avatarImage: null,
+        status: 'idle',
+      });
+      return identity;
+    } catch (e) {
+      set({ status: 'idle', error: (e as Error).message });
+      throw e;
+    }
+  },
+
+  async linkDevice(identity: Identity) {
+    set({ status: 'generating', error: null });
+    try {
+      await saveIdentity({
+        aegisId: identity.aegisId,
+        publicKeyB64: identity.publicKeyB64,
+        secretKeyB64: identity.secretKeyB64,
+        signingPublicKeyB64: identity.signingPublicKeyB64,
+        signingSecretKeyB64: identity.signingSecretKeyB64,
+        createdAt: identity.createdAt,
+      });
+
+      // No publishToServer because mobile already registered this identity.
+      const activeSlotId = get().activeSlotId || 'self';
+      const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
+      const defaultColor = '#3b82f6';
+
+      await secureStorage().set(getPrefKey('aegis.displayName', activeSlotId), defaultName);
+      await secureStorage().set(getPrefKey('aegis.avatarColor', activeSlotId), defaultColor);
+      await secureStorage().delete(getPrefKey('aegis.avatarImage', activeSlotId));
+
+      set({
+        identity,
+        displayName: defaultName,
+        avatarColor: defaultColor,
+        avatarImage: null,
+        status: 'idle',
+      });
+    } catch (e) {
+      set({ status: 'idle', error: (e as Error).message });
+      throw e;
+    }
   },
 
   async reset() {

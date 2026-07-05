@@ -178,10 +178,18 @@ export function DevicesScreen({ onBack }: Props) {
       // Use an ephemeral keypair for this single approval — never stored.
       const myKeypair = nacl.box.keyPair();
 
+      const { loadLatestSpkSecret } = require('../db/prekeys');
+      const latestSpk = await loadLatestSpkSecret();
+
       const plaintext = decodeUTF8(
         JSON.stringify({
           aegisId: identity.aegisId,
+          publicKeyB64: identity.publicKeyB64,
+          secretKeyB64: identity.secretKeyB64,
           signingPublicKeyB64: identity.signingPublicKeyB64,
+          signingSecretKeyB64: identity.signingSecretKeyB64,
+          spkSecretB64: latestSpk?.b64,
+          spkId: latestSpk?.keyId,
         }),
       );
 
@@ -202,7 +210,16 @@ export function DevicesScreen({ onBack }: Props) {
 
       const socket = getSocket();
       if (socket) {
-        socket.emit('device:link:approve', payload);
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(i18nT('devices.linkTimeout', 'Request timed out'))), 8000);
+          socket.emit('device:link:approve', payload, (res: { ok: boolean; error?: string }) => {
+            clearTimeout(timer);
+            if (res && res.ok) resolve();
+            else reject(new Error(res?.error ?? 'link_failed'));
+          });
+        });
+      } else {
+        throw new Error('Socket not connected');
       }
 
       // Zero out ephemeral secret key bytes immediately — never stored.

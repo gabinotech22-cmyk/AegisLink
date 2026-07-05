@@ -521,8 +521,31 @@ async function uploadPreKeys(identity: Identity) {
           : {}),
       },
       (ack: { ok: boolean; error?: string }) => {
-        if (ack?.ok) resolve();
-        else reject(new Error(ack?.error || 'failed to upload prekeys'));
+        if (ack?.ok) {
+          // Multi-device: sync the new SPK secret to our other linked devices.
+          try {
+            const innerPayload = {
+              v: 2,
+              from: identity.aegisId,
+              selfCopy: true,
+              deviceSync: { type: 'spk', spkId: nextSpkKeyId, spkSecretB64: encodeBase64(mySpkSecretCache!) }
+            };
+            const { stripAndPad } = require('../crypto/metadata') as typeof import('../crypto/metadata');
+            const innerBytes = stripAndPad(innerPayload);
+            const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
+            const outerCiphertext = nacl.box(innerBytes, outerNonce, identity.publicKey, identity.secretKey);
+            socket!.emit('envelope', {
+              id: crypto.randomUUID(),
+              to: identity.aegisId,
+              ciphertext: encodeBase64(outerCiphertext),
+              nonce: encodeBase64(outerNonce),
+              selfCopy: true,
+            });
+          } catch (e) {
+            if (DEV) logger.warn('[socket] deviceSync broadcast failed:', (e as Error).message);
+          }
+          resolve();
+        } else reject(new Error(ack?.error || 'failed to upload prekeys'));
       },
     );
   });
@@ -1967,6 +1990,14 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
   }
   if ((parsed as { selfCopy?: unknown }).selfCopy !== true) {
     if (DEV) logger.warn('[socket] self-copy inner flag missing — dropping');
+    return;
+  }
+
+  if ((parsed as any).deviceSync?.type === 'spk') {
+    const spkSync = (parsed as any).deviceSync;
+    const { saveSpkSecret } = require('../db/local') as typeof import('../db/local');
+    await saveSpkSecret(spkSync.spkId, spkSync.spkSecretB64);
+    if (DEV) logger.debug(`[socket] Synced SPK secret for keyId ${spkSync.spkId} from other device`);
     return;
   }
 
