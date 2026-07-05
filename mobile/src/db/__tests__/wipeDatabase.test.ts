@@ -120,6 +120,7 @@ describe('wipeDatabase — SecureStore key material', () => {
     // prove a panic-enabled account existed on the device.
     expect(deletedKeys).toContain('aegis.panic.v1');
     expect(deletedKeys).toContain('aegis.preferences.v1');
+    expect(deletedKeys).toContain('aegis.polls.v1');
   });
 
   it('purges the SPK and every OPK secret listed in aegis.opkIds.json', async () => {

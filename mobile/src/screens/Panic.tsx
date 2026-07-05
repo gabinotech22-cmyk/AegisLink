@@ -19,7 +19,7 @@ const PANIC_KEY = 'aegis.panic.v1';
 interface Props {
   onBack: () => void;
   /** Navigate to the app-lock (PIN) configuration. Required to gate panic mode. */
-  onConfigureLock?: () => void;
+  onConfigureLock: () => void;
 }
 
 const GESTURES = [
@@ -122,6 +122,10 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
   }, []);
 
   useEffect(() => {
+    // Panic mode is gated behind the PIN lock, so don't load panic config — and
+    // above all don't generate/persist a signed remote-wipe token — until the
+    // lock is confirmed present. Re-runs when hasLockPin resolves to true.
+    if (hasLockPin !== true) return;
     ss.get(PANIC_KEY).then((raw) => {
       if (!raw) {
         void generateAndSaveToken();
@@ -145,7 +149,7 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
     }).catch(() => {});
   // generateAndSaveToken is stable (useCallback with stable dep)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasLockPin]);
 
   // ── Gate: panic mode requires the app PIN lock ─────────────────────────────
   if (hasLockPin === null) {
@@ -184,7 +188,7 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={i18nT('panic.configureLock')}
-            onPress={() => onConfigureLock?.()}
+            onPress={onConfigureLock}
             style={({ pressed }) => ({
               marginTop: 4,
               backgroundColor: t.accent,

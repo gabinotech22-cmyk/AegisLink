@@ -117,5 +117,8 @@ describe('handlePanicDeepLink — wipe failure', () => {
     mockWipeDatabase.mockRejectedValueOnce(new Error('disk error'));
     const ok = await handlePanicDeepLink(VALID_URL);
     expect(ok).toBe(false);
+    // Wipe-before-reset ordering must hold on the failure path too: if the wipe
+    // throws, identity reset must never run.
+    expect(mockReset).not.toHaveBeenCalled();
   });
 });
