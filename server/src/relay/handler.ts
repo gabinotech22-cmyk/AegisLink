@@ -192,7 +192,7 @@ export function attachRelay(io: SocketServer) {
 
       // Throttle per target identity so an unauthenticated socket can't spam
       // link requests at a victim. Silent drop — no oracle signal on excess.
-      if (!checkDeviceLinkRateLimit(targetAegisId)) {
+      if (!(await checkDeviceLinkRateLimit(targetAegisId))) {
         return;
       }
       // Bound the pending-link map independently of the rate-limit maps: refuse
