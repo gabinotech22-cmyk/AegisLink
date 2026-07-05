@@ -22,22 +22,39 @@ es de **consolidación, privacidad-por-defecto y alcance de plataforma**, no de 
 
 ---
 
-## Hito 0 — Desbloquear y sanear el árbol (INMEDIATO) 🔴
+## Hito 0 — Desbloquear y sanear el árbol ✅ HECHO (2026-07-05)
 
-CI de los dos PRs abiertos está en rojo. Reglas de oro de ramas/estructura rotas. Cerrar antes de nada.
+CI de los dos PRs abiertos estaba en rojo. Reglas de oro de ramas/estructura rotas. Cerrado antes de seguir.
 
-- [ ] **Verde PR #240**: commitear el fix `async` de `server/src/relay/handler.ts:185`
-      (arregla `error TS1308` → Server TS + Server tests + Build smoke) y resincronizar
-      `mobile/package-lock.json` (`npm install`, falta `typescript@5.9.3`) → arregla todos los jobs mobile.
-- [ ] **Verde PR #239** (`feat/multi-device-spk`): misma familia (lock + `await`); evaluar
-      solapamiento con #240 (device-linking) y consolidar para no fragmentar (regla ramas #5).
-- [ ] **Basura trackeada fuera de git** (regla estructura): `alerts.json`, `all_alerts.json`,
-      `pr_236..240_comments.txt`, `mobile/crash2.txt`, `server/.expo/devices.json` →
-      `git rm --cached` + `.gitignore`.
-- [ ] **Stash huérfano**: aplicar o descartar `stash@{0}: WIP on fix/decoy-pin-length` (regla ramas #2).
-- [ ] **Ramas zombi**: borrar `fix/dependabot-alerts` y `fix/technical-debt-audit` (idénticas a `main`);
-      `fix/panic-lock-gestures` está contenida en `fix/decoy-pin-length`.
-- [ ] **Todo a `main`**: mergear lo verde; no acumular ramas que no llegan a `main` (regla ramas #4).
+- [x] **Verde PR #240**: la causa real (a la hora de cerrar) no fue el `async` de `handler.ts:185`
+      ni el lock de `typescript@5.9.3` — ambos ya habían sido arreglados en commits previos de la
+      rama (`ecc8470`, `e7a74e1`). El único job en rojo era **Mobile tests**, por una aserción de test
+      desactualizada (`client.deleteForEveryone.test.ts:269` esperaba la firma vieja de 2 args de
+      `remoteDelete`, la implementación real y correcta ya usa 3 args para scoping por `senderId`).
+      Fix: commit `64c89cd`. Mergeado a `main` en `08f4997`.
+- [x] **Verde PR #239** (`feat/multi-device-spk`): la consolidación con #240 que este roadmap pedía
+      ya había ocurrido — la rama `feat/multi-device-spk` se fusionó dentro de `feat/mnemonic-and-redis`
+      antes de este cierre. Al mergear #240, GitHub detectó los commits y auto-cerró #239 como
+      `MERGED` con el mismo merge commit (`08f4997`). Sin acción adicional.
+- [x] **Basura trackeada fuera de git**: ya resuelto en un commit previo de la propia rama
+      (`6241898 chore: untrack transient review/debug dumps (Hito 0)`), incluido en el merge de #240.
+      Verificado post-merge: `alerts.json`, `all_alerts.json`, `mobile/crash2.txt`, `server/.expo/**`
+      ya no están trackeados y sí están en `.gitignore`.
+- [x] **Stash huérfano**: `stash@{0}: WIP on fix/decoy-pin-length` no era descartable — contenía una
+      feature real y completa (ocultar view-once/scheduled/location en el attach sheet de grupos,
+      `isGroup` prop + tests). Aplicado en rama `fix/attach-sheet-group-scope` (commit `c7df869`,
+      15/15 tests verdes), stash dropeado. **Pendiente**: [PR #246](https://github.com/gabinotech22-cmyk/AegisLink/pull/246)
+      abierto, aún sin mergear — único punto no cerrado de este hito.
+- [x] **Ramas zombi**: `fix/dependabot-alerts` y `fix/technical-debt-audit` ya no existían (limpiadas
+      antes de este cierre). Se encontraron y borraron en su lugar dos ramas distintas con diff neto
+      cero contra `main` (contenido ya absorbido vía PR #233 y #237 con otros hashes):
+      `fix/channel-header-name` y `fix/panic-lock-gestures`.
+- [x] **Todo a `main`**: además de #239/#240, la auditoría de ramas huérfanas encontró **5 ramas más**
+      sin PR abierto con trabajo real no fragmentario (`chore/repo-hygiene-rules`, `docs/onion-deployed-status`,
+      `feat/mailbox-mode-production`, `fix/decoy-pin-length`, `fix/security-remediation`) — todas viejas
+      (26-35 commits detrás), 3 con conflictos de merge reales. Resueltos vía subagentes en worktrees
+      aislados (sin debilitar ninguna validación de seguridad al reconciliar `blob.ts`/`publicChannels.ts`)
+      y mergeados como PR #241–#245. Cero ramas remotas huérfanas al cierre, salvo #246 en curso.
 
 ## Hito 1 — Extraer Work + pagos de este repo 🟠
 
