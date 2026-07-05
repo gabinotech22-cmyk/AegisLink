@@ -25,9 +25,11 @@ beforeAll(async () => {
 });
 
 function extractInlineScript(html: string): string {
-  const m = html.match(/<script>([\s\S]*?)<\/script>/);
-  if (!m) throw new Error('no inline <script> found in landing HTML');
-  return m[1];
+  const start = html.indexOf('<script>');
+  if (start === -1) throw new Error('no inline <script> found in landing HTML');
+  const end = html.indexOf('</script>', start);
+  if (end === -1) throw new Error('no inline </script> found in landing HTML');
+  return html.slice(start + 8, end);
 }
 
 function cspDirective(csp: string, name: string): string | undefined {

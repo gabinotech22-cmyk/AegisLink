@@ -27,13 +27,14 @@ let registered = false;
 let localHandlersAttached = false;
 
 // Callback set by App.tsx to handle deep links from notification taps.
-// A tap can target either a 1:1 chat (aegisId) or a group chat (groupId) — the
-// App handler routes to whichever is present. For group messages `aegisId` is
-// the message SENDER (not the chat), so groupId MUST be provided to open the
-// correct screen.
+// A tap can target a 1:1 chat (aegisId), a group chat (groupId), or a public
+// channel post (channelId) — the App handler routes to whichever is present.
+// For group messages `aegisId` is the message SENDER (not the chat), so
+// groupId MUST be provided to open the correct screen.
 export interface NotificationOpenTarget {
   aegisId?: string;
   groupId?: string;
+  channelId?: string;
 }
 let _onOpenChat: ((target: NotificationOpenTarget) => void) | null = null;
 
@@ -43,16 +44,20 @@ export function setNotificationOpenChatHandler(fn: (target: NotificationOpenTarg
 
 /**
  * Resolve which chat a notification tap should open from its `data` payload.
- * Group messages carry `isGroup:true` + `groupId` (the `fromAegisId` is the
- * SENDER, not the chat) → route by groupId. 1:1 messages route by fromAegisId.
- * Returns null when there isn't enough to route (e.g. a contentless server
- * wake-up push, which by design carries no chat identity).
+ * Channel posts carry `isChannel:true` + `channelId` (see
+ * notifications/channelNotifications.ts) → route by channelId. Group messages
+ * carry `isGroup:true` + `groupId` (the `fromAegisId` is the SENDER, not the
+ * chat) → route by groupId. 1:1 messages route by fromAegisId. Returns null
+ * when there isn't enough to route (e.g. a contentless server wake-up push,
+ * which by design carries no chat identity).
  */
 export function resolveNotificationOpenTarget(
   data: Record<string, unknown> | undefined,
 ): NotificationOpenTarget | null {
   const fromAegisId = data?.fromAegisId as string | undefined;
   const groupId = data?.groupId as string | undefined;
+  const channelId = data?.channelId as string | undefined;
+  if (data?.isChannel === true) return channelId ? { channelId } : null;
   if (data?.isGroup === true) return groupId ? { groupId } : null;
   return fromAegisId ? { aegisId: fromAegisId } : null;
 }
@@ -358,6 +363,11 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
       const { registerChannelBackgroundSync } = require('./channelBackgroundSync') as typeof import('./channelBackgroundSync');
       await registerChannelBackgroundSync();
     } catch { /* task module unavailable (Expo Go) — foreground live notify still works */ }
+
+    try {
+      const { registerDailySummaryTask } = require('./dailySummaryTask') as typeof import('./dailySummaryTask');
+      await registerDailySummaryTask();
+    } catch { /* task module unavailable */ }
 
     const tokenResponse = await Notifications.getExpoPushTokenAsync();
     const expoToken = tokenResponse.data;

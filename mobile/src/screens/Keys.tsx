@@ -7,7 +7,7 @@ import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { Section, Row } from '../components/Section';
 import { useIdentity } from '../store/identity';
-import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import { themedAlert } from '../components/AlertHost';
 
 interface Props {
@@ -30,8 +30,8 @@ export function KeysScreen({ onBack }: Props) {
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
 
-  const handleCopy = async (text: string, label: string) => {
-    await Clipboard.setStringAsync(text);
+  const handleCopy = async (text: string) => {
+    await copySensitiveText(text);
     themedAlert(i18nT('keys.copied'), i18nT('keys.copiedDesc'));
   };
 
@@ -55,7 +55,6 @@ export function KeysScreen({ onBack }: Props) {
   }
 
   const fingerprint = formatFingerprint(identity.publicKeyB64);
-  const did = `did:key:z${identity.publicKeyB64.substring(0, 32).replace(/[^a-zA-Z0-9]/g, '')}`;
   const creationDate = new Date(identity.createdAt).toLocaleDateString();
 
   return (
@@ -77,14 +76,14 @@ export function KeysScreen({ onBack }: Props) {
             icon={<I.Person size={20} color={t.textDim} />}
             label={i18nT('keys.aegisId')}
             sub={identity.aegisId}
-            onPress={() => handleCopy(identity.aegisId, 'Aegis ID')}
+            onPress={() => handleCopy(identity.aegisId)}
           />
           <Row
             t={t}
             icon={<I.Fingerprint size={20} color={t.textDim} />}
             label={i18nT('keys.fingerprint')}
             sub={fingerprint}
-            onPress={() => handleCopy(fingerprint, 'Fingerprint')}
+            onPress={() => handleCopy(fingerprint)}
             noBorder
           />
         </Section>
@@ -111,16 +110,7 @@ export function KeysScreen({ onBack }: Props) {
           />
         </Section>
 
-        <Section t={t} label={i18nT('keys.didSection')}>
-          <Row
-            t={t}
-            icon={<I.Globe size={20} color={t.textDim} />}
-            label={i18nT('keys.did')}
-            sub={did}
-            onPress={() => handleCopy(did, 'DID')}
-            noBorder
-          />
-        </Section>
+
 
         <Section t={t} label={i18nT('keys.safetySection')}>
           <View style={{ padding: 16, backgroundColor: t.surface2, borderRadius: t.radius, flexDirection: 'row', gap: 12 }}>

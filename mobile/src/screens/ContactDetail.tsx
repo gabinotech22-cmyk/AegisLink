@@ -216,7 +216,7 @@ export function ContactDetailScreen({
             <I.ChevronL size={22} color={t.textDim} />
           </Pressable>
         }
-        right={<I.More size={20} color={t.textDim} />}
+
       />
 
       {removing ? (

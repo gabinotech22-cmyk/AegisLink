@@ -3,6 +3,7 @@ import { View, Text, TextInput, Pressable, ScrollView, StyleSheet, ActivityIndic
 import { BrandedQR } from '../components/BrandedQR';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -87,7 +88,7 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
           onPress={onCancel}
           hitSlop={8}
           style={{ padding: 6 }}
-          accessibilityLabel="Volver"
+          accessibilityLabel={i18nT("common.back", "Volver")}
         >
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
@@ -99,34 +100,34 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
 
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 32 }}>
         <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 20, marginBottom: 22, textAlign: 'center' }}>
-          AegisLink nunca lee tu agenda. Elige cómo intercambiar identidades.
+          {i18nT("addContact.intro", "AegisLink nunca lee tu agenda. Elige cómo intercambiar identidades.")}
         </Text>
 
         <View style={{ gap: 12 }}>
           <MethodCard
             t={t}
             icon={<I.QR size={26} color={t.accent} />}
-            label="En persona — QR"
-            sub="Lo más seguro. Tu QR se muestra solo a quien tienes delante."
-            cta="MOSTRAR MI QR →"
-            badge="RECOMENDADO"
+            label={i18nT("addContact.qrLabel", "En persona — QR")}
+            sub={i18nT("addContact.qrSub", "Lo más seguro. Tu QR se muestra solo a quien tienes delante.")}
+            cta={i18nT("addContact.qrCta", "MOSTRAR MI QR →")}
+            badge={i18nT("addContact.recommended", "RECOMENDADO")}
             primary
             onPress={() => setMethod('qr')}
           />
           <MethodCard
             t={t}
             icon={<I.Link size={24} color={t.text} />}
-            label="Enlace de invitación"
-            sub="Genera un enlace de un solo uso que expira en 24h."
-            cta="GENERAR ENLACE →"
+            label={i18nT("addContact.linkLabel", "Enlace de invitación")}
+            sub={i18nT("addContact.linkSub", "Genera un enlace para compartir tu identidad.")}
+            cta={i18nT("addContact.linkCta", "GENERAR ENLACE →")}
             onPress={() => setMethod('link')}
           />
           <MethodCard
             t={t}
             icon={<I.Key size={24} color={t.text} />}
-            label="Por Aegis ID"
-            sub="Introduce el ID del contacto. Verifica opcionalmente con 8 palabras de seguridad."
-            cta="INTRODUCIR ID →"
+            label={i18nT("addContact.idLabel", "Por Aegis ID")}
+            sub={i18nT("addContact.idSub", "Introduce el ID del contacto. Verifica opcionalmente con 8 palabras de seguridad.")}
+            cta={i18nT("addContact.idCta", "INTRODUCIR ID →")}
             onPress={() => setMethod('id')}
           />
         </View>
@@ -139,10 +140,10 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
           <I.Shield size={18} color={t.warn} style={{ marginTop: 2 }} />
           <View style={{ flex: 1 }}>
             <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>
-              Verifica antes de hablar.
+              {i18nT("addContact.verifyWarningTitle", "Verifica antes de hablar.")}
             </Text>
             <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 18, marginTop: 4 }}>
-              Cualquier método sirve para iniciar — pero comparen las 8 palabras de seguridad antes de enviar algo sensible.
+              {i18nT("addContact.verifyWarningBody", "Cualquier método sirve para iniciar — pero comparen las 8 palabras de seguridad antes de enviar algo sensible.")}
             </Text>
           </View>
         </View>
@@ -430,7 +431,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    await Clipboard.setStringAsync(link);
+    await copySensitiveText(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -449,7 +450,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
           onPress={onBack}
           hitSlop={8}
           style={{ padding: 6 }}
-          accessibilityLabel="Volver"
+          accessibilityLabel={i18nT("common.back", "Volver")}
         >
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
@@ -576,7 +577,7 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
           onPress={onBack}
           hitSlop={8}
           style={{ padding: 6 }}
-          accessibilityLabel="Volver"
+          accessibilityLabel={i18nT("common.back", "Volver")}
         >
           <I.ChevronL size={22} color={t.text} />
         </Pressable>

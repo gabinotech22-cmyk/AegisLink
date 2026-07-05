@@ -1,8 +1,16 @@
 # Relay Onion Service — runbook (Fase 4 · mailbox mode)
 
-> Estado: **infra en repo, PENDIENTE de deploy en prod.** Este doc es la fuente
-> canónica del estado del onion service del relay. Cuando se despliegue y se
-> valide, actualizar AQUÍ (los demás docs enlazan, no duplican).
+> Estado: **✅ DESPLEGADO EN PROD (2026-07-03).** Deploy ejecutado por el owner
+> vía el wrapper de escritorio: prod en `47c060d`, contenedor `aegislink-tor`
+> corriendo, volumen `aegislink_tor_keys` creado. Dirección onion publicada:
+>
+> `http://fhxnal5jmuuqsbtzz7avos4drhqmuy4c7ffd35gi3hw2uwbe5iqshfyd.onion`
+>
+> (Fuente canónica de la dirección: `/var/lib/tor/aegislink_relay/hostname`
+> dentro del volumen `tor_keys` — ante cualquier duda, leerla de ahí.)
+> Este doc es la fuente canónica del estado del onion service del relay
+> (los demás docs enlazan, no duplican). Pendiente del checklist: backup de
+> clave + verificación por Tor (§checklist 2-3), y el flip de cliente (§4-6).
 >
 > Código: `infra/tor/` (Dockerfile + torrc), servicio `tor` en
 > `docker-compose.yml`, wiring en `infra/deploy.sh`.
@@ -70,17 +78,28 @@ privada.
 
 ## Checklist para encender mailbox mode (en orden)
 
-1. ☐ Deploy del onion service en prod (`bash infra/deploy.sh`) y anotar la
-   `.onion` que imprime.
-2. ☐ Backup de `tor_keys` (arriba).
-3. ☐ Probar reachability desde un cliente Tor cualquiera:
-   `curl --socks5-hostname 127.0.0.1:9050 http://<addr>.onion/health` → `"ok"`.
+1. ✅ Deploy del onion service en prod — HECHO 2026-07-03 (prod `47c060d`,
+   dirección arriba; deploy vía wrapper del owner, sección Tor añadida al
+   wrapper el mismo día).
+2. ✅ Backup de `tor_keys` — HECHO 2026-07-03
+   (`/root/backups/tor_keys-2026-07-03-165052.tar.gz`, 21 MB).
+3. ✅ Reachability por Tor — HECHO 2026-07-03 (`REACH_OK`: cliente Tor efímero
+   → `http://<addr>.onion/health` respondió `ok` de extremo a extremo por la
+   red Tor real, no en loopback).
 4. ☐ En EAS (o `.env.production`): `EXPO_PUBLIC_ONION_URL=http://<addr>.onion`
    y `EXPO_PUBLIC_MAILBOX_MODE=on`. Sin la URL, `MAILBOX_ENABLED` queda `false`
    (fail-closed por diseño, `mobile/src/config.ts`).
 5. ☐ Build **nativo** del APK (el módulo `AegisTor` no existe en Expo Go).
 6. ☐ Validación 2 dispositivos reales, ambos en mailbox mode, roots
    intercambiados (mensajes en ambos sentidos + receipts sellados de #229).
+
+> **Servidor Fase 4: ✅ HECHO y verificado (pasos 1-3).** Lo que queda (4-6) es
+> el flip de CLIENTE, que es un cambio de transporte en vivo, difícil de
+> revertir y de cara al usuario. Recomendación: primero un build de PRUEBA con
+> mailbox ON (perfil dedicado, sin tocar el build público) validado en 2
+> dispositivos; solo si pasa limpio, decidir si el build publicado va con
+> mailbox ON. El build público de HOY sigue con mailbox OFF (comportamiento
+> actual, cero cambio) y puede afirmar "E2EE real" con verdad total.
 
 ## Consideraciones conocidas
 

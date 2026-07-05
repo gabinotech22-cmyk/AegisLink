@@ -122,9 +122,11 @@ router.get('/challenge', challengeLimiter, (_req, res) => {
 // Requires a valid PoW solution passed as query params alongside the binary body.
 router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
   // PoW fields come from query string so we can still accept raw binary body.
+  const powChallenge = typeof req.query.powChallenge === 'string' ? req.query.powChallenge : '';
+  const powNonce = typeof req.query.powNonce === 'string' ? req.query.powNonce : '';
   const parsed = UploadPoWSchema.safeParse({
-    powChallenge: req.query.powChallenge,
-    powNonce: req.query.powNonce,
+    powChallenge,
+    powNonce,
   });
   if (!parsed.success) {
     res.status(400).json({ error: 'pow_required', issues: parsed.error.issues });
@@ -142,8 +144,15 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
     return;
   }
 
+  const uploadBuffer: Buffer = req.body;
+  const uploadLength = uploadBuffer instanceof Buffer ? uploadBuffer.length : 0;
+  if (uploadLength === 0) {
+    res.status(400).json({ error: 'body_must_be_binary' });
+    return;
+  }
+
   // ── Global quota check (FIX A) ────────────────────────────────────────────
-  if (currentTotalBytes + req.body.length > MAX_TOTAL_UPLOAD_BYTES) {
+  if (currentTotalBytes + uploadLength > MAX_TOTAL_UPLOAD_BYTES) {
     res.status(507).json({ error: 'storage_full' });
     return;
   }
@@ -151,12 +160,12 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
   const id = crypto.randomUUID();
   const filePath = path.join(UPLOADS_DIR, id);
 
-  fs.writeFile(filePath, req.body, (err) => {
+  fs.writeFile(filePath, uploadBuffer, (err) => {
     if (err) {
       res.status(500).json({ error: 'SERVER_ERROR' });
       return;
     }
-    currentTotalBytes += req.body.length;
+    currentTotalBytes += uploadLength;
     // Return the download token bound to this id. It travels inside the E2EE
     // envelope; the relay never needs to persist it (it is recomputed on GET).
     res.json({ id, token: mintDownloadToken(id) });
@@ -167,8 +176,18 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
 // UUID v4 strict validation.
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-router.get('/download/:id', (req, res) => {
-  const id = req.params.id;
+const downloadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
+  },
+});
+
+router.get('/download/:id', downloadLimiter, (req, res) => {
+  const id = typeof req.params.id === 'string' ? req.params.id : '';
   if (!UUID_V4_RE.test(id)) {
     res.status(400).json({ error: 'INVALID_PAYLOAD' });
     return;
@@ -182,7 +201,12 @@ router.get('/download/:id', (req, res) => {
     return;
   }
 
-  const filePath = path.join(UPLOADS_DIR, id);
+  const filePath = path.resolve(UPLOADS_DIR, id);
+  if (!filePath.startsWith(UPLOADS_DIR)) {
+    res.status(403).json({ error: 'forbidden' });
+    return;
+  }
+
   if (!fs.existsSync(filePath)) {
     res.status(404).json({ error: 'not_found' });
     return;

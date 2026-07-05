@@ -119,7 +119,8 @@
       "PowerShell(gh pr checks 221)",
       "PowerShell(gh pr view 221 --json headRefOid,commits --jq '.headRefOid')",
       "PowerShell(gh run view 28628021044 --job 84898765478 --log-failed 2>$null)",
-      "PowerShell(gh run view --job 84898765478 --log-failed)"
+      "PowerShell(gh run view --job 84898765478 --log-failed)",
+      "Bash(git status *)"
     ]
   }
 }

@@ -37,6 +37,7 @@ export function setActiveDbSlot(slot: string): void {
   activeSlot = slot;
   dbPromise = null;
   cachedDbKey = null;
+  dbFatalError = null;
   // Reset the ready promise for the new slot so that callers waiting on
   // dbReadyPromise get a fresh signal after the new slot's DB is opened.
   dbReadyPromise = new Promise<void>((resolve) => {
@@ -70,6 +71,7 @@ export async function closeActiveDatabase(): Promise<void> {
 export function resetDbConnection(): void {
   dbPromise = null;
   cachedDbKey = null;
+  dbFatalError = null;
 }
 
 export async function deleteIdentitySlot(slot: string): Promise<void> {
@@ -129,6 +131,7 @@ export interface StoredIdentity {
 }
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let dbFatalError: Error | null = null;
 // Tracks whether a close is in progress to prevent concurrent operations from
 // reopening the DB mid-close then immediately seeing "Access to closed resource".
 let _closing = false;
@@ -358,6 +361,8 @@ export function warmUpDb(): void {
 }
 
 async function db(): Promise<SQLite.SQLiteDatabase> {
+  if (dbFatalError) throw dbFatalError;
+
   // Wait until any in-progress close finishes before opening a new connection.
   if (_closing) {
     await new Promise<void>((resolve) => {
@@ -391,6 +396,9 @@ async function db(): Promise<SQLite.SQLiteDatabase> {
       // Reset so the next call retries cleanly instead of re-returning
       // this permanently-rejected promise (which causes infinite NPE crashes).
       dbPromise = null;
+      if (!isRecoverableDbError(err)) {
+        dbFatalError = err instanceof Error ? err : new Error(String(err));
+      }
       throw err;
     });
   }

@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, Modal } from 'react-native';
+import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, Modal, AppState, type AppStateStatus } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Crypto from 'expo-crypto';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -31,6 +31,7 @@ import { themedAlert } from '../components/AlertHost';
 import { SchedulePicker } from '../components/SchedulePicker';
 import { VoiceRecorderScreen } from './VoiceRecorder';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
+import { useChannelSelfHydrate } from '../hooks/useChannelSelfHydrate';
 import { encryptAndUploadMedia } from '../crypto/media';
 import { useChannels, type FeedPost } from '../store/channels';
 import type { PostMedia } from '../channels/channelService';
@@ -99,13 +100,25 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
   const myDisplayName = useIdentity((s) => s.displayName);
 
   const summary = useChannels((s) => s.subscribed.find((c) => c.channelId === channelId));
+  const hydrated = useChannels((s) => s.hydrated);
+  const hydrateSubscribed = useChannels((s) => s.hydrateSubscribed);
+  // Verified directory entry — the fallback name/avatar source for a channel
+  // opened from Discover before it's in `subscribed` (see channelName below).
+  const dirEntry = useChannels((s) => s.directory.find((c) => c.channelId === channelId));
   const posts = useChannels((s) => s.feeds[channelId]);
   const loadFeed = useChannels((s) => s.loadFeed);
   const sendPost = useChannels((s) => s.sendPost);
   const attachLive = useChannels((s) => s.attachLive);
   const deletePost = useChannels((s) => s.deletePost);
 
-  const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
+  // Prefer the subscribed summary; fall back to the verified directory entry so a
+  // channel opened from Discover (not yet subscribed) still shows its real name +
+  // avatar in the header — parity with the group header, which always carries the
+  // group name. Only when neither is known do we show the generic "Channels" label.
+  const channelName = summary?.name ?? dirEntry?.name ?? null;
+  const channelAvatarHash = summary?.avatarHash ?? dirEntry?.avatarHash ?? null;
+
+  const channelAvatarUri = useChannelAvatar(channelId, channelAvatarHash);
 
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -124,12 +137,26 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
 
   useEffect(() => { void loadPending(); }, [loadPending]);
 
+  useChannelSelfHydrate(hydrated, summary, hydrateSubscribed);
+
   useEffect(() => {
     if (!identity) return;
     void loadFeed(channelId, identity);
     const off = attachLive(identity);
     return off;
   }, [channelId, identity, loadFeed, attachLive]);
+
+  // Pull-on-foreground: if the user backgrounds the app while this screen is
+  // mounted (e.g. a scheduled post fired while backgrounded, or the socket
+  // dropped and attachLive's fan-out was missed), re-pull the delta on return
+  // to foreground rather than waiting for the next unrelated re-mount/navigation.
+  useEffect(() => {
+    if (!identity) return;
+    const sub = AppState.addEventListener('change', (s: AppStateStatus) => {
+      if (s === 'active') void loadFeed(channelId, identity);
+    });
+    return () => sub.remove();
+  }, [channelId, identity, loadFeed]);
 
   // While this feed is focused, suppress local notifications for its own posts
   // (same activeChatId guard Chat/GroupChat use). Reset on unmount.
@@ -367,7 +394,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
         style={{ paddingVertical: 12, paddingHorizontal: 15, borderBottomWidth: 1, borderBottomColor: t.divider }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-          <Avatar t={t} name={mine ? (summary?.name ?? '?') : senderLabel} seed={item.from} size={24} />
+          <Avatar t={t} name={mine ? (channelName ?? '?') : senderLabel} seed={item.from} size={24} />
           <Text style={{ fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.text }}>{senderLabel}</Text>
           <Text style={{ marginLeft: 'auto', fontFamily: t.fontMono, fontSize: 9, color: t.textFaint }}>#{item.seqNum}</Text>
         </View>
@@ -404,11 +431,11 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <TopBar
         t={t}
-        title={summary?.name ?? i18nT('channels.title')}
+        title={channelName ?? i18nT('channels.title')}
         left={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Pressable onPress={onBack} hitSlop={8} accessibilityLabel={i18nT('common.back', 'Back')}><I.ChevronL size={22} color={t.text} /></Pressable>
-            <Avatar t={t} name={summary?.name ?? '?'} seed={channelId} size={28} photoUri={channelAvatarUri} />
+            <Avatar t={t} name={channelName ?? '?'} seed={channelId} size={28} photoUri={channelAvatarUri} />
           </View>
         }
         right={

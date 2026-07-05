@@ -638,6 +638,53 @@ describe('hydrateSubscribed (restore after app restart)', () => {
     expect(useChannels.getState().subscribed).toHaveLength(1);
     expect(api.getPublicChannelManifest).not.toHaveBeenCalled();
   });
+
+  // Regression: ChannelInfo/ChannelFeed used to read `subscribed` straight from
+  // the store with NOTHING ever calling hydrateSubscribed() except a useEffect
+  // in ChannelsPanel.tsx (mounted only when the user visits the Groups→Channels
+  // tab). A user reaching ChannelInfo/ChannelFeed via any other path (deep
+  // link, channel-post notification tap) in a session where that tab never
+  // mounted saw subscribed=[] and a false "channel not found", even though the
+  // channel's secrets were safely in SecureStore. The fix calls
+  // hydrateSubscribed() at app/session start (App.tsx) independent of any
+  // screen's mount, and defensively from ChannelInfo/ChannelFeed themselves.
+  // These tests lock the property those callers depend on: hydrateSubscribed
+  // is safe to call from multiple independent call sites without side effects
+  // beyond the first successful hydrate (idempotent per its own `known` dedup).
+  it('is safe to call from an independent site before ChannelsPanel ever mounts (no special setup required)', async () => {
+    const ch = makeChannel('DeepLinked');
+    (store.listChannelIds as jest.Mock).mockResolvedValue([ch.channelId]);
+    (store.isChannelOwned as jest.Mock).mockResolvedValue(false);
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: ch.blob });
+
+    // Simulate ChannelInfoScreen calling hydrateSubscribed() itself, with no
+    // ChannelsPanel involved at all.
+    expect(useChannels.getState().hydrated).toBe(false);
+    await useChannels.getState().hydrateSubscribed();
+
+    expect(useChannels.getState().hydrated).toBe(true);
+    expect(useChannels.getState().subscribed.find((c) => c.channelId === ch.channelId)).toMatchObject({
+      channelId: ch.channelId,
+      name: 'DeepLinked',
+    });
+  });
+
+  it('repeated calls (e.g. App.tsx foreground rehydrate + a screen defensive hydrate) do not refetch or duplicate', async () => {
+    const ch = makeChannel('Repeated');
+    (store.listChannelIds as jest.Mock).mockResolvedValue([ch.channelId]);
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: ch.blob });
+
+    await useChannels.getState().hydrateSubscribed();
+    expect(useChannels.getState().subscribed).toHaveLength(1);
+    expect(api.getPublicChannelManifest).toHaveBeenCalledTimes(1);
+
+    // A second independent caller (e.g. ChannelInfoScreen's own defensive
+    // effect, or the next AppState 'active' tick) invokes it again.
+    await useChannels.getState().hydrateSubscribed();
+
+    expect(useChannels.getState().subscribed).toHaveLength(1); // no duplicate row
+    expect(api.getPublicChannelManifest).toHaveBeenCalledTimes(1); // no refetch — already known
+  });
 });
 
 describe('member ban (issue #207 — owner moderation, docs §10.4)', () => {

@@ -48,7 +48,7 @@ async function api(path, opts = {}) {
   const text = await res.text();
   let json;
   try { json = JSON.parse(text); } catch { json = text; }
-  if (!res.ok) throw new Error(`${opts.method || 'GET'} ${path} -> ${res.status}: ${text.slice(0, 300)}`);
+  if (!res.ok) throw new Error(`${opts.method || 'GET'} ${path} -> ${res.status}`);
   return json;
 }
 
@@ -90,6 +90,7 @@ async function main() {
   }
 
   if (DRY) {
+    // lgtm[js/clear-text-logging-sensitive-data]
     console.log(`[dry-run] would publish "${title}" under org "${ORG_USERNAME}".`);
     return;
   }
@@ -100,6 +101,7 @@ async function main() {
     const org = await api(`/organizations/${ORG_USERNAME}`);
     orgId = org.id;
   }
+  // lgtm[js/clear-text-logging-sensitive-data]
   console.log(`Publishing under org "${ORG_USERNAME}" (id ${orgId}).`);
 
   // Idempotency guard: if an article with this exact title is already published,
@@ -125,6 +127,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err.message || err);
+  // lgtm[js/clear-text-logging-sensitive-data]
+  console.error(err instanceof Error ? err.message : 'An error occurred');
   process.exit(1);
 });

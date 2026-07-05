@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Share } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import { useTheme } from '../theme/ThemeContext';
 import { FloatingMenu, type FloatingMenuItem } from './FloatingMenu';
 import { I } from './icons';
@@ -34,7 +34,7 @@ export function ShareLinkSheet({ visible, onClose, link, title, shareMessage }: 
 
   async function copy() {
     try {
-      await Clipboard.setStringAsync(link);
+      await copySensitiveText(link);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {/* ignore */}

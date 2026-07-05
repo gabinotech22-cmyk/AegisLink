@@ -266,7 +266,7 @@ describe('delete-for-everyone over the E2EE channel', () => {
     });
     await flush();
 
-    expect(mockRemoteDelete).toHaveBeenCalledWith(peer.aegisId, 'msg-to-retract');
+    expect(mockRemoteDelete).toHaveBeenCalledWith(peer.aegisId, 'msg-to-retract', peer.aegisId);
     expect(mockAppend).not.toHaveBeenCalled();
   });
 

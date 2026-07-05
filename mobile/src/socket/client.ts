@@ -588,8 +588,33 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
           }
         : {}),
     }, (ack: { ok: boolean, error?: string }) => {
-      if (ack?.ok) resolve();
-      else reject(new Error(ack?.error || 'failed to upload prekeys'));
+      if (ack?.ok) {
+        // Multi-device: sync the new SPK secret to our other linked devices.
+        try {
+          const innerPayload = {
+            v: 2,
+            from: identity.aegisId,
+            selfCopy: true,
+            deviceSync: { type: 'spk', spkId: nextSpkKeyId, spkSecretB64: encodeBase64(mySpkSecretCache!) }
+          };
+          const { stripAndPad } = require('../crypto/metadata') as typeof import('../crypto/metadata');
+          const innerBytes = stripAndPad(innerPayload);
+          const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
+          const outerCiphertext = nacl.box(innerBytes, outerNonce, identity.publicKey, identity.secretKey);
+          socket!.emit('envelope', {
+            id: Crypto.randomUUID(),
+            to: identity.aegisId,
+            ciphertext: encodeBase64(outerCiphertext),
+            nonce: encodeBase64(outerNonce),
+            selfCopy: true,
+          });
+        } catch (e) {
+          if (__DEV__) logger.warn('[socket] deviceSync broadcast failed:', (e as Error).message);
+        }
+        resolve();
+      } else {
+        reject(new Error(ack?.error || 'failed to upload prekeys'));
+      }
     });
   });
 }
@@ -978,7 +1003,9 @@ export function connect(identity: Identity): Socket {
 
   socket.on('envelope', async (env: WireSealedEnvelope) => {
     rdiag(`[RDIAG] envelope RECV from=${env.from ?? '(none)'} hasSenderPub=${!!env.senderPublicKeyB64} self=${!!env.selfCopy}`);
-    await handleIncoming(env, identity);
+    await handleIncoming(env, identity).catch((e) => {
+      if (__DEV__) logger.warn('[socket] handleIncoming failed:', (e as Error).message);
+    });
   });
 
   // Sealed-sender v2: no `from` on the wire. The ephemeral box opens with our
@@ -986,7 +1013,9 @@ export function connect(identity: Identity): Socket {
   // exact same downstream as v1 via decryptAndAppend.
   socket.on('envelope:v2', async (env: WireSealedEnvelopeV2) => {
     rdiag(`[RDIAG] envelope:v2 RECV id=${env.id}`);
-    await handleIncomingV2(env, identity);
+    await handleIncomingV2(env, identity).catch((e) => {
+      if (__DEV__) logger.warn('[socket] handleIncomingV2 failed:', (e as Error).message);
+    });
   });
 
   // ── Fase 4: dedicated mailbox delivery socket ────────────────────────────────
@@ -999,7 +1028,9 @@ export function connect(identity: Identity): Socket {
   if (MAILBOX_ENABLED) {
     void connectMailboxSocket((env) => {
       rdiag(`[RDIAG] envelope:mb RECV id=${env.id}`);
-      void handleIncomingV2(env, identity);
+      void handleIncomingV2(env, identity).catch((e) => {
+        if (__DEV__) logger.warn('[socket] handleIncomingV2(mb) failed:', (e as Error).message);
+      });
     });
   }
 
@@ -1845,9 +1876,40 @@ async function decryptAndAppendLocked(
     rdiag(`[RDIAG] established session + lower re-init → adopting (rekey) me=${identity.aegisId} peer=${contact.aegisId}`);
   }
 
-  if (existingJson && !parsed.x3dh) {
-    const s = reviveRatchetState(existingJson);
-    ratchetState = s;
+  let loadedRatchetState: RatchetState | null = null;
+  if (existingJson) {
+    loadedRatchetState = reviveRatchetState(existingJson);
+
+    // PREVENT REPLAY ATTACKS ON X3DH INIT (State Downgrade / DoS)
+    // If the message contains an x3dhInit but we already have an established session,
+    // we must try to decrypt it against the existing session first. If it succeeds,
+    // the message is a delayed or replayed message from this existing session, NOT
+    // a fresh handshake. If we were to blindly accept the x3dhInit, a replayed Message 0
+    // would successfully decrypt and overwrite our advanced session, causing a state downgrade.
+    if (parsed.x3dh) {
+      try {
+        const { cloneState } = require('../crypto/signal/ratchet') as typeof import('../crypto/signal/ratchet');
+        const rHeader = parseRatchetHeader(parsed.ratchet);
+        const rCiphertext = decodeBase64(parsed.ratchet.ciphertextB64);
+        const rNonce = decodeBase64(parsed.ratchet.nonceB64);
+        const trialState = cloneState(loadedRatchetState);
+        
+        // Trial decrypt - mutates trialState but leaves `loadedRatchetState` untouched.
+        if (ratchetDecrypt(trialState, rHeader, rCiphertext, rNonce)) {
+          // Success! This is a replay. Delete the x3dh header so we treat it as
+          // a normal message under the established session.
+          delete parsed.x3dh;
+          rdiag(`[RDIAG] x3dh-replay-prevented: existing session successfully decrypted message with X3DH headers me=${identity.aegisId} peer=${contact.aegisId}`);
+        }
+      } catch {
+        // Trial decrypt failed. This is expected if the sender legitimately wiped
+        // their state and sent a fresh X3DH init. Fall through to the fresh X3DH adoption block.
+      }
+    }
+  }
+
+  if (loadedRatchetState && !parsed.x3dh) {
+    ratchetState = loadedRatchetState;
   } else {
     // Bob doesn't have a session, or the sender is re-keying/starting a fresh session via X3DH setup!
     if (!parsed.x3dh) {
@@ -2143,14 +2205,14 @@ async function decryptAndAppendLocked(
         return true;
       }
 
-      // E2EE delete-for-everyone: the peer retracts one of their messages
-      // (payload.text = the target msgId). Arrives over the normal ratchet
-      // channel — durable (outbox + mailbox), sealed, zero relay metadata —
-      // unlike the old plaintext fire-and-forget `msg:delete` event. Apply
-      // silently; do NOT append a chat row. Still persist ratchet state.
       if (parsedPayload.type === 'msg_delete') {
         if (typeof parsedPayload.text === 'string' && parsedPayload.text) {
-          await useMessages.getState().remoteDelete(contact.aegisId, parsedPayload.text);
+          // If the retraction specifies a groupId, use it as the chatId (so group
+          // messages can be deleted). Otherwise default to contact.aegisId (1:1 chat).
+          const targetChatId = (typeof parsedPayload.groupId === 'string' && parsedPayload.groupId)
+            ? parsedPayload.groupId
+            : contact.aegisId;
+          await useMessages.getState().remoteDelete(targetChatId, parsedPayload.text, contact.aegisId);
         }
         await saveSessionState(contact.aegisId, ratchetState);
         return true;
@@ -2183,7 +2245,9 @@ async function decryptAndAppendLocked(
       if (parsedPayload.type === 'group_msg') {
         const groupId: string = parsedPayload.groupId;
         const claimedName: string = parsedPayload.groupName;
-        const senderId: string = parsedPayload.senderId ?? contact.aegisId;
+        // MUST use the mathematically-authenticated sender from the sealed sender
+        // channel, NOT the forgeable field in the JSON payload, to prevent spoofing.
+        const senderId: string = contact.aegisId;
         const msgBody: string = parsedPayload.body;
         const claimedMembers: string[] = parsedPayload.members ?? [senderId, identity.aegisId];
         const claimedAdminId: string | undefined = parsedPayload.adminId;
@@ -2240,6 +2304,12 @@ async function decryptAndAppendLocked(
         async function getAdminSigningKey(): Promise<string | null> {
           if (!claimedAdminId) return null;
           if (claimedAdminId === senderId) return resolveSigningKey(claimedAdminId, contact.signingPublicKeyB64);
+          // Never resolve/auto-add the local user's own identity as a "group
+          // admin contact" — a buggy or adversarial group could claim the
+          // local aegisId as its admin, which would otherwise silently create
+          // a self-contact row (store guard in contacts.ts also rejects this,
+          // but skip the lookup entirely here so we never even attempt it).
+          if (claimedAdminId === identity.aegisId) return null;
           let admin = useContacts.getState().contacts.find((c) => c.aegisId === claimedAdminId);
           if (!admin) {
             try {
@@ -2707,9 +2777,9 @@ async function decryptAndAppendLocked(
         }
 
         const senderDisp = parsedPayload.senderName || senderId.substring(0, 8);
-        // Embed sender prefix in body so GroupBubble can extract and display it
-        // as a sender header chip above the bubble. For media messages cleanMsgBody
-        // is the filename / "[audio:Ns]" / "" (image) — never the raw blob URI.
+        // Backwards-compat: still embed sender prefix in body so older code
+        // paths (notifications, previews) that read m.body keep working. The UI
+        // layer (GroupBubble) now reads m.senderId for tamper-proof attribution.
         const formattedBody = `${senderDisp}: ${cleanMsgBody}`;
 
         await saveSessionState(contact.aegisId, ratchetState);
@@ -2723,6 +2793,7 @@ async function decryptAndAppendLocked(
           type: groupMsgType as 'text' | 'image' | 'audio' | 'video' | 'file' | 'poll' | 'location' | 'view_once',
           mediaUri: groupMsgMediaUri,
           attachments: groupMsgAttachments,
+          senderId,
         });
 
         // Trigger local notification in alignment with AegisLink notifications spec.
@@ -2983,6 +3054,11 @@ async function decryptAndAppendLocked(
     mediaUri: detectedMediaUri,
     expiresAt: parsedPayload?.expiresAt ?? null,
     attachments: detectedAttachments,
+    // Persist the mathematically-authenticated sender so a later peer-initiated
+    // retraction (msg_delete) can match this row via setRemoteMessageDeleted's
+    // `sender_id = ?` predicate — without this, 1:1 incoming rows had sender_id
+    // NULL and remote unsend silently no-opped in direct chats.
+    senderId: contact.aegisId,
   });
 
   // Trigger local notification in alignment with AegisLink notifications spec
@@ -3377,6 +3453,14 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
   // Defence-in-depth: the inner payload MUST also self-declare as a self-copy.
   if ((parsed as { selfCopy?: unknown }).selfCopy !== true) {
     if (__DEV__) logger.warn('[socket] self-copy inner flag missing — dropping');
+    return;
+  }
+
+  if ((parsed as any).deviceSync?.type === 'spk') {
+    const spkSync = (parsed as any).deviceSync;
+    const { saveSpkSecret } = require('../db/local') as typeof import('../db/local');
+    await saveSpkSecret(spkSync.spkId, spkSync.spkSecretB64);
+    if (__DEV__) logger.debug(`[socket] Synced SPK secret for keyId ${spkSync.spkId} from other device`);
     return;
   }
 

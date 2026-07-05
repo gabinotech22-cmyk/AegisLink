@@ -39,7 +39,7 @@ export function previewLabel(
   if (body.startsWith('[sticker:')) return `🖼 ${t('attachSheet.sticker', 'Sticker')}`;
   if (body.startsWith('[image:')) return `📷 ${t('attachSheet.image', 'Image')}`;
   if (body.startsWith('[audio:')) return `🎙 ${t('attachSheet.audio', 'Audio')}`;
-  if (body.startsWith('[viewonce:')) return `👁 ${t('attachSheet.viewOnce', 'View once')}`;
+  if (body.startsWith('[viewonce]') || body.startsWith('[viewonce:')) return `👁 ${t('attachSheet.viewOnce', 'View once')}`;
   if (body.startsWith('[location:')) return `📍 ${t('attachSheet.location', 'Location')}`;
   if (body.startsWith('[file:')) {
     // Wire format: [file:<name>:<blobUri>]
