@@ -12,7 +12,7 @@ import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
-import { hashPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
+import { hashPinWithSalt, DURESS_PIN_SALT, verifyPIN } from '../lock/pin';
 
 const PANIC_KEY = 'aegis.panic.v1';
 
@@ -47,7 +47,7 @@ export function PanicScreen({ onBack }: Props) {
   const [wiping, setWiping] = useState(false);
 
   // PIN modal inline feedback: null = no msg, 'invalid' | 'saved' | 'error'
-  const [pinFeedback, setPinFeedback] = useState<null | 'invalid' | 'saved' | 'error'>(null);
+  const [pinFeedback, setPinFeedback] = useState<null | 'invalid' | 'sameAsNormal' | 'saved' | 'error'>(null);
 
   // Regenerate-token confirm: null = idle, 'confirm' = showing confirm
   const [regenConfirm, setRegenConfirm] = useState(false);
@@ -552,7 +552,7 @@ export function PanicScreen({ onBack }: Props) {
               value={tempPin}
               onChangeText={(val) => setTempPin(val.replace(/[^0-9]/g, ''))}
               keyboardType="numeric"
-              maxLength={6}
+              maxLength={4}
               secureTextEntry
               autoFocus
               style={{
@@ -586,9 +586,11 @@ export function PanicScreen({ onBack }: Props) {
                 }}>
                   {pinFeedback === 'invalid'
                     ? i18nT('panic.invalidPinDesc')
-                    : pinFeedback === 'saved'
-                      ? i18nT('panic.pinSavedDesc')
-                      : i18nT('panic.pinSaveErrorDesc')}
+                    : pinFeedback === 'sameAsNormal'
+                      ? i18nT('panic.decoyPinSameAsNormal', 'The decoy PIN cannot be the same as the lock PIN.')
+                      : pinFeedback === 'saved'
+                        ? i18nT('panic.pinSavedDesc')
+                        : i18nT('panic.pinSaveErrorDesc')}
                 </Text>
               </View>
             )}
@@ -597,7 +599,7 @@ export function PanicScreen({ onBack }: Props) {
                 accessibilityRole="button"
                 accessibilityLabel={i18nT('panic.savePinBtn')}
                 onPress={() => {
-                  if (tempPin.length < 4 || tempPin.length > 6) {
+                  if (tempPin.length !== 4) {
                     setPinFeedback('invalid');
                     return;
                   }
@@ -605,6 +607,11 @@ export function PanicScreen({ onBack }: Props) {
                   const len = tempPin.length;
                   void (async () => {
                     try {
+                      const isNormalPin = await verifyPIN(tempPin);
+                      if (isNormalPin) {
+                        setPinFeedback('sameAsNormal');
+                        return;
+                      }
                       const pinHash = await hashPinWithSalt(tempPin, DURESS_PIN_SALT);
                       setPinLength(len);
                       await persist({ pinHash, pinLength: len, pinValue: undefined });
