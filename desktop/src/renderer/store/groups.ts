@@ -60,6 +60,15 @@ interface GroupsState {
     patch: Partial<Pick<StoredGroup, 'adminOnlyInvite' | 'moderateNewMembers' | 'permissions'>>,
   ) => Promise<void>;
   leaveGroup: (id: string) => Promise<void>;
+  /**
+   * Admin-only: dissolve the group for EVERY member. Broadcasts a signed
+   * dissolution marker (canonicalGroupDissolveBytes, see socket/client.ts
+   * signGroupDissolve) to the roster first (offline-safe via the group
+   * offline queue), then wipes the group locally exactly like leaveGroup.
+   * No-op for non-admins — use leaveGroup instead. Parity with mobile's
+   * store/groups.ts dissolveGroup.
+   */
+  dissolveGroup: (id: string) => Promise<void>;
 }
 
 export const useGroups = create<GroupsState>((set, get) => ({
@@ -135,6 +144,33 @@ export const useGroups = create<GroupsState>((set, get) => ({
   },
 
   async leaveGroup(id) {
+    await deleteContactMessages(id);
+    await deleteGroup(id);
+    set({ groups: get().groups.filter((g) => g.id !== id) });
+    const { useMessages } = await import('./messages');
+    useMessages.getState().clearChat(id);
+  },
+
+  async dissolveGroup(id) {
+    const group = get().groups.find((g) => g.id === id);
+    if (!group) return;
+    const { useIdentity } = await import('./identity');
+    const me = useIdentity.getState().identity;
+    // Admin-only. Non-admins must use leaveGroup instead — the UI (GroupAdmin.tsx)
+    // already branches on this, but the store itself must not trust the caller.
+    if (!me || !group.adminId || me.aegisId !== group.adminId) return;
+
+    // Broadcast FIRST so the signed dissolution rides the offline queue even if
+    // we are offline right now.
+    try {
+      const { broadcastGroupDissolve } = await import('../socket/client');
+      await broadcastGroupDissolve(me, id);
+    } catch {
+      // Best-effort — the offline queue (if reached) retries on reconnect
+      // regardless of this catch.
+    }
+
+    // Local wipe — identical to leaveGroup.
     await deleteContactMessages(id);
     await deleteGroup(id);
     set({ groups: get().groups.filter((g) => g.id !== id) });

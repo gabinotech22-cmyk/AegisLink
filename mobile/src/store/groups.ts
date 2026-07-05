@@ -129,6 +129,13 @@ interface GroupsState {
    *  joins the active list and starts rendering messages. */
   acceptGroupInvite: (id: string) => Promise<void>;
   leaveGroup: (id: string) => Promise<void>;
+  /**
+   * Admin-only: dissolve the group for EVERY member. Broadcasts a signed
+   * dissolution marker (canonicalGroupDissolveBytes) to the roster first
+   * (offline-safe via the outbox), then wipes the group locally exactly like
+   * leaveGroup. No-op for non-admins — use leaveGroup instead.
+   */
+  dissolveGroup: (id: string) => Promise<void>;
 }
 
 export const useGroups = create<GroupsState>((set, get) => ({
@@ -418,6 +425,39 @@ export const useGroups = create<GroupsState>((set, get) => ({
     await deleteGroup(id);
     set({ groups: get().groups.filter((g) => g.id !== id) });
     // Clear in-memory chat state from the messages store
+    const { useMessages } = require('./messages');
+    useMessages.getState().clearChat(id);
+  },
+
+  async dissolveGroup(id) {
+    const group = get().groups.find((g) => g.id === id);
+    if (!group) return;
+    const { useIdentity } = require('./identity') as typeof import('./identity');
+    const me = useIdentity.getState().identity;
+    // Admin-only. Non-admins must use leaveGroup instead — the UI (GroupAdmin.tsx)
+    // already branches on this, but the store itself must not trust the caller.
+    if (!me || !group.adminId || me.aegisId !== group.adminId) return;
+
+    // Broadcast FIRST so the signed dissolution rides the outbox even if we are
+    // offline right now (mirrors removeMember: re-key/broadcast before the local
+    // wipe). If the broadcast throws for a reason other than "not admin" (e.g.
+    // transient network), we still proceed to the local wipe below — the admin
+    // explicitly asked to delete the group on their own device, and the signed
+    // marker was already durably enqueued per-member inside broadcastGroupDissolve
+    // (via sendGroupMessage's outbox) before any exception could propagate from
+    // the network call itself.
+    try {
+      const { broadcastGroupDissolve } = require('../socket/client') as typeof import('../socket/client');
+      await broadcastGroupDissolve(me, id);
+    } catch {
+      // Best-effort — the outbox entries persisted by broadcastGroupDissolve (if
+      // it got that far) retry on the next reconnect regardless of this catch.
+    }
+
+    // Local wipe — identical to leaveGroup.
+    await deleteContactMessages(id);
+    await deleteGroup(id);
+    set({ groups: get().groups.filter((g) => g.id !== id) });
     const { useMessages } = require('./messages');
     useMessages.getState().clearChat(id);
   },

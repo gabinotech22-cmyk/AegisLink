@@ -235,3 +235,59 @@ export function verifyGroupMetadataV2(
     return false;
   }
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Group dissolution (aegis.group.dissolve.v1)
+//
+// ADDITIVE and INDEPENDENT of the roster/governance signatures above. Deleting
+// a group must be authenticated exactly like any other admin action — a bare
+// `dissolved: true` flag on the wire with no signature would let ANY sender
+// (or a malicious relay replaying/crafting a payload) wipe a group for every
+// member. The signature is over {groupId, adminId, createdAt} so it cannot be
+// replayed against a different group, and only the ORIGINAL adminId's signing
+// key can produce it. Receivers must additionally check that the sender of
+// the envelope IS existingGroup.adminId AND claimedAdminId === existingGroup.adminId
+// (same isAdmin gate used for roster/name/avatar updates) before honoring it.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Canonical dissolution signing payload. `createdAt` is the group's original
+ * creation timestamp (not "now") so the signed bytes are a pure function of
+ * immutable group identity — no fresh nonce/timestamp state to track — while
+ * still being impossible to replay against a different group (groupId is
+ * covered) or forge without the admin's key.
+ */
+export function canonicalGroupDissolveBytes(args: {
+  groupId: string;
+  adminId: string;
+  createdAt: number;
+}): Uint8Array {
+  const canonical = JSON.stringify(['aegis.group.dissolve.v1', args.groupId, args.adminId, args.createdAt]);
+  return new TextEncoder().encode(canonical);
+}
+
+/** Sign a group-dissolution marker with the admin's Ed25519 signing secret key. */
+export function signGroupDissolve(
+  args: { groupId: string; adminId: string; createdAt: number },
+  signingSecretKey: Uint8Array,
+): string {
+  const sig = nacl.sign.detached(canonicalGroupDissolveBytes(args), signingSecretKey);
+  return encodeBase64(sig);
+}
+
+/** Verify a group-dissolution signature (Base64) was made by the admin's signing key. */
+export function verifyGroupDissolve(
+  args: { groupId: string; adminId: string; createdAt: number },
+  sigB64: string,
+  signingPublicKeyB64: string,
+): boolean {
+  try {
+    const sig = decodeBase64(sigB64);
+    const pub = decodeBase64(signingPublicKeyB64);
+    if (sig.length !== nacl.sign.signatureLength) return false;
+    if (pub.length !== nacl.sign.publicKeyLength) return false;
+    return nacl.sign.detached.verify(canonicalGroupDissolveBytes(args), sig, pub);
+  } catch {
+    return false;
+  }
+}

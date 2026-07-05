@@ -15,7 +15,7 @@ interface Props {
 
 export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
   const { t } = useTheme();
-  const { renameGroup, addMember, removeMember, updateGroupPermissions, leaveGroup } = useGroups();
+  const { renameGroup, addMember, removeMember, updateGroupPermissions, leaveGroup, dissolveGroup } = useGroups();
   const contacts = useContacts((s) => s.contacts);
   const identity = useIdentity((s) => s.identity);
   const [editingName, setEditingName] = useState(false);
@@ -24,6 +24,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
   const group = useGroups((s) => s.groups.find((g) => g.id === groupProp.id)) ?? groupProp;
 
   const isMe = (id: string) => id === identity?.aegisId;
+  const amIAdmin = !!identity && identity.aegisId === group.adminId;
 
   function getMemberName(id: string) {
     if (isMe(id)) return 'You';
@@ -55,8 +56,17 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
 
   function handleRemoveMember(id: string) {
     if (isMe(id)) {
-      if (window.confirm('Leave group and delete locally?')) {
-        void leaveGroup(group.id);
+      const isAdmin = !!identity && identity.aegisId === group.adminId;
+      // The group admin "leaving" actually DISSOLVES the group for everyone —
+      // a plain leaveGroup would only wipe it locally and silently strand every
+      // other member in a group whose creator vanished. Non-admins keep the
+      // original leave-only flow (they lack the signing key to dissolve).
+      const message = isAdmin
+        ? 'You are the admin. Leaving will delete this group for every member, not just you. Continue?'
+        : 'Leave group and delete locally?';
+      if (window.confirm(message)) {
+        if (isAdmin) void dissolveGroup(group.id);
+        else void leaveGroup(group.id);
         onBack();
       }
       return;
@@ -187,15 +197,25 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
           >
             Leave group
           </button>
-          <button
-            onClick={() => {
-              if (window.confirm('Delete group for everyone? This cannot be undone.')) { void leaveGroup(group.id); onBack(); }
-            }}
-            style={{ display: 'block', width: '100%', padding: '13px 16px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', fontFamily: t.font, fontSize: 14, color: t.danger, fontWeight: '600' }}
-            aria-label="Delete group"
-          >
-            Delete group for everyone
-          </button>
+          {/* Only the group admin holds the signing key that can dissolve the
+              group for every member (see socket/client.ts broadcastGroupDissolve
+              / signGroupDissolve) — a non-admin clicking this could previously
+              only wipe their own local copy while the button promised
+              otherwise. Hidden for non-admins to avoid that false promise. */}
+          {amIAdmin && (
+            <button
+              onClick={() => {
+                if (window.confirm('Delete group for everyone? This cannot be undone.')) {
+                  void dissolveGroup(group.id);
+                  onBack();
+                }
+              }}
+              style={{ display: 'block', width: '100%', padding: '13px 16px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', fontFamily: t.font, fontSize: 14, color: t.danger, fontWeight: '600' }}
+              aria-label="Delete group"
+            >
+              Delete group for everyone
+            </button>
+          )}
         </Section>
       </div>
     </div>

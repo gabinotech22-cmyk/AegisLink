@@ -54,6 +54,7 @@ import {
   verifyGroupMetadata,
   signGroupMetadataV2,
   verifyGroupMetadataV2,
+  verifyGroupDissolve,
   type GroupPermissions,
 } from '../crypto/groupSig';
 
@@ -202,6 +203,16 @@ const profiledGroupImages = new Set<string>();
  * message. Keep in sync with the receive-handler intercept.
  */
 const GROUP_META_SYNC_BODY = '[group:meta]';
+
+/**
+ * Body of a group-dissolution carrier. Rendered as NO chat bubble (suppressed
+ * on receipt, same as GROUP_META_SYNC_BODY) — its entire purpose is to carry
+ * the signed `dissolved`/`dissolveSig` fields on the payload (see
+ * sendGroupMessage) so the receive path can verify-then-wipe. Distinct from
+ * GROUP_META_SYNC_BODY so a dissolve is never confused with an ordinary
+ * metadata refresh at the intercept site.
+ */
+const GROUP_DISSOLVE_BODY = '[group:dissolved]';
 
 /**
  * Forget that a group's avatar was already sent this session, so the next group
@@ -2356,6 +2367,60 @@ async function decryptAndAppendLocked(
         const { getGroup, saveGroup } = require('../db/local');
         const existingGroup = await getGroup(groupId);
 
+        // ── Group dissolution (admin only, signature-gated) ────────────────────
+        // Wire shape: { dissolved: true, dissolveAdminId, dissolveSig } riding a
+        // `[group:dissolved]` carrier body. Honored ONLY if:
+        //   1. We actually have this group locally (nothing to dissolve otherwise).
+        //   2. The envelope's sealed-sender-authenticated senderId IS the group's
+        //      CURRENT adminId (existingGroup.adminId) — same isAdmin gate as
+        //      roster/name/avatar updates below. A former/never-admin, or the
+        //      admin of a DIFFERENT group, cannot trigger this.
+        //   3. dissolveAdminId (the claimed signer) also equals existingGroup.adminId
+        //      — mirrors the double-check (claimedAdminId === existingGroup.adminId)
+        //      used by the v1 metadata-update gate.
+        //   4. verifyGroupDissolve succeeds against the admin's REAL signing key
+        //      (resolved the same way as every other admin-signed field — never
+        //      trust a signing key embedded in the payload itself).
+        // On success: wipe the group locally exactly like leaveGroup (messages +
+        // group record + in-memory chat state) for the RECEIVING member. Non-admin
+        // or bad-signature dissolve attempts are silently ignored — the group and
+        // its messages are left completely untouched.
+        if (
+          parsedPayload.dissolved === true &&
+          existingGroup &&
+          existingGroup.adminId &&
+          senderId === existingGroup.adminId &&
+          parsedPayload.dissolveAdminId === existingGroup.adminId
+        ) {
+          const dissolveSig: string | undefined =
+            typeof parsedPayload.dissolveSig === 'string' ? parsedPayload.dissolveSig : undefined;
+          const adminPub = await resolveSigningKey(existingGroup.adminId, contact.signingPublicKeyB64);
+          const dissolveIsAuthentic =
+            !!dissolveSig &&
+            !!adminPub &&
+            verifyGroupDissolve(
+              { groupId, adminId: existingGroup.adminId, createdAt: existingGroup.createdAt },
+              dissolveSig,
+              adminPub,
+            );
+          if (dissolveIsAuthentic) {
+            const { deleteContactMessages, deleteGroup } = require('../db/local');
+            await deleteContactMessages(groupId);
+            await deleteGroup(groupId);
+            const { useGroups } = require('../store/groups');
+            useGroups.setState((s: { groups: Array<{ id: string }> }) => ({
+              groups: s.groups.filter((g) => g.id !== groupId),
+            }));
+            const { useMessages } = require('../store/messages');
+            useMessages.getState().clearChat(groupId);
+            await saveSessionState(contact.aegisId, ratchetState);
+            return true;
+          }
+          if (__DEV__) logger.warn('[socket] group dissolve rejected — invalid or missing signature');
+          // Fall through — treat as an ordinary (untrusted) metadata message so
+          // the rest of the pipeline behaves exactly as if `dissolved` were absent.
+        }
+
         if (isV2) {
           // ── v2 path: roster by reference ──────────────────────────────────────
           // The verify-before-trust decision is a PURE function
@@ -4099,6 +4164,13 @@ export async function sendGroupMessage(opts: {
    * Mirrors the same flag on sendMessage() for 1:1 chats.
    */
   skipLocalAppend?: boolean;
+  /**
+   * Admin-only, signed group-dissolution marker (see groupSig.ts,
+   * canonicalGroupDissolveBytes). When present the payload carries
+   * `dissolved: true` + `dissolveSig` so every member's receive path can
+   * verify-then-wipe the group. Set only by broadcastGroupDissolve.
+   */
+  dissolve?: { adminId: string; dissolveSig: string };
 }): Promise<void> {
   const { getGroup, saveGroup } = require('../db/local');
   const group = await getGroup(opts.groupId);
@@ -4237,6 +4309,11 @@ export async function sendGroupMessage(opts: {
         : {}),
       groupAvatarColor,
       groupAvatarImage,
+      // Group dissolution (admin only, signed — see canonicalGroupDissolveBytes).
+      // Absent for every ordinary message; only set by broadcastGroupDissolve.
+      ...(opts.dissolve
+        ? { dissolved: true, dissolveAdminId: opts.dissolve.adminId, dissolveSig: opts.dissolve.dissolveSig }
+        : {}),
       senderId: opts.identity.aegisId,
       senderName,
       senderColor,
@@ -4341,6 +4418,42 @@ export async function broadcastGroupMetadata(identity: Identity, groupId: string
     groupId,
     plaintext: GROUP_META_SYNC_BODY,
     skipLocalAppend: true,
+  });
+}
+
+/**
+ * Admin-only: dissolve a group for every member. Signs a dedicated
+ * {groupId, adminId, createdAt} marker (canonicalGroupDissolveBytes) — NOT the
+ * roster/name signature, which covers different bytes — so a non-admin, or a
+ * replay against a different group, can never forge it. The signed marker
+ * rides the existing group_msg carrier (`[group:dissolved]` body, no bubble),
+ * fanned out to every member via sendGroupMessage's outbox, so it survives the
+ * caller being offline. The caller (store/groups.ts dissolveGroup) is
+ * responsible for wiping the group LOCALLY only after this resolves — mirrors
+ * the "broadcast first, then local wipe" ordering used by leaveGroup's peers
+ * (removeMember re-keys/broadcasts before touching local state).
+ *
+ * Throws if the local identity is not the group's admin — callers must gate
+ * on `group.adminId === identity.aegisId` before invoking (dissolveGroup does).
+ */
+export async function broadcastGroupDissolve(identity: Identity, groupId: string): Promise<void> {
+  const { getGroup } = require('../db/local');
+  const group = await getGroup(groupId);
+  if (!group) throw new Error('group_not_found');
+  if (group.adminId !== identity.aegisId) throw new Error('not_group_admin');
+
+  const { signGroupDissolve } = require('../crypto/groupSig') as typeof import('../crypto/groupSig');
+  const dissolveSig = signGroupDissolve(
+    { groupId, adminId: identity.aegisId, createdAt: group.createdAt },
+    identity.signingSecretKey,
+  );
+
+  await sendGroupMessage({
+    identity,
+    groupId,
+    plaintext: GROUP_DISSOLVE_BODY,
+    skipLocalAppend: true,
+    dissolve: { adminId: identity.aegisId, dissolveSig },
   });
 }
 

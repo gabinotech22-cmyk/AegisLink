@@ -35,7 +35,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { renameGroup, updateGroupAvatar, addMember, removeMember, setGroupPermission, setMemberRole, leaveGroup } = useGroups();
+  const { renameGroup, updateGroupAvatar, addMember, removeMember, setGroupPermission, setMemberRole, leaveGroup, dissolveGroup } = useGroups();
   const contacts = useContacts((s) => s.contacts);
   const identity = useIdentity((s) => s.identity);
   const myAvatarImage = useIdentity((s) => s.avatarImage);
@@ -124,17 +124,27 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
 
   function handleRemoveMember(aegisId: string) {
     if (aegisId === identity?.aegisId) {
-      themedAlert(i18nT('groupAdmin.leaveGroupTitle'), i18nT('groupAdmin.leaveGroupDesc'), [
-        { text: i18nT('common.cancel'), style: 'cancel' },
-        {
-          text: i18nT('groupAdmin.leaveAndDelete'),
-          style: 'destructive',
-          onPress: () => {
-            void leaveGroup(group.id);
-            onBack();
+      const isAdmin = !!identity && identity.aegisId === group.adminId;
+      // The group admin "leaving" actually DISSOLVES the group for everyone —
+      // a plain leaveGroup would only wipe it locally and silently strand every
+      // other member in a group whose creator vanished. Non-admins keep the
+      // original leave-only flow (they lack the signing key to dissolve).
+      themedAlert(
+        isAdmin ? i18nT('groupAdmin.dissolveGroupTitle') : i18nT('groupAdmin.leaveGroupTitle'),
+        isAdmin ? i18nT('groupAdmin.dissolveGroupDesc') : i18nT('groupAdmin.leaveGroupDesc'),
+        [
+          { text: i18nT('common.cancel'), style: 'cancel' },
+          {
+            text: isAdmin ? i18nT('groupAdmin.dissolveAndDelete') : i18nT('groupAdmin.leaveAndDelete'),
+            style: 'destructive',
+            onPress: () => {
+              if (isAdmin) void dissolveGroup(group.id);
+              else void leaveGroup(group.id);
+              onBack();
+            },
           },
-        },
-      ]);
+        ],
+      );
       return;
     }
     const name = getMemberName(aegisId);
