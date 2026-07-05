@@ -83,6 +83,10 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   // mode: null while initialising, then 'biometric' or 'pin'
   const [mode, setMode] = useState<'biometric' | 'pin' | null>(null);
   const [bioAvailable, setBioAvailable] = useState(false);
+  // Which biometric the device offers — drives the biometric view's icon + copy
+  // (face vs fingerprint). Detected in init; does NOT affect WHETHER biometric
+  // mode shows — that stays gated on `bio && biometricsEnabled` (PIN is default).
+  const [bioKind, setBioKind] = useState<'face' | 'fingerprint'>('fingerprint');
   const [hasPIN, setHasPIN] = useState(false);
 
   const [pinCode, setPinCode] = useState('');
@@ -111,17 +115,32 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       // `biometricsEnabled` controls auto-launch behaviour, not whether the
       // button is shown.
       let bio = false;
+      let kind: 'face' | 'fingerprint' = 'fingerprint';
       try {
         // expo-local-authentication works perfectly in modern Expo Go builds
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
+        const LA = require('expo-local-authentication') as {
+          hasHardwareAsync(): Promise<boolean>;
+          isEnrolledAsync(): Promise<boolean>;
+          supportedAuthenticationTypesAsync(): Promise<number[]>;
+        };
         const hasHw = await LA.hasHardwareAsync();
         const enrolled = await LA.isEnrolledAsync();
         bio = hasHw && enrolled;
+        if (bio) {
+          // AuthenticationType: 1 = FINGERPRINT, 2 = FACIAL_RECOGNITION.
+          // Prefer face when the device reports it; otherwise fingerprint.
+          const types = await LA.supportedAuthenticationTypesAsync();
+          if (types.includes(2)) kind = 'face';
+          else if (types.includes(1)) kind = 'fingerprint';
+        }
       } catch { /* module not available in this build */ }
 
       setBioAvailable(bio);
-      setBioStatus(i18nT('lock.tapToUnlock'));
+      setBioKind(kind);
+      setBioStatus(kind === 'face'
+        ? i18nT('lock.lookAtDevice', 'Mira el dispositivo')
+        : i18nT('lock.touchSensor', 'Toca el sensor'));
 
       // Auto-launch biometric UI only when the user has enabled it AND hardware
       // is present. If the preference is off but hardware exists, we show PIN
@@ -419,7 +438,9 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
               />
             ))}
             <View style={{ width: 74, height: 74, borderRadius: 37, backgroundColor: t.surface, borderWidth: 1, borderColor: t.borderStrong, alignItems: 'center', justifyContent: 'center' }}>
-              <I.Fingerprint size={40} color={t.accent} />
+              {bioKind === 'face'
+                ? <I.FaceId size={40} color={t.accent} />
+                : <I.Fingerprint size={40} color={t.accent} />}
             </View>
           </Pressable>
 
@@ -428,7 +449,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
               {bioStatus}
             </Text>
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.6, marginTop: 6 }}>
-              {i18nT('lock.faceIdLabel')}
+              {i18nT(bioKind === 'face' ? 'lock.faceIdLabel' : 'lock.fingerprintUnlockLabel')}
             </Text>
           </View>
 
