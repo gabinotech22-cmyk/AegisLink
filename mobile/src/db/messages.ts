@@ -33,6 +33,8 @@ export interface StoredMessage {
   deliveryStatus?: 'sent' | 'delivered' | 'read';
   expiresAt?: number | null;
   attachments?: Attachment[] | null;
+  /** Authenticated sender aegisId from the E2EE envelope (group messages). */
+  senderId?: string | null;
 }
 
 interface MessageRow {
@@ -51,6 +53,7 @@ interface MessageRow {
   delivery_status: string | null;
   expires_at: number | null;
   attachments: string | null;
+  sender_id: string | null;
 }
 
 async function rowToMessage(r: MessageRow, body: string): Promise<StoredMessage> {
@@ -79,6 +82,7 @@ async function rowToMessage(r: MessageRow, body: string): Promise<StoredMessage>
     deliveryStatus: (r.delivery_status as 'sent' | 'delivered' | 'read' | null) ?? 'sent',
     expiresAt: r.expires_at ?? null,
     attachments,
+    senderId: r.sender_id ?? null,
   };
 }
 
@@ -88,8 +92,8 @@ export async function saveMessage(m: StoredMessage): Promise<void> {
     const encryptedMediaUri = m.mediaUri ? await encryptBody(m.mediaUri) : null;
     await d.runAsync(
       `INSERT OR REPLACE INTO messages
-       (id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments, sender_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       m.id,
       m.chatId,
       m.direction,
@@ -104,7 +108,8 @@ export async function saveMessage(m: StoredMessage): Promise<void> {
       m.pinned ? 1 : 0,
       m.deliveryStatus ?? 'sent',
       m.expiresAt ?? null,
-      m.attachments ? JSON.stringify(m.attachments) : null
+      m.attachments ? JSON.stringify(m.attachments) : null,
+      m.senderId ?? null
     );
   });
 }
@@ -130,7 +135,7 @@ export async function updateMessageMediaUri(id: string, mediaUri: string): Promi
   });
 }
 
-const MSG_SELECT = `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments`;
+const MSG_SELECT = `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments, sender_id`;
 
 export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[]> {
   return withDb(async (d) => {
@@ -198,15 +203,16 @@ export async function setMessageDeleted(id: string): Promise<void> {
  * must not be able to erase the user's own messages or messages from other
  * chats by supplying an arbitrary id. Returns true iff a row was deleted.
  */
-export async function setRemoteMessageDeleted(id: string, chatId: string): Promise<boolean> {
+export async function setRemoteMessageDeleted(id: string, chatId: string, senderId: string): Promise<boolean> {
   return withDb(async (d) => {
     const empty = await encryptBody('');
     const res = await d.runAsync(
       `UPDATE messages SET deleted = 1, body = ?, media_uri = NULL
-         WHERE id = ? AND chat_id = ? AND direction = 'in'`,
+         WHERE id = ? AND chat_id = ? AND sender_id = ? AND direction = 'in'`,
       empty,
       id,
-      chatId
+      chatId,
+      senderId
     );
     return res.changes > 0;
   });

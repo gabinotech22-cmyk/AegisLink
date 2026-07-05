@@ -1,5 +1,15 @@
 import * as SQLite from 'expo-sqlite';
 
+async function addColumn(d: SQLite.SQLiteDatabase, table: string, colDef: string) {
+  try {
+    await d.execAsync(`ALTER TABLE ${table} ADD COLUMN ${colDef};`);
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.includes('duplicate column name')) return;
+    throw e;
+  }
+}
+
+
 /**
  * Runs every PRAGMA, CREATE TABLE, and migration execAsync on a freshly opened
  * SQLiteDatabase handle.  Only execAsync calls are made here so that openAndInit
@@ -73,7 +83,8 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       starred         INTEGER NOT NULL DEFAULT 0,
       deleted         INTEGER NOT NULL DEFAULT 0,
       delivery_status TEXT NOT NULL DEFAULT 'sent',
-      expires_at      INTEGER
+      expires_at      INTEGER,
+      sender_id       TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
@@ -202,7 +213,7 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 11;
+  const USER_DB_VERSION = 12;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -215,7 +226,7 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   if (currentVersion < 2) {
     // v1 → v2: add delivery_status for read receipts and delivery indicators
-    try { await d.execAsync("ALTER TABLE messages ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'sent';"); } catch (e) {}
+    await addColumn(d, 'messages', "delivery_status TEXT NOT NULL DEFAULT 'sent';");
     await d.execAsync('PRAGMA user_version = 2');
   }
 
@@ -226,17 +237,17 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // Each ALTER is wrapped individually — "duplicate column name" means the
     // column already exists (e.g. from an earlier unconditional migration run),
     // which is harmless and should be silently ignored.
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN admin_only_invite INTEGER NOT NULL DEFAULT 1;'); } catch {}
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN moderate_new_members INTEGER NOT NULL DEFAULT 0;'); } catch {}
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN admin_id TEXT;'); } catch {}
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN admin_sig TEXT;'); } catch {}
+    await addColumn(d, 'groups', 'admin_only_invite INTEGER NOT NULL DEFAULT 1;');
+    await addColumn(d, 'groups', 'moderate_new_members INTEGER NOT NULL DEFAULT 0;');
+    await addColumn(d, 'groups', 'admin_id TEXT;');
+    await addColumn(d, 'groups', 'admin_sig TEXT;');
     await d.execAsync('PRAGMA user_version = 3');
   }
 
   if (currentVersion < 4) {
     // v3 → v4: add moderators column (JSON array of aegisIds).
     // Fresh installs already have this column via CREATE TABLE above.
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN moderators TEXT;'); } catch {}
+    await addColumn(d, 'groups', 'moderators TEXT;');
     await d.execAsync('PRAGMA user_version = 4');
   }
 
@@ -260,8 +271,8 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   if (currentVersion < 7) {
     // v6 → v7: add group_id + post_meta to scheduled_messages (scheduled group
     // posts). Fresh installs already have the columns via CREATE TABLE above.
-    try { await d.execAsync('ALTER TABLE scheduled_messages ADD COLUMN group_id TEXT;'); } catch {}
-    try { await d.execAsync('ALTER TABLE scheduled_messages ADD COLUMN post_meta TEXT;'); } catch {}
+    await addColumn(d, 'scheduled_messages', 'group_id TEXT;');
+    await addColumn(d, 'scheduled_messages', 'post_meta TEXT;');
     await d.execAsync('PRAGMA user_version = 7');
   }
 
@@ -270,7 +281,7 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // by-reference roster of large groups — aegis.group.v2). Fresh installs
     // already have the column via CREATE TABLE above. NULL means "legacy /
     // unset" and is treated as version 1 by readers.
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN roster_version INTEGER;'); } catch {}
+    await addColumn(d, 'groups', 'roster_version INTEGER;');
     await d.execAsync('PRAGMA user_version = 8');
   }
 
@@ -282,9 +293,9 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // via CREATE TABLE above. All NULL on existing rows → readers fall back to
     // DEFAULT_PERMISSIONS and treat gov_version as 1, so legacy groups keep
     // working with creator=owner and default gates (no data migration needed).
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN permissions TEXT;'); } catch {}
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN gov_sig TEXT;'); } catch {}
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN gov_version INTEGER;'); } catch {}
+    await addColumn(d, 'groups', 'permissions TEXT;');
+    await addColumn(d, 'groups', 'gov_sig TEXT;');
+    await addColumn(d, 'groups', 'gov_version INTEGER;');
     await d.execAsync('PRAGMA user_version = 9');
   }
 
@@ -292,65 +303,66 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // v9 → v10: add pending flag to groups (unaccepted group invitations, see
     // requireGroupApproval). Fresh installs already have the column via CREATE
     // TABLE above. NULL on existing rows → treated as not pending (joined).
-    try { await d.execAsync('ALTER TABLE groups ADD COLUMN pending INTEGER;'); } catch {}
+    await addColumn(d, 'groups', 'pending INTEGER;');
     await d.execAsync('PRAGMA user_version = 10');
   }
 
   if (currentVersion < 11) {
     // v10 → v11: add channel_id to scheduled_messages (scheduled channel posts).
     // Fresh installs already have the column via CREATE TABLE above.
-    try { await d.execAsync('ALTER TABLE scheduled_messages ADD COLUMN channel_id TEXT;'); } catch {}
+    await addColumn(d, 'scheduled_messages', 'channel_id TEXT;');
     await d.execAsync('PRAGMA user_version = 11');
+  }
+
+  if (currentVersion < 12) {
+    // v11 → v12: add sender_id to messages (native group-chat sender attribution).
+    // Replaces the fragile body-prefix parsing ("Name: text") with a dedicated
+    // column populated from the authenticated E2EE envelope. Fresh installs
+    // already have the column via CREATE TABLE above. NULL on old rows →
+    // GroupBubble falls back to legacy body parsing for backwards compat.
+    await addColumn(d, 'messages', 'sender_id TEXT;');
+    await d.execAsync('PRAGMA user_version = 12');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.
   void USER_DB_VERSION;
 
   // Database migrations: Alter tables safely to append optional columns on existing installs
-  try {
-    await d.execAsync('ALTER TABLE contacts ADD COLUMN signing_public_key_b64 TEXT DEFAULT "";');
-  } catch (e) {}
-  try {
-    await d.execAsync('ALTER TABLE contacts ADD COLUMN color TEXT;');
-  } catch (e) {}
-  try {
-    await d.execAsync('ALTER TABLE contacts ADD COLUMN avatar_image TEXT;');
-  } catch (e) {}
+  await addColumn(d, 'contacts', 'signing_public_key_b64 TEXT DEFAULT "";');
+  await addColumn(d, 'contacts', 'color TEXT;');
+  await addColumn(d, 'contacts', 'avatar_image TEXT;');
 
-  try {
-    await d.execAsync('ALTER TABLE groups ADD COLUMN avatar_color TEXT;');
-  } catch (e) {}
-  try {
-    await d.execAsync('ALTER TABLE groups ADD COLUMN avatar_image TEXT;');
-  } catch (e) {}
+  await addColumn(d, 'groups', 'avatar_color TEXT;');
+  await addColumn(d, 'groups', 'avatar_image TEXT;');
   // Contact capabilities (mute, zero-trust mode, status, block)
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN zero_trust INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN status TEXT;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN muted_until INTEGER;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
-  try { await d.execAsync("ALTER TABLE contacts ADD COLUMN profile TEXT NOT NULL DEFAULT 'personal';"); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
+  await addColumn(d, 'contacts', 'muted INTEGER NOT NULL DEFAULT 0;');
+  await addColumn(d, 'contacts', 'zero_trust INTEGER NOT NULL DEFAULT 0;');
+  await addColumn(d, 'contacts', 'status TEXT;');
+  await addColumn(d, 'contacts', 'muted_until INTEGER;');
+  await addColumn(d, 'contacts', 'blocked INTEGER NOT NULL DEFAULT 0;');
+  await addColumn(d, 'contacts', 'archived INTEGER NOT NULL DEFAULT 0;');
+  await addColumn(d, 'contacts', "profile TEXT NOT NULL DEFAULT 'personal';");
+  await addColumn(d, 'contacts', 'pinned INTEGER NOT NULL DEFAULT 0;');
   // `hidden` = chat removed from the list but contact kept (reappears on next
   // message). Distinct from `archived` (moved to the archived section).
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN last_seen_at INTEGER;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN online INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
+  await addColumn(d, 'contacts', 'hidden INTEGER NOT NULL DEFAULT 0;');
+  await addColumn(d, 'contacts', 'last_seen_at INTEGER;');
+  await addColumn(d, 'contacts', 'online INTEGER NOT NULL DEFAULT 0;');
   // `pending` = auto-added from an unknown incoming sender (message request).
   // The chat opens in "accept/block/delete" mode and sending is gated until the
   // user accepts — a stranger never lands directly in a normal thread.
-  try { await d.execAsync('ALTER TABLE contacts ADD COLUMN pending INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
+  await addColumn(d, 'contacts', 'pending INTEGER NOT NULL DEFAULT 0;');
 
   // Message capabilities (replies, reactions, star, delete, media)
-  try { await d.execAsync('ALTER TABLE messages ADD COLUMN type TEXT;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE messages ADD COLUMN media_uri TEXT;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE messages ADD COLUMN reply_to_id TEXT;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE messages ADD COLUMN reactions TEXT;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE messages ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE messages ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE messages ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE messages ADD COLUMN expires_at INTEGER;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE messages ADD COLUMN attachments TEXT;'); } catch (e) {}
-  try { await d.execAsync('ALTER TABLE chat_state ADD COLUMN ephemeral_timer INTEGER NOT NULL DEFAULT 0;'); } catch (e) {}
+  await addColumn(d, 'messages', 'type TEXT;');
+  await addColumn(d, 'messages', 'media_uri TEXT;');
+  await addColumn(d, 'messages', 'reply_to_id TEXT;');
+  await addColumn(d, 'messages', 'reactions TEXT;');
+  await addColumn(d, 'messages', 'starred INTEGER NOT NULL DEFAULT 0;');
+  await addColumn(d, 'messages', 'deleted INTEGER NOT NULL DEFAULT 0;');
+  await addColumn(d, 'messages', 'pinned INTEGER NOT NULL DEFAULT 0;');
+  await addColumn(d, 'messages', 'expires_at INTEGER;');
+  await addColumn(d, 'messages', 'attachments TEXT;');
+  await addColumn(d, 'messages', 'sender_id TEXT;');
+  await addColumn(d, 'chat_state', 'ephemeral_timer INTEGER NOT NULL DEFAULT 0;');
 }

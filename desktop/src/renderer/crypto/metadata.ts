@@ -11,7 +11,7 @@ const BUCKETS: readonly number[] = [
 ];
 
 const ALLOWED_INNER_FIELDS: ReadonlySet<string> = new Set([
-  'v', 'from', 'senderPubB64', 'ratchet', 'x3dh', 'pad',
+  'v', 'from', 'senderPubB64', 'ratchet', 'x3dh', 'pad', 'selfCopy', 'deviceSync'
 ]);
 
 export function pickBucket(length: number): number {

@@ -169,6 +169,12 @@ export function DevicesScreen({ onBack }: Props) {
     setLinking(true);
     setLinkError(null);
 
+    let myKeypair: nacl.BoxKeyPair | null = null;
+    // Hoisted so the `finally` below can zeroize it on EVERY exit path (timeout,
+    // link_failed, socket-not-connected) — not only on success. This buffer
+    // carries the raw secretKeyB64/signingSecretKeyB64/spkSecretB64 plaintext.
+    let plaintext: Uint8Array | null = null;
+
     try {
       const theirPubKey = decodeBase64(scannedPayload.pubKey);
       if (theirPubKey.length !== nacl.box.publicKeyLength) {
@@ -176,12 +182,20 @@ export function DevicesScreen({ onBack }: Props) {
       }
 
       // Use an ephemeral keypair for this single approval — never stored.
-      const myKeypair = nacl.box.keyPair();
+      myKeypair = nacl.box.keyPair();
 
-      const plaintext = decodeUTF8(
+      const { loadLatestSpkSecret } = require('../db/prekeys');
+      const latestSpk = await loadLatestSpkSecret();
+
+      plaintext = decodeUTF8(
         JSON.stringify({
           aegisId: identity.aegisId,
+          publicKeyB64: identity.publicKeyB64,
+          secretKeyB64: identity.secretKeyB64,
           signingPublicKeyB64: identity.signingPublicKeyB64,
+          signingSecretKeyB64: identity.signingSecretKeyB64,
+          spkSecretB64: latestSpk?.b64,
+          spkId: latestSpk?.keyId,
         }),
       );
 
@@ -202,17 +216,28 @@ export function DevicesScreen({ onBack }: Props) {
 
       const socket = getSocket();
       if (socket) {
-        socket.emit('device:link:approve', payload);
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(i18nT('devices.linkTimeout', 'Request timed out'))), 8000);
+          socket.emit('device:link:approve', payload, (res: { ok: boolean; error?: string }) => {
+            clearTimeout(timer);
+            if (res && res.ok) resolve();
+            else reject(new Error(res?.error ?? 'link_failed'));
+          });
+        });
+      } else {
+        throw new Error('Socket not connected');
       }
-
-      // Zero out ephemeral secret key bytes immediately — never stored.
-      myKeypair.secretKey.fill(0);
 
       // Optimistically add the new device and refresh from server.
       await loadDevices();
     } catch (e) {
       setLinkError((e as Error).message);
     } finally {
+      // Zero out ephemeral secret key bytes AND the serialized identity
+      // secrets on every path (success, timeout, link_failed, no-socket) —
+      // never leave key material sitting in memory past this call.
+      if (myKeypair) myKeypair.secretKey.fill(0);
+      if (plaintext) plaintext.fill(0);
       setLinking(false);
       setConfirmVisible(false);
       setScannedPayload(null);

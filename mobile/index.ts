@@ -11,6 +11,10 @@ import './src/notifications/backgroundReconnect';
 // leak-free channel notifications, no server push). Must be defined before a
 // headless BGAppRefresh / background-fetch launch can fire it.
 import './src/notifications/channelBackgroundSync';
+// Same for the daily-summary background-fetch task — TaskManager.defineTask
+// must run at module load so the OS can find 'aegis.daily-summary' when it
+// launches us headless, before App ever mounts.
+import './src/notifications/dailySummaryTask';
 
 import { registerRootComponent } from 'expo';
 import App from './App';

@@ -107,6 +107,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   const hideRecents = usePreferences((s) => s.hideRecents);
   const setPref = usePreferences((s) => s.set);
 
+  const [bioAvailable, setBioAvailable] = useState(false);
   const [pinStored, setPinStored] = useState(false);
   const [pinModal, setPinModal] = useState(false);
   const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
@@ -118,16 +119,16 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   // Pending enable: if user triggers enable but has no PIN, we wait for PIN setup
   const pendingEnable = useRef(false);
 
-  const [bioAvailable, setBioAvailable] = useState(false);
 
   useEffect(() => {
     hasStoredPIN().then(setPinStored);
     void (async () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean> };
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
         const hasHw = await LA.hasHardwareAsync();
-        setBioAvailable(hasHw);
+        const enrolled = await LA.isEnrolledAsync();
+        setBioAvailable(hasHw && enrolled);
       } catch {
         setBioAvailable(false);
       }

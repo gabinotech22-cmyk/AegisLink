@@ -364,6 +364,11 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
       await registerChannelBackgroundSync();
     } catch { /* task module unavailable (Expo Go) — foreground live notify still works */ }
 
+    try {
+      const { registerDailySummaryTask } = require('./dailySummaryTask') as typeof import('./dailySummaryTask');
+      await registerDailySummaryTask();
+    } catch { /* task module unavailable */ }
+
     const tokenResponse = await Notifications.getExpoPushTokenAsync();
     const expoToken = tokenResponse.data;
 

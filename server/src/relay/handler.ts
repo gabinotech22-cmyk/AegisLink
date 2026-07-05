@@ -182,7 +182,7 @@ export function attachRelay(io: SocketServer) {
     });
 
     // Allow unauthenticated sockets to register as a linking-pending desktop.
-    socket.on('device:link', (raw: unknown) => {
+    socket.on('device:link', async (raw: unknown) => {
       const parsed = DeviceLink.safeParse(raw);
       if (!parsed.success) {
         socket.emit('error_msg', { code: 'invalid_device_link' });
@@ -192,7 +192,7 @@ export function attachRelay(io: SocketServer) {
 
       // Throttle per target identity so an unauthenticated socket can't spam
       // link requests at a victim. Silent drop — no oracle signal on excess.
-      if (!checkDeviceLinkRateLimit(targetAegisId)) {
+      if (!(await checkDeviceLinkRateLimit(targetAegisId))) {
         return;
       }
       // Bound the pending-link map independently of the rate-limit maps: refuse

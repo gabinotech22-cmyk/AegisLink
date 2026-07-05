@@ -14,11 +14,12 @@
     "expo-server-sdk": "^6.1.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
+    "ioredis": "^5.11.1",
     "pg": "8.22.0",
     "socket.io": "^4.8.1",
+    "tsx": "^4.22.4",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
-    "tsx": "^4.22.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {

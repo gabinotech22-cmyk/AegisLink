@@ -5,6 +5,7 @@ import type { Theme } from './theme/vault';
 import { SplashScreen } from './screens/Splash';
 import { EntryScreen } from './screens/Entry';
 import { OnboardingScreen } from './screens/Onboarding';
+import { LinkDeviceScreen } from './screens/LinkDevice';
 import { HomeScreen } from './screens/Home';
 import { GroupsScreen } from './screens/Groups';
 import { VerifyScreen } from './screens/Verify';
@@ -108,7 +109,7 @@ function Shell() {
   const [showEntry, setShowEntry] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
   const [onboardingRestore, setOnboardingRestore] = useState(false);
-  const [onboardingMode, setOnboardingMode] = useState<'generate' | 'restore'>('generate');
+  const [onboardingMode, setOnboardingMode] = useState<'generate' | 'restore' | 'link'>('generate');
   const [pendingLinkAfterOnboarding, setPendingLinkAfterOnboarding] = useState(false);
   const [netError, setNetError] = useState(false);
   const [appLocked, setAppLocked] = useState(false);
@@ -394,8 +395,7 @@ function Shell() {
         }}
         onLinkMobile={() => {
           setShowEntry(false);
-          setOnboardingMode('generate');
-          setPendingLinkAfterOnboarding(true);
+          setOnboardingMode('link');
           setShowOnboarding(true);
         }}
       />
@@ -403,8 +403,23 @@ function Shell() {
   }
 
   if (showOnboarding) {
+    if (onboardingMode === 'link') {
+      return (
+        <LinkDeviceScreen
+          onBack={() => {
+            setOnboardingMode('generate');
+            setShowOnboarding(false);
+            setShowEntry(true);
+          }}
+          onLinked={() => {
+            setShowOnboarding(false);
+          }}
+        />
+      );
+    }
+    
     if (onboardingRestore || onboardingMode === 'restore') {
-      return <PanicScreen onBack={() => { setOnboardingRestore(false); setOnboardingMode('generate'); setShowEntry(true); setShowOnboarding(false); }} />;
+      return <BackupScreen onBack={() => { setOnboardingRestore(false); setOnboardingMode('generate'); setShowEntry(true); setShowOnboarding(false); }} onRestored={() => { setShowOnboarding(false); }} />;
     }
     return (
       <OnboardingScreen

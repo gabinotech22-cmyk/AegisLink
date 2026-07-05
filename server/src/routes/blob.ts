@@ -187,7 +187,7 @@ const downloadLimiter = rateLimit({
 });
 
 router.get('/download/:id', downloadLimiter, (req, res) => {
-  const id = req.params.id;
+  const id = typeof req.params.id === 'string' ? req.params.id : '';
   if (!UUID_V4_RE.test(id)) {
     res.status(400).json({ error: 'INVALID_PAYLOAD' });
     return;
