@@ -127,11 +127,11 @@ function PinFlow({
   }
 
   function handleDigit(d: string) {
-    if (pin.length >= 4) return;
+    if (pin.length >= 6) return;
     const next = pin + d;
     setPin(next);
     setError('');
-    if (next.length === 4) setTimeout(() => validate(next), 160);
+    if (next.length === 6) setTimeout(() => validate(next), 160);
   }
 
   function handleDelete() {
@@ -171,14 +171,14 @@ function PinFlow({
 
   const title =
     step.kind === 'create-new'
-      ? i18nT('lockSetup.createNewTitle', 'Create your 4-digit PIN')
+      ? i18nT('lockSetup.createNewTitle', 'Create your 6-digit PIN')
       : step.kind === 'confirm-new'
       ? i18nT('lockSetup.confirmNewTitle', 'Confirm your PIN')
       : i18nT('lockSetup.verifyCurrentTitle', 'Enter your current PIN');
 
   const sub =
     step.kind === 'create-new'
-      ? i18nT('lockSetup.createNewSub', 'Choose 4 digits you remember')
+      ? i18nT('lockSetup.createNewSub', 'Choose 6 digits you remember')
       : step.kind === 'confirm-new'
       ? i18nT('lockSetup.confirmNewSub', 'Retype the same PIN')
       : i18nT('lockSetup.verifyCurrentSub', 'We need to verify your identity');
@@ -500,7 +500,7 @@ export function LockSetupScreen({ onBack }: Props) {
             t={t}
             icon={<I.Key size={20} color={t.textDim} />}
             label={hasPIN ? i18nT('lockSetup.changePin', 'Change PIN') : i18nT('lockSetup.pinSetup', 'Create PIN')}
-            sub={hasPIN ? i18nT('lockSetup.changePinSub', 'Tap to set a new PIN') : i18nT('lockSetup.createPinSub', '4-digit PIN required for lock')}
+            sub={hasPIN ? i18nT('lockSetup.changePinSub', 'Tap to set a new PIN') : i18nT('lockSetup.createPinSub', '6-digit PIN required for lock')}
             onPress={startCreatePIN}
           />
           {hasPIN && (

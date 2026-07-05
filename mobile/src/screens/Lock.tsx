@@ -243,11 +243,11 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
   // ── PIN entry ──────────────────────────────────────────────────────────────
   function handleDigit(d: string) {
-    if (pinCode.length >= 4) return;
+    if (pinCode.length >= 6) return;
     const next = pinCode + d;
     setPinCode(next);
     setPinError('');
-    if (next.length === 4) setTimeout(() => validatePin(next), 180);
+    if (next.length === 6) setTimeout(() => validatePin(next), 180);
   }
 
   function handleDelete() {

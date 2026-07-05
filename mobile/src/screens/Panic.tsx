@@ -552,7 +552,7 @@ export function PanicScreen({ onBack }: Props) {
               value={tempPin}
               onChangeText={(val) => setTempPin(val.replace(/[^0-9]/g, ''))}
               keyboardType="numeric"
-              maxLength={4}
+              maxLength={6}
               secureTextEntry
               autoFocus
               style={{
@@ -599,7 +599,7 @@ export function PanicScreen({ onBack }: Props) {
                 accessibilityRole="button"
                 accessibilityLabel={i18nT('panic.savePinBtn')}
                 onPress={() => {
-                  if (tempPin.length !== 4) {
+                  if (tempPin.length !== 6) {
                     setPinFeedback('invalid');
                     return;
                   }

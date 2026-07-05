@@ -155,11 +155,11 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   }
 
   function handleDigit(d: string) {
-    if (pinEntry.length >= 4) return;
+    if (pinEntry.length >= 6) return;
     const next = pinEntry + d;
     setPinEntry(next);
     setPinError('');
-    if (next.length === 4) {
+    if (next.length === 6) {
       setTimeout(() => processPin(next), 180);
     }
   }
@@ -433,7 +433,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
 
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 40 }}>
             <Text style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, marginBottom: 4 }}>
-              {pinStep === 'enter' ? i18nT('lockConfig.enterPinPrompt', 'Enter a 4-digit PIN') : i18nT('lockConfig.confirmPinPrompt', 'Confirm your PIN')}
+              {pinStep === 'enter' ? i18nT('lockConfig.enterPinPrompt', 'Enter a 6-digit PIN') : i18nT('lockConfig.confirmPinPrompt', 'Confirm your PIN')}
             </Text>
 
             <Animated.View style={{ transform: [{ translateX: shakeAnim }] }}>
