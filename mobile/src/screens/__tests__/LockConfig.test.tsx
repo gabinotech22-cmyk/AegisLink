@@ -15,6 +15,9 @@
 import React from 'react';
 
 jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
+jest.mock('expo-local-authentication', () => ({
+  hasHardwareAsync: jest.fn().mockResolvedValue(true),
+}));
 import { themedAlert } from '../../components/AlertHost';
 import { render, fireEvent, act, waitFor } from '@testing-library/react-native';
 
