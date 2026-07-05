@@ -45,6 +45,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const screenshot = usePreferences((s) => s.blockScreenshots);
   const routeViaTor = usePreferences((s) => s.routeViaTor);
   const requireGroupApproval = usePreferences((s) => s.requireGroupApproval);
+  const duressActive = usePreferences((s) => s.duressActive);
   const setPref = usePreferences((s) => s.set);
   const pqDowngradeFallbacks = useSecurityDiagnostics((s) => s.pqDowngradeFallbacks);
   const lastPqDowngradeAt = useSecurityDiagnostics((s) => s.lastPqDowngradeAt);
@@ -244,15 +245,18 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             label={i18nT('privacy.linkedDevices')}
             sub={i18nT('privacy.linkedDevicesSub')}
             onPress={() => onNav('devices')}
+            noBorder={duressActive}
           />
-          <Row
-            t={t}
-            icon={<I.Shield size={20} color={t.accent} />}
-            label={i18nT('privacy.panicMode')}
-            sub={i18nT('privacy.panicModeSub')}
-            onPress={() => onNav('panic')}
-            noBorder
-          />
+          {!duressActive && (
+            <Row
+              t={t}
+              icon={<I.Shield size={20} color={t.accent} />}
+              label={i18nT('privacy.panicMode')}
+              sub={i18nT('privacy.panicModeSub')}
+              onPress={() => onNav('panic')}
+              noBorder
+            />
+          )}
         </Section>
 
         <Section t={t} label={i18nT('settings.language')}>

@@ -25,7 +25,7 @@ interface Props {
 function PinDots({ count, error, t }: { count: number; error: boolean; t: Theme }) {
   return (
     <View style={{ flexDirection: 'row', gap: 18, justifyContent: 'center', marginVertical: 32 }}>
-      {[0, 1, 2, 3].map((i) => (
+      {[0, 1, 2, 3, 4, 5].map((i) => (
         <View
           key={i}
           style={{
@@ -243,11 +243,11 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
   // ── PIN entry ──────────────────────────────────────────────────────────────
   function handleDigit(d: string) {
-    if (pinCode.length >= 4) return;
+    if (pinCode.length >= 6) return;
     const next = pinCode + d;
     setPinCode(next);
     setPinError('');
-    if (next.length === 4) setTimeout(() => validatePin(next), 180);
+    if (next.length === 6) setTimeout(() => validatePin(next), 180);
   }
 
   function handleDelete() {
@@ -265,13 +265,17 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         };
         if (config.duressPin && typeof config.pinHash === 'string' && config.pinHash.length > 0) {
           if (await verifyPinWithSalt(pin, DURESS_PIN_SALT, config.pinHash)) {
-            // Wipe first — if interrupted mid-wipe, real data is already gone.
-            // Only after a successful wipe do we surface the decoy UI.
-            try {
-              await wipeDatabase();
-              await useIdentity.getState().reset();
-            } catch { /* wipe failure is non-recoverable; decoy still shown */ }
+            // Entrar en modo señuelo (no destructivo, no borra la base de datos)
             usePreferences.setState({ duressActive: true });
+            try {
+              await useIdentity.getState().hydrate();
+              const { useContacts } = require('../store/contacts');
+              const { useMessages } = require('../store/messages');
+              await useContacts.getState().hydrate();
+              useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
+            } catch (err) {
+              if (__DEV__) logger.warn('[lock-panic] failed to load decoy state:', err);
+            }
             setPinCode('');
             onUnlock();
             return;
