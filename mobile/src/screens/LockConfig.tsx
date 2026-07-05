@@ -107,6 +107,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   const hideRecents = usePreferences((s) => s.hideRecents);
   const setPref = usePreferences((s) => s.set);
 
+  const [bioAvailable, setBioAvailable] = useState(false);
   const [pinStored, setPinStored] = useState(false);
   const [pinModal, setPinModal] = useState(false);
   const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
@@ -120,6 +121,16 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
 
   useEffect(() => {
     hasStoredPIN().then(setPinStored);
+    void (async () => {
+      try {
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
+        const hasHw = await LA.hasHardwareAsync();
+        const enrolled = await LA.isEnrolledAsync();
+        setBioAvailable(hasHw && enrolled);
+      } catch {
+        setBioAvailable(false);
+      }
+    })();
   }, []);
 
   function shake() {
@@ -244,13 +255,15 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
 
           {appLockEnabled && (
             <>
-              <Toggle
-                t={t}
-                label={i18nT('lockConfig.biometrics', 'Face ID / Fingerprint')}
-                sub={i18nT('lockConfig.biometricsSub', 'Use biometrics as primary method')}
-                value={biometricsEnabled}
-                onChange={(v) => void setPref('biometricsEnabled', v)}
-              />
+              {bioAvailable && (
+                <Toggle
+                  t={t}
+                  label={i18nT('lockConfig.biometrics', 'Face ID / Fingerprint')}
+                  sub={i18nT('lockConfig.biometricsSub', 'Use biometrics as primary method')}
+                  value={biometricsEnabled}
+                  onChange={(v) => void setPref('biometricsEnabled', v)}
+                />
+              )}
 
               {/* Timeout picker row */}
               <Pressable

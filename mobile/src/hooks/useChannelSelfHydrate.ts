@@ -11,6 +11,8 @@ import { logger } from '../utils/logger';
  *
  * Shared by ChannelFeed.tsx and ChannelInfo.tsx (previously duplicated).
  */
+let hydrationPromise: Promise<void> | null = null;
+
 export function useChannelSelfHydrate<T>(
   hydrated: boolean,
   summary: T,
@@ -18,8 +20,14 @@ export function useChannelSelfHydrate<T>(
 ): void {
   useEffect(() => {
     if (hydrated || summary) return;
-    void hydrateSubscribed().catch((err: unknown) => {
-      logger.warn('[useChannelSelfHydrate] hydrate failed:', err);
-    });
+    if (hydrationPromise) return;
+
+    hydrationPromise = hydrateSubscribed()
+      .catch((err: unknown) => {
+        logger.warn('[useChannelSelfHydrate] hydrate failed:', err);
+      })
+      .finally(() => {
+        hydrationPromise = null;
+      });
   }, [hydrated, summary, hydrateSubscribed]);
 }

@@ -12,7 +12,7 @@ import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
-import { hashPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
+import { hashPinWithSalt, DURESS_PIN_SALT, verifyPIN } from '../lock/pin';
 
 const PANIC_KEY = 'aegis.panic.v1';
 
@@ -45,6 +45,7 @@ export function PanicScreen({ onBack }: Props) {
   // step 0 = closed, step 1 = first confirm, step 2 = final confirm, step 3 = error
   const [panicStep, setPanicStep] = useState<0 | 1 | 2 | 3>(0);
   const [wiping, setWiping] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // PIN modal inline feedback: null = no msg, 'invalid' | 'saved' | 'error'
   const [pinFeedback, setPinFeedback] = useState<null | 'invalid' | 'saved' | 'error'>(null);
@@ -601,10 +602,18 @@ export function PanicScreen({ onBack }: Props) {
                     setPinFeedback('invalid');
                     return;
                   }
+                  if (saving) return;
                   setPinFeedback(null);
                   const len = tempPin.length;
+                  setSaving(true);
                   void (async () => {
                     try {
+                      const sameAsNormal = await verifyPIN(tempPin);
+                      if (sameAsNormal) {
+                        setPinFeedback('invalid');
+                        return;
+                      }
+
                       const pinHash = await hashPinWithSalt(tempPin, DURESS_PIN_SALT);
                       setPinLength(len);
                       await persist({ pinHash, pinLength: len, pinValue: undefined });
@@ -617,19 +626,22 @@ export function PanicScreen({ onBack }: Props) {
                       }, 1200);
                     } catch {
                       setPinFeedback('error');
+                    } finally {
+                      setSaving(false);
                     }
                   })();
                 }}
                 style={{
                   flex: 1,
-                  backgroundColor: t.danger,
+                  backgroundColor: saving ? t.textDim : t.danger,
                   paddingVertical: 12,
                   borderRadius: t.radiusS,
                   alignItems: 'center',
                 }}
+                disabled={saving}
               >
                 <Text style={{ color: '#fff', fontFamily: t.font, fontWeight: '600' }}>
-                  {i18nT('panic.savePinBtn')}
+                  {saving ? '...' : i18nT('panic.savePinBtn')}
                 </Text>
               </Pressable>
               <Pressable

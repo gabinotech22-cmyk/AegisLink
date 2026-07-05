@@ -10,6 +10,8 @@ import { ss } from '../utils/secureStore';
 import { verifyPIN, hasStoredPIN, verifyPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
 import { usePreferences } from '../store/preferences';
 import { useIdentity } from '../store/identity';
+import { useContacts } from '../store/contacts';
+import { useMessages } from '../store/messages';
 import { wipeDatabase } from '../db/local';
 import { usePanicGesture } from '../hooks/usePanicGesture';
 
@@ -269,7 +271,20 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
             try {
               await wipeDatabase();
               await useIdentity.getState().reset();
-            } catch { /* wipe failure is non-recoverable; decoy still shown */ }
+              await useContacts.getState().hydrate();
+              useMessages.setState({
+                byChat: {},
+                previews: {},
+                pinnedMsg: {},
+                ephemeralTimers: {},
+                unreadCounts: {},
+                drafts: {},
+              });
+            } catch (e) {
+              setPinError('');
+              setPinCode('');
+              return;
+            }
             usePreferences.setState({ duressActive: true });
             setPinCode('');
             onUnlock();
@@ -287,7 +302,22 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       usePreferences.setState({ duressActive: false });
       if (wasDecoy) {
         // Reload real identity and data now that decoy mode is off
-        await useIdentity.getState().hydrate();
+        try {
+          await useIdentity.getState().hydrate();
+          await useContacts.getState().hydrate();
+          useMessages.setState({
+            byChat: {},
+            previews: {},
+            pinnedMsg: {},
+            drafts: {},
+          });
+          await useMessages.getState().loadAllUnreads();
+          await useMessages.getState().loadAllEphemeralTimers();
+        } catch {
+          setPinError('');
+          setPinCode('');
+          return;
+        }
       }
       setPinCode('');
       onUnlock();
