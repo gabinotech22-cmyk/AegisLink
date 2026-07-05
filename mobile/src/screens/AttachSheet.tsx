@@ -22,9 +22,10 @@ interface Props {
   onMultipleImages?: (assets: ImagePickerAsset[]) => void;
   /** Called when user picks multiple files (2+) via DocumentPicker. */
   onMultipleFiles?: (assets: DocumentPickerAsset[]) => void;
+  isGroup?: boolean;
 }
 
-export function AttachSheetScreen({ onBack, onPick, onMultipleImages, onMultipleFiles }: Props) {
+export function AttachSheetScreen({ onBack, onPick, onMultipleImages, onMultipleFiles, isGroup }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -184,9 +185,11 @@ export function AttachSheetScreen({ onBack, onPick, onMultipleImages, onMultiple
     { id: 'video', icon: <I.Video size={22} color={t.textDim} />, label: i18nT('attachSheet.video', 'Video'), sub: i18nT('attachSheet.videoGallery', 'Gallery · E2EE'), handler: handleVideo },
     // Voice note removed from the attach sheet — normal voice notes are now sent
     // from the inline mic button in the composer (reactive, hides while typing).
-    { id: 'viewoncesend', icon: <I.EyeOff size={22} color={t.accent} />, label: i18nT('attachSheet.viewOnce', 'View once'), sub: i18nT('attachSheet.viewOnceSub', 'Non-savable'), accent: true },
-    { id: 'scheduled', icon: <I.Timer size={22} color={t.textDim} />, label: i18nT('attachSheet.scheduled', 'Scheduled'), sub: i18nT('attachSheet.delayedSend', 'Delayed send') },
-    { id: 'location', icon: <I.Globe size={22} color={t.textDim} />, label: i18nT('attachSheet.location', 'Location'), sub: i18nT('attachSheet.temporary', 'Temporary') },
+    ...(!isGroup ? [
+      { id: 'viewoncesend' as const, icon: <I.EyeOff size={22} color={t.accent} />, label: i18nT('attachSheet.viewOnce', 'View once'), sub: i18nT('attachSheet.viewOnceSub', 'Non-savable'), accent: true },
+      { id: 'scheduled' as const, icon: <I.Timer size={22} color={t.textDim} />, label: i18nT('attachSheet.scheduled', 'Scheduled'), sub: i18nT('attachSheet.delayedSend', 'Delayed send') },
+      { id: 'location' as const, icon: <I.Globe size={22} color={t.textDim} />, label: i18nT('attachSheet.location', 'Location'), sub: i18nT('attachSheet.temporary', 'Temporary') },
+    ] : []),
     { id: 'contact', icon: <I.Users size={22} color={t.textDim} />, label: i18nT('attachSheet.contact', 'Contact'), sub: i18nT('attachSheet.shareId', 'Share ID') },
   ];
 

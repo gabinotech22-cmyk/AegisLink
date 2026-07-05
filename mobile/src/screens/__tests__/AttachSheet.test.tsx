@@ -266,4 +266,18 @@ describe('AttachSheetScreen', () => {
     expect(queryByText('attachSheet.audio')).toBeNull();
     expect(queryByText('attachSheet.voice')).toBeNull();
   });
+
+  it("renders scheduled, location, and viewOnce when isGroup is false or undefined", () => {
+    const { getByText } = render(<AttachSheetScreen onBack={onBack} onPick={onPick} />);
+    expect(getByText('attachSheet.scheduled')).toBeTruthy();
+    expect(getByText('attachSheet.location')).toBeTruthy();
+    expect(getByText('attachSheet.viewOnce')).toBeTruthy();
+  });
+
+  it("does NOT render scheduled, location, and viewOnce when isGroup is true", () => {
+    const { queryByText } = render(<AttachSheetScreen onBack={onBack} onPick={onPick} isGroup={true} />);
+    expect(queryByText('attachSheet.scheduled')).toBeNull();
+    expect(queryByText('attachSheet.location')).toBeNull();
+    expect(queryByText('attachSheet.viewOnce')).toBeNull();
+  });
 });
