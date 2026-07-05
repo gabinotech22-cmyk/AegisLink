@@ -1503,6 +1503,7 @@ function Shell() {
       case 'groupAttach':
         return (
           <AttachSheetScreen
+            isGroup={true}
             onBack={pop}
             onMultipleImages={(assets) => {
               const mapped: MultiPreviewAsset[] = assets.map((a) => ({ kind: 'image' as const, asset: a }));
