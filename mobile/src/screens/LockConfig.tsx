@@ -107,6 +107,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   const hideRecents = usePreferences((s) => s.hideRecents);
   const setPref = usePreferences((s) => s.set);
 
+  const [bioAvailable, setBioAvailable] = useState(false);
   const [pinStored, setPinStored] = useState(false);
   const [pinModal, setPinModal] = useState(false);
   const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
@@ -117,8 +118,6 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   const shakeAnim = useRef(new Animated.Value(0)).current;
   // Pending enable: if user triggers enable but has no PIN, we wait for PIN setup
   const pendingEnable = useRef(false);
-
-  const [bioAvailable, setBioAvailable] = useState(false);
 
   useEffect(() => {
     hasStoredPIN().then(setPinStored);

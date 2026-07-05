@@ -1,24 +1,16 @@
-import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, Pressable, ScrollView, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ss } from '../utils/secureStore';
-import { Switch } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { Section } from '../components/Section';
 import { themedAlert } from '../components/AlertHost';
-
-const LOCK_SETTINGS_KEY = 'aegis.lockSettings';
-
-interface LockSettingsData {
-  biometrics: boolean;
-  autoLockMinutes: number; // 1, 5, 30
-  lockOnBackground: boolean;
-}
+import { usePreferences } from '../store/preferences';
 
 const AUTO_LOCK_OPTIONS = [
+  { value: 0 },
   { value: 1 },
   { value: 5 },
   { value: 30 },
@@ -33,25 +25,17 @@ export function LockSettingsScreen({ onBack }: Props) {
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
 
-  const [biometrics, setBiometrics] = useState(false);
-  const [autoLockMinutes, setAutoLockMinutes] = useState(5);
-  const [lockOnBackground, setLockOnBackground] = useState(true);
+  // Read directly from the single source of truth (preferences store).
+  const biometrics = usePreferences((s) => s.biometricsEnabled);
+  const autoLockMinutes = usePreferences((s) => s.lockTimeoutMin);
+  const hideRecents = usePreferences((s) => s.hideRecents);
+  const setPref = usePreferences((s) => s.set);
 
+  // Local loading guard to prevent double-taps.
+  const [busy, setBusy] = useState(false);
   const [bioAvailable, setBioAvailable] = useState(false);
 
   useEffect(() => {
-    ss.get(LOCK_SETTINGS_KEY)
-      .then((raw) => {
-        if (!raw) return;
-        try {
-          const s = JSON.parse(raw) as LockSettingsData;
-          setBiometrics(s.biometrics ?? false);
-          setAutoLockMinutes(s.autoLockMinutes ?? 5);
-          setLockOnBackground(s.lockOnBackground ?? true);
-        } catch { /* corrupt */ }
-      })
-      .catch(() => {});
-
     void (async () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -65,35 +49,48 @@ export function LockSettingsScreen({ onBack }: Props) {
     })();
   }, []);
 
-  async function save(patch: Partial<LockSettingsData>) {
-    try {
-      const raw = await ss.get(LOCK_SETTINGS_KEY);
-      const current: LockSettingsData = raw
-        ? (JSON.parse(raw) as LockSettingsData)
-        : { biometrics, autoLockMinutes, lockOnBackground };
-      await ss.set(LOCK_SETTINGS_KEY, JSON.stringify({ ...current, ...patch }));
-    } catch { /* storage unavailable */ }
-  }
-
-  function handleBiometrics(v: boolean) {
-    setBiometrics(v);
-    void save({ biometrics: v });
+  async function handleBiometrics(v: boolean) {
+    if (busy) return;
     if (v) {
+      // Verify biometric enrollment before enabling.
+      try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const LA = require('expo-local-authentication') as { isEnrolledAsync: () => Promise<boolean> };
+        const enrolled = await LA.isEnrolledAsync();
+        if (!enrolled) {
+          themedAlert(
+            i18nT('lockSettings.biometricsAlertTitle', 'Biometrics'),
+            i18nT('lockSettings.notEnrolled', 'No biometrics enrolled on this device. Please configure Face ID / fingerprint in your device settings first.')
+          );
+          return;
+        }
+      } catch {
+        // Module unavailable (Expo Go) — allow toggle but warn.
+      }
       themedAlert(
         i18nT('lockSettings.biometricsAlertTitle', 'Biometrics'),
-        i18nT('lockSettings.biometricsAlertMsg', 'Face ID / fingerprint will be used to unlock the app. Make sure you have biometrics configured in your device settings.')
+        i18nT('lockSettings.biometricsAlertMsg', 'Face ID / fingerprint will be used to unlock the app.')
       );
+    }
+    try {
+      setBusy(true);
+      await setPref('biometricsEnabled', v);
+    } finally {
+      setBusy(false);
     }
   }
 
-  function handleAutoLock(minutes: number) {
-    setAutoLockMinutes(minutes);
-    void save({ autoLockMinutes: minutes });
+  async function handleAutoLock(minutes: number) {
+    await setPref('lockTimeoutMin', minutes);
   }
 
-  function handleLockOnBackground(v: boolean) {
-    setLockOnBackground(v);
-    void save({ lockOnBackground: v });
+  async function handleHideRecents(v: boolean) {
+    await setPref('hideRecents', v);
+  }
+
+  function getAutoLockLabel(value: number): string {
+    if (value === 0) return i18nT('lockSettings.immediately', 'Immediately');
+    return i18nT('lockSettings.afterMinutes', 'After {{count}} min', { count: value });
   }
 
   return (
@@ -131,7 +128,7 @@ export function LockSettingsScreen({ onBack }: Props) {
               </View>
               <Switch
                 value={biometrics}
-                onValueChange={handleBiometrics}
+                onValueChange={(v) => void handleBiometrics(v)}
                 trackColor={{ false: t.surface3, true: t.accent }}
                 thumbColor={biometrics ? t.accentInk : t.textFaint}
               />
@@ -148,17 +145,17 @@ export function LockSettingsScreen({ onBack }: Props) {
           >
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>
-                {i18nT('lockSettings.lockOnBackground', 'Lock on background')}
+                {i18nT('lockSettings.hideRecents', 'Hide in recents')}
               </Text>
               <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
-                {i18nT('lockSettings.lockOnBackgroundDesc', 'Lock when app goes to background')}
+                {i18nT('lockSettings.hideRecentsDesc', 'Blur app content in the task switcher')}
               </Text>
             </View>
             <Switch
-              value={lockOnBackground}
-              onValueChange={handleLockOnBackground}
+              value={hideRecents}
+              onValueChange={(v) => void handleHideRecents(v)}
               trackColor={{ false: t.surface3, true: t.accent }}
-              thumbColor={lockOnBackground ? t.accentInk : t.textFaint}
+              thumbColor={hideRecents ? t.accentInk : t.textFaint}
             />
           </View>
         </Section>
@@ -169,8 +166,8 @@ export function LockSettingsScreen({ onBack }: Props) {
             return (
               <Pressable
                 key={opt.value}
-                onPress={() => handleAutoLock(opt.value)}
-                accessibilityLabel={i18nT('lockSettings.accessibilityAfterMinutes', 'Auto-lock after {{count}} minutes', { count: opt.value })}
+                onPress={() => void handleAutoLock(opt.value)}
+                accessibilityLabel={getAutoLockLabel(opt.value)}
                 style={({ pressed }) => ({
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -205,7 +202,7 @@ export function LockSettingsScreen({ onBack }: Props) {
                     fontWeight: selected ? '600' : '400',
                   }}
                 >
-                  {i18nT('lockSettings.afterMinutes', 'After {{count}} min', { count: opt.value })}
+                  {getAutoLockLabel(opt.value)}
                 </Text>
                 {selected ? (
                   <I.Check size={14} color={t.accent} style={{ marginLeft: 'auto' } as never} />

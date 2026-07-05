@@ -138,9 +138,9 @@ export function DataExportScreen({ onBack }: Props) {
           </Text>
         </View>
 
-        <Section t={t} label={i18nT('dataExport.exportSection', 'EXPORT · ENCRYPTED FILE')}>
+        <Section t={t} label={i18nT('dataExport.exportSection', 'EXPORT · LOCAL FILE')}>
           <Toggle t={t} label={i18nT('common.messages', 'Messages')} sub={i18nT('dataExport.messagesSub', 'Export chat history')} value={pick.messages} onChange={(v) => set('messages', v)} />
-          <Toggle t={t} label={i18nT('dataExport.media', 'Media')} sub={i18nT('dataExport.mediaSub', 'Export photos/videos')} value={pick.media} onChange={(v) => set('media', v)} />
+          <Toggle t={t} label={i18nT('dataExport.media', 'Media')} sub={i18nT('dataExport.mediaSub', 'Not yet available')} value={false} onChange={() => {}} disabled />
           <Toggle t={t} label={i18nT('common.contacts', 'Contacts')} sub={i18nT('dataExport.contactsSub', 'Export address book')} value={pick.contacts} onChange={(v) => set('contacts', v)} />
           <Toggle t={t} label={i18nT('common.settings', 'Settings')} sub={i18nT('dataExport.settingsSub', 'Preferences')} value={pick.settings} onChange={(v) => set('settings', v)} noBorder />
         </Section>
@@ -162,7 +162,7 @@ export function DataExportScreen({ onBack }: Props) {
               {i18nT('dataExport.format', 'FORMAT')}
             </Text>
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 0.5 }}>
-              {i18nT('dataExport.formatValue', 'JSON (ENCRYPTED IN PRODUCTION)')}
+              {i18nT('dataExport.formatValue', 'JSON')}
             </Text>
           </View>
         </View>
@@ -180,7 +180,7 @@ export function DataExportScreen({ onBack }: Props) {
         <Section t={t} label={i18nT('dataExport.deleteAccount', 'Delete account')} hint={i18nT('dataExport.irreversible', 'IRREVERSIBLE')}>
           <View style={{ padding: 14 }}>
             <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19 }}>
-              {i18nT('dataExport.deleteDesc', 'Deleting your account wipes your local keys and sends a revocation signal to all relays. Messages already received by your contacts remain on their devices — but no one will ever be able to decrypt messages to you again.')}
+              {i18nT('dataExport.deleteDesc', 'Deleting your account permanently wipes all local keys, messages, and contacts from this device. Messages already received by your contacts remain on their devices.')}
             </Text>
           </View>
         </Section>

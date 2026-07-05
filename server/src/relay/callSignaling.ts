@@ -2,7 +2,8 @@ import type { Socket } from 'socket.io';
 import { z } from 'zod';
 import { sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 import { AEGIS_ID_RE } from './schemas.js';
-import { RATE_LIMIT_MAP_MAX } from './rateLimits.js';
+import { redisIncrAtomic, RATE_LIMIT_MAP_MAX } from './rateLimits.js';
+
 import { liveSockets } from './liveSockets.js';
 
 const CallTo = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().min(1).max(128) });
@@ -70,7 +71,9 @@ const GroupCallChannel = z.object({
 // Rate-limit buckets for call:offer — keyed by aegisId, max 5 per minute
 const callOfferRateLimit = new Map<string, { count: number; reset: number }>();
 
-function checkCallOfferRateLimit(aegisId: string): boolean {
+async function checkCallOfferRateLimit(aegisId: string): Promise<boolean> {
+  const count = await redisIncrAtomic(`ratelimit:callOffer:${aegisId}`, 60);
+  if (count !== null) return count <= 5;
   const now = Date.now();
   const entry = callOfferRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -91,7 +94,9 @@ function checkCallOfferRateLimit(aegisId: string): boolean {
 // headroom than the one-shot invite: 20 per minute.
 const groupCallChannelRateLimit = new Map<string, { count: number; reset: number }>();
 
-function checkGroupCallChannelRateLimit(aegisId: string): boolean {
+async function checkGroupCallChannelRateLimit(aegisId: string): Promise<boolean> {
+  const count = await redisIncrAtomic(`ratelimit:groupCallChannel:${aegisId}`, 60);
+  if (count !== null) return count <= 20;
   const now = Date.now();
   const entry = groupCallChannelRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -215,25 +220,36 @@ export function attachCallSignaling(socket: Socket, me: string, sockets: Map<str
   socket.on('call:invite:v2', (raw) => {
     const parsed = CallInviteV2.safeParse(raw);
     if (!parsed.success) return;
-    if (!checkCallOfferRateLimit(me)) {
-      socket.emit('error_msg', { code: 'rate_limited', for: 'call:invite' });
-      return;
-    }
+    // Forward/queue the invite SYNCHRONOUSLY, before any `await`. The rate-limit
+    // check below is async (Redis round-trip or a resolved-on-microtask promise
+    // even in the in-memory fallback), and Socket.IO does not serialize handler
+    // execution across events — if we awaited first, a `call:ice:v2` fired
+    // immediately after on the same socket could run (and find no pending
+    // invite to buffer into) before this handler resumes. Queuing first
+    // preserves same-socket event ordering; a rate-limit rejection unwinds the
+    // queue afterward instead of gating it.
     const { delivered, payload } = forwardSealed('call:invite:v2', parsed.data, /* silent */ true);
-    if (!delivered) {
-      queueCallInvite(parsed.data.to, parsed.data.callId, payload);
-      sendCallWakeUp(parsed.data.to, me, parsed.data.media as CallMedia, parsed.data.callId)
-        .then((pushed) => {
-          if (!pushed) {
+    if (!delivered) queueCallInvite(parsed.data.to, parsed.data.callId, payload);
+    void (async () => {
+      if (!(await checkCallOfferRateLimit(me))) {
+        if (!delivered) cancelCallInvite(parsed.data.to, parsed.data.callId);
+        socket.emit('error_msg', { code: 'rate_limited', for: 'call:invite' });
+        return;
+      }
+      if (!delivered) {
+        sendCallWakeUp(parsed.data.to, me, parsed.data.media as CallMedia, parsed.data.callId)
+          .then((pushed) => {
+            if (!pushed) {
+              cancelCallInvite(parsed.data.to, parsed.data.callId);
+              socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
+            }
+          })
+          .catch(() => {
             cancelCallInvite(parsed.data.to, parsed.data.callId);
             socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
-          }
-        })
-        .catch(() => {
-          cancelCallInvite(parsed.data.to, parsed.data.callId);
-          socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
-        });
-    }
+          });
+      }
+    })();
   });
   socket.on('call:answer:v2', (raw) => {
     const parsed = CallAnswerV2.safeParse(raw);
@@ -319,10 +335,10 @@ export function attachGroupCallSignaling(socket: Socket, me: string, sockets: Ma
   // Voice-channel heartbeat: per-recipient sealed roster, no `from`. ONLINE
   // members get the sealed banner; OFFLINE members get a deduped zero-metadata
   // wake-up push so a backgrounded/killed app reconnects and re-receives it.
-  socket.on('group_call:channel', (raw) => {
+  socket.on('group_call:channel', async (raw) => {
     const parsed = GroupCallChannel.safeParse(raw);
     if (!parsed.success) return;
-    if (!checkGroupCallChannelRateLimit(me)) return;
+    if (!(await checkGroupCallChannelRateLimit(me))) return;
     const { callId, groupId, media, items } = parsed.data;
     for (const it of items) {
       if (it.to === me) continue;

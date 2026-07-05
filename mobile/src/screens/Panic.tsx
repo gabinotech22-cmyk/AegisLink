@@ -45,13 +45,13 @@ export function PanicScreen({ onBack }: Props) {
   // step 0 = closed, step 1 = first confirm, step 2 = final confirm, step 3 = error
   const [panicStep, setPanicStep] = useState<0 | 1 | 2 | 3>(0);
   const [wiping, setWiping] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // PIN modal inline feedback: null = no msg, 'invalid' | 'saved' | 'error'
   const [pinFeedback, setPinFeedback] = useState<null | 'invalid' | 'sameAsNormal' | 'saved' | 'error'>(null);
 
   // Regenerate-token confirm: null = idle, 'confirm' = showing confirm
   const [regenConfirm, setRegenConfirm] = useState(false);
-  const [savingPin, setSavingPin] = useState(false);
 
   const resetIdentity = useIdentity((s) => s.reset);
   const identity = useIdentity((s) => s.identity);
@@ -600,14 +600,14 @@ export function PanicScreen({ onBack }: Props) {
                 accessibilityRole="button"
                 accessibilityLabel={i18nT('panic.savePinBtn')}
                 onPress={() => {
-                  if (savingPin) return;
                   if (tempPin.length !== 6) {
                     setPinFeedback('invalid');
                     return;
                   }
+                  if (saving) return;
                   setPinFeedback(null);
                   const len = tempPin.length;
-                  setSavingPin(true);
+                  setSaving(true);
                   void (async () => {
                     try {
                       const isNormalPin = await verifyPIN(tempPin);
@@ -628,20 +628,21 @@ export function PanicScreen({ onBack }: Props) {
                     } catch {
                       setPinFeedback('error');
                     } finally {
-                      setSavingPin(false);
+                      setSaving(false);
                     }
                   })();
                 }}
                 style={{
                   flex: 1,
-                  backgroundColor: t.danger,
+                  backgroundColor: saving ? t.textDim : t.danger,
                   paddingVertical: 12,
                   borderRadius: t.radiusS,
                   alignItems: 'center',
                 }}
+                disabled={saving}
               >
                 <Text style={{ color: '#fff', fontFamily: t.font, fontWeight: '600' }}>
-                  {i18nT('panic.savePinBtn')}
+                  {saving ? '...' : i18nT('panic.savePinBtn')}
                 </Text>
               </Pressable>
               <Pressable

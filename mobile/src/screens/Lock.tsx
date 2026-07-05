@@ -10,6 +10,8 @@ import { ss } from '../utils/secureStore';
 import { verifyPIN, hasStoredPIN, verifyPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
 import { usePreferences } from '../store/preferences';
 import { useIdentity } from '../store/identity';
+import { useContacts } from '../store/contacts';
+import { useMessages } from '../store/messages';
 import { wipeDatabase } from '../db/local';
 import { usePanicGesture } from '../hooks/usePanicGesture';
 import { AegisMark } from '../components/AegisMark';
@@ -247,7 +249,12 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     const next = pinCode + d;
     setPinCode(next);
     setPinError('');
-    if (next.length === 6) setTimeout(() => validatePin(next), 180);
+    if (next.length === 4) {
+      // Background silent check for legacy 4-digit PINs.
+      setTimeout(() => validatePin(next, true), 10);
+    } else if (next.length === 6) {
+      setTimeout(() => validatePin(next, false), 180);
+    }
   }
 
   function handleDelete() {
@@ -255,7 +262,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     setPinError('');
   }
 
-  async function validatePin(pin: string) {
+  async function validatePin(pin: string, silent = false) {
     try {
       const panicRaw = await ss.get('aegis.panic.v1');
       if (panicRaw) {
@@ -265,7 +272,25 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         };
         if (config.duressPin && typeof config.pinHash === 'string' && config.pinHash.length > 0) {
           if (await verifyPinWithSalt(pin, DURESS_PIN_SALT, config.pinHash)) {
-            // Entrar en modo señuelo (no destructivo, no borra la base de datos)
+            // Wipe first — if interrupted mid-wipe, real data is already gone.
+            // Only after a successful wipe do we surface the decoy UI.
+            try {
+              await wipeDatabase();
+              await useIdentity.getState().reset();
+              await useContacts.getState().hydrate();
+              useMessages.setState({
+                byChat: {},
+                previews: {},
+                pinnedMsg: {},
+                ephemeralTimers: {},
+                unreadCounts: {},
+                drafts: {},
+              });
+            } catch (e) {
+              setPinError('');
+              setPinCode('');
+              return;
+            }
             usePreferences.setState({ duressActive: true });
             try {
               await useIdentity.getState().hydrate();
@@ -275,9 +300,6 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
               useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
             } catch (err) {
               if (__DEV__) logger.warn('[lock-panic] failed to load decoy state:', err);
-              usePreferences.setState({ duressActive: false });
-              setPinError(i18nT('lock.pinError'));
-              return;
             }
             setPinCode('');
             onUnlock();
@@ -295,16 +317,30 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       usePreferences.setState({ duressActive: false });
       if (wasDecoy) {
         // Reload real identity and data now that decoy mode is off
-        await useIdentity.getState().hydrate();
-        const { useContacts } = require('../store/contacts');
-        const { useMessages } = require('../store/messages');
-        await useContacts.getState().hydrate();
-        useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
+        try {
+          await useIdentity.getState().hydrate();
+          await useContacts.getState().hydrate();
+          useMessages.setState({
+            byChat: {},
+            previews: {},
+            pinnedMsg: {},
+            drafts: {},
+          });
+          await useMessages.getState().loadAllUnreads();
+          await useMessages.getState().loadAllEphemeralTimers();
+        } catch {
+          setPinError('');
+          setPinCode('');
+          return;
+        }
       }
       setPinCode('');
       onUnlock();
       return;
     }
+    
+    if (silent) return;
+
     const newAttempts = attempts + 1;
     setAttempts(newAttempts);
     shake();
