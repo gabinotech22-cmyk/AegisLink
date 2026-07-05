@@ -16,7 +16,6 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.aegislink.app",
-      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSCameraUsageDescription": "AegisLink uses the camera to scan verification QR codes and send encrypted photos.",
         "NSMicrophoneUsageDescription": "AegisLink uses the microphone for encrypted voice and video calls.",
@@ -58,7 +57,6 @@
     },
     "android": {
       "package": "com.aegislink.app",
-      "googleServicesFile": "./google-services.json",
       "intentFilters": [
         {
           "action": "VIEW",

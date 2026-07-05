@@ -16,7 +16,7 @@ import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
 import { withPickingGuard } from '../utils/pickingGuard';
 import { themedAlert } from '../components/AlertHost';
-import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import { getOrCreateDID } from '../web3/did/DIDManager';
 
 // expo-file-system v19 removed EncodingType from the main index — use legacy subpath
@@ -336,7 +336,7 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
         {did && (
           <Section t={t} label={i18nT('profile.didSection')} hint={i18nT('profile.didHint')}>
             <Pressable
-              onPress={() => { void Clipboard.setStringAsync(did); themedAlert(i18nT('profile.didCopied'), did); }}
+              onPress={() => { void copySensitiveText(did); themedAlert(i18nT('profile.didCopied'), did); }}
               accessibilityLabel={i18nT('profile.didCopied')}
               style={{ padding: 14 }}
             >

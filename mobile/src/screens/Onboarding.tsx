@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated, Easing, Pressable, ActivityIndicator, TextInput } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -359,7 +359,7 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
           {identity && (
             <Pressable
               onPress={async () => {
-                try { await Clipboard.setStringAsync(identity.aegisId); } catch { /* clipboard unavailable */ }
+                try { await copySensitiveText(identity.aegisId); } catch { /* clipboard unavailable */ }
               }}
               style={{ padding: 6 }}
               hitSlop={8}

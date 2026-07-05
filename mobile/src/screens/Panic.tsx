@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ss } from '../utils/secureStore';
-import * as Clipboard from 'expo-clipboard';
+import { copySensitiveText } from '../utils/secureClipboard';
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
@@ -12,7 +12,7 @@ import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
-import { hashPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
+import { hashPinWithSalt, DURESS_PIN_SALT, verifyPIN } from '../lock/pin';
 
 const PANIC_KEY = 'aegis.panic.v1';
 
@@ -47,7 +47,7 @@ export function PanicScreen({ onBack }: Props) {
   const [wiping, setWiping] = useState(false);
 
   // PIN modal inline feedback: null = no msg, 'invalid' | 'saved' | 'error'
-  const [pinFeedback, setPinFeedback] = useState<null | 'invalid' | 'saved' | 'error'>(null);
+  const [pinFeedback, setPinFeedback] = useState<null | 'invalid' | 'sameAsNormal' | 'saved' | 'error'>(null);
 
   // Regenerate-token confirm: null = idle, 'confirm' = showing confirm
   const [regenConfirm, setRegenConfirm] = useState(false);
@@ -98,7 +98,7 @@ export function PanicScreen({ onBack }: Props) {
   const copyLink = useCallback(async () => {
     if (!remoteToken || !remoteTokenSig) return;
     // Both halves are required — the deep-link handler rejects unsigned tokens.
-    await Clipboard.setStringAsync(
+    await copySensitiveText(
       `aegislink://panic?token=${remoteToken}&sig=${encodeURIComponent(remoteTokenSig)}`,
     );
     setCopied(true);
@@ -586,9 +586,11 @@ export function PanicScreen({ onBack }: Props) {
                 }}>
                   {pinFeedback === 'invalid'
                     ? i18nT('panic.invalidPinDesc')
-                    : pinFeedback === 'saved'
-                      ? i18nT('panic.pinSavedDesc')
-                      : i18nT('panic.pinSaveErrorDesc')}
+                    : pinFeedback === 'sameAsNormal'
+                      ? i18nT('panic.decoyPinSameAsNormal', 'The decoy PIN cannot be the same as the lock PIN.')
+                      : pinFeedback === 'saved'
+                        ? i18nT('panic.pinSavedDesc')
+                        : i18nT('panic.pinSaveErrorDesc')}
                 </Text>
               </View>
             )}
@@ -597,7 +599,7 @@ export function PanicScreen({ onBack }: Props) {
                 accessibilityRole="button"
                 accessibilityLabel={i18nT('panic.savePinBtn')}
                 onPress={() => {
-                  if (tempPin.length < 4 || tempPin.length > 6) {
+                  if (tempPin.length !== 6) {
                     setPinFeedback('invalid');
                     return;
                   }
@@ -605,6 +607,11 @@ export function PanicScreen({ onBack }: Props) {
                   const len = tempPin.length;
                   void (async () => {
                     try {
+                      const isNormalPin = await verifyPIN(tempPin);
+                      if (isNormalPin) {
+                        setPinFeedback('sameAsNormal');
+                        return;
+                      }
                       const pinHash = await hashPinWithSalt(tempPin, DURESS_PIN_SALT);
                       setPinLength(len);
                       await persist({ pinHash, pinLength: len, pinValue: undefined });

@@ -2240,6 +2240,12 @@ async function decryptAndAppendLocked(
         async function getAdminSigningKey(): Promise<string | null> {
           if (!claimedAdminId) return null;
           if (claimedAdminId === senderId) return resolveSigningKey(claimedAdminId, contact.signingPublicKeyB64);
+          // Never resolve/auto-add the local user's own identity as a "group
+          // admin contact" — a buggy or adversarial group could claim the
+          // local aegisId as its admin, which would otherwise silently create
+          // a self-contact row (store guard in contacts.ts also rejects this,
+          // but skip the lookup entirely here so we never even attempt it).
+          if (claimedAdminId === identity.aegisId) return null;
           let admin = useContacts.getState().contacts.find((c) => c.aegisId === claimedAdminId);
           if (!admin) {
             try {

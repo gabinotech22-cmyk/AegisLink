@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, Modal } from 'react-native';
+import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, Modal, AppState, type AppStateStatus } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Crypto from 'expo-crypto';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -31,6 +31,7 @@ import { themedAlert } from '../components/AlertHost';
 import { SchedulePicker } from '../components/SchedulePicker';
 import { VoiceRecorderScreen } from './VoiceRecorder';
 import { useChannelAvatar } from '../channels/useChannelAvatar';
+import { useChannelSelfHydrate } from '../hooks/useChannelSelfHydrate';
 import { encryptAndUploadMedia } from '../crypto/media';
 import { useChannels, type FeedPost } from '../store/channels';
 import type { PostMedia } from '../channels/channelService';
@@ -99,6 +100,8 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
   const myDisplayName = useIdentity((s) => s.displayName);
 
   const summary = useChannels((s) => s.subscribed.find((c) => c.channelId === channelId));
+  const hydrated = useChannels((s) => s.hydrated);
+  const hydrateSubscribed = useChannels((s) => s.hydrateSubscribed);
   // Verified directory entry — the fallback name/avatar source for a channel
   // opened from Discover before it's in `subscribed` (see channelName below).
   const dirEntry = useChannels((s) => s.directory.find((c) => c.channelId === channelId));
@@ -134,12 +137,26 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
 
   useEffect(() => { void loadPending(); }, [loadPending]);
 
+  useChannelSelfHydrate(hydrated, summary, hydrateSubscribed);
+
   useEffect(() => {
     if (!identity) return;
     void loadFeed(channelId, identity);
     const off = attachLive(identity);
     return off;
   }, [channelId, identity, loadFeed, attachLive]);
+
+  // Pull-on-foreground: if the user backgrounds the app while this screen is
+  // mounted (e.g. a scheduled post fired while backgrounded, or the socket
+  // dropped and attachLive's fan-out was missed), re-pull the delta on return
+  // to foreground rather than waiting for the next unrelated re-mount/navigation.
+  useEffect(() => {
+    if (!identity) return;
+    const sub = AppState.addEventListener('change', (s: AppStateStatus) => {
+      if (s === 'active') void loadFeed(channelId, identity);
+    });
+    return () => sub.remove();
+  }, [channelId, identity, loadFeed]);
 
   // While this feed is focused, suppress local notifications for its own posts
   // (same activeChatId guard Chat/GroupChat use). Reset on unmount.
