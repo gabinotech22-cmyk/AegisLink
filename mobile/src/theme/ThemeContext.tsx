@@ -39,11 +39,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (autoMode) setDarkState(scheme !== 'light');
   }, [scheme, autoMode]);
 
+  // Persist sequentially (await in order, not fire-and-forget in parallel):
+  // usePreferences.set persists the FULL preferences blob on every call, so two
+  // concurrent writes race and whichever resolves last wins — it could stomp
+  // the other field back to its pre-update value, leaving themeAutoMode stale.
   const setDark = (d: boolean) => {
     setAutoModeState(false);
     setDarkState(d);
-    void setPref('themeDark', d);
-    void setPref('themeAutoMode', false);
+    void (async () => {
+      await setPref('themeDark', d);
+      await setPref('themeAutoMode', false);
+    })();
   };
 
   const setAutoMode = (auto: boolean) => {

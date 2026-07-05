@@ -12,7 +12,7 @@ import {
   publicChannelJoinRepo,
 } from '../../db/client.js';
 import { evictExpired, checkPubchannelApplyRateLimit } from '../rateLimits.js';
-import { redis } from '../redisClient.js';
+import { redisIncrAtomic } from '../rateLimits.js';
 import {
   verifyChannelDeliveryToken,
   verifyTombstone,
@@ -31,12 +31,8 @@ const PUBCHANNEL_FLAG = () => (process.env['PUBLIC_CHANNELS'] ?? 'off').toLowerC
 const pubchannelMsgRateLimit = new Map<string, { count: number; reset: number }>();
 
 async function checkPubchannelMsgRateLimit(tokenHash: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:pubchannelMsg:${tokenHash}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60);
-    return count <= 120;
-  }
+  const count = await redisIncrAtomic(`ratelimit:pubchannelMsg:${tokenHash}`, 60);
+  if (count !== null) return count <= 120;
   const now = Date.now();
   const entry = pubchannelMsgRateLimit.get(tokenHash) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
@@ -50,12 +46,8 @@ async function checkPubchannelMsgRateLimit(tokenHash: string): Promise<boolean> 
 const approvalPollRateLimit = new Map<string, { count: number; reset: number }>();
 
 async function checkApprovalPollRateLimit(key: string): Promise<boolean> {
-  if (redis) {
-    const redisKey = `ratelimit:approvalPoll:${key}`;
-    const count = await redis.incr(redisKey);
-    if (count === 1) await redis.expire(redisKey, 30);
-    return count <= 1;
-  }
+  const count = await redisIncrAtomic(`ratelimit:approvalPoll:${key}`, 30);
+  if (count !== null) return count <= 1;
   const now = Date.now();
   const entry = approvalPollRateLimit.get(key) ?? { count: 0, reset: now + 30_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 30_000; }
@@ -69,12 +61,8 @@ async function checkApprovalPollRateLimit(key: string): Promise<boolean> {
 const pubchannelJoinRateLimit = new Map<string, { count: number; reset: number }>();
 
 async function checkPubchannelJoinRateLimit(tokenHash: string): Promise<boolean> {
-  if (redis) {
-    const key = `ratelimit:pubchannelJoin:${tokenHash}`;
-    const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, 60);
-    return count <= 10;
-  }
+  const count = await redisIncrAtomic(`ratelimit:pubchannelJoin:${tokenHash}`, 60);
+  if (count !== null) return count <= 10;
   const now = Date.now();
   const entry = pubchannelJoinRateLimit.get(tokenHash) ?? { count: 0, reset: now + 60_000 };
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }

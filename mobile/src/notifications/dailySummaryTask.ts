@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { logger } from '../utils/logger';
 import { ss } from '../utils/secureStore';
+import type { StoredContact } from '../db/contacts';
 
 export const DAILY_SUMMARY_TASK = 'aegis.daily-summary';
 
@@ -16,7 +17,10 @@ export async function runDailySummary(): Promise<boolean> {
     if (now.getHours() < 19 || (now.getHours() === 19 && now.getMinutes() < 30)) {
       return false; // too early
     }
-    const todayString = now.toISOString().split('T')[0];
+    // Dedup key must match the local-time gate above (not UTC) — otherwise near
+    // midnight UTC the gate (local hour) and the dedup key (UTC date) can point
+    // at different calendar days and the task fires twice, or never, per day.
+    const todayString = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const lastRun = await ss.get('lastDailySummary');
     if (lastRun === todayString) return false; // already ran today
 
@@ -44,7 +48,7 @@ export async function runDailySummary(): Promise<boolean> {
         
         for (const r of res) {
           total += r.c;
-          const contact = contacts.find((c: any) => c.aegisId === r.sender_id);
+          const contact = contacts.find((c: StoredContact) => c.aegisId === r.sender_id);
           names.push(contact ? contact.name : r.sender_id);
         }
       }
@@ -52,7 +56,7 @@ export async function runDailySummary(): Promise<boolean> {
 
     if (total > 0) {
       const namesStr = names.slice(0, 3).join(', ') + (names.length > 3 ? '...' : '');
-      const body = `Recibiste ${total} mensajes hoy de ${namesStr}.`;
+      const body = `Recibiste ${total} ${total === 1 ? 'mensaje' : 'mensajes'} hoy de ${namesStr}.`;
       
       await Notifications.scheduleNotificationAsync({
         content: {

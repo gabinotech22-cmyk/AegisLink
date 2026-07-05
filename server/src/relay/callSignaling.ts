@@ -217,28 +217,39 @@ export function attachCallSignaling(socket: Socket, me: string, sockets: Map<str
   // invite and recovered only by the callee. The offline queue re-delivers on
   // the matching v2 events. Legacy v1 handlers (call:invite/:answer/:ice/:hangup,
   // which stamped `from`) were removed in Fase C — no client emits them.
-  socket.on('call:invite:v2', async (raw) => {
+  socket.on('call:invite:v2', (raw) => {
     const parsed = CallInviteV2.safeParse(raw);
     if (!parsed.success) return;
-    if (!(await checkCallOfferRateLimit(me))) {
-      socket.emit('error_msg', { code: 'rate_limited', for: 'call:invite' });
-      return;
-    }
+    // Forward/queue the invite SYNCHRONOUSLY, before any `await`. The rate-limit
+    // check below is async (Redis round-trip or a resolved-on-microtask promise
+    // even in the in-memory fallback), and Socket.IO does not serialize handler
+    // execution across events — if we awaited first, a `call:ice:v2` fired
+    // immediately after on the same socket could run (and find no pending
+    // invite to buffer into) before this handler resumes. Queuing first
+    // preserves same-socket event ordering; a rate-limit rejection unwinds the
+    // queue afterward instead of gating it.
     const { delivered, payload } = forwardSealed('call:invite:v2', parsed.data, /* silent */ true);
-    if (!delivered) {
-      queueCallInvite(parsed.data.to, parsed.data.callId, payload);
-      sendCallWakeUp(parsed.data.to, me, parsed.data.media as CallMedia, parsed.data.callId)
-        .then((pushed) => {
-          if (!pushed) {
+    if (!delivered) queueCallInvite(parsed.data.to, parsed.data.callId, payload);
+    void (async () => {
+      if (!(await checkCallOfferRateLimit(me))) {
+        if (!delivered) cancelCallInvite(parsed.data.to, parsed.data.callId);
+        socket.emit('error_msg', { code: 'rate_limited', for: 'call:invite' });
+        return;
+      }
+      if (!delivered) {
+        sendCallWakeUp(parsed.data.to, me, parsed.data.media as CallMedia, parsed.data.callId)
+          .then((pushed) => {
+            if (!pushed) {
+              cancelCallInvite(parsed.data.to, parsed.data.callId);
+              socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
+            }
+          })
+          .catch(() => {
             cancelCallInvite(parsed.data.to, parsed.data.callId);
             socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
-          }
-        })
-        .catch(() => {
-          cancelCallInvite(parsed.data.to, parsed.data.callId);
-          socket.emit('error_msg', { code: 'peer_offline', for: 'call:invite' });
-        });
-    }
+          });
+      }
+    })();
   });
   socket.on('call:answer:v2', (raw) => {
     const parsed = CallAnswerV2.safeParse(raw);

@@ -65,7 +65,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
 
   const mnemonic = useMemo<string>(() => {
     if (!identity?.secretKey) return '';
-    return Array.from(identity.secretKey).map((b: number) => String(b).padStart(3, '0')).join(' ');
+    return Array.from(identity.secretKey).map((b: number) => WORDLIST_256[b]).join(' ');
   }, [identity?.secretKey]);
 
   const strength: PassphraseStrength = ratePassphrase(passphrase);
@@ -295,15 +295,18 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                     window.alert('Frase de recuperación inválida. Debe contener exactamente 32 palabras.');
                     return;
                   }
+                  let secretKeyBytes: Uint8Array | null = null;
+                  let keypair: nacl.BoxKeyPair | null = null;
+                  let signKeys: nacl.SignKeyPair | null = null;
                   try {
                     const bytes = words.map((w) => {
                       const idx = WORDLIST_256.indexOf(w);
                       if (idx === -1) throw new Error(`Palabra no encontrada en el diccionario: ${w}`);
                       return idx;
                     });
-                    const secretKeyBytes = new Uint8Array(bytes);
-                    const keypair = nacl.box.keyPair.fromSecretKey(secretKeyBytes);
-                    const signKeys = nacl.sign.keyPair.fromSeed(secretKeyBytes);
+                    secretKeyBytes = new Uint8Array(bytes);
+                    keypair = nacl.box.keyPair.fromSecretKey(secretKeyBytes);
+                    signKeys = nacl.sign.keyPair.fromSeed(secretKeyBytes);
 
                     const restored = identityFromStored({
                       publicKeyB64: encodeBase64(keypair.publicKey),
@@ -318,14 +321,14 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                     await useIdentity.getState().hydrate();
                     setRestoring(false);
                     setMnemonicInput('');
-                    if (onRestored) {
-                      window.alert(`Identidad recuperada exitosamente:\n${restored.aegisId}`);
-                      onRestored();
-                    } else {
-                      window.alert(`Identidad recuperada exitosamente:\n${restored.aegisId}`);
-                    }
+                    window.alert(`Identidad recuperada exitosamente:\n${restored.aegisId}`);
+                    onRestored?.();
                   } catch (e) {
                     window.alert(`Error al recuperar identidad: ${(e as Error).message}`);
+                  } finally {
+                    secretKeyBytes?.fill(0);
+                    keypair?.secretKey.fill(0);
+                    signKeys?.secretKey.fill(0);
                   }
                 }}
                 style={{ flex: 1, padding: '10px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', color: t.accentInk, fontSize: 13 }}

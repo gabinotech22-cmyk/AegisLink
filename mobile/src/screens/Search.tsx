@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, Pressable, FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -29,8 +29,15 @@ type Result =
 
 const RECENTS_KEY = '__aegis_search_recents__';
 
-async function saveRecents(items: string[]) {
-  await ss.set(RECENTS_KEY, JSON.stringify(items));
+async function saveRecents(items: string[]): Promise<void> {
+  // ss.set can reject (e.g. the 5s SecureStore write timeout) — this is a
+  // best-effort persistence of search recents, never something that should
+  // surface as an unhandled promise rejection to the caller.
+  try {
+    await ss.set(RECENTS_KEY, JSON.stringify(items));
+  } catch {
+    /* non-fatal — recents just won't persist this time */
+  }
 }
 
 function formatTime(ts: number): string {
@@ -56,16 +63,24 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [recents, setRecents] = useState<string[]>([]);
+  const recentsSeededRef = useRef(false);
 
   useEffect(() => {
-    ss.get(RECENTS_KEY).then((v) => {
-      if (v) {
-        try {
-          const parsed = JSON.parse(v);
-          if (Array.isArray(parsed)) setRecents(parsed);
-        } catch {}
-      }
-    });
+    ss.get(RECENTS_KEY)
+      .then((v) => {
+        // If commitRecent already wrote a fresher value while this bootstrap
+        // read was in flight, don't clobber it with the stale seed.
+        if (recentsSeededRef.current) return;
+        if (v) {
+          try {
+            const parsed = JSON.parse(v);
+            if (Array.isArray(parsed)) setRecents(parsed);
+          } catch {}
+        }
+      })
+      .catch(() => {
+        /* non-fatal — start with empty recents */
+      });
   }, []);
 
   const { contacts } = useContacts();
@@ -155,9 +170,10 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
   function commitRecent(value: string) {
     const v = value.trim();
     if (!v) return;
+    recentsSeededRef.current = true;
     const next = [v, ...recents.filter((x) => x !== v)].slice(0, 8);
     setRecents(next);
-    saveRecents(next);
+    void saveRecents(next);
   }
 
   return (

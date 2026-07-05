@@ -1,4 +1,5 @@
 import { redis } from './redisClient.js';
+import { logger } from './logger.js';
 
 
 // TODO (A-1, deferred): migrate to Redis ONLY when running >1 relay instance.
@@ -18,7 +19,7 @@ export async function redisIncrAtomic(key: string, ttlSeconds: number): Promise<
   try {
     return await redis.eval(INCR_EXPIRE_LUA, 1, key, ttlSeconds) as number;
   } catch (err) {
-    console.error('Redis atomic incr failed', { error: err instanceof Error ? err.message : String(err) });
+    logger.error('Redis atomic incr failed', { message: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }

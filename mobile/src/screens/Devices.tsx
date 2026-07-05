@@ -170,6 +170,10 @@ export function DevicesScreen({ onBack }: Props) {
     setLinkError(null);
 
     let myKeypair: nacl.BoxKeyPair | null = null;
+    // Hoisted so the `finally` below can zeroize it on EVERY exit path (timeout,
+    // link_failed, socket-not-connected) — not only on success. This buffer
+    // carries the raw secretKeyB64/signingSecretKeyB64/spkSecretB64 plaintext.
+    let plaintext: Uint8Array | null = null;
 
     try {
       const theirPubKey = decodeBase64(scannedPayload.pubKey);
@@ -183,7 +187,7 @@ export function DevicesScreen({ onBack }: Props) {
       const { loadLatestSpkSecret } = require('../db/prekeys');
       const latestSpk = await loadLatestSpkSecret();
 
-      const plaintext = decodeUTF8(
+      plaintext = decodeUTF8(
         JSON.stringify({
           aegisId: identity.aegisId,
           publicKeyB64: identity.publicKeyB64,
@@ -229,8 +233,11 @@ export function DevicesScreen({ onBack }: Props) {
     } catch (e) {
       setLinkError((e as Error).message);
     } finally {
-      // Zero out ephemeral secret key bytes on every path — never stored.
+      // Zero out ephemeral secret key bytes AND the serialized identity
+      // secrets on every path (success, timeout, link_failed, no-socket) —
+      // never leave key material sitting in memory past this call.
       if (myKeypair) myKeypair.secretKey.fill(0);
+      if (plaintext) plaintext.fill(0);
       setLinking(false);
       setConfirmVisible(false);
       setScannedPayload(null);

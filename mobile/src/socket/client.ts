@@ -3054,6 +3054,11 @@ async function decryptAndAppendLocked(
     mediaUri: detectedMediaUri,
     expiresAt: parsedPayload?.expiresAt ?? null,
     attachments: detectedAttachments,
+    // Persist the mathematically-authenticated sender so a later peer-initiated
+    // retraction (msg_delete) can match this row via setRemoteMessageDeleted's
+    // `sender_id = ?` predicate — without this, 1:1 incoming rows had sender_id
+    // NULL and remote unsend silently no-opped in direct chats.
+    senderId: contact.aegisId,
   });
 
   // Trigger local notification in alignment with AegisLink notifications spec

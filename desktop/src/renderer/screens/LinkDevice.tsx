@@ -47,15 +47,23 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
   const ephemeralKeyRef = useRef<{ publicKey: Uint8Array, secretKey: Uint8Array } | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
+  // Zeroize the ephemeral secret in EVERY terminal path (connect error, server
+  // error, decrypt failure, success, unmount) — not only on success. Idempotent.
+  function wipeEphemeralKey() {
+    if (ephemeralKeyRef.current) {
+      ephemeralKeyRef.current.secretKey.fill(0);
+      ephemeralKeyRef.current = null;
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();
       }
-      if (ephemeralKeyRef.current) {
-        ephemeralKeyRef.current.secretKey.fill(0);
-      }
+      wipeEphemeralKey();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleNext() {
@@ -82,6 +90,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
         setStep('input');
         setLoading(false);
         socket.disconnect();
+        wipeEphemeralKey();
       });
 
       socket.on('connect', () => {
@@ -97,8 +106,9 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
 
       socket.on('device:link:approved', async (payload: { encryptedPayload: string, nonceB64: string, mobilePubKey: string }) => {
         if (!ephemeralKeyRef.current) return;
+        let dec: Uint8Array | null = null;
         try {
-          const dec = nacl.box.open(
+          dec = nacl.box.open(
             decodeBase64(payload.encryptedPayload),
             decodeBase64(payload.nonceB64),
             decodeBase64(payload.mobilePubKey),
@@ -108,7 +118,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
             setError('Error decrypting identity');
             return;
           }
-          
+
           const parsed = JSON.parse(encodeUTF8(dec));
           if (
             typeof parsed !== 'object' || parsed === null ||
@@ -139,21 +149,28 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
             createdAt: Date.now()
           });
 
-          newIdentity.aegisId = json.aegisId; // Ensure Aegis ID matches exactly
+          // Trust the aegisId DERIVED from the transported pubkey, never the one
+          // supplied alongside it. A mismatch means a corrupt/tampered transfer —
+          // reject it instead of silently overwriting the derived value.
+          if (json.aegisId && json.aegisId !== newIdentity.aegisId) {
+            setError('Identity mismatch — transfer rejected');
+            return;
+          }
 
           await useIdentity.getState().linkDevice(newIdentity);
-          
+
           if (json.spkId != null && json.spkSecretB64) {
             await saveSpkSecret(json.spkId, json.spkSecretB64);
           }
-          
+
           await useIdentity.getState().hydrate();
-          
+
           onLinked();
         } catch (err) {
           setError('Error processing approval: ' + (err as Error).message);
         } finally {
-          ephemeralKeyRef.current.secretKey.fill(0);
+          dec?.fill(0);
+          wipeEphemeralKey();
         }
       });
 
@@ -162,6 +179,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
         setStep('input');
         setLoading(false);
         socket.disconnect();
+        wipeEphemeralKey();
       });
 
     } catch (err) {

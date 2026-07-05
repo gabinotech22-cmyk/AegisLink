@@ -261,8 +261,6 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         createdAt: identity.createdAt,
       });
 
-      await publishToServer(identity);
-
       const activeSlotId = get().activeSlotId || 'self';
       const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
       const defaultColor = '#05b875';
@@ -278,6 +276,12 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         avatarImage: null,
         status: 'ready',
       });
+
+      // Publish AFTER the identity is in-memory ready: if the relay rejects or is
+      // slow, the identity is already persisted and usable rather than stranded
+      // on disk with the store never reaching 'ready'.
+      void publishToServer(identity);
+
       return identity;
     } catch (e) {
       set({ status: 'idle', error: (e as Error).message });
@@ -311,7 +315,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         displayName: defaultName,
         avatarColor: defaultColor,
         avatarImage: null,
-        status: 'idle',
+        status: 'ready',
+        hydrated: true,
       });
     } catch (e) {
       set({ status: 'idle', error: (e as Error).message });
