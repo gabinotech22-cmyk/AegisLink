@@ -1263,7 +1263,7 @@ function Shell() {
             onCancel={pop}
             onAdded={(c) => {
               setStack([]);
-              push({ name: 'chat', contact: c });
+              push({ name: 'firstContact', contact: c });
             }}
           />
         );
@@ -1273,7 +1273,7 @@ function Shell() {
             onCancel={pop}
             onAdded={(c) => {
               setStack([]);
-              push({ name: 'chat', contact: c });
+              push({ name: 'firstContact', contact: c });
             }}
             onGroupInvite={(groupId, groupName, adminId) => {
               pop();
