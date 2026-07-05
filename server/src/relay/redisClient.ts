@@ -3,7 +3,15 @@ import Redis from 'ioredis';
 
 const REDIS_URL = process.env.REDIS_URL;
 
-export const redis = REDIS_URL ? new Redis(REDIS_URL) : null;
+export const redis = REDIS_URL ? new Redis(REDIS_URL, {
+  maxRetriesPerRequest: 3,
+  retryStrategy(times) {
+    if (times > 5) {
+      return null;
+    }
+    return Math.min(times * 100, 3000);
+  }
+}) : null;
 
 if (redis) {
   redis.on('error', (err) => {

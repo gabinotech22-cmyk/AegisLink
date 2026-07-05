@@ -249,7 +249,12 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     const next = pinCode + d;
     setPinCode(next);
     setPinError('');
-    if (next.length === 6) setTimeout(() => validatePin(next), 180);
+    if (next.length === 4) {
+      // Background silent check for legacy 4-digit PINs.
+      setTimeout(() => validatePin(next, true), 10);
+    } else if (next.length === 6) {
+      setTimeout(() => validatePin(next, false), 180);
+    }
   }
 
   function handleDelete() {
@@ -257,7 +262,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     setPinError('');
   }
 
-  async function validatePin(pin: string) {
+  async function validatePin(pin: string, silent = false) {
     try {
       const panicRaw = await ss.get('aegis.panic.v1');
       if (panicRaw) {
@@ -333,6 +338,9 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       onUnlock();
       return;
     }
+    
+    if (silent) return;
+
     const newAttempts = attempts + 1;
     setAttempts(newAttempts);
     shake();

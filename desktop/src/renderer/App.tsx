@@ -419,11 +419,7 @@ function Shell() {
     }
     
     if (onboardingRestore || onboardingMode === 'restore') {
-      if (usePreferences.getState().duressPin) {
-        // If we are about to restore but a duress PIN is active, we must panic
-        // to prevent restoring data into a DB that's supposed to be ephemeral/decoy.
-        return <PanicScreen onBack={() => { setOnboardingRestore(false); setOnboardingMode('generate'); setShowEntry(true); setShowOnboarding(false); }} />;
-      }
+      return <BackupScreen onBack={() => { setOnboardingRestore(false); setOnboardingMode('generate'); setShowEntry(true); setShowOnboarding(false); }} onRestored={() => { setShowOnboarding(false); }} />;
     }
     return (
       <OnboardingScreen

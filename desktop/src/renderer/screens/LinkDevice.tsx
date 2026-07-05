@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import nacl from 'tweetnacl';
-import { encodeBase64, decodeBase64, decodeUTF8 } from 'tweetnacl-util';
+import { encodeBase64, decodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
 import { SERVER_URL } from '../config';
@@ -17,7 +17,7 @@ interface Props {
   onLinked: () => void;
 }
 
-function QRCanvas({ payload, t }: { payload: string; t: { radius: number } }) {
+function QRCanvas({ payload, t }: { payload: string; t: { radius: number; borderStrong: string } }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -109,7 +109,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
             return;
           }
           
-          const parsed = JSON.parse(decodeUTF8(dec));
+          const parsed = JSON.parse(encodeUTF8(dec));
           if (
             typeof parsed !== 'object' || parsed === null ||
             typeof parsed.publicKeyB64 !== 'string' ||

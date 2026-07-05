@@ -19,7 +19,7 @@ import {
 import { WORDLIST_256 } from '../crypto/wordlist';
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
-import { identityFromStored } from '../store/identity';
+import { identityFromStored } from '../crypto/identity';
 
 interface Props {
   onBack: () => void;
@@ -313,14 +313,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                       createdAt: Date.now(),
                     });
 
-                    await useIdentity.getState().saveIdentity({
-                      aegisId: restored.aegisId,
-                      publicKeyB64: restored.publicKeyB64,
-                      secretKeyB64: restored.secretKeyB64,
-                      signingPublicKeyB64: restored.signingPublicKeyB64,
-                      signingSecretKeyB64: restored.signingSecretKeyB64,
-                      createdAt: restored.createdAt,
-                    });
+                    await useIdentity.getState().linkDevice(restored);
 
                     await useIdentity.getState().hydrate();
                     setRestoring(false);
