@@ -119,7 +119,6 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   // Pending enable: if user triggers enable but has no PIN, we wait for PIN setup
   const pendingEnable = useRef(false);
 
-  const [bioAvailable, setBioAvailable] = useState(false);
 
   useEffect(() => {
     hasStoredPIN().then(setPinStored);

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 import { AEGIS_ID_RE } from './schemas.js';
 import { redisIncrAtomic, RATE_LIMIT_MAP_MAX } from './rateLimits.js';
-import { redis } from './redisClient.js';
+
 import { liveSockets } from './liveSockets.js';
 
 const CallTo = z.object({ to: z.string().regex(AEGIS_ID_RE), callId: z.string().min(1).max(128) });

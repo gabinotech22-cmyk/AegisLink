@@ -1,5 +1,5 @@
 import { redis } from './redisClient.js';
-import { logger } from './logger.js';
+
 
 // TODO (A-1, deferred): migrate to Redis ONLY when running >1 relay instance.
 // Single-instance today, so in-memory is correct; the cap below bounds memory.
@@ -18,7 +18,7 @@ export async function redisIncrAtomic(key: string, ttlSeconds: number): Promise<
   try {
     return await redis.eval(INCR_EXPIRE_LUA, 1, key, ttlSeconds) as number;
   } catch (err) {
-    logger.error('Redis atomic incr failed', { error: err instanceof Error ? err.message : String(err) });
+    console.error('Redis atomic incr failed', { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }

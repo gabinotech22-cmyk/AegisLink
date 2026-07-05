@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -36,24 +36,13 @@ export function LockSettingsScreen({ onBack }: Props) {
   const [bioAvailable, setBioAvailable] = useState(false);
 
   useEffect(() => {
-    ss.get(LOCK_SETTINGS_KEY)
-      .then((raw) => {
-        if (!raw) return;
-        try {
-          const s = JSON.parse(raw) as LockSettingsData;
-          setBiometrics(s.biometrics ?? false);
-          setAutoLockMinutes(s.autoLockMinutes ?? 5);
-          setLockOnBackground(s.lockOnBackground ?? true);
-        } catch { /* corrupt */ }
-      })
-      .catch(() => {});
-
     void (async () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean> };
+        const LA = require('expo-local-authentication') as { hasHardwareAsync(): Promise<boolean>; isEnrolledAsync(): Promise<boolean> };
         const hasHw = await LA.hasHardwareAsync();
-        setBioAvailable(hasHw);
+        const enrolled = await LA.isEnrolledAsync();
+        setBioAvailable(hasHw && enrolled);
       } catch {
         setBioAvailable(false);
       }
