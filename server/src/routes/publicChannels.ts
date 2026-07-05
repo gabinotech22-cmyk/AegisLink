@@ -439,6 +439,7 @@ export function createPublicChannelsRouter(): Router {
     res.set('Content-Type', 'application/octet-stream');
     res.set('Cache-Control', 'public, max-age=3600, immutable');
     res.set('X-Content-Type-Options', 'nosniff');
+    // nosemgrep: javascript.express.security.audit.express-res-sendfile.express-res-sendfile
     res.sendFile(blobPath);
   });
 

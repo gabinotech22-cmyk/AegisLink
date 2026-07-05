@@ -48,16 +48,20 @@ function enabled(level: Exclude<LogLevel, 'silent'>): boolean {
 export const logger = {
   /** Verbose dev tracing. Gated at runtime; default-off in production. */
   debug: (...args: unknown[]): void => {
+    // nosemgrep: semgrep.aegislink-no-console-log-production
     if (enabled('debug')) console.log(...args);
   },
   info: (...args: unknown[]): void => {
+    // nosemgrep: semgrep.aegislink-no-console-log-production
     if (enabled('info')) console.info(...args);
   },
   warn: (...args: unknown[]): void => {
+    // nosemgrep: semgrep.aegislink-no-console-log-production
     if (enabled('warn')) console.warn(...args);
   },
   /** Survives production builds (still gated by level, default-enabled). */
   error: (...args: unknown[]): void => {
+    // nosemgrep: semgrep.aegislink-no-console-log-production
     if (enabled('error')) console.error(...args);
   },
 };
