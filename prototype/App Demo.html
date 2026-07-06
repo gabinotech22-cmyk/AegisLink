@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>AegisLink — App Demo (loop)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&family=EB+Garamond:wght@400;500;600&display=swap"/>
+  <style>
+    html, body { margin: 0; padding: 0; background: #07090a; }
+    html { overflow-x: hidden; }
+    body {
+      font-family: 'Space Grotesk', system-ui, sans-serif;
+      color: #e8f0ec;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    * { box-sizing: border-box; }
+
+    /* Grain backdrop */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 40%, rgba(91,242,185,0.06), transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 90%, rgba(91,242,185,0.04), transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .stage {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 56px;
+      align-items: center;
+      padding: 48px 56px;
+      max-width: 1280px;
+      width: 100%;
+    }
+
+    /* LEFT — captions, counter, REC */
+    .meta { text-align: right; }
+    .rec {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; letter-spacing: 0.16em;
+      color: #5bf2b9;
+      padding: 6px 12px;
+      border: 1px solid rgba(91,242,185,0.4);
+      border-radius: 99px;
+    }
+    .rec .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #5bf2b9;
+      animation: blink 1.4s steps(2, start) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0.25; } }
+
+    .wordmark {
+      font-family: 'EB Garamond', serif;
+      font-size: 76px; line-height: 0.92;
+      letter-spacing: -0.02em;
+      font-weight: 500;
+      margin: 32px 0 12px;
+      color: #f4f0e9;
+    }
+    .tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      color: rgba(232,240,236,0.5);
+      text-transform: uppercase;
+    }
+
+    .caption-card {
+      margin-top: 40px;
+      display: inline-block;
+      text-align: left;
+      min-width: 340px;
+      padding: 18px 22px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.02);
+      border-radius: 14px;
+      backdrop-filter: blur(6px);
+    }
+    .caption-no {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.16em;
+      color: #5bf2b9;
+      text-transform: uppercase;
+    }
+    .caption-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: #f4f0e9;
+      margin-top: 6px;
+      transition: opacity 240ms ease;
+    }
+    .caption-desc {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 13.5px;
+      line-height: 1.45;
+      color: rgba(232,240,236,0.58);
+      margin-top: 8px;
+      transition: opacity 240ms ease;
+    }
+
+    /* RIGHT — progress strip */
+    .progress {
+      display: flex; flex-direction: column; gap: 6px;
+      align-items: flex-start;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: rgba(232,240,236,0.32);
+      letter-spacing: 0.06em;
+    }
+    .progress .row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 6px 0;
+      transition: color 240ms ease, opacity 240ms ease;
+      opacity: 0.55;
+    }
+    .progress .row.active { color: #5bf2b9; opacity: 1; }
+    .progress .row.done { color: rgba(232,240,236,0.55); }
+    .progress .bar {
+      width: 24px; height: 1px;
+      background: currentColor;
+      opacity: 0.5;
+    }
+    .progress .row.active .bar { width: 56px; height: 2px; opacity: 1; }
+    .progress .num { width: 22px; }
+
+    /* CENTER — phone */
+    .phone-wrap {
+      position: relative;
+      width: 372px;
+      height: 808px;
+    }
+    .phone-glow {
+      position: absolute;
+      inset: -40px;
+      border-radius: 80px;
+      background: radial-gradient(circle, rgba(91,242,185,0.10), transparent 70%);
+      filter: blur(20px);
+      pointer-events: none;
+    }
+    #phone-mount {
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Loop progress bar at bottom of phone */
+    .scrub {
+      position: absolute;
+      left: 0; right: 0; bottom: -22px;
+      height: 2px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .scrub > i {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: #5bf2b9;
+      transition: width 80ms linear;
+    }
+
+    /* Crossfade between screen states */
+    .fade { animation: scrFade 480ms ease both; }
+    @keyframes scrFade {
+      0% { opacity: 0; transform: translateY(6px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Compact layout */
+    @media (max-width: 1100px) {
+      body { align-items: flex-start; padding: 24px 0; }
+      .stage { grid-template-columns: 1fr; gap: 24px; padding: 24px; }
+      .meta, .progress { text-align: center; align-items: center; }
+      .progress { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+      .wordmark { font-size: 56px; }
+      .phone-wrap { justify-self: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="stage">
+    <!-- LEFT -->
+    <div class="meta">
+      <div class="rec"><span class="dot"></span>REC · LOOP</div>
+      <div class="wordmark">AegisLink</div>
+      <div class="tag">Vault · cifrado · anónimo · sin metadatos</div>
+      <div class="caption-card">
+        <div class="caption-no" id="cap-no">00 · INTRO</div>
+        <div class="caption-title" id="cap-title">Loading…</div>
+        <div class="caption-desc"  id="cap-desc">Preparing demo loop…</div>
+      </div>
+    </div>
+
+    <!-- CENTER -->
+    <div class="phone-wrap">
+      <div class="phone-glow"></div>
+      <div id="phone-mount"></div>
+      <div class="scrub"><i id="scrub-bar"></i></div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="progress" id="progress"></div>
+  </div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="ios-frame.jsx"></script>
+  <script type="text/babel" src="theme.jsx"></script>
+  <script type="text/babel" src="icons.jsx"></script>
+  <script type="text/babel" src="logo.jsx"></script>
+  <script type="text/babel" src="screens.jsx"></script>
+  <script type="text/babel" src="screens-extra.jsx"></script>
+  <script type="text/babel" src="screens-phase2.jsx"></script>
+  <script type="text/babel" src="screens-states.jsx"></script>
+  <script type="text/babel" src="screens-empty.jsx"></script>
+  <script type="text/babel" src="phone.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { VAULT, VAULT_LIGHT, Phone } = window;
+
+    // Demo reel — pairs of (screen, label, description, duration ms)
+    const REEL = [
+      { s: 'onboarding',  no: '01', t: 'Identidad anónima',     d: 'Sin teléfono ni email. Llave generada en el dispositivo.',         dur: 3200, theme: 'dark' },
+      { s: 'home',        no: '02', t: 'Bandeja cifrada',       d: 'Conversaciones 1:1 y grupos. Cero metadatos almacenados.',         dur: 2800, theme: 'dark' },
+      { s: 'home',        no: '02', t: 'Modo claro',            d: 'El mismo sistema, ambos modos. Cambio sin recarga.',               dur: 2400, theme: 'light' },
+      { s: 'chat',        no: '03', t: 'Conversación segura',   d: 'E2E por defecto. Burbujas de menta sobre negro.',                  dur: 3000, theme: 'dark' },
+      { s: 'attach',      no: '03', t: 'Adjuntos',              d: 'Foto, archivo, ubicación, ver-una-vez — desde la misma hoja.',     dur: 2600, theme: 'dark' },
+      { s: 'viewonce',    no: '03', t: 'Ver una vez',           d: 'El contenido se destruye al cerrar. Captura bloqueada.',           dur: 2600, theme: 'dark' },
+      { s: 'location',    no: '04', t: 'Ubicación temporal',    d: 'Compartida cifrada. Auto-borrado con duración explícita.',         dur: 2600, theme: 'dark' },
+      { s: 'verify',      no: '05', t: 'Verify · QR + palabras',d: 'Confirmación visual. Cambio de clave = bloqueo del chat.',         dur: 2800, theme: 'dark' },
+      { s: 'call',        no: '06', t: 'Llamada cifrada',       d: 'Fingerprint en vivo. Auditable durante la llamada.',               dur: 2800, theme: 'dark' },
+      { s: 'groups',      no: '07', t: 'Grupos',                d: 'Admin/mod/member. Encuestas anónimas, sin filtraciones.',          dur: 2600, theme: 'dark' },
+      { s: 'settings',    no: '08', t: 'Privacidad',            d: 'Face ID, modo pánico con PIN señuelo, backup cifrado.',            dur: 2800, theme: 'dark' },
+    ];
+
+    function Reel() {
+      const [i, setI] = React.useState(0);
+      const [k, setK] = React.useState(0); // remount key for crossfade
+      const [progress, setProgress] = React.useState(0);
+      const rafRef = React.useRef(null);
+      const startRef = React.useRef(0);
+
+      const item = REEL[i];
+      const theme = item.theme === 'light' ? VAULT_LIGHT : VAULT;
+
+      // Advance loop
+      React.useEffect(() => {
+        startRef.current = performance.now();
+        const dur = item.dur;
+        const tick = (now) => {
+          const t = Math.min(1, (now - startRef.current) / dur);
+          setProgress(t);
+          if (t < 1) {
+            rafRef.current = requestAnimationFrame(tick);
+          } else {
+            const next = (i + 1) % REEL.length;
+            setI(next);
+            setK(x => x + 1);
+          }
+        };
+        rafRef.current = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(rafRef.current);
+      }, [i]);
+
+      // Side effects → update DOM captions/progress/scrub
+      React.useEffect(() => {
+        document.getElementById('cap-no').textContent    = item.no + ' · ' + item.s.toUpperCase();
+        document.getElementById('cap-title').textContent = item.t;
+        document.getElementById('cap-desc').textContent  = item.d;
+        const cap = document.getElementById('cap-title');
+        const desc = document.getElementById('cap-desc');
+        cap.style.opacity = '0'; desc.style.opacity = '0';
+        requestAnimationFrame(() => {
+          cap.style.opacity = '1'; desc.style.opacity = '1';
+        });
+        renderProgress();
+      }, [i]);
+
+      React.useEffect(() => {
+        const bar = document.getElementById('scrub-bar');
+        if (bar) bar.style.width = (progress * 100).toFixed(1) + '%';
+      }, [progress]);
+
+      function renderProgress() {
+        const wrap = document.getElementById('progress');
+        if (!wrap) return;
+        // Group by `no` (section)
+        const sections = [];
+        const seen = new Set();
+        REEL.forEach((r) => {
+          if (!seen.has(r.no)) {
+            seen.add(r.no);
+            sections.push({ no: r.no, t: r.t });
+          }
+        });
+        const activeNo = item.no;
+        wrap.innerHTML = sections.map((s, idx) => {
+          const isActive = s.no === activeNo;
+          const isDone = parseInt(s.no, 10) < parseInt(activeNo, 10);
+          const cls = ['row', isActive && 'active', isDone && 'done'].filter(Boolean).join(' ');
+          return `
+            <div class="${cls}">
+              <span class="num">${s.no}</span>
+              <span class="bar"></span>
+              <span>${s.t}</span>
+            </div>`;
+        }).join('');
+      }
+
+      return (
+        <div className="fade" key={k}>
+          <Phone t={theme} initial={item.s} density="regular"/>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('phone-mount')).render(<Reel/>);
+  </script>
+</body>
+</html>

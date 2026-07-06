@@ -434,12 +434,14 @@ function btnIcon(t) {
   };
 }
 
-function TabBar({ t, nav, current }) {
+// Mirrors mobile/src/components/TabBar.tsx: 3 tabs (Verify left the shipping
+// nav — it's reached from the chat, not a tab), es labels from i18n
+// (tabBar.chats/groups/privacy), unread badges on Chats/Comunidades.
+function TabBar({ t, nav, current, badges = { home: 1, groups: 2 } }) {
   const items = [
-    { id: 'home',     label: 'Chats',   icon: I.Chat,  to: 'home' },
-    { id: 'groups',   label: 'Groups',  icon: I.Users, to: 'groups' },
-    { id: 'verify',   label: 'Verify',  icon: I.QR,    to: 'verify' },
-    { id: 'settings', label: 'Privacy', icon: I.Shield,to: 'settings' },
+    { id: 'home',     label: 'Chats',       icon: I.Chat,   to: 'home' },
+    { id: 'groups',   label: 'Comunidades', icon: I.Users,  to: 'groups' },
+    { id: 'settings', label: 'Privacidad',  icon: I.Shield, to: 'settings' },
   ];
   return (
     <div style={{
@@ -449,15 +451,29 @@ function TabBar({ t, nav, current }) {
     }}>
       {items.map(it => {
         const active = current === it.id;
+        const badge = badges[it.id] || 0;
         return (
           <button key={it.id} onClick={() => nav(it.to)} style={{
             background: 'transparent', border: 'none', cursor: 'pointer',
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-            color: active ? t.accent : t.textFaint, padding: 4,
+            color: active ? t.accent : t.textFaint, padding: '4px 8px',
           }}>
-            <it.icon size={20} stroke={active ? 2.2 : 1.8}/>
+            <span style={{ position: 'relative', display: 'flex' }}>
+              <it.icon size={20} stroke={active ? 2.2 : 1.8}/>
+              {badge > 0 && (
+                <span style={{
+                  position: 'absolute', top: -5, right: -10,
+                  minWidth: 16, height: 16, borderRadius: 8,
+                  padding: '0 4px', boxSizing: 'border-box',
+                  background: t.accent, color: t.accentInk,
+                  border: `1.5px solid ${t.surface}`,
+                  fontFamily: t.fontMono, fontSize: 9, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>{badge > 99 ? '99+' : badge}</span>
+              )}
+            </span>
             <span style={{
-              fontFamily: t.fontMono, fontSize: 9, letterSpacing: '0.08em',
+              fontFamily: t.fontMono, fontSize: 9, letterSpacing: '0.8px',
               fontWeight: active ? 600 : 400,
             }}>{it.label.toUpperCase()}</span>
           </button>
