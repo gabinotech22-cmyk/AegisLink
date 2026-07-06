@@ -147,6 +147,13 @@ export const useIdentity = create<IdentityState>((set, get) => ({
           profileStatus: '',
           status: 'ready',
           hydrated: true,
+          // The decoy must never reach the relay: mark it as already published
+          // and clear any pending retry/error state, otherwise HomeScreen would
+          // see a failed/unknown publish and re-run runPublish() with the decoy
+          // identity — registering decoy keys on the relay during coercion.
+          publishStatus: 'published',
+          publishError: null,
+          publishRetryAfterMs: null,
         });
         return;
       }

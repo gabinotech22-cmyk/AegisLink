@@ -120,4 +120,18 @@ describe('identity store — duress hydrate', () => {
     expect(useIdentity.getState().identity?.publicKeyB64).toBe(mockRealStoredIdentity.publicKeyB64);
     expect(useIdentity.getState().identity?.secretKeyB64).toBe(mockRealStoredIdentity.secretKeyB64);
   });
+
+  it('marks the decoy as already published so no relay registration is retried', async () => {
+    // If publishStatus stayed failed/unknown, HomeScreen would call
+    // runPublish() with the decoy identity — registering decoy keys on the
+    // relay while under coercion. The duress hydrate must neutralize it.
+    useIdentity.setState({ publishStatus: 'failed', publishError: 'boom', publishRetryAfterMs: 5000 });
+    usePreferences.setState({ duressActive: true });
+
+    await useIdentity.getState().hydrate();
+
+    expect(useIdentity.getState().publishStatus).toBe('published');
+    expect(useIdentity.getState().publishError).toBeNull();
+    expect(useIdentity.getState().publishRetryAfterMs).toBeNull();
+  });
 });

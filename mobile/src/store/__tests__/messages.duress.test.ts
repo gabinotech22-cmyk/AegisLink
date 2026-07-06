@@ -136,7 +136,9 @@ describe('messages store — duress write guard', () => {
 
     await useMessages.getState().clearChat('decoy-chat');
 
-    expect(useMessages.getState().byChat['decoy-chat']).toBeUndefined();
+    // An empty cached entry (not undefined): loadChat's in-memory cache must
+    // win so the cleared chat isn't resurrected from the decoy blob.
+    expect(useMessages.getState().byChat['decoy-chat']).toEqual([]);
     expect(dbLocal.deleteContactMessages).not.toHaveBeenCalled();
     expect(dbLocal.deleteChatState).not.toHaveBeenCalled();
     expect(dbLocal.deleteContactRatchetSession).not.toHaveBeenCalled();
@@ -172,5 +174,28 @@ describe('messages store — duress write guard', () => {
     await useMessages.getState().setChatEphemeralTimer('decoy-chat', 300);
     expect(useMessages.getState().ephemeralTimers['decoy-chat']).toBe(300);
     expect(dbLocal.setChatEphemeralTimer).not.toHaveBeenCalled();
+  });
+
+  it('loadChat() prefers in-memory decoy state over the blob (in-session edits survive reopen)', async () => {
+    const edited = makeMsg({ id: 'm1', starred: true });
+    useMessages.setState({ byChat: { 'decoy-chat': [edited] } });
+
+    const list = await useMessages.getState().loadChat('decoy-chat');
+
+    expect(list).toEqual([edited]);
+    // The blob (mocked with messagesByChat: {}) must not have clobbered the edit.
+    expect(useMessages.getState().byChat['decoy-chat'][0].starred).toBe(true);
+  });
+
+  it('clearChat() under duress leaves an empty cached entry so the chat is not resurrected from the blob', async () => {
+    useMessages.setState({ byChat: { 'decoy-chat': [makeMsg()] } });
+
+    await useMessages.getState().clearChat('decoy-chat');
+    expect(useMessages.getState().byChat['decoy-chat']).toEqual([]);
+
+    // Reopening the chat must respect the cleared (cached) state, not reload
+    // the seeded conversation from the decoy blob.
+    const list = await useMessages.getState().loadChat('decoy-chat');
+    expect(list).toEqual([]);
   });
 });

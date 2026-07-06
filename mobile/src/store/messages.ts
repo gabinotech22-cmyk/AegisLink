@@ -97,6 +97,10 @@ export const useMessages = create<MessagesState>((set, get) => ({
   async loadChat(chatId) {
     const { usePreferences } = require('./preferences');
     if (usePreferences.getState().duressActive) {
+      // In-session decoy edits (star/pin/soft-delete/clearChat) live only in
+      // byChat — reloading from the blob on reopen would clobber them.
+      const cachedDecoy = get().byChat[chatId];
+      if (cachedDecoy) return cachedDecoy;
       // Decoy mode: serve the seeded fake conversation from the SecureStore
       // decoy blob. The real SQLite DB is never read while under duress.
       const { getOrCreateDecoyBlob } = require('./duressDecoy') as typeof import('./duressDecoy');
@@ -437,7 +441,8 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async clearChat(chatId) {
-    if (!isDuress()) {
+    const duress = isDuress();
+    if (!duress) {
       await deleteContactMessages(chatId);
       await deleteChatState(chatId);
       // Also drop the Double Ratchet session so message numbering can't drift
@@ -455,7 +460,10 @@ export const useMessages = create<MessagesState>((set, get) => ({
       const unreadCounts = { ...s.unreadCounts };
       const pinnedMsg = { ...s.pinnedMsg };
       const drafts = { ...s.drafts };
-      delete byChat[chatId];
+      // Under duress keep an (empty) entry so loadChat's in-memory cache wins
+      // and the cleared chat isn't resurrected from the decoy blob on reopen.
+      if (duress) byChat[chatId] = [];
+      else delete byChat[chatId];
       delete previews[chatId];
       delete unreadCounts[chatId];
       delete pinnedMsg[chatId];
