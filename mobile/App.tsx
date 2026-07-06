@@ -1344,7 +1344,7 @@ function Shell() {
       case 'lock':
         return <LockScreen onUnlock={pop} onPanic={() => void triggerPanic()} />;
       case 'panic':
-        return <PanicScreen onBack={pop} />;
+        return <PanicScreen onBack={pop} onConfigureLock={() => push({ name: 'lockConfig' })} />;
       case 'ephemeral':
         return <EphemeralScreen onBack={pop} chatId={top.chatId} />;
       case 'export':

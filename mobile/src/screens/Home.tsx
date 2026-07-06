@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppState, View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, PanResponder, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,8 +11,6 @@ import { FloatingMenu } from '../components/FloatingMenu';
 import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { normalizeAegisId } from '../crypto/aegisId';
-import { wipeDatabase } from '../db/local';
-import { usePanicGesture } from '../hooks/usePanicGesture';
 import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
 import { useTyping } from '../store/typing';
@@ -57,15 +55,6 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   const clearChat = useMessages((s) => s.clearChat);
   const [showArchived, setShowArchived] = useState(false);
   const [menuContact, setMenuContact] = useState<StoredContact | null>(null);
-
-  // ── Panic gesture ─────────────────────────────────────────────────────────
-  const handlePanicTrigger = useCallback(async () => {
-    try {
-      await wipeDatabase();
-      await useIdentity.getState().reset();
-    } catch { /* non-recoverable */ }
-  }, []);
-  const { registerTap } = usePanicGesture(handlePanicTrigger);
 
   useEffect(() => {
     void hydrate();
@@ -222,7 +211,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         }}
       >
         <Pressable
-          onPress={() => { registerTap(); onProfile(); }}
+          onPress={onProfile}
           onLongPress={onProfileSwitcher}
           accessibilityLabel="AegisLink home — mantén pulsado para cambiar de perfil"
           style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}

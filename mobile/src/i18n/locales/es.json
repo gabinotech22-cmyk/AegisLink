@@ -333,6 +333,9 @@
   },
   "panic": {
     "title": "Modo pánico",
+    "lockRequiredTitle": "Configura el bloqueo por PIN",
+    "lockRequiredDesc": "El modo pánico necesita el bloqueo de la app por PIN. El PIN señuelo, los gestos de la pantalla de bloqueo y el borrado automático dependen de él.",
+    "configureLock": "Configurar bloqueo",
     "heroTitle": "Si te obligan a abrir la app",
     "heroDesc": "AegisLink puede eliminar al instante tus chats o mostrar una cuenta vacía con un PIN de coacción.",
     "gestureSection": "GESTO DE PÁNICO",

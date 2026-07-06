@@ -333,6 +333,9 @@
   },
   "panic": {
     "title": "Panic mode",
+    "lockRequiredTitle": "Set up your PIN lock",
+    "lockRequiredDesc": "Panic mode needs the app's PIN lock. The decoy PIN, lock-screen gestures and auto-wipe all depend on it.",
+    "configureLock": "Set up lock",
     "heroTitle": "If you are forced to open the app",
     "heroDesc": "AegisLink can instantly delete your chats, or show an empty account under a duress PIN.",
     "gestureSection": "PANIC GESTURE",
