@@ -37,7 +37,10 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
   // false = gate the whole screen behind "set up your PIN lock first".
   const [hasLockPin, setHasLockPin] = useState<boolean | null>(null);
   const [gesture, setGesture] = useState<string>('off');
-  const [duressPin, setDuressPin] = useState(true);
+  // Off until a decoy PIN is actually configured — an ON switch with no PIN set
+  // is misleading. Setting a decoy PIN flips it on (see the save handler);
+  // loading a config with a stored hash reflects it as on (see the load effect).
+  const [duressPin, setDuressPin] = useState(false);
   const [hidePin, setHidePin] = useState(false);
   const [autoWipe, setAutoWipe] = useState(false);
   const [pinLength, setPinLength] = useState(0);
@@ -132,9 +135,13 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
         return;
       }
       try {
-        const s = JSON.parse(raw) as { gesture?: string; duressPin?: boolean; hidePin?: boolean; autoWipe?: boolean; pinLength?: number; remoteToken?: string; remoteTokenSig?: string };
+        const s = JSON.parse(raw) as { gesture?: string; duressPin?: boolean; hidePin?: boolean; autoWipe?: boolean; pinLength?: number; pinHash?: string; remoteToken?: string; remoteTokenSig?: string };
         if (s.gesture !== undefined) setGesture(s.gesture);
-        if (s.duressPin !== undefined) setDuressPin(s.duressPin);
+        // Reflect the toggle from reality: ON when a decoy PIN hash is stored,
+        // unless the user explicitly turned it off. This also repairs legacy
+        // configs saved with a hash but no duressPin flag.
+        const hasDecoyPin = typeof s.pinHash === 'string' && s.pinHash.length > 0;
+        setDuressPin(s.duressPin ?? hasDecoyPin);
         if (s.hidePin !== undefined) setHidePin(s.hidePin);
         if (s.autoWipe !== undefined) setAutoWipe(s.autoWipe);
         if (typeof s.pinLength === 'number') setPinLength(s.pinLength);
@@ -692,7 +699,14 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
                       }
                       const pinHash = await hashPinWithSalt(tempPin, DURESS_PIN_SALT);
                       setPinLength(len);
-                      await persist({ pinHash, pinLength: len, pinValue: undefined });
+                      // Setting a decoy PIN implies enabling duress: persist the
+                      // flag the lock screen gates on (Lock.tsx validatePin reads
+                      // config.duressPin). Without this, a user who configures the
+                      // PIN without ever toggling the switch (which defaults ON in
+                      // the UI) leaves aegis.panic.v1 without duressPin, so the
+                      // lock screen skips the duress branch and rejects the PIN.
+                      setDuressPin(true);
+                      await persist({ pinHash, pinLength: len, duressPin: true, pinValue: undefined });
                       setTempPin('');
                       setPinFeedback('saved');
                       // Close after a brief moment so the user sees the confirmation.
