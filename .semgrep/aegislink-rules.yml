@@ -88,6 +88,12 @@ rules:
         - '*.spec.ts'
         - '**/__tests__/**'
         - 'scripts/**'
+        # The logger IS the sanctioned console wrapper — product code calls
+        # logger.*, which internally reaches console. Flagging the abstraction
+        # that enforces the rule is a false positive.
+        - '**/logger.ts'
+        # Build-time config, not the shipped runtime bundle.
+        - '**/metro.config.js'
 
   - id: aegislink-no-cors-wildcard
     languages: [typescript, javascript]
