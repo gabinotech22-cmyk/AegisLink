@@ -7,9 +7,12 @@
  *      zeroed so forensic reads of the raw file find nothing).
  *   2. All SecureStore key material is purged: identity secret keys, the
  *      at-rest DB encryption key, X3DH prekey secrets (SPK + every OPK id in
- *      the stored list), slot bookkeeping, and the forensic remnants
+ *      the stored list), slot bookkeeping, the forensic remnants
  *      (panic config, preferences) whose mere existence would reveal that a
- *      panic-enabled account lived on the device.
+ *      panic-enabled account lived on the device, AND the app-lock PIN hash
+ *      + salt — otherwise the old PIN keeps gating the lock screen after a
+ *      wipe/re-onboarding, and its survival would itself prove an app-lock
+ *      was configured.
  *   3. Lock.tsx duress (coercion) flow is HIDE + REVERSIBLE and never calls
  *      wipeDatabase — only the lock-screen gestures, the remote wipe deep
  *      link, auto-wipe-on-max-attempts, and the manual Panic button may
@@ -126,6 +129,12 @@ describe('wipeDatabase — SecureStore key material', () => {
     expect(deletedKeys).toContain('aegis.polls.v1');
     // The decoy blob itself: surviving it would prove duress mode existed.
     expect(deletedKeys).toContain('aegis.duress.decoy.v1');
+    // App-lock PIN material: a surviving hash/salt keeps the old PIN gating
+    // the lock screen post-wipe and proves an app-lock existed (forensic leak).
+    expect(deletedKeys).toContain('aegis.pin.hash');
+    expect(deletedKeys).toContain('aegis.pin.salt.v2');
+    // Legacy v1 lock-settings blob (still present on upgraded devices).
+    expect(deletedKeys).toContain('aegis.lockSettings');
   });
 
   it('purges the SPK and every OPK secret listed in aegis.opkIds.json', async () => {
@@ -137,6 +146,45 @@ describe('wipeDatabase — SecureStore key material', () => {
     expect(deletedKeys).toContain('aegis.opkIds.json');
     expect(deletedKeys).toContain('aegis.spkSecret.b64');
     expect(deletedKeys).toContain('aegis.spk.keyId');
+  });
+
+  it('leaves hasStoredPIN() false after a wipe, so the old PIN no longer gates the lock screen', async () => {
+    jest.resetModules();
+    jest.clearAllMocks();
+
+    // A real in-memory store shared by expo-secure-store's mocked functions,
+    // so writes from a pre-wipe setPIN() and reads/deletes from wipeDatabase()
+    // + hasStoredPIN() all observe the same state (unlike the plain
+    // jest.fn() mocks used by runWipe(), which don't track values).
+    const store = new Map<string, string>();
+    const sqlite = require('expo-sqlite') as { openDatabaseAsync: jest.Mock };
+    sqlite.openDatabaseAsync.mockResolvedValue(makeMockDb());
+
+    const SecureStore = require('expo-secure-store') as {
+      getItemAsync: jest.Mock;
+      setItemAsync: jest.Mock;
+      deleteItemAsync: jest.Mock;
+    };
+    SecureStore.getItemAsync.mockImplementation((key: string) => Promise.resolve(store.get(key) ?? null));
+    SecureStore.setItemAsync.mockImplementation((key: string, v: string) => { store.set(key, v); return Promise.resolve(); });
+    SecureStore.deleteItemAsync.mockImplementation((key: string) => { store.delete(key); return Promise.resolve(); });
+
+    const { ss } = require('../../utils/secureStore') as { ss: { get: jest.Mock } };
+    ss.get.mockResolvedValue(mockFixedKeyB64);
+
+    // ss (utils/secureStore) is a thin wrapper over the same expo-secure-store
+    // mock, so pin.ts's setPIN/hasStoredPIN observe the same `store`.
+    const { setPIN, hasStoredPIN } = require('../../lock/pin') as typeof import('../../lock/pin');
+    await setPIN('123456');
+    expect(await hasStoredPIN()).toBe(true);
+    expect(store.has('aegis.pin.hash')).toBe(true);
+
+    const { wipeDatabase } = require('../local') as typeof import('../local');
+    await wipeDatabase();
+
+    expect(await hasStoredPIN()).toBe(false);
+    expect(store.has('aegis.pin.hash')).toBe(false);
+    expect(store.has('aegis.pin.salt.v2')).toBe(false);
   });
 });
 

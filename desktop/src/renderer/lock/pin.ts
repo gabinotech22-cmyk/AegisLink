@@ -92,4 +92,9 @@ export async function hasStoredPIN(): Promise<boolean> {
 
 export async function clearPIN(): Promise<void> {
   await ss().delete(PIN_HASH_KEY);
+  // Also drop the per-install salt (mirrors mobile/src/lock/pin.ts): leaving
+  // it behind proves an app-lock was once configured, and getPinSalt() mints
+  // a fresh one on the next setPIN(), so there is no correctness reason to
+  // keep it.
+  await ss().delete(PIN_SALT_KEY);
 }

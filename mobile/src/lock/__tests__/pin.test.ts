@@ -82,6 +82,17 @@ describe('app-lock PIN (a3 format)', () => {
     expect(await verifyPIN('1234')).toBe(false);
   });
 
+  it('clearPIN also removes the per-install salt, leaving no orphaned trace', async () => {
+    await setPIN('1234');
+    expect(mockStore.has(PIN_SALT_KEY)).toBe(true);
+    await clearPIN();
+    expect(mockStore.has(PIN_HASH_KEY)).toBe(false);
+    expect(mockStore.has(PIN_SALT_KEY)).toBe(false);
+    // A fresh setPIN() after clearing must still work (mints a new salt).
+    await setPIN('5678');
+    expect(await verifyPIN('5678')).toBe(true);
+  });
+
   it('verifies an old a2 hash and upgrades it to a3', async () => {
     const salt = new Uint8Array(16).fill(7);
     mockStore.set(PIN_SALT_KEY, encodeBase64(salt));

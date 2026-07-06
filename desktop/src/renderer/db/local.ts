@@ -271,6 +271,13 @@ export async function wipeDatabase(): Promise<void> {
   await secureStorage().delete('aegis.panic.v1').catch(() => {});
   await secureStorage().delete('aegis.preferences.v1').catch(() => {});
   await secureStorage().delete('aegis.polls.v1').catch(() => {});
+  // App-lock PIN material (mirrors mobile/src/db/core.ts wipeDatabase — a
+  // surviving hash/salt would keep the old PIN gating the lock screen for an
+  // identity that no longer exists, and its mere presence would prove an
+  // app-lock was configured, contradicting panic mode's "leaves nothing
+  // behind" promise).
+  await secureStorage().delete('aegis.pin.v1').catch(() => {});
+  await secureStorage().delete('aegis.pin.salt.v2').catch(() => {});
 }
 
 // ─── Chat state (draft + unread) ─────────────────────────────────────────────
