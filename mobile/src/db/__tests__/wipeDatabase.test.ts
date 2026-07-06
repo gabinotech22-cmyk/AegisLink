@@ -50,6 +50,24 @@ jest.mock('../../utils/secureStore', () => ({
   },
 }));
 
+// Minimal in-memory stand-in for the real Zustand preferences store. Lets us
+// assert that wipeDatabase() resets appLockEnabled in RAM, not just in the
+// persisted SecureStore blob (the actual bug: the persisted key was deleted
+// but the in-memory store kept appLockEnabled: true, re-arming the lock gate
+// for a freshly regenerated identity with no valid PIN — a permanent lockout).
+const mockPrefsState = { appLockEnabled: true };
+const mockPrefsReset = jest.fn(async () => {
+  mockPrefsState.appLockEnabled = false;
+});
+jest.mock('../../store/preferences', () => ({
+  usePreferences: {
+    getState: () => ({
+      appLockEnabled: mockPrefsState.appLockEnabled,
+      reset: mockPrefsReset,
+    }),
+  },
+}));
+
 function makeMockDb() {
   return {
     execAsync: jest.fn().mockResolvedValue(undefined),
@@ -71,6 +89,9 @@ const EXPECTED_TABLES = [
 async function runWipe(opts?: { opkIds?: number[] }): Promise<{ db: MockDb; deletedKeys: string[] }> {
   jest.resetModules();
   jest.clearAllMocks();
+  // Simulate a device where app-lock was enabled before the wipe, matching
+  // the real lockout scenario (see mockPrefsState above).
+  mockPrefsState.appLockEnabled = true;
 
   const sqlite = require('expo-sqlite') as { openDatabaseAsync: jest.Mock };
   const db = makeMockDb();
@@ -146,6 +167,16 @@ describe('wipeDatabase — SecureStore key material', () => {
     expect(deletedKeys).toContain('aegis.opkIds.json');
     expect(deletedKeys).toContain('aegis.spkSecret.b64');
     expect(deletedKeys).toContain('aegis.spk.keyId');
+  });
+});
+
+describe('wipeDatabase — in-memory preferences reset (lockout regression)', () => {
+  it('resets usePreferences.appLockEnabled to false, not just the persisted SecureStore blob', async () => {
+    expect(mockPrefsState.appLockEnabled).toBe(true); // sanity: simulated pre-wipe state
+    await runWipe();
+    const { usePreferences } = require('../../store/preferences') as typeof import('../../store/preferences');
+    expect(mockPrefsReset).toHaveBeenCalled();
+    expect(usePreferences.getState().appLockEnabled).toBe(false);
   });
 });
 

@@ -172,6 +172,48 @@ describe('H-5 — handlePanicDeepLink rejects malformed / unsigned tokens', () =
   });
 });
 
+describe('Duress unlock never reveals panic/settings screens (source regression)', () => {
+  // Bug: unlocking with the duress/coercion PIN from the Panic-mode config
+  // screen (or any other sensitive screen) returned to that same screen
+  // after the auto-lock, revealing to a coercer that panic/duress mode
+  // exists. A duress unlock must always land on the decoy chat/home view.
+  const APP_TSX = path.resolve(SRC, '..', 'App.tsx');
+
+  it('App.tsx pops the "panic" route (not just profileSwitcher/createProfile) while duress is active', () => {
+    const src = fs.readFileSync(APP_TSX, 'utf8');
+    const guardIdx = src.indexOf("topRoute?.name === 'profileSwitcher'");
+    expect(guardIdx).toBeGreaterThan(-1);
+    // The defense-in-depth pop effect must also cover 'panic', on the same
+    // guard condition as profileSwitcher/createProfile.
+    const guardBlockEnd = src.indexOf('pop();', guardIdx);
+    const guardBlock = src.slice(guardIdx, guardBlockEnd);
+    expect(guardBlock).toMatch(/topRoute\?\.name === 'panic'/);
+  });
+
+  it('App.tsx resets the nav stack to home on the duressActive false->true transition', () => {
+    const src = fs.readFileSync(APP_TSX, 'utf8');
+    // A ref must track the previous duressActive value so the reset fires
+    // only on the transition, not on every render while duress stays active
+    // (which would otherwise trap the decoy session mid-navigation).
+    expect(src).toMatch(/wasDuressActiveRef/);
+    const effectIdx = src.indexOf('if (duressActive && !wasDuressActiveRef.current)');
+    expect(effectIdx).toBeGreaterThan(-1);
+    const effectBlockEnd = src.indexOf('}', src.indexOf('{', effectIdx));
+    const effectBlock = src.slice(effectIdx, effectBlockEnd);
+    expect(effectBlock).toMatch(/setStack\(\[\]\)/);
+    expect(effectBlock).toMatch(/setTab\('home'\)/);
+  });
+
+  it("case 'panic' renders null under duress (same guard pattern as profileSwitcher/createProfile)", () => {
+    const src = fs.readFileSync(APP_TSX, 'utf8');
+    const caseIdx = src.indexOf("case 'panic':");
+    expect(caseIdx).toBeGreaterThan(-1);
+    const nextCaseIdx = src.indexOf("case '", caseIdx + 1);
+    const caseBlock = src.slice(caseIdx, nextCaseIdx);
+    expect(caseBlock).toMatch(/usePreferences\.getState\(\)\.duressActive\)\s*return null;/);
+  });
+});
+
 describe('M-2 — certificate pinning manifest entries exist', () => {
   // `android/` is `expo prebuild` output and is gitignored (managed workflow),
   // so it is absent in CI where no prebuild runs. Guard the native-file

@@ -738,6 +738,18 @@ export async function wipeDatabase(): Promise<void> {
   await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
   await SecureStore.deleteItemAsync('aegis.preferences.v1').catch(() => {});
   await SecureStore.deleteItemAsync('aegis.polls.v1').catch(() => {});
+
+  // Reset the IN-MEMORY preferences store too — deleting the SecureStore blob
+  // above is not enough, since usePreferences (Zustand) keeps the last
+  // hydrated values in RAM. Without this, appLockEnabled stays true after a
+  // panic wipe, the lock-gate re-arms for the freshly regenerated identity,
+  // and — since aegis.pin.hash was just deleted — NO PIN can ever unlock it:
+  // a permanent lockout on a brand-new account. Lazy require avoids a cycle
+  // (preferences.ts doesn't import db/core.ts, but keep this defensive).
+  try {
+    const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
+    await usePreferences.getState().reset();
+  } catch { /* non-fatal — SecureStore key above is already gone either way */ }
   // A surviving decoy blob would prove the duress feature was configured.
   await SecureStore.deleteItemAsync('aegis.duress.decoy.v1').catch(() => {});
 
