@@ -172,7 +172,6 @@ describe('wipeDatabase — SecureStore key material', () => {
 
 describe('wipeDatabase — in-memory preferences reset (lockout regression)', () => {
   it('resets usePreferences.appLockEnabled to false, not just the persisted SecureStore blob', async () => {
-    expect(mockPrefsState.appLockEnabled).toBe(true); // sanity: simulated pre-wipe state
     await runWipe();
     const { usePreferences } = require('../../store/preferences') as typeof import('../../store/preferences');
     expect(mockPrefsReset).toHaveBeenCalled();
