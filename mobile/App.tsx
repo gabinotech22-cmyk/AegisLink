@@ -1628,6 +1628,9 @@ function Shell() {
           />
         );
       case 'profileSwitcher':
+        // Defense in depth: the profile switcher must never be reachable while
+        // showing the decoy account, even if some other path pushes the route.
+        if (usePreferences.getState().duressActive) { pop(); return null; }
         return (
           <ProfileSwitcherScreen
             onBack={pop}
@@ -1635,6 +1638,7 @@ function Shell() {
           />
         );
       case 'createProfile':
+        if (usePreferences.getState().duressActive) { pop(); return null; }
         return (
           <CreateProfileScreen
             onBack={pop}

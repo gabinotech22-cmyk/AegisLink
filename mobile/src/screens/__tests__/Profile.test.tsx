@@ -287,4 +287,12 @@ describe('ProfileScreen', () => {
     fireEvent.press(backBtns[0]);
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
+
+  // ── 10. Isolated-profiles row hidden under duress (decoy mode) ───────────
+  it('hides the "isolated profiles" row while duressActive is true', () => {
+    mockPrefs.duressActive = true;
+    const { queryByText } = render(<ProfileScreen {...makeProps()} />);
+    expect(queryByText('profile.isolatedProfiles')).toBeNull();
+    mockPrefs.duressActive = false;
+  });
 });

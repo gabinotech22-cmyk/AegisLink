@@ -66,6 +66,9 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
   const photoVis = usePreferences((s) => s.photoVis);
   const lastSeen = usePreferences((s) => s.lastSeenVisible);
   const typing = usePreferences((s) => s.typingVisible);
+  // Isolated-profiles switcher must stay hidden while showing the decoy
+  // account — it would reveal that a real, hidden identity exists.
+  const duressActive = usePreferences((s) => s.duressActive);
 
   const setPhotoVis = (v: 'all' | 'contacts' | 'none') => void setPreference('photoVis', v);
   const setLastSeen = (v: boolean) => void setPreference('lastSeenVisible', v);
@@ -410,7 +413,7 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
               onPress={onExport}
             />
           )}
-          {onProfileSwitcher && (
+          {onProfileSwitcher && !duressActive && (
             <Row
               t={t}
               icon={<I.Person size={18} color={t.textDim} />}

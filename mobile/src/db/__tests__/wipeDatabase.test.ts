@@ -10,8 +10,11 @@
  *      the stored list), slot bookkeeping, and the forensic remnants
  *      (panic config, preferences) whose mere existence would reveal that a
  *      panic-enabled account lived on the device.
- *   3. Lock.tsx duress flow wipes BEFORE flagging decoy mode (source-order
- *      regression, same style as audit-regression.test.ts).
+ *   3. Lock.tsx duress (coercion) flow is HIDE + REVERSIBLE and never calls
+ *      wipeDatabase — only the lock-screen gestures, the remote wipe deep
+ *      link, auto-wipe-on-max-attempts, and the manual Panic button may
+ *      destroy data (source-order regression, same style as
+ *      audit-regression.test.ts).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -121,6 +124,8 @@ describe('wipeDatabase — SecureStore key material', () => {
     expect(deletedKeys).toContain('aegis.panic.v1');
     expect(deletedKeys).toContain('aegis.preferences.v1');
     expect(deletedKeys).toContain('aegis.polls.v1');
+    // The decoy blob itself: surviving it would prove duress mode existed.
+    expect(deletedKeys).toContain('aegis.duress.decoy.v1');
   });
 
   it('purges the SPK and every OPK secret listed in aegis.opkIds.json', async () => {
@@ -135,18 +140,38 @@ describe('wipeDatabase — SecureStore key material', () => {
   });
 });
 
-describe('Lock.tsx duress flow — wipe-before-decoy ordering (source regression)', () => {
-  it('the duress branch calls wipeDatabase BEFORE flagging duressActive', () => {
-    // If interrupted mid-flow (battery pull, force-close) the REAL data must
-    // already be gone; showing the decoy is only ever the second step.
+describe('Lock.tsx duress flow — hide-and-reversible, never destructive (source regression)', () => {
+  it('the duress branch does NOT call wipeDatabase before (or as part of) flagging duressActive', () => {
+    // Product model: the duress PIN HIDES the real account behind a decoy and
+    // is fully REVERSIBLE — it must never wipe real data. Only the lock-screen
+    // gestures, the remote wipe deep link, auto-wipe-on-max-attempts, and the
+    // manual Panic button are allowed to call wipeDatabase().
     const src = fs.readFileSync(
       path.resolve(__dirname, '..', '..', 'screens', 'Lock.tsx'),
       'utf8',
     );
-    const wipeIdx = src.indexOf('await wipeDatabase()');
     const decoyIdx = src.indexOf('duressActive: true');
-    expect(wipeIdx).toBeGreaterThan(-1);
     expect(decoyIdx).toBeGreaterThan(-1);
-    expect(wipeIdx).toBeLessThan(decoyIdx);
+
+    // Find the duress branch: from the duressPin config check up to the next
+    // top-level PIN check (the real-PIN branch starts at "const ok = hasPIN").
+    const duressBranchStart = src.indexOf('if (config.duressPin');
+    const duressBranchEnd = src.indexOf('const ok = hasPIN ? await verifyPIN');
+    expect(duressBranchStart).toBeGreaterThan(-1);
+    expect(duressBranchEnd).toBeGreaterThan(duressBranchStart);
+
+    const duressBranch = src.slice(duressBranchStart, duressBranchEnd);
+    expect(duressBranch).not.toContain('wipeDatabase()');
+    expect(duressBranch).toContain('duressActive: true');
+  });
+
+  it('wipeDatabase remains present for the real destructive paths (auto-wipe on max attempts)', () => {
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '..', '..', 'screens', 'Lock.tsx'),
+      'utf8',
+    );
+    // Two legitimate call sites: biometric auto-wipe and PIN auto-wipe.
+    const matches = src.match(/await wipeDatabase\(\)/g) ?? [];
+    expect(matches.length).toBeGreaterThanOrEqual(2);
   });
 });

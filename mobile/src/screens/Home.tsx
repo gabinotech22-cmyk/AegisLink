@@ -14,6 +14,7 @@ import { normalizeAegisId } from '../crypto/aegisId';
 import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
 import { useTyping } from '../store/typing';
+import { usePreferences } from '../store/preferences';
 import type { StoredContact, StoredMessage } from '../db/local';
 import { previewLabel } from '../utils/messagePreview';
 import { themedAlert } from '../components/AlertHost';
@@ -33,6 +34,9 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
+  // Profile switcher must stay hidden while showing the decoy account —
+  // revealing multi-profile UI would break the plausible-deniability model.
+  const duressActive = usePreferences((s) => s.duressActive);
   const {
     identity,
     displayName,
@@ -212,7 +216,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
       >
         <Pressable
           onPress={onProfile}
-          onLongPress={onProfileSwitcher}
+          onLongPress={duressActive ? undefined : onProfileSwitcher}
           accessibilityLabel="AegisLink home — mantén pulsado para cambiar de perfil"
           style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
         >

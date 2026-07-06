@@ -123,18 +123,26 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     try {
       const { usePreferences } = require('./preferences');
       if (usePreferences.getState().duressActive) {
-        // Generate a cryptographically random throwaway identity so the decoy
-        // looks indistinguishable from a real account: real AegisID, real key
-        // material, real createdAt. All-zero keys are trivially detectable under
-        // forensic analysis and must never be used here.
-        const decoyIdentity = createIdentity();
-        const decoyName = decoyIdentity.aegisId.toLowerCase().replace(/-/g, '');
+        // Stable decoy: real AegisID + real key material (never all-zero, so
+        // forensic analysis can't distinguish it from a genuine identity), but
+        // generated ONCE and persisted so every duress unlock shows the SAME
+        // decoy account. Two different "accounts" across unlocks would be a
+        // dead giveaway that duress mode exists.
+        const { getOrCreateDecoyBlob } = require('./duressDecoy') as typeof import('./duressDecoy');
+        const { identity: decoy } = await getOrCreateDecoyBlob();
+        const decoyIdentity: Identity = identityFromStored({
+          publicKeyB64: decoy.publicKeyB64,
+          secretKeyB64: decoy.secretKeyB64,
+          signingPublicKeyB64: decoy.signingPublicKeyB64,
+          signingSecretKeyB64: decoy.signingSecretKeyB64,
+          createdAt: decoy.createdAt,
+        });
         set({
           identity: decoyIdentity,
           activeSlotId: 'self',
           slotsList: ['self'],
-          displayName: decoyName,
-          avatarColor: '#5bf2b9',
+          displayName: decoy.displayName,
+          avatarColor: decoy.avatarColor,
           avatarImage: null,
           profileStatus: '',
           status: 'ready',
