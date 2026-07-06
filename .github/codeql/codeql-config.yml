@@ -18,3 +18,18 @@ paths-ignore:
   - '**/dist/**'
   - '**/build/**'
   - '**/out/**'
+  # Tests are not shipped: regex/anchor findings in assertion fixtures are noise,
+  # not runtime vulnerabilities.
+  - '**/__tests__/**'
+  - '**/*.test.ts'
+  - '**/*.test.tsx'
+  - '**/*.spec.ts'
+  # Dev/ops tooling, not the shipped app: one-off publish scripts, TURN cred
+  # rotation, deploy helpers. (The legacy `// lgtm[...]` suppressions here no
+  # longer work since lgtm.com was retired.)
+  - 'scripts/**'
+  - 'infra/**'
+  # Expo config plugins run only at prebuild (build-time), never in the shipped
+  # bundle; a build-time TOCTOU is out of the runtime threat model.
+  - 'mobile/plugins/**'
+  - '**/*.plugin.js'

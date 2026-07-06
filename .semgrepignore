@@ -1,0 +1,29 @@
+# Semgrep scan scope — mirror CodeQL's config (.github/codeql/codeql-config.yml).
+#
+# Scope SAST to SHIPPED product + ops code. Design prototypes, scratch dumps and
+# regenerable build/coverage artifacts are NOT the product; scanning them only
+# floods the code-scanning tab with noise (e.g. 197 unquoted-attribute-var and
+# 9 wildcard-postMessage findings, all inside prototype/, drowned the signal).
+#
+# gitignore-style syntax. Semgrep already skips node_modules and .git by default.
+
+# Design prototypes / mockups (Regla de Oro — Estructura: prototype/ is not product)
+prototype/
+
+# Transient scratch (gitignored working tree — never product)
+_scratch/
+
+# Regenerable build & coverage artifacts
+coverage/
+**/coverage/
+**/lcov-report/
+dist/
+**/dist/
+build/
+**/build/
+out/
+**/out/
+.expo/
+**/.expo/
+android/
+ios/
