@@ -289,7 +289,10 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           duressPin?: boolean;
           pinHash?: string;
         };
-        if (config.duressPin && typeof config.pinHash === 'string' && config.pinHash.length > 0) {
+        // A stored decoy hash means duress is configured. Treat it as enabled
+        // unless the user explicitly turned the toggle off (duressPin === false),
+        // so configs written without the flag (older save path) still work.
+        if (config.duressPin !== false && typeof config.pinHash === 'string' && config.pinHash.length > 0) {
           if (await verifyPinWithSalt(pin, DURESS_PIN_SALT, config.pinHash)) {
             // Duress PIN = HIDE + REVERSIBLE, never destructive. Flip the flag
             // then hydrate the (stable, seeded) decoy identity/contacts/

@@ -86,6 +86,7 @@ jest.mock('../../components/icons', () => ({
 // ── Import after mocks ────────────────────────────────────────────────────────
 import { PanicScreen } from '../Panic';
 import { hasStoredPIN } from '../../lock/pin';
+import { setItemAsync } from 'expo-secure-store';
 
 describe('PanicScreen — accessibility', () => {
   it('has at least one button with accessibilityRole', async () => {
@@ -121,6 +122,39 @@ describe('PanicScreen — accessibility', () => {
       );
       expect(pinInput).toBeTruthy();
       expect(pinInput!.props.autoFocus).toBe(true);
+    });
+  });
+
+  // Regression: saving the decoy PIN must persist duressPin:true, otherwise the
+  // lock screen (which gates on config.duressPin) never enters the duress branch
+  // and rejects the decoy PIN as "wrong PIN". The switch defaults ON in the UI
+  // but is only written to storage on toggle, so the save path must write it.
+  it('persists duressPin:true when the decoy PIN is saved', async () => {
+    const { getByText, UNSAFE_getAllByType } = render(
+      <PanicScreen onBack={jest.fn()} onConfigureLock={jest.fn()} />,
+    );
+
+    const changeBtn = await waitFor(() => getByText('panic.changeDecoyPin'));
+    fireEvent.press(changeBtn);
+
+    const { TextInput } = require('react-native');
+    const pinInput = await waitFor(() => {
+      const input = UNSAFE_getAllByType(TextInput).find(
+        (i: { props: { secureTextEntry?: boolean } }) => i.props.secureTextEntry === true,
+      );
+      expect(input).toBeTruthy();
+      return input!;
+    });
+
+    fireEvent.changeText(pinInput, '135790');
+    fireEvent.press(getByText('panic.savePinBtn'));
+
+    await waitFor(() => {
+      const panicWrite = (setItemAsync as jest.Mock).mock.calls.find(
+        ([key]) => key === 'aegis.panic.v1',
+      );
+      expect(panicWrite).toBeTruthy();
+      expect(JSON.parse(panicWrite![1])).toMatchObject({ duressPin: true, pinHash: 'hashed' });
     });
   });
 

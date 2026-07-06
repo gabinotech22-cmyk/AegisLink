@@ -692,7 +692,14 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
                       }
                       const pinHash = await hashPinWithSalt(tempPin, DURESS_PIN_SALT);
                       setPinLength(len);
-                      await persist({ pinHash, pinLength: len, pinValue: undefined });
+                      // Setting a decoy PIN implies enabling duress: persist the
+                      // flag the lock screen gates on (Lock.tsx validatePin reads
+                      // config.duressPin). Without this, a user who configures the
+                      // PIN without ever toggling the switch (which defaults ON in
+                      // the UI) leaves aegis.panic.v1 without duressPin, so the
+                      // lock screen skips the duress branch and rejects the PIN.
+                      setDuressPin(true);
+                      await persist({ pinHash, pinLength: len, duressPin: true, pinValue: undefined });
                       setTempPin('');
                       setPinFeedback('saved');
                       // Close after a brief moment so the user sees the confirmation.

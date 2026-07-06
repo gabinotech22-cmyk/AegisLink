@@ -438,7 +438,13 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
 
       {/* ── PIN Setup Modal ── */}
       <Modal visible={pinModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setPinModal(false)}>
-        <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: 20 }}>
+        {/* presentationStyle="pageSheet" is iOS-only; on Android the Modal is a
+            full-screen window, so the header must clear the status bar itself.
+            In edge-to-edge (Android 15 / targetSdk 35) the old hardcoded
+            paddingTop left the "Cancel" button under the status bar and
+            untappable. Mirrors the safe-area pattern already used by the
+            WallpaperPicker and DistributionLists modals. */}
+        <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top + 8 }}>
           {/* Header */}
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: t.divider }}>
             <Pressable onPress={() => { setPinModal(false); pendingEnable.current = false; }} hitSlop={10}>
