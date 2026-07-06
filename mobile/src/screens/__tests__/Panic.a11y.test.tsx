@@ -127,8 +127,8 @@ describe('PanicScreen — accessibility', () => {
 
   // Regression: saving the decoy PIN must persist duressPin:true, otherwise the
   // lock screen (which gates on config.duressPin) never enters the duress branch
-  // and rejects the decoy PIN as "wrong PIN". The switch defaults ON in the UI
-  // but is only written to storage on toggle, so the save path must write it.
+  // and rejects the decoy PIN as "wrong PIN". The switch defaults off until a PIN
+  // is actually set, so the save path — not the toggle — must write the flag.
   it('persists duressPin:true when the decoy PIN is saved', async () => {
     const { getByText, UNSAFE_getAllByType } = render(
       <PanicScreen onBack={jest.fn()} onConfigureLock={jest.fn()} />,
