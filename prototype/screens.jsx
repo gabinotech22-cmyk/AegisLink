@@ -5,55 +5,16 @@
 const { I } = window;
 
 // ─── Primitives ──────────────────────────────────────────────────────────
-// Mirrors mobile/src/components/Identicon.tsx: FNV-1a hash + LCG PRNG,
-// 5x5 grid with columns 0-2 mirrored to 3-4. Same seed → same drawing.
-function identiconHash(s) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
-
-function Identicon({ seed, size = 44, color }) {
-  const h = identiconHash(seed);
-  let st = h >>> 0;
-  const rnd = () => { st = (Math.imul(st, 1103515245) + 12345) >>> 0; return st / 4294967296; };
-  const cells = [];
-  for (let c = 0; c < 3; c++) {
-    for (let r = 0; r < 5; r++) {
-      if (rnd() > 0.5) {
-        cells.push([c, r]);
-        if (4 - c !== c) cells.push([4 - c, r]);
-      }
-    }
-  }
-  const fill = color || `hsl(${h % 360}, 60%, 58%)`;
-  const cell = size / 5;
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      {cells.map(([c, r], i) => (
-        <rect key={i} x={c * cell} y={r * cell} width={cell} height={cell} fill={fill}/>
-      ))}
-    </svg>
-  );
-}
-
-// Mirrors mobile/src/components/Avatar.tsx: no photo → deterministic identicon
-// on a surface2 circle (in the app the seed is the contact's pubkey; the name
-// stands in here). A tint equal to surface2 would vanish — fall back to the
-// seed-derived hue, same guard as the app.
-function Avatar({ t, name, color, size = 44, seed }) {
-  const tint = color && color !== t.surface2 ? color : undefined;
+function Avatar({ t, name, color, size = 44 }) {
+  const initials = name.split(' ').slice(0,2).map(s=>s[0]).join('').toUpperCase();
   return (
     <div style={{
-      width: size, height: size, borderRadius: '50%',
-      background: t.surface2, overflow: 'hidden', flexShrink: 0,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }}>
-      <Identicon seed={seed || name} size={size} color={tint}/>
-    </div>
+      width: size, height: size, borderRadius: t.radiusL,
+      background: color || t.surface2,
+      color: t.text, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: t.font, fontWeight: 600, fontSize: size * 0.36,
+      flexShrink: 0, letterSpacing: '-0.02em',
+    }}>{initials}</div>
   );
 }
 
@@ -108,33 +69,57 @@ function Row({ t, children, onClick, noBorder }) {
 }
 
 // ─── 1. Onboarding ────────────────────────────────────────────────────────
-// Mirrors mobile/src/screens/Onboarding.tsx (personal flow, es strings):
-// welcome → generating → show identity → optional nickname. No org, no
-// enrolment, no invitation code — identity is generated on device.
-function ScreenOnboarding({ t, nav }) {
+function ScreenOnboarding({ t, nav, isWorkMode, setIsWorkMode }) {
   const [step, setStep] = React.useState(0);
-  const [nickname, setNickname] = React.useState('');
-  const [selectedColor, setSelectedColor] = React.useState('#5bf2b9');
+  const [inviteCode, setInviteCode] = React.useState('CKT-30J2-M3EE');
+  const [atestProgress, setAtestProgress] = React.useState(0);
+  const [atestMsg, setAtestMsg] = React.useState('Conectando al relay corporativo zurich-prime...');
   const fingerprint = ['a7f3', '92e1', 'b4c8', '5d0a', '6f12', 'eb73', '8c9d', '1a45'];
-  const aegisId = 'AEGIS-K4T2-9XR7';
-  const defaultName = 'aegisk4t29xr7';
-  const swatches = ['#5bf2b9', '#3ba3f0', '#8b7cf6', '#f06fb0', '#f0a93b', '#f0664b'];
 
-  // App enforces a 2s minimum on the generating animation — mirror it.
   React.useEffect(() => {
-    if (step === 1) {
-      const id = setTimeout(() => setStep(2), 2400);
-      return () => clearTimeout(id);
+    if (step === 4) {
+      setAtestProgress(0);
+      setAtestMsg('Conectando al relay corporativo zurich-prime...');
+      
+      const t1 = setTimeout(() => {
+        setAtestProgress(35);
+        setAtestMsg('Atestando firmas del Secure Enclave del dispositivo...');
+      }, 1000);
+
+      const t2 = setTimeout(() => {
+        setAtestProgress(70);
+        setAtestMsg('Sincronizando políticas de seguridad de Cirrus Labs...');
+      }, 2000);
+
+      const t3 = setTimeout(() => {
+        setAtestProgress(100);
+        setAtestMsg('Atestación completa. Firmando identidad en el relay...');
+      }, 3000);
+
+      const t4 = setTimeout(() => {
+        if (setIsWorkMode) setIsWorkMode(true);
+        setStep(5);
+      }, 4000);
+
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearTimeout(t3);
+        clearTimeout(t4);
+      };
     }
   }, [step]);
 
-  // Step 0: Welcome
+  // Step 0: Welcome Screen for AegisLink Work
   if (step === 0) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
                   padding: '64px 28px 32px', background: t.bg, color: t.text }}>
-      <div style={{ marginTop: 40, marginBottom: 28, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <window.AegisMark t={t} size={56}/>
-        <window.AegisWord t={t} size={30}/>
+      <div style={{ marginTop: 40, marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <window.AegisMark t={t} size={48}/>
+        <div>
+          <span style={{ fontFamily: t.fontDisplay, fontWeight: 700, fontSize: 24, letterSpacing: '-0.02em' }}>AegisLink</span>
+          <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: '0.1em' }}>WORK · ENTERPRISE</div>
+        </div>
       </div>
       <div style={{
         fontFamily: t.fontDisplay, fontSize: 36, lineHeight: 1.05,
@@ -142,28 +127,81 @@ function ScreenOnboarding({ t, nav }) {
         fontStyle: t.italic ? 'italic' : 'normal',
         letterSpacing: '-0.03em', marginBottom: 16,
       }}>
-        Mensajería sin rastros.
+        Secure Enterprise Messaging.
       </div>
       <div style={{
         fontFamily: t.font, fontSize: 15, lineHeight: 1.45,
         color: t.textDim, marginBottom: 'auto',
       }}>
-        Sin número de teléfono. Sin correo. Sin metadatos. Tu identidad es una
-        clave, generada y guardada únicamente en este dispositivo.
+        AegisLink Work is your organization's private communication vault. 
+        Direct end-to-end encryption with zero metadata retention.
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <PrimaryButton t={t} onClick={() => setStep(1)}>Generar mi identidad</PrimaryButton>
-        <GhostButton t={t}>Restaurar desde copia de seguridad</GhostButton>
+        <PrimaryButton t={t} onClick={() => setStep(3)}>Enrol Device (Join Org)</PrimaryButton>
+        <GhostButton t={t} onClick={() => setStep(3)}>Restore Work Profile</GhostButton>
       </div>
       <div style={{
         fontFamily: t.fontMono, fontSize: 10, color: t.textFaint,
         textAlign: 'center', marginTop: 18, letterSpacing: '0.06em',
-      }}>V0.1.0 · CÓDIGO ABIERTO</div>
+      }}>SECURED BY AEGISLINK FOR ENTERPRISES · SWITZERLAND</div>
     </div>
   );
 
-  // Step 1: Generating keypair on device
-  if (step === 1) return (
+  // Step 3: Enter invitation code
+  if (step === 3) return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
+                  padding: '64px 24px 28px', background: t.bg, color: t.text }}>
+      <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent,
+                    letterSpacing: '0.1em', marginBottom: 14 }}>ORGANIZATION ENROLMENT</div>
+      <div style={{
+        fontFamily: t.fontDisplay, fontSize: 28, fontWeight: t.displayWeight,
+        fontStyle: t.italic ? 'italic' : 'normal',
+        letterSpacing: '-0.02em', marginBottom: 24,
+      }}>
+        Enter invitation code
+      </div>
+      <div style={{
+        fontFamily: t.font, fontSize: 14, color: t.textDim,
+        lineHeight: 1.45, marginBottom: 20
+      }}>
+        Please enter the corporate key code provided by your system administrator to associate this device with your team.
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 'auto' }}>
+        <div>
+          <label style={{ display: 'block', fontSize: 10, fontFamily: t.fontMono, color: t.textDim, marginBottom: 6, letterSpacing: '0.04em' }}>INVITATION CODE</label>
+          <input 
+            type="text"
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+            placeholder="Ej: CKT-XXXX-XXXX"
+            style={{
+              width: '100%', padding: '12px 14px', background: t.surface, color: t.text,
+              border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS,
+              fontFamily: t.fontMono, fontSize: 16, outline: 'none'
+            }}
+          />
+        </div>
+        <GhostButton t={t}>Scan QR Invitation</GhostButton>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+        <button 
+          onClick={() => setStep(0)}
+          style={{
+            background: 'transparent', color: t.textDim, border: `1px solid ${t.border}`,
+            borderRadius: t.radius, padding: '14px 20px',
+            fontFamily: t.font, fontSize: 14, fontWeight: 500, cursor: 'pointer'
+          }}>Atrás</button>
+        <div style={{ flex: 1 }}>
+          <PrimaryButton t={t} onClick={() => setStep(4)}>Validate invitation</PrimaryButton>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Step 4: Cryptographic device attestation simulator
+  if (step === 4) return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
                   padding: '80px 28px 40px', background: t.bg, color: t.text,
                   alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
@@ -173,122 +211,79 @@ function ScreenOnboarding({ t, nav }) {
         fontStyle: t.italic ? 'italic' : 'normal',
         fontWeight: t.displayWeight,
         letterSpacing: '-0.02em',
-      }}>Generando tu par de claves</div>
-      <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim,
+      }}>Hardware Attestation</div>
+      <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent,
                     marginTop: 12, letterSpacing: '0.04em' }}>
-        CURVE25519 · 256-BIT · EN DISPOSITIVO
+        {atestMsg}
       </div>
       <div style={{ marginTop: 28, width: '100%' }}>
-        <Progress t={t}/>
+        <div style={{ height: 3, background: t.surface3, borderRadius: 99, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${atestProgress}%`, background: t.accent,
+                        borderRadius: 99, transition: 'width 0.3s ease-out' }}/>
+        </div>
       </div>
-      <button onClick={() => setStep(2)} style={{
+      <button onClick={() => { if (setIsWorkMode) setIsWorkMode(true); setStep(5); }} style={{
         marginTop: 32, background: 'transparent', border: 'none',
         color: t.accent, fontFamily: t.fontMono, fontSize: 11,
         letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer',
-      }}>SALTAR ANIMACIÓN ▸</button>
+      }}>SKIP ATTESTATION ▸</button>
     </div>
   );
 
-  // Step 2: Show identity (AegisID + public key fingerprint)
-  if (step === 2) return (
+  // Step 5: Success Enrolment Screen (Cirrus Labs AG)
+  return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
                   padding: '64px 24px 28px', background: t.bg, color: t.text }}>
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: '50%', background: `${t.accent}22`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.accent
+        }}>
+          <I.Shield size={32} stroke={2}/>
+        </div>
+      </div>
+      
       <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent,
-                    letterSpacing: '0.1em', marginBottom: 14 }}>TU IDENTIDAD</div>
+                    letterSpacing: '0.1em', textAlign: 'center', marginBottom: 10 }}>DEVICE ENROLLED</div>
       <div style={{
-        fontFamily: t.fontDisplay, fontSize: 28, fontWeight: t.displayWeight,
+        fontFamily: t.fontDisplay, fontSize: 26, fontWeight: t.displayWeight,
         fontStyle: t.italic ? 'italic' : 'normal',
-        letterSpacing: '-0.02em', marginBottom: 24, lineHeight: 1.15,
+        letterSpacing: '-0.02em', marginBottom: 24, textAlign: 'center'
       }}>
-        Esta es tuya.<br/>Nadie más la tiene.
+        Welcome to Cirrus Labs AG
       </div>
 
       <div style={{
         border: `1px solid ${t.borderStrong}`, borderRadius: t.radius,
-        padding: 20, marginBottom: 16, background: t.surface,
+        padding: 18, marginBottom: 20, background: t.surface,
+        display: 'flex', flexDirection: 'column', gap: 12
       }}>
-        <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: '0.06em' }}>AEGIS ID</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{ fontFamily: t.fontMono, fontSize: 22, color: t.text, marginTop: 2 }}>{aegisId}</div>
-          <I.Copy size={16} style={{ color: t.textDim }}/>
+        <div>
+          <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: '0.06em' }}>ORGANIZATION</div>
+          <div style={{ fontFamily: t.font, fontSize: 14, fontWeight: 600, color: t.text, marginTop: 2 }}>Cirrus Labs AG</div>
         </div>
-        <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: '0.06em', marginBottom: 8 }}>HUELLA DIGITAL DE CLAVE PÚBLICA</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {fingerprint.map((f, i) => (
-            <div key={i} style={{
-              width: '23.5%', background: t.surface2, borderRadius: t.radiusS,
-              padding: '6px 0', textAlign: 'center',
-              fontFamily: t.fontMono, fontSize: 12, color: t.text,
-            }}>{f}</div>
-          ))}
+        <div style={{ borderBottom: `1px solid ${t.divider}` }}/>
+        <div>
+          <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: '0.06em' }}>YOUR CORPORATE AEGIS ID</div>
+          <div style={{ fontFamily: t.fontMono, fontSize: 18, fontWeight: 500, color: t.text, marginTop: 2 }}>{inviteCode}</div>
+        </div>
+        <div style={{ borderBottom: `1px solid ${t.divider}` }}/>
+        <div>
+          <div style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: '0.06em' }}>SECURITY DIRECTIVES APPLIED</div>
+          <div style={{ fontFamily: t.font, fontSize: 12, color: t.accent, marginTop: 4, lineHeight: 1.4 }}>
+            ✔ Enforce MFA (2FA) Active<br/>
+            ✔ Block Screenshots Active<br/>
+            ✔ Ephemeral Auto-burn: 30 days
+          </div>
         </div>
       </div>
 
       <div style={{ fontFamily: t.font, fontSize: 12, color: t.textDim,
-                    lineHeight: 1.5, marginBottom: 'auto' }}>
-        Apúntalo o haz una copia de seguridad cifrada. Si lo pierdes, nadie —
-        ni nosotros — podrá recuperarlo.
+                    lineHeight: 1.5, marginBottom: 'auto', textAlign: 'center', padding: '0 10px' }}>
+        This device has been cryptographically associated. Key material is backed up locally under corporate directy.
       </div>
 
-      <PrimaryButton t={t} onClick={() => setStep(3)}>Continuar</PrimaryButton>
-    </div>
-  );
-
-  // Step 3: Optional nickname + identicon tint
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
-                  padding: '64px 24px 28px', background: t.bg, color: t.text }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-        <window.AegisMark t={t} size={28}/>
-        <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: '0.1em' }}>CASI LISTO</span>
-      </div>
-
-      <div style={{
-        fontFamily: t.fontDisplay, fontSize: 28, fontWeight: t.displayWeight,
-        fontStyle: t.italic ? 'italic' : 'normal',
-        letterSpacing: '-0.02em', marginBottom: 10,
-      }}>¿Cómo te llamamos?</div>
-      <div style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: 1.45, marginBottom: 24 }}>
-        Tu avatar se genera de tu clave. Puedes teñirlo, o subir una foto luego
-        en tu perfil. Todo es opcional; sigues siendo anónimo.
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-        <Avatar t={t} name={aegisId} seed={aegisId} color={selectedColor} size={64}/>
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginBottom: 24 }}>
-        {swatches.map(c => (
-          <button key={c} onClick={() => setSelectedColor(c)} style={{
-            width: 30, height: 30, borderRadius: '50%', background: c,
-            border: c === selectedColor ? `2px solid ${t.accent}` : 'none',
-            cursor: 'pointer', padding: 0,
-          }}/>
-        ))}
-      </div>
-
-      <label style={{ display: 'block', fontSize: 10, fontFamily: t.fontMono, color: t.textDim, marginBottom: 6, letterSpacing: '0.04em' }}>NOMBRE VISIBLE (OPCIONAL)</label>
-      <input
-        type="text"
-        value={nickname}
-        onChange={(e) => setNickname(e.target.value)}
-        placeholder={defaultName}
-        maxLength={20}
-        style={{
-          width: '100%', padding: 12, background: t.surface, color: t.text,
-          border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS,
-          fontFamily: t.font, fontSize: 15, outline: 'none', marginBottom: 8,
-        }}
-      />
-      <div style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint,
-                    letterSpacing: '0.04em', marginBottom: 'auto' }}>
-        Por defecto: {defaultName}
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <PrimaryButton t={t} onClick={() => nav('home')}>Continuar</PrimaryButton>
-        <GhostButton t={t} onClick={() => nav('home')}>Omitir por ahora</GhostButton>
-      </div>
+      <PrimaryButton t={t} onClick={() => nav('home')}>Enter AegisLink Work</PrimaryButton>
     </div>
   );
 }
@@ -348,10 +343,10 @@ function GhostButton({ t, children, onClick }) {
 
 // ─── 2. Home / chat list ──────────────────────────────────────────────────
 const CHATS = [
-  { id: 101, name: 'vesper',          last: 'Las fotos del viaje ya están, todas cifradas 📷', time: '12:42', unread: 1, verified: true, color: '#8b5cf6' },
-  { id: 102, name: 'milo',            last: '¿Te va una llamada esta tarde?',                   time: '11:08', unread: 0, verified: true, color: '#5bf2b9' },
-  { id: 103, name: 'ada',             last: 'Te compartí mi ubicación temporal · expira en 1 h', time: '09:30', unread: 0, verified: true, color: '#f59e0b' },
-  { id: 104, name: 'Club de lectura', last: 'Encuesta anónima: ¿próximo libro del mes?',        time: 'mar',   unread: 2, group: true, color: '#ec4899' },
+  { id: 101, name: 'Alice (Lead)',   last: 'Confirmada la clave de atestación del relay principal.', time: '12:42', unread: 1, verified: true, color: '#8b5cf6' },
+  { id: 102, name: 'Bob',            last: 'Dispositivo enrolado. Enviando logs de depuración.',   time: '11:08', unread: 0, verified: true, color: '#5bf2b9' },
+  { id: 103, name: 'Carol (Legal)',  last: 'Políticas de retención actualizadas a 30 días.',       time: '09:30', unread: 0, verified: true, color: '#f59e0b' },
+  { id: 104, name: 'DAO · Treasury', last: 'Votación anónima aprobada para la rotación de llaves.', time: 'Tue',   unread: 2, group: true, color: '#ec4899' },
 ];
 
 function ScreenHome({ t, nav, density, isWorkMode }) {
@@ -366,7 +361,10 @@ function ScreenHome({ t, nav, density, isWorkMode }) {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: t.text }}>
           <window.AegisMark t={t} size={26}/>
-          <window.AegisWord t={t} size={18}/>
+          <div>
+            <window.AegisWord t={t} size={18}/>
+            <div style={{ fontFamily: t.fontMono, fontSize: 8, color: t.accent, letterSpacing: '0.08em', marginTop: -2 }}>WORK</div>
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: t.textDim }}>
           <button onClick={() => nav('search')} style={btnIcon(t)}><I.Search size={20}/></button>
@@ -382,7 +380,7 @@ function ScreenHome({ t, nav, density, isWorkMode }) {
         fontFamily: t.fontMono, fontSize: 11, color: t.textDim,
         letterSpacing: '0.04em',
       }}>
-        <I.Shield size={14} color={t.accent}/> <span style={{ color: t.accent, fontWeight: 600 }}>CIFRADO EXTREMO A EXTREMO · CERO METADATOS</span>
+        <I.Shield size={14} color={t.accent}/> <span style={{ color: t.accent, fontWeight: 600 }}>CIRRUS LABS AG · SECURED NODE</span>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -486,17 +484,18 @@ function TabBar({ t, nav, current, badges = { home: 1, groups: 2 } }) {
 }
 
 // ─── 3. Chat conversation ────────────────────────────────────────────────
-const CHAT_MESSAGES = [
-  { id: 1, me: false, text: 'Ya subí las fotos del viaje al chat. Van cifradas de extremo a extremo, como todo aquí 😄', time: '12:38' },
-  { id: 2, me: true,  text: 'Se ven geniales. ¿Verificamos claves cuando nos veamos? Así el candado queda en verde.', time: '12:39' },
-  { id: 3, me: false, text: 'Hecho. Escaneamos el QR el sábado y listo.', time: '12:40' },
-  { id: 4, me: true,  text: 'Te mando la dirección por aquí, con ubicación temporal que expira en una hora.', time: '12:41' },
-  { id: 5, me: false, text: 'Perfecto. Este mensaje se quema en 24 h, por cierto 🔥', time: '12:42', ephemeral: true },
+const WORK_MESSAGES = [
+  { id: 1, me: false, text: 'Hola Alice, dispositivo corporativo enrolado correctamente.', time: '12:38' },
+  { id: 2, me: false, text: 'Hemos verificado tu firma local Ed25519 con el Secure Enclave del dispositivo.', time: '12:38' },
+  { id: 3, me: true,  text: 'Excelente, atestación exitosa y relays configurados 👍', time: '12:39' },
+  { id: 4, me: false, text: 'Recuerda que las directivas del relay suizo están activas. El borrado automático está configurado para 30 días en este canal.', time: '12:40' },
+  { id: 5, me: true,  text: 'Entendido. ¿La rotación de claves se ejecutará hoy?', time: '12:41' },
+  { id: 6, me: false, text: 'Sí, la rotación preventiva se completará a las 14:00. Verás el aviso en tu registro.', time: '12:42', ephemeral: true },
 ];
 
 function ScreenChat({ t, nav, density, contact, isWorkMode }) {
   const c = contact || CHATS[0];
-  const [msgs, setMsgs] = React.useState(CHAT_MESSAGES);
+  const [msgs, setMsgs] = React.useState(WORK_MESSAGES);
   const [input, setInput] = React.useState('');
   const [moreOpen, setMoreOpen] = React.useState(false);
   const moreRef = React.useRef(null);
@@ -904,104 +903,45 @@ function ScreenCall({ t, nav, contact }) {
 
 // ─── 6. Groups ────────────────────────────────────────────────────────────
 const GROUPS = [
-  { id: 'g1', name: 'Club de lectura', members: 8,  last: 'ada: Encuesta anónima: ¿próximo libro?',  time: '12:10', unread: 2, color: '#ec4899' },
-  { id: 'g2', name: 'Familia',         members: 6,  last: 'milo: Foto del domingo 📷',               time: '10:44', unread: 0, color: '#06b6d4' },
-  { id: 'g3', name: 'Senderismo',      members: 12, last: 'vesper: Ruta del sábado, ubicación temporal', time: 'lun', unread: 0, color: '#f59e0b' },
-  { id: 'g4', name: 'Cipher Reading',  members: 23, last: 'kes: Capítulo 4 de Serious Cryptography',  time: 'dom',  unread: 0, color: '#5bf2b9' },
+  { id: 1, name: 'DAO · Treasury',  members: 5,  desc: 'Multisig signers · 3-of-5', color: '#f59e0b' },
+  { id: 2, name: 'PrivacyOps',      members: 11, desc: 'Relay infra & monitoring',   color: '#ef4444' },
+  { id: 3, name: 'Audit Q2',        members: 4,  desc: 'External review · Cure53',   color: '#8b5cf6' },
+  { id: 4, name: 'Family',          members: 6,  desc: 'Personal',                   color: '#06b6d4' },
+  { id: 5, name: 'Cipher Reading',  members: 23, desc: 'Cryptography study group',   color: '#5bf2b9' },
 ];
 
-const CHANNELS = [
-  { id: 'c1', name: 'Aegis Notes',   last: 'Build 0.9.3 firmada y verificada',        time: '11:02', owned: true,  color: '#5bf2b9' },
-  { id: 'c2', name: 'Privacy Daily', last: 'Análisis del leak de metadatos de ayer',  time: '09:15', owned: false, color: '#a78bfa' },
-  { id: 'c3', name: 'OpSec Field',   last: 'Guía: rotación de claves en dispositivos', time: 'lun',  owned: false, color: '#f59e0b' },
-];
-
-// Mirrors mobile/src/screens/Groups.tsx: one "Comunidades" tab holding a
-// Grupos | Canales segment pager (channels are sealed public broadcasts).
 function ScreenGroups({ t, nav }) {
-  const [seg, setSeg] = React.useState('groups');
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
                   background: t.bg, color: t.text, overflow: 'hidden' }}>
-      <TopBar t={t} title={seg === 'channels' ? 'Canales' : 'Grupos'} big
-        right={<button onClick={() => nav('emptyGroups')} style={btnIcon(t)}><I.Plus size={22} color={t.accent}/></button>}/>
+      <TopBar t={t} title="Groups" big
+        right={<button onClick={() => nav('emptyGroups')} style={btnIcon(t)}><I.Plus size={22}/></button>}/>
 
-      {/* Grupos | Canales segment — same pill control as the app */}
-      <div style={{
-        display: 'flex', gap: 4, margin: '2px 14px 8px', padding: 3,
-        background: t.surface, border: `1px solid ${t.border}`,
-        borderRadius: t.radius, flexShrink: 0,
-      }}>
-        {[['groups', 'Grupos'], ['channels', 'Canales']].map(([id, label]) => {
-          const on = seg === id;
-          return (
-            <button key={id} onClick={() => setSeg(id)} style={{
-              flex: 1, padding: '7px 0', border: 'none', cursor: 'pointer',
-              borderRadius: t.radiusS, background: on ? t.accent : 'transparent',
-              fontFamily: t.font, fontSize: 12, fontWeight: 600,
-              color: on ? t.accentInk : t.textDim,
-            }}>{label}</button>
-          );
-        })}
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {seg === 'groups' ? GROUPS.map(g => (
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+        {GROUPS.map(g => (
           <div key={g.id} onClick={() => nav('chat', { ...g, group: true })} style={{
             display: 'flex', alignItems: 'center', gap: 12,
             padding: '14px 18px', cursor: 'pointer',
             borderBottom: `1px solid ${t.divider}`,
           }}>
-            <Avatar t={t} name={g.name} seed={g.id} color={g.color} size={44}/>
+            <div style={{
+              width: 46, height: 46, borderRadius: t.radiusL,
+              background: g.color + '22', color: g.color,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}><I.Users size={22}/></div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <span style={{ fontFamily: t.font, fontWeight: 600, fontSize: 15, color: t.text,
-                               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {g.name}
-                </span>
-                <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim }}>{g.time}</span>
+              <div style={{ fontFamily: t.font, fontWeight: 600, fontSize: 15, color: t.text }}>
+                {g.name}
               </div>
-              <div style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 4,
-                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {g.last}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                <I.Lock size={10} color={t.accent}/>
-                <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: '0.05em' }}>
-                  E2EE · {g.members} MIEMBROS
-                </span>
+              <div style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
+                {g.desc}
               </div>
             </div>
-            {g.unread > 0 && (
-              <span style={{
-                minWidth: 20, height: 20, borderRadius: 10, padding: '0 4px',
-                background: t.accent, color: t.accentInk, boxSizing: 'border-box',
-                fontFamily: t.fontMono, fontSize: 11, fontWeight: 700,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>{g.unread}</span>
-            )}
-          </div>
-        )) : CHANNELS.map(c => (
-          <div key={c.id} style={{
-            display: 'flex', alignItems: 'center', gap: 11,
-            padding: '11px 15px', cursor: 'pointer',
-            borderBottom: `1px solid ${t.divider}`,
-          }}>
-            <Avatar t={t} name={c.name} seed={c.id} color={c.color} size={42}/>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontFamily: t.font, fontWeight: 600, fontSize: 14, color: t.text,
-                               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {c.name}
-                </span>
-                {c.owned && <I.Key size={12} style={{ color: t.accent }}/>}
-              </div>
-              <div style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 2,
-                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {c.last}
-              </div>
-            </div>
-            <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint }}>{c.time}</span>
+            <div style={{
+              fontFamily: t.fontMono, fontSize: 11, color: t.textFaint,
+              padding: '3px 7px', background: t.surface2, borderRadius: 99,
+            }}>{g.members}</div>
           </div>
         ))}
       </div>
@@ -1019,7 +959,7 @@ function ScreenSettings({ t, nav, flipped, setFlipped }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
                   background: t.bg, color: t.text, overflow: 'hidden' }}>
-      <TopBar t={t} title="Privacidad" big
+      <TopBar t={t} title="Work Privacy" big
         left={<button onClick={() => nav('home')} style={btnIcon(t)}><I.ChevronL size={22}/></button>}/>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 24px' }}>
@@ -1030,14 +970,14 @@ function ScreenSettings({ t, nav, flipped, setFlipped }) {
           background: t.surface, cursor: 'pointer',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <Avatar t={t} name="AEGIS-K4T2-9XR7" seed="AEGIS-K4T2-9XR7" color={t.accent} size={52}/>
+            <Avatar t={t} name="You" color={t.accent} size={52}/>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: t.fontDisplay, fontSize: 17,
                             fontStyle: t.italic ? 'italic' : 'normal',
-                            fontWeight: t.displayWeight }}>aegisk4t29xr7</div>
+                            fontWeight: t.displayWeight }}>You (Corporate)</div>
               <div style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent,
-                            letterSpacing: '0.04em', marginTop: 2 }}>AEGIS-K4T2-9XR7</div>
-              <div style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 2 }}>Identidad local · solo en este dispositivo</div>
+                            letterSpacing: '0.04em', marginTop: 2 }}>CKT-30J2-M3EE</div>
+              <div style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, marginTop: 2 }}>Enrolado en Cirrus Labs AG · Admin</div>
             </div>
             <I.Chevron size={16} style={{ color: t.textFaint }}/>
           </div>
@@ -1067,7 +1007,7 @@ function ScreenSettings({ t, nav, flipped, setFlipped }) {
                 App contents hidden in screen recording
               </div>
               <div style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, marginTop: 4, fontWeight: 500 }}>
-                Siempre activo · FLAG_SECURE
+                ★ Forzado por administrador de Cirrus Labs AG
               </div>
             </div>
             <button disabled style={{
@@ -1093,12 +1033,12 @@ function ScreenSettings({ t, nav, flipped, setFlipped }) {
             opacity: 0.85
           }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>Ruta vía Tor</div>
+              <div style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>Route via Tor / Swiss Relay</div>
               <div style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
-                El buzón se consulta a través de Tor embebido
+                Enforce routing via Zurich-Prime private relays only
               </div>
               <div style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, marginTop: 4, fontWeight: 500 }}>
-                Sealed sender · el relay no ve el emisor
+                ★ Forzado por directiva de infraestructura
               </div>
             </div>
             <button disabled style={{
@@ -1177,9 +1117,9 @@ function ScreenSettings({ t, nav, flipped, setFlipped }) {
           <Row t={t}>
             <I.Shield size={20} style={{ color: t.textDim }}/>
             <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: t.font, fontSize: 14 }}>Auditoría de seguridad</div>
+              <div style={{ fontFamily: t.font, fontSize: 14 }}>Security audit</div>
               <div style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
-                Pendiente · auditoría independiente en curso
+                Cure53 · 2026 Q1 · passed
               </div>
             </div>
             <I.Chevron size={16} style={{ color: t.textFaint }}/>
@@ -1187,9 +1127,9 @@ function ScreenSettings({ t, nav, flipped, setFlipped }) {
           <Row t={t} noBorder>
             <I.Globe size={20} style={{ color: t.textDim }}/>
             <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: t.font, fontSize: 14 }}>Código abierto</div>
+              <div style={{ fontFamily: t.font, fontSize: 14 }}>Jurisdiction</div>
               <div style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2 }}>
-                Toda la criptografía es verificable · repositorio público
+                Zurich, Switzerland
               </div>
             </div>
           </Row>
