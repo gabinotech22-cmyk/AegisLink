@@ -740,4 +740,17 @@ export async function wipeDatabase(): Promise<void> {
   await SecureStore.deleteItemAsync('aegis.polls.v1').catch(() => {});
   // A surviving decoy blob would prove the duress feature was configured.
   await SecureStore.deleteItemAsync('aegis.duress.decoy.v1').catch(() => {});
+
+  // App-lock PIN material (global keys, no slot prefix — see lock/pin.ts).
+  // A surviving PIN hash/salt would (a) keep the OLD PIN gating the lock
+  // screen for an identity that no longer exists, and (b) prove to a
+  // forensic analysis that an app-lock was configured, contradicting the
+  // "leaves nothing behind" promise of panic mode.
+  await SecureStore.deleteItemAsync('aegis.pin.hash').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.pin.salt.v2').catch(() => {});
+  // Legacy v1 lock-settings blob: current builds persist lock prefs inside
+  // aegis.preferences.v1 (already purged above), but devices upgraded from v1
+  // still carry this key. Best-effort delete so an upgraded device leaves no
+  // proof that an app-lock was ever configured.
+  await SecureStore.deleteItemAsync('aegis.lockSettings').catch(() => {});
 }

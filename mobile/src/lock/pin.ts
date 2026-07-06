@@ -131,4 +131,9 @@ export async function hasStoredPIN(): Promise<boolean> {
 
 export async function clearPIN(): Promise<void> {
   await ss.delete(PIN_HASH_KEY);
+  // Also drop the per-install salt: leaving it behind is a harmless-looking
+  // orphan today, but it still proves an app-lock PIN was once configured
+  // (minimize metadata at-rest) and getPinSalt() will happily mint a fresh
+  // one on the next setPIN(), so there is no correctness reason to keep it.
+  await ss.delete(PIN_SALT_KEY);
 }
