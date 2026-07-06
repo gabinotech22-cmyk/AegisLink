@@ -278,6 +278,17 @@ export async function wipeDatabase(): Promise<void> {
   // behind" promise).
   await secureStorage().delete('aegis.pin.v1').catch(() => {});
   await secureStorage().delete('aegis.pin.salt.v2').catch(() => {});
+
+  // Reset the IN-MEMORY preferences store too — deleting the persisted blob
+  // above is not enough, since usePreferences (Zustand) keeps the last
+  // hydrated values in RAM. Without this, appLockEnabled stays true after a
+  // panic wipe, the lock-gate re-arms for the freshly regenerated identity,
+  // and — since the PIN hash was just deleted — NO PIN can ever unlock it: a
+  // permanent lockout on a brand-new account. Mirrors mobile/src/db/core.ts.
+  try {
+    const { usePreferences } = await import('../store/preferences');
+    await usePreferences.getState().reset();
+  } catch { /* non-fatal — persisted key above is already gone either way */ }
 }
 
 // ─── Chat state (draft + unread) ─────────────────────────────────────────────

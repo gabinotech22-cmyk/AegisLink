@@ -583,10 +583,29 @@ function Shell() {
   // JSX is a render side effect.
   useEffect(() => {
     const topRoute = stack[stack.length - 1];
-    if (duressActive && (topRoute?.name === 'profileSwitcher' || topRoute?.name === 'createProfile')) {
+    if (
+      duressActive &&
+      (topRoute?.name === 'profileSwitcher' || topRoute?.name === 'createProfile' || topRoute?.name === 'panic')
+    ) {
       pop();
     }
   }, [duressActive, stack, pop]);
+
+  // Security: a duress-PIN unlock must ALWAYS land on the decoy home/chat
+  // view, never on a sensitive screen (e.g. Panic mode config) that would
+  // reveal to a coercer that a duress/panic feature exists. Reset the
+  // navigation stack the instant duressActive flips false -> true. The ref
+  // guard ensures this fires only on that transition — not on every render
+  // while duress stays active, which would otherwise trap the decoy session
+  // and prevent the user from navigating the decoy UI freely.
+  const wasDuressActiveRef = useRef(duressActive);
+  useEffect(() => {
+    if (duressActive && !wasDuressActiveRef.current) {
+      setStack([]);
+      setTab('home');
+    }
+    wasDuressActiveRef.current = duressActive;
+  }, [duressActive]);
 
   // ── Panic gesture ───────────────────────────────────────────────────────────
   const triggerPanic = useCallback(async () => {
@@ -1356,6 +1375,10 @@ function Shell() {
       case 'lock':
         return <LockScreen onUnlock={pop} onPanic={() => void triggerPanic()} />;
       case 'panic':
+        // Defense in depth: never reveal panic/duress config under a duress
+        // session, even if some other path pushes this route (same guard
+        // pattern as profileSwitcher/createProfile below).
+        if (usePreferences.getState().duressActive) return null;
         return <PanicScreen onBack={pop} onConfigureLock={() => push({ name: 'lockConfig' })} />;
       case 'ephemeral':
         return <EphemeralScreen onBack={pop} chatId={top.chatId} />;
