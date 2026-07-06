@@ -17,7 +17,7 @@
     "ioredis": "^5.11.1",
     "pg": "8.22.0",
     "socket.io": "^4.8.1",
-    "tsx": "^4.22.4",
+    "tsx": "^4.23.0",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
     "zod": "^4.4.3"
@@ -27,7 +27,7 @@
     "@types/express": "^5.0.0",
     "@types/express-rate-limit": "^6.0.2",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.0.1",
+    "@types/node": "^26.1.0",
     "@types/pg": "8.20.0",
     "@types/react": "~19.2.17",
     "@types/supertest": "^7.2.0",
