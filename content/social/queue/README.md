@@ -34,3 +34,6 @@ weeks old.
 ## Files
 
 - `bank-001.md` — 18 posts, first batch (written 2026-06-25)
+- `bank-002.md` — Android Closed Testing launch: 3 queue posts + one-shot
+  community posts (Reddit ×4, Show HN) with their own posting ground rules
+  (written 2026-07-06)
