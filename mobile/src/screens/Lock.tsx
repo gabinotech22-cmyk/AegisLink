@@ -291,30 +291,13 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         };
         if (config.duressPin && typeof config.pinHash === 'string' && config.pinHash.length > 0) {
           if (await verifyPinWithSalt(pin, DURESS_PIN_SALT, config.pinHash)) {
-            // Wipe first — if interrupted mid-wipe, real data is already gone.
-            // Only after a successful wipe do we surface the decoy UI.
-            try {
-              await wipeDatabase();
-              await useIdentity.getState().reset();
-              await useContacts.getState().hydrate();
-              useMessages.setState({
-                byChat: {},
-                previews: {},
-                pinnedMsg: {},
-                ephemeralTimers: {},
-                unreadCounts: {},
-                drafts: {},
-              });
-            } catch (e) {
-              setPinError('');
-              setPinCode('');
-              return;
-            }
+            // Duress PIN = HIDE + REVERSIBLE, never destructive. Flip the flag
+            // then hydrate the (stable, seeded) decoy identity/contacts/
+            // messages — the real data is left completely untouched in the
+            // real DB and is restored the instant the real PIN is entered.
             usePreferences.setState({ duressActive: true });
             try {
               await useIdentity.getState().hydrate();
-              const { useContacts } = require('../store/contacts');
-              const { useMessages } = require('../store/messages');
               await useContacts.getState().hydrate();
               useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
             } catch (err) {

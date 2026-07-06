@@ -607,15 +607,17 @@ describe('loadChat — duress mode', () => {
     jest.clearAllMocks();
   });
 
-  it('returns [] and does not call loadMessagesByChat when duressActive is true', async () => {
-    // Override the preferences mock to simulate duress mode
-    jest.resetModules();
-    jest.doMock('../preferences', () => ({
-      usePreferences: { getState: () => ({ duressActive: true }) },
-    }));
+  afterEach(() => {
+    // Restore to non-duress for other tests in the suite.
+    const { usePreferences } = require('../preferences') as {
+      usePreferences: { getState: () => { duressActive: boolean } };
+    };
+    (usePreferences as { getState: () => { duressActive: boolean } }).getState = () => ({
+      duressActive: false,
+    });
+  });
 
-    // Re-import store after re-mocking preferences
-    // We achieve duress simulation by temporarily patching the mock module
+  it('returns seeded decoy messages and does not call loadMessagesByChat (real DB) when duressActive is true', async () => {
     const { usePreferences } = require('../preferences') as {
       usePreferences: { getState: () => { duressActive: boolean } };
     };
@@ -623,14 +625,21 @@ describe('loadChat — duress mode', () => {
       duressActive: true,
     });
 
+    const fakeDecoyMessages: StoredMessage[] = [
+      makeMsg({ id: 'decoy-0-0', chatId: 'chat-alice', direction: 'in', body: 'hola! llegaste bien?' }),
+      makeMsg({ id: 'decoy-0-1', chatId: 'chat-alice', direction: 'out', body: 'si, todo tranquilo jaja' }),
+    ];
+    jest.doMock('../duressDecoy', () => ({
+      getOrCreateDecoyBlob: jest.fn().mockResolvedValue({
+        identity: { aegisId: 'DECOY-0000-0000' },
+        contacts: [],
+        messagesByChat: { 'chat-alice': fakeDecoyMessages },
+      }),
+    }));
+
     const result = await useMessages.getState().loadChat('chat-alice');
 
-    expect(result).toEqual([]);
+    expect(result).toEqual(fakeDecoyMessages);
     expect(dbLocal.loadMessagesByChat).not.toHaveBeenCalled();
-
-    // Restore to non-duress for other tests
-    (usePreferences as { getState: () => { duressActive: boolean } }).getState = () => ({
-      duressActive: false,
-    });
   });
 });

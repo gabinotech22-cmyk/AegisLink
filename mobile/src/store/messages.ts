@@ -65,6 +65,16 @@ interface MessagesState {
   clearChat: (chatId: string) => Promise<void>;
 }
 
+/**
+ * True while showing the decoy account. Every mutator that would otherwise
+ * write to the real SQLite DB MUST check this first and, if true, apply the
+ * change in-memory only — the real database is never touched under duress.
+ */
+function isDuress(): boolean {
+  const { usePreferences } = require('./preferences') as typeof import('./preferences');
+  return usePreferences.getState().duressActive;
+}
+
 export const useMessages = create<MessagesState>((set, get) => ({
   byChat: {},
   previews: {},
@@ -87,7 +97,23 @@ export const useMessages = create<MessagesState>((set, get) => ({
   async loadChat(chatId) {
     const { usePreferences } = require('./preferences');
     if (usePreferences.getState().duressActive) {
-      return [];
+      // In-session decoy edits (star/pin/soft-delete/clearChat) live only in
+      // byChat — reloading from the blob on reopen would clobber them.
+      const cachedDecoy = get().byChat[chatId];
+      if (cachedDecoy) return cachedDecoy;
+      // Decoy mode: serve the seeded fake conversation from the SecureStore
+      // decoy blob. The real SQLite DB is never read while under duress.
+      const { getOrCreateDecoyBlob } = require('./duressDecoy') as typeof import('./duressDecoy');
+      const { messagesByChat } = await getOrCreateDecoyBlob();
+      const list = messagesByChat[chatId] ?? [];
+      const pinned = list.find((m) => m.pinned) ?? null;
+      set((s) => ({
+        byChat: { ...s.byChat, [chatId]: list },
+        pinnedMsg: { ...s.pinnedMsg, [chatId]: pinned },
+      }));
+      const last = list[list.length - 1];
+      if (last) set((s) => ({ previews: { ...s.previews, [chatId]: last } }));
+      return list;
     }
     const cached = get().byChat[chatId];
     if (cached) return cached;
@@ -114,6 +140,23 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async append(m) {
+    const { usePreferences } = require('./preferences');
+    const duress = usePreferences.getState().duressActive;
+    if (duress) {
+      // Decoy mode: a message typed/received while showing the decoy is kept
+      // only in the SecureStore decoy blob (so it survives this duress
+      // session) and in memory — it must NEVER reach the real SQLite DB.
+      const { appendDecoyMessage } = require('./duressDecoy') as typeof import('./duressDecoy');
+      await appendDecoyMessage(m.chatId, m);
+      set((s) => {
+        const existing = s.byChat[m.chatId] ?? [];
+        return {
+          byChat: { ...s.byChat, [m.chatId]: [...existing, m] },
+          previews: { ...s.previews, [m.chatId]: m },
+        };
+      });
+      return;
+    }
     await saveMessage(m);
     // A message that arrives while its own chat screen is focused has already
     // been seen — it must NOT bump the unread badge. We key off the same active
@@ -152,18 +195,35 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async refreshPreview(chatId) {
+    // Under duress, previews come from the decoy blob at hydration time —
+    // reading the real DB here would leak real message previews into the decoy.
+    if (isDuress()) return;
     const last = await lastMessageByChat(chatId);
     if (!last) return;
     set((s) => ({ previews: { ...s.previews, [chatId]: last } }));
   },
 
   async markRead(chatId) {
+    if (isDuress()) {
+      set((s) => ({ unreadCounts: { ...s.unreadCounts, [chatId]: 0 } }));
+      return;
+    }
     await resetUnread(chatId);
     set((s) => ({ unreadCounts: { ...s.unreadCounts, [chatId]: 0 } }));
   },
 
   async saveDraft(chatId, text) {
     const trimmed = text.trim();
+    if (isDuress()) {
+      set((s) => ({
+        drafts: trimmed ? { ...s.drafts, [chatId]: trimmed } : (() => {
+          const d = { ...s.drafts };
+          delete d[chatId];
+          return d;
+        })(),
+      }));
+      return;
+    }
     await setChatDraft(chatId, trimmed || null);
     set((s) => ({
       drafts: trimmed ? { ...s.drafts, [chatId]: trimmed } : (() => {
@@ -175,6 +235,9 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async loadAllUnreads() {
+    // Home calls this on mount — under duress it must not surface real unread
+    // counts inside the decoy account.
+    if (isDuress()) return;
     const counts = await getAllUnreadCounts();
     set((s) => ({ unreadCounts: { ...s.unreadCounts, ...counts } }));
   },
@@ -185,6 +248,12 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async setChatEphemeralTimer(chatId, seconds) {
+    if (isDuress()) {
+      set((s) => ({
+        ephemeralTimers: { ...s.ephemeralTimers, [chatId]: seconds },
+      }));
+      return;
+    }
     await setChatEphemeralTimer(chatId, seconds);
     set((s) => ({
       ephemeralTimers: { ...s.ephemeralTimers, [chatId]: seconds },
@@ -196,6 +265,8 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async loadAllEphemeralTimers() {
+    // App.tsx calls this on foreground — same rule as loadAllUnreads.
+    if (isDuress()) return;
     const timers = await getAllChatEphemeralTimers();
     set((s) => ({ ephemeralTimers: { ...s.ephemeralTimers, ...timers } }));
   },
@@ -223,12 +294,14 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async toggleStar(chatId, id) {
-    const { setMessageStarred } = require('../db/local');
     const list = get().byChat[chatId] ?? [];
     const msg = list.find((m) => m.id === id);
     if (!msg) return;
     const next = !msg.starred;
-    await setMessageStarred(id, next);
+    if (!isDuress()) {
+      const { setMessageStarred } = require('../db/local');
+      await setMessageStarred(id, next);
+    }
     set((s) => ({
       byChat: {
         ...s.byChat,
@@ -238,8 +311,10 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async softDelete(chatId, id) {
-    const { setMessageDeleted } = require('../db/local');
-    await setMessageDeleted(id);
+    if (!isDuress()) {
+      const { setMessageDeleted } = require('../db/local');
+      await setMessageDeleted(id);
+    }
     const list = get().byChat[chatId] ?? [];
     set((s) => ({
       byChat: {
@@ -252,7 +327,6 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async toggleReaction(chatId, id, emoji, aegisId) {
-    const { setMessageReactions } = require('../db/local');
     const list = get().byChat[chatId] ?? [];
     const msg = list.find((m) => m.id === id);
     if (!msg) return;
@@ -264,7 +338,10 @@ export const useMessages = create<MessagesState>((set, get) => ({
     if (reactors.size === 0) delete current[emoji];
     else current[emoji] = Array.from(reactors);
 
-    await setMessageReactions(id, current);
+    if (!isDuress()) {
+      const { setMessageReactions } = require('../db/local');
+      await setMessageReactions(id, current);
+    }
     set((s) => ({
       byChat: {
         ...s.byChat,
@@ -274,8 +351,10 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async updateDelivery(chatId, id, status) {
-    const { updateMessageDelivery } = require('../db/local');
-    await updateMessageDelivery(id, status);
+    if (!isDuress()) {
+      const { updateMessageDelivery } = require('../db/local');
+      await updateMessageDelivery(id, status);
+    }
     const list = get().byChat[chatId] ?? [];
     set((s) => ({
       byChat: {
@@ -286,8 +365,10 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async setMediaUri(chatId, id, mediaUri) {
-    const { updateMessageMediaUri } = require('../db/local');
-    await updateMessageMediaUri(id, mediaUri);
+    if (!isDuress()) {
+      const { updateMessageMediaUri } = require('../db/local');
+      await updateMessageMediaUri(id, mediaUri);
+    }
     const list = get().byChat[chatId] ?? [];
     set((s) => ({
       byChat: {
@@ -298,8 +379,10 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async setAttachments(chatId, id, attachments) {
-    const { updateMessageAttachments } = require('../db/local');
-    await updateMessageAttachments(id, attachments);
+    if (!isDuress()) {
+      const { updateMessageAttachments } = require('../db/local');
+      await updateMessageAttachments(id, attachments);
+    }
     const list = get().byChat[chatId] ?? [];
     set((s) => ({
       byChat: {
@@ -310,6 +393,9 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async remoteDelete(chatId, id, senderId) {
+    // Not expected under duress — the socket never connects with the decoy
+    // identity — but guarded here too so no path can reach the real DB.
+    if (isDuress()) return;
     const { setRemoteMessageDeleted } = require('../db/local');
     // Authorization-scoped: a peer may only retract a message they sent.
     // We enforce both chatId (so it belongs to the current context) and
@@ -328,14 +414,16 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async togglePin(chatId, id) {
-    const { setMessagePinned } = require('../db/local');
     const list = get().byChat[chatId] ?? [];
     const msg = list.find((m) => m.id === id);
     if (!msg) return;
     const next = !msg.pinned;
     const prevPinned = list.find((m) => m.pinned && m.id !== id);
-    if (prevPinned) await setMessagePinned(prevPinned.id, false);
-    await setMessagePinned(id, next);
+    if (!isDuress()) {
+      const { setMessagePinned } = require('../db/local');
+      if (prevPinned) await setMessagePinned(prevPinned.id, false);
+      await setMessagePinned(id, next);
+    }
     set((s) => ({
       byChat: {
         ...s.byChat,
@@ -353,15 +441,18 @@ export const useMessages = create<MessagesState>((set, get) => ({
   },
 
   async clearChat(chatId) {
-    await deleteContactMessages(chatId);
-    await deleteChatState(chatId);
-    // Also drop the Double Ratchet session so message numbering can't drift
-    // out of sync with the peer after a one-sided history wipe. The next
-    // outbound message will trigger a fresh X3DH + ratchet init.
-    try {
-      await deleteContactRatchetSession(chatId);
-    } catch {
-      // chatId may be a groupId (no ratchet row) — safe to ignore
+    const duress = isDuress();
+    if (!duress) {
+      await deleteContactMessages(chatId);
+      await deleteChatState(chatId);
+      // Also drop the Double Ratchet session so message numbering can't drift
+      // out of sync with the peer after a one-sided history wipe. The next
+      // outbound message will trigger a fresh X3DH + ratchet init.
+      try {
+        await deleteContactRatchetSession(chatId);
+      } catch {
+        // chatId may be a groupId (no ratchet row) — safe to ignore
+      }
     }
     set((s) => {
       const byChat = { ...s.byChat };
@@ -369,7 +460,10 @@ export const useMessages = create<MessagesState>((set, get) => ({
       const unreadCounts = { ...s.unreadCounts };
       const pinnedMsg = { ...s.pinnedMsg };
       const drafts = { ...s.drafts };
-      delete byChat[chatId];
+      // Under duress keep an (empty) entry so loadChat's in-memory cache wins
+      // and the cleared chat isn't resurrected from the decoy blob on reopen.
+      if (duress) byChat[chatId] = [];
+      else delete byChat[chatId];
       delete previews[chatId];
       delete unreadCounts[chatId];
       delete pinnedMsg[chatId];

@@ -209,6 +209,7 @@ function Shell() {
   const hideRecents = usePreferences((s) => s.hideRecents);
   const hydratePrefs = usePreferences((s) => s.hydrate);
   const appLockEnabled = usePreferences((s) => s.appLockEnabled);
+  const duressActive = usePreferences((s) => s.duressActive);
   const lockTimeoutMin = usePreferences((s) => s.lockTimeoutMin);
   const [tab, setTab] = useState<Tab>('home');
   const [isBackgroundShieldActive, setIsBackgroundShieldActive] = useState(false);
@@ -575,6 +576,17 @@ function Shell() {
 
   const push = useCallback((r: PushRoute) => setStack((s) => [...s, r]), []);
   const pop = useCallback(() => setStack((s) => s.slice(0, -1)), []);
+
+  // Defense in depth: the profile switcher must never be reachable while
+  // showing the decoy account, even if some other path pushes the route.
+  // Done here (not inside renderTop) because popping the stack while building
+  // JSX is a render side effect.
+  useEffect(() => {
+    const topRoute = stack[stack.length - 1];
+    if (duressActive && (topRoute?.name === 'profileSwitcher' || topRoute?.name === 'createProfile')) {
+      pop();
+    }
+  }, [duressActive, stack, pop]);
 
   // ── Panic gesture ───────────────────────────────────────────────────────────
   const triggerPanic = useCallback(async () => {
@@ -1628,6 +1640,8 @@ function Shell() {
           />
         );
       case 'profileSwitcher':
+        // The duress effect above pops this route; render nothing meanwhile.
+        if (usePreferences.getState().duressActive) return null;
         return (
           <ProfileSwitcherScreen
             onBack={pop}
@@ -1635,6 +1649,7 @@ function Shell() {
           />
         );
       case 'createProfile':
+        if (usePreferences.getState().duressActive) return null;
         return (
           <CreateProfileScreen
             onBack={pop}

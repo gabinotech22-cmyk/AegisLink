@@ -22,6 +22,17 @@ function isSelfAegisId(aegisId: string): boolean {
   return typeof selfId === 'string' && normalizeAegisId(selfId) === normalizeAegisId(aegisId);
 }
 
+/**
+ * True while showing the decoy account. Every mutator that would otherwise
+ * touch the real SQLite DB (saveContact/deleteContact/...) MUST check this
+ * first and, if true, apply the change to the in-memory decoy list only — the
+ * real database is never written to while under duress.
+ */
+function isDuressActive(): boolean {
+  const { usePreferences } = require('./preferences') as typeof import('./preferences');
+  return usePreferences.getState().duressActive;
+}
+
 export type AddResult =
   | { kind: 'added'; contact: StoredContact }
   | { kind: 'already_exists'; contact: StoredContact }
@@ -68,7 +79,11 @@ export const useContacts = create<ContactsState>((set, get) => ({
     try {
       const { usePreferences } = require('./preferences');
       if (usePreferences.getState().duressActive) {
-        set({ contacts: [], loading: false });
+        // Decoy mode: serve stable, seeded fake contacts from the SecureStore
+        // decoy blob. The real SQLite DB is never touched while under duress.
+        const { getOrCreateDecoyBlob } = require('./duressDecoy') as typeof import('./duressDecoy');
+        const { contacts } = await getOrCreateDecoyBlob();
+        set({ contacts, loading: false });
         return;
       }
       const contacts = await loadContacts();
@@ -82,6 +97,9 @@ export const useContacts = create<ContactsState>((set, get) => ({
     set({ error: null });
     if (isSelfAegisId(aegisId)) {
       throw new Error('Cannot add your own Aegis ID as a contact.');
+    }
+    if (isDuressActive()) {
+      throw new Error('Cannot add contacts in this mode.');
     }
     const existing = await getContact(aegisId);
     if (existing) {
@@ -143,6 +161,10 @@ export const useContacts = create<ContactsState>((set, get) => ({
   },
 
   async acceptContact(aegisId) {
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, pending: false } : c)) });
+      return;
+    }
     const existing = await getContact(aegisId);
     if (!existing || !existing.pending) return;
     const updated = { ...existing, pending: false };
@@ -155,6 +177,9 @@ export const useContacts = create<ContactsState>((set, get) => ({
 
     if (isSelfAegisId(aegisId)) {
       throw new Error('Cannot add your own Aegis ID as a contact.');
+    }
+    if (isDuressActive()) {
+      throw new Error('Cannot add contacts in this mode.');
     }
 
     // Defense in depth: parseIdentityQR already binds ID↔key, but addFromQR is a
@@ -230,15 +255,23 @@ export const useContacts = create<ContactsState>((set, get) => ({
   },
 
   async confirmKeyChange(aegisId, newPublicKeyB64) {
-    const existing = await getContact(aegisId);
+    const existing = get().contacts.find((c) => c.aegisId === aegisId);
     if (!existing) return null;
     const updated: StoredContact = { ...existing, publicKeyB64: newPublicKeyB64, verified: true, addedAt: Date.now() };
+    if (isDuressActive()) {
+      set({ contacts: [updated, ...get().contacts.filter((c) => c.aegisId !== aegisId)] });
+      return updated;
+    }
     await saveContact(updated);
     set({ contacts: [updated, ...get().contacts.filter((c) => c.aegisId !== aegisId)] });
     return updated;
   },
 
   async markVerified(aegisId, verified) {
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, verified } : c)) });
+      return;
+    }
     const existing = await getContact(aegisId);
     if (!existing) return;
     const updated = { ...existing, verified };
@@ -246,12 +279,25 @@ export const useContacts = create<ContactsState>((set, get) => ({
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
   },
   get(aegisId) {
-    const { usePreferences } = require('./preferences');
-    if (usePreferences.getState().duressActive) return undefined;
+    // Under duress, `contacts` already holds the seeded decoy list (set by
+    // hydrate()) — looking it up here is safe and keeps the decoy UI coherent
+    // (e.g. resolving a decoy chat's contact for the ChatScreen header).
     return get().contacts.find((c) => c.aegisId === aegisId);
   },
 
   async updateContactProfile(aegisId, name, color, avatarImage, status) {
+    if (isDuressActive()) {
+      set({
+        contacts: get().contacts.map((c) => (c.aegisId === aegisId ? {
+          ...c,
+          name: name?.trim() || c.name,
+          color: color || c.color,
+          avatarImage: avatarImage !== undefined ? avatarImage : c.avatarImage,
+          status: status !== undefined ? status : c.status,
+        } : c)),
+      });
+      return;
+    }
     const existing = await getContact(aegisId);
     if (!existing) return;
     const updated = {
@@ -266,6 +312,10 @@ export const useContacts = create<ContactsState>((set, get) => ({
   },
 
   async muteContact(aegisId, muted, mutedUntil) {
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, muted, mutedUntil: muted ? (mutedUntil ?? null) : null } : c)) });
+      return;
+    }
     const existing = await getContact(aegisId);
     if (!existing) return;
     const updated = { ...existing, muted, mutedUntil: muted ? (mutedUntil ?? null) : null };
@@ -274,6 +324,10 @@ export const useContacts = create<ContactsState>((set, get) => ({
   },
 
   async setBlocked(aegisId, blocked) {
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, blocked } : c)) });
+      return;
+    }
     const existing = await getContact(aegisId);
     if (!existing) return;
     const updated = { ...existing, blocked };
@@ -282,6 +336,10 @@ export const useContacts = create<ContactsState>((set, get) => ({
   },
 
   async setZeroTrust(aegisId, enabled) {
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, zeroTrust: enabled } : c)) });
+      return;
+    }
     const existing = await getContact(aegisId);
     if (!existing) return;
     const updated = { ...existing, zeroTrust: enabled };
@@ -290,6 +348,10 @@ export const useContacts = create<ContactsState>((set, get) => ({
   },
 
   async archiveContact(aegisId, archived) {
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, archived } : c)) });
+      return;
+    }
     const existing = await getContact(aegisId);
     if (!existing) return;
     const updated = { ...existing, archived };
@@ -301,6 +363,10 @@ export const useContacts = create<ContactsState>((set, get) => ({
   // sets hidden=true (and clears messages); any new message un-hides it again
   // (see store/messages appendMsg).
   async setChatHidden(aegisId, hidden) {
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, hidden } : c)) });
+      return;
+    }
     const existing = await getContact(aegisId);
     if (!existing) return;
     const updated = { ...existing, hidden };
@@ -309,11 +375,21 @@ export const useContacts = create<ContactsState>((set, get) => ({
   },
 
   async pinContact(aegisId, pinned) {
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, pinned } : c)) });
+      return;
+    }
     await dbPinContact(aegisId, pinned);
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? { ...c, pinned } : c)) });
   },
 
   async removeContact(aegisId) {
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.filter((c) => c.aegisId !== aegisId) });
+      const { useMessages } = require('./messages');
+      await useMessages.getState().clearChat(aegisId);
+      return;
+    }
     await deleteContactMessages(aegisId);
     await deleteContactRatchetSession(aegisId);
     await deleteContact(aegisId);

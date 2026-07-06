@@ -738,4 +738,6 @@ export async function wipeDatabase(): Promise<void> {
   await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
   await SecureStore.deleteItemAsync('aegis.preferences.v1').catch(() => {});
   await SecureStore.deleteItemAsync('aegis.polls.v1').catch(() => {});
+  // A surviving decoy blob would prove the duress feature was configured.
+  await SecureStore.deleteItemAsync('aegis.duress.decoy.v1').catch(() => {});
 }
