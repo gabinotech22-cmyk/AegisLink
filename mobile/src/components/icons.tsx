@@ -253,6 +253,14 @@ export const I = {
       <Path d="M6.5 17a13 13 0 01-1.5-6 7 7 0 0114 0v1M3 11a9 9 0 011.4-4.8M21 17v-1a13 13 0 00-1-5M11 7a4 4 0 014 4 25 25 0 01-1 7M9 16a25 25 0 002-7 2 2 0 014 0v3M9.5 20.5l.5-2.5" />
     </IconBase>
   ),
+  // Face-scan mark (eyes are zero-length paths → round dots via strokeLinecap).
+  FaceId: (p: IconProps) => (
+    <IconBase {...p}>
+      <Path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" />
+      <Path d="M8 14s1.5 2 4 2 4-2 4-2" />
+      <Path d="M9 9h.01M15 9h.01" />
+    </IconBase>
+  ),
   Building: (p: IconProps) => (
     <IconBase {...p}>
       <Rect x={4} y={2} width={16} height={20} rx={1} />
