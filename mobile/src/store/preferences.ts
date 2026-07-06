@@ -165,7 +165,12 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
   },
 
   async reset() {
-    setState({ ...DEFAULTS });
+    // A factory reset must never leave duress (decoy) mode armed — it is
+    // extra store state outside Preferences, and Zustand's setState is a
+    // partial merge, so omitting it here would let a prior `duressActive:
+    // true` survive the reset and trap a freshly regenerated identity in
+    // decoy mode until the process restarts.
+    setState({ ...DEFAULTS, duressActive: false });
     await ss.delete(STORAGE_KEY);
   },
 
