@@ -12,6 +12,11 @@
 > real (2 workers, MISMA máquina, MISMO puerto) — ver la sección
 > "Por qué PM2 `exec_mode: 'cluster'` solo no basta" más abajo. La arquitectura
 > quedó corregida en el mismo cambio, antes de mergear nada.
+>
+> Para la **topología de VMs** (cuántas, en qué orden, coturn/Postgres/LB
+> separados), ver `docs/INFRA-HA-SCALING-ROADMAP-2026-07.md` — ese doc
+> secuencia la activación de las piezas descritas aquí dentro de un plan de
+> alta disponibilidad más amplio.
 
 ## Qué ya existe en código (rama `feat/socketio-redis-adapter-pm2-cluster`)
 
