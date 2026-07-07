@@ -58,6 +58,7 @@ import { GroupCallScreen } from './src/screens/GroupCall';
 import { IncomingGroupCallScreen } from './src/screens/IncomingGroupCall';
 import { FloatingCallBar } from './src/components/FloatingCallBar';
 import { FloatingGroupCallBar } from './src/components/FloatingGroupCallBar';
+import { registerShellNav, navigateToGroupChat } from './src/utils/shellNav';
 import { NetworkErrorScreen } from './src/screens/NetworkError';
 import { LockSettingsScreen } from './src/screens/LockSettings';
 import { KeysScreen } from './src/screens/Keys';
@@ -576,6 +577,16 @@ function Shell() {
 
   const push = useCallback((r: PushRoute) => setStack((s) => [...s, r]), []);
   const pop = useCallback(() => setStack((s) => s.slice(0, -1)), []);
+
+  // Register this Shell's push() with the shellNav escape hatch so components
+  // that render OUTSIDE Shell (e.g. FloatingGroupCallBarRoot, a sibling of
+  // <Shell/> in App()) can still navigate into the custom stack — same
+  // module-level registration pattern as themedAlert()/AlertHost and
+  // setNotificationOpenChatHandler(). See src/utils/shellNav.ts.
+  useEffect(() => {
+    registerShellNav({ push });
+    return () => registerShellNav(null);
+  }, [push]);
 
   // Defense in depth: the profile switcher must never be reachable while
   // showing the decoy account, even if some other path pushes the route.
@@ -1784,11 +1795,13 @@ function FloatingGroupCallBarRoot() {
     <FloatingGroupCallBar
       onExpand={() => {
         useGroupCall.getState().setMinimized(false);
-        // Navigate to the group chat — find it in the nav stack or push groupCall
-        // We can't directly access push() here; the expand is handled by tapping
-        // the bar which calls onExpand. For now we just un-minimize and the
-        // GroupChatScreen's useEffect will pick it up once the user navigates back.
-        void groupId; // keep reference in case we add direct navigation later
+        // Navigate straight to this group's GroupChatScreen (resolved via the
+        // groups store) through the shellNav escape hatch — Shell owns the
+        // nav stack but FloatingGroupCallBarRoot renders outside it. Once
+        // GroupChatScreen mounts, its own effect sees isInCallHere=true and
+        // renders the inline InCallGroupBar (mirrors tapping the 1:1
+        // FloatingCallBar back to the full-screen CallScreen).
+        navigateToGroupChat(groupId);
       }}
     />
   );
