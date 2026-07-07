@@ -15,12 +15,33 @@ Configure secrets at: **repo → Settings → Secrets and variables → Actions 
 |--------|-------------|----------------|
 | `EXPO_TOKEN` | EAS access token | expo.dev → Account Settings → Access Tokens → Create |
 
-Optional, only for App Store submissions (`eas submit`):
+Optional, only for App Store submissions (`eas submit` / the `Build iOS` workflow's
+`submit: true`):
 
 | Secret | Description |
 |--------|-------------|
-| `APPLE_ID` | Apple ID email for App Store Connect |
+| `APPLE_ID` | Apple ID email for App Store Connect (e.g. `starsking1422@icloud.com`) |
 | `ASC_APP_ID` | App Store Connect numeric app ID |
+
+> `APPLE_TEAM_ID` (`X2W7MRTDMJ`) is **not** a secret — it's pinned directly in
+> `.github/workflows/build-ios.yml`.
+
+### iOS build/submit in CI — `Build iOS` workflow
+
+`.github/workflows/build-ios.yml` (`workflow_dispatch`) drives `eas build -p ios` on
+EAS's hosted macOS workers and optionally `--auto-submit`s to TestFlight — the iOS
+counterpart of `build-aab.yml`. No local Mac, no committed signing material.
+
+**One-time web bootstrap** (so `--non-interactive` builds can sign without a 2FA prompt):
+
+1. App Store Connect → **Users and Access → Integrations → App Store Connect API** →
+   generate a key (role **App Manager**). Download the `.p8`; note **Key ID** + **Issuer ID**.
+2. expo.dev → project `aegislink` → **Credentials → iOS** → add the **App Store Connect API
+   Key** (`.p8` + Key ID + Issuer ID). EAS then auto-manages the Distribution Certificate
+   and Provisioning Profile on the first build.
+
+With the API key in EAS, submit authenticates with the key and `APPLE_ID`/`ASC_APP_ID`
+become optional. Trigger: **Actions → "Build iOS" → Run workflow**.
 
 ---
 
