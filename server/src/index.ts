@@ -17,6 +17,7 @@ import proxyLinkPreviewRoutes from './routes/proxyLinkPreview.js';
 import { createWorkRouter } from './routes/work.js';
 import { createPublicChannelsRouter } from './routes/publicChannels.js';
 import { attachRelay } from './relay/handler.js';
+import { attachSocketIoRedisAdapter } from './relay/socketIoRedisAdapter.js';
 import { initDb, messageRepo, senderKeyDistRepo, pruneExpiredWorkMessages } from './db/client.js';
 
 // ── Last-resort error handlers ───────────────────────────────────────────────
@@ -166,7 +167,24 @@ const io = new SocketServer(httpServer, {
   pingInterval: 15000,
   pingTimeout: 20000,
   // Bind to all interfaces so phones on LAN can reach the dev server.
+  //
+  // `transports` deliberately left at the Socket.IO default (websocket +
+  // long-polling), NOT restricted to `['websocket']`, even though horizontal
+  // scaling (PM2 cluster / multiple VMs) without sticky sessions breaks
+  // long-polling (a client's successive polling requests can land on
+  // different worker processes before the websocket upgrade completes).
+  // Reasoning: the mobile client (mobile/src/socket/client.ts) explicitly
+  // configures `transports: ['websocket', 'polling']` as a deliberate
+  // resilience fallback for restrictive/mobile networks and the Tor onion
+  // path (docs/RELAY-ONION-SERVICE.md) — dropping polling server-side would
+  // silently remove that fallback for exactly the constrained-network users
+  // it exists to protect, without coordinating with mobile-lead. The correct
+  // fix for scaling is therefore sticky sessions at the load balancer (nginx
+  // ip_hash / cookie-based), documented as an infra requirement in
+  // docs/RELAY-HORIZONTAL-SCALING.md — not a transport change here.
 });
+
+attachSocketIoRedisAdapter(io);
 
 attachRelay(io);
 
