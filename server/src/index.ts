@@ -1,9 +1,11 @@
 import express from 'express';
 import cors from 'cors';
+import cluster from 'node:cluster';
 import { createServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { readFileSync } from 'node:fs';
 import { Server as SocketServer } from 'socket.io';
+import { setupWorker } from '@socket.io/sticky';
 import identityRoutes from './routes/identity.js';
 import pushRoutes from './routes/push.js';
 import web3Routes from './routes/web3.js';
@@ -18,6 +20,7 @@ import { createWorkRouter } from './routes/work.js';
 import { createPublicChannelsRouter } from './routes/publicChannels.js';
 import { attachRelay } from './relay/handler.js';
 import { attachSocketIoRedisAdapter } from './relay/socketIoRedisAdapter.js';
+import { attachSocketIoClusterAdapter } from './relay/socketIoClusterAdapter.js';
 import { initDb, messageRepo, senderKeyDistRepo, pruneExpiredWorkMessages } from './db/client.js';
 
 // ── Last-resort error handlers ───────────────────────────────────────────────
@@ -36,6 +39,15 @@ process.on('unhandledRejection', (reason) => {
 
 const PORT = Number(process.env.PORT ?? 3001);
 const IS_PROD = process.env.NODE_ENV === 'production';
+
+// True ONLY for a process forked via Node's own `cluster.fork()` (signaled by
+// `NODE_UNIQUE_ID`, which Node sets internally) — i.e. exactly the workers
+// spawned by src/clusterMaster.ts. A plain `pm2 start`/`node src/index.ts`
+// process (dev, Docker, PM2 fork mode) is never a cluster worker, so this
+// check is a safe, deployment-agnostic signal. See docs/RELAY-HORIZONTAL-SCALING.md
+// for why PM2's own `exec_mode: 'cluster'` is NOT used for this (it cannot
+// provide the sticky-session routing Socket.IO long-polling needs).
+const isClusterWorker = cluster.isWorker;
 // Dev defaults to '*' so React Native / Expo Go (which doesn't send a stable
 // Origin) can connect from physical phones on LAN. In PRODUCTION we refuse to
 // default to '*' (fail closed, golden rule #6): browser origins must match the
@@ -126,6 +138,25 @@ app.use('/public-channels', createPublicChannelsRouter());
 const TLS_CERT_PATH = process.env.TLS_CERT_PATH;
 const TLS_KEY_PATH = process.env.TLS_KEY_PATH;
 const tlsDirect = Boolean(TLS_CERT_PATH && TLS_KEY_PATH);
+
+if (isClusterWorker && tlsDirect) {
+  // Fail closed rather than silently building a broken worker: the cluster
+  // master (src/clusterMaster.ts) owns ONE plain-HTTP listening socket and
+  // hands off raw, un-TLS'd connections to workers over IPC — a documented
+  // limitation of @socket.io/sticky ("not compatible with an HTTPS server").
+  // A worker that built its own https.Server and received a raw TCP socket
+  // via `io.httpServer.emit('connection', ...)` would misparse every
+  // request (no TLS handshake ever happened on that socket). TLS must be
+  // terminated in FRONT of the cluster master (nginx/Caddy) instead —
+  // see docs/RELAY-HORIZONTAL-SCALING.md.
+  console.error(
+    '[aegislink-server] FATAL: TLS_CERT_PATH/TLS_KEY_PATH direct TLS termination ' +
+    'is not supported in cluster-worker mode. Terminate TLS in front of the ' +
+    'cluster master (nginx/Caddy) instead — see docs/RELAY-HORIZONTAL-SCALING.md.'
+  );
+  process.exit(1);
+}
+
 const serverScheme = tlsDirect ? 'https' : 'http';
 const httpServer = tlsDirect
   ? createHttpsServer(
@@ -170,21 +201,40 @@ const io = new SocketServer(httpServer, {
   //
   // `transports` deliberately left at the Socket.IO default (websocket +
   // long-polling), NOT restricted to `['websocket']`, even though horizontal
-  // scaling (PM2 cluster / multiple VMs) without sticky sessions breaks
-  // long-polling (a client's successive polling requests can land on
-  // different worker processes before the websocket upgrade completes).
-  // Reasoning: the mobile client (mobile/src/socket/client.ts) explicitly
-  // configures `transports: ['websocket', 'polling']` as a deliberate
-  // resilience fallback for restrictive/mobile networks and the Tor onion
-  // path (docs/RELAY-ONION-SERVICE.md) — dropping polling server-side would
+  // scaling without sticky routing breaks long-polling (a client's successive
+  // polling requests can land on a different worker/VM before the websocket
+  // upgrade completes). Reasoning: the mobile client
+  // (mobile/src/socket/client.ts) explicitly configures
+  // `transports: ['websocket', 'polling']` as a deliberate resilience
+  // fallback for restrictive/mobile networks and the Tor onion path
+  // (docs/RELAY-ONION-SERVICE.md) — dropping polling server-side would
   // silently remove that fallback for exactly the constrained-network users
   // it exists to protect, without coordinating with mobile-lead. The correct
-  // fix for scaling is therefore sticky sessions at the load balancer (nginx
-  // ip_hash / cookie-based), documented as an infra requirement in
-  // docs/RELAY-HORIZONTAL-SCALING.md — not a transport change here.
+  // fix is sticky ROUTING, not disabling polling:
+  //   - same-machine PM2 cluster (src/clusterMaster.ts, `isClusterWorker`
+  //     above): `@socket.io/sticky` routes every request by Engine.IO's
+  //     `sid` — solved in-process, no infra change needed.
+  //   - real multi-VM scale-out (future): sticky sessions at the load
+  //     balancer (nginx `hash $arg_sid` / cookie-based), documented as an
+  //     infra requirement in docs/RELAY-HORIZONTAL-SCALING.md.
 });
 
-attachSocketIoRedisAdapter(io);
+// ── Cross-process broadcast adapter ─────────────────────────────────────────
+// Exactly one of these applies (see relay/socketIoRedisAdapter.ts and
+// relay/socketIoClusterAdapter.ts for the full reasoning behind each):
+//   - REDIS_URL set: Redis adapter. Works for both same-machine AND real
+//     multi-VM scale-out, so it wins whenever configured.
+//   - No REDIS_URL but running as a cluster worker (src/clusterMaster.ts):
+//     the zero-dependency IPC cluster adapter — correct and sufficient for
+//     N workers on ONE machine, which is what's actually deployed if PM2 is
+//     pointed at ecosystem.config.cjs without Redis provisioned yet.
+//   - Neither: Socket.IO's own default in-memory adapter — today's real
+//     single-process production deployment, zero behavior change.
+if (process.env.REDIS_URL) {
+  attachSocketIoRedisAdapter(io);
+} else if (isClusterWorker) {
+  attachSocketIoClusterAdapter(io);
+}
 
 attachRelay(io);
 
@@ -208,14 +258,26 @@ app.use((err: Error, _req: express.Request, res: express.Response, next: express
 
 // Bootstrap DB then start server.
 initDb().then(() => {
-  httpServer.listen(PORT, '0.0.0.0', () => {
+  if (isClusterWorker) {
+    // The cluster master (src/clusterMaster.ts) already owns the real
+    // listening socket and hands off raw connections over IPC — this worker
+    // must NOT also call `.listen()` (that would try to bind PORT a second
+    // time in this process and fail, or worse, race the master for it).
+    setupWorker(io);
     // nosemgrep: aegislink-no-console-log-production
-    console.log(`[aegislink-server] listening on ${serverScheme}://0.0.0.0:${PORT}${tlsDirect ? ' (direct TLS)' : ''}`);
-    // nosemgrep: aegislink-no-console-log-production
-    console.log(`[aegislink-server] CORS origin: ${ORIGIN}`);
-  });
+    console.log(`[aegislink-server] cluster worker pid=${process.pid} ready (routed via src/clusterMaster.ts sticky sessions)`);
+  } else {
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      // nosemgrep: aegislink-no-console-log-production
+      console.log(`[aegislink-server] listening on ${serverScheme}://0.0.0.0:${PORT}${tlsDirect ? ' (direct TLS)' : ''}`);
+      // nosemgrep: aegislink-no-console-log-production
+      console.log(`[aegislink-server] CORS origin: ${ORIGIN}`);
+    });
+  }
 
   // Purge expired queued messages and SenderKey distributions every 10 minutes.
+  // NOTE: under cluster mode, every worker runs this independently — harmless
+  // (the underlying deletes are idempotent), just modestly redundant work.
   setInterval(() => {
     void messageRepo.purgeExpired();
     void senderKeyDistRepo.purgeExpired();

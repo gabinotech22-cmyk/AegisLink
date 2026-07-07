@@ -6,11 +6,14 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node --import tsx src/index.ts",
+    "start:cluster": "node --import tsx src/clusterMaster.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs --runInBand"
   },
   "dependencies": {
+    "@socket.io/cluster-adapter": "^0.3.0",
     "@socket.io/redis-adapter": "^8.3.0",
+    "@socket.io/sticky": "^1.0.4",
     "cors": "^2.8.5",
     "expo-server-sdk": "^6.1.0",
     "express": "^5.2.1",
