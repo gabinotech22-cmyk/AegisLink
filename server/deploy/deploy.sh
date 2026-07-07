@@ -84,7 +84,10 @@ if [ ! -f .env ]; then
 PORT=3001
 NODE_ENV=production
 CORS_ORIGIN=*
-TRUST_PROXY=0
+# Trust the first proxy hop (nginx) so express-rate-limit reads the real
+# client IP from X-Forwarded-For instead of nginx's own loopback address.
+# Only set to 0 if the relay is NOT behind a reverse proxy.
+TRUST_PROXY=1
 # EXPO_ACCESS_TOKEN=
 ENV
   echo "  ⚠  .env creado por defecto — edítalo en \${APP_DIR}/.env"
