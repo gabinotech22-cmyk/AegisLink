@@ -53,7 +53,24 @@ const app = express();
 // Trust the first proxy hop so express-rate-limit reads the real client IP
 // from X-Forwarded-For when deployed behind nginx/caddy/etc.
 // Set to 1 (one trusted proxy) — adjust to 0 if running without a reverse proxy.
-app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
+const TRUST_PROXY_SETTING = Number(process.env.TRUST_PROXY ?? 1);
+app.set('trust proxy', TRUST_PROXY_SETTING);
+// Safety net for a stale `.env` on the box: if this ever ships as 0 in
+// production, express ignores X-Forwarded-For and every per-IP rate limiter
+// (registrationLimiter, challengeLimiter, lookupLimiter, etc.) falls back to
+// the raw socket IP — always nginx's own loopback address — so every client
+// in the world collapses into ONE shared bucket. This does not touch the
+// TRUST_PROXY default (still 1); it only makes a misconfigured box loud in
+// the startup logs instead of silently rate-limiting the whole userbase.
+if (IS_PROD && TRUST_PROXY_SETTING === 0) {
+  console.warn(
+    '[aegislink-server] TRUST_PROXY=0 in production — X-Forwarded-For is ' +
+      'ignored, so every client shares ONE express-rate-limit bucket keyed ' +
+      "off the reverse proxy's own IP. If nginx/Caddy sits in front of this " +
+      'relay, set TRUST_PROXY=1 in .env and run: ' +
+      'pm2 reload aegislink-relay --update-env'
+  );
+}
 
 app.use(cors({
   origin: (origin, cb) => {
