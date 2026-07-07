@@ -1,0 +1,88 @@
+# Build iOS — signed .ipa via EAS Build (cloud macOS), optionally auto-submitted to TestFlight.
+#
+# Why this exists: the store artifact for iOS must be a Release-signed .ipa produced on
+# macOS with Apple code signing. No local Mac is available, so — exactly like build-aab.yml
+# does for Android — we drive the build in CI. Here the Ubuntu runner only *invokes* EAS;
+# the actual compile + signing happens on EAS's hosted macOS workers. EAS holds the
+# Distribution Certificate / Provisioning Profile / APNs key, so nothing Apple-signed is
+# committed and no secret .p12 travels through GitHub.
+#
+# ── ONE-TIME BOOTSTRAP (web only, no terminal) ────────────────────────────────
+# `eas build --non-interactive` can only run once iOS credentials exist in EAS. Set them
+# up once from the browser:
+#   1. App Store Connect → Users and Access → Integrations → App Store Connect API →
+#      generate a key (role: App Manager). Download the .p8, note the Key ID + Issuer ID.
+#   2. expo.dev → project `aegislink` → Credentials → iOS → add the App Store Connect API Key
+#      (upload the .p8 + Key ID + Issuer ID). EAS will then auto-generate the Distribution
+#      Certificate and Provisioning Profile non-interactively on the first build.
+# After that, every build below is a one-click "Run workflow" — no terminal, no 2FA prompt.
+#
+# ── REQUIRED / OPTIONAL GitHub Secrets (Settings → Secrets and variables → Actions) ──
+#   EXPO_TOKEN   (required)  — already configured; drives all EAS CLI auth.
+#   APPLE_ID     (submit)    — Apple ID email, e.g. starsking1422@icloud.com.
+#   ASC_APP_ID   (submit)    — App Store Connect numeric app ID (from the app's URL/App Info).
+# APPLE_TEAM_ID is not secret and is pinned below (X2W7MRTDMJ) to satisfy eas.json's
+# `submit.production.ios` interpolation. If the ASC API key is configured (bootstrap above),
+# submit authenticates with the key and APPLE_ID/ASC_APP_ID become optional.
+#
+# Trigger: Actions tab → "Build iOS" → Run workflow, or `gh workflow run build-ios.yml`.
+name: Build iOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: 'Submit the build to TestFlight after it finishes'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: EAS build iOS (production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      # eas.json `submit.production.ios` interpolates these from the environment. Team ID
+      # is public (not a secret); Apple ID / ASC app id come from secrets when submitting.
+      APPLE_TEAM_ID: X2W7MRTDMJ
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Verify EXPO_TOKEN is present
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN secret is empty — set it in Settings → Secrets and variables → Actions (expo.dev → Account → Access Tokens)."
+            exit 1
+          fi
+          echo "EXPO_TOKEN present."
+
+      - name: EAS build iOS (production)${{ inputs.submit && ' + submit to TestFlight' || '' }}
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ "${{ inputs.submit }}" = "true" ]; then
+            echo "Building and auto-submitting to TestFlight…"
+            npx eas-cli build --platform ios --profile production --non-interactive --wait --auto-submit
+          else
+            echo "Building only (no submit)…"
+            npx eas-cli build --platform ios --profile production --non-interactive --wait
+          fi

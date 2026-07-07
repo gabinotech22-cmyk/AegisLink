@@ -4,12 +4,14 @@
 > sin MacBook, usando **EAS Build en la nube**.
 > Espejo de `ANDROID-LAUNCH-READINESS.md`. Filosofía igual: riesgo conocido, pequeño y monitoreado.
 
-## TL;DR — no hace falta Mac
+## TL;DR — no hace falta Mac, ni terminal
 
-Compilar iOS **no requiere Mac**. EAS Build compila en máquinas macOS de Expo y gestiona los
-certificados de Apple en la nube. Solo necesitas: cuenta Apple Developer (✅ activa), tus iPhones,
-y este PC Windows. La distribución a los teléfonos de test se hace por **TestFlight** — sin
-registrar UDIDs, sin Xcode, sin Keychain.
+Compilar iOS **no requiere Mac**. Se hace en **GitHub Actions** (`.github/workflows/build-ios.yml`),
+igual que Android (`build-aab.yml`): el runner invoca **EAS Build**, que compila y firma en
+máquinas macOS de Expo y guarda los certificados de Apple en la nube. Disparas el build con
+**Actions → "Build iOS" → Run workflow** (un botón), y con `submit: true` sube solo a **TestFlight**.
+Solo necesitas: cuenta Apple Developer (✅ activa), tus iPhones, y un **bootstrap web único** (subir
+una App Store Connect API Key a expo.dev — ver Fase 1). Sin Xcode, sin Keychain, sin registrar UDIDs.
 
 ---
 
@@ -28,37 +30,40 @@ registrar UDIDs, sin Xcode, sin Keychain.
 
 ## 🔴 FASE 1 — Bloqueantes para testing en TestFlight (must)
 
-### 1. Crear la app en App Store Connect  *(manual, requiere tu Apple ID)*
-- [ ] appstoreconnect.apple.com → **Apps → +** → nueva app.
-- [ ] Bundle ID: `com.aegislink.app`. Plataforma: iOS. Nombre: AegisLink.
-- [ ] Anotar el **`ASC_APP_ID`** (el número que aparece en la URL / App Information) → hace falta
-      para `eas submit`.
+### 1. Crear la app en App Store Connect  *(web, requiere tu Apple ID)* — ✅ hecho 2026-07-07
+- [x] appstoreconnect.apple.com → **Apps → +** → nueva app. Bundle `com.aegislink.app`, iOS,
+      nombre AegisLink. App ID registrado antes en el portal (capability: Push Notifications).
+- [ ] Anotar el **`ASC_APP_ID`** (número en la URL `/apps/<id>/...` o en *App Information*) →
+      opcional si se usa API key (paso 2), pero cómodo tenerlo.
 
-### 2. Definir las env vars de submit  *(local, este PC)*
-```
-APPLE_ID=<tu email de Apple Developer>
-APPLE_TEAM_ID=X2W7MRTDMJ
-ASC_APP_ID=<el de App Store Connect, paso 1>
-```
-> No commitear estos valores. Se exportan en la shell antes de `eas submit`.
+### 2. Bootstrap de credenciales — App Store Connect API Key  *(web, una sola vez)*
+> Esto reemplaza el login interactivo de Apple. Se hace por navegador, sin terminal ni 2FA repetido.
+- [ ] App Store Connect → **Users and Access → Integrations → App Store Connect API** → generar
+      key (rol **App Manager**). Descargar el `.p8`, anotar **Key ID** + **Issuer ID**.
+- [ ] expo.dev → proyecto `aegislink` → **Credentials → iOS** → añadir la **App Store Connect API
+      Key** (subir `.p8` + Key ID + Issuer ID). EAS ya podrá generar el Distribution Certificate y
+      el Provisioning Profile **sin interacción** en el primer build.
 
-### 3. Generar credenciales iOS en la nube  *(sin Mac)*
-- [ ] `eas credentials -p ios` → loguea con el Apple ID una vez; EAS crea y guarda el
-      **Distribution Certificate** + **Provisioning Profile** en su servidor.
+### 3. Secrets de GitHub  *(web, una sola vez)*
+> Settings → Secrets and variables → Actions.
+- [x] `EXPO_TOKEN` — ya configurado (se reutiliza el de Android).
+- [ ] `APPLE_ID` = `starsking1422@icloud.com` *(opcional si la API key está puesta)*.
+- [ ] `ASC_APP_ID` = el del paso 1 *(opcional si la API key está puesta)*.
+- ℹ️ `APPLE_TEAM_ID` (`X2W7MRTDMJ`) va fijado en el propio workflow — no es secreto.
 
-### 4. Build de producción iOS  *(nube)*
-- [ ] `eas build -p ios --profile production` → genera el `.ipa` firmado.
-
-### 5. Subir a TestFlight
-- [ ] `eas submit -p ios --profile production` → sube el build a App Store Connect.
+### 4. Build + submit desde GitHub  *(un botón, sin terminal)*
+- [ ] Pestaña **Actions → "Build iOS" → Run workflow**, rama `main`, `submit: true`.
+- [ ] El workflow (`.github/workflows/build-ios.yml`) corre
+      `eas build -p ios --profile production --auto-submit` en la nube (~15-25 min) y sube el
+      `.ipa` firmado a TestFlight.
 - [ ] Esperar el procesado de Apple (~5-30 min) — aparece en la pestaña **TestFlight**.
 
-### 6. Testers internos  *(sin review de Apple)*
+### 5. Testers internos  *(sin review de Apple)*
 - [ ] En TestFlight → **Internal Testing** → añadir tus Apple IDs (hasta 100).
 - [ ] Los testers instalan la app **TestFlight** en el iPhone y aceptan la invitación.
 - [ ] **No requiere beta review** → se puede probar de inmediato.
 
-### 7. Smoke test en iPhone físico
+### 6. Smoke test en iPhone físico
 - [ ] Onboarding anónimo → identidad → chat 1:1 E2EE → grupo → llamada 1:1 → llamada grupal →
       adjunto (imagen/audio) → efímero → **modo pánico** → **push wake-up con la app cerrada**.
 - [ ] Verificar `voip` background + push cifrado (FCM no aplica en iOS: es **APNs**; confirmar que
