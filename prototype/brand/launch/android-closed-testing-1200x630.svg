@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="bgw" cx="30%" cy="30%" r="95%">
+      <stop offset="0%" stop-color="#12211b"/>
+      <stop offset="60%" stop-color="#0a0e0d"/>
+      <stop offset="100%" stop-color="#06090a"/>
+    </radialGradient>
+    <radialGradient id="auroraw" cx="90%" cy="92%" r="62%">
+      <stop offset="0%" stop-color="#5bf2b9" stop-opacity="0.16"/>
+      <stop offset="64%" stop-color="#5bf2b9" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="hexmeshw" width="84" height="96" patternUnits="userSpaceOnUse">
+      <path d="M42 5 L78 25 L78 70 L42 90 L6 70 L6 25 Z" fill="none" stroke="#5bf2b9" stroke-opacity="0.045" stroke-width="2"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bgw)"/>
+  <rect width="1200" height="630" fill="url(#hexmeshw)"/>
+  <rect width="1200" height="630" fill="url(#auroraw)"/>
+
+  <!-- vault mark, left -->
+  <g transform="translate(250,300) translate(-160,-160) scale(8)">
+    <path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/>
+    <rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/>
+    <rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/>
+  </g>
+
+  <!-- status chip -->
+  <g transform="translate(470,150)">
+    <rect x="0" y="-30" width="430" height="60" rx="30" fill="none" stroke="#5bf2b9" stroke-opacity="0.5" stroke-width="2"/>
+    <circle cx="42" cy="0" r="8" fill="#5bf2b9"/>
+    <text x="70" y="9" font-family="Consolas, monospace" font-size="24" fill="#5bf2b9" letter-spacing="3">CLOSED TESTING · ANDROID</text>
+  </g>
+
+  <text x="470" y="290" font-family="Arial, Helvetica, sans-serif" font-size="78" font-weight="700" fill="#e8f0ec" letter-spacing="1">Now on Android</text>
+  <text x="472" y="342" font-family="Consolas, monospace" font-size="28" fill="#5bf2b9" letter-spacing="4" opacity="0.9">early testers wanted</text>
+
+  <text x="470" y="430" font-family="Arial, Helvetica, sans-serif" font-size="29" fill="#e8f0ec" opacity="0.62">Anonymous · E2EE · sealed-sender · embedded Tor</text>
+  <text x="470" y="474" font-family="Consolas, monospace" font-size="22" fill="#e8f0ec" letter-spacing="2" opacity="0.4">pre-audit · open source · arm64 + 3GB</text>
+
+  <text x="470" y="560" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="600" fill="#e8f0ec" opacity="0.85" letter-spacing="2">AegisLink</text>
+</svg>
