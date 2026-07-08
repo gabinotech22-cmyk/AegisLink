@@ -98,11 +98,14 @@ function withAppDelegateVoip(config) {
     }
     let src = config.modResults.contents;
 
-    // Import (idempotent, but assert the anchor matched when we do inject).
+    // Import: insert after the FIRST existing import line, so we don't depend on
+    // a specific one. SDK 54's AppDelegate.swift starts with `import Expo`, NOT
+    // `import ExpoModulesCore`, so anchoring on the latter threw during prebuild.
+    // Every AppDelegate has at least one import, so this stays version-robust.
     if (!src.includes(VOIP_IMPORT)) {
       src = injectOrThrow(
         src,
-        (s) => s.replace(/^import ExpoModulesCore/m, `${VOIP_IMPORT}\n$&`),
+        (s) => s.replace(/^(import .+)$/m, `$1\n${VOIP_IMPORT}`),
         VOIP_IMPORT,
       );
     }
