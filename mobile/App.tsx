@@ -84,6 +84,7 @@ import { attachGroupCallHandlers, acceptGroupCall, declineGroupCall } from './sr
 import { useGroupCall } from './src/store/groupCall';
 import { registerForPush, setNotificationOpenChatHandler } from './src/notifications/push';
 import { initCallKeep } from './src/calls/callkeep';
+import { registerVoIPToken } from './src/calls/voip-push';
 import { WEBRTC_AVAILABLE } from './src/runtime';
 import { clearTurnCache } from './src/webrtc/ice';
 import { handlePanicDeepLink } from './src/utils/panicLink';
@@ -532,6 +533,7 @@ function Shell() {
       });
       void registerForPush(identity);
       initCallKeep();
+      registerVoIPToken();
     } else if (!identity && status === 'idle') {
       disconnectSocket();
       clearTurnCache();

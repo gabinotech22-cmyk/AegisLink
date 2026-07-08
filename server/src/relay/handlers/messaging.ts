@@ -1,7 +1,7 @@
 import type { Socket } from 'socket.io';
-import { TypingEvent, MsgRead, PushRegister } from '../schemas.js';
+import { TypingEvent, MsgRead, PushRegister, VoipRegister } from '../schemas.js';
 import { checkLowFreqRateLimit } from '../rateLimits.js';
-import { pushRepo } from '../../db/client.js';
+import { pushRepo, voipTokenRepo } from '../../db/client.js';
 
 export interface MessagingEphemeralDeps {
   me: string;
@@ -72,6 +72,24 @@ export function attachMessagingEphemeral(socket: Socket, { me, sockets }: Messag
       aegis_id: me,
       expo_token: parsed.data.token,
       platform: parsed.data.platform,
+      updated_at: Date.now(),
+    }).catch(() => { /* silent — do not log token or aegisId */ });
+  });
+
+  // ─── iOS VoIP (PushKit) token registration ───────────────────────────────
+  // Same authenticated path as push:register: the token is bound to `me`, the
+  // aegisId proven via the Ed25519 challenge-response. Knowing an aegisId never
+  // lets anyone else register a VoIP token for it (security golden rule #3).
+  socket.on('voip:register', async (raw) => {
+    if (!(await checkLowFreqRateLimit(me))) {
+      socket.emit('error_msg', { code: 'rate_limited', for: 'voip:register' });
+      return;
+    }
+    const parsed = VoipRegister.safeParse(raw);
+    if (!parsed.success) return;
+    void voipTokenRepo.upsert({
+      aegis_id: me,
+      voip_token: parsed.data.token,
       updated_at: Date.now(),
     }).catch(() => { /* silent — do not log token or aegisId */ });
   });

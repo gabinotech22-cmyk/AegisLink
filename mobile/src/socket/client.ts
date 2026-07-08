@@ -912,6 +912,18 @@ export function connect(identity: Identity): Socket {
       }
     })();
 
+    // ── Register iOS VoIP (PushKit) token ────────────────────────────────────
+    // A VoIP token obtained (async, native) before this socket was authed is
+    // cached; flush it now over the authenticated channel. No-op off iOS.
+    void (async () => {
+      try {
+        const { flushVoipToken } = require('../calls/voip-push') as typeof import('../calls/voip-push');
+        await flushVoipToken();
+      } catch (e) {
+        if (__DEV__) logger.warn('[socket] voip token registration failed:', e);
+      }
+    })();
+
     // Sealed-sender v2: register the HASH of our delivery token so contacts can
     // submit sealed envelopes to us. Only the hash leaves the device; the raw
     // token reaches contacts inside our E2EE profile_update (see below).

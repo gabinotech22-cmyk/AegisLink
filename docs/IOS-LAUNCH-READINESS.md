@@ -58,6 +58,22 @@ una App Store Connect API Key a expo.dev — ver Fase 1). Sin Xcode, sin Keychai
       `.ipa` firmado a TestFlight.
 - [ ] Esperar el procesado de Apple (~5-30 min) — aparece en la pestaña **TestFlight**.
 
+### 4b. APNs Auth Key para VoIP push  *(web + env del relay, una sola vez)*
+> Necesario para que una **llamada entrante suene con la app cerrada** en iOS
+> (PushKit → CallKit). El código ya está (`server/src/push/apns-voip.ts`,
+> `mobile/src/calls/{voip-push,callkeep}.ts`, plugin `withIosVoip.js`); solo falta
+> la credencial. Es una **key distinta** de la App Store Connect API Key del paso 2.
+- [ ] developer.apple.com → **Certificates, IDs & Profiles → Keys → +** → habilitar
+      **Apple Push Notifications service (APNs)**. Descargar el `.p8`, anotar el **Key ID**.
+- [ ] En el relay (`.env` / secrets del deploy) fijar: `APNS_KEY_ID`,
+      `APNS_TEAM_ID` = `X2W7MRTDMJ`, `APNS_BUNDLE_ID` = `com.aegislink.app`,
+      `APNS_KEY_P8` = contenido del `.p8` con saltos como `\n`. Ver `server/.env.example`.
+- [ ] Si falta cualquier var, el relay hace fallback silencioso al push visible de
+      Expo (`isApnsConfigured()` → false): no rompe nada, pero no hay ring con app cerrada.
+- [ ] ⚠️ El AppDelegate nativo (PushKit + `reportNewIncomingCall`) lo inyecta
+      `withIosVoip.js`; **validar que compila en el primer `eas build -p ios`** (no se
+      pudo compilar fuera de macOS).
+
 ### 5. Testers internos  *(sin review de Apple)*
 - [ ] En TestFlight → **Internal Testing** → añadir tus Apple IDs (hasta 100).
 - [ ] Los testers instalan la app **TestFlight** en el iPhone y aceptan la invitación.

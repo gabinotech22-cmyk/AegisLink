@@ -54,7 +54,7 @@ import { USE_PG, dbRun, dbAll, dbGet, pgPopOpk } from './driver';
 // ── Row types & constants → ./types (M4 split) ──────────────────────────────
 export * from './types';
 import {
-  IdentityRow, MessageRow, PushTokenRow, SignedPreKeyRow, OneTimePreKeyRow,
+  IdentityRow, MessageRow, PushTokenRow, VoipTokenRow, SignedPreKeyRow, OneTimePreKeyRow,
   PqSignedPreKeyRow, LinkedDeviceRow, RevokedDIDHashRow, LightningInvoiceRow,
   SubscriptionRow, MESSAGE_TTL_MS,
 } from './types';
@@ -93,6 +93,7 @@ export const identityRepo = {
     await dbRun(`DELETE FROM prekeys_signed WHERE aegis_id = ?`, [aegisId]);
     await dbRun(`DELETE FROM prekeys_pq_signed WHERE aegis_id = ?`, [aegisId]);
     await dbRun(`DELETE FROM push_tokens WHERE aegis_id = ?`, [aegisId]);
+    await dbRun(`DELETE FROM voip_tokens WHERE aegis_id = ?`, [aegisId]);
     await dbRun(`DELETE FROM delivery_tokens WHERE aegis_id = ?`, [aegisId]);
     await dbRun(`DELETE FROM linked_devices WHERE aegis_id = ?`, [aegisId]);
     await dbRun(`DELETE FROM identities WHERE aegis_id = ?`, [aegisId]);
@@ -372,6 +373,37 @@ export const pushRepo = {
   },
   async delete(token: string): Promise<void> {
     await dbRun(`DELETE FROM push_tokens WHERE expo_token = ?`, [token]);
+  },
+};
+
+// ── voipTokenRepo ─────────────────────────────────────────────────────────────
+// iOS VoIP (PushKit) tokens. Written only via the authenticated socket
+// (voip:register); read by the APNs VoIP sender (push/apns-voip.ts).
+
+export const voipTokenRepo = {
+  async upsert(row: VoipTokenRow): Promise<void> {
+    if (USE_PG) {
+      await dbRun(
+        `INSERT INTO voip_tokens (aegis_id, voip_token, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(aegis_id, voip_token) DO UPDATE SET updated_at = EXCLUDED.updated_at`,
+        [row.aegis_id, row.voip_token, row.updated_at]
+      );
+    } else {
+      await dbRun(
+        `INSERT INTO voip_tokens (aegis_id, voip_token, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(aegis_id, voip_token) DO UPDATE SET updated_at = excluded.updated_at`,
+        [row.aegis_id, row.voip_token, row.updated_at]
+      );
+    }
+  },
+  async forRecipient(aegisId: string): Promise<VoipTokenRow[]> {
+    return dbAll<VoipTokenRow>(
+      `SELECT aegis_id, voip_token, updated_at FROM voip_tokens WHERE aegis_id = ?`,
+      [aegisId]
+    );
+  },
+  async delete(token: string): Promise<void> {
+    await dbRun(`DELETE FROM voip_tokens WHERE voip_token = ?`, [token]);
   },
 };
 

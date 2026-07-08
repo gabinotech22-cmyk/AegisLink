@@ -1,5 +1,6 @@
 import { Expo, type ExpoPushMessage } from 'expo-server-sdk';
 import { pushRepo } from '../db/client.js';
+import { sendVoipWakeUp } from './apns-voip.js';
 
 export type CallMedia = 'audio' | 'video';
 
@@ -69,11 +70,18 @@ export async function notifyRecipient(aegisId: string): Promise<void> {
 export async function sendCallWakeUp(
   toAegisId: string,
   _fromAegisId: string,
-  _media: CallMedia,
-  _callId: string,
+  media: CallMedia,
+  callId: string,
 ): Promise<boolean> {
+  // iOS PushKit path first: a VoIP push is the only thing that reliably rings a
+  // fully-killed iOS app. If it goes out, we suppress the redundant Expo push to
+  // this recipient's iOS devices to avoid a double ring (native CallKit + Expo
+  // heads-up). Android devices still get the Expo wake-up below. fromAegisId is
+  // NEVER forwarded — the callId is a random UUID that reveals nothing.
+  const voipSent = await sendVoipWakeUp(toAegisId, callId, media);
+
   const tokens = await pushRepo.forRecipient(toAegisId);
-  if (tokens.length === 0) return false;
+  if (tokens.length === 0) return voipSent;
 
   const messages: ExpoPushMessage[] = [];
   for (const row of tokens) {
@@ -81,6 +89,8 @@ export async function sendCallWakeUp(
       void pushRepo.delete(row.expo_token);
       continue;
     }
+    // Skip iOS Expo tokens when a VoIP push already went out — CallKit rings.
+    if (voipSent && row.platform === 'ios') continue;
     messages.push({
       to: row.expo_token,
       sound: 'default',
@@ -97,7 +107,7 @@ export async function sendCallWakeUp(
     });
   }
 
-  if (messages.length === 0) return false;
+  if (messages.length === 0) return voipSent;
   await sendChunked(messages);
   return true;
 }

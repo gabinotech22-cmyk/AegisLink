@@ -83,6 +83,13 @@ export const PushRegister = z.object({
   platform: z.enum(['ios', 'android', 'unknown']).default('unknown'),
 });
 
+// iOS VoIP (PushKit) token registration. The token is a raw APNs device token
+// (lowercase hex, 64 chars for a standard APNs token, but capped generously).
+export const VoipRegister = z.object({
+  token: z.string().min(1).max(256),
+  platform: z.literal('ios').default('ios'),
+});
+
 export interface PreKeyBundle {
   /** Ed25519 identity key of the recipient — required to verify the SPK signature in X3DH. */
   signingPublicKeyB64: string;
