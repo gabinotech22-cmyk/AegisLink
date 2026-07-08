@@ -1,26 +1,31 @@
 /**
- * Expo config plugin — iOS VoIP push (PushKit) + CallKit native wiring.
+ * Expo config plugin — iOS VoIP push (PushKit) native wiring.
  *
  * Keeps `expo prebuild --clean` reproducible for the native pieces that
- * react-native-voip-push-notification and react-native-callkeep need but that
- * the managed workflow does not add automatically:
+ * react-native-voip-push-notification needs but the managed workflow does not
+ * add automatically:
  *
  *   1. Entitlements: `aps-environment` = production (required for APNs, incl.
  *      the VoIP push type). Push Notifications capability.
  *   2. Info.plist: guarantees `voip` + `remote-notification` background modes
  *      (also declared in app.json; re-asserted here so the plugin is the single
  *      source of truth for the VoIP capability and survives app.json edits).
- *   3. AppDelegate.swift: registers for VoIP pushes on launch and reports every
- *      incoming VoIP push to CallKit *synchronously in the native push handler*
- *      — the only Apple-compliant way (a JS-deferred report races the OS watchdog
- *      that kills PushKit-without-CallKit apps). See src/calls/voip-push.ts and
- *      src/calls/callkeep.ts for the JS side.
+ *   3. AppDelegate.swift: calls `RNVoipPushNotificationManager.voipRegistration()`
+ *      on launch. That single call makes the library register ITSELF as the
+ *      PKPushRegistry delegate and forward token/incoming-push events to the JS
+ *      layer. We deliberately do NOT hand-write PKPushRegistryDelegate methods in
+ *      the AppDelegate — that would fight the library's own delegate (it owns the
+ *      registry) and never fire. The mandatory CallKit report happens on the JS
+ *      side: the `notification` handler in src/calls/voip-push.ts calls
+ *      displayIncomingCall() (src/calls/callkeep.ts) as soon as the push arrives.
  *
  * ┌─ VALIDATION NOTE ───────────────────────────────────────────────────────────┐
- * │ The AppDelegate.swift injection (step 3) is written from the upstream        │
- * │ library docs but has NOT been compiled on this machine (no macOS/Xcode).     │
- * │ It MUST be validated on the first `eas build -p ios` / local `expo prebuild  │
- * │ && pod install && xcodebuild`. Steps 1–2 are pure plist edits and safe.      │
+ * │ The AppDelegate.swift injection (step 3) has NOT been compiled on this        │
+ * │ machine (no macOS/Xcode). Validate on the first `eas build -p ios`. If the    │
+ * │ Swift `import RNVoipPushNotification` fails under the managed (non            │
+ * │ use_frameworks) build, the fallback is a bridging header that does            │
+ * │ `#import "RNVoipPushNotificationManager.h"`. Steps 1–2 are pure plist edits   │
+ * │ and safe.                                                                     │
  * └─────────────────────────────────────────────────────────────────────────────┘
  */
 const {
@@ -52,50 +57,17 @@ function withVoipBackgroundModes(config) {
   });
 }
 
-// ── 3. AppDelegate.swift: PushKit registration + CallKit report ───────────────
-const IMPORTS = ['import PushKit', 'import react_native_voip_push_notification'];
+// ── 3. AppDelegate.swift: VoIP registration ───────────────────────────────────
+// The library's Swift module exposes RNVoipPushNotificationManager.
+const VOIP_IMPORT = 'import RNVoipPushNotification';
 
-// Registers for VoIP pushes as soon as the app launches (foreground or a VoIP
-// cold-start). Inserted just before the didFinishLaunching `return`.
+// voipRegistration() wires the PKPushRegistry delegate internally (inside the
+// library) and forwards events to JS. Inserted just before didFinishLaunching's
+// `return`.
 const REGISTER_SNIPPET = `
-    // AegisLink: register for VoIP (PushKit) pushes.
+    // AegisLink: register for VoIP (PushKit) pushes. The library sets itself as
+    // the PKPushRegistry delegate and forwards events to the JS layer.
     RNVoipPushNotificationManager.voipRegistration()`;
-
-// PKPushRegistryDelegate — the OS calls these. We forward the token to JS and,
-// on an incoming push, report to CallKit synchronously (Apple requirement).
-const DELEGATE_METHODS = `
-  // MARK: - AegisLink VoIP (PushKit)
-  public func pushRegistry(_ registry: PKPushRegistry, didUpdate pushCredentials: PKPushCredentials, for type: PKPushType) {
-    RNVoipPushNotificationManager.didUpdate(pushCredentials, forType: type.rawValue)
-  }
-
-  public func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {}
-
-  public func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload: PKPushPayload, for type: PKPushType, completion: @escaping () -> Void) {
-    // 1) Report to CallKit FIRST and synchronously — iOS kills the app if a VoIP
-    //    push is not answered with an incoming-call report. Zero-metadata: the
-    //    displayed handle/name are generic; only a random callId is read.
-    let dict = payload.dictionaryPayload
-    let callId = (dict["callId"] as? String) ?? UUID().uuidString
-    let hasVideo = (dict["media"] as? String) == "video"
-    RNCallKeep.reportNewIncomingCall(
-      callId,
-      handle: "aegislink",
-      handleType: "generic",
-      hasVideo: hasVideo,
-      localizedCallerName: "Llamada cifrada · E2EE",
-      supportsHolding: false,
-      supportsDTMF: false,
-      supportsGrouping: false,
-      supportsUngrouping: false,
-      fromPushKit: true,
-      payload: dict,
-      withCompletionHandler: completion
-    )
-    // 2) Hand the raw push to the JS layer so the app can drain the sealed
-    //    call:invite over the socket once it reconnects.
-    RNVoipPushNotificationManager.didReceiveIncomingPush(with: payload, forType: type.rawValue)
-  }`;
 
 function withAppDelegateVoip(config) {
   return withAppDelegate(config, (config) => {
@@ -106,9 +78,9 @@ function withAppDelegateVoip(config) {
     }
     let src = config.modResults.contents;
 
-    // Imports (idempotent).
-    for (const imp of IMPORTS) {
-      if (!src.includes(imp)) src = src.replace(/^import ExpoModulesCore/m, `${imp}\n$&`);
+    // Import (idempotent).
+    if (!src.includes(VOIP_IMPORT)) {
+      src = src.replace(/^import ExpoModulesCore/m, `${VOIP_IMPORT}\n$&`);
     }
 
     // VoIP registration inside didFinishLaunchingWithOptions.
@@ -117,12 +89,6 @@ function withAppDelegateVoip(config) {
         /(func application\([^)]*didFinishLaunchingWithOptions[\s\S]*?)(\n\s*return )/,
         `$1${REGISTER_SNIPPET}$2`,
       );
-    }
-
-    // PKPushRegistryDelegate methods — insert before the final class brace.
-    if (!src.includes('AegisLink VoIP (PushKit)')) {
-      const lastBrace = src.lastIndexOf('}');
-      src = src.slice(0, lastBrace) + DELEGATE_METHODS + '\n' + src.slice(lastBrace);
     }
 
     config.modResults.contents = src;

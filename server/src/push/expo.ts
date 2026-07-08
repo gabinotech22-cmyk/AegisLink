@@ -74,14 +74,23 @@ export async function sendCallWakeUp(
   callId: string,
 ): Promise<boolean> {
   // iOS PushKit path first: a VoIP push is the only thing that reliably rings a
-  // fully-killed iOS app. If it goes out, we suppress the redundant Expo push to
-  // this recipient's iOS devices to avoid a double ring (native CallKit + Expo
-  // heads-up). Android devices still get the Expo wake-up below. fromAegisId is
-  // NEVER forwarded — the callId is a random UUID that reveals nothing.
+  // fully-killed iOS app. fromAegisId is NEVER forwarded — the callId is a
+  // random UUID that reveals nothing.
   const voipSent = await sendVoipWakeUp(toAegisId, callId, media);
 
   const tokens = await pushRepo.forRecipient(toAegisId);
   if (tokens.length === 0) return voipSent;
+
+  // Only suppress the redundant iOS Expo heads-up (avoids a double ring with
+  // CallKit) when the account has exactly ONE iOS device. sendVoipWakeUp only
+  // reports a per-recipient success and push_tokens carries no device id, so if
+  // there are multiple iOS devices we cannot tell which one actually got the
+  // VoIP push — suppressing all of them could starve a device (a stale VoIP
+  // token on one device would drop CallKit AND Expo on the others). In that
+  // case we keep the Expo fallback for every iOS device (correctness over the
+  // minor double-ring on the one that also got VoIP).
+  const iosExpoCount = tokens.filter((r) => r.platform === 'ios').length;
+  const suppressIosExpo = voipSent && iosExpoCount === 1;
 
   const messages: ExpoPushMessage[] = [];
   for (const row of tokens) {
@@ -89,8 +98,8 @@ export async function sendCallWakeUp(
       void pushRepo.delete(row.expo_token);
       continue;
     }
-    // Skip iOS Expo tokens when a VoIP push already went out — CallKit rings.
-    if (voipSent && row.platform === 'ios') continue;
+    // Skip the single iOS Expo token when a VoIP push already went out — CallKit rings.
+    if (suppressIosExpo && row.platform === 'ios') continue;
     messages.push({
       to: row.expo_token,
       sound: 'default',

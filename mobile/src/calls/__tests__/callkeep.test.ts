@@ -74,4 +74,22 @@ describe('callkeep — zero-metadata CallKit', () => {
     displayIncomingCall('dup-uuid', 'x', 'y', false);
     expect(mockCallKeep.displayIncomingCall).toHaveBeenCalledTimes(1);
   });
+
+  it('retries setup after a transient failure (does not latch on reject)', async () => {
+    // Fresh module so _setupDone starts false, independent of earlier tests.
+    jest.resetModules();
+    const RNCallKeepFresh = (require('react-native-callkeep') as { default: { setup: jest.Mock } }).default;
+    RNCallKeepFresh.setup
+      .mockImplementationOnce(() => Promise.reject(new Error('transient')))
+      .mockImplementationOnce(() => Promise.resolve(true));
+    const { initCallKeep: initFresh } = require('../callkeep') as typeof import('../callkeep');
+
+    initFresh();
+    await new Promise((r) => setImmediate(r)); // let the rejected setup settle
+    expect(RNCallKeepFresh.setup).toHaveBeenCalledTimes(1);
+
+    initFresh(); // must retry because the failed setup left _setupDone false
+    await new Promise((r) => setImmediate(r));
+    expect(RNCallKeepFresh.setup).toHaveBeenCalledTimes(2);
+  });
 });

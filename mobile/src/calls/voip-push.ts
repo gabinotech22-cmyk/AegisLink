@@ -162,8 +162,25 @@ export async function flushVoipToken(): Promise<void> {
     const sent = await SecureStore.getItemAsync(VOIP_TOKEN_SENT_KEY);
     if (sent === token) return; // already registered this exact token
 
-    socket.emit('voip:register', { token, platform: 'ios' });
-    await SecureStore.setItemAsync(VOIP_TOKEN_SENT_KEY, token);
+    // Wait for the relay to ACK the write before caching as "sent". A
+    // fire-and-forget emit that gets dropped (or a silent server-side write
+    // failure) would otherwise set VOIP_TOKEN_SENT_KEY permanently and block
+    // re-registration of a valid token. On no-ack we leave it unsent so the
+    // next socket auth (client.ts calls flushVoipToken again) retries.
+    const ok = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const done = (v: boolean): void => {
+        if (settled) return;
+        settled = true;
+        resolve(v);
+      };
+      const timer = setTimeout(() => done(false), 8_000);
+      socket.emit('voip:register', { token, platform: 'ios' }, (res: { ok?: boolean } | undefined) => {
+        clearTimeout(timer);
+        done(res?.ok === true);
+      });
+    });
+    if (ok) await SecureStore.setItemAsync(VOIP_TOKEN_SENT_KEY, token);
   } catch (e) {
     logger.warn('[voip] flush failed', e);
   }

@@ -59,7 +59,6 @@ const _displayed = new Set<string>();
  */
 export function initCallKeep(): void {
   if (!CALLKIT_ENABLED || _setupDone) return;
-  _setupDone = true;
 
   RNCallKeep.setup({
     ios: {
@@ -81,7 +80,14 @@ export function initCallKeep(): void {
       additionalPermissions: [],
     },
   })
-    .then(() => bindListeners())
+    .then(() => {
+      // Only latch _setupDone on success so a transient setup failure can be
+      // retried on the next initCallKeep() (App.tsx re-runs on identity change).
+      // CallKit is mandatory for VoIP wake-ups, so silent permanent disable
+      // would break incoming-call ringing for the whole session.
+      _setupDone = true;
+      bindListeners();
+    })
     .catch((e) => logger.warn('[callkeep] setup failed', e));
 }
 

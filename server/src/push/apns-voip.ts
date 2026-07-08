@@ -122,24 +122,28 @@ interface ApnsResult {
 
 function postToApns(deviceToken: string, body: string): Promise<ApnsResult> {
   return new Promise((resolve) => {
+    // Everything here can throw synchronously: getSession() (TLS/HTTP2 setup),
+    // providerToken() (createPrivateKey on a malformed APNS_KEY_P8), and
+    // session.request(). Any throw must resolve { status: 0 } so sendVoipWakeUp
+    // never rejects and sendCallWakeUp's Expo fallback still runs.
     let session: http2.ClientHttp2Session;
+    let req: http2.ClientHttp2Stream;
     try {
       session = getSession();
+      req = session.request({
+        ':method': 'POST',
+        ':path': `/3/device/${deviceToken}`,
+        authorization: `bearer ${providerToken()}`,
+        'apns-topic': VOIP_TOPIC,
+        'apns-push-type': 'voip',
+        'apns-priority': '10',
+        'apns-expiration': `${Math.floor(Date.now() / 1000) + 30}`,
+        'content-type': 'application/json',
+      });
     } catch {
       resolve({ status: 0 });
       return;
     }
-
-    const req = session.request({
-      ':method': 'POST',
-      ':path': `/3/device/${deviceToken}`,
-      authorization: `bearer ${providerToken()}`,
-      'apns-topic': VOIP_TOPIC,
-      'apns-push-type': 'voip',
-      'apns-priority': '10',
-      'apns-expiration': `${Math.floor(Date.now() / 1000) + 30}`,
-      'content-type': 'application/json',
-    });
 
     let status = 0;
     let data = '';
@@ -205,9 +209,13 @@ export async function sendVoipWakeUp(
   media: CallMedia,
 ): Promise<boolean> {
   if (!isApnsConfigured()) return false;
-  const tokens = await voipTokenRepo.forRecipient(aegisId);
-  if (tokens.length === 0) return false;
-
-  const results = await Promise.all(tokens.map((t) => sendOne(t.voip_token, callId, media)));
-  return results.some(Boolean);
+  try {
+    const tokens = await voipTokenRepo.forRecipient(aegisId);
+    if (tokens.length === 0) return false;
+    const results = await Promise.all(tokens.map((t) => sendOne(t.voip_token, callId, media)));
+    return results.some(Boolean);
+  } catch {
+    // Never let a VoIP failure break the caller's Expo fallback.
+    return false;
+  }
 }
