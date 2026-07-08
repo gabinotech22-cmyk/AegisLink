@@ -10,22 +10,25 @@
  *   2. Info.plist: guarantees `voip` + `remote-notification` background modes
  *      (also declared in app.json; re-asserted here so the plugin is the single
  *      source of truth for the VoIP capability and survives app.json edits).
- *   3. AppDelegate.swift: calls `RNVoipPushNotificationManager.voipRegistration()`
- *      on launch. That single call makes the library register ITSELF as the
- *      PKPushRegistry delegate and forward token/incoming-push events to the JS
- *      layer. We deliberately do NOT hand-write PKPushRegistryDelegate methods in
- *      the AppDelegate — that would fight the library's own delegate (it owns the
- *      registry) and never fire. The mandatory CallKit report happens on the JS
- *      side: the `notification` handler in src/calls/voip-push.ts calls
- *      displayIncomingCall() (src/calls/callkeep.ts) as soon as the push arrives.
+ *   3. (DISABLED) AppDelegate.swift native VoIP registration — see note below.
  *
- * ┌─ VALIDATION NOTE ───────────────────────────────────────────────────────────┐
- * │ The AppDelegate.swift injection (step 3) has NOT been compiled on this        │
- * │ machine (no macOS/Xcode). Validate on the first `eas build -p ios`. If the    │
- * │ Swift `import RNVoipPushNotification` fails under the managed (non            │
- * │ use_frameworks) build, the fallback is a bridging header that does            │
- * │ `#import "RNVoipPushNotificationManager.h"`. Steps 1–2 are pure plist edits   │
- * │ and safe.                                                                     │
+ * ┌─ WHY STEP 3 IS DISABLED ─────────────────────────────────────────────────────┐
+ * │ The AppDelegate injection did `import RNVoipPushNotification` in Swift, which  │
+ * │ fails the Xcode build under Expo's managed setup (no use_frameworks!) with     │
+ * │ "no such module 'RNVoipPushNotification'" — the pod is ObjC and isn't a Swift  │
+ * │ module. Confirmed on EAS build 5c192197.                                       │
+ * │                                                                               │
+ * │ It is NOT needed for VoIP to work in the app-running / background case:        │
+ * │ src/calls/voip-push.ts calls VoipPushNotification.registerVoipToken() over the │
+ * │ RN bridge, which triggers the SAME native registration (the library sets       │
+ * │ itself as the PKPushRegistry delegate and forwards events to JS). The native   │
+ * │ call only helps register earlier on a cold start FROM a VoIP push.             │
+ * │                                                                               │
+ * │ FOLLOW-UP: re-enable via an Objective-C bridging header                        │
+ * │ (`#import "RNVoipPushNotificationManager.h"` + SWIFT_OBJC_BRIDGING_HEADER),     │
+ * │ NOT a Swift `import`, and validate on a build. withAppDelegateVoip() is kept   │
+ * │ below (unused) for that work. VoIP push is not live yet anyway (the relay      │
+ * │ APNS_* key is unset), so this does not regress any shipped behavior.           │
  * └─────────────────────────────────────────────────────────────────────────────┘
  */
 const {
@@ -127,6 +130,13 @@ function withAppDelegateVoip(config) {
 module.exports = function withIosVoip(config) {
   config = withApsEntitlement(config);
   config = withVoipBackgroundModes(config);
-  config = withAppDelegateVoip(config);
+  // withAppDelegateVoip is intentionally NOT applied — see "WHY STEP 3 IS
+  // DISABLED" in the header. It breaks the Xcode build (Swift can't import the
+  // ObjC pod). VoIP registration works via JS (voip-push.ts registerVoipToken).
+  // void withAppDelegateVoip;  // re-enable via a bridging header in a follow-up.
   return config;
 };
+
+// Referenced only to keep the (currently-disabled) helper from tripping no-unused
+// lint while we keep it for the bridging-header follow-up.
+void withAppDelegateVoip;
