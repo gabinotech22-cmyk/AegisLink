@@ -1,5 +1,6 @@
 import { Expo, type ExpoPushMessage } from 'expo-server-sdk';
 import { pushRepo } from '../db/client.js';
+import { sendVoipWakeUp } from './apns-voip.js';
 
 export type CallMedia = 'audio' | 'video';
 
@@ -69,11 +70,27 @@ export async function notifyRecipient(aegisId: string): Promise<void> {
 export async function sendCallWakeUp(
   toAegisId: string,
   _fromAegisId: string,
-  _media: CallMedia,
-  _callId: string,
+  media: CallMedia,
+  callId: string,
 ): Promise<boolean> {
+  // iOS PushKit path first: a VoIP push is the only thing that reliably rings a
+  // fully-killed iOS app. fromAegisId is NEVER forwarded — the callId is a
+  // random UUID that reveals nothing.
+  const voipSent = await sendVoipWakeUp(toAegisId, callId, media);
+
   const tokens = await pushRepo.forRecipient(toAegisId);
-  if (tokens.length === 0) return false;
+  if (tokens.length === 0) return voipSent;
+
+  // Only suppress the redundant iOS Expo heads-up (avoids a double ring with
+  // CallKit) when the account has exactly ONE iOS device. sendVoipWakeUp only
+  // reports a per-recipient success and push_tokens carries no device id, so if
+  // there are multiple iOS devices we cannot tell which one actually got the
+  // VoIP push — suppressing all of them could starve a device (a stale VoIP
+  // token on one device would drop CallKit AND Expo on the others). In that
+  // case we keep the Expo fallback for every iOS device (correctness over the
+  // minor double-ring on the one that also got VoIP).
+  const iosExpoCount = tokens.filter((r) => r.platform === 'ios').length;
+  const suppressIosExpo = voipSent && iosExpoCount === 1;
 
   const messages: ExpoPushMessage[] = [];
   for (const row of tokens) {
@@ -81,6 +98,8 @@ export async function sendCallWakeUp(
       void pushRepo.delete(row.expo_token);
       continue;
     }
+    // Skip the single iOS Expo token when a VoIP push already went out — CallKit rings.
+    if (suppressIosExpo && row.platform === 'ios') continue;
     messages.push({
       to: row.expo_token,
       sound: 'default',
@@ -97,7 +116,7 @@ export async function sendCallWakeUp(
     });
   }
 
-  if (messages.length === 0) return false;
+  if (messages.length === 0) return voipSent;
   await sendChunked(messages);
   return true;
 }

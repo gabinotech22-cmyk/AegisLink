@@ -59,6 +59,14 @@ export async function initPgSchema(): Promise<void> {
       PRIMARY KEY (aegis_id, expo_token)
     );
 
+    -- iOS VoIP (PushKit) tokens — see SQLite schema above for rationale.
+    CREATE TABLE IF NOT EXISTS voip_tokens (
+      aegis_id    TEXT NOT NULL,
+      voip_token  TEXT NOT NULL,
+      updated_at  BIGINT NOT NULL,
+      PRIMARY KEY (aegis_id, voip_token)
+    );
+
     -- Sealed-sender (Phase 1) — see SQLite schema above for rationale.
     CREATE TABLE IF NOT EXISTS delivery_tokens (
       aegis_id       TEXT PRIMARY KEY,

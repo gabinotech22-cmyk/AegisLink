@@ -44,6 +44,13 @@ export interface PushTokenRow {
   updated_at: number;
 }
 
+export interface VoipTokenRow {
+  aegis_id: string;
+  /** Raw APNs VoIP device token (hex string), NOT an Expo token. */
+  voip_token: string;
+  updated_at: number;
+}
+
 export interface SignedPreKeyRow {
   aegis_id: string;
   /** Device identifier for this prekey. Defaults to 'default' for legacy single-device clients. */
