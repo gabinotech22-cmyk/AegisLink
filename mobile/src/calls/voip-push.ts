@@ -12,9 +12,10 @@
  *      and the normal in-app call flow takes over — same callId, deduped.
  *
  * ── Zero-metadata ─────────────────────────────────────────────────────────────
- * The VoIP push payload carries ONLY a random `callId` (a UUID that reveals
- * nothing — no sender, no media type, no content). The relay never sees who is
- * calling whom; that stays sealed inside `call:invite`.
+ * The VoIP push payload carries a random `callId` (a UUID that reveals nothing)
+ * plus a coarse `media` hint ('audio' | 'video', so CallKit picks the right UI).
+ * Nothing identifying: no sender, no recipient, no content. The relay never sees
+ * who is calling whom; that stays sealed inside `call:invite`.
  *
  * ── Security ──────────────────────────────────────────────────────────────────
  * The VoIP token is registered ONLY over the authenticated Socket.IO channel

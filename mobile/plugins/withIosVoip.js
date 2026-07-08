@@ -62,12 +62,32 @@ function withVoipBackgroundModes(config) {
 const VOIP_IMPORT = 'import RNVoipPushNotification';
 
 // voipRegistration() wires the PKPushRegistry delegate internally (inside the
-// library) and forwards events to JS. Inserted just before didFinishLaunching's
-// `return`.
+// library) and forwards events to JS. Inserted right after didFinishLaunching's
+// opening brace — the library recommends registering "as early as possible",
+// and anchoring to the opening `{` (not a `return`) sidesteps any early-return
+// in the generated body.
 const REGISTER_SNIPPET = `
-    // AegisLink: register for VoIP (PushKit) pushes. The library sets itself as
-    // the PKPushRegistry delegate and forwards events to the JS layer.
+    // AegisLink: register for VoIP (PushKit) pushes as early as possible. The
+    // library sets itself as the PKPushRegistry delegate and forwards events to JS.
     RNVoipPushNotificationManager.voipRegistration()`;
+
+/**
+ * Apply `replacer` and throw if it was a no-op. Regex-based Swift injection into
+ * Expo's generated AppDelegate.swift is fragile: if a future SDK bump changes
+ * the template, a silent no-op would produce a build with NO VoIP registration —
+ * discoverable only as a missed call in production. Fail loud at build time.
+ */
+function injectOrThrow(src, replacer, label) {
+  const next = replacer(src);
+  if (next === src) {
+    throw new Error(
+      `[withIosVoip] failed to inject ${label}: the generated AppDelegate.swift ` +
+        `did not match the expected anchor. The Expo template likely changed — ` +
+        `update mobile/plugins/withIosVoip.js.`,
+    );
+  }
+  return next;
+}
 
 function withAppDelegateVoip(config) {
   return withAppDelegate(config, (config) => {
@@ -78,16 +98,21 @@ function withAppDelegateVoip(config) {
     }
     let src = config.modResults.contents;
 
-    // Import (idempotent).
+    // Import (idempotent, but assert the anchor matched when we do inject).
     if (!src.includes(VOIP_IMPORT)) {
-      src = src.replace(/^import ExpoModulesCore/m, `${VOIP_IMPORT}\n$&`);
+      src = injectOrThrow(
+        src,
+        (s) => s.replace(/^import ExpoModulesCore/m, `${VOIP_IMPORT}\n$&`),
+        VOIP_IMPORT,
+      );
     }
 
-    // VoIP registration inside didFinishLaunchingWithOptions.
+    // VoIP registration right after didFinishLaunchingWithOptions' opening brace.
     if (!src.includes('RNVoipPushNotificationManager.voipRegistration()')) {
-      src = src.replace(
-        /(func application\([^)]*didFinishLaunchingWithOptions[\s\S]*?)(\n\s*return )/,
-        `$1${REGISTER_SNIPPET}$2`,
+      src = injectOrThrow(
+        src,
+        (s) => s.replace(/(func application\([^)]*didFinishLaunchingWithOptions[^{]*\{)/, `$1${REGISTER_SNIPPET}`),
+        'voipRegistration()',
       );
     }
 

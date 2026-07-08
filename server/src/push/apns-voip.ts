@@ -40,8 +40,23 @@ const HOST =
 
 const VOIP_TOPIC = `${BUNDLE_ID}.voip`;
 
+// Memoized check that KEY_P8 is actually parseable EC key material. A malformed
+// .p8 is treated the same as "not configured" so we fail closed to the Expo
+// fallback at config time instead of throwing on the first send.
+let _keyMaterialOk: boolean | null = null;
+function keyMaterialOk(): boolean {
+  if (_keyMaterialOk !== null) return _keyMaterialOk;
+  try {
+    privateKey();
+    _keyMaterialOk = true;
+  } catch {
+    _keyMaterialOk = false;
+  }
+  return _keyMaterialOk;
+}
+
 export function isApnsConfigured(): boolean {
-  return KEY_ID !== '' && TEAM_ID !== '' && KEY_P8 !== '';
+  return KEY_ID !== '' && TEAM_ID !== '' && KEY_P8 !== '' && keyMaterialOk();
 }
 
 // ── ES256 JWT (Apple provider token) ──────────────────────────────────────────
