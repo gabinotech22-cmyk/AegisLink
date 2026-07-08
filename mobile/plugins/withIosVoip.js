@@ -133,7 +133,6 @@ module.exports = function withIosVoip(config) {
   // withAppDelegateVoip is intentionally NOT applied — see "WHY STEP 3 IS
   // DISABLED" in the header. It breaks the Xcode build (Swift can't import the
   // ObjC pod). VoIP registration works via JS (voip-push.ts registerVoipToken).
-  // void withAppDelegateVoip;  // re-enable via a bridging header in a follow-up.
   return config;
 };
 

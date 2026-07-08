@@ -70,10 +70,13 @@ una App Store Connect API Key a expo.dev — ver Fase 1). Sin Xcode, sin Keychai
       `APNS_KEY_P8` = contenido del `.p8` con saltos como `\n`. Ver `server/.env.example`.
 - [ ] Si falta cualquier var, el relay hace fallback silencioso al push visible de
       Expo (`isApnsConfigured()` → false): no rompe nada, pero no hay ring con app cerrada.
-- [ ] ⚠️ El AppDelegate nativo (`RNVoipPushNotificationManager.voipRegistration()`)
-      lo inyecta `withIosVoip.js`; **validar que compila en el primer `eas build -p ios`**
-      (no se pudo compilar fuera de macOS). Si el `import RNVoipPushNotification` falla
-      bajo el build managed, usar un bridging header con `RNVoipPushNotificationManager.h`.
+- [x] ✅ **Build iOS compila y firma** — primer `.ipa` generado en EAS (build `52997e08`, PR #276).
+- [ ] ⚠️ El registro VoIP nativo en el AppDelegate está **DESACTIVADO** en `withIosVoip.js`:
+      el `import RNVoipPushNotification` de Swift rompe el build de Xcode (el pod es ObjC, no
+      un módulo Swift; "no such module"). El registro del token VoIP se hace por **JS**
+      (`voip-push.ts` → `registerVoipToken()`), suficiente con la app viva/en background.
+      **Follow-up:** reactivar el registro nativo temprano vía **bridging header**
+      (`#import "RNVoipPushNotificationManager.h"`) para el caso app-cerrada, y validar en build.
 - [ ] ⚠️ **CallKit + New Architecture**: `react-native-callkeep@4.3.16` rompe la New
       Arch en Android (dos `@ReactMethod` "displayIncomingCall" → crash al arrancar),
       por eso `callkeep.ts` lo carga con `require` perezoso **solo en iOS** y con
