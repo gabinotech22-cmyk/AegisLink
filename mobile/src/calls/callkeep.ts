@@ -29,13 +29,44 @@
  * (socket/calls.ts): on Android and on non-native runtimes they are no-ops.
  */
 import { Platform } from 'react-native';
-import RNCallKeep from 'react-native-callkeep';
+// TYPE-ONLY import — erased at compile time, so it never triggers a runtime
+// `require` of the native module. See callKeep() below for why that matters.
+import type RNCallKeepModule from 'react-native-callkeep';
 import { logger } from '../utils/logger';
 import { IS_EXPO_GO } from '../runtime';
+
+type RNCallKeepType = typeof RNCallKeepModule;
 
 // Native CallKit is only available on a real iOS build (not Expo Go, which lacks
 // the native module and would throw on setup()).
 const CALLKIT_ENABLED = Platform.OS === 'ios' && !IS_EXPO_GO;
+
+/**
+ * Lazily load react-native-callkeep — ONLY ever on a real iOS runtime.
+ *
+ * A STATIC `import` is fatal: the library's module init runs
+ * `new NativeEventEmitter(NativeModules.RNCallKeep)` at load time, and under the
+ * New Architecture (`newArchEnabled: true`) its Android native module fails
+ * TurboModule parsing (it exports two @ReactMethods named "displayIncomingCall"),
+ * which crashes the app on launch on Android — and throws "NativeEventEmitter
+ * requires a non-null argument" under Jest. So we must never even `require` it
+ * off iOS. Callers gate on CALLKIT_ENABLED first, so callKeep() only runs on iOS.
+ *
+ * The try/catch also degrades gracefully: if the module can't initialise (e.g. a
+ * New-Arch incompatibility surfaces on iOS too — validate on the first EAS
+ * build), CallKit is simply disabled rather than crashing the app.
+ */
+let _callKeep: RNCallKeepType | null | undefined;
+function callKeep(): RNCallKeepType | null {
+  if (_callKeep !== undefined) return _callKeep;
+  try {
+    _callKeep = (require('react-native-callkeep') as { default: RNCallKeepType }).default;
+  } catch (e) {
+    logger.warn('[callkeep] native module unavailable', e);
+    _callKeep = null;
+  }
+  return _callKeep;
+}
 
 /**
  * Generic, non-identifying labels shown on the native iOS call UI and lock
@@ -59,6 +90,8 @@ const _displayed = new Set<string>();
  */
 export function initCallKeep(): void {
   if (!CALLKIT_ENABLED || _setupDone) return;
+  const RNCallKeep = callKeep();
+  if (!RNCallKeep) return;
 
   RNCallKeep.setup({
     ios: {
@@ -86,7 +119,7 @@ export function initCallKeep(): void {
       // CallKit is mandatory for VoIP wake-ups, so silent permanent disable
       // would break incoming-call ringing for the whole session.
       _setupDone = true;
-      bindListeners();
+      bindListeners(RNCallKeep);
     })
     .catch((e) => logger.warn('[callkeep] setup failed', e));
 }
@@ -95,7 +128,7 @@ export function initCallKeep(): void {
  * Bridge CallKit's native actions (green "answer", red "decline/end", mute
  * toggle on the system UI / lock screen) back into the app's call flow.
  */
-function bindListeners(): void {
+function bindListeners(RNCallKeep: RNCallKeepType): void {
   if (_listenersBound) return;
   _listenersBound = true;
 
@@ -165,6 +198,8 @@ export function displayIncomingCall(
   isVideo: boolean,
 ): void {
   if (!CALLKIT_ENABLED) return;
+  const RNCallKeep = callKeep();
+  if (!RNCallKeep) return;
   if (_displayed.has(callId)) return;
   _displayed.add(callId);
   try {
@@ -178,6 +213,8 @@ export function displayIncomingCall(
 /** Mark the CallKit call as connected (call answered + media flowing). */
 export function reportCallConnected(callId: string): void {
   if (!CALLKIT_ENABLED) return;
+  const RNCallKeep = callKeep();
+  if (!RNCallKeep) return;
   try {
     RNCallKeep.setCurrentCallActive(callId);
   } catch (e) {
@@ -189,6 +226,8 @@ export function reportCallConnected(callId: string): void {
 export function endNativeCall(callId: string): void {
   _displayed.delete(callId);
   if (!CALLKIT_ENABLED) return;
+  const RNCallKeep = callKeep();
+  if (!RNCallKeep) return;
   try {
     RNCallKeep.endCall(callId);
   } catch (e) {
@@ -199,6 +238,8 @@ export function endNativeCall(callId: string): void {
 /** Reflect the app's mute state on the native call UI. */
 export function setNativeMuted(callId: string, muted: boolean): void {
   if (!CALLKIT_ENABLED) return;
+  const RNCallKeep = callKeep();
+  if (!RNCallKeep) return;
   try {
     RNCallKeep.setMutedCall(callId, muted);
   } catch (e) {

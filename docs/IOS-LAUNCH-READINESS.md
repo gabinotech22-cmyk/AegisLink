@@ -70,9 +70,16 @@ una App Store Connect API Key a expo.dev — ver Fase 1). Sin Xcode, sin Keychai
       `APNS_KEY_P8` = contenido del `.p8` con saltos como `\n`. Ver `server/.env.example`.
 - [ ] Si falta cualquier var, el relay hace fallback silencioso al push visible de
       Expo (`isApnsConfigured()` → false): no rompe nada, pero no hay ring con app cerrada.
-- [ ] ⚠️ El AppDelegate nativo (PushKit + `reportNewIncomingCall`) lo inyecta
-      `withIosVoip.js`; **validar que compila en el primer `eas build -p ios`** (no se
-      pudo compilar fuera de macOS).
+- [ ] ⚠️ El AppDelegate nativo (`RNVoipPushNotificationManager.voipRegistration()`)
+      lo inyecta `withIosVoip.js`; **validar que compila en el primer `eas build -p ios`**
+      (no se pudo compilar fuera de macOS). Si el `import RNVoipPushNotification` falla
+      bajo el build managed, usar un bridging header con `RNVoipPushNotificationManager.h`.
+- [ ] ⚠️ **CallKit + New Architecture**: `react-native-callkeep@4.3.16` rompe la New
+      Arch en Android (dos `@ReactMethod` "displayIncomingCall" → crash al arrancar),
+      por eso `callkeep.ts` lo carga con `require` perezoso **solo en iOS** y con
+      `try/catch` (degrada sin crashear). **Validar en el primer build iOS** que el
+      módulo carga bien bajo New Arch; si no, subir a una versión de callkeep compatible
+      o aplicar `patch-package`.
 
 ### 5. Testers internos  *(sin review de Apple)*
 - [ ] En TestFlight → **Internal Testing** → añadir tus Apple IDs (hasta 100).
