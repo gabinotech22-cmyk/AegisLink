@@ -126,3 +126,52 @@ describe('VoiceRecorderScreen — recorder lifecycle', () => {
     expect(recordingInstances[0].prepareToRecordAsync).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── iOS audit fix #4: audio session restored after stopping (earpiece-routing
+// regression). Without this, sending a note without ever tapping Preview
+// leaves allowsRecordingIOS: true for the rest of the app session — all
+// later audio (including notification sound FX) routes through the iOS
+// earpiece instead of the speaker. ────────────────────────────────────────────
+describe('VoiceRecorderScreen — audio session restore (earpiece-routing regression)', () => {
+  it('restores allowsRecordingIOS to false after stopRecording, even without previewing', async () => {
+    const { getByLabelText } = render(<VoiceRecorderScreen onBack={jest.fn()} onSend={jest.fn()} />);
+    await act(async () => {
+      fireEvent.press(getByLabelText('Grabar nota de voz'));
+    });
+    await waitFor(() => expect(recordingInstances.length).toBe(1));
+
+    const { Audio } = require('expo-av') as { Audio: { setAudioModeAsync: jest.Mock } };
+    Audio.setAudioModeAsync.mockClear(); // isolate the stop-time call from the start-time call
+
+    await act(async () => {
+      fireEvent.press(getByLabelText('Detener grabación'));
+    });
+
+    await waitFor(() =>
+      expect(Audio.setAudioModeAsync).toHaveBeenCalledWith({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      }),
+    );
+  });
+
+  it('restores allowsRecordingIOS to false on unmount mid-recording (back out without stopping)', async () => {
+    const { getByLabelText, unmount } = render(<VoiceRecorderScreen onBack={jest.fn()} onSend={jest.fn()} />);
+    await act(async () => {
+      fireEvent.press(getByLabelText('Grabar nota de voz'));
+    });
+    await waitFor(() => expect(recordingInstances.length).toBe(1));
+
+    const { Audio } = require('expo-av') as { Audio: { setAudioModeAsync: jest.Mock } };
+    Audio.setAudioModeAsync.mockClear();
+
+    unmount();
+
+    await waitFor(() =>
+      expect(Audio.setAudioModeAsync).toHaveBeenCalledWith({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      }),
+    );
+  });
+});
