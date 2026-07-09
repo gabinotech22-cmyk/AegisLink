@@ -111,9 +111,9 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       const stored = await hasStoredPIN();
       setHasPIN(stored);
 
-      // Always detect hardware availability regardless of user preference.
-      // `biometricsEnabled` controls auto-launch behaviour, not whether the
-      // button is shown.
+      // Always detect hardware availability — it also picks the right
+      // icon/copy. Whether the biometric option is OFFERED at all is gated
+      // below on `bio && biometricsEnabled`.
       let bio = false;
       let kind: 'face' | 'fingerprint' = 'fingerprint';
       try {
@@ -142,10 +142,15 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         ? i18nT('lock.lookAtDevice', 'Mira el dispositivo')
         : i18nT('lock.touchSensor', 'Toca el sensor'));
 
-      // Auto-launch biometric UI only when the user has enabled it AND hardware
-      // is present. If the preference is off but hardware exists, we show PIN
-      // by default and surface a "Use Face ID / Fingerprint" button instead.
-      if (bio && biometricsEnabled) {
+      // PIN-first (product + security decision): whenever a PIN exists, the
+      // PIN pad is the default view. The duress/panic PIN lives on this
+      // screen — it must ALWAYS be typeable, and the biometric prompt is a
+      // modal system alert that covers the screen (and the "use PIN" button
+      // under it) when auto-launched; a failing sensor then traps the user
+      // (seen on iPhone 8 / Touch ID, TestFlight build 14). Biometrics are
+      // offered as an explicit button on the PIN view instead. Only a
+      // bio-only setup (no PIN stored) starts on the biometric view.
+      if (!stored && bio && biometricsEnabled) {
         setMode('biometric');
         // auto-trigger after mode is set via the effect below
       } else {
@@ -199,7 +204,12 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       const result = await LA.authenticateAsync({
         promptMessage: i18nT('lock.promptMessage'),
         fallbackLabel: i18nT('lock.fallbackLabel'),
-        disableDeviceFallback: false,
+        // NEVER fall back to the device passcode: it would unlock the app
+        // while bypassing validatePin() entirely — i.e. skipping the duress
+        // (decoy) PIN path, so a coerced user couldn't present the decoy.
+        // The fallback button returns 'user_fallback', which routes to the
+        // app's own PIN view below.
+        disableDeviceFallback: true,
       });
 
       if (result.success) {
@@ -497,7 +507,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
         <Numpad onDigit={handleDigit} onDelete={handleDelete} t={t} />
 
-        {bioAvailable && (
+        {bioAvailable && biometricsEnabled && (
           <Pressable
             onPress={() => {
               setPinCode('');
