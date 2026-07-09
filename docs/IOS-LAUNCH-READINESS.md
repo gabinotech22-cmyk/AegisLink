@@ -100,11 +100,24 @@ una App Store Connect API Key a expo.dev — ver Fase 1). Sin Xcode, sin Keychai
 
 ## 🟡 FASE 2 — Antes de testers externos / lanzamiento público
 
-### Export compliance (cripto)
-- `ITSAppUsesNonExemptEncryption: true` → cada build de TestFlight pregunta por compliance.
-  Una app de mensajería E2EE suele calificar para la **exención estándar** (encryption for
-  authentication / standard algorithms). Decidir y documentar la clasificación; automatizar la
-  respuesta en el infoPlist para no repetirla en cada subida.
+### Export compliance (cripto) — decisión tomada 2026-07-09
+- **`ITSAppUsesNonExemptEncryption: true`** en `mobile/app.json` (infoPlist). Es lo **correcto y
+  legalmente exacto**: una app de mensajería E2EE **usa cifrado no exento** según los propios docs
+  de Apple; declarar `false` sería inexacto (lo flagó CodeRabbit en PR #277). El interino `false`
+  se puso solo para pasar la validación del **primer** upload a TestFlight interno; queda revertido.
+- **Clasificación (US EAR / control de exportación)**: AegisLink usa **algoritmos estándar
+  publicados** — TweetNaCl (Curve25519, XSalsa20, Poly1305) — sobre una implementación **open
+  source**. Esto suele calificar para la **auto-clasificación simplificada** (License Exception ENC
+  §740.17(b), con **annual self-report a BIS**) en lugar de un **CCATS** completo. **Confirmar con
+  la guía de BIS / un abogado antes del lanzamiento público** — es una declaración legal del dueño,
+  no de la IA.
+- **Pasos pendientes en App Store Connect** (web, antes de externos/público):
+  1. Completar el **cuestionario de export compliance** del app/build. Con algoritmos estándar +
+     open source, la ruta es la exención/auto-clasificación, no CCATS.
+  2. Si Apple emite un **App Encryption Export Compliance Code**, añadirlo como
+     **`ITSEncryptionExportComplianceCode`** en el `infoPlist` de `mobile/app.json` → así se
+     **omite el cuestionario en cada build** y no hay que responderlo por subida.
+  3. Rebuild + resubmit vía **Actions → "Build iOS"** y confirmar que el upload pasa con `true`.
 
 ### ⚠️ Riesgo de opsec — cuenta "Persona física"
 - Una cuenta **individual** publica bajo tu **nombre legal** como vendedor en el App Store
