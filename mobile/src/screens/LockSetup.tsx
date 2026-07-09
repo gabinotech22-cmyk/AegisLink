@@ -16,6 +16,7 @@ import { Section, Row, Toggle } from '../components/Section';
 import { setPIN, clearPIN, hasStoredPIN, verifyPIN } from '../lock/pin';
 import { usePreferences } from '../store/preferences';
 import { themedAlert } from '../components/AlertHost';
+import { withPickingGuard } from '../utils/pickingGuard';
 
 interface Props {
   onBack: () => void;
@@ -385,9 +386,14 @@ export function LockSetupScreen({ onBack }: Props) {
           const LA = require('expo-local-authentication') as {
             authenticateAsync(opts: object): Promise<{ success: boolean }>;
           };
-          const res = await LA.authenticateAsync({
-            promptMessage: i18nT('lockSetup.enableBioPrompt', 'Enable Face ID / Fingerprint for AegisLink'),
-          });
+          // iOS: the Face ID prompt sends AppState to 'inactive'; with
+          // lockTimeoutMin=0 the lock handler in App.tsx would re-lock the app
+          // the moment the prompt closes. The guard suppresses that lock.
+          const res = await withPickingGuard(() =>
+            LA.authenticateAsync({
+              promptMessage: i18nT('lockSetup.enableBioPrompt', 'Enable Face ID / Fingerprint for AegisLink'),
+            })
+          );
           if (!res.success) return;
         } catch {
           themedAlert(
