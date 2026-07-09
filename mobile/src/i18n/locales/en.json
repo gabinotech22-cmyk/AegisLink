@@ -84,7 +84,8 @@
     "archiveAction": "ARCHIVE",
     "registering": "REGISTERING IDENTITY…",
     "registrationFailed": "IDENTITY REGISTRATION FAILED",
-    "retry": "RETRY"
+    "retry": "RETRY",
+    "registrationRateLimited": "Too many registration attempts. Automatic retry in {{minutes}} min"
   },
   "chat": {
     "encryptedToday": "END-TO-END ENCRYPTED · TODAY",
