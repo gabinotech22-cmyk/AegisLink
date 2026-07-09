@@ -35,6 +35,10 @@ on:
         description: 'Submit the build to TestFlight after it finishes'
         type: boolean
         default: true
+      submit_only:
+        description: 'Skip the build; only submit the latest finished build to TestFlight'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,12 +51,6 @@ jobs:
     defaults:
       run:
         working-directory: mobile
-    env:
-      # eas.json `submit.production.ios` interpolates these from the environment. Team ID
-      # is public (not a secret); Apple ID / ASC app id come from secrets when submitting.
-      APPLE_TEAM_ID: X2W7MRTDMJ
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
     steps:
       - uses: actions/checkout@v7
 
@@ -75,11 +73,21 @@ jobs:
           fi
           echo "EXPO_TOKEN present."
 
-      - name: EAS build iOS (production)${{ inputs.submit && ' + submit to TestFlight' || '' }}
+      - name: EAS iOS ${{ inputs.submit_only && 'submit latest' || (inputs.submit && 'build + submit' || 'build only') }}
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          # Submit auth: Apple ID + app-specific password. EAS reads EXPO_APPLE_ID
+          # (the Apple ID email — kept in a secret, NOT committed to eas.json) and
+          # EXPO_APPLE_APP_SPECIFIC_PASSWORD. The app-specific password avoids the
+          # fastlane spaceship "invalid curve name" OpenSSL bug hit by the ASC API
+          # Key (.p8) path on the EAS macOS workers.
+          EXPO_APPLE_ID: ${{ secrets.APPLE_ID }}
+          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_SPECIFIC_PASWORD }}
         run: |
-          if [ "${{ inputs.submit }}" = "true" ]; then
+          if [ "${{ inputs.submit_only }}" = "true" ]; then
+            echo "Submitting the latest finished build to TestFlight (no rebuild)…"
+            npx eas-cli submit --platform ios --profile production --latest --non-interactive
+          elif [ "${{ inputs.submit }}" = "true" ]; then
             echo "Building and auto-submitting to TestFlight…"
             npx eas-cli build --platform ios --profile production --non-interactive --wait --auto-submit
           else
