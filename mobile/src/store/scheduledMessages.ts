@@ -22,6 +22,7 @@ import {
 } from '../db/local';
 import type { Identity } from '../crypto/identity';
 import type { PostMedia } from '../channels/channelService';
+import { toRelativeMediaPath, toAbsoluteMediaUri } from '../utils/mediaPaths';
 
 const MAX_RETRIES = 3;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -106,10 +107,24 @@ async function decryptPostOptions(postMeta: string | undefined): Promise<GroupPo
   const metaJson = await decryptBody(postMeta);
   if (!metaJson || metaJson === '[DECRYPTION_ERROR]') return DEFAULT_POST_OPTIONS;
   try {
-    return { ...DEFAULT_POST_OPTIONS, ...(JSON.parse(metaJson) as Partial<GroupPostOptions>) };
+    const parsed = { ...DEFAULT_POST_OPTIONS, ...(JSON.parse(metaJson) as Partial<GroupPostOptions>) };
+    // Staged file paths were persisted RELATIVE (see encryptPostOptions below);
+    // resolve against the current container's directories on read.
+    if (parsed.imagePath) parsed.imagePath = toAbsoluteMediaUri(parsed.imagePath);
+    if (parsed.filePath) parsed.filePath = toAbsoluteMediaUri(parsed.filePath);
+    return parsed;
   } catch {
     return DEFAULT_POST_OPTIONS;
   }
+}
+
+/** Serialize post options with staged file paths made container-independent. */
+function encryptablePostOptions(options: GroupPostOptions): GroupPostOptions {
+  return {
+    ...options,
+    imagePath: options.imagePath ? toRelativeMediaPath(options.imagePath) : options.imagePath,
+    filePath: options.filePath ? toRelativeMediaPath(options.filePath) : options.filePath,
+  };
 }
 
 /**
@@ -164,10 +179,20 @@ async function decryptChannelPostOptions(postMeta: string | undefined): Promise<
   const metaJson = await decryptBody(postMeta);
   if (!metaJson || metaJson === '[DECRYPTION_ERROR]') return {};
   try {
-    return JSON.parse(metaJson) as ChannelPostOptions;
+    const parsed = JSON.parse(metaJson) as ChannelPostOptions;
+    // Staged media path persisted RELATIVE -- resolve against the current
+    // container's directories on read (see encryptableChannelPostOptions).
+    if (parsed.media) parsed.media = { ...parsed.media, path: toAbsoluteMediaUri(parsed.media.path) };
+    return parsed;
   } catch {
     return {};
   }
+}
+
+/** Serialize channel post options with the staged media path made container-independent. */
+function encryptableChannelPostOptions(options: ChannelPostOptions): ChannelPostOptions {
+  if (!options.media) return options;
+  return { ...options, media: { ...options.media, path: toRelativeMediaPath(options.media.path) } };
 }
 
 /** Unlink a staged channel-post file. Refuses paths outside the staging dir. */
@@ -407,7 +432,7 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
     // level as the outbox plaintext and ratchet sessions. Ratchet encryption
     // happens at fire time (processDue) against fresh group membership.
     const encryptedPayload = await encryptBody(plaintext);
-    const postMeta = await encryptBody(JSON.stringify(options ?? DEFAULT_POST_OPTIONS));
+    const postMeta = await encryptBody(JSON.stringify(encryptablePostOptions(options ?? DEFAULT_POST_OPTIONS)));
     const stored: StoredScheduledMessage = {
       id: id ?? Crypto.randomUUID(),
       recipientAegisId: groupId,
@@ -453,7 +478,7 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
       }
     }
     const hasOptions = !!options?.media;
-    const postMeta = hasOptions ? await encryptBody(JSON.stringify(options)) : undefined;
+    const postMeta = hasOptions ? await encryptBody(JSON.stringify(encryptableChannelPostOptions(options as ChannelPostOptions))) : undefined;
     const stored: StoredScheduledMessage = {
       id: id ?? Crypto.randomUUID(),
       recipientAegisId: channelId,

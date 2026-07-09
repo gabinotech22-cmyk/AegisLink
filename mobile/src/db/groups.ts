@@ -1,5 +1,6 @@
 import { withDb } from './core';
 import type { GroupPermissions } from '../crypto/groupSig';
+import { toRelativeMediaPath, toAbsoluteMediaUri } from '../utils/mediaPaths';
 
 export interface StoredGroup {
   id: string;
@@ -77,7 +78,9 @@ function rowToGroup(r: GroupRow): StoredGroup {
     members: JSON.parse(r.members),
     createdAt: r.created_at,
     avatarColor: r.avatar_color || undefined,
-    avatarImage: r.avatar_image || undefined,
+    // avatar_image may be a relative pointer or a stale absolute URI from a
+    // previous install (see mediaPaths.ts) -- resolve against the CURRENT container.
+    avatarImage: r.avatar_image ? toAbsoluteMediaUri(r.avatar_image) : undefined,
     adminOnlyInvite: r.admin_only_invite === 1,
     moderateNewMembers: r.moderate_new_members === 1,
     adminId: r.admin_id ?? undefined,
@@ -102,7 +105,9 @@ export async function saveGroup(g: StoredGroup): Promise<void> {
       JSON.stringify(g.members),
       g.createdAt,
       g.avatarColor || null,
-      g.avatarImage || null,
+      // Persist a container-independent relative pointer, never the absolute
+      // URI -- the sandbox UUID changes across TestFlight builds/reinstalls.
+      g.avatarImage ? toRelativeMediaPath(g.avatarImage) : null,
       g.adminOnlyInvite !== false ? 1 : 0,
       g.moderateNewMembers ? 1 : 0,
       g.adminId ?? null,

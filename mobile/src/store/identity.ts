@@ -10,6 +10,7 @@ const SS_OPTS: SecureStore.SecureStoreOptions = {
 import { createIdentity, identityFromStored, type Identity } from '../crypto/identity';
 import { loadIdentity, saveIdentity } from '../db/local';
 import { ensureRegistered } from '../crypto/ensureRegistered';
+import { toRelativeMediaPath, toAbsoluteMediaUri } from '../utils/mediaPaths';
 
 /** Publication status of this identity on the relay. */
 export type PublishStatus = 'unknown' | 'publishing' | 'published' | 'failed';
@@ -194,8 +195,18 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
       const displayName = displayNameRaw ?? identity.aegisId.toLowerCase().replace(/-/g, '');
       const avatarColor = avatarColorRaw ?? '#05b875';
-      const avatarImage = avatarImageRaw ?? null;
+      // Resolve against the CURRENT container -- avatarImageRaw may be a
+      // relative pointer, or a stale absolute URI from a previous install.
+      const avatarImage = avatarImageRaw ? toAbsoluteMediaUri(avatarImageRaw) : null;
       const profileStatus = profileStatusRaw ?? '';
+      // Re-persist the relative form so subsequent reads skip the migration
+      // branch (best-effort -- never block hydrate on this).
+      if (avatarImageRaw && avatarImage) {
+        const relative = toRelativeMediaPath(avatarImageRaw);
+        if (relative !== avatarImageRaw) {
+          SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', activeSlotId), relative, SS_OPTS).catch(() => {});
+        }
+      }
 
       // Expose identity to UI immediately regardless of server state.
       set({
@@ -336,7 +347,13 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     await SecureStore.setItemAsync(getPrefKey('aegis.displayName', slotId), displayName, SS_OPTS);
     await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', slotId), avatarColor, SS_OPTS);
     if (persistentAvatarUri) {
-      await SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', slotId), persistentAvatarUri, SS_OPTS);
+      // Persist a container-independent relative pointer, never the absolute
+      // URI -- the sandbox UUID changes across TestFlight builds/reinstalls.
+      await SecureStore.setItemAsync(
+        getPrefKey('aegis.avatarImage', slotId),
+        toRelativeMediaPath(persistentAvatarUri),
+        SS_OPTS,
+      );
     } else {
       await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', slotId));
     }
