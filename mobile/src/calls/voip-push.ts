@@ -36,7 +36,17 @@ import { displayIncomingCall } from './callkeep';
 const VOIP_TOKEN_KEY = 'aegis.voipToken';
 const VOIP_TOKEN_SENT_KEY = 'aegis.voipToken.sent';
 
-const VOIP_ENABLED = Platform.OS === 'ios' && !IS_EXPO_GO;
+// VoIP push is DISABLED until the native AppDelegate wiring is re-enabled via an
+// Objective-C bridging header (see withIosVoip.js — withAppDelegateVoip is not
+// applied because Swift can't import the ObjC pod). Without that native wiring,
+// calling the library's JS registerVoipToken() still triggers native PushKit
+// registration, and its success callback hits an unrecognized selector →
+// -[PKPushRegistry voipRegistrationSucceededWithDeviceToken:] → SIGABRT crash
+// right after identity generation (confirmed on iOS 16.7, TestFlight build 12).
+// VoIP push isn't live yet anyway (the relay APNS_* key is unset). Flip
+// VOIP_NATIVE_WIRED to true together with the withIosVoip bridging-header work.
+const VOIP_NATIVE_WIRED: boolean = false;
+const VOIP_ENABLED = VOIP_NATIVE_WIRED && Platform.OS === 'ios' && !IS_EXPO_GO;
 
 /** Minimal shape of the native module we depend on (dynamically required). */
 interface VoipPushModule {
