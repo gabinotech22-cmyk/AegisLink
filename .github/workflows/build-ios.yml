@@ -75,6 +75,21 @@ jobs:
           fi
           echo "EXPO_TOKEN present."
 
+      # Write the App Store Connect API Key (.p8) for EAS Submit. eas.json's
+      # submit.production.ios references it via ascApiKeyPath. Only needed when
+      # submitting; the file is git-ignored and never committed.
+      - name: Write ASC API Key for submit
+        if: ${{ inputs.submit }}
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          if [ -z "$ASC_API_KEY_P8" ]; then
+            echo "::error::ASC_API_KEY_P8 secret is empty — paste the .p8 contents of your App Store Connect API Key (Admin) into Settings → Secrets → Actions."
+            exit 1
+          fi
+          printf '%s' "$ASC_API_KEY_P8" > asc-api-key.p8
+          echo "ASC API Key written."
+
       - name: EAS build iOS (production)${{ inputs.submit && ' + submit to TestFlight' || '' }}
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}

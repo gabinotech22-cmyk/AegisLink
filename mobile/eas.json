@@ -69,7 +69,10 @@
     "production": {
       "ios": {
         "ascAppId": "6788507322",
-        "appleTeamId": "X2W7MRTDMJ"
+        "appleTeamId": "X2W7MRTDMJ",
+        "ascApiKeyPath": "./asc-api-key.p8",
+        "ascApiKeyId": "9S28B38G65",
+        "ascApiKeyIssuerId": "106b3dff-b970-409a-8913-5e988eea1b55"
       },
       "android": {
         "serviceAccountKeyPath": "./google-service-account.json",
