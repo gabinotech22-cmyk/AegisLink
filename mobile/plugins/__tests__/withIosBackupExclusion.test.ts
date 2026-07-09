@@ -46,15 +46,19 @@ describe('withIosBackupExclusion', () => {
 
   it('excludes every documentDirectory subdir holding private data', () => {
     const out = injectBackupExclusion(APP_DELEGATE_SWIFT);
-    for (const dir of [
-      'avatars', // finding #7: contact/group/self profile photos
-      'channel_avatars',
-      'media',
-      'channelposts',
-      'scheduledposts',
-      'SQLite',
-    ]) {
-      expect(EXCLUDED_DIRS).toContain(dir);
+    // Pin the expected set (catches accidental removals from EXCLUDED_DIRS)…
+    expect(EXCLUDED_DIRS).toEqual(
+      expect.arrayContaining([
+        'avatars', // finding #7: contact/group/self profile photos
+        'channel_avatars',
+        'media',
+        'channelposts',
+        'scheduledposts',
+        'SQLite',
+      ]),
+    );
+    // …then iterate the source of truth so future additions are covered too.
+    for (const dir of EXCLUDED_DIRS) {
       expect(out).toContain(`"${dir}"`);
     }
   });

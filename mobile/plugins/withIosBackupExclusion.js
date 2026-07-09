@@ -49,10 +49,18 @@ const SNIPPET = `
     let aegisDocs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     for aegisDirName in [${EXCLUDED_DIRS.map((d) => `"${d}"`).join(', ')}] {
       var aegisDir = aegisDocs.appendingPathComponent(aegisDirName, isDirectory: true)
-      try? FileManager.default.createDirectory(at: aegisDir, withIntermediateDirectories: true)
+      do {
+        try FileManager.default.createDirectory(at: aegisDir, withIntermediateDirectories: true)
+      } catch {
+        NSLog("[AegisLink] backup-exclusion: failed to create %@: %@", aegisDirName, String(describing: error))
+      }
       var aegisValues = URLResourceValues()
       aegisValues.isExcludedFromBackup = true
-      try? aegisDir.setResourceValues(aegisValues)
+      do {
+        try aegisDir.setResourceValues(aegisValues)
+      } catch {
+        NSLog("[AegisLink] backup-exclusion: failed to exclude %@ from backup: %@", aegisDirName, String(describing: error))
+      }
     }`;
 
 /**
