@@ -133,6 +133,14 @@ describe('app-lock PIN (a3 format)', () => {
     expect(await getStoredPinLength()).toBe(6);
   });
 
+  it('rejects a PIN that is not exactly 4 or 6 digits without persisting anything', async () => {
+    await expect(setPIN('12345')).rejects.toThrow(/4 or 6/);
+    expect(mockStore.has(PIN_HASH_KEY)).toBe(false);
+    expect(mockStore.has(PIN_SALT_KEY)).toBe(false);
+    expect(await getStoredPinLength()).toBeNull();
+    expect(await hasStoredPIN()).toBe(false);
+  });
+
   it('setStoredPinLength persists the flag without touching the hash', async () => {
     await setPIN('1234');
     const hashBefore = mockStore.get(PIN_HASH_KEY);

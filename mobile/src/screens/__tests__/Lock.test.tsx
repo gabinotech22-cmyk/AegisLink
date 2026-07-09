@@ -163,3 +163,130 @@ describe('LockScreen — PIN-first', () => {
     await waitFor(() => expect(mockAuthenticateAsync).toHaveBeenCalledTimes(1));
   });
 });
+
+/**
+ * Attempt counting, progressive cooldown and PIN-length gating (lock
+ * hardening, PR #288). Attempts persist under aegis.lock.attempts.v1 so a
+ * relaunch can't reset the counter; biometric failures stay entirely outside
+ * the PIN attempt/auto-wipe path (owner decision, roadmap §5).
+ */
+const ATTEMPTS_KEY = 'aegis.lock.attempts.v1';
+
+describe('LockScreen — attempts, cooldown & PIN length', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSecureStore.clear();
+    mockHasStoredPIN.mockResolvedValue(true);
+    mockVerifyPIN.mockResolvedValue(false);
+    mockVerifyPinWithSalt.mockResolvedValue(false);
+    mockGetStoredPinLength.mockResolvedValue(6);
+    mockPrefsState.biometricsEnabled = true;
+    mockPrefsState.duressActive = false;
+    mockAuthenticateAsync.mockResolvedValue({ success: false, error: 'user_cancel' });
+  });
+
+  it('counts a wrong 4-digit entry as an attempt immediately on a 4-digit install', async () => {
+    mockGetStoredPinLength.mockResolvedValue(4);
+    const { getByText } = render(<LockScreen onUnlock={jest.fn()} onPanic={jest.fn()} />);
+    await waitFor(() => getByText('lock.enterPin'));
+
+    for (const d of ['9', '9', '9', '9']) fireEvent.press(getByText(d));
+
+    await waitFor(() => expect(mockVerifyPIN).toHaveBeenCalledWith('9999'));
+    await waitFor(() => getByText('lock.pinError_plural')); // "N attempts left"
+    expect(JSON.parse(mockSecureStore.get(ATTEMPTS_KEY)!)).toEqual({
+      count: 1,
+      lockedUntilMs: null,
+    });
+  });
+
+  it('never validates at 4 digits on a 6-digit install (no silent probe)', async () => {
+    const { getByText } = render(<LockScreen onUnlock={jest.fn()} onPanic={jest.fn()} />);
+    await waitFor(() => getByText('lock.enterPin'));
+
+    for (const d of ['1', '2', '3', '4']) fireEvent.press(getByText(d));
+    // Give the (10 ms) four-digit checkpoint time to run.
+    await new Promise((r) => setTimeout(r, 80));
+
+    expect(mockVerifyPIN).not.toHaveBeenCalled();
+    expect(mockSecureStore.has(ATTEMPTS_KEY)).toBe(false); // counter untouched
+  });
+
+  it('blocks the numpad during a persisted cooldown', async () => {
+    mockSecureStore.set(
+      ATTEMPTS_KEY,
+      JSON.stringify({ count: 5, lockedUntilMs: Date.now() + 60_000 }),
+    );
+    const { getByText } = render(<LockScreen onUnlock={jest.fn()} onPanic={jest.fn()} />);
+    await waitFor(() => getByText('lock.cooldownWait'));
+
+    for (const d of ['1', '2', '3', '4', '5', '6']) fireEvent.press(getByText(d));
+    await new Promise((r) => setTimeout(r, 250)); // past the 180 ms validate delay
+
+    expect(mockVerifyPIN).not.toHaveBeenCalled();
+  });
+
+  it('accepts input again once the persisted cooldown has expired', async () => {
+    mockSecureStore.set(
+      ATTEMPTS_KEY,
+      JSON.stringify({ count: 5, lockedUntilMs: Date.now() - 1_000 }),
+    );
+    mockVerifyPIN.mockResolvedValue(true);
+    const onUnlock = jest.fn();
+    const { getByText, queryByText } = render(
+      <LockScreen onUnlock={onUnlock} onPanic={jest.fn()} />,
+    );
+    await waitFor(() => getByText('lock.enterPin'));
+    expect(queryByText('lock.cooldownWait')).toBeNull(); // expired lock not re-shown
+
+    for (const d of ['1', '1', '1', '1', '1', '1']) fireEvent.press(getByText(d));
+
+    await waitFor(() => expect(onUnlock).toHaveBeenCalledTimes(1));
+    // Successful unlock resets the persisted counter.
+    expect(JSON.parse(mockSecureStore.get(ATTEMPTS_KEY)!)).toEqual({
+      count: 0,
+      lockedUntilMs: null,
+    });
+  });
+
+  it('a biometric failure never touches the PIN attempt counter or the wipe path', async () => {
+    mockAuthenticateAsync.mockResolvedValue({ success: false, error: 'lockout' });
+    const { getByText } = render(<LockScreen onUnlock={jest.fn()} onPanic={jest.fn()} />);
+    await waitFor(() => getByText('lock.useBiometrics'));
+
+    fireEvent.press(getByText('lock.useBiometrics'));
+    await waitFor(() => expect(mockAuthenticateAsync).toHaveBeenCalledTimes(1));
+    await waitFor(() => getByText('lock.bioFailed'));
+
+    expect(mockSecureStore.has(ATTEMPTS_KEY)).toBe(false);
+    expect(mockWipeDatabase).not.toHaveBeenCalled();
+  });
+
+  it('ignores further input while a counted validation is in flight (no double-count)', async () => {
+    mockGetStoredPinLength.mockResolvedValue(4);
+    let resolveVerify: (v: boolean) => void = () => {};
+    mockVerifyPIN.mockImplementation(
+      () => new Promise<boolean>((r) => { resolveVerify = r; }),
+    );
+    const { getByText } = render(<LockScreen onUnlock={jest.fn()} onPanic={jest.fn()} />);
+    await waitFor(() => getByText('lock.enterPin'));
+
+    for (const d of ['9', '9', '9', '9']) fireEvent.press(getByText(d));
+    await waitFor(() => expect(mockVerifyPIN).toHaveBeenCalledTimes(1));
+
+    // Verify still pending — digits and deletes must be swallowed, otherwise
+    // a delete+retype schedules a second overlapping (double-counted) attempt.
+    fireEvent.press(getByText('⌫'));
+    fireEvent.press(getByText('9'));
+    fireEvent.press(getByText('9'));
+
+    resolveVerify(false);
+    await waitFor(() => getByText('lock.pinError_plural'));
+
+    expect(mockVerifyPIN).toHaveBeenCalledTimes(1); // exactly one counted attempt
+    expect(JSON.parse(mockSecureStore.get(ATTEMPTS_KEY)!)).toEqual({
+      count: 1,
+      lockedUntilMs: null,
+    });
+  });
+});

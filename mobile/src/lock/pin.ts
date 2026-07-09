@@ -99,6 +99,14 @@ export async function verifyPinWithSalt(
 }
 
 export async function setPIN(pin: string): Promise<void> {
+  // Fail closed on anything but the two supported lengths: persisting a
+  // 5/7-digit PIN with a wrong length flag would corrupt the lock screen's
+  // 4th-digit checkpoint logic. Both setup UIs already enforce this; the
+  // check guards future callers (and the transparent re-hash in verifyPIN,
+  // which by construction only sees PINs the lock screen validated at 4 or 6).
+  if (pin.length !== 4 && pin.length !== 6) {
+    throw new Error(`unsupported PIN length: ${pin.length} (must be 4 or 6)`);
+  }
   const salt = await getPinSalt();
   await ss.set(PIN_HASH_KEY, await argonPinV3(pin, salt));
   await setStoredPinLength(pin.length === 4 ? 4 : 6);

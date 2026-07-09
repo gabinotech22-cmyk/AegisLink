@@ -272,7 +272,13 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     const tick = () => {
       const left = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
       setCooldownSecondsLeft(left);
-      if (left <= 0) setCooldownUntil(null);
+      if (left <= 0) {
+        setCooldownUntil(null);
+        // The "wait M:SS" message set by the failure that started this
+        // cooldown is stale the moment it expires — clear it so the pad
+        // reads as usable again.
+        setPinError('');
+      }
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -347,21 +353,44 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   }
 
   // ── PIN entry ──────────────────────────────────────────────────────────────
+  // Set synchronously the moment an entry becomes a COUNTED attempt, cleared
+  // when that validation settles. Without it, the ~1 s async Argon2 verify
+  // leaves the numpad live: typing (or delete+retype) during the verify could
+  // schedule a second overlapping validatePin and double-count attempts —
+  // straight towards the cooldown/auto-wipe thresholds. Deliberately NOT set
+  // for the uncounted 4-digit checkpoints (duress probe on a 6-digit install,
+  // legacy silent check): those run while the user keeps typing digits 5-6,
+  // and blocking there would swallow input for the whole verify.
+  const validationInFlight = useRef(false);
+
   function handleDigit(d: string) {
     if (cooldownUntil && cooldownUntil > Date.now()) return; // numpad disabled during cooldown
+    if (validationInFlight.current) return; // a counted attempt is being verified
     if (pinCode.length >= 6) return;
     const next = pinCode + d;
     setPinCode(next);
     setPinError('');
     if (next.length === 4) {
-      setTimeout(() => void handleFourDigitCheckpoint(next), 10);
+      const counted = pinLenFlag === 4; // 4-digit install: this IS the attempt
+      if (counted) validationInFlight.current = true;
+      setTimeout(() => {
+        void handleFourDigitCheckpoint(next).finally(() => {
+          if (counted) validationInFlight.current = false;
+        });
+      }, 10);
     } else if (next.length === 6) {
-      setTimeout(() => void validatePin(next, false), 180);
+      validationInFlight.current = true;
+      setTimeout(() => {
+        void validatePin(next, false).finally(() => {
+          validationInFlight.current = false;
+        });
+      }, 180);
     }
   }
 
   function handleDelete() {
     if (cooldownUntil && cooldownUntil > Date.now()) return;
+    if (validationInFlight.current) return; // entry already submitted — deleting would desync
     setPinCode((p) => p.slice(0, -1));
     setPinError('');
   }
