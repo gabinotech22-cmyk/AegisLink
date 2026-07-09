@@ -19,7 +19,16 @@ export function isPicking(): boolean {
 export async function withPickingGuard<T>(fn: () => Promise<T>): Promise<T> {
   _picking = true;
   try {
-    return await fn();
+    const result = await fn();
+    // iOS: launchImageLibraryAsync()/launchCameraAsync() can resolve while the
+    // system picker's dismissal animation is still in flight. Callers
+    // typically react by opening another native Modal (the in-app avatar
+    // cropper) in the very next tick — presenting a new UIViewController while
+    // the previous one is still dismissing is a UIKit deadlock on iOS (no
+    // crash, no error — the app just hard-freezes). Android has no such race.
+    // Give the dismissal a beat to finish before handing control back.
+    await new Promise<void>((resolve) => setTimeout(resolve, 350));
+    return result;
   } finally {
     clearWhenActive();
   }
