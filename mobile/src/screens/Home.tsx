@@ -45,6 +45,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
     publishStatus,
     publishError,
     publishRetryAfterMs,
+    publishCooldownUntilMs,
     retryPublish,
   } = useIdentity();
   const contacts = useContacts((s) => s.contacts);
@@ -77,13 +78,18 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
 
   function schedulePublishRetry() {
     if (publishRetryTimerRef.current !== null) return; // already scheduled
-    // Honor the relay's explicit cooldown (429 retryAfterMs) over our own
-    // backoff — retrying inside a rate-limit window is wasted work and can
-    // extend a sliding-window ban. setTimeout clamps to a 32-bit signed delay,
-    // so cap at ~24h to avoid overflow wrapping to an immediate fire.
+    // Honor the relay's explicit cooldown over our own backoff — retrying
+    // inside a rate-limit window is wasted work and can extend a sliding-
+    // window ban. The cooldown is tracked as an absolute deadline
+    // (publishCooldownUntilMs, persisted across restarts) rather than a
+    // relative duration, so the delay here is always "time remaining until
+    // that deadline", not a stale duration captured at 429-time. setTimeout
+    // clamps to a 32-bit signed delay, so cap at ~24h to avoid overflow
+    // wrapping to an immediate fire.
     const DAY_MS = 24 * 60 * 60 * 1000;
-    const delay = publishRetryAfterMs != null && publishRetryAfterMs > 0
-      ? Math.min(publishRetryAfterMs, DAY_MS)
+    const remaining = publishCooldownUntilMs != null ? publishCooldownUntilMs - Date.now() : null;
+    const delay = remaining != null && remaining > 0
+      ? Math.min(remaining, DAY_MS)
       : nextBackoffMs(publishRetryCountRef.current);
     publishRetryTimerRef.current = setTimeout(() => {
       publishRetryTimerRef.current = null;
@@ -115,12 +121,16 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publishStatus]);
 
-  // Also retry when app comes back to foreground
+  // Also retry when app comes back to foreground — but never while a relay
+  // cooldown is still active (F1): retryPublish() itself gates on the
+  // cooldown too, but checking here avoids even the wasted async call/log
+  // noise on every foreground bounce during a 15-min rate-limit window.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active') {
-        void retryPublish();
-      }
+      if (nextState !== 'active') return;
+      const cooldownUntil = useIdentity.getState().publishCooldownUntilMs;
+      if (cooldownUntil != null && Date.now() < cooldownUntil) return;
+      void retryPublish();
     });
     return () => sub.remove();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -392,9 +402,11 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
               letterSpacing: 0.4,
             }}
           >
-            {i18nT('home.registrationFailed')}
+            {publishRetryAfterMs != null
+              ? i18nT('home.registrationRateLimited', { minutes: Math.max(1, Math.ceil(publishRetryAfterMs / 60000)) })
+              : i18nT('home.registrationFailed')}
           </Text>
-          {publishError ? (
+          {publishError && publishRetryAfterMs == null ? (
             <Text
               style={{
                 fontFamily: t.fontMono,

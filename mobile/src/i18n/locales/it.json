@@ -84,7 +84,8 @@
     "archiveAction": "ARCHIVIA",
     "registering": "REGISTRAZIONE IDENTITÀ…",
     "registrationFailed": "REGISTRAZIONE IDENTITÀ FALLITA",
-    "retry": "RIPROVA"
+    "retry": "RIPROVA",
+    "registrationRateLimited": "Troppi tentativi di registrazione. Nuovo tentativo automatico tra {{minutes}} min"
   },
   "chat": {
     "encryptedToday": "CIFRATO END-TO-END · OGGI",

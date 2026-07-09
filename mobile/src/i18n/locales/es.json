@@ -84,7 +84,8 @@
     "archiveAction": "ARCHIVAR",
     "registering": "REGISTRANDO IDENTIDAD…",
     "registrationFailed": "FALLO AL REGISTRAR IDENTIDAD",
-    "retry": "REINTENTAR"
+    "retry": "REINTENTAR",
+    "registrationRateLimited": "Demasiados intentos de registro. Reintento automático en {{minutes}} min"
   },
   "chat": {
     "encryptedToday": "CIFRADO EXTREMO A EXTREMO · HOY",
