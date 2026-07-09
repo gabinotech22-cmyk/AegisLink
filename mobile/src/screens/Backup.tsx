@@ -32,6 +32,7 @@ import {
   type PassphraseStrength,
 } from '../crypto/backup';
 import { themedAlert } from '../components/AlertHost';
+import { withPickingGuard } from '../utils/pickingGuard';
 
 interface Props {
   onBack: () => void;
@@ -188,11 +189,13 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   // ─── Encrypted restore flow ───────────────────────────────────────────────
   async function pickBackupFile(): Promise<void> {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        copyToCacheDirectory: true,
-        multiple: false,
-        type: '*/*',
-      });
+      const result = await withPickingGuard(() =>
+        DocumentPicker.getDocumentAsync({
+          copyToCacheDirectory: true,
+          multiple: false,
+          type: '*/*',
+        })
+      );
       if (result.canceled || result.assets.length === 0) return;
       const asset = result.assets[0];
       const file = new File(asset.uri);
