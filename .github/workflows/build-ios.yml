@@ -85,7 +85,7 @@ jobs:
           # Submit auth: Apple ID + app-specific password. Avoids the fastlane
           # spaceship "invalid curve name" OpenSSL bug that the ASC API Key (.p8)
           # path hits on the EAS macOS workers.
-          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_SPECIFIC_PASWORD }}
         run: |
           if [ "${{ inputs.submit_only }}" = "true" ]; then
             echo "Submitting the latest finished build to TestFlight (no rebuild)…"
