@@ -87,8 +87,10 @@ jobs:
             echo "::error::ASC_API_KEY_P8 secret is empty — paste the .p8 contents of your App Store Connect API Key (Admin) into Settings → Secrets → Actions."
             exit 1
           fi
-          printf '%s' "$ASC_API_KEY_P8" > asc-api-key.p8
-          echo "ASC API Key written."
+          # Strip CR (the .p8 is often pasted from a Windows editor → CRLF, which
+          # makes Ruby/OpenSSL in fastlane fail with "invalid curve name").
+          printf '%s' "$ASC_API_KEY_P8" | tr -d '\r' > asc-api-key.p8
+          echo "ASC API Key written ($(wc -l < asc-api-key.p8) lines)."
 
       - name: EAS build iOS (production)${{ inputs.submit && ' + submit to TestFlight' || '' }}
         env:
