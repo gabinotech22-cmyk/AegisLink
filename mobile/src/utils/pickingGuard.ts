@@ -8,7 +8,7 @@
  * App.tsx consulta isPicking() antes de activar el lock.
  */
 
-import { AppState, type AppStateStatus } from 'react-native';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
 
 let _picking = false;
 
@@ -19,7 +19,20 @@ export function isPicking(): boolean {
 export async function withPickingGuard<T>(fn: () => Promise<T>): Promise<T> {
   _picking = true;
   try {
-    return await fn();
+    const result = await fn();
+    // iOS: launchImageLibraryAsync()/launchCameraAsync() can resolve while the
+    // system picker's dismissal animation is still in flight. Callers
+    // typically react by opening another native Modal (the in-app avatar
+    // cropper) in the very next tick — presenting a new UIViewController while
+    // the previous one is still dismissing is a UIKit deadlock on iOS (no
+    // crash, no error — the app just hard-freezes). Give the dismissal a beat
+    // to finish before handing control back. Android has no such race, so it
+    // skips the delay (it would only add latency, e.g. to every voice-note
+    // start via the guarded mic-permission request).
+    if (Platform.OS === 'ios') {
+      await new Promise<void>((resolve) => setTimeout(resolve, 350));
+    }
+    return result;
   } finally {
     clearWhenActive();
   }
