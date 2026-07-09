@@ -488,8 +488,16 @@ export async function saveIdentity(v: StoredIdentity): Promise<void> {
   // AFTER_FIRST_UNLOCK: compatible with Android 14 hardware-backed Keystore
   // (StrongBox). Without this, setItemAsync can throw a native NPE on first
   // write on real devices even when the JS catch would normally handle it.
+  // _THIS_DEVICE_ONLY: on iOS, a Keychain item without this suffix is
+  // eligible for inclusion in an encrypted iCloud/iTunes device backup and
+  // gets RESTORED onto a different physical device when that backup is
+  // restored — silently leaking the user's private identity keys off-device.
+  // `keychainAccessible` is iOS-only (Android/Keystore ignores it), so no
+  // Platform.OS gate is needed; the StrongBox compatibility this comment
+  // documents is about AFTER_FIRST_UNLOCK vs WHEN_UNLOCKED, not about the
+  // THIS_DEVICE_ONLY suffix, so it is preserved.
   const secureOpts: SecureStore.SecureStoreOptions = {
-    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
   };
   const persistKeys = async () => {
     await SecureStore.setItemAsync(getSecretKeySlot(), v.secretKeyB64, secureOpts);
