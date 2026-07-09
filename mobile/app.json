@@ -122,6 +122,7 @@
       "./plugins/withCallForegroundService.js",
       "./plugins/withTorEmbedded.js",
       "./plugins/withIosVoip.js",
+      "./plugins/withIosBackupExclusion.js",
       "expo-secure-store",
       [
         "expo-sqlite",
