@@ -51,12 +51,6 @@ jobs:
     defaults:
       run:
         working-directory: mobile
-    env:
-      # eas.json `submit.production.ios` interpolates these from the environment. Team ID
-      # is public (not a secret); Apple ID / ASC app id come from secrets when submitting.
-      APPLE_TEAM_ID: X2W7MRTDMJ
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
     steps:
       - uses: actions/checkout@v7
 
@@ -82,9 +76,12 @@ jobs:
       - name: EAS iOS ${{ inputs.submit_only && 'submit latest' || (inputs.submit && 'build + submit' || 'build only') }}
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          # Submit auth: Apple ID + app-specific password. Avoids the fastlane
-          # spaceship "invalid curve name" OpenSSL bug that the ASC API Key (.p8)
-          # path hits on the EAS macOS workers.
+          # Submit auth: Apple ID + app-specific password. EAS reads EXPO_APPLE_ID
+          # (the Apple ID email — kept in a secret, NOT committed to eas.json) and
+          # EXPO_APPLE_APP_SPECIFIC_PASSWORD. The app-specific password avoids the
+          # fastlane spaceship "invalid curve name" OpenSSL bug hit by the ASC API
+          # Key (.p8) path on the EAS macOS workers.
+          EXPO_APPLE_ID: ${{ secrets.APPLE_ID }}
           EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_SPECIFIC_PASWORD }}
         run: |
           if [ "${{ inputs.submit_only }}" = "true" ]; then
