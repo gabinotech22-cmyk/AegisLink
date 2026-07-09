@@ -53,8 +53,23 @@ jest.mock('../../theme/ThemeContext', () => ({
 jest.mock('../../components/icons', () => ({ I: new Proxy({}, { get: () => () => null }) }));
 jest.mock('../../components/AegisMark', () => ({ AegisMark: () => null }));
 jest.mock('../../utils/logger', () => ({ logger: { warn: jest.fn(), error: jest.fn(), info: jest.fn() } }));
-jest.mock('../../utils/secureStore', () => ({ ss: { get: jest.fn().mockResolvedValue(null) } }));
-jest.mock('../../db/local', () => ({ wipeDatabase: jest.fn() }));
+
+const mockSecureStore = new Map<string, string>();
+jest.mock('../../utils/secureStore', () => ({
+  ss: {
+    get: jest.fn(async (k: string) => mockSecureStore.get(k) ?? null),
+    set: jest.fn(async (k: string, v: string) => { mockSecureStore.set(k, v); }),
+    delete: jest.fn(async (k: string) => { mockSecureStore.delete(k); }),
+  },
+}));
+
+const mockWipeDatabase = jest.fn();
+jest.mock('../../db/local', () => ({ wipeDatabase: (...a: unknown[]) => mockWipeDatabase(...a) }));
+
+const mockWithPickingGuard = jest.fn((fn: () => Promise<unknown>) => fn());
+jest.mock('../../utils/pickingGuard', () => ({
+  withPickingGuard: (fn: () => Promise<unknown>) => mockWithPickingGuard(fn),
+}));
 jest.mock('../../hooks/usePanicGesture', () => ({
   usePanicGesture: () => ({ registerTap: jest.fn(), registerLongPress: jest.fn() }),
 }));
@@ -72,11 +87,17 @@ jest.mock('../../store/messages', () => ({
 }));
 
 const mockHasStoredPIN = jest.fn();
+const mockVerifyPIN = jest.fn();
+const mockVerifyPinWithSalt = jest.fn();
+const mockGetStoredPinLength = jest.fn();
+const mockSetStoredPinLength = jest.fn();
 jest.mock('../../lock/pin', () => ({
-  verifyPIN: jest.fn().mockResolvedValue(false),
+  verifyPIN: (...a: unknown[]) => mockVerifyPIN(...a),
   hasStoredPIN: () => mockHasStoredPIN(),
-  verifyPinWithSalt: jest.fn().mockResolvedValue(false),
+  verifyPinWithSalt: (...a: unknown[]) => mockVerifyPinWithSalt(...a),
   DURESS_PIN_SALT: 'duress-salt',
+  getStoredPinLength: () => mockGetStoredPinLength(),
+  setStoredPinLength: (...a: unknown[]) => mockSetStoredPinLength(...a),
 }));
 
 const mockPrefsState = { biometricsEnabled: true, duressActive: false };
@@ -95,7 +116,11 @@ import { LockScreen } from '../Lock';
 describe('LockScreen — PIN-first', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockSecureStore.clear();
     mockHasStoredPIN.mockResolvedValue(true);
+    mockVerifyPIN.mockResolvedValue(false);
+    mockVerifyPinWithSalt.mockResolvedValue(false);
+    mockGetStoredPinLength.mockResolvedValue(6);
     mockPrefsState.biometricsEnabled = true;
     mockPrefsState.duressActive = false;
     // Cancelled prompt: keeps the flow on-screen without unlocking.

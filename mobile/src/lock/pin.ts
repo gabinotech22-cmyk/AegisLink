@@ -7,6 +7,7 @@ import { ss } from '../utils/secureStore';
 
 const PIN_HASH_KEY = 'aegis.pin.hash';
 const PIN_SALT_KEY = 'aegis.pin.salt.v2'; // per-install random salt (base64)
+const PIN_LEN_KEY = 'aegis.pin.len.v1'; // '4' | '6' — closes the silent-4th-digit brute-force gap
 const LEGACY_PIN_SALT = 'aegislink:pin:v1:';
 export const DURESS_PIN_SALT = 'aegislink:panic:v1:';
 
@@ -100,6 +101,29 @@ export async function verifyPinWithSalt(
 export async function setPIN(pin: string): Promise<void> {
   const salt = await getPinSalt();
   await ss.set(PIN_HASH_KEY, await argonPinV3(pin, salt));
+  await setStoredPinLength(pin.length === 4 ? 4 : 6);
+}
+
+/**
+ * Persist the PIN length WITHOUT touching the hash — used by setPIN() itself
+ * and by the lock screen migration path (an install predating this flag
+ * learns its real PIN length on the first successful unlock, closing the
+ * silent-4th-digit brute-force gap from then on).
+ */
+export async function setStoredPinLength(len: 4 | 6): Promise<void> {
+  await ss.set(PIN_LEN_KEY, String(len));
+}
+
+/**
+ * null = pre-existing install with no length flag yet (migration case): the
+ * lock screen keeps the legacy silent 4th-digit check until the next
+ * successful unlock persists the real length.
+ */
+export async function getStoredPinLength(): Promise<4 | 6 | null> {
+  const v = await ss.get(PIN_LEN_KEY);
+  if (v === '4') return 4;
+  if (v === '6') return 6;
+  return null;
 }
 
 export async function verifyPIN(pin: string): Promise<boolean> {
@@ -136,4 +160,5 @@ export async function clearPIN(): Promise<void> {
   // (minimize metadata at-rest) and getPinSalt() will happily mint a fresh
   // one on the next setPIN(), so there is no correctness reason to keep it.
   await ss.delete(PIN_SALT_KEY);
+  await ss.delete(PIN_LEN_KEY);
 }
