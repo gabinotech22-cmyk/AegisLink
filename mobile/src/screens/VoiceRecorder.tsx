@@ -48,6 +48,9 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
       recordingRef.current = null;
       void releaseActiveRecording();
       void soundRef.current?.unloadAsync().catch(() => {});
+      // Cover the "back out mid-recording" path, which never reaches
+      // stopRecording()'s own restore — leaves iOS stuck in recording mode.
+      void Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {});
     };
   }, []);
 
@@ -159,6 +162,13 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
       themedAlert(i18nT('common.error'), (e as Error).message);
       setStage('idle');
     } finally {
+      // Restore the audio session out of recording mode regardless of the
+      // outcome above — otherwise, if the user sends the note without ever
+      // tapping Preview (the common path), allowsRecordingIOS stays true for
+      // the rest of the app session and all subsequent playback (including
+      // notification sound FX) routes through the iOS earpiece instead of
+      // the speaker. Tolerant of failure: never block stop/send on this.
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {});
       busyRef.current = false;
     }
   }

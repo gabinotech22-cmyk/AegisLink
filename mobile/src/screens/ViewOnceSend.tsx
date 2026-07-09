@@ -439,6 +439,13 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
       recordingRef.current = null;
       themedAlert(i18nT('common.error'), (e as Error).message);
       setAudioStage('idle');
+    } finally {
+      // Restore the audio session out of recording mode regardless of the
+      // outcome above — otherwise, if the user sends the note without ever
+      // tapping Preview, allowsRecordingIOS stays true for the rest of the
+      // session and subsequent playback (including notification sound FX)
+      // routes through the iOS earpiece. Tolerant of failure.
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {});
     }
   }
 

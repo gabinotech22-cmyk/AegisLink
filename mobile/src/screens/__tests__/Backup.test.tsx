@@ -87,6 +87,15 @@ jest.mock('expo-document-picker', () => ({
   getDocumentAsync: jest.fn().mockResolvedValue({ canceled: true, assets: [] }),
 }));
 
+// ── pickingGuard — execute fn() directly, but track the call so we can assert
+// the restore-file picker is routed through it (iOS audit fix #2: without
+// this guard, DocumentPicker resolving mid-dismissal + the passphrase Modal
+// opening in the same tick is the same UIKit "present while dismissing"
+// freeze already fixed for the avatar picker). ──────────────────────────────
+jest.mock('../../utils/pickingGuard', () => ({
+  withPickingGuard: jest.fn((fn: () => unknown) => fn()),
+}));
+
 // ── secure store ────────────────────────────────────────────────────────────
 const mockSsSet = jest.fn().mockResolvedValue(undefined);
 jest.mock('../../utils/secureStore', () => ({
@@ -230,5 +239,25 @@ describe('BackupScreen', () => {
     fireEvent.changeText(getByPlaceholderText('backup.mnemonicPlaceholder'), 'w0 w1 w2');
     fireEvent.press(getByText('backup.importPhrase'));
     expect(alertSpy).toHaveBeenCalledWith('backup.invalidMnemonic', 'backup.mnemonicExactly32');
+  });
+
+  // ── iOS audit fix #2: restore-file picker routed through withPickingGuard ──
+  it('routes the restore-file DocumentPicker call through withPickingGuard', async () => {
+    const { withPickingGuard } = require('../../utils/pickingGuard') as {
+      withPickingGuard: jest.Mock;
+    };
+    const DocumentPicker = require('expo-document-picker') as {
+      getDocumentAsync: jest.Mock;
+    };
+    const { getByText } = render(<BackupScreen onBack={jest.fn()} />);
+
+    await act(async () => {
+      fireEvent.press(getByText('backup.restoreFileBtn'));
+    });
+
+    expect(withPickingGuard).toHaveBeenCalledTimes(1);
+    // The picker call itself must still happen (guard is transparent, not a
+    // replacement) — asserts the wrapped fn was actually invoked, not skipped.
+    expect(DocumentPicker.getDocumentAsync).toHaveBeenCalledTimes(1);
   });
 });
