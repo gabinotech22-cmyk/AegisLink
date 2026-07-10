@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, ScrollView } from 'react-native';
 import Svg, { Circle, Path, Line } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +8,7 @@ import type { Theme } from '../theme/vault';
 import { PrimaryButton } from '../components/Button';
 import { SERVER_URL } from '../config';
 import { themedAlert } from '../components/AlertHost';
+import { useIdentity } from '../store/identity';
 
 interface Props {
   onRetry: () => void;
@@ -25,6 +26,17 @@ export function NetworkErrorScreen({ onRetry }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
+
+  // Registration failures are the #1 reason a device ends up stuck here: a
+  // failed ensureRegistered() leaves publishStatus='failed' and this screen
+  // then takes over the WHOLE tree (App.tsx, ~5s offline), burying Home's
+  // error banner underneath it. themedAlert (in identity.ts) covers the
+  // first moment, but an Alert can be dismissed and lost — this block is
+  // PERSISTENT for as long as the device sits on this screen, so the
+  // `[step] ErrorName: message` diagnostic is always readable, not just
+  // glimpsed once.
+  const publishStatus = useIdentity((s) => s.publishStatus);
+  const publishError = useIdentity((s) => s.publishError);
 
   // Show a generic label instead of the real relay hostname — no need to expose
   // the actual endpoint in the UI. The status (reachable/unreachable) is still
@@ -87,6 +99,34 @@ export function NetworkErrorScreen({ onRetry }: Props) {
       <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: 21, textAlign: 'center', maxWidth: 320, marginBottom: 20 }}>
         {i18nT('networkError.desc')}
       </Text>
+
+      {publishStatus === 'failed' && !!publishError && (
+        <View
+          accessibilityRole="alert"
+          accessibilityLabel={`registration-error: ${publishError}`}
+          style={{
+            width: '100%',
+            padding: 12,
+            backgroundColor: t.surface,
+            borderWidth: 1,
+            borderColor: t.danger,
+            borderRadius: t.radius,
+            marginBottom: 14,
+          }}
+        >
+          <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.danger, letterSpacing: 0.5, marginBottom: 6 }}>
+            REGISTRATION FAILED
+          </Text>
+          <ScrollView style={{ maxHeight: 110 }} nestedScrollEnabled>
+            <Text
+              selectable
+              style={{ fontFamily: t.fontMono, fontSize: 11, color: t.text, lineHeight: 16 }}
+            >
+              {publishError}
+            </Text>
+          </ScrollView>
+        </View>
+      )}
 
       <View
         style={{
