@@ -21,9 +21,25 @@ jest.mock('../../store/identity', () => ({
 }));
 
 import { fetchTurnConfig, clearTurnCache, rtcConfig } from '../ice';
+import type { RTCConfigShape } from '../ice';
 
 const FAKE_USERNAME = 'test-user';
 const FAKE_PASSWORD = 'test-pass';
+
+// Hostnames that must NEVER appear in any iceServers entry: querying a third-party
+// STUN leaks "this AegisLink user is calling now, from this IP" to an outside party.
+const THIRD_PARTY_STUN = ['google.com', 'cloudflare.com', 'stun.l.google', 'stun1.l.google'];
+
+function assertNoThirdPartyStun(config: RTCConfigShape): void {
+  for (const server of config.iceServers) {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    for (const url of urls) {
+      for (const bad of THIRD_PARTY_STUN) {
+        expect(url).not.toContain(bad);
+      }
+    }
+  }
+}
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
@@ -46,17 +62,37 @@ function makeFetchOk() {
   });
 }
 
+// Success response where the relay advertises its OWN coturn (STUN + TURN on the
+// same host), exactly as server/src/routes/turn.ts now builds `urls`.
+function makeFetchOkWithOwnUrls() {
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({
+      username: FAKE_USERNAME,
+      credential: FAKE_PASSWORD,
+      urls: [
+        'stun:relay.aegis.internal:3478',
+        'turn:relay.aegis.internal:3478?transport=udp',
+        'turn:relay.aegis.internal:3478?transport=tcp',
+      ],
+      ttl: 3600,
+    }),
+  });
+}
+
 describe('fetchTurnConfig', () => {
-  it('calls relay on first fetch and returns ICE config with STUN', async () => {
-    makeFetchOk();
+  it('uses the relay-supplied STUN (our own host), never a third-party STUN', async () => {
+    makeFetchOkWithOwnUrls();
     const config = await fetchTurnConfig('aegis-id-1');
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(config.iceServers.length).toBeGreaterThanOrEqual(1);
-    // Must always include STUN
-    const stunEntry = config.iceServers.find(
-      (s) => Array.isArray(s.urls) && (s.urls as string[]).some((u) => u.startsWith('stun:')),
+    // The STUN entry, when present, must point at OUR host — never Google/Cloudflare.
+    const allUrls = config.iceServers.flatMap((s) =>
+      Array.isArray(s.urls) ? s.urls : [s.urls],
     );
-    expect(stunEntry).toBeDefined();
+    const stunUrls = allUrls.filter((u) => u.startsWith('stun:'));
+    expect(stunUrls).toContain('stun:relay.aegis.internal:3478');
+    for (const u of stunUrls) expect(u).toContain('relay.aegis.internal');
+    assertNoThirdPartyStun(config);
   });
 
   it('returns cached result on second call without hitting fetch again', async () => {
@@ -105,5 +141,34 @@ describe('fetchTurnConfig', () => {
     expect(mockFetch).not.toHaveBeenCalled();
     expect(config.iceServers).toEqual(rtcConfig().iceServers);
     spy.mockRestore();
+  });
+});
+
+describe('no third-party STUN (metadata leak guard)', () => {
+  it('rtcConfig() never lists Google/Cloudflare STUN', () => {
+    assertNoThirdPartyStun(rtcConfig());
+    assertNoThirdPartyStun(rtcConfig(false));
+  });
+
+  it('with no TURN configured, rtcConfig() has NO STUN entry (host candidates only, not a public fallback)', () => {
+    // In the test env EXPO_PUBLIC_TURN_URL is unset and __DEV__ derives '' → no
+    // TURN, therefore no derivable STUN. The correct result is an empty list,
+    // NOT a fallback to a public STUN server.
+    const config = rtcConfig();
+    const stunUrls = config.iceServers
+      .flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]))
+      .filter((u) => u.startsWith('stun:'));
+    expect(stunUrls).toHaveLength(0);
+  });
+
+  it('fetchTurnConfig() with a relay that returns no urls yields no third-party STUN', async () => {
+    makeFetchOk(); // legacy response: username/password only, no urls array
+    const config = await fetchTurnConfig('aegis-id-nostun');
+    assertNoThirdPartyStun(config);
+    // No TURN configured + relay gave no urls → no STUN entry at all.
+    const stunUrls = config.iceServers
+      .flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]))
+      .filter((u) => u.startsWith('stun:'));
+    expect(stunUrls).toHaveLength(0);
   });
 });

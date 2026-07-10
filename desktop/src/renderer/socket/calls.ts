@@ -42,14 +42,30 @@ interface RTCConfigShape {
   iceTransportPolicy?: 'all' | 'relay';
 }
 
+/**
+ * Derive a `stun:` URL from our own TURN URL (same host+port). coturn serves STUN
+ * on the TURN port, so this yields server-reflexive candidates from OUR server —
+ * never a third party. Returns null for an empty/malformed TURN URL.
+ */
+function deriveStunUrl(turnUrl: string): string | null {
+  const noQuery = turnUrl.split('?')[0];
+  const m = /^turns?:(.+)$/.exec(noQuery);
+  return m ? `stun:${m[1]}` : null;
+}
+
 function defaultRtcConfig(): RTCConfigShape {
   const TURN_URL = (import.meta.env.VITE_TURN_URL as string | undefined) ?? '';
   const TURN_USERNAME = (import.meta.env.VITE_TURN_USERNAME as string | undefined) ?? '';
   const TURN_PASSWORD = (import.meta.env.VITE_TURN_PASSWORD as string | undefined) ?? '';
 
-  const iceServers: RTCConfigShape['iceServers'] = [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-  ];
+  // ZERO third-party STUN: querying public STUN (Google/Cloudflare) would leak
+  // "this AegisLink user is calling now, from this IP" to an outside party. Our
+  // coturn serves STUN on the same host/port as TURN, so derive a stun: entry from
+  // TURN_URL. No TURN configured → no STUN entry (host candidates only), never a
+  // public fallback. Parity with mobile/src/webrtc/ice.ts.
+  const iceServers: RTCConfigShape['iceServers'] = [];
+  const stunUrl = TURN_URL ? deriveStunUrl(TURN_URL) : null;
+  if (stunUrl) iceServers.push({ urls: [stunUrl] });
   if (TURN_URL) {
     iceServers.push({ urls: TURN_URL, username: TURN_USERNAME, credential: TURN_PASSWORD });
   }
@@ -78,21 +94,33 @@ async function fetchTurnConfig(_aegisId: string): Promise<RTCConfigShape> {
       { signal: AbortSignal.timeout(3000) },
     );
     if (!res.ok) return defaultRtcConfig();
-    // Server returns { urls, username, credential, ttl }. Accept the legacy
-    // `password` alias too for older relays.
-    const { username, credential, password } = (await res.json()) as {
+    // Server returns { urls, username, credential, ttl }. The `urls` array now
+    // includes our OWN stun: URL (same coturn host) — no third-party STUN ever.
+    // Accept the legacy `password` alias too for older relays.
+    const { username, credential, password, urls: turnUrls } = (await res.json()) as {
       username: string;
       credential?: string;
       password?: string;
+      urls?: string[];
       ttl: number;
     };
     const cred = credential ?? password ?? '';
     const TURN_URL = (import.meta.env.VITE_TURN_URL as string | undefined) ?? '';
-    const iceServers: RTCConfigShape['iceServers'] = [
-      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-    ];
-    if (TURN_URL) {
-      iceServers.push({ urls: TURN_URL, username, credential: cred });
+    // Prefer the server-supplied urls (include UDP+TCP+TLS TURN and our stun:).
+    // Fall back to the static TURN_URL if the relay didn't return urls.
+    const resolvedUrls: string[] = (turnUrls && turnUrls.length > 0)
+      ? turnUrls
+      : (TURN_URL ? [TURN_URL] : []);
+    const iceServers: RTCConfigShape['iceServers'] = [];
+    if (resolvedUrls.length > 0) {
+      iceServers.push({ urls: resolvedUrls, username, credential: cred });
+    }
+    // If the server didn't advertise a stun: URL (older relay or TURN_URL
+    // fallback), derive one from our TURN host — never a public STUN. Parity with
+    // mobile/src/webrtc/ice.ts.
+    if (!resolvedUrls.some((u) => u.startsWith('stun:'))) {
+      const stunUrl = TURN_URL ? deriveStunUrl(TURN_URL) : null;
+      if (stunUrl) iceServers.unshift({ urls: [stunUrl] });
     }
     return { iceServers };
   } catch {
