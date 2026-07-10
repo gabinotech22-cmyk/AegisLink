@@ -109,7 +109,9 @@ interface GroupsState {
   hydrate: () => Promise<void>;
   createGroup: (name: string, members: string[], avatarColor?: string, avatarImage?: string) => Promise<StoredGroup>;
   renameGroup: (id: string, name: string) => Promise<void>;
-  updateGroupAvatar: (id: string, avatarImage: string) => Promise<void>;
+  /** Set (string) or CLEAR (null) the group avatar. Clearing falls the group
+   *  back to its seed-based identicon and propagates to members. */
+  updateGroupAvatar: (id: string, avatarImage: string | null) => Promise<void>;
   addMember: (id: string, aegisId: string) => Promise<void>;
   removeMember: (id: string, aegisId: string) => Promise<void>;
   /**
@@ -229,8 +231,9 @@ export const useGroups = create<GroupsState>((set, get) => ({
     const group = get().groups.find((g) => g.id === id);
     if (!group) return;
     // Persist picker URIs (file://, content://) into documentDirectory so the
-    // avatar survives cache eviction — same as createGroup.
-    let persistentAvatarUri = avatarImage;
+    // avatar survives cache eviction — same as createGroup. A null/empty value
+    // CLEARS the avatar (→ undefined), restoring the seed-based identicon.
+    let persistentAvatarUri: string | undefined = avatarImage ?? undefined;
     if (avatarImage && (avatarImage.startsWith('file://') || avatarImage.startsWith('content://'))) {
       try {
         const FS = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');

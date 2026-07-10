@@ -653,21 +653,28 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
               </View>
             </View>
           </ScrollView>
+
+          {/* Avatar cropper — rendered INLINE inside this same modal (not as a
+              second stacked <Modal>), because iOS can't reliably present a modal
+              over a modal: the cropper's gestures/confirm silently broke, so the
+              picked photo never applied and the "remove" button (which only shows
+              once editImage is set) never appeared. Inline overlay = same layer,
+              gestures work. */}
+          <AvatarCropModal
+            t={t}
+            inline
+            visible={cropSource !== null}
+            imageUri={cropSource?.uri ?? null}
+            imageWidth={cropSource?.width ?? 0}
+            imageHeight={cropSource?.height ?? 0}
+            title={i18nT('profile.adjustPhoto')}
+            confirmLabel={i18nT('common.confirm')}
+            cancelLabel={i18nT('common.cancel')}
+            onCancel={() => setCropSource(null)}
+            onConfirm={(uri) => { setEditImage(uri); setCropSource(null); }}
+          />
         </View>
       </Modal>
-
-      <AvatarCropModal
-        t={t}
-        visible={cropSource !== null}
-        imageUri={cropSource?.uri ?? null}
-        imageWidth={cropSource?.width ?? 0}
-        imageHeight={cropSource?.height ?? 0}
-        title={i18nT('profile.adjustPhoto')}
-        confirmLabel={i18nT('common.confirm')}
-        cancelLabel={i18nT('common.cancel')}
-        onCancel={() => setCropSource(null)}
-        onConfirm={(uri) => { setEditImage(uri); setCropSource(null); }}
-      />
     </View>
   );
 }

@@ -118,6 +118,24 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
     }
   }
 
+  // Clear the group photo → the group falls back to its seed-based identicon
+  // (same generated avatar shown in the groups list / chat header). Propagates
+  // to members via the metadata broadcast inside updateGroupAvatar.
+  function handleRemoveGroupAvatar() {
+    themedAlert(
+      i18nT('groupAdmin.removePhotoTitle', 'Quitar foto del grupo'),
+      i18nT('groupAdmin.removePhotoDesc', 'El grupo volverá a su ícono generado.'),
+      [
+        { text: i18nT('common.cancel'), style: 'cancel' },
+        {
+          text: i18nT('groupAdmin.removePhoto', 'Quitar foto'),
+          style: 'destructive',
+          onPress: () => { void updateGroupAvatar(group.id, null); },
+        },
+      ],
+    );
+  }
+
   function handleAddMember() {
     setShowAddMember(true);
   }
@@ -260,6 +278,17 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
           <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 0.5, marginTop: 4 }}>
             {i18nT('groupAdmin.e2eeGroupBadge', { count: group.members.length })}
           </Text>
+
+          {/* Remove the group photo → fall back to the seed-based identicon.
+              Only shown to editors when a custom photo is actually set. */}
+          {canEdit && group.avatarImage && (
+            <Pressable onPress={handleRemoveGroupAvatar} hitSlop={8} style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <I.Trash size={12} color={t.danger} />
+              <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger, letterSpacing: 0.3 }}>
+                {i18nT('groupAdmin.removePhoto', 'Quitar foto')}
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         {/* Members */}

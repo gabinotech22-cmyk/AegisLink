@@ -1,4 +1,21 @@
 {
+  "notif": {
+    "newMessage": "New encrypted message",
+    "groupNewMessage": "1 new group message",
+    "securityTitle": "AegisLink · Security",
+    "revokedTitle": "AegisLink · Revoked",
+    "autoWipeTitle": "AegisLink · AUTO-WIPE IMMINENT",
+    "aContact": "a contact",
+    "keyChanged": "A contact's key changed. Re-verify {{name}} before continuing.",
+    "sessionRevoked": "Session closed. This device has been remotely revoked by another of your instances.",
+    "autoWipeBody": "10s until permanent wipe from too many failed PINs.",
+    "groupVoiceActive": "A voice channel is active · tap to join",
+    "incomingVideoCall": "Incoming E2EE video call",
+    "incomingVoiceCall": "Incoming E2EE voice call",
+    "dailySummaryTitle": "Daily summary",
+    "dailySummaryBody_one": "You received {{count}} message today from {{names}}.",
+    "dailySummaryBody_other": "You received {{count}} messages today from {{names}}."
+  },
   "common": {
     "cancel": "Cancel",
     "save": "Save",
