@@ -330,6 +330,7 @@
     "pinError_plural": "Wrong PIN · {{count}} attempts remaining",
     "wipingData": "Wiping all data...",
     "maxAttemptsReached": "{{max}} failed attempts. The app is locked.",
+    "cooldownWait": "Too many attempts. Try again in {{time}}.",
     "tapToUnlock": "Tap to unlock"
   },
   "panic": {

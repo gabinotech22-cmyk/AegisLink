@@ -330,6 +330,7 @@
     "pinError_plural": "PIN errato · {{count}} tentativi rimanenti",
     "wipingData": "Cancellazione di tutti i dati...",
     "maxAttemptsReached": "{{max}} tentativi falliti. L'app è bloccata.",
+    "cooldownWait": "Troppi tentativi. Riprova tra {{time}}.",
     "tapToUnlock": "Tocca per sbloccare"
   },
   "panic": {

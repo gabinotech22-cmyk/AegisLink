@@ -7,16 +7,68 @@ import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { ss } from '../utils/secureStore';
-import { verifyPIN, hasStoredPIN, verifyPinWithSalt, DURESS_PIN_SALT } from '../lock/pin';
+import {
+  verifyPIN,
+  hasStoredPIN,
+  verifyPinWithSalt,
+  DURESS_PIN_SALT,
+  getStoredPinLength,
+  setStoredPinLength,
+} from '../lock/pin';
 import { usePreferences } from '../store/preferences';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { useMessages } from '../store/messages';
 import { wipeDatabase } from '../db/local';
 import { usePanicGesture } from '../hooks/usePanicGesture';
+import { withPickingGuard } from '../utils/pickingGuard';
 import { AegisMark } from '../components/AegisMark';
 
 const MAX_ATTEMPTS = 5;
+
+// ── Persisted attempt counter + progressive cooldown (SecureStore, local only) ──
+const ATTEMPTS_KEY = 'aegis.lock.attempts.v1';
+
+interface AttemptsState {
+  count: number;
+  lockedUntilMs: number | null;
+}
+
+async function loadAttemptsState(): Promise<AttemptsState> {
+  try {
+    const raw = await ss.get(ATTEMPTS_KEY);
+    if (!raw) return { count: 0, lockedUntilMs: null };
+    const parsed = JSON.parse(raw) as Partial<AttemptsState>;
+    return {
+      count: typeof parsed.count === 'number' ? parsed.count : 0,
+      lockedUntilMs: typeof parsed.lockedUntilMs === 'number' ? parsed.lockedUntilMs : null,
+    };
+  } catch {
+    return { count: 0, lockedUntilMs: null };
+  }
+}
+
+async function saveAttemptsState(s: AttemptsState): Promise<void> {
+  try {
+    await ss.set(ATTEMPTS_KEY, JSON.stringify(s));
+  } catch { /* storage unavailable — cooldown just won't survive a restart */ }
+}
+
+// Escalating cooldown: 1-4 fails → none, 5th → 30s, 6th → 60s, 7th → 5min,
+// 8th+ → 15min each.
+function cooldownMsForCount(count: number): number {
+  if (count <= 4) return 0;
+  if (count === 5) return 30_000;
+  if (count === 6) return 60_000;
+  if (count === 7) return 5 * 60_000;
+  return 15 * 60_000;
+}
+
+function formatCooldown(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 interface Props {
   onUnlock: () => void;
@@ -92,11 +144,19 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   const [pinCode, setPinCode] = useState('');
   const [pinError, setPinError] = useState('');
   const [attempts, setAttempts] = useState(0);
+  // Length of the REAL PIN, persisted separately from the hash so the numpad
+  // knows whether to treat the 4th digit as a real (counted) attempt, wait
+  // for a 6th digit, or — for pre-existing installs with no flag yet — fall
+  // back to the legacy silent check until the next successful unlock.
+  const [pinLenFlag, setPinLenFlag] = useState<4 | 6 | null>(null);
+
+  // Progressive cooldown after repeated failures — persisted so it survives
+  // an app restart (closes the "reinstall/relaunch to reset attempts" gap).
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [cooldownSecondsLeft, setCooldownSecondsLeft] = useState(0);
 
   const [bioStatus, setBioStatus] = useState('');
   const scanningRef = useRef(false);
-  // Track genuine biometric failures (not user cancellations) for auto-wipe.
-  const bioAttemptsRef = useRef(0);
 
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const [pulse1] = useState(new Animated.Value(0));
@@ -110,6 +170,16 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     async function init() {
       const stored = await hasStoredPIN();
       setHasPIN(stored);
+
+      const [attemptsState, storedLen] = await Promise.all([
+        loadAttemptsState(),
+        getStoredPinLength(),
+      ]);
+      setAttempts(attemptsState.count);
+      setPinLenFlag(storedLen);
+      if (attemptsState.lockedUntilMs && attemptsState.lockedUntilMs > Date.now()) {
+        setCooldownUntil(attemptsState.lockedUntilMs);
+      }
 
       // Always detect hardware availability — it also picks the right
       // icon/copy. Whether the biometric option is OFFERED at all is gated
@@ -193,7 +263,32 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     return () => { l1.stop(); l2.stop(); };
   }, [mode, pulse1, pulse2]);
 
+  // ── Cooldown countdown (progressive lockout after repeated PIN fails) ──────
+  useEffect(() => {
+    if (!cooldownUntil) {
+      setCooldownSecondsLeft(0);
+      return;
+    }
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+      setCooldownSecondsLeft(left);
+      if (left <= 0) {
+        setCooldownUntil(null);
+        // The "wait M:SS" message set by the failure that started this
+        // cooldown is stale the moment it expires — clear it so the pad
+        // reads as usable again.
+        setPinError('');
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [cooldownUntil]);
+
   // ── Biometric auth ─────────────────────────────────────────────────────────
+  // A misread sensor is not an attacker and iOS/Android already rate-limit
+  // biometric prompts natively after a handful of failures — the auto-wipe
+  // stays exclusively on the PIN path (see validatePin below).
   const attemptBiometric = useCallback(async () => {
     if (scanningRef.current) return;
     scanningRef.current = true;
@@ -201,16 +296,23 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
 
     try {
       const LA = require('expo-local-authentication') as { authenticateAsync(opts: object): Promise<{ success: boolean; error?: string }> };
-      const result = await LA.authenticateAsync({
-        promptMessage: i18nT('lock.promptMessage'),
-        fallbackLabel: i18nT('lock.fallbackLabel'),
-        // NEVER fall back to the device passcode: it would unlock the app
-        // while bypassing validatePin() entirely — i.e. skipping the duress
-        // (decoy) PIN path, so a coerced user couldn't present the decoy.
-        // The fallback button returns 'user_fallback', which routes to the
-        // app's own PIN view below.
-        disableDeviceFallback: true,
-      });
+      // withPickingGuard: the system biometric prompt can toggle AppState to
+      // 'inactive' while it's shown; with an "Immediately" lock timeout,
+      // App.tsx's re-lock handler would otherwise fire right as the prompt
+      // dismisses. isPicking() is the same mechanism the picker flows use to
+      // tell App.tsx to ignore that transition.
+      const result = await withPickingGuard(() =>
+        LA.authenticateAsync({
+          promptMessage: i18nT('lock.promptMessage'),
+          fallbackLabel: i18nT('lock.fallbackLabel'),
+          // NEVER fall back to the device passcode: it would unlock the app
+          // while bypassing validatePin() entirely — i.e. skipping the duress
+          // (decoy) PIN path, so a coerced user couldn't present the decoy.
+          // The fallback button returns 'user_fallback', which routes to the
+          // app's own PIN view below.
+          disableDeviceFallback: true,
+        })
+      );
 
       if (result.success) {
         setBioStatus(i18nT('lock.unlocked'));
@@ -226,31 +328,9 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           setBioStatus(i18nT('lock.bioCancelled'));
         }
       } else {
-        // Genuine biometric failure (wrong finger/face, lockout, etc.)
-        const newBioAttempts = bioAttemptsRef.current + 1;
-        bioAttemptsRef.current = newBioAttempts;
+        // Genuine biometric failure (wrong finger/face, lockout, etc.) — does
+        // NOT count towards the PIN attempt counter or auto-wipe.
         setBioStatus(i18nT('lock.bioFailed'));
-
-        if (newBioAttempts >= MAX_ATTEMPTS) {
-          let autoWipe = false;
-          try {
-            const panicRaw = await ss.get('aegis.panic.v1');
-            if (panicRaw) {
-              const cfg = JSON.parse(panicRaw) as { autoWipe?: boolean };
-              autoWipe = cfg.autoWipe === true;
-            }
-          } catch { /* storage unavailable */ }
-
-          if (autoWipe) {
-            setBioStatus(i18nT('lock.wipingData'));
-            setTimeout(async () => {
-              try {
-                await wipeDatabase();
-                await useIdentity.getState().reset();
-              } catch { /* non-recoverable — app will reset on next launch */ }
-            }, 800);
-          }
-        }
       }
     } catch (e) {
       // Library threw — show friendly message, stay on biometric screen
@@ -273,61 +353,156 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
   }
 
   // ── PIN entry ──────────────────────────────────────────────────────────────
+  // Set synchronously the moment an entry becomes a COUNTED attempt, cleared
+  // when that validation settles. Without it, the ~1 s async Argon2 verify
+  // leaves the numpad live: typing (or delete+retype) during the verify could
+  // schedule a second overlapping validatePin and double-count attempts —
+  // straight towards the cooldown/auto-wipe thresholds. Deliberately NOT set
+  // for the uncounted 4-digit checkpoints (duress probe on a 6-digit install,
+  // legacy silent check): those run while the user keeps typing digits 5-6,
+  // and blocking there would swallow input for the whole verify.
+  const validationInFlight = useRef(false);
+
   function handleDigit(d: string) {
+    if (cooldownUntil && cooldownUntil > Date.now()) return; // numpad disabled during cooldown
+    if (validationInFlight.current) return; // a counted attempt is being verified
     if (pinCode.length >= 6) return;
     const next = pinCode + d;
     setPinCode(next);
     setPinError('');
     if (next.length === 4) {
-      // Background silent check for legacy 4-digit PINs.
-      setTimeout(() => validatePin(next, true), 10);
+      const counted = pinLenFlag === 4; // 4-digit install: this IS the attempt
+      if (counted) validationInFlight.current = true;
+      setTimeout(() => {
+        void handleFourDigitCheckpoint(next).finally(() => {
+          if (counted) validationInFlight.current = false;
+        });
+      }, 10);
     } else if (next.length === 6) {
-      setTimeout(() => validatePin(next, false), 180);
+      validationInFlight.current = true;
+      setTimeout(() => {
+        void validatePin(next, false).finally(() => {
+          validationInFlight.current = false;
+        });
+      }, 180);
     }
   }
 
   function handleDelete() {
+    if (cooldownUntil && cooldownUntil > Date.now()) return;
+    if (validationInFlight.current) return; // entry already submitted — deleting would desync
     setPinCode((p) => p.slice(0, -1));
     setPinError('');
   }
 
-  async function validatePin(pin: string, silent = false) {
+  /**
+   * FIX 1 — closing the silent-4th-digit brute-force gap.
+   *
+   * With a 6-digit real PIN, the 4th digit must NEVER be validated (an
+   * attacker could probe all 10,000 4-digit combos while the counter stays
+   * at 0 by typing 4, deleting 1, retyping). With a 4-digit real PIN, the
+   * 4th digit IS the real, counted attempt. Pre-flag installs (pinLenFlag
+   * === null) keep the legacy silent behaviour until the next successful
+   * unlock persists the real length.
+   *
+   * The duress (decoy) PIN can have a different length than the real PIN, so
+   * it is checked independently here, gated on the duress config's own
+   * `pinLength` (falls back to "always check" for older configs saved
+   * without that field) — and NEVER counts as an attempt.
+   */
+  async function handleFourDigitCheckpoint(pin: string) {
+    const duressLen = await getDuressPinLength();
+    if (duressLen === 4 || duressLen === null) {
+      const unlockedViaDuress = await checkDuress(pin);
+      if (unlockedViaDuress) return;
+    }
+
+    if (pinLenFlag === 6) return; // real PIN is 6 digits — still typing, no check yet
+    if (pinLenFlag === 4) {
+      await validatePin(pin, false); // real, counted attempt
+      return;
+    }
+    // pinLenFlag === null: pre-existing install, no length flag persisted
+    // yet — preserve the legacy silent check (validatePin() persists the
+    // correct length on the first successful unlock, closing the gap).
+    await validatePin(pin, true);
+  }
+
+  async function getDuressPinLength(): Promise<number | null> {
     try {
       const panicRaw = await ss.get('aegis.panic.v1');
-      if (panicRaw) {
-        const config = JSON.parse(panicRaw) as {
-          duressPin?: boolean;
-          pinHash?: string;
-        };
-        // A stored decoy hash means duress is configured. Treat it as enabled
-        // unless the user explicitly turned the toggle off (duressPin === false),
-        // so configs written without the flag (older save path) still work.
-        if (config.duressPin !== false && typeof config.pinHash === 'string' && config.pinHash.length > 0) {
-          if (await verifyPinWithSalt(pin, DURESS_PIN_SALT, config.pinHash)) {
-            // Duress PIN = HIDE + REVERSIBLE, never destructive. Flip the flag
-            // then hydrate the (stable, seeded) decoy identity/contacts/
-            // messages — the real data is left completely untouched in the
-            // real DB and is restored the instant the real PIN is entered.
-            usePreferences.setState({ duressActive: true });
-            try {
-              await useIdentity.getState().hydrate();
-              await useContacts.getState().hydrate();
-              useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
-            } catch (err) {
-              if (__DEV__) logger.warn('[lock-panic] failed to load decoy state:', err);
-            }
-            setPinCode('');
-            onUnlock();
-            return;
-          }
-        }
+      if (!panicRaw) return null;
+      const config = JSON.parse(panicRaw) as { pinLength?: number };
+      return typeof config.pinLength === 'number' ? config.pinLength : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Returns true if `pin` matched the duress/decoy PIN and unlocked into it. */
+  async function checkDuress(pin: string): Promise<boolean> {
+    try {
+      const panicRaw = await ss.get('aegis.panic.v1');
+      if (!panicRaw) return false;
+      const config = JSON.parse(panicRaw) as {
+        duressPin?: boolean;
+        pinHash?: string;
+      };
+      // A stored decoy hash means duress is configured. Treat it as enabled
+      // unless the user explicitly turned the toggle off (duressPin === false),
+      // so configs written without the flag (older save path) still work.
+      if (config.duressPin === false || typeof config.pinHash !== 'string' || config.pinHash.length === 0) {
+        return false;
       }
+      if (!(await verifyPinWithSalt(pin, DURESS_PIN_SALT, config.pinHash))) return false;
+
+      // Duress PIN = HIDE + REVERSIBLE, never destructive. Flip the flag
+      // then hydrate the (stable, seeded) decoy identity/contacts/messages —
+      // the real data is left completely untouched in the real DB and is
+      // restored the instant the real PIN is entered.
+      usePreferences.setState({ duressActive: true });
+      try {
+        await useIdentity.getState().hydrate();
+        await useContacts.getState().hydrate();
+        useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
+      } catch (err) {
+        if (__DEV__) logger.warn('[lock-panic] failed to load decoy state:', err);
+      }
+      // Reset the attempt counter on ANY successful unlock, including
+      // duress — a different reset pattern would let an observer tell the
+      // decoy PIN apart from the real one.
+      await resetAttempts();
+      setPinCode('');
+      onUnlock();
+      return true;
     } catch (e) {
       if (__DEV__) logger.warn('[lock-panic] failed to load duress config:', e);
+      return false;
     }
+  }
+
+  async function resetAttempts() {
+    setAttempts(0);
+    setCooldownUntil(null);
+    await saveAttemptsState({ count: 0, lockedUntilMs: null });
+  }
+
+  async function validatePin(pin: string, silent = false) {
+    if (await checkDuress(pin)) return;
 
     const ok = hasPIN ? await verifyPIN(pin) : false;
     if (ok) {
+      // Migration: an install with no persisted PIN length yet learns its
+      // real length on the first successful unlock, closing the silent-4th-
+      // digit gap for good from here on.
+      if (pinLenFlag === null) {
+        const len: 4 | 6 = pin.length === 4 ? 4 : 6;
+        try {
+          await setStoredPinLength(len);
+          setPinLenFlag(len);
+        } catch { /* storage unavailable — will retry on next unlock */ }
+      }
+
       const wasDecoy = usePreferences.getState().duressActive;
       usePreferences.setState({ duressActive: false });
       if (wasDecoy) {
@@ -349,17 +524,24 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           return;
         }
       }
+      await resetAttempts();
       setPinCode('');
       onUnlock();
       return;
     }
-    
+
     if (silent) return;
 
     const newAttempts = attempts + 1;
     setAttempts(newAttempts);
     shake();
     setPinCode('');
+
+    const cooldownMs = cooldownMsForCount(newAttempts);
+    const lockedUntilMs = cooldownMs > 0 ? Date.now() + cooldownMs : null;
+    await saveAttemptsState({ count: newAttempts, lockedUntilMs });
+    if (lockedUntilMs) setCooldownUntil(lockedUntilMs);
+
     if (newAttempts >= MAX_ATTEMPTS) {
       // Read autoWipe setting from SecureStore
       let autoWipe = false;
@@ -379,10 +561,12 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
             await useIdentity.getState().reset();
           } catch { /* wipe failure is non-recoverable; app will reset on restart */ }
         }, 800);
-      } else {
-        // Stay on lock screen — do NOT navigate away or unlock the app
-        setPinError(i18nT('lock.maxAttemptsReached', { max: MAX_ATTEMPTS }));
+        return;
       }
+    }
+
+    if (lockedUntilMs) {
+      setPinError(i18nT('lock.cooldownWait', { time: formatCooldown(Math.ceil(cooldownMs / 1000)) }));
     } else {
       const left = MAX_ATTEMPTS - newAttempts;
       setPinError(i18nT(left === 1 ? 'lock.pinError' : 'lock.pinError_plural', { count: left }));
@@ -497,7 +681,11 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           <PinDots count={pinCode.length} error={pinError.length > 0} t={t} />
         </Animated.View>
 
-        {pinError ? (
+        {cooldownUntil && cooldownSecondsLeft > 0 ? (
+          <Text style={{ fontFamily: t.font, fontSize: 13, color: t.danger, textAlign: 'center', marginBottom: 20, paddingHorizontal: 32 }}>
+            {i18nT('lock.cooldownWait', { time: formatCooldown(cooldownSecondsLeft) })}
+          </Text>
+        ) : pinError ? (
           <Text style={{ fontFamily: t.font, fontSize: 13, color: t.danger, textAlign: 'center', marginBottom: 20, paddingHorizontal: 32 }}>
             {pinError}
           </Text>
