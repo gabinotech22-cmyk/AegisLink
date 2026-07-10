@@ -8,7 +8,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { issueChallenge, verifyPoW, POW_DIFFICULTY } from '../pow/challenge.js';
+import { issueChallenge, verifyPoW, POW_DIFFICULTY, CHALLENGE_TTL_MS } from '../pow/challenge.js';
 
 function hasLeadingZeroBits(buf: Buffer, bits: number): boolean {
   let remaining = bits;
@@ -68,5 +68,38 @@ describe('PoW challenge — A-2 difficulty binding', () => {
 
   it('rejects an unknown challenge', () => {
     expect(verifyPoW('f'.repeat(64), '0')).toBe('challenge_unknown');
+  });
+});
+
+describe('PoW challenge — TTL (raised to 15 min for slow/non-JIT devices)', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('is configured for 900_000 ms (15 minutes)', () => {
+    expect(CHALLENGE_TTL_MS).toBe(900_000);
+  });
+
+  it('is still accepted just before the 15-minute TTL elapses', () => {
+    jest.useFakeTimers();
+    const start = Date.now();
+    const c = issueChallenge(4);
+    const nonce = solve(c.challenge, 4);
+
+    // 1ms shy of expiry — must still be valid.
+    jest.setSystemTime(start + CHALLENGE_TTL_MS - 1);
+    expect(verifyPoW(c.challenge, nonce)).toBeNull();
+  });
+
+  it('is rejected with challenge_expired just after the 15-minute TTL elapses', () => {
+    jest.useFakeTimers();
+    const start = Date.now();
+    const c = issueChallenge(4);
+    const nonce = solve(c.challenge, 4);
+
+    // 1ms past expiry — must be rejected, proving the TTL is actually enforced
+    // at the new (raised) value rather than merely documented.
+    jest.setSystemTime(start + CHALLENGE_TTL_MS + 1);
+    expect(verifyPoW(c.challenge, nonce)).toBe('challenge_expired');
   });
 });

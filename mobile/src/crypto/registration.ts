@@ -160,27 +160,91 @@ export async function solvePoW(
   }
   const challengeBytes = utf8ToBytes(challenge);
   const batch = 2048;
-  let counter = 0;
+
+  // ── Buffer-reuse strategy (Hermes hot loop) ────────────────────────────────
+  // The naive loop rebuilt the SHA-256 input on EVERY iteration:
+  //   utf8ToBytes(nonce)  → 1 alloc
+  //   new Uint8Array(...) → 1 alloc
+  //   two .set(...)       → 2 copies
+  // i.e. ≥2 heap allocations per hash × ~262 k hashes (difficulty 18). On Hermes
+  // (no JIT, pure-JS SHA-256) that GC churn — not the hashing — dominated the
+  // runtime and could push a single solve past the challenge TTL on old devices.
+  //
+  // Instead we allocate ONE reusable input buffer laid out as:
+  //   [ zero-padded hex nonce (nonceWidth bytes) | challenge bytes ]
+  // The challenge suffix is written ONCE and never touched again. The nonce
+  // region is a fixed-width, zero-padded ASCII-hex counter that we advance in
+  // place like an odometer (increment the least-significant hex digit, carry
+  // left) — zero allocations and zero string building inside the loop.
+  //
+  // Protocol note: we hash (and therefore return) the EXACT zero-padded hex
+  // string (e.g. "0000000a"). The relay re-hashes `nonce + challenge` as a
+  // plain string concatenation (server/src/pow/challenge.ts), so leading zeros
+  // are re-hashed identically and its `/^[0-9a-f]{1,32}$/` gate accepts the
+  // fixed-width form. As long as the returned string is byte-for-byte what we
+  // hashed locally, client and server agree.
+  let nonceWidth = 8; // up to 0xffff_ffff attempts before the field must widen
+  let input = new Uint8Array(nonceWidth + challengeBytes.length);
+  input.set(challengeBytes, nonceWidth);
+  input.fill(0x30 /* '0' */, 0, nonceWidth); // initialize nonce = "0000...0"
+
   // eslint-disable-next-line no-constant-condition
   while (true) {
     for (let i = 0; i < batch; i++) {
-      const nonce = counter.toString(16);
-      const nonceBytes = utf8ToBytes(nonce);
-      const input = new Uint8Array(nonceBytes.length + challengeBytes.length);
-      input.set(nonceBytes, 0);
-      input.set(challengeBytes, nonceBytes.length);
       const digest = sha256(input);
       if (hasLeadingZeroBits(digest, difficulty)) {
+        // Return the exact hex string we hashed (leading zeros included). The
+        // only allocation on the entire solve path, executed once.
+        let nonce = '';
+        for (let p = 0; p < nonceWidth; p++) {
+          nonce += String.fromCharCode(input[p]);
+        }
         return nonce;
       }
-      counter++;
+      // Odometer increment for the next attempt. ASCII hex codes:
+      //   '0'..'9' = 0x30..0x39, 'a'..'f' = 0x61..0x66.
+      let pos = nonceWidth - 1;
+      while (pos >= 0) {
+        const d = input[pos];
+        if (d === 0x39) {
+          // '9' → 'a'
+          input[pos] = 0x61;
+          break;
+        } else if (d === 0x66) {
+          // 'f' → '0', carry to the digit on the left
+          input[pos] = 0x30;
+          pos--;
+        } else {
+          // '0'..'8' or 'a'..'e' → +1
+          input[pos] = d + 1;
+          break;
+        }
+      }
+      if (pos < 0) {
+        // Overflowed the whole field (…ffff → 1…0000). Widen by one hex digit.
+        // At real difficulties this never fires (P ≈ e^-16384 at 18 bits), but it
+        // keeps the loop correct for arbitrarily hard challenges instead of
+        // silently wrapping the counter.
+        nonceWidth += 1;
+        const widened = new Uint8Array(nonceWidth + challengeBytes.length);
+        widened.set(challengeBytes, nonceWidth);
+        widened.fill(0x30 /* '0' */, 0, nonceWidth);
+        widened[0] = 0x31; // leading '1' → value "1" + zeros
+        input = widened;
+      }
     }
     // Yield to the event loop so React Native can keep the UI responsive.
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 }
 
-function hasLeadingZeroBits(digest: Uint8Array, bits: number): boolean {
+/**
+ * Count leading zero bits on a digest against a required `bits` threshold.
+ * Exported for protocol-compatibility tests (the same predicate the server
+ * enforces). Efficient and correct — do not change without a matching server
+ * change.
+ */
+export function hasLeadingZeroBits(digest: Uint8Array, bits: number): boolean {
   const fullBytes = Math.floor(bits / 8);
   const remBits = bits % 8;
   for (let i = 0; i < fullBytes; i++) {
