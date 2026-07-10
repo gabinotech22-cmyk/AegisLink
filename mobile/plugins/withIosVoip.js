@@ -189,11 +189,34 @@ function withAppDelegateVoip(config) {
   });
 }
 
+// ── VoIP native registration DISABLED (launch-crash) ──────────────────────────
+// react-native-voip-push-notification@3.3.3 uses the OLD RN bridge
+// (RCTEventEmitter). This app runs the New Architecture (bridgeless —
+// app.json `newArchEnabled: true`), where that bridge API is gone. So when
+// PushKit delivers the VoIP token, the library's success callback
+// -[PKPushRegistry voipRegistrationSucceededWithDeviceToken:] tries to emit an
+// event over the missing bridge → -[UIResponder doesNotRecognizeSelector:] →
+// SIGABRT, crashing the app ~2 s after launch. Confirmed on iOS 16.7 / iPhone 8
+// from a real .ips (TestFlight), and it is the reason builds AFTER PR #279 —
+// which re-enabled this native registration — crash on launch while build 15
+// (before #279) did not.
+//
+// Fix: do NOT inject voipRegistration() (nor its supporting bridging header)
+// until the library is New-Architecture-compatible (or replaced). VoIP push is
+// not functional anyway (VOIP_NATIVE_WIRED=false in src/calls/voip-push.ts, and
+// the relay APNS_* keys are unset), so nothing is lost. Entitlements +
+// background modes stay (harmless; they don't trigger PushKit registration on
+// their own — only the explicit voipRegistration() call does). Flip this back on
+// TOGETHER with a New-Arch-capable VoIP library and VOIP_NATIVE_WIRED.
+const VOIP_NATIVE_WIRED = false;
+
 module.exports = function withIosVoip(config) {
   config = withApsEntitlement(config);
   config = withVoipBackgroundModes(config);
-  config = withVoipBridgingHeaderFile(config);
-  config = withVoipBridgingHeaderSetting(config);
-  config = withAppDelegateVoip(config);
+  if (VOIP_NATIVE_WIRED) {
+    config = withVoipBridgingHeaderFile(config);
+    config = withVoipBridgingHeaderSetting(config);
+    config = withAppDelegateVoip(config);
+  }
   return config;
 };

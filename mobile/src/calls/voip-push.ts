@@ -36,15 +36,18 @@ import { displayIncomingCall } from './callkeep';
 const VOIP_TOKEN_KEY = 'aegis.voipToken';
 const VOIP_TOKEN_SENT_KEY = 'aegis.voipToken.sent';
 
-// VoIP push is DISABLED until the native AppDelegate wiring is re-enabled via an
-// Objective-C bridging header (see withIosVoip.js — withAppDelegateVoip is not
-// applied because Swift can't import the ObjC pod). Without that native wiring,
-// calling the library's JS registerVoipToken() still triggers native PushKit
-// registration, and its success callback hits an unrecognized selector →
-// -[PKPushRegistry voipRegistrationSucceededWithDeviceToken:] → SIGABRT crash
-// right after identity generation (confirmed on iOS 16.7, TestFlight build 12).
-// VoIP push isn't live yet anyway (the relay APNS_* key is unset). Flip
-// VOIP_NATIVE_WIRED to true together with the withIosVoip bridging-header work.
+// VoIP push is DISABLED. react-native-voip-push-notification@3.3.3 uses the OLD
+// RN bridge (RCTEventEmitter), but this app runs the New Architecture
+// (bridgeless — app.json `newArchEnabled: true`) where that bridge is gone. Any
+// native PushKit registration therefore crashes: the token success callback
+// -[PKPushRegistry voipRegistrationSucceededWithDeviceToken:] emits over the
+// missing bridge → doesNotRecognizeSelector → SIGABRT ~2 s after launch
+// (confirmed on iOS 16.7 / iPhone 8 from a real .ips). The native AppDelegate
+// injection is gated OFF in withIosVoip.js (VOIP_NATIVE_WIRED there) for the
+// same reason, and calling the library's registerVoipToken() from JS would
+// trigger the SAME crash — so this stays a no-op too. VoIP push isn't live
+// anyway (the relay APNS_* key is unset). Re-enable BOTH flags together only
+// with a New-Architecture-compatible VoIP library (or replacement).
 const VOIP_NATIVE_WIRED: boolean = false;
 const VOIP_ENABLED = VOIP_NATIVE_WIRED && Platform.OS === 'ios' && !IS_EXPO_GO;
 
