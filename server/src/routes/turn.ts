@@ -113,6 +113,15 @@ router.get('/credentials', turnLimiter, async (req, res) => {
   const turnsPort = process.env.TURNS_PORT || '';
 
   const urls: string[] = [
+    // Advertise OUR OWN coturn as the STUN server. coturn serves STUN natively on
+    // the same host/port as TURN (there is no `no-stun` in turnserver.conf), so
+    // the client gets server-reflexive candidates from infrastructure we control.
+    // We deliberately do NOT list any third-party public STUN (Google/Cloudflare):
+    // that would leak "this AegisLink user is calling now, from this IP" to an
+    // outside party — a metadata leak that contradicts the zero-metadata promise.
+    // The server is the single source of truth for its own host/port; clients do
+    // not re-derive it.
+    `stun:${turnHost}:${turnPort}`,
     `turn:${turnHost}:${turnPort}?transport=udp`,
     `turn:${turnHost}:${turnPort}?transport=tcp`,
   ];

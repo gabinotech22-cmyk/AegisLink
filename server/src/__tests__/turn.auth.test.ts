@@ -62,6 +62,24 @@ describe('GET /turn/credentials — signature auth', () => {
     expect(res.body.username).toContain(`:${AEGIS_ID}`);
   });
 
+  it('advertises our OWN coturn as STUN (same host/port as TURN), never a third party', async () => {
+    const ts = Date.now();
+    const sig = sign(AEGIS_ID, ts, signKeys.secretKey);
+    const res = await request(app)
+      .get('/turn/credentials')
+      .query({ aegisId: AEGIS_ID, sig, ts });
+    expect(res.status).toBe(200);
+    const urls: string[] = res.body.urls;
+    // TURN_HOST/TURN_PORT are unset in the test env → defaults localhost:3478.
+    // coturn serves STUN on the TURN port, so the response must include our stun:.
+    expect(urls).toContain('stun:localhost:3478');
+    // And NEVER a public third-party STUN.
+    for (const u of urls) {
+      expect(u).not.toContain('google.com');
+      expect(u).not.toContain('cloudflare.com');
+    }
+  });
+
   it('rejects a request with no signature (400)', async () => {
     const res = await request(app)
       .get('/turn/credentials')

@@ -1,14 +1,20 @@
 /**
  * ICE server config for WebRTC peer connections.
  *
- * Public STUN works for direct connectivity when at least one peer is on an
- * unrestricted NAT. For symmetric NATs (common on mobile carriers ~20% of the
- * time), TURN is required to relay media. Self-host coturn in the same VPS
+ * ZERO third-party STUN. We NEVER query public STUN (Google/Cloudflare): doing so
+ * would reveal "this AegisLink user is calling now, from this IP" to an outside
+ * party — a metadata leak that contradicts the zero-metadata promise, even though
+ * forceRelay keeps that IP away from the peer. Our own coturn serves STUN natively
+ * on the same host/port as TURN (no `no-stun` in turnserver.conf), so every STUN
+ * candidate comes from infrastructure we control. Self-host coturn in the same VPS
  * as the relay; set EXPO_PUBLIC_TURN_URL / USER / PASS in `.env`.
  *
- * For production use, call `fetchTurnConfig(aegisId)` before each call to
- * obtain ephemeral HMAC-SHA1 credentials from the relay (TTL 24h). Falls back
- * to `rtcConfig()` (static env creds or STUN-only) on any fetch failure.
+ * For production use, call `fetchTurnConfig(aegisId)` before each call to obtain
+ * ephemeral HMAC-SHA1 credentials from the relay (TTL 1h); the relay's response
+ * also advertises our own stun: URL. Falls back to `rtcConfig()` on any fetch
+ * failure — which derives STUN from the configured TURN host, never a third party.
+ * With no TURN configured (dev without coturn) the result has NO STUN entry at
+ * all (host candidates only) rather than falling back to a public server.
  */
 
 import nacl from 'tweetnacl';
@@ -31,6 +37,18 @@ const TURN_USERNAME = (process.env.EXPO_PUBLIC_TURN_USERNAME as string | undefin
 const TURN_PASSWORD = (process.env.EXPO_PUBLIC_TURN_PASSWORD as string | undefined) ?? '';
 
 /**
+ * Derive a `stun:` URL from our own TURN URL (same host+port). coturn serves STUN
+ * on the TURN port, so this yields server-reflexive candidates from OUR server —
+ * never a third party. Strips any `?transport=` query and swaps the turn/turns
+ * scheme for stun. Returns null for an empty/malformed TURN URL (→ no STUN entry).
+ */
+function deriveStunUrl(turnUrl: string): string | null {
+  const noQuery = turnUrl.split('?')[0];
+  const m = /^turns?:(.+)$/.exec(noQuery);
+  return m ? `stun:${m[1]}` : null;
+}
+
+/**
  * When `forceRelay` is true the peer connection ONLY emits relay (TURN) ICE
  * candidates — host and server-reflexive candidates are suppressed so neither
  * peer's real IP address ever appears in the signaling exchange. This is the
@@ -39,13 +57,12 @@ const TURN_PASSWORD = (process.env.EXPO_PUBLIC_TURN_PASSWORD as string | undefin
  * to the peer is acceptable.
  */
 export function rtcConfig(forceRelay: boolean = true): RTCConfigShape {
-  const iceServers: RTCConfigShape['iceServers'] = [
-    { urls: [
-      'stun:stun.l.google.com:19302',
-      'stun:stun1.l.google.com:19302',
-      'stun:stun.cloudflare.com:3478',
-    ] },
-  ];
+  const iceServers: RTCConfigShape['iceServers'] = [];
+  // STUN is derived from OUR TURN host (coturn serves STUN on the same port).
+  // No third-party public STUN — see file header. With no TURN configured this
+  // list stays empty (host candidates only), never a public fallback.
+  const stunUrl = TURN_URL ? deriveStunUrl(TURN_URL) : null;
+  if (stunUrl) iceServers.push({ urls: [stunUrl] });
   if (TURN_URL) {
     iceServers.push({
       urls: TURN_URL,
@@ -133,15 +150,17 @@ export async function fetchTurnConfig(aegisId: string, forceRelay: boolean = tru
     const resolvedUrls: string[] = (turnUrls && turnUrls.length > 0)
       ? turnUrls
       : (TURN_URL ? [TURN_URL] : []);
-    const iceServers: RTCConfigShape['iceServers'] = [
-      { urls: [
-        'stun:stun.l.google.com:19302',
-        'stun:stun1.l.google.com:19302',
-        'stun:stun.cloudflare.com:3478',
-      ] },
-    ];
+    const iceServers: RTCConfigShape['iceServers'] = [];
     if (resolvedUrls.length > 0) {
       iceServers.push({ urls: resolvedUrls, username, credential: cred });
+    }
+    // The relay now advertises its OWN stun: URL inside `urls` (same coturn host),
+    // so no third-party STUN is ever needed. If it didn't (older relay, or we fell
+    // back to the static TURN_URL), derive a stun: entry from our TURN host — never
+    // a public server (metadata leak). No TURN at all → no STUN entry.
+    if (!resolvedUrls.some((u) => u.startsWith('stun:'))) {
+      const stunUrl = TURN_URL ? deriveStunUrl(TURN_URL) : null;
+      if (stunUrl) iceServers.unshift({ urls: [stunUrl] });
     }
     const config: RTCConfigShape = { iceServers };
     // Relay-only ICE keeps both peers' real IPs out of the signaling exchange.
