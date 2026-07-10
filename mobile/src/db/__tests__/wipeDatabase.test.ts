@@ -204,13 +204,28 @@ describe('Lock.tsx duress flow — hide-and-reversible, never destructive (sourc
     expect(duressBranch).toContain('duressActive: true');
   });
 
-  it('wipeDatabase remains present for the real destructive paths (auto-wipe on max attempts)', () => {
+  it('wipeDatabase remains present for the real destructive path (PIN auto-wipe on max attempts)', () => {
     const src = fs.readFileSync(
       path.resolve(__dirname, '..', '..', 'screens', 'Lock.tsx'),
       'utf8',
     );
-    // Two legitimate call sites: biometric auto-wipe and PIN auto-wipe.
+    // Exactly one legitimate call site: PIN auto-wipe. Biometric failures were
+    // deliberately stripped of auto-wipe (owner decision, roadmap §5 — a
+    // misread sensor is not an attacker) — see the companion assertion below
+    // and Lock.test.tsx's "a biometric failure never touches ... the wipe path".
     const matches = src.match(/await wipeDatabase\(\)/g) ?? [];
-    expect(matches.length).toBeGreaterThanOrEqual(2);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('the biometric failure path never calls wipeDatabase (auto-wipe is PIN-only)', () => {
+    const src = fs.readFileSync(
+      path.resolve(__dirname, '..', '..', 'screens', 'Lock.tsx'),
+      'utf8',
+    );
+    const bioStart = src.indexOf('const attemptBiometric');
+    const bioEnd = src.indexOf('// ── Shake animation');
+    expect(bioStart).toBeGreaterThan(-1);
+    expect(bioEnd).toBeGreaterThan(bioStart);
+    expect(src.slice(bioStart, bioEnd)).not.toContain('wipeDatabase()');
   });
 });
