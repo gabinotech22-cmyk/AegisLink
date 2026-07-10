@@ -12,6 +12,7 @@ import { createIdentity, identityFromStored, type Identity } from '../crypto/ide
 import { loadIdentity, saveIdentity } from '../db/local';
 import { ensureRegistered } from '../crypto/ensureRegistered';
 import { toRelativeMediaPath, toAbsoluteMediaUri } from '../utils/mediaPaths';
+import { themedAlert } from '../components/AlertHost';
 
 /** Publication status of this identity on the relay. */
 export type PublishStatus = 'unknown' | 'publishing' | 'published' | 'failed';
@@ -166,11 +167,22 @@ async function runPublish(identity: Identity, slotId: string, silent = false): P
     return;
   }
   if (__DEV__) logger.warn('[identity] publish failed:', result.error);
+  const errorMsg = result.error ?? 'Unknown error';
   useIdentity.setState({
     publishStatus: 'failed',
-    publishError: result.error ?? 'Unknown error',
+    publishError: errorMsg,
     publishRetryAfterMs: result.retryAfterMs ?? null,
   });
+  // Visible (non-silent) registration failures must be seen even if the device
+  // is currently offline-gated behind NetworkErrorScreen (App.tsx replaces the
+  // whole tree at 5s offline, hiding Home's publishError banner underneath).
+  // A native-style Modal (themedAlert) renders above ANY screen, so it is the
+  // only reliable channel here. Silent background refreshes of an
+  // already-published identity intentionally do NOT alert — see the `silent`
+  // doc comment on runPublish.
+  if (!silent) {
+    themedAlert('Registro fallido', errorMsg);
+  }
 }
 
 export const useIdentity = create<IdentityState>((set, get) => ({
