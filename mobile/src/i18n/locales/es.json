@@ -256,7 +256,8 @@
     "securingWorkSlot": "Asegurando el cambio de contexto de la base de datos...",
     "generatingWorkTitle": "Generando tu par de claves de Trabajo",
     "generatingWorkSubtitle": "Curve25519 · 256-bit · SQLite aislado",
-    "keygenError": "Error al generar el par de claves de trabajo"
+    "keygenError": "Error al generar el par de claves de trabajo",
+    "viewPhoto": "Ver foto"
   },
   "privacy": {
     "title": "Privacidad",
@@ -1209,7 +1210,11 @@
     "shareInviteLink": "Compartir enlace de invitación",
     "shareInviteLinkSub": "Cualquiera con el enlace puede solicitar unirse",
     "inviteQrLabel": "Código QR de invitación al grupo",
-    "inviteQrSub": "Escanea este código para solicitar unirte al grupo"
+    "inviteQrSub": "Escanea este código para solicitar unirte al grupo",
+    "viewPhoto": "Ver foto del grupo",
+    "removePhoto": "Quitar foto",
+    "removePhotoTitle": "Quitar foto del grupo",
+    "removePhotoDesc": "El grupo volverá a su ícono generado."
   },
   "groupJoin": {
     "title": "Unirse al grupo",
@@ -1301,7 +1306,8 @@
     "clearBlockDesc": "¿Eliminar todos los mensajes con {{name}} y el contacto? Esta acción no se puede deshacer.",
     "clearBlockBtn": "Borrar y bloquear",
     "addedAgo": "hace {{count}}d",
-    "addedAgoLabel": "añadido"
+    "addedAgoLabel": "añadido",
+    "viewPhoto": "Ver foto"
   },
   "keys": {
     "title": "Identidades y claves",
@@ -1534,6 +1540,7 @@
     "bannedBadge": "Baneado",
     "notificationsSection": "Notificaciones",
     "notificationsToggle": "Notificaciones de publicaciones",
-    "notificationsToggleSub": "Solo en este dispositivo — nunca se comparte con el servidor"
+    "notificationsToggleSub": "Solo en este dispositivo — nunca se comparte con el servidor",
+    "viewPhoto": "Ver foto"
   }
 }

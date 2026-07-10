@@ -256,7 +256,8 @@
     "securingWorkSlot": "Securing database context swap...",
     "generatingWorkTitle": "Generating your Work keypair",
     "generatingWorkSubtitle": "Curve25519 · 256-bit · Isolated SQLite",
-    "keygenError": "Error generating work keypair"
+    "keygenError": "Error generating work keypair",
+    "viewPhoto": "View photo"
   },
   "privacy": {
     "title": "Privacy",
@@ -1209,7 +1210,11 @@
     "shareInviteLink": "Share invite link",
     "shareInviteLinkSub": "Anyone with the link can request to join",
     "inviteQrLabel": "Group invite QR code",
-    "inviteQrSub": "Scan this code to request to join the group"
+    "inviteQrSub": "Scan this code to request to join the group",
+    "viewPhoto": "View group photo",
+    "removePhoto": "Remove photo",
+    "removePhotoTitle": "Remove group photo",
+    "removePhotoDesc": "The group will go back to its generated icon."
   },
   "groupJoin": {
     "title": "Join group",
@@ -1301,7 +1306,8 @@
     "clearBlockDesc": "Delete all messages with {{name}} and remove the contact? This action cannot be undone.",
     "clearBlockBtn": "Clear and block",
     "addedAgo": "{{count}}d ago",
-    "addedAgoLabel": "added"
+    "addedAgoLabel": "added",
+    "viewPhoto": "View photo"
   },
   "keys": {
     "title": "Identities & Keys",
@@ -1534,6 +1540,7 @@
     "bannedBadge": "Banned",
     "notificationsSection": "Notifications",
     "notificationsToggle": "New post notifications",
-    "notificationsToggleSub": "Only on this device — never shared with the server"
+    "notificationsToggleSub": "Only on this device — never shared with the server",
+    "viewPhoto": "View photo"
   }
 }

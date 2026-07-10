@@ -8,6 +8,7 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { AvatarCropModal } from '../components/AvatarCropModal';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import { encodeIdentityLink } from '../crypto/qr';
 import { TopBar } from '../components/TopBar';
@@ -90,6 +91,10 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
   // In-app avatar cropper: holds the freshly-picked image until the user frames
   // and confirms it. Null when the cropper is closed.
   const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
+
+  // Full-screen expanded view of the own profile photo (tap the avatar —
+  // standard messenger behavior). Only when a photo is set.
+  const [photoOpen, setPhotoOpen] = useState(false);
 
   // Synchronize state when store hydrates/updates or active identity tab changes
   useEffect(() => {
@@ -211,14 +216,21 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
           }}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-            <Avatar
-              t={t}
-              name={displayName}
-              color={avatarColor}
-              size={56}
-              photoUri={avatarImage}
-              seed={identity?.publicKeyB64}
-            />
+            {/* Tap the avatar itself → expand the photo full-screen (when set);
+                tapping the rest of the card still opens the profile editor. */}
+            <Pressable
+              onPress={avatarImage ? () => setPhotoOpen(true) : () => setIsEditing(true)}
+              accessibilityLabel={i18nT('profile.viewPhoto', 'Ver foto')}
+            >
+              <Avatar
+                t={t}
+                name={displayName}
+                color={avatarColor}
+                size={56}
+                photoUri={avatarImage}
+                seed={identity?.publicKeyB64}
+              />
+            </Pressable>
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text
@@ -675,6 +687,13 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
           />
         </View>
       </Modal>
+
+      {/* Expanded own profile photo (tap avatar). Reuses the chat image viewer. */}
+      <ImageViewerModal
+        t={t}
+        images={photoOpen && avatarImage ? [avatarImage] : null}
+        onClose={() => setPhotoOpen(false)}
+      />
     </View>
   );
 }
