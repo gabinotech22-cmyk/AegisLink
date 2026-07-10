@@ -5,6 +5,28 @@ import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { hkdfSHA256 } from './kdf';
 import { type Identity } from '../identity';
 
+/**
+ * Diagnostic-only helper: re-throws any caught value as `[step] Name: message`
+ * so a registration failure that dies inside ensureDevicePreKeys/generatePreKeys
+ * (native PQ keygen, SQLite prekey writes) names the EXACT sub-operation that
+ * broke, instead of a bare "ensureDevicePreKeys failed" caught two frames up in
+ * ensureRegistered.ts. Intentionally NOT gated behind `__DEV__` — this is the
+ * only signal available once a build ships. Never includes key material: only
+ * the JS exception's own name/message.
+ */
+function tagError(step: string, e: unknown): Error {
+  if (e instanceof Error) {
+    return new Error(`[${step}] ${e.name || 'Error'}: ${e.message}`);
+  }
+  let rendered: string;
+  try {
+    rendered = typeof e === 'string' ? e : JSON.stringify(e);
+  } catch {
+    rendered = Object.prototype.toString.call(e);
+  }
+  return new Error(`[${step}] non-Error throw: ${rendered}`);
+}
+
 // ─── PQXDH (post-quantum hybrid X3DH, Signal-style) ──────────────────────────
 //
 // We do NOT replace classic X3DH. The four X25519 DH legs (DH1..DH4) stay byte
@@ -459,7 +481,12 @@ export function generatePreKeys(
   const signature = nacl.sign.detached(spk.publicKey, identity.signingSecretKey);
 
   // Signed PQ PreKey (ML-KEM-768), signed with the SAME Ed25519 identity key.
-  const pq = ml_kem768.keygen();
+  let pq: ReturnType<typeof ml_kem768.keygen>;
+  try {
+    pq = ml_kem768.keygen();
+  } catch (e) {
+    throw tagError('ml_kem768.keygen', e);
+  }
   const pqSignature = nacl.sign.detached(pq.publicKey, identity.signingSecretKey);
 
   const oneTimePreKeys: { keyId: number; publicKeyB64: string }[] = [];
@@ -571,6 +598,7 @@ async function persistPqSpkWithReadback(
   secret: Uint8Array,
 ): Promise<boolean> {
   const b64 = encodeBase64(secret);
+  let lastErr: unknown = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       await db.savePqSpkSecret(keyId, b64);
@@ -579,8 +607,16 @@ async function persistPqSpkWithReadback(
         try { await db.setPqSpkKeyId(keyId); } catch {/* best-effort */}
         return true;
       }
-    } catch {/* retry once */}
+      lastErr = null; // write succeeded but readback mismatched — no exception to report
+    } catch (e) {
+      lastErr = e; // retry once, but remember the exception in case both attempts fail
+    }
   }
+  // Both attempts failed to persist+read back the PQSPK secret. If we captured
+  // a real exception (vs. a silent readback mismatch), surface it tagged so the
+  // caller's "refusing to publish" error names the underlying SQLite/native
+  // failure instead of just "false".
+  if (lastErr != null) throw tagError('persistPqSpk', lastErr);
   return false;
 }
 
@@ -626,7 +662,12 @@ export async function ensureDevicePreKeys(identity: Identity): Promise<DevicePre
           if (pqB64) pqSpkSecret = decodeBase64(pqB64);
         }
         if (!pqSpkSecret) {
-          const pq = ml_kem768.keygen();
+          let pq: ReturnType<typeof ml_kem768.keygen>;
+          try {
+            pq = ml_kem768.keygen();
+          } catch (e) {
+            throw tagError('ml_kem768.keygen', e);
+          }
           const newPqKeyId = (pqSpkKeyId ?? 0) + 1;
           const ok = await persistPqSpkWithReadback(db, newPqKeyId, pq.secretKey);
           if (!ok) {
@@ -660,14 +701,20 @@ export async function ensureDevicePreKeys(identity: Identity): Promise<DevicePre
     const spkSecretB64 = encodeBase64(set.signedPreKey.secretKey);
 
     let persisted = false;
+    let spkLastErr: unknown = null;
     for (let attempt = 1; attempt <= 2 && !persisted; attempt++) {
       try {
         await db.saveSpkSecret(set.signedPreKey.keyId, spkSecretB64);
         const back = await db.loadSpkSecret(set.signedPreKey.keyId);
-        if (back === spkSecretB64) persisted = true;
-      } catch {/* retry once */}
+        if (back === spkSecretB64) { persisted = true; spkLastErr = null; }
+      } catch (e) {
+        spkLastErr = e; // retry once, but remember the exception in case both attempts fail
+      }
     }
     if (!persisted) {
+      // Surface the underlying exception (if any) so this doesn't read as a
+      // generic failure — a real SQLite/native error should name itself here.
+      if (spkLastErr != null) throw tagError('saveSpkSecret', spkLastErr);
       throw new Error(
         `ensureDevicePreKeys: could not persist SPK secret for keyId ${set.signedPreKey.keyId} — refusing to publish`,
       );

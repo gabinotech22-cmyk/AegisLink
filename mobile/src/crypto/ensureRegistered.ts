@@ -36,12 +36,54 @@ export interface EnsureResult {
  * Rate-limit (429) and 409 (already registered) are treated as non-fatal
  * to keep the caller logic uniform; the store maps them appropriately.
  */
+/**
+ * Diagnostic-only helper: turns any thrown value into a compact, SAFE string
+ * of the form `[step] ErrorName: message`. Never includes key material, IPs,
+ * or the aegisId — only the JS exception's own name/message, which is what we
+ * need to tell "PoW timed out" apart from "ml_kem768.keygen is not a function"
+ * apart from "SQLite NPE" without shipping a debugger. Intentionally NOT
+ * gated behind `__DEV__`: this is the only signal available in a
+ * preview/production build, and it carries no sensitive payload.
+ */
+function describeStepError(step: string, e: unknown): Error {
+  if (e instanceof Error) {
+    const name = e.name || 'Error';
+    return new Error(`[${step}] ${name}: ${e.message}`);
+  }
+  // Non-Error throws (rare, but some native bindings reject with plain
+  // strings/objects) — stringify defensively without leaking structure.
+  let rendered: string;
+  try {
+    rendered = typeof e === 'string' ? e : JSON.stringify(e);
+  } catch {
+    rendered = Object.prototype.toString.call(e);
+  }
+  return new Error(`[${step}] non-Error throw: ${rendered}`);
+}
+
 export async function ensureRegistered(identity: Identity): Promise<EnsureResult> {
   try {
-    const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
-    const nonce = await solvePoW(challenge, difficulty);
+    let challenge: string;
+    let difficulty: number;
+    try {
+      ({ challenge, difficulty } = await fetchPowChallenge(SERVER_URL));
+    } catch (e) {
+      throw describeStepError('fetchPowChallenge', e);
+    }
 
-    const preKeys = await ensureDevicePreKeys(identity);
+    let nonce: string;
+    try {
+      nonce = await solvePoW(challenge, difficulty);
+    } catch (e) {
+      throw describeStepError('solvePoW', e);
+    }
+
+    let preKeys: Awaited<ReturnType<typeof ensureDevicePreKeys>>;
+    try {
+      preKeys = await ensureDevicePreKeys(identity);
+    } catch (e) {
+      throw describeStepError('ensureDevicePreKeys', e);
+    }
 
     const result: RegistrationResult = await uploadIdentityAndPrekeys(
       identity,
@@ -85,11 +127,17 @@ export async function ensureRegistered(identity: Identity): Promise<EnsureResult
       }
       return { ok: true };
     } catch (verifyErr) {
-      const msg = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
-      return { ok: false, error: `Upload ok but verification failed: ${msg}` };
+      const labeled = describeStepError('lookupIdentity', verifyErr);
+      return { ok: false, error: `Upload ok but verification failed: ${labeled.message}` };
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, error: msg };
+    // e is already a `[step] Name: message` Error when it came from one of the
+    // labeled sub-steps above; describeStepError is idempotent-ish in that it
+    // still prefixes with `[ensureRegistered]` only when the throw bypassed
+    // every inner try/catch (e.g. a synchronous error before the first await).
+    if (e instanceof Error && /^\[[^\]]+\]/.test(e.message)) {
+      return { ok: false, error: e.message };
+    }
+    return { ok: false, error: describeStepError('ensureRegistered', e).message };
   }
 }
