@@ -19,8 +19,18 @@ export const POW_DIFFICULTY = 14; // ~16 k hashes on average — trivial for a r
 export const REGISTRATION_POW_DIFFICULTY =
   process.env['NODE_ENV'] === 'production' ? 18 : POW_DIFFICULTY;
 
-/** Challenge TTL in milliseconds. */
-const CHALLENGE_TTL_MS = 300_000;
+/**
+ * Challenge TTL in milliseconds.
+ * Raised from 5 to 15 minutes: on slow, non-JIT hardware (e.g. Hermes on an
+ * iPhone 8) mining the registration PoW at REGISTRATION_POW_DIFFICULTY (18
+ * bits, geometric distribution -> high variance) can take longer than the
+ * old 300s window, causing registration to fail permanently since the retry
+ * loop requests a brand-new challenge instead of resuming prior work. The
+ * anti-abuse cost is enforced by the difficulty, not the TTL, so widening
+ * this window only gives honest slow devices more wall-clock margin — it
+ * does not reduce the work a bot must do. See docs/ROADMAP-2026-07.md §2.
+ */
+export const CHALLENGE_TTL_MS = 900_000;
 
 interface ChallengeEntry {
   challenge: string; // hex
