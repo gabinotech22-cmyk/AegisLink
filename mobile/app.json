@@ -22,7 +22,7 @@
         "NSPhotoLibraryUsageDescription": "AegisLink accesses your photo library to send encrypted attachments.",
         "NSFaceIDUsageDescription": "AegisLink uses Face ID to protect your messages. Your biometric data never leaves the device.",
         "NSLocalNetworkUsageDescription": "AegisLink uses the local network only to establish direct peer-to-peer connections for end-to-end encrypted calls. It never scans or discovers devices on your network.",
-        "ITSAppUsesNonExemptEncryption": false,
+        "ITSAppUsesNonExemptEncryption": true,
         "UIBackgroundModes": [
           "voip",
           "audio",
