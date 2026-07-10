@@ -142,6 +142,13 @@ function withIconAliases(config) {
 //   echo Q | openssl s_client -connect aegislink.duckdns.org:443 2>/dev/null \
 //     | openssl x509 -pubkey -noout | openssl pkey -pubin -outform der \
 //     | openssl dgst -sha256 -binary | openssl enc -base64
+//
+// PARITY: iOS enforces the SAME pins via ATS (app.json → ios.infoPlist →
+// NSAppTransportSecurity.NSPinnedDomains). When you rotate SPKI_PRIMARY here,
+// update app.json's NSPinnedCAIdentities with the SAME three values too — a
+// stale iOS pin makes ATS reject the connection at the OS level (no app-code
+// override possible), while Android silently keeps working. This exact drift
+// caused a "registration failed" bug on the first iOS TestFlight build.
 const SPKI_PRIMARY = 'FHU7MjGd0nNUIZbayXMzSxHlMSay5Mfj2fBRzY6OFYc=';
 const SPKI_BACKUP  = 'brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4='; // LE YE1 intermediate
 // Independently-held offline backup key (P-256). Private key is COLD-STORED

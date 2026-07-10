@@ -44,6 +44,8 @@ import {
   hashPinWithSalt,
   verifyPinWithSalt,
   DURESS_PIN_SALT,
+  getStoredPinLength,
+  setStoredPinLength,
 } from '../pin';
 
 // pin.ts imports nobleNextTickPatch, which swaps noble's nextTick for a
@@ -121,6 +123,37 @@ describe('app-lock PIN (a3 format)', () => {
 
     expect(await verifyPIN('0000')).toBe(false);
     expect(mockStore.get(PIN_HASH_KEY)).toBe(a2); // untouched
+  });
+
+  it('setPIN persists the PIN length flag (4 vs 6) for the lock screen', async () => {
+    expect(await getStoredPinLength()).toBeNull(); // no flag yet — migration case
+    await setPIN('1234');
+    expect(await getStoredPinLength()).toBe(4);
+    await setPIN('123456');
+    expect(await getStoredPinLength()).toBe(6);
+  });
+
+  it('rejects a PIN that is not exactly 4 or 6 digits without persisting anything', async () => {
+    await expect(setPIN('12345')).rejects.toThrow(/4 or 6/);
+    expect(mockStore.has(PIN_HASH_KEY)).toBe(false);
+    expect(mockStore.has(PIN_SALT_KEY)).toBe(false);
+    expect(await getStoredPinLength()).toBeNull();
+    expect(await hasStoredPIN()).toBe(false);
+  });
+
+  it('setStoredPinLength persists the flag without touching the hash', async () => {
+    await setPIN('1234');
+    const hashBefore = mockStore.get(PIN_HASH_KEY);
+    await setStoredPinLength(6);
+    expect(await getStoredPinLength()).toBe(6);
+    expect(mockStore.get(PIN_HASH_KEY)).toBe(hashBefore); // untouched
+  });
+
+  it('clearPIN also removes the stored PIN length flag', async () => {
+    await setPIN('1234');
+    expect(await getStoredPinLength()).toBe(4);
+    await clearPIN();
+    expect(await getStoredPinLength()).toBeNull();
   });
 });
 

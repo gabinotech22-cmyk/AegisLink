@@ -1,4 +1,12 @@
 import { withDb, encryptBody, decryptBody } from './core';
+import { toRelativeMediaPath, toAbsoluteMediaUri } from '../utils/mediaPaths';
+
+/**
+ * media_uri may hold a blob pointer (`blob:id:key:nonce`, remote, opaque --
+ * passthrough) or a LOCAL staged file path. Local paths must never be
+ * persisted absolute -- the iOS sandbox container UUID changes across
+ * TestFlight builds/reinstalls, orphaning the reference (audit finding #6).
+ */
 
 export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'file' | 'poll' | 'location' | 'view_once';
 
@@ -65,7 +73,8 @@ async function rowToMessage(r: MessageRow, body: string): Promise<StoredMessage>
   if (r.attachments) {
     try { attachments = JSON.parse(r.attachments); } catch { /* ignore */ }
   }
-  const mediaUri = r.media_uri ? await decryptBody(r.media_uri) : null;
+  const decryptedMediaUri = r.media_uri ? await decryptBody(r.media_uri) : null;
+  const mediaUri = decryptedMediaUri ? toAbsoluteMediaUri(decryptedMediaUri) : null;
   return {
     id: r.id,
     chatId: r.chat_id,
@@ -89,7 +98,7 @@ async function rowToMessage(r: MessageRow, body: string): Promise<StoredMessage>
 export async function saveMessage(m: StoredMessage): Promise<void> {
   return withDb(async (d) => {
     const encrypted = await encryptBody(m.body);
-    const encryptedMediaUri = m.mediaUri ? await encryptBody(m.mediaUri) : null;
+    const encryptedMediaUri = m.mediaUri ? await encryptBody(toRelativeMediaPath(m.mediaUri)) : null;
     await d.runAsync(
       `INSERT OR REPLACE INTO messages
        (id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments, sender_id)
@@ -129,7 +138,7 @@ export async function updateMessageAttachments(id: string, attachments: Attachme
 
 /** Update a message's media reference (stored encrypted, like saveMessage). */
 export async function updateMessageMediaUri(id: string, mediaUri: string): Promise<void> {
-  const encryptedMediaUri = await encryptBody(mediaUri);
+  const encryptedMediaUri = await encryptBody(toRelativeMediaPath(mediaUri));
   return withDb(async (d) => {
     await d.runAsync('UPDATE messages SET media_uri = ? WHERE id = ?', encryptedMediaUri, id);
   });

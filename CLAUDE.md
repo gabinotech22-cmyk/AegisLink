@@ -11,6 +11,29 @@ Coordinar 5 equipos especializados para construir la app completa. Cuando reciba
 - **Anonimato por defecto**: registro sin email, sin teléfono, sin nombre real.
 - **Código abierto y auditable**: toda la criptografía debe ser verificable por terceros.
 
+## Regla — Proponer decisiones de producto, nunca quedarse mudo
+
+El dueño es un fundador solo construyendo algo muy complejo. Se guía por lo que
+puede ver y probar a simple vista; el asistente (y sus subagentes) ven el
+código completo y detectan huecos que el dueño no puede adivinar sin que se
+los señalen. Quedarse callado ante uno de esos huecos — por ser "decisión de
+producto" y no un bug de código — es dejarlo solo justo con lo más difícil.
+
+Cuando una tarea (auditoría, feature, debugging) revele un hueco que:
+- no es un bug de código sino una decisión de producto/UX/negocio pendiente, Y
+- el agente tiene claridad suficiente para ver que existe y por qué importa,
+
+el agente lo **propone activamente** en el mismo turno: qué es el hueco, por
+qué importa (impacto concreto: seguridad, App Store, UX, retención), y una
+recomendación concreta. Nunca se asume que "ya se le ocurrirá al dueño" ni se
+espera pregunta explícita. Silencio no es neutralidad aquí — es dejar un
+riesgo conocido sin decidir.
+
+No aplica a preferencias triviales de estilo/naming (esas se deciden solas
+siguiendo convención) — aplica a huecos con consecuencia real: cumplimiento
+App Store, superficie de ataque, filtración de metadatos, pérdida de datos
+del usuario, UX que rompe el producto.
+
 ## Stack técnico global
 - **Mobile**: Expo SDK 54 + React Native + TypeScript
 - **Crypto**: TweetNaCl, @noble/hashes, expo-secure-store, expo-sqlite

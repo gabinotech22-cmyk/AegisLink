@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { logger } from '../utils/logger';
 import * as SecureStore from 'expo-secure-store';
+import { ss } from '../utils/secureStore';
 
 // AFTER_FIRST_UNLOCK: required for Android 14 hardware-backed Keystore (StrongBox).
 // Without this flag, setItemAsync throws a native NPE on first write on real devices.
@@ -10,6 +11,7 @@ const SS_OPTS: SecureStore.SecureStoreOptions = {
 import { createIdentity, identityFromStored, type Identity } from '../crypto/identity';
 import { loadIdentity, saveIdentity } from '../db/local';
 import { ensureRegistered } from '../crypto/ensureRegistered';
+import { toRelativeMediaPath, toAbsoluteMediaUri } from '../utils/mediaPaths';
 
 /** Publication status of this identity on the relay. */
 export type PublishStatus = 'unknown' | 'publishing' | 'published' | 'failed';
@@ -34,6 +36,14 @@ interface IdentityState {
    * already told us how long to wait. null when not rate-limited.
    */
   publishRetryAfterMs: number | null;
+  /**
+   * Absolute deadline (Date.now()-comparable ms) until which no PoW mining or
+   * registration attempt should run. Persisted (see COOLDOWN_KEY) as a plain
+   * local-operation timestamp — restarting the app must NOT reset the cooldown
+   * and re-trigger CPU-heavy PoW mining against a relay that already rate-
+   * limited us. null when no cooldown is active.
+   */
+  publishCooldownUntilMs: number | null;
 
   // Multi-E2EE Slots State
   activeSlotId: string;
@@ -61,6 +71,38 @@ function getPrefKey(key: string, slot: string): string {
 }
 
 /**
+ * Persisted registration cooldown deadline (absolute epoch ms). This is a
+ * local-operation timestamp only — no server identifiers, no message
+ * metadata — used solely to stop the retry loop from re-mining PoW across
+ * app restarts while the relay's 429 window is still open.
+ */
+const COOLDOWN_KEY = 'aegis.reg.cooldown.v1';
+
+async function loadCooldownUntil(): Promise<number | null> {
+  try {
+    const raw = await ss.get(COOLDOWN_KEY);
+    if (!raw) return null;
+    const until = Number(raw);
+    if (!Number.isFinite(until) || until <= Date.now()) {
+      await ss.delete(COOLDOWN_KEY).catch(() => {});
+      return null;
+    }
+    return until;
+  } catch {
+    return null;
+  }
+}
+
+async function persistCooldownUntil(until: number | null): Promise<void> {
+  try {
+    if (until == null) await ss.delete(COOLDOWN_KEY);
+    else await ss.set(COOLDOWN_KEY, String(until));
+  } catch {
+    /* best-effort: persistence is a UX optimization, not a security boundary */
+  }
+}
+
+/**
  * Internal helper: run ensureRegistered and sync the store's publishStatus.
  * Slot-keyed SecureStore flag is updated on success so hydrate() fast-paths.
  *
@@ -73,10 +115,33 @@ function getPrefKey(key: string, slot: string): string {
  * so the retry loop can re-register.
  */
 async function runPublish(identity: Identity, slotId: string, silent = false): Promise<void> {
+  // Gate BEFORE any network call / PoW mining: if a relay-issued cooldown is
+  // still active, never re-mine — that is exactly the retry storm this fix
+  // eliminates. This is the single choke point both retryPublish() and the
+  // hydrate()-triggered background publish go through.
+  const cooldownUntil = useIdentity.getState().publishCooldownUntilMs;
+  if (cooldownUntil != null && Date.now() < cooldownUntil) {
+    const retryAfterMs = cooldownUntil - Date.now();
+    if (!silent) {
+      useIdentity.setState({
+        publishStatus: 'failed',
+        publishError: 'rate_limited',
+        publishRetryAfterMs: retryAfterMs,
+      });
+    }
+    return;
+  }
+
   if (!silent) useIdentity.setState({ publishStatus: 'publishing', publishError: null });
   const result = await ensureRegistered(identity);
   if (result.ok) {
-    useIdentity.setState({ publishStatus: 'published', publishError: null, publishRetryAfterMs: null });
+    useIdentity.setState({
+      publishStatus: 'published',
+      publishError: null,
+      publishRetryAfterMs: null,
+      publishCooldownUntilMs: null,
+    });
+    void persistCooldownUntil(null);
     // Persist the published flag BEFORE returning (was fire-and-forget): if the
     // process is killed right after a slow first registration, an un-flushed
     // write meant the next cold-start re-ran a VISIBLE (non-silent) publish and
@@ -85,6 +150,13 @@ async function runPublish(identity: Identity, slotId: string, silent = false): P
     // here costs nothing user-visible — runPublish is always called via void.
     try { await SecureStore.setItemAsync(`aegis.published.${slotId}`, '1', SS_OPTS); } catch { /* best-effort */ }
     return;
+  }
+  // A 429 always sets/persists the cooldown deadline — silent or not — so the
+  // NEXT attempt (this session or after a restart) skips PoW mining entirely.
+  if (result.retryAfterMs != null) {
+    const until = Date.now() + result.retryAfterMs;
+    useIdentity.setState({ publishCooldownUntilMs: until });
+    void persistCooldownUntil(until);
   }
   // Suppress ONLY a transient rate-limit during a silent (already-published)
   // refresh — staying 'published' avoids a false alarm and the retry storm that
@@ -114,6 +186,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
   publishStatus: 'unknown',
   publishError: null,
   publishRetryAfterMs: null,
+  publishCooldownUntilMs: null,
 
   activeSlotId: 'self',
   slotsList: ['self'],
@@ -154,6 +227,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
           publishStatus: 'published',
           publishError: null,
           publishRetryAfterMs: null,
+          publishCooldownUntilMs: null,
         });
         return;
       }
@@ -194,8 +268,22 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
       const displayName = displayNameRaw ?? identity.aegisId.toLowerCase().replace(/-/g, '');
       const avatarColor = avatarColorRaw ?? '#05b875';
-      const avatarImage = avatarImageRaw ?? null;
+      // Resolve against the CURRENT container -- avatarImageRaw may be a
+      // relative pointer, or a stale absolute URI from a previous install.
+      const avatarImage = avatarImageRaw ? toAbsoluteMediaUri(avatarImageRaw) : null;
       const profileStatus = profileStatusRaw ?? '';
+      // Re-persist the relative form so subsequent reads skip the migration
+      // branch (best-effort -- never block hydrate on this).
+      if (avatarImageRaw && avatarImage) {
+        const relative = toRelativeMediaPath(avatarImageRaw);
+        if (relative !== avatarImageRaw) {
+          SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', activeSlotId), relative, SS_OPTS).catch(() => {});
+        }
+      }
+
+      // Hydrate the persisted registration cooldown deadline (if any). A cold
+      // start must NOT forget an active 429 window and re-mine PoW.
+      const publishCooldownUntilMs = await loadCooldownUntil();
 
       // Expose identity to UI immediately regardless of server state.
       set({
@@ -209,7 +297,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         // If we have the stored flag, assume published until we verify otherwise.
         publishStatus: alreadyPublished ? 'published' : 'unknown',
         publishError: null,
-        publishRetryAfterMs: null,
+        publishRetryAfterMs: publishCooldownUntilMs != null ? publishCooldownUntilMs - Date.now() : null,
+        publishCooldownUntilMs,
         status: 'ready',
         hydrated: true,
       });
@@ -283,6 +372,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     const { purgeCachedDecryptedMedia } = require('../crypto/media');
     await (purgeCachedDecryptedMedia as () => Promise<void>)().catch(() => {});
 
+    // Clear any persisted registration cooldown — a full identity reset means
+    // a brand-new identity will register next, unrelated to the old one's ban.
+    await persistCooldownUntil(null);
+
     // Reset all other Zustand stores — DB is already empty, bring memory in sync
     const { useContacts } = require('./contacts');
     const { useGroups } = require('./groups');
@@ -301,6 +394,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       publishStatus: 'unknown',
       publishError: null,
       publishRetryAfterMs: null,
+      publishCooldownUntilMs: null,
       status: 'idle',
     });
   },
@@ -336,7 +430,13 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     await SecureStore.setItemAsync(getPrefKey('aegis.displayName', slotId), displayName, SS_OPTS);
     await SecureStore.setItemAsync(getPrefKey('aegis.avatarColor', slotId), avatarColor, SS_OPTS);
     if (persistentAvatarUri) {
-      await SecureStore.setItemAsync(getPrefKey('aegis.avatarImage', slotId), persistentAvatarUri, SS_OPTS);
+      // Persist a container-independent relative pointer, never the absolute
+      // URI -- the sandbox UUID changes across TestFlight builds/reinstalls.
+      await SecureStore.setItemAsync(
+        getPrefKey('aegis.avatarImage', slotId),
+        toRelativeMediaPath(persistentAvatarUri),
+        SS_OPTS,
+      );
     } else {
       await SecureStore.deleteItemAsync(getPrefKey('aegis.avatarImage', slotId));
     }

@@ -21,6 +21,7 @@
         "NSMicrophoneUsageDescription": "AegisLink uses the microphone for encrypted voice and video calls.",
         "NSPhotoLibraryUsageDescription": "AegisLink accesses your photo library to send encrypted attachments.",
         "NSFaceIDUsageDescription": "AegisLink uses Face ID to protect your messages. Your biometric data never leaves the device.",
+        "NSLocalNetworkUsageDescription": "AegisLink uses the local network only to establish direct peer-to-peer connections for end-to-end encrypted calls. It never scans or discovers devices on your network.",
         "ITSAppUsesNonExemptEncryption": true,
         "UIBackgroundModes": [
           "voip",
@@ -35,10 +36,10 @@
               "NSIncludesSubdomains": true,
               "NSPinnedCAIdentities": [
                 {
-                  "SPKI-SHA256-BASE64": "CMcP8NMKUoqDBl0haU7v7dgEsxIFbWry8NjhhHzgX3c="
+                  "SPKI-SHA256-BASE64": "FHU7MjGd0nNUIZbayXMzSxHlMSay5Mfj2fBRzY6OFYc="
                 },
                 {
-                  "SPKI-SHA256-BASE64": "iFvwVyJSxnQdyaUvUERIf+8qk7gRze3612JMwoO3zdU="
+                  "SPKI-SHA256-BASE64": "brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4="
                 },
                 {
                   "SPKI-SHA256-BASE64": "LvglXAxgB9K5SCOZrLvdX0VVc8UuEU+Bj6r58LSA7r8="
@@ -121,6 +122,7 @@
       "./plugins/withCallForegroundService.js",
       "./plugins/withTorEmbedded.js",
       "./plugins/withIosVoip.js",
+      "./plugins/withIosBackupExclusion.js",
       "expo-secure-store",
       [
         "expo-sqlite",

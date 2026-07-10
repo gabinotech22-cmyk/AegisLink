@@ -640,8 +640,11 @@ function Shell() {
     contact: StoredContact,
     onMultiple?: (assets: import('expo-document-picker').DocumentPickerAsset[]) => void
   ) {
-    const DocumentPicker = require('expo-document-picker');
-    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: true });
+    const DocumentPicker = require('expo-document-picker') as typeof import('expo-document-picker');
+    const { withPickingGuard } = require('./src/utils/pickingGuard') as typeof import('./src/utils/pickingGuard');
+    const result = await withPickingGuard(() =>
+      DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: true })
+    );
     if (result.canceled || !result.assets?.[0]) return;
     const assets: import('expo-document-picker').DocumentPickerAsset[] = result.assets;
     if (assets.length > 1) {
@@ -777,8 +780,11 @@ function Shell() {
     group: StoredGroup,
     onMultiple?: (assets: import('expo-document-picker').DocumentPickerAsset[]) => void
   ) {
-    const DocumentPicker = require('expo-document-picker');
-    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: true });
+    const DocumentPicker = require('expo-document-picker') as typeof import('expo-document-picker');
+    const { withPickingGuard } = require('./src/utils/pickingGuard') as typeof import('./src/utils/pickingGuard');
+    const result = await withPickingGuard(() =>
+      DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: true })
+    );
     if (result.canceled || !result.assets?.[0]) return;
     const assets: import('expo-document-picker').DocumentPickerAsset[] = result.assets;
     if (assets.length > 1) {

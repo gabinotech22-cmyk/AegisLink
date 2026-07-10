@@ -71,12 +71,20 @@ una App Store Connect API Key a expo.dev — ver Fase 1). Sin Xcode, sin Keychai
 - [ ] Si falta cualquier var, el relay hace fallback silencioso al push visible de
       Expo (`isApnsConfigured()` → false): no rompe nada, pero no hay ring con app cerrada.
 - [x] ✅ **Build iOS compila y firma** — primer `.ipa` generado en EAS (build `52997e08`, PR #276).
-- [ ] ⚠️ El registro VoIP nativo en el AppDelegate está **DESACTIVADO** en `withIosVoip.js`:
-      el `import RNVoipPushNotification` de Swift rompe el build de Xcode (el pod es ObjC, no
-      un módulo Swift; "no such module"). El registro del token VoIP se hace por **JS**
-      (`voip-push.ts` → `registerVoipToken()`), suficiente con la app viva/en background.
-      **Follow-up:** reactivar el registro nativo temprano vía **bridging header**
-      (`#import "RNVoipPushNotificationManager.h"`) para el caso app-cerrada, y validar en build.
+- [ ] ⚠️ **VoIP push está 100% DESACTIVADO — ni nativo ni JS** (commit `77c42ed`, PR #280).
+      El registro VoIP nativo en el AppDelegate sigue desactivado en `withIosVoip.js` (el
+      `import RNVoipPushNotification` de Swift rompe el build de Xcode: el pod es ObjC, no
+      un módulo Swift; "no such module"). Pero además, `registerVoipToken()` por **JS**
+      (`voip-push.ts`) también está gateada tras `VOIP_NATIVE_WIRED = false`: llamar al
+      registro JS sin el AppDelegate nativo hace crashear la app justo tras generar identidad
+      (`-[PKPushRegistry voipRegistrationSucceededWithDeviceToken:]` → `doesNotRecognizeSelector`,
+      confirmado en iOS 16.7 / TestFlight build 12), así que el flag apaga **todo** el camino
+      VoIP, no solo la parte nativa. Estado real actual: **una llamada entrante solo suena con
+      la app en foreground** (socket Socket.IO vivo); con la app en background o cerrada no hay
+      ningún camino de aviso vía CallKit — limitación conocida, no un bug pendiente de reportar.
+      **Follow-up:** reactivar el registro nativo vía **bridging header**
+      (`#import "RNVoipPushNotificationManager.h"`), y solo entonces volver a poner
+      `VOIP_NATIVE_WIRED = true` para reactivar también el registro JS.
 - [ ] ⚠️ **CallKit + New Architecture**: `react-native-callkeep@4.3.16` rompe la New
       Arch en Android (dos `@ReactMethod` "displayIncomingCall" → crash al arrancar),
       por eso `callkeep.ts` lo carga con `require` perezoso **solo en iOS** y con

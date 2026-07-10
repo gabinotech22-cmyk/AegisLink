@@ -84,7 +84,8 @@
     "archiveAction": "ARCHIVAR",
     "registering": "REGISTRANDO IDENTIDAD…",
     "registrationFailed": "FALLO AL REGISTRAR IDENTIDAD",
-    "retry": "REINTENTAR"
+    "retry": "REINTENTAR",
+    "registrationRateLimited": "Demasiados intentos de registro. Reintento automático en {{minutes}} min"
   },
   "chat": {
     "encryptedToday": "CIFRADO EXTREMO A EXTREMO · HOY",
@@ -329,6 +330,7 @@
     "pinError_plural": "PIN incorrecto · {{count}} intentos restantes",
     "wipingData": "Borrando todos los datos...",
     "maxAttemptsReached": "{{max}} intentos fallidos. La app está bloqueada.",
+    "cooldownWait": "Demasiados intentos. Vuelve a intentarlo en {{time}}.",
     "tapToUnlock": "Toca para desbloquear"
   },
   "panic": {

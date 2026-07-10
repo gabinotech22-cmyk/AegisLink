@@ -84,7 +84,8 @@
     "archiveAction": "ARCHIVE",
     "registering": "REGISTERING IDENTITY…",
     "registrationFailed": "IDENTITY REGISTRATION FAILED",
-    "retry": "RETRY"
+    "retry": "RETRY",
+    "registrationRateLimited": "Too many registration attempts. Automatic retry in {{minutes}} min"
   },
   "chat": {
     "encryptedToday": "END-TO-END ENCRYPTED · TODAY",
@@ -329,6 +330,7 @@
     "pinError_plural": "Wrong PIN · {{count}} attempts remaining",
     "wipingData": "Wiping all data...",
     "maxAttemptsReached": "{{max}} failed attempts. The app is locked.",
+    "cooldownWait": "Too many attempts. Try again in {{time}}.",
     "tapToUnlock": "Tap to unlock"
   },
   "panic": {

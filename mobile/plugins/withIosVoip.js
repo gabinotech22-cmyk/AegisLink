@@ -10,32 +10,38 @@
  *   2. Info.plist: guarantees `voip` + `remote-notification` background modes
  *      (also declared in app.json; re-asserted here so the plugin is the single
  *      source of truth for the VoIP capability and survives app.json edits).
- *   3. (DISABLED) AppDelegate.swift native VoIP registration — see note below.
+ *   3. Objective-C bridging header exposing RNVoipPushNotificationManager to
+ *      Swift, so the AppDelegate can register for VoIP pushes as early as
+ *      possible (native early-registration, before JS loads).
+ *   4. AppDelegate.swift: call RNVoipPushNotificationManager.voipRegistration()
+ *      in didFinishLaunchingWithOptions.
  *
- * ┌─ WHY STEP 3 IS DISABLED ─────────────────────────────────────────────────────┐
- * │ The AppDelegate injection did `import RNVoipPushNotification` in Swift, which  │
- * │ fails the Xcode build under Expo's managed setup (no use_frameworks!) with     │
- * │ "no such module 'RNVoipPushNotification'" — the pod is ObjC and isn't a Swift  │
- * │ module. Confirmed on EAS build 5c192197.                                       │
+ * ┌─ WHY A BRIDGING HEADER, NOT A SWIFT `import` ────────────────────────────────┐
+ * │ The pod is Objective-C, not a Swift module. A Swift `import                   │
+ * │ RNVoipPushNotification` fails the Xcode build under Expo's managed setup       │
+ * │ (no use_frameworks!) with "no such module 'RNVoipPushNotification'" (confirmed │
+ * │ on EAS build 5c192197, PR #276). The supported way to reach an ObjC pod from   │
+ * │ Swift is an ObjC bridging header (`#import "RNVoipPushNotificationManager.h"`   │
+ * │ + SWIFT_OBJC_BRIDGING_HEADER), which is what step 3 sets up.                    │
  * │                                                                               │
- * │ It is NOT needed for VoIP to work in the app-running / background case:        │
- * │ src/calls/voip-push.ts calls VoipPushNotification.registerVoipToken() over the │
- * │ RN bridge, which triggers the SAME native registration (the library sets       │
- * │ itself as the PKPushRegistry delegate and forwards events to JS). The native   │
- * │ call only helps register earlier on a cold start FROM a VoIP push.             │
- * │                                                                               │
- * │ FOLLOW-UP: re-enable via an Objective-C bridging header                        │
- * │ (`#import "RNVoipPushNotificationManager.h"` + SWIFT_OBJC_BRIDGING_HEADER),     │
- * │ NOT a Swift `import`, and validate on a build. withAppDelegateVoip() is kept   │
- * │ below (unused) for that work. VoIP push is not live yet anyway (the relay      │
- * │ APNS_* key is unset), so this does not regress any shipped behavior.           │
+ * │ Native early-registration is not strictly required for the app-running /       │
+ * │ background case: src/calls/voip-push.ts calls                                   │
+ * │ VoipPushNotification.registerVoipToken() over the RN bridge, which triggers the │
+ * │ SAME native registration (the library sets itself as the PKPushRegistry         │
+ * │ delegate and forwards events to JS). The native call registers EARLIER on a     │
+ * │ cold start FROM a VoIP push — more reliable for the app-fully-killed ringing    │
+ * │ path, where JS may not be up yet.                                               │
  * └─────────────────────────────────────────────────────────────────────────────┘
  */
 const {
   withEntitlementsPlist,
   withInfoPlist,
   withAppDelegate,
+  withXcodeProject,
+  withDangerousMod,
 } = require('@expo/config-plugins');
+const fs = require('fs');
+const path = require('path');
 
 // ── 1. Entitlements: APNs / Push Notifications ────────────────────────────────
 function withApsEntitlement(config) {
@@ -60,15 +66,81 @@ function withVoipBackgroundModes(config) {
   });
 }
 
-// ── 3. AppDelegate.swift: VoIP registration ───────────────────────────────────
-// The library's Swift module exposes RNVoipPushNotificationManager.
-const VOIP_IMPORT = 'import RNVoipPushNotification';
+// ── 3. Objective-C bridging header ────────────────────────────────────────────
+// Swift can't `import` the ObjC pod (no use_frameworks!). The supported bridge is
+// an ObjC bridging header that #imports the manager's public header; Swift then
+// sees RNVoipPushNotificationManager as a native type. The pod's header search
+// paths (added by CocoaPods) make the quoted #import resolve.
+const BRIDGING_IMPORT = '#import "RNVoipPushNotificationManager.h"';
 
+// 3a. Write (or extend) the bridging header file at ios/<project>/<project>-Bridging-Header.h.
+function withVoipBridgingHeaderFile(config) {
+  return withDangerousMod(config, [
+    'ios',
+    async (config) => {
+      const projectName = config.modRequest.projectName;
+      if (!projectName) {
+        throw new Error('[withIosVoip] could not resolve iOS projectName for the bridging header.');
+      }
+      const headerPath = path.join(
+        config.modRequest.platformProjectRoot,
+        projectName,
+        `${projectName}-Bridging-Header.h`,
+      );
+      let contents = fs.existsSync(headerPath) ? fs.readFileSync(headerPath, 'utf8') : '';
+      if (!contents.includes(BRIDGING_IMPORT)) {
+        // Append rather than overwrite: another plugin may already own a bridging
+        // header. A trailing newline keeps the file well-formed either way.
+        const prefix = contents.length > 0 && !contents.endsWith('\n') ? '\n' : '';
+        contents += `${prefix}${BRIDGING_IMPORT}\n`;
+        fs.writeFileSync(headerPath, contents);
+      }
+      return config;
+    },
+  ]);
+}
+
+// 3b. Point the app target's SWIFT_OBJC_BRIDGING_HEADER build setting at it.
+function withVoipBridgingHeaderSetting(config) {
+  return withXcodeProject(config, (config) => {
+    const projectName = config.modRequest.projectName;
+    if (!projectName) {
+      throw new Error('[withIosVoip] could not resolve iOS projectName for the bridging header build setting.');
+    }
+    const xcodeProject = config.modResults;
+    // Path is relative to SRCROOT (the ios/ dir), quoted to be safe.
+    const headerRelative = `"${projectName}/${projectName}-Bridging-Header.h"`;
+
+    // Scope to the app target's build configurations ONLY. Setting this globally
+    // would also hit the Pods project's configs and break pod compilation.
+    const firstTarget = xcodeProject.getFirstTarget().firstTarget;
+    const configListId = firstTarget.buildConfigurationList;
+    const configList = xcodeProject.pbxXCConfigurationList()[configListId];
+    const buildConfigs = xcodeProject.pbxXCBuildConfigurationSection();
+    let touched = 0;
+    for (const ref of configList.buildConfigurations) {
+      const buildSettings = buildConfigs[ref.value] && buildConfigs[ref.value].buildSettings;
+      if (!buildSettings) continue;
+      buildSettings.SWIFT_OBJC_BRIDGING_HEADER = headerRelative;
+      touched += 1;
+    }
+    if (touched === 0) {
+      throw new Error(
+        '[withIosVoip] failed to set SWIFT_OBJC_BRIDGING_HEADER: no build ' +
+          'configurations found on the app target. The Xcode project layout changed.',
+      );
+    }
+    return config;
+  });
+}
+
+// ── 4. AppDelegate.swift: VoIP registration ───────────────────────────────────
 // voipRegistration() wires the PKPushRegistry delegate internally (inside the
 // library) and forwards events to JS. Inserted right after didFinishLaunching's
 // opening brace — the library recommends registering "as early as possible",
 // and anchoring to the opening `{` (not a `return`) sidesteps any early-return
-// in the generated body.
+// in the generated body. RNVoipPushNotificationManager is visible to Swift via
+// the ObjC bridging header (step 3) — NO Swift `import` is needed or wanted.
 const REGISTER_SNIPPET = `
     // AegisLink: register for VoIP (PushKit) pushes as early as possible. The
     // library sets itself as the PKPushRegistry delegate and forwards events to JS.
@@ -101,19 +173,9 @@ function withAppDelegateVoip(config) {
     }
     let src = config.modResults.contents;
 
-    // Import: insert after the FIRST existing import line, so we don't depend on
-    // a specific one. SDK 54's AppDelegate.swift starts with `import Expo`, NOT
-    // `import ExpoModulesCore`, so anchoring on the latter threw during prebuild.
-    // Every AppDelegate has at least one import, so this stays version-robust.
-    if (!src.includes(VOIP_IMPORT)) {
-      src = injectOrThrow(
-        src,
-        (s) => s.replace(/^(import .+)$/m, `$1\n${VOIP_IMPORT}`),
-        VOIP_IMPORT,
-      );
-    }
-
     // VoIP registration right after didFinishLaunchingWithOptions' opening brace.
+    // No Swift `import` — RNVoipPushNotificationManager comes from the ObjC
+    // bridging header (step 3).
     if (!src.includes('RNVoipPushNotificationManager.voipRegistration()')) {
       src = injectOrThrow(
         src,
@@ -130,12 +192,8 @@ function withAppDelegateVoip(config) {
 module.exports = function withIosVoip(config) {
   config = withApsEntitlement(config);
   config = withVoipBackgroundModes(config);
-  // withAppDelegateVoip is intentionally NOT applied — see "WHY STEP 3 IS
-  // DISABLED" in the header. It breaks the Xcode build (Swift can't import the
-  // ObjC pod). VoIP registration works via JS (voip-push.ts registerVoipToken).
+  config = withVoipBridgingHeaderFile(config);
+  config = withVoipBridgingHeaderSetting(config);
+  config = withAppDelegateVoip(config);
   return config;
 };
-
-// Referenced only to keep the (currently-disabled) helper from tripping no-unused
-// lint while we keep it for the bridging-header follow-up.
-void withAppDelegateVoip;
