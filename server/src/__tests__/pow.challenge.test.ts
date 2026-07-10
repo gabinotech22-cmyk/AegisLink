@@ -7,6 +7,7 @@
  * the one-time-use (consume) contract.
  */
 
+import { jest } from '@jest/globals';
 import { createHash } from 'node:crypto';
 import { issueChallenge, verifyPoW, POW_DIFFICULTY, CHALLENGE_TTL_MS } from '../pow/challenge.js';
 
