@@ -82,18 +82,18 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
       return (
         <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
           <View style={styles.top}>
-            <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }} accessibilityLabel="Volver">
+            <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }} accessibilityLabel={i18nT('common.back', 'Volver')}>
               <I.ChevronL size={22} color={t.text} />
             </Pressable>
             <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, letterSpacing: -0.4 }}>
-              Verificar
+              {i18nT('verify.title', 'Verificar')}
             </Text>
             <View style={{ width: 22 }} />
           </View>
           <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28 }}>
             <I.Shield size={32} color={t.textDim} />
             <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, marginTop: 12, textAlign: 'center' }}>
-              Contacto no encontrado.
+              {i18nT('verify.contactNotFound', 'Contacto no encontrado.')}
             </Text>
           </View>
         </View>
@@ -103,7 +103,7 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
     return (
       <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
         <View style={styles.top}>
-          <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }} accessibilityLabel="Volver">
+          <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }} accessibilityLabel={i18nT('common.back', 'Volver')}>
             <I.ChevronL size={22} color={t.text} />
           </Pressable>
           <Text
@@ -236,7 +236,7 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
   return (
     <View style={[styles.screen, { backgroundColor: t.bg, paddingTop: insets.top }]}>
       <View style={styles.top}>
-        <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }} accessibilityLabel="Volver">
+        <Pressable onPress={onBack} hitSlop={8} style={{ padding: 6 }} accessibilityLabel={i18nT('common.back', 'Volver')}>
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, letterSpacing: -0.4 }}>

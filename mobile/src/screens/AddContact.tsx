@@ -93,7 +93,7 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '600', color: t.text }}>
-          Añadir contacto
+          {i18nT("addContact.title", "Añadir contacto")}
         </Text>
         <View style={{ width: 34 }} />
       </View>
@@ -162,6 +162,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
   addByAegisId: (aegisId: string, displayName?: string) => Promise<StoredContact>;
   onAdded: (contact: StoredContact) => void;
 }) {
+  const { t: i18nT } = useTranslation();
   const [mode, setMode] = useState<'show' | 'scan' | 'success'>('show');
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -203,16 +204,16 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
 
         if (result.kind === 'mitm_detected') {
           themedAlert(
-            'Alerta de seguridad',
-            `La clave pública en el QR no coincide con la registrada en el servidor.\n\nID: ${parsed.aegisId}\n\nNo añadas este contacto a menos que confirmes que es tu interlocutor real.`,
+            i18nT('addContact.mitmTitle', 'Alerta de seguridad'),
+            i18nT('addContact.mitmDesc', 'La clave pública en el QR no coincide con la registrada en el servidor.\n\nID: {{id}}\n\nNo añadas este contacto a menos que confirmes que es tu interlocutor real.', { id: parsed.aegisId }),
             [
               {
-                text: 'Cancelar',
+                text: i18nT('common.cancel', 'Cancelar'),
                 style: 'cancel',
                 onPress: () => { setScanned(false); setScanning(false); setMode('show'); },
               },
               {
-                text: 'Confiar en el QR',
+                text: i18nT('addContact.trustQR', 'Confiar en el QR'),
                 style: 'destructive',
                 onPress: async () => {
                   const updated = await useContacts.getState().confirmKeyChange(parsed.aegisId, parsed.publicKeyB64);
@@ -236,12 +237,12 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
         return;
       }
 
-      themedAlert('QR inválido', 'Este código QR no pertenece a AegisLink.', [
-        { text: 'OK', onPress: () => { setScanned(false); setScanning(false); setMode('show'); } },
+      themedAlert(i18nT('addContact.invalidQrTitle', 'QR inválido'), i18nT('addContact.invalidQrDesc', 'Este código QR no pertenece a AegisLink.'), [
+        { text: i18nT('common.ok', 'OK'), onPress: () => { setScanned(false); setScanning(false); setMode('show'); } },
       ]);
     } catch (e) {
-      themedAlert('Error', (e as Error).message, [
-        { text: 'OK', onPress: () => { setScanned(false); setScanning(false); setMode('show'); } },
+      themedAlert(i18nT('common.error', 'Error'), (e as Error).message, [
+        { text: i18nT('common.ok', 'OK'), onPress: () => { setScanned(false); setScanning(false); setMode('show'); } },
       ]);
     }
   };
@@ -259,7 +260,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
         </View>
 
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, color: t.text, fontWeight: '700', marginBottom: 8 }}>
-          Contacto añadido
+          {i18nT('addContact.addedTitle', 'Contacto añadido')}
         </Text>
 
         <Text style={{ fontFamily: t.fontMono, fontSize: 16, color: t.accent, letterSpacing: 2, marginBottom: 16 }}>
@@ -280,7 +281,9 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
             color: addedContact.verified ? t.accent : t.warn,
             letterSpacing: 0.8, fontWeight: '600',
           }}>
-            {addedContact.verified ? 'IDENTIDAD VERIFICADA' : 'SIN VERIFICAR'}
+            {addedContact.verified
+              ? i18nT('addContact.verifiedBadge', 'IDENTIDAD VERIFICADA')
+              : i18nT('addContact.unverifiedBadge', 'SIN VERIFICAR')}
           </Text>
         </View>
 
@@ -289,13 +292,13 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
             fontFamily: t.font, fontSize: 12, color: t.textDim,
             textAlign: 'center', lineHeight: 18, maxWidth: 280, marginBottom: 20,
           }}>
-            Para verificar, compara las 8 palabras de seguridad en Privacidad → Verificar
+            {i18nT('addContact.verifyHint', 'Para verificar, compara las 8 palabras de seguridad en Privacidad → Verificar')}
           </Text>
         )}
 
         <Pressable
           onPress={() => onAdded(addedContact)}
-          accessibilityLabel="Abrir chat con el contacto añadido"
+          accessibilityLabel={i18nT('addContact.openChatA11y', 'Abrir chat con el contacto añadido')}
           style={{
             backgroundColor: t.accent, borderRadius: t.radius,
             paddingHorizontal: 24, paddingVertical: 14,
@@ -303,7 +306,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
           }}
         >
           <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accentInk, letterSpacing: 0.5, fontWeight: '600' }}>
-            ABRIR CHAT →
+            {i18nT('addContact.openChat', 'ABRIR CHAT →')}
           </Text>
         </Pressable>
       </View>
@@ -318,12 +321,14 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
           onPress={onBack}
           hitSlop={8}
           style={{ padding: 6 }}
-          accessibilityLabel="Volver"
+          accessibilityLabel={i18nT('common.back', 'Volver')}
         >
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
-          {mode === 'show' ? 'Mi código QR' : 'Escanear QR'}
+          {mode === 'show'
+            ? i18nT('addContact.myQrTitle', 'Mi código QR')
+            : i18nT('scanQR.title', 'Escanear QR')}
         </Text>
         <View style={{ width: 34 }} />
       </View>
@@ -331,7 +336,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
       {mode === 'show' ? (
         <ScrollView contentContainerStyle={{ alignItems: 'center', padding: 28, gap: 24 }}>
           <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, textAlign: 'center', lineHeight: 20 }}>
-            Muestra este código a quien quieras añadir. Solo es válido para tu identidad actual.
+            {i18nT('addContact.showQrIntro', 'Muestra este código a quien quieras añadir. Solo es válido para tu identidad actual.')}
           </Text>
 
           {myQRData ? (
@@ -359,7 +364,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
             alignItems: 'center',
           }}>
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5, marginBottom: 4 }}>
-              TU AEGIS ID
+              {i18nT('addContact.yourAegisId', 'TU AEGIS ID')}
             </Text>
             <Text style={{ fontFamily: t.fontMono, fontSize: 18, color: t.text, letterSpacing: 2 }}>
               {identity?.aegisId ?? '—'}
@@ -368,7 +373,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
 
           <Pressable
             onPress={handleScan}
-            accessibilityLabel="Escanear código QR del contacto"
+            accessibilityLabel={i18nT('addContact.scanContactQrA11y', 'Escanear código QR del contacto')}
             style={{
               flexDirection: 'row', alignItems: 'center', gap: 8,
               backgroundColor: t.surface, borderWidth: 1, borderColor: t.border,
@@ -377,7 +382,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
           >
             <I.QR size={18} color={t.accent} />
             <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.text, letterSpacing: 0.5 }}>
-              ESCANEAR QR DEL CONTACTO
+              {i18nT('addContact.scanContactQr', 'ESCANEAR QR DEL CONTACTO')}
             </Text>
           </Pressable>
         </ScrollView>
@@ -395,14 +400,14 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
           }}>
             <Pressable
               onPress={() => setMode('show')}
-              accessibilityLabel="Cancelar escaneo"
+              accessibilityLabel={i18nT('addContact.cancelScanA11y', 'Cancelar escaneo')}
               style={{
                 backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 99,
                 paddingHorizontal: 20, paddingVertical: 10,
               }}
             >
               <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: '#fff', letterSpacing: 0.5 }}>
-                CANCELAR
+                {i18nT('common.cancel', 'Cancelar').toUpperCase()}
               </Text>
             </Pressable>
           </View>
@@ -438,7 +443,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
 
   const handleShare = async () => {
     await Share.share({
-      message: `Agrégate en AegisLink (E2EE, sin metadatos):\n${link}`,
+      message: i18nT('addContact.shareMessage', 'Agrégate en AegisLink (E2EE, sin metadatos):\n{{link}}', { link }),
       url: link,
     });
   };
@@ -455,14 +460,14 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
-          Enlace de invitación
+          {i18nT('addContact.linkTitle', 'Enlace de invitación')}
         </Text>
         <View style={{ width: 34 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 22, gap: 18 }}>
         <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 20, textAlign: 'center' }}>
-          Este enlace identifica tu cuenta. Cualquiera que lo reciba podrá agregarte como contacto.
+          {i18nT('addContact.linkIntro', 'Este enlace identifica tu cuenta. Cualquiera que lo reciba podrá agregarte como contacto.')}
         </Text>
 
         {/* Link display */}
@@ -471,7 +476,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
           borderRadius: t.radius, padding: 16,
         }}>
           <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent, letterSpacing: 0.5, marginBottom: 8 }}>
-            TU ENLACE DE CONTACTO
+            {i18nT('addContact.yourLinkLabel', 'TU ENLACE DE CONTACTO')}
           </Text>
           <Text style={{ fontFamily: t.fontMono, fontSize: 13, color: t.text, lineHeight: 20 }}>
             {link}
@@ -481,7 +486,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
         <View style={{ gap: 10 }}>
           <Pressable
             onPress={handleCopy}
-            accessibilityLabel={copied ? 'Enlace copiado' : 'Copiar enlace'}
+            accessibilityLabel={copied ? i18nT('addContact.copiedA11y', 'Enlace copiado') : i18nT('addContact.copyLinkA11y', 'Copiar enlace')}
             style={{
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
               backgroundColor: copied ? t.accent + '22' : t.surface,
@@ -491,13 +496,13 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
           >
             <I.Copy size={18} color={copied ? t.accent : t.text} />
             <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: copied ? t.accent : t.text, letterSpacing: 0.5 }}>
-              {copied ? 'COPIADO ✓' : 'COPIAR ENLACE'}
+              {copied ? i18nT('addContact.copied', 'COPIADO ✓') : i18nT('addContact.copyLink', 'COPIAR ENLACE')}
             </Text>
           </Pressable>
 
           <Pressable
             onPress={handleShare}
-            accessibilityLabel="Compartir enlace de invitación"
+            accessibilityLabel={i18nT('addContact.shareA11y', 'Compartir enlace de invitación')}
             style={{
               flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
               backgroundColor: t.accent, borderRadius: t.radius, paddingVertical: 14,
@@ -505,7 +510,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
           >
             <I.Send size={18} color={t.accentInk} />
             <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accentInk, letterSpacing: 0.5, fontWeight: '600' }}>
-              COMPARTIR
+              {i18nT('addContact.share', 'COMPARTIR')}
             </Text>
           </Pressable>
         </View>
@@ -516,7 +521,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
         }}>
           <I.Shield size={16} color={t.warn} style={{ marginTop: 2 }} />
           <Text style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 18 }}>
-            Comparte solo con personas de confianza. Quien reciba este enlace podrá ver tu Aegis ID y agregarte.
+            {i18nT('addContact.linkWarning', 'Comparte solo con personas de confianza. Quien reciba este enlace podrá ver tu Aegis ID y agregarte.')}
           </Text>
         </View>
       </ScrollView>
@@ -560,9 +565,9 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
         raw.toLowerCase().includes('timeout') ||
         raw.toLowerCase().includes('econnrefused');
       themedAlert(
-        'No se pudo agregar',
+        i18nT('addContact.addError', 'No se pudo agregar'),
         isNetwork
-          ? 'No se puede conectar al servidor AegisLink. Verifica tu conexión.'
+          ? i18nT('addContact.networkError', 'No se puede conectar al servidor AegisLink. Verifica tu conexión.')
           : raw,
       );
     } finally {
@@ -582,20 +587,20 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
           <I.ChevronL size={22} color={t.text} />
         </Pressable>
         <Text style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
-          Por Aegis ID
+          {i18nT('addContact.idLabel', 'Por Aegis ID')}
         </Text>
         <View style={{ width: 34 }} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 22, gap: 18 }}>
         <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 20, textAlign: 'center' }}>
-          Introduce el ID de 12 caracteres de tu contacto. Recomendamos verificar las 8 palabras de seguridad después en Privacidad → Verificar.
+          {i18nT('addContact.idIntro', 'Introduce el ID de 12 caracteres de tu contacto. Recomendamos verificar las 8 palabras de seguridad después en Privacidad → Verificar.')}
         </Text>
 
         {/* ID input */}
         <View>
           <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8 }}>
-            AEGIS ID
+            {i18nT('addContact.aegisIdLabel', 'AEGIS ID')}
           </Text>
           <View style={{
             flexDirection: 'row', alignItems: 'center',
@@ -606,7 +611,7 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
             <TextInput
               value={aegisId}
               onChangeText={(s) => setAegisId(s.toUpperCase())}
-              placeholder="XXX-XXXX-XXXX"
+              placeholder={i18nT('addContact.idPlaceholder', 'XXX-XXXX-XXXX')}
               placeholderTextColor={t.textFaint}
               autoCapitalize="characters"
               autoCorrect={false}
@@ -620,14 +625,14 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
               onPress={handlePaste}
               hitSlop={8}
               style={{ padding: 6 }}
-              accessibilityLabel="Pegar ID desde portapapeles"
+              accessibilityLabel={i18nT('addContact.pasteA11y', 'Pegar ID desde portapapeles')}
             >
               <I.Copy size={18} color={t.textDim} />
             </Pressable>
           </View>
           {aegisId.length > 0 && !idValid && (
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger, marginTop: 6 }}>
-              Formato inválido — debe ser XXX-XXXX-XXXX
+              {i18nT('addContact.invalidFormat', 'Formato inválido — debe ser XXX-XXXX-XXXX')}
             </Text>
           )}
         </View>
@@ -635,12 +640,12 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
         {/* Nickname */}
         <View>
           <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8 }}>
-            APODO (OPCIONAL)
+            {i18nT('addContact.nicknameLabel', 'APODO (OPCIONAL)')}
           </Text>
           <TextInput
             value={name}
             onChangeText={setName}
-            placeholder="¿Cómo quieres llamarle?"
+            placeholder={i18nT('addContact.nicknamePlaceholder', '¿Cómo quieres llamarle?')}
             placeholderTextColor={t.textFaint}
             style={{
               backgroundColor: t.surface, borderWidth: 1, borderColor: t.border,
@@ -652,7 +657,7 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
 
         <PrimaryButton
           t={t}
-          label={submitting ? 'Añadiendo…' : 'Añadir contacto'}
+          label={submitting ? i18nT('addContact.adding', 'Añadiendo…') : i18nT('addContact.addBtn', 'Añadir contacto')}
           disabled={!idValid || submitting}
           onPress={handleAdd}
         />

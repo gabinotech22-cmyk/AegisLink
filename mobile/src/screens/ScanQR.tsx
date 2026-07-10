@@ -216,7 +216,7 @@ export function ScanQRScreen({ onCancel, onAdded, onGroupInvite }: Props) {
             textAlign: 'center',
           }}
         >
-          {busy ? i18nT('common.loading', 'ADDING…').toUpperCase() : i18nT('scanQR.instruction', 'POINT AT A PEER’S QR').toUpperCase()}
+          {busy ? i18nT('scanQR.adding', 'ADDING…').toUpperCase() : i18nT('scanQR.instruction', 'POINT AT A PEER’S QR').toUpperCase()}
         </Text>
       </View>
     </View>
