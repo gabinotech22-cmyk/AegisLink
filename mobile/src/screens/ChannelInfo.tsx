@@ -23,6 +23,7 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { AvatarCropModal } from '../components/AvatarCropModal';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import { TopBar } from '../components/TopBar';
 import { Section } from '../components/Section';
@@ -103,6 +104,9 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
   const channelAvatarUri = useChannelAvatar(channelId, summary?.avatarHash ?? null);
 
   const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
+  // Full-screen expanded view of the channel photo (tap the avatar — standard
+  // messenger behavior, available to every subscriber).
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [showShareLink, setShowShareLink] = useState(false);
   const [signingKey, setSigningKey] = useState<Uint8Array | null>(null);
   const [capability, setCapability] = useState<Uint8Array | null>(null);
@@ -177,18 +181,22 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
 
   // ── Avatar pick (owner only) ───────────────────────────────────────────────
 
-  // Tapping the header avatar (owner only) is the single entry point for avatar
-  // edits — mirrors the group-info flow. When a photo already exists it offers
-  // Replace/Remove; otherwise it picks straight away. (The old duplicate
-  // "AVATAR" section below was removed.)
+  // Tapping the header avatar is the single entry point for avatar actions —
+  // mirrors the group-info flow. Owners with a photo get View/Replace/Remove;
+  // owners without one pick straight away; NON-owners with a photo get the
+  // standard tap-to-expand every messenger has.
   function handleAvatarPress() {
-    if (!isOwner || !signingKey) return;
+    if (!isOwner || !signingKey) {
+      if (channelAvatarUri) setPhotoOpen(true);
+      return;
+    }
     if (channelAvatarUri) {
       themedAlert(
         i18nT('channelInfo.avatarActionsTitle', 'Channel photo'),
         i18nT('channelInfo.avatarActionsDesc', 'Replace or remove the channel photo.'),
         [
           { text: i18nT('common.cancel', 'Cancel'), style: 'cancel' },
+          { text: i18nT('channelInfo.viewPhoto', 'View photo'), onPress: () => setPhotoOpen(true) },
           { text: i18nT('channelInfo.removePhoto', 'Remove photo'), style: 'destructive', onPress: () => void handleRemoveAvatar() },
           { text: i18nT('channelInfo.replacePhoto', 'Replace photo'), onPress: () => void handlePickAvatar() },
         ],
@@ -504,9 +512,14 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
         {/* Header */}
         <View style={{ alignItems: 'center', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 18 }}>
           <Pressable
-            onPress={isOwner && signingKey ? handleAvatarPress : undefined}
-            disabled={!isOwner || !signingKey}
-            accessibilityLabel={i18nT('channelInfo.changeAvatar', 'Change channel photo')}
+            // Owners manage the photo; anyone can expand it when one is set.
+            onPress={(isOwner && signingKey) || channelAvatarUri ? handleAvatarPress : undefined}
+            disabled={!(isOwner && signingKey) && !channelAvatarUri}
+            accessibilityLabel={
+              isOwner && signingKey
+                ? i18nT('channelInfo.changeAvatar', 'Change channel photo')
+                : i18nT('channelInfo.viewPhoto', 'View photo')
+            }
           >
             {channelAvatarUri ? (
               <Image
@@ -971,6 +984,13 @@ export function ChannelInfoScreen({ channelId, onBack }: Props) {
         title={i18nT('channelInfo.shareInvite', 'Share invite link')}
         link={inviteLink}
         shareMessage={i18nT('channels.shareMessage', { name: summary.name })}
+      />
+
+      {/* Expanded channel photo (tap avatar). Reuses the chat image viewer. */}
+      <ImageViewerModal
+        t={t}
+        images={photoOpen && channelAvatarUri ? [channelAvatarUri] : null}
+        onClose={() => setPhotoOpen(false)}
       />
     </View>
   );

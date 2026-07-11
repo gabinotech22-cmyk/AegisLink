@@ -11,6 +11,7 @@ import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { BrandedQR } from '../components/BrandedQR';
 import { AvatarCropModal } from '../components/AvatarCropModal';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 import { ContactPickerSheet } from '../components/ContactPickerSheet';
 import { FloatingMenu, type FloatingMenuItem } from '../components/FloatingMenu';
 import { ShareLinkSheet } from '../components/ShareLinkSheet';
@@ -43,6 +44,9 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(groupProp.name);
   const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
+  // Full-screen expanded view of the group photo (tap the avatar — standard
+  // messenger behavior, available to every member).
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
   // aegisId of the member whose role/actions floating menu is open (owner only).
   const [roleMenuFor, setRoleMenuFor] = useState<string | null>(null);
@@ -198,9 +202,21 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
         {/* Header */}
         <View style={{ alignItems: 'center', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 18 }}>
           <Pressable
-            onPress={canEdit ? () => void handlePickGroupAvatar() : undefined}
-            disabled={!canEdit}
-            accessibilityLabel={i18nT('groupAdmin.changeAvatar', 'Cambiar imagen del grupo')}
+            // With a photo set: tap EXPANDS it full-screen (standard messenger
+            // behavior, for every member). Without one: editors tap to pick.
+            onPress={
+              group.avatarImage
+                ? () => setPhotoOpen(true)
+                : canEdit
+                  ? () => void handlePickGroupAvatar()
+                  : undefined
+            }
+            disabled={!group.avatarImage && !canEdit}
+            accessibilityLabel={
+              group.avatarImage
+                ? i18nT('groupAdmin.viewPhoto', 'Ver foto del grupo')
+                : i18nT('groupAdmin.changeAvatar', 'Cambiar imagen del grupo')
+            }
           >
             {group.avatarImage ? (
               <Image
@@ -221,7 +237,12 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
               />
             )}
             {canEdit && (
-              <View
+              // Nested Pressable: the pencil badge stays the CHANGE-photo entry
+              // point now that tapping the photo itself expands it.
+              <Pressable
+                onPress={() => void handlePickGroupAvatar()}
+                hitSlop={6}
+                accessibilityLabel={i18nT('groupAdmin.changeAvatar', 'Cambiar imagen del grupo')}
                 style={{
                   position: 'absolute',
                   right: -2,
@@ -237,7 +258,7 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
                 }}
               >
                 <I.Image size={13} color={t.accentInk} />
-              </View>
+              </Pressable>
             )}
           </Pressable>
 
@@ -639,6 +660,13 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
             }
           })();
         }}
+      />
+
+      {/* Expanded group photo (tap avatar). Reuses the chat image viewer. */}
+      <ImageViewerModal
+        t={t}
+        images={photoOpen && group.avatarImage ? [group.avatarImage] : null}
+        onClose={() => setPhotoOpen(false)}
       />
     </View>
   );

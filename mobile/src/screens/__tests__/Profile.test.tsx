@@ -142,8 +142,6 @@ const mockSetPreference = jest.fn();
 const mockPrefs: Record<string, unknown> = {
   set: mockSetPreference,
   photoVis: 'all',
-  lastSeenVisible: true,
-  typingVisible: false,
 };
 jest.mock('../../store/preferences', () => ({
   usePreferences: (sel: (s: Record<string, unknown>) => unknown) => sel(mockPrefs),
@@ -171,8 +169,6 @@ describe('ProfileScreen', () => {
     mockIdentity.profileStatus = '';
     mockIdentity.identity = { aegisId: 'AEGIS-7QX', publicKeyB64: 'pubkey-b64' };
     mockPrefs.photoVis = 'all';
-    mockPrefs.lastSeenVisible = true;
-    mockPrefs.typingVisible = false;
   });
 
   // ── 1. Title + identity ──────────────────────────────────────────────────
@@ -265,17 +261,6 @@ describe('ProfileScreen', () => {
     // labels are upper-cased in the segmented control
     fireEvent.press(getByText('PROFILE.NOBODY'));
     expect(mockSetPreference).toHaveBeenCalledWith('photoVis', 'none');
-  });
-
-  // ── 8. Toggles invert and persist their preference ───────────────────────
-  it('toggles lastSeen and typing visibility, inverting current value', () => {
-    const { getByText } = render(<ProfileScreen {...makeProps()} />);
-
-    fireEvent.press(getByText('profile.lastSeen')); // current true → false
-    expect(mockSetPreference).toHaveBeenCalledWith('lastSeenVisible', false);
-
-    fireEvent.press(getByText('profile.typingIndicator')); // current false → true
-    expect(mockSetPreference).toHaveBeenCalledWith('typingVisible', true);
   });
 
   // ── 9. Back button ───────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ import { useContacts } from '../store/contacts';
 import { usePreferences } from '../store/preferences';
 import type { StoredContact } from '../db/local';
 import { themedAlert } from '../components/AlertHost';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 
 // Abuse reports are delivered by the reporter's own mail client — nothing touches
 // the relay, so this stays compatible with the zero-metadata guarantee. Reporting
@@ -47,6 +48,9 @@ export function ContactDetailScreen({
   const [removing, setRemoving] = useState(false);
   const [wallpaper, setWallpaper] = useState<WallpaperOption>(0);
   const [wallpaperPickerOpen, setWallpaperPickerOpen] = useState(false);
+  // Full-screen expanded view of the contact's profile photo (standard
+  // messenger behavior: tap the avatar → see it big). Only when a photo is set.
+  const [photoOpen, setPhotoOpen] = useState(false);
 
   // Use live contact from store so muted/zeroTrust updates reflect instantly
   const { muteContact, setZeroTrust, setBlocked, removeContact, confirmKeyChange, markVerified } = useContacts();
@@ -226,7 +230,13 @@ export function ContactDetailScreen({
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: 22 }}>
           <View style={{ alignItems: 'center', paddingHorizontal: 22, paddingVertical: 14 }}>
-            <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.accent} size={88} seed={contact.publicKeyB64 || contact.aegisId} />
+            <Pressable
+              onPress={contact.avatarImage ? () => setPhotoOpen(true) : undefined}
+              disabled={!contact.avatarImage}
+              accessibilityLabel={i18nT('contactDetail.viewPhoto', 'Ver foto')}
+            >
+              <Avatar t={t} name={contact.avatarImage || contact.name} color={contact.color ?? t.accent} size={88} seed={contact.publicKeyB64 || contact.aegisId} />
+            </Pressable>
             <Text
               style={{
                 fontFamily: /^[A-Z0-9]{3}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(contact.name) ? t.fontMono : t.fontDisplay,
@@ -593,6 +603,13 @@ export function ContactDetailScreen({
           </Animated.View>
         </Pressable>
       </Modal>
+
+      {/* Expanded profile photo (tap avatar). Reuses the chat image viewer. */}
+      <ImageViewerModal
+        t={t}
+        images={photoOpen && contact.avatarImage ? [contact.avatarImage] : null}
+        onClose={() => setPhotoOpen(false)}
+      />
     </View>
   );
 }

@@ -63,12 +63,28 @@ jest.mock('../registration', () => ({
 }));
 
 // ── import SUT after mocks ─────────────────────────────────────────────────────
-import {
+// Loaded via require() AFTER the jest.mock registrations above instead of a
+// top-level `import`, and AFTER jest.resetModules(). In CI (Linux workers,
+// full parallel suite) this exact suite failed 12/12 with the REAL
+// expo-file-system/legacy bound by media.ts — even once the SUT was loaded via
+// a require() that provably ran after every factory registration. The only
+// mechanism consistent with that: the real module was ALREADY in the module
+// registry before this file's mocks registered (jest-expo's setupFiles can
+// pull in expo-modules-core/expo-file-system transitively, environment-
+// dependently — which is why it never reproduces locally and tracked
+// worker/scheduling changes in CI, not code changes). jest.mock() after a
+// module is already required is a no-op for the cached instance.
+// jest.resetModules() clears that primed registry while KEEPING the mock
+// factories registered above, so the require below re-resolves everything
+// fresh and the factories are guaranteed to intercept.
+/* eslint-disable @typescript-eslint/no-var-requires */
+jest.resetModules();
+const {
   encryptAndUploadMedia,
   persistEncryptedBlob,
   resolveMediaDetailed,
   downloadAndDecryptMedia,
-} from '../media';
+} = require('../media') as typeof import('../media');
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

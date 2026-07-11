@@ -203,9 +203,6 @@
     "visibilitySection": "VISIBILITÀ",
     "visibilityHint": "COSA CONDIVIDI",
     "profilePhoto": "Foto profilo",
-    "lastSeen": "Ultimo accesso",
-    "lastSeenSub": "Mostra quando sei online",
-    "typingIndicator": "Indicatore di scrittura",
     "appearanceSection": "ASPETTO",
     "appIcon": "Icona app",
     "appIconSub": "Dark · Light · Tinted · Work",
@@ -256,7 +253,8 @@
     "securingWorkSlot": "Sicurezza del cambio di contesto del database...",
     "generatingWorkTitle": "Generazione della coppia di chiavi Work",
     "generatingWorkSubtitle": "Curve25519 · 256-bit · SQLite isolato",
-    "keygenError": "Errore durante la generazione della coppia di chiavi di lavoro"
+    "keygenError": "Errore durante la generazione della coppia di chiavi di lavoro",
+    "viewPhoto": "Vedi foto"
   },
   "privacy": {
     "title": "Privacy",
@@ -1004,7 +1002,8 @@
     "title": "Impostazioni blocco",
     "timeout": "Blocco automatico dopo",
     "immediately": "Immediatamente",
-    "hideRecents": "Nascondi nelle recenti"
+    "hideRecents": "Nascondi nelle recenti",
+    "hideRecentsDesc": "Offusca il contenuto dell'app nel task switcher"
   },
   "lockConfig": {
     "title": "Schermata di blocco",
@@ -1194,7 +1193,11 @@
     "shareInviteLink": "Condividi link di invito",
     "shareInviteLinkSub": "Chiunque abbia il link può richiedere di unirsi",
     "inviteQrLabel": "Codice QR di invito al gruppo",
-    "inviteQrSub": "Scansiona questo codice per richiedere di unirti al gruppo"
+    "inviteQrSub": "Scansiona questo codice per richiedere di unirti al gruppo",
+    "viewPhoto": "Vedi foto del gruppo",
+    "removePhoto": "Rimuovi foto",
+    "removePhotoTitle": "Rimuovi foto del gruppo",
+    "removePhotoDesc": "Il gruppo tornerà alla sua icona generata."
   },
   "groupJoin": {
     "title": "Unisciti al gruppo",
@@ -1286,7 +1289,8 @@
     "clearBlockDesc": "Eliminare tutti i messaggi con {{name}} e rimuovere il contatto? Questa azione non può essere annullata.",
     "clearBlockBtn": "Svuota e blocca",
     "addedAgo": "{{count}}g fa",
-    "addedAgoLabel": "aggiunto"
+    "addedAgoLabel": "aggiunto",
+    "viewPhoto": "Vedi foto"
   },
   "keys": {
     "title": "Identità e chiavi",
@@ -1534,6 +1538,7 @@
     "bannedBadge": "Espulso",
     "notificationsSection": "Notifiche",
     "notificationsToggle": "Notifiche dei nuovi post",
-    "notificationsToggleSub": "Solo su questo dispositivo — mai condiviso con il server"
+    "notificationsToggleSub": "Solo su questo dispositivo — mai condiviso con il server",
+    "viewPhoto": "Vedi foto"
   }
 }

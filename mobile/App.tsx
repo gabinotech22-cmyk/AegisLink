@@ -3,7 +3,7 @@ import './src/i18n';
 import { logger } from './src/utils/logger';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking } from 'react-native';
-import { View, Text, ActivityIndicator, AppState, Pressable, type AppStateStatus, Dimensions } from 'react-native';
+import { View, Text, ActivityIndicator, AppState, Pressable, Platform, type AppStateStatus, Dimensions } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -283,7 +283,41 @@ function Shell() {
     return () => sub.remove();
   }, [appLockEnabled, lockTimeoutMin, identity]);
 
+  // "Hide in recents" — was a pure-JS overlay (below) with NO effect on the
+  // actual OS-level task-switcher thumbnail: iOS snapshots the screen the
+  // instant it resigns active, before React has a chance to re-render the
+  // shield, so the real content could still be captured; on Android nothing
+  // native was ever called for this preference at all — only `blockScreenshots`
+  // (FLAG_SECURE) actually blanked recents there, so toggling THIS setting did
+  // nothing observable. Fixed to drive the real native APIs, with the JS
+  // overlay kept only as a same-frame visual (belt-and-suspenders, and the
+  // sole mechanism on iOS <13 / Android without Play Services where the native
+  // call silently no-ops).
   useEffect(() => {
+    try {
+      const SC = require('expo-screen-capture');
+      const e2e = process.env.EXPO_PUBLIC_E2E === '1';
+      if (hideRecents && !e2e) {
+        // iOS: native app-switcher blur — handled by the OS itself, so there is
+        // no React re-render race with the snapshot. preventScreenCaptureAsync
+        // is deliberately NOT called here on iOS: unlike Android's FLAG_SECURE
+        // (which only affects the recents thumbnail), iOS's screen-capture
+        // block also blocks in-app screenshots — that is blockScreenshots'
+        // job, and this toggle must not silently widen its own scope into it.
+        SC.enableAppSwitcherProtectionAsync?.().catch(() => {});
+        if (Platform.OS === 'android') {
+          // FLAG_SECURE also blanks the recents thumbnail. Own key so toggling
+          // this off never cancels blockScreenshots' protection (and vice
+          // versa) — see the comment on that effect above.
+          SC.preventScreenCaptureAsync('hideRecents').catch(() => {});
+        }
+      } else {
+        SC.disableAppSwitcherProtectionAsync?.().catch(() => {});
+        if (Platform.OS === 'android') {
+          SC.allowScreenCaptureAsync('hideRecents').catch(() => {});
+        }
+      }
+    } catch { /* package not installed — graceful no-op */ }
     if (!hideRecents) {
       setIsBackgroundShieldActive(false);
       return;
@@ -388,10 +422,14 @@ function Shell() {
     try {
       const SC = require('expo-screen-capture');
       const e2e = process.env.EXPO_PUBLIC_E2E === '1';
+      // Explicit, distinct key: hideRecents (below) independently calls the SAME
+      // prevent/allow pair on Android with its OWN key. Two callers sharing the
+      // implicit default key would let either one's allowScreenCaptureAsync()
+      // silently cancel the other's protection.
       if (blockScreenshots && !e2e) {
-        SC.preventScreenCaptureAsync().catch(() => {});
+        SC.preventScreenCaptureAsync('blockScreenshots').catch(() => {});
       } else {
-        SC.allowScreenCaptureAsync().catch(() => {});
+        SC.allowScreenCaptureAsync('blockScreenshots').catch(() => {});
       }
     } catch { /* package not installed — graceful no-op */ }
   }, [blockScreenshots]);

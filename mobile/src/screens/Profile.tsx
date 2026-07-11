@@ -8,6 +8,7 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { AvatarCropModal } from '../components/AvatarCropModal';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import { encodeIdentityLink } from '../crypto/qr';
 import { TopBar } from '../components/TopBar';
@@ -64,15 +65,11 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
 
   const setPreference = usePreferences((s) => s.set);
   const photoVis = usePreferences((s) => s.photoVis);
-  const lastSeen = usePreferences((s) => s.lastSeenVisible);
-  const typing = usePreferences((s) => s.typingVisible);
   // Isolated-profiles switcher must stay hidden while showing the decoy
   // account — it would reveal that a real, hidden identity exists.
   const duressActive = usePreferences((s) => s.duressActive);
 
   const setPhotoVis = (v: 'all' | 'contacts' | 'none') => void setPreference('photoVis', v);
-  const setLastSeen = (v: boolean) => void setPreference('lastSeenVisible', v);
-  const setTyping = (v: boolean) => void setPreference('typingVisible', v);
 
 
   // Profile Editor States
@@ -90,6 +87,10 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
   // In-app avatar cropper: holds the freshly-picked image until the user frames
   // and confirms it. Null when the cropper is closed.
   const [cropSource, setCropSource] = useState<{ uri: string; width: number; height: number } | null>(null);
+
+  // Full-screen expanded view of the own profile photo (tap the avatar —
+  // standard messenger behavior). Only when a photo is set.
+  const [photoOpen, setPhotoOpen] = useState(false);
 
   // Synchronize state when store hydrates/updates or active identity tab changes
   useEffect(() => {
@@ -211,14 +212,21 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
           }}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-            <Avatar
-              t={t}
-              name={displayName}
-              color={avatarColor}
-              size={56}
-              photoUri={avatarImage}
-              seed={identity?.publicKeyB64}
-            />
+            {/* Tap the avatar itself → expand the photo full-screen (when set);
+                tapping the rest of the card still opens the profile editor. */}
+            <Pressable
+              onPress={avatarImage ? () => setPhotoOpen(true) : () => setIsEditing(true)}
+              accessibilityLabel={i18nT('profile.viewPhoto', 'Ver foto')}
+            >
+              <Avatar
+                t={t}
+                name={displayName}
+                color={avatarColor}
+                size={56}
+                photoUri={avatarImage}
+                seed={identity?.publicKeyB64}
+              />
+            </Pressable>
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text
@@ -366,22 +374,12 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
               alignItems: 'center',
               paddingHorizontal: 16,
               paddingVertical: 12,
-              borderBottomWidth: 1,
-              borderBottomColor: t.divider,
               gap: 12,
             }}
           >
             <Text style={{ flex: 1, fontFamily: t.font, fontSize: 14, color: t.text }}>{i18nT('profile.profilePhoto')}</Text>
             <PhotoVisPicker t={t} value={photoVis} onChange={setPhotoVis} />
           </View>
-          <Toggle
-            t={t}
-            label={i18nT('profile.lastSeen')}
-            sub={i18nT('profile.lastSeenSub')}
-            value={lastSeen}
-            onChange={setLastSeen}
-          />
-          <Toggle t={t} label={i18nT('profile.typingIndicator')} value={typing} onChange={setTyping} noBorder />
         </Section>
 
         <Section t={t} label={i18nT('profile.appearanceSection')}>
@@ -675,6 +673,13 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
           />
         </View>
       </Modal>
+
+      {/* Expanded own profile photo (tap avatar). Reuses the chat image viewer. */}
+      <ImageViewerModal
+        t={t}
+        images={photoOpen && avatarImage ? [avatarImage] : null}
+        onClose={() => setPhotoOpen(false)}
+      />
     </View>
   );
 }

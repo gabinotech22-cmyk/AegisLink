@@ -61,22 +61,27 @@ export function ViewOnceScreen({ contact, mediaUri, messageId, onBack }: Props) 
     }
   };
 
-  // Dynamic screen capture prevention while viewing view-once media
+  // Dynamic screen capture prevention while viewing view-once media. Uses its
+  // OWN key ('viewOnce'), independent of blockScreenshots' own key — the
+  // global toggle protects/unprotects itself; this only needs to guarantee
+  // capture is blocked for the duration of THIS screen and released the
+  // instant it unmounts, regardless of the global setting. Sharing the
+  // default (unkeyed) call with blockScreenshots' effect used to let leaving
+  // this screen with blockScreenshots ON strand an unreleased default-key
+  // block — invisible until the user later turned blockScreenshots off and
+  // capture stayed blocked anyway, since that effect only ever releases its
+  // OWN 'blockScreenshots' key.
   useEffect(() => {
     try {
       const SC = require('expo-screen-capture');
-      SC.preventScreenCaptureAsync().catch(() => {});
+      SC.preventScreenCaptureAsync('viewOnce').catch(() => {});
     } catch (e) {
       if (__DEV__) logger.warn('[view-once] screen capture block failed:', e);
     }
     return () => {
       try {
-        const { usePreferences } = require('../store/preferences');
-        const blockGlobal = usePreferences.getState().blockScreenshots;
         const SC = require('expo-screen-capture');
-        if (!blockGlobal) {
-          SC.allowScreenCaptureAsync().catch(() => {});
-        }
+        SC.allowScreenCaptureAsync('viewOnce').catch(() => {});
       } catch (e) {}
     };
   }, []);

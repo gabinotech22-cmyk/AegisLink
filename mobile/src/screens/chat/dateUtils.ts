@@ -1,19 +1,4 @@
 // Date/time formatting helpers for the chat screen (pure — no imports).
-export function formatLastSeen(ts: number): string {
-  const now = Date.now();
-  const diffMs = now - ts;
-  const diffMin = Math.floor(diffMs / 60_000);
-  const diffHours = Math.floor(diffMs / 3_600_000);
-  const diffDays = Math.floor(diffMs / 86_400_000);
-  if (diffMin < 1) return 'Visto hace un momento';
-  if (diffMin < 60) return `Visto hace ${diffMin}m`;
-  if (diffHours < 24) return `Visto hace ${diffHours}h`;
-  if (diffDays === 1) return 'Visto ayer';
-  const d = new Date(ts);
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  return `Visto el ${dd}/${mm}`;
-}
 
 /** True when two timestamps fall on the same local calendar day. */
 export function isSameLocalDay(a: number, b: number): boolean {

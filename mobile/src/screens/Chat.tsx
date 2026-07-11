@@ -31,7 +31,7 @@ import { WEBRTC_AVAILABLE } from '../runtime';
 import { SoundFX } from '../hooks/useSoundFX';
 import type { StoredContact, StoredMessage } from '../db/local';
 import { themedAlert } from '../components/AlertHost';
-import { formatLastSeen, isSameLocalDay, dayLabel } from './chat/dateUtils';
+import { isSameLocalDay, dayLabel } from './chat/dateUtils';
 import { Bubble } from './chat/bubbles';
 
 const EMPTY_MSGS: StoredMessage[] = [];
@@ -690,17 +690,6 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
                     {isContactTyping ? (
                       <Text style={{ fontFamily: t.font, fontSize: 11, color: t.accent, fontStyle: 'italic' }}>
                         {i18nT('home.typing')}
-                      </Text>
-                    ) : contact.online ? (
-                      <Text style={{ fontFamily: t.font, fontSize: 11, color: t.accent }}>
-                        {i18nT('chat.online', 'En línea')}
-                      </Text>
-                    ) : contact.lastSeenAt ? (
-                      <Text
-                        numberOfLines={1}
-                        style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, flex: 1 }}
-                      >
-                        {formatLastSeen(contact.lastSeenAt)}
                       </Text>
                     ) : contact.status ? (
                       <>
