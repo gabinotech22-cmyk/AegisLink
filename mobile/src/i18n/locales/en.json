@@ -40,7 +40,10 @@
     "processingImage": "PROCESSING IMAGE…",
     "permissionDenied": "Permission denied",
     "offline": "OFFLINE — messages queued",
-    "retryConnection": "Retry connection"
+    "retryConnection": "Retry connection",
+    "contacts": "Contacts",
+    "messages": "Messages",
+    "settings": "Settings"
   },
   "onboarding": {
     "tagline": "Messaging without a trace.",
@@ -72,7 +75,10 @@
     "nicknameLabel": "VISIBLE NAME (OPTIONAL)",
     "nicknameDefault": "Default: {{name}}",
     "colorSwatchLabel": "Avatar color {{color}}",
-    "skipNickname": "Skip for now"
+    "skipNickname": "Skip for now",
+    "dbInitializing": "Initializing secure storage…",
+    "switchDark": "Switch to dark mode",
+    "switchLight": "Switch to light mode"
   },
   "home": {
     "identityCreated": "Identity created",
@@ -102,7 +108,12 @@
     "registering": "REGISTERING IDENTITY…",
     "registrationFailed": "IDENTITY REGISTRATION FAILED",
     "retry": "RETRY",
-    "registrationRateLimited": "Too many registration attempts. Automatic retry in {{minutes}} min"
+    "registrationRateLimited": "Too many registration attempts. Automatic retry in {{minutes}} min",
+    "deleteChat": "Delete chat",
+    "deleteChatConfirm": "Delete the chat with {{name}} from the list? The conversation is cleared but the contact is kept (you can delete it from their profile). It reappears if there's a new message.",
+    "pin": "Pin",
+    "unarchive": "Unarchive",
+    "unpin": "Unpin"
   },
   "chat": {
     "encryptedToday": "END-TO-END ENCRYPTED · TODAY",
@@ -177,7 +188,23 @@
     "joinRequestUnknownGroup": "Group not available on this device",
     "joinRequestPreview": "Join request",
     "joinRequestErrorTitle": "Could not add member",
-    "joinRequestErrorDesc": "Check your connection and try again."
+    "joinRequestErrorDesc": "Check your connection and try again.",
+    "attach": "Attach file",
+    "callDeclinedByThem": "Call declined",
+    "callNoAnswer": "No answer",
+    "contactAddFailed": "Could not add",
+    "contactAdded": "Contact added",
+    "idCopied": "ID copied to clipboard",
+    "noResults": "No results",
+    "replyIcon": "↩",
+    "searchMessages": "Search messages",
+    "searchNext": "Next result",
+    "searchPlaceholder": "Search messages…",
+    "searchPrev": "Previous result",
+    "sendAccessibilityLabel": "Send message",
+    "videoCallMade": "Video call",
+    "voiceCallMade": "Voice call",
+    "voiceNote": "Record voice note"
   },
   "contacts": {
     "title": "Contacts",
@@ -254,7 +281,9 @@
     "generatingWorkTitle": "Generating your Work keypair",
     "generatingWorkSubtitle": "Curve25519 · 256-bit · Isolated SQLite",
     "keygenError": "Error generating work keypair",
-    "viewPhoto": "View photo"
+    "viewPhoto": "View photo",
+    "shareMyId": "Share my ID",
+    "shareMyIdSub": "Share your AegisLink contact"
   },
   "privacy": {
     "title": "Privacy",
@@ -400,7 +429,9 @@
     "copied": "Copied!",
     "regenerate": "Regenerate",
     "regenerateConfirmTitle": "Regenerate trigger link?",
-    "regenerateConfirmDesc": "The previous link will stop working immediately."
+    "regenerateConfirmDesc": "The previous link will stop working immediately.",
+    "confirmMsg": "This action is irreversible. All messages, contacts and keys will be deleted.",
+    "confirmTitle": "Wipe everything?"
   },
   "networkError": {
     "status": "NO RELAY ACCESS",
@@ -410,7 +441,11 @@
     "emergencyRelay": "USE EMERGENCY RELAY · TOR LINK ▸",
     "emergencyRelayTitle": "Emergency relay",
     "emergencyRelayDesc": "Tor routing is available in the production version. Make sure you have Orbot installed and active on your device.",
-    "understood": "Got it"
+    "understood": "Got it",
+    "probing": "probing…",
+    "reachable": "reachable",
+    "relayLabel": "AegisLink relay",
+    "unreachable": "unreachable"
   },
   "tabBar": {
     "chats": "CHATS",
@@ -435,7 +470,13 @@
     "sendError": "Error sending",
     "sendOrSchedule": "Send — long-press to schedule a post",
     "postScheduledTitle": "Post scheduled",
-    "postScheduledDesc": "It will be posted to the group automatically at the chosen time."
+    "postScheduledDesc": "It will be posted to the group automatically at the chosen time.",
+    "anonymousVotes": "Anonymous Poll · {{count}} votes",
+    "deleteMessageConfirm": "Delete this message?",
+    "deletedMessage": "Deleted message",
+    "locationShared": "Shared location",
+    "modBadge": "MOD",
+    "openMaps": "OPEN IN MAPS"
   },
   "groups": {
     "title": "Groups",
@@ -476,7 +517,8 @@
     "errorCreate": "Could not create the group.",
     "permissionDeniedGallery": "We need permission to access your image gallery.",
     "permissionDeniedCamera": "We need permission to access your camera.",
-    "permissionDeniedTitle": "Permission denied"
+    "permissionDeniedTitle": "Permission denied",
+    "groupPhoto": "Group image"
   },
   "addContact": {
     "title": "Add contact",
@@ -609,7 +651,8 @@
     "accountRecovered": "Account recovered",
     "identityRestoredSuccess": "Identity {{aegisId}} restored successfully.",
     "successLabel": "Success",
-    "successfullyRecovered": "Account {{aegisId}} successfully recovered!"
+    "successfullyRecovered": "Account {{aegisId}} successfully recovered!",
+    "invalidEnvelope": "File is not a valid AegisLink backup"
   },
   "notifications": {
     "title": "Notifications",
@@ -618,13 +661,49 @@
     "sound": "Sound",
     "badge": "Badge counter",
     "summary": "Summary notifications",
-    "keywords": "Alert keywords"
+    "keywords": "Alert keywords",
+    "addBtn": "+ add",
+    "always": "always",
+    "badgeSub": "Red dot counter on app icon",
+    "dailySummary": "DAILY SUMMARY",
+    "generalSection": "GENERAL",
+    "keywordPlaceholder": "keyword...",
+    "keywordsDesc": "Messages containing these keywords will always notify you, even if the chat is muted.",
+    "keywordsLabel": "PRIORITY KEYWORDS",
+    "localSummary": "Generate local summary",
+    "localSummarySub": "Processed on-device · 19:30",
+    "masterSub": "Master switch · turns off all notifications",
+    "mutedSectionTitle": "MUTED · {{count}}",
+    "mutedUntil": "UNTIL {{until}}",
+    "notifLabel": "Notifications",
+    "showContent": "Show content",
+    "showContentSub": "If off, only displays \"new encrypted message\"",
+    "unmuteBtn": "UNMUTE"
   },
   "devices": {
     "title": "Linked devices",
     "noDevices": "No linked devices",
     "linkDevice": "Link new device",
-    "remove": "Remove device"
+    "remove": "Remove device",
+    "activeNow": "Active now",
+    "deviceKeyLabel": "DEVICE KEY",
+    "emptyDesc": "Link your desktop to sync conversations securely without sharing keys",
+    "emptyTitle": "No linked devices",
+    "infoDesc": "Each device has its own key. If you lose one, revoke it here — new messages will immediately become unreadable.",
+    "invalidDesktopPubKey": "Invalid desktop public key.",
+    "invalidQrFormat": "Invalid QR — incorrect format.",
+    "invalidQrJson": "Invalid QR — not a JSON.",
+    "link": "Link",
+    "linkDesktopBtn": "+ Link desktop",
+    "linkDesktopConfirmDesc": "This desktop will be able to send and receive messages using your AegisLink identity. Keys never leave your devices.",
+    "linkDesktopConfirmTitle": "Link AegisLink Desktop?",
+    "linkTimeout": "Request timed out",
+    "linkedAt": "Linked {{time}}",
+    "pointAtDesktopQr": "POINT AT DESKTOP QR",
+    "revoke": "Revoke",
+    "revokeDeviceConfirm": "Revoke \"{{name}}\"? New messages will immediately become unreadable.",
+    "revokeDeviceTitle": "Revoke device",
+    "thisDevice": "THIS DEVICE"
   },
   "search": {
     "title": "Search",
@@ -639,7 +718,10 @@
     "mlsEncrypted": "End-to-end encrypted",
     "fileFromIn": "{{size}} · from {{from}} · {{time}} · in {{chat}}",
     "fromYou": "you",
-    "file": "file"
+    "file": "file",
+    "emptyDesc": "Find messages, contacts, files and groups",
+    "emptyTitle": "Search AegisLink",
+    "noResultsTitle": "No results"
   },
   "scheduled": {
     "title": "Scheduled messages",
@@ -736,7 +818,9 @@
     "cancel": "Cancel",
     "permissionTitle": "Permission required",
     "permissionMessage": "Microphone access is needed to record a voice note.",
-    "playing": "Playing…"
+    "playing": "Playing…",
+    "record": "Record voice note",
+    "stop": "Stop recording"
   },
   "location": {
     "title": "Share location",
@@ -943,7 +1027,27 @@
     "title": "Your data",
     "export": "Export data",
     "deleteAccount": "Delete account",
-    "gdpr": "GDPR request"
+    "gdpr": "GDPR request",
+    "contactsSub": "Export address book",
+    "deleteAccountCaps": "DELETE ACCOUNT",
+    "deleteBtn": "Delete my account forever",
+    "deleteConfirmBtn": "Yes, Delete",
+    "deleteConfirmMsg": "This will delete all your local keys and messages from this device permanently. It cannot be undone. Continue?",
+    "deleteDesc": "Deleting your account permanently wipes all local keys, messages, and contacts from this device. Messages already received by your contacts remain on their devices.",
+    "dialogTitle": "Export AegisLink data",
+    "exportError": "Export error",
+    "exportSection": "EXPORT · LOCAL FILE",
+    "fileSaved": "File saved",
+    "format": "FORMAT",
+    "formatValue": "JSON",
+    "generateBtn": "Generate file",
+    "infoDesc": "AegisLink does not save anything on the server beyond opaque encrypted blobs. Here you control what leaves the device — and how to wipe everything if you leave.",
+    "irreversible": "IRREVERSIBLE",
+    "media": "Media",
+    "mediaSub": "Not yet available",
+    "messagesSub": "Export chat history",
+    "savedTo": "Saved to: {{uri}}",
+    "settingsSub": "Preferences"
   },
   "call": {
     "connecting": "Connecting…",
@@ -955,12 +1059,43 @@
     "video": "Video",
     "noVideo": "No video",
     "minimize": "Minimize call",
-    "tapToReturn": "Return to call"
+    "tapToReturn": "Return to call",
+    "alertDesc": "This call uses DTLS-SRTP with ephemeral CURVE25519 key exchange. No server can decrypt or intercept the audio/video stream.",
+    "alertTitle": "End-to-End Encrypted Call",
+    "audio": "AUDIO",
+    "badgeShort": "E2EE · ENCRYPTED",
+    "calling": "CALLING…",
+    "cameraA11yOff": "Camera off",
+    "cameraA11yOn": "Camera on",
+    "cameraOff": "Cam off",
+    "cameraOn": "Cam on",
+    "ended": "CALL ENDED",
+    "fingerprintDesc": "Compare with your contact to verify",
+    "fingerprintPending": "Deriving session fingerprint…",
+    "hangup": "Hang up",
+    "more": "More",
+    "muteA11y": "Muted",
+    "muteA11yOff": "Mic on",
+    "sessionFingerprintTitle": "SESSION FINGERPRINT",
+    "speakerOff": "Earpiece",
+    "speakerOn": "Speaker",
+    "verifyDesc": "Read this code aloud with your contact. If it matches on both phones, no one is intercepting the call.",
+    "verifyFingerprint": "Verify fingerprint",
+    "verifyTitle": "Verify fingerprint"
   },
   "incomingCall": {
     "incoming": "Incoming call",
     "accept": "Accept",
-    "decline": "Decline"
+    "decline": "Decline",
+    "e2eeCall": "E2EE CALL · ENCRYPTED",
+    "quickReply1": "Cannot talk now",
+    "quickReply2": "Call you in 5 minutes",
+    "quickReply3": "What do you need?",
+    "quickReply4": "I am in a meeting",
+    "quickReply5": "Write to me instead",
+    "reply": "REPLY",
+    "replyAndReject": "REPLY AND REJECT",
+    "verified": "Verified identity"
   },
   "lockSetup": {
     "title": "Set up lock",
@@ -1011,14 +1146,25 @@
     "minutes_one": "1 minute",
     "minutes_other": "{{count}} minutes",
     "hours_one": "1 hour",
-    "hours_other": "{{count}} hours"
+    "hours_other": "{{count}} hours",
+    "bioLabel": "BIOMETRICS",
+    "configLabel": "CONFIGURATION",
+    "pinLabel": "PIN"
   },
   "lockSettings": {
     "title": "Lock settings",
     "timeout": "Auto-lock after",
     "immediately": "Immediately",
     "hideRecents": "Hide in recents",
-    "hideRecentsDesc": "Blur app content in the task switcher"
+    "hideRecentsDesc": "Blur app content in the task switcher",
+    "afterMinutes": "After {{count}} min",
+    "autoLockTimer": "AUTO-LOCK TIMER",
+    "bioUnlockDesc": "Face ID / fingerprint unlock",
+    "biometricsAlertMsg": "Face ID / fingerprint will be used to unlock the app.",
+    "biometricsAlertTitle": "Biometrics",
+    "notEnrolled": "No biometrics enrolled on this device. Please configure Face ID / fingerprint in your device settings first.",
+    "requireBiometrics": "Require biometrics",
+    "security": "SECURITY"
   },
   "lockConfig": {
     "title": "Lock screen",
@@ -1029,7 +1175,26 @@
     "timeout": "Auto-lock after",
     "hideRecents": "Hide in recents",
     "hideRecentsSub": "Blur app in task switcher",
-    "setup": "Set up PIN"
+    "setup": "Set up PIN",
+    "accessProtection": "ACCESS PROTECTION",
+    "advanced": "ADVANCED",
+    "appLockActive": "Active · Authentication required to open",
+    "appLockDisabled": "Disabled",
+    "bioDisclaimer": "AegisLink has no access to your biometric data. They are processed locally by your device's Secure Enclave. The PIN never leaves the device.",
+    "changePin": "Change PIN",
+    "confirmPinPrompt": "Confirm your PIN",
+    "deletePin": "Delete PIN",
+    "deletePinAlertMsg": "App lock will be disabled and the PIN deleted. You will need to set a new one to enable it again.",
+    "deletePinAlertTitle": "Delete PIN",
+    "enterPinPrompt": "Enter a 6-digit PIN",
+    "inactivityTime": "Inactivity timeout",
+    "lockNowTest": "Lock now (Test) ▸",
+    "lockSettings": "Lock Settings",
+    "pinMismatch": "PINs do not match. Try again.",
+    "sameAsDecoy": "PIN cannot be the same as decoy PIN.",
+    "screenPrivacy": "SCREEN PRIVACY",
+    "setPin": "Set PIN",
+    "titleBar": "App Lock"
   },
   "appIcon": {
     "title": "App icon",
@@ -1086,7 +1251,8 @@
     "alreadyVerified": "IDENTITY ALREADY VERIFIED",
     "markedTitle": "Verified",
     "markedDesc": "{{name}} is verified. Your messages are protected against man-in-the-middle attacks.",
-    "contactNotFound": "Contact not found."
+    "contactNotFound": "Contact not found.",
+    "loading": "Loading identity…"
   },
   "firstContact": {
     "title": "First contact",
@@ -1158,7 +1324,14 @@
     "loading": "LOADING...",
     "permissionRequired": "Permission required",
     "galleryPermission": "Access to gallery is required.",
-    "cameraPermission": "Access to camera is required."
+    "cameraPermission": "Access to camera is required.",
+    "errorCamera": "Could not access camera",
+    "errorGallery": "Could not open gallery",
+    "errorProcessImage": "Could not process image securely",
+    "poll": "Poll",
+    "sticker": "Sticker",
+    "video": "Video",
+    "videoGallery": "Gallery · E2EE"
   },
   "groupAdmin": {
     "title": "Group admin",
@@ -1212,7 +1385,9 @@
     "viewPhoto": "View group photo",
     "removePhoto": "Remove photo",
     "removePhotoTitle": "Remove group photo",
-    "removePhotoDesc": "The group will go back to its generated icon."
+    "removePhotoDesc": "The group will go back to its generated icon.",
+    "changeAvatar": "Change group image",
+    "memberLimitReached": "This group has reached the maximum of 1024 members."
   },
   "groupJoin": {
     "title": "Join group",
@@ -1486,7 +1661,8 @@
     "awaitingApproval": "awaiting approval",
     "deletePostTitle": "Delete post",
     "deletePostDesc": "Delete this post for everyone in the channel? This cannot be undone.",
-    "deletePostHint": "Long-press to delete post"
+    "deletePostHint": "Long-press to delete post",
+    "schedulePost": "Schedule post"
   },
   "channelInfo": {
     "title": "Channel info",
@@ -1539,6 +1715,44 @@
     "notificationsSection": "Notifications",
     "notificationsToggle": "New post notifications",
     "notificationsToggleSub": "Only on this device — never shared with the server",
-    "viewPhoto": "View photo"
+    "viewPhoto": "View photo",
+    "avatarActionsDesc": "Replace or remove the channel photo.",
+    "avatarActionsTitle": "Channel photo"
+  },
+  "groupCall": {
+    "adminOnlyDetail": "Only admins can start calls in this group.",
+    "adminOnlyTitle": "Admins only",
+    "alone": "Alone in the channel",
+    "callerLabel": "Started by",
+    "calling": "Calling…",
+    "channelActive": "Voice channel active",
+    "connecting": "Connecting…",
+    "e2ee": "E2EE · MESH",
+    "ended": "Call ended",
+    "expandCall": "View fullscreen",
+    "groupCall": "Group call",
+    "inCallCount": "{{count}} in call",
+    "join": "Join",
+    "joinBanner": "Join the voice call",
+    "noMembers": "No members",
+    "noMembersDetail": "There are no other members in this group.",
+    "participantCountShort": "{{count}} in call",
+    "startCall": "Start group call",
+    "tapToExpand": "Return to group call",
+    "tooMany": "Too many participants",
+    "tooManyDetail": "Max. 8 participants in group calls.",
+    "waitingForParticipants": "Waiting for participants…"
+  },
+  "multiPreview": {
+    "captionPlaceholder": "Add a message… (optional)",
+    "file": "file",
+    "send": "Send",
+    "sendTo": "SEND TO",
+    "title": "attachments"
+  },
+  "shareLink": {
+    "copy": "Copy link",
+    "shareVia": "Share via app…",
+    "title": "Sharing link"
   }
 }

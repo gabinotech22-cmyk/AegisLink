@@ -40,7 +40,10 @@
     "processingImage": "ELABORAZIONE IMMAGINE…",
     "permissionDenied": "Permesso negato",
     "offline": "OFFLINE — messaggi in coda",
-    "retryConnection": "Riprova connessione"
+    "retryConnection": "Riprova connessione",
+    "contacts": "Contatti",
+    "messages": "Messaggi",
+    "settings": "Impostazioni"
   },
   "onboarding": {
     "tagline": "Messaggi senza tracce.",
@@ -72,7 +75,10 @@
     "nicknameLabel": "NOME VISIBILE (OPZIONALE)",
     "nicknameDefault": "Predefinito: {{name}}",
     "colorSwatchLabel": "Colore avatar {{color}}",
-    "skipNickname": "Salta per ora"
+    "skipNickname": "Salta per ora",
+    "dbInitializing": "Inizializzazione archiviazione sicura…",
+    "switchDark": "Passa alla modalità scura",
+    "switchLight": "Passa alla modalità chiara"
   },
   "home": {
     "identityCreated": "Identità creata",
@@ -102,7 +108,12 @@
     "registering": "REGISTRAZIONE IDENTITÀ…",
     "registrationFailed": "REGISTRAZIONE IDENTITÀ FALLITA",
     "retry": "RIPROVA",
-    "registrationRateLimited": "Troppi tentativi di registrazione. Nuovo tentativo automatico tra {{minutes}} min"
+    "registrationRateLimited": "Troppi tentativi di registrazione. Nuovo tentativo automatico tra {{minutes}} min",
+    "deleteChat": "Elimina chat",
+    "deleteChatConfirm": "Eliminare la chat con {{name}} dall'elenco? La conversazione viene cancellata ma il contatto viene mantenuto (puoi eliminarlo dal suo profilo). Riappare se arriva un nuovo messaggio.",
+    "pin": "Fissa",
+    "unarchive": "Rimuovi da archivio",
+    "unpin": "Rimuovi fissaggio"
   },
   "chat": {
     "encryptedToday": "CIFRATO END-TO-END · OGGI",
@@ -177,7 +188,23 @@
     "joinRequestUnknownGroup": "Gruppo non disponibile su questo dispositivo",
     "joinRequestPreview": "Richiesta di adesione",
     "joinRequestErrorTitle": "Impossibile aggiungere",
-    "joinRequestErrorDesc": "Controlla la connessione e riprova."
+    "joinRequestErrorDesc": "Controlla la connessione e riprova.",
+    "attach": "Allega file",
+    "callDeclinedByThem": "Chiamata rifiutata",
+    "callNoAnswer": "Nessuna risposta",
+    "contactAddFailed": "Impossibile aggiungere",
+    "contactAdded": "Contatto aggiunto",
+    "idCopied": "ID copiato negli appunti",
+    "noResults": "Nessun risultato",
+    "replyIcon": "↩",
+    "searchMessages": "Cerca messaggi",
+    "searchNext": "Risultato successivo",
+    "searchPlaceholder": "Cerca messaggi…",
+    "searchPrev": "Risultato precedente",
+    "sendAccessibilityLabel": "Invia messaggio",
+    "videoCallMade": "Videochiamata",
+    "voiceCallMade": "Chiamata vocale",
+    "voiceNote": "Registra nota vocale"
   },
   "contacts": {
     "title": "Contatti",
@@ -254,7 +281,9 @@
     "generatingWorkTitle": "Generazione della coppia di chiavi Work",
     "generatingWorkSubtitle": "Curve25519 · 256-bit · SQLite isolato",
     "keygenError": "Errore durante la generazione della coppia di chiavi di lavoro",
-    "viewPhoto": "Vedi foto"
+    "viewPhoto": "Vedi foto",
+    "shareMyId": "Condividi il mio ID",
+    "shareMyIdSub": "Condividi il tuo contatto AegisLink"
   },
   "privacy": {
     "title": "Privacy",
@@ -400,7 +429,9 @@
     "copied": "Copiato!",
     "regenerate": "Rigenera",
     "regenerateConfirmTitle": "Rigenerare il link di attivazione?",
-    "regenerateConfirmDesc": "Il link precedente smetterà di funzionare immediatamente."
+    "regenerateConfirmDesc": "Il link precedente smetterà di funzionare immediatamente.",
+    "confirmMsg": "Questa azione è irreversibile. Tutti i messaggi, i contatti e le chiavi verranno eliminati.",
+    "confirmTitle": "Cancellare tutto?"
   },
   "networkError": {
     "status": "NESSUN ACCESSO AI RELAY",
@@ -410,7 +441,11 @@
     "emergencyRelay": "USA RELAY DI EMERGENZA · LINK TOR ▸",
     "emergencyRelayTitle": "Relay di emergenza",
     "emergencyRelayDesc": "Il routing via Tor è disponibile nella versione di produzione. Assicurati di avere Orbot installato e attivo sul tuo dispositivo.",
-    "understood": "Capito"
+    "understood": "Capito",
+    "probing": "sondaggio in corso…",
+    "reachable": "raggiungibile",
+    "relayLabel": "Relay AegisLink",
+    "unreachable": "irraggiungibile"
   },
   "tabBar": {
     "chats": "CHAT",
@@ -435,7 +470,13 @@
     "sendError": "Errore di invio",
     "sendOrSchedule": "Invia — tieni premuto per programmare un post",
     "postScheduledTitle": "Post programmato",
-    "postScheduledDesc": "Verrà pubblicato automaticamente nel gruppo all'ora scelta."
+    "postScheduledDesc": "Verrà pubblicato automaticamente nel gruppo all'ora scelta.",
+    "anonymousVotes": "Sondaggio anonimo · {{count}} voti",
+    "deleteMessageConfirm": "Eliminare questo messaggio?",
+    "deletedMessage": "Messaggio eliminato",
+    "locationShared": "Posizione condivisa",
+    "modBadge": "MOD",
+    "openMaps": "APRI IN MAPPE"
   },
   "groups": {
     "title": "Gruppi",
@@ -476,7 +517,8 @@
     "errorCreate": "Impossibile creare il gruppo.",
     "permissionDeniedGallery": "Abbiamo bisogno del permesso per accedere alla tua galleria di immagini.",
     "permissionDeniedCamera": "Abbiamo bisogno del permesso per accedere alla tua fotocamera.",
-    "permissionDeniedTitle": "Permesso negato"
+    "permissionDeniedTitle": "Permesso negato",
+    "groupPhoto": "Immagine del gruppo"
   },
   "addContact": {
     "title": "Aggiungi contatto",
@@ -609,7 +651,8 @@
     "accountRecovered": "Account recuperato",
     "identityRestoredSuccess": "Identità {{aegisId}} ripristinata con successo.",
     "successLabel": "Successo",
-    "successfullyRecovered": "Account {{aegisId}} recuperato con successo!"
+    "successfullyRecovered": "Account {{aegisId}} recuperato con successo!",
+    "invalidEnvelope": "Il file non è un backup AegisLink valido"
   },
   "notifications": {
     "title": "Notifiche",
@@ -618,13 +661,49 @@
     "sound": "Suono",
     "badge": "Contatore badge",
     "summary": "Notifiche riepilogo",
-    "keywords": "Parole chiave di avviso"
+    "keywords": "Parole chiave di avviso",
+    "addBtn": "+ aggiungi",
+    "always": "sempre",
+    "badgeSub": "Contatore a pallino rosso sull'icona dell'app",
+    "dailySummary": "RIEPILOGO GIORNALIERO",
+    "generalSection": "GENERALE",
+    "keywordPlaceholder": "parola chiave...",
+    "keywordsDesc": "I messaggi che contengono queste parole chiave ti notificheranno sempre, anche se la chat è silenziata.",
+    "keywordsLabel": "PAROLE CHIAVE PRIORITARIE",
+    "localSummary": "Genera riepilogo locale",
+    "localSummarySub": "Elaborato sul dispositivo · 19:30",
+    "masterSub": "Interruttore principale · disattiva tutte le notifiche",
+    "mutedSectionTitle": "SILENZIATI · {{count}}",
+    "mutedUntil": "FINO A {{until}}",
+    "notifLabel": "Notifiche",
+    "showContent": "Mostra contenuto",
+    "showContentSub": "Se disattivato, mostra solo \"nuovo messaggio cifrato\"",
+    "unmuteBtn": "RIATTIVA"
   },
   "devices": {
     "title": "Dispositivi collegati",
     "noDevices": "Nessun dispositivo collegato",
     "linkDevice": "Collega nuovo dispositivo",
-    "remove": "Rimuovi dispositivo"
+    "remove": "Rimuovi dispositivo",
+    "activeNow": "Attivo ora",
+    "deviceKeyLabel": "CHIAVE DISPOSITIVO",
+    "emptyDesc": "Collega il tuo desktop per sincronizzare le conversazioni in modo sicuro senza condividere le chiavi",
+    "emptyTitle": "Nessun dispositivo collegato",
+    "infoDesc": "Ogni dispositivo ha la propria chiave. Se ne perdi uno, revocalo qui — i nuovi messaggi diventeranno immediatamente illeggibili.",
+    "invalidDesktopPubKey": "Chiave pubblica del desktop non valida.",
+    "invalidQrFormat": "QR non valido — formato errato.",
+    "invalidQrJson": "QR non valido — non è un JSON.",
+    "link": "Collega",
+    "linkDesktopBtn": "+ Collega desktop",
+    "linkDesktopConfirmDesc": "Questo desktop potrà inviare e ricevere messaggi usando la tua identità AegisLink. Le chiavi non lasciano mai i tuoi dispositivi.",
+    "linkDesktopConfirmTitle": "Collegare AegisLink Desktop?",
+    "linkTimeout": "Richiesta scaduta",
+    "linkedAt": "Collegato {{time}}",
+    "pointAtDesktopQr": "PUNTA AL QR DEL DESKTOP",
+    "revoke": "Revoca",
+    "revokeDeviceConfirm": "Revocare \"{{name}}\"? I nuovi messaggi diventeranno immediatamente illeggibili.",
+    "revokeDeviceTitle": "Revoca dispositivo",
+    "thisDevice": "QUESTO DISPOSITIVO"
   },
   "scheduled": {
     "title": "Messaggi programmati",
@@ -721,7 +800,9 @@
     "cancel": "Annulla",
     "permissionTitle": "Permesso richiesto",
     "permissionMessage": "È necessario l'accesso al microfono per registrare una nota vocale.",
-    "playing": "In riproduzione…"
+    "playing": "In riproduzione…",
+    "record": "Registra nota vocale",
+    "stop": "Ferma registrazione"
   },
   "location": {
     "title": "Condividi posizione",
@@ -928,7 +1009,27 @@
     "title": "I tuoi dati",
     "export": "Esporta dati",
     "deleteAccount": "Elimina account",
-    "gdpr": "Richiesta GDPR"
+    "gdpr": "Richiesta GDPR",
+    "contactsSub": "Esporta rubrica",
+    "deleteAccountCaps": "ELIMINA ACCOUNT",
+    "deleteBtn": "Elimina il mio account per sempre",
+    "deleteConfirmBtn": "Sì, elimina",
+    "deleteConfirmMsg": "Questo eliminerà permanentemente tutte le tue chiavi e i messaggi locali da questo dispositivo. Non può essere annullato. Continuare?",
+    "deleteDesc": "Eliminare il tuo account cancella permanentemente tutte le chiavi, i messaggi e i contatti locali da questo dispositivo. I messaggi già ricevuti dai tuoi contatti restano sui loro dispositivi.",
+    "dialogTitle": "Esporta dati AegisLink",
+    "exportError": "Errore di esportazione",
+    "exportSection": "ESPORTA · FILE LOCALE",
+    "fileSaved": "File salvato",
+    "format": "FORMATO",
+    "formatValue": "JSON",
+    "generateBtn": "Genera file",
+    "infoDesc": "AegisLink non salva nulla sul server oltre a blob cifrati opachi. Qui controlli cosa esce dal dispositivo — e come cancellare tutto se te ne vai.",
+    "irreversible": "IRREVERSIBILE",
+    "media": "Media",
+    "mediaSub": "Non ancora disponibile",
+    "messagesSub": "Esporta cronologia chat",
+    "savedTo": "Salvato in: {{uri}}",
+    "settingsSub": "Preferenze"
   },
   "call": {
     "connecting": "Connessione in corso…",
@@ -940,12 +1041,43 @@
     "video": "Video",
     "noVideo": "Nessun video",
     "minimize": "Minimizza chiamata",
-    "tapToReturn": "Torna alla chiamata"
+    "tapToReturn": "Torna alla chiamata",
+    "alertDesc": "Questa chiamata usa DTLS-SRTP con scambio di chiavi effimero CURVE25519. Nessun server può decifrare o intercettare il flusso audio/video.",
+    "alertTitle": "Chiamata cifrata end-to-end",
+    "audio": "AUDIO",
+    "badgeShort": "E2EE · CIFRATA",
+    "calling": "CHIAMATA IN CORSO…",
+    "cameraA11yOff": "Fotocamera spenta",
+    "cameraA11yOn": "Fotocamera accesa",
+    "cameraOff": "Cam spenta",
+    "cameraOn": "Cam accesa",
+    "ended": "CHIAMATA TERMINATA",
+    "fingerprintDesc": "Confronta con il tuo contatto per verificare",
+    "fingerprintPending": "Derivazione dell'impronta di sessione…",
+    "hangup": "Riaggancia",
+    "more": "Altro",
+    "muteA11y": "Silenziato",
+    "muteA11yOff": "Microfono acceso",
+    "sessionFingerprintTitle": "IMPRONTA DI SESSIONE",
+    "speakerOff": "Auricolare",
+    "speakerOn": "Altoparlante",
+    "verifyDesc": "Leggi questo codice ad alta voce con il tuo contatto. Se corrisponde su entrambi i telefoni, nessuno sta intercettando la chiamata.",
+    "verifyFingerprint": "Verifica impronta",
+    "verifyTitle": "Verifica impronta"
   },
   "incomingCall": {
     "incoming": "Chiamata in arrivo",
     "accept": "Accetta",
-    "decline": "Rifiuta"
+    "decline": "Rifiuta",
+    "e2eeCall": "CHIAMATA E2EE · CIFRATA",
+    "quickReply1": "Non posso parlare ora",
+    "quickReply2": "Ti richiamo tra 5 minuti",
+    "quickReply3": "Di cosa hai bisogno?",
+    "quickReply4": "Sono in riunione",
+    "quickReply5": "Scrivimi piuttosto",
+    "reply": "RISPONDI",
+    "replyAndReject": "RISPONDI E RIFIUTA",
+    "verified": "Identità verificata"
   },
   "lockSetup": {
     "title": "Schermata di blocco",
@@ -996,14 +1128,25 @@
     "minutes_one": "1 minuto",
     "minutes_other": "{{count}} minuti",
     "hours_one": "1 ora",
-    "hours_other": "{{count}} ore"
+    "hours_other": "{{count}} ore",
+    "bioLabel": "BIOMETRIA",
+    "configLabel": "CONFIGURAZIONE",
+    "pinLabel": "PIN"
   },
   "lockSettings": {
     "title": "Impostazioni blocco",
     "timeout": "Blocco automatico dopo",
     "immediately": "Immediatamente",
     "hideRecents": "Nascondi nelle recenti",
-    "hideRecentsDesc": "Offusca il contenuto dell'app nel task switcher"
+    "hideRecentsDesc": "Offusca il contenuto dell'app nel task switcher",
+    "afterMinutes": "Dopo {{count}} min",
+    "autoLockTimer": "TIMER DI BLOCCO AUTOMATICO",
+    "bioUnlockDesc": "Sblocco con Face ID / impronta",
+    "biometricsAlertMsg": "Verrà usato Face ID / impronta per sbloccare l'app.",
+    "biometricsAlertTitle": "Biometria",
+    "notEnrolled": "Nessuna biometria registrata su questo dispositivo. Configura prima Face ID / impronta nelle impostazioni del dispositivo.",
+    "requireBiometrics": "Richiedi biometria",
+    "security": "SICUREZZA"
   },
   "lockConfig": {
     "title": "Schermata di blocco",
@@ -1014,7 +1157,26 @@
     "timeout": "Blocco automatico dopo",
     "hideRecents": "Nascondi nelle recenti",
     "hideRecentsSub": "Offusca l'app nel task switcher",
-    "setup": "Configura PIN"
+    "setup": "Configura PIN",
+    "accessProtection": "PROTEZIONE ACCESSO",
+    "advanced": "AVANZATE",
+    "appLockActive": "Attivo · È richiesta l'autenticazione per aprire",
+    "appLockDisabled": "Disattivato",
+    "bioDisclaimer": "AegisLink non ha accesso ai tuoi dati biometrici. Vengono elaborati localmente dal Secure Enclave del tuo dispositivo. Il PIN non lascia mai il dispositivo.",
+    "changePin": "Cambia PIN",
+    "confirmPinPrompt": "Conferma il tuo PIN",
+    "deletePin": "Elimina PIN",
+    "deletePinAlertMsg": "Il blocco dell'app verrà disattivato e il PIN eliminato. Dovrai impostarne uno nuovo per riattivarlo.",
+    "deletePinAlertTitle": "Elimina PIN",
+    "enterPinPrompt": "Inserisci un PIN a 6 cifre",
+    "inactivityTime": "Timeout di inattività",
+    "lockNowTest": "Blocca ora (Test) ▸",
+    "lockSettings": "Impostazioni di blocco",
+    "pinMismatch": "I PIN non corrispondono. Riprova.",
+    "sameAsDecoy": "Il PIN non può essere uguale al PIN esca.",
+    "screenPrivacy": "PRIVACY SCHERMO",
+    "setPin": "Imposta PIN",
+    "titleBar": "Blocco app"
   },
   "appIcon": {
     "title": "Icona app",
@@ -1071,7 +1233,8 @@
     "alreadyVerified": "IDENTITÀ GIÀ VERIFICATA",
     "markedTitle": "Verificato",
     "markedDesc": "{{name}} è verificato. I tuoi messaggi sono protetti dagli attacchi man-in-the-middle.",
-    "contactNotFound": "Contatto non trovato."
+    "contactNotFound": "Contatto non trovato.",
+    "loading": "Caricamento identità…"
   },
   "firstContact": {
     "title": "Primo contatto",
@@ -1143,7 +1306,14 @@
     "loading": "CARICAMENTO...",
     "permissionRequired": "Permesso richiesto",
     "galleryPermission": "È richiesto l'accesso alla galleria.",
-    "cameraPermission": "È richiesto l'accesso alla fotocamera."
+    "cameraPermission": "È richiesto l'accesso alla fotocamera.",
+    "errorCamera": "Impossibile accedere alla fotocamera",
+    "errorGallery": "Impossibile aprire la galleria",
+    "errorProcessImage": "Impossibile elaborare l'immagine in modo sicuro",
+    "poll": "Sondaggio",
+    "sticker": "Sticker",
+    "video": "Video",
+    "videoGallery": "Galleria · E2EE"
   },
   "groupAdmin": {
     "title": "Amministrazione gruppo",
@@ -1197,7 +1367,9 @@
     "viewPhoto": "Vedi foto del gruppo",
     "removePhoto": "Rimuovi foto",
     "removePhotoTitle": "Rimuovi foto del gruppo",
-    "removePhotoDesc": "Il gruppo tornerà alla sua icona generata."
+    "removePhotoDesc": "Il gruppo tornerà alla sua icona generata.",
+    "changeAvatar": "Cambia immagine del gruppo",
+    "memberLimitReached": "Questo gruppo ha raggiunto il limite massimo di 1024 membri."
   },
   "groupJoin": {
     "title": "Unisciti al gruppo",
@@ -1323,7 +1495,10 @@
     "mlsEncrypted": "Cifrato E2EE",
     "fileFromIn": "{{size}} · da {{from}} · {{time}} · in {{chat}}",
     "fromYou": "te",
-    "file": "file"
+    "file": "file",
+    "emptyDesc": "Trova messaggi, contatti, file e gruppi",
+    "emptyTitle": "Cerca in AegisLink",
+    "noResultsTitle": "Nessun risultato"
   },
   "groupPosts": {
     "title": "Post",
@@ -1486,7 +1661,8 @@
     "awaitingApproval": "in attesa di approvazione",
     "deletePostTitle": "Elimina post",
     "deletePostDesc": "Eliminare questo post per tutti nel canale? Non può essere annullato.",
-    "deletePostHint": "Tieni premuto per eliminare il post"
+    "deletePostHint": "Tieni premuto per eliminare il post",
+    "schedulePost": "Programma post"
   },
   "channelInfo": {
     "title": "Info canale",
@@ -1539,6 +1715,44 @@
     "notificationsSection": "Notifiche",
     "notificationsToggle": "Notifiche dei nuovi post",
     "notificationsToggleSub": "Solo su questo dispositivo — mai condiviso con il server",
-    "viewPhoto": "Vedi foto"
+    "viewPhoto": "Vedi foto",
+    "avatarActionsDesc": "Sostituisci o rimuovi la foto del canale.",
+    "avatarActionsTitle": "Foto del canale"
+  },
+  "groupCall": {
+    "adminOnlyDetail": "Solo gli admin possono avviare chiamate in questo gruppo.",
+    "adminOnlyTitle": "Solo admin",
+    "alone": "Da solo nel canale",
+    "callerLabel": "Avviata da",
+    "calling": "Chiamata in corso…",
+    "channelActive": "Canale vocale attivo",
+    "connecting": "Connessione in corso…",
+    "e2ee": "E2EE · MESH",
+    "ended": "Chiamata terminata",
+    "expandCall": "Visualizza a schermo intero",
+    "groupCall": "Chiamata di gruppo",
+    "inCallCount": "{{count}} in chiamata",
+    "join": "Unisciti",
+    "joinBanner": "Unisciti alla chiamata vocale",
+    "noMembers": "Nessun membro",
+    "noMembersDetail": "Non ci sono altri membri in questo gruppo.",
+    "participantCountShort": "{{count}} in chiamata",
+    "startCall": "Avvia chiamata di gruppo",
+    "tapToExpand": "Torna alla chiamata di gruppo",
+    "tooMany": "Troppi partecipanti",
+    "tooManyDetail": "Max. 8 partecipanti nelle chiamate di gruppo.",
+    "waitingForParticipants": "In attesa di partecipanti…"
+  },
+  "multiPreview": {
+    "captionPlaceholder": "Aggiungi un messaggio… (opzionale)",
+    "file": "file",
+    "send": "Invia",
+    "sendTo": "INVIA A",
+    "title": "allegati"
+  },
+  "shareLink": {
+    "copy": "Copia link",
+    "shareVia": "Condividi tramite app…",
+    "title": "Link di condivisione"
   }
 }
