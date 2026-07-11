@@ -363,7 +363,9 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     {
       const { usePreferences } = require('./preferences') as typeof import('./preferences');
       if (usePreferences.getState().duressActive) {
-        set({ subscribed: [], feeds: {}, heads: {}, hydrated: true });
+        // Clear EVERY slice holding real channel state — pending join
+        // applications and ban lists included, both loaded at cold start.
+        set({ subscribed: [], feeds: {}, heads: {}, pendingApplications: [], banned: {}, hydrated: true });
         return;
       }
     }

@@ -439,6 +439,49 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
     }
   }
 
+  /**
+   * Re-hydrate every store that renders real user data. Shared by BOTH lock
+   * transitions (real→duress and duress→real) so the two paths can never
+   * silently diverge — each store's hydrate is duress-aware and serves decoy/
+   * empty state or real state according to the CURRENT duressActive flag.
+   */
+  async function rehydrateProtectedStores(): Promise<void> {
+    const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+    const { useChannels } = require('../store/channels') as typeof import('../store/channels');
+    const { useScheduledMessages } = require('../store/scheduledMessages') as typeof import('../store/scheduledMessages');
+    const { useProfiles } = require('../store/profiles') as typeof import('../store/profiles');
+    await useGroups.getState().hydrate();
+    await useChannels.getState().hydrateSubscribed();
+    await useScheduledMessages.getState().loadPending();
+    await useProfiles.getState().hydrate();
+  }
+
+  /**
+   * Fail-closed fallback for the DURESS entry path: if any duress-aware
+   * hydrate above throws, force-clear the sensitive slices in memory with
+   * plain setState (no DB, no await — cannot fail the same way). The unlock
+   * still proceeds: refusing to open on the duress PIN while a coercer is
+   * watching would expose that the PIN is special, endangering the user —
+   * an EMPTY decoy is safe, a blocked unlock is not.
+   */
+  function forceClearProtectedStores(): void {
+    try {
+      const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+      const { useChannels } = require('../store/channels') as typeof import('../store/channels');
+      const { useScheduledMessages } = require('../store/scheduledMessages') as typeof import('../store/scheduledMessages');
+      const { useProfiles } = require('../store/profiles') as typeof import('../store/profiles');
+      const { useContacts } = require('../store/contacts') as typeof import('../store/contacts');
+      const { usePollsStore } = require('../store/polls') as typeof import('../store/polls');
+      useGroups.setState({ groups: [] });
+      useChannels.setState({ subscribed: [], feeds: {}, heads: {}, pendingApplications: [], banned: {} });
+      useScheduledMessages.setState({ scheduled: [] });
+      useProfiles.setState({ profiles: [], activeSlotId: 'self' });
+      useContacts.setState({ contacts: [] });
+      usePollsStore.setState({ results: {}, seenCommitments: new Set(), myVoteSecrets: {} });
+      useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
+    } catch { /* last resort — never throw from the containment fallback */ }
+  }
+
   /** Returns true if `pin` matched the duress/decoy PIN and unlocked into it. */
   async function checkDuress(pin: string): Promise<boolean> {
     try {
@@ -470,18 +513,14 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         // re-running them here, the REAL groups/channels/scheduled/profiles
         // loaded at cold start would remain in zustand memory and be shown to
         // the coercer, defeating the decoy entirely (real leak found in QA).
-        {
-          const { useGroups } = require('../store/groups') as typeof import('../store/groups');
-          const { useChannels } = require('../store/channels') as typeof import('../store/channels');
-          const { useScheduledMessages } = require('../store/scheduledMessages') as typeof import('../store/scheduledMessages');
-          const { useProfiles } = require('../store/profiles') as typeof import('../store/profiles');
-          await useGroups.getState().hydrate();
-          await useChannels.getState().hydrateSubscribed();
-          await useScheduledMessages.getState().loadPending();
-          await useProfiles.getState().hydrate();
-        }
+        await rehydrateProtectedStores();
       } catch (err) {
         if (__DEV__) logger.warn('[lock-panic] failed to load decoy state:', err);
+        // Fail CLOSED: any real data still resident in memory must not reach
+        // the decoy session. Clearing via setState cannot fail like the
+        // DB-backed hydrates can; the unlock still proceeds (see helper doc —
+        // blocking the duress PIN in front of a coercer endangers the user).
+        forceClearProtectedStores();
       }
       // Reset the attempt counter on ANY successful unlock, including
       // duress — a different reset pattern would let an observer tell the
@@ -535,16 +574,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           await useMessages.getState().loadAllEphemeralTimers();
           // Mirror of the duress-entry path: restore the REAL groups/channels/
           // scheduled/profiles that the decoy hydrates emptied out.
-          {
-            const { useGroups } = require('../store/groups') as typeof import('../store/groups');
-            const { useChannels } = require('../store/channels') as typeof import('../store/channels');
-            const { useScheduledMessages } = require('../store/scheduledMessages') as typeof import('../store/scheduledMessages');
-            const { useProfiles } = require('../store/profiles') as typeof import('../store/profiles');
-            await useGroups.getState().hydrate();
-            await useChannels.getState().hydrateSubscribed();
-            await useScheduledMessages.getState().loadPending();
-            await useProfiles.getState().hydrate();
-          }
+          await rehydrateProtectedStores();
         } catch {
           setPinError('');
           setPinCode('');

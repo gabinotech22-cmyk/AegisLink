@@ -25,6 +25,15 @@ jest.mock('../preferences', () => ({
   usePreferences: { getState: () => ({ duressActive: mockDuressActive }) },
 }));
 
+// No identity → signAsAdmin returns null and the metadata broadcast is
+// skipped; keeps the mutator test free of crypto/socket machinery.
+jest.mock('../identity', () => ({
+  useIdentity: { getState: () => ({ identity: null }) },
+}));
+jest.mock('../../socket/client', () => ({
+  broadcastGroupMetadata: jest.fn(),
+}));
+
 // SUT after mocks.
 import { useGroups } from '../groups';
 
@@ -57,5 +66,31 @@ describe('groups store — duress containment', () => {
 
     expect(mockLoadGroups).toHaveBeenCalledTimes(1);
     expect(useGroups.getState().groups).toEqual(real);
+  });
+
+  it('mutators under duress update in-memory state but NEVER write the real DB', async () => {
+    mockDuressActive = true;
+    useGroups.setState({
+      groups: [{ id: 'g1', name: 'old name', members: [], admin: 'me' } as never],
+    });
+
+    await useGroups.getState().renameGroup('g1', 'new name');
+
+    // Decoy UI stays coherent (in-memory update applied)…
+    expect(useGroups.getState().groups[0]).toMatchObject({ id: 'g1', name: 'new name' });
+    // …but the real SQLite DB is untouched.
+    expect(mockSaveGroup).not.toHaveBeenCalled();
+    expect(mockDeleteGroup).not.toHaveBeenCalled();
+    expect(mockDeleteContactMessages).not.toHaveBeenCalled();
+  });
+
+  it('the same mutator outside duress persists to the DB', async () => {
+    useGroups.setState({
+      groups: [{ id: 'g1', name: 'old name', members: [], admin: 'me' } as never],
+    });
+
+    await useGroups.getState().renameGroup('g1', 'new name');
+
+    expect(mockSaveGroup).toHaveBeenCalledTimes(1);
   });
 });
