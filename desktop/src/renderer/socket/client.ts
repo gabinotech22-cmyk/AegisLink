@@ -700,40 +700,38 @@ export function connect(identity: Identity): Socket {
   socket.on('error_msg', async (e: { code?: string }) => {
     if (DEV) logger.warn('[socket] server error:', e);
     if (e?.code === 'unknown_identity') {
-      if (DEV) logger.debug('[socket] unknown_identity — re-registering and reconnecting');
+      // Server doesn't know us — re-register via the SINGLE de-duplicated path
+      // (store/identity.ts retryPublish() -> runPublish() -> the module-level
+      // single-flight publishToServer()). Previously this handler ran its OWN
+      // separate inline PoW/registration flow, bypassing that single-flight
+      // guard entirely — a registration already in progress from
+      // generate()/hydrate() would race a SECOND one started here, doubling
+      // PoW work and hits against the relay's per-IP rate limit. See
+      // utils/socketGate.ts for the companion fix on the connect side.
+      if (DEV) logger.debug('[socket] unknown_identity — re-registering via retryPublish and reconnecting');
       try {
-        const { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } = await import(
-          '../crypto/registration'
-        );
-        const { generatePreKeys: genPK } = await import('../crypto/signal/x3dh');
-        const { challenge, difficulty } = await fetchPowChallenge(RELAY_URL);
-        const nonce = await solvePoW(challenge, difficulty);
-        const preKeys = genPK(identity);
-        const result = await uploadIdentityAndPrekeys(
-          identity,
-          {
-            signedPreKey: {
-              keyId: preKeys.signedPreKey.keyId,
-              secretKey: preKeys.signedPreKey.secretKey,
-            },
-            opkSecrets: preKeys.opkSecrets,
-          },
-          RELAY_URL,
-          challenge,
-          nonce,
-          preKeys.oneTimePreKeys,
-          {
-            keyId: preKeys.signedPreKey.keyId,
-            publicKeyB64: preKeys.signedPreKey.publicKeyB64,
-            signatureB64: preKeys.signedPreKey.signatureB64,
-          },
-        );
-        if (result.ok) {
+        const { useIdentity } = await import('../store/identity');
+        const before = useIdentity.getState().publishStatus;
+        await useIdentity.getState().retryPublish();
+        const after = useIdentity.getState();
+        if (after.publishStatus === 'published') {
           if (DEV) logger.debug('[socket] re-registered — reconnecting');
-          socket?.disconnect();
-        } else {
-          if (DEV) logger.warn('[socket] re-registration failed:', result.error);
+          // The relay already closed this socket server-side, and that does
+          // NOT trigger socket.io-client's auto-reconnect. Re-open explicitly
+          // so the new identity gets a fresh auth challenge (mirrors mobile's
+          // socket/client.ts unknown_identity handler — previously this
+          // called socket?.disconnect() here instead of connect(), which
+          // never actually brought the connection back).
+          socket?.connect();
+        } else if (after.publishStatus === 'failed') {
+          if (DEV) logger.warn('[socket] re-registration failed:', after.publishError);
           useConnection.getState().setOnline(false);
+        } else if (before === 'publishing') {
+          // A registration was already in flight (retryPublish no-op'd) — it
+          // will itself flip publishStatus to 'published'/'failed', and
+          // App.tsx's shouldConnectSocket-gated effect reconnects the socket
+          // once it resolves.
+          if (DEV) logger.debug('[socket] unknown_identity: publish already in flight, deferring reconnect');
         }
       } catch (err) {
         if (DEV) logger.warn('[socket] re-registration failed:', err);
