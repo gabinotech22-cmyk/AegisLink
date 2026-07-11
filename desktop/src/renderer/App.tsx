@@ -103,6 +103,7 @@ function Shell() {
   const hydratePrefs = usePreferences((s) => s.hydrate);
   const appLockEnabled = usePreferences((s) => s.appLockEnabled);
   const lockTimeoutMin = usePreferences((s) => s.lockTimeoutMin);
+  const duressActive = usePreferences((s) => s.duressActive);
 
   const [tab, setTab] = useState<Tab>('home');
   const [stack, setStack] = useState<PushRoute[]>([]);
@@ -270,7 +271,7 @@ function Shell() {
     // utils/socketGate.ts for the full root-cause writeup. This effect
     // re-runs once publishStatus resolves ('published'/'failed'/'unknown'),
     // at which point it is safe to open the socket.
-    if (shouldConnectSocket({ hasIdentity: !!identity, identityStatus: status, publishStatus })) {
+    if (shouldConnectSocket({ hasIdentity: !!identity, identityStatus: status, publishStatus, duressActive })) {
       connectSocket(identity!);
       attachCallHandlers();
       setNotificationOpenChatHandler((aegisId) => {
@@ -284,7 +285,7 @@ function Shell() {
       setStack([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, status, publishStatus]);
+  }, [identity, status, publishStatus, duressActive]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

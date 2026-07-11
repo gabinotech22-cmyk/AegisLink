@@ -813,17 +813,25 @@ export function connect(identity: Identity): Socket {
     if (e?.code === 'unknown_identity') {
       // Server doesn't know us — re-register via the SINGLE de-duplicated path
       // (store/identity.ts retryPublish()), never a direct ensureRegistered()
-      // call here. retryPublish() no-ops if a registration is already
-      // 'publishing' or already 'published', so this can never race a publish
-      // already in flight from generate()/hydrate() — that used to cause a
-      // second, concurrent PoW/registration attempt (double PoW mining +
-      // double hit on the relay's per-IP rate limit). See
+      // call here. retryPublish(true) still no-ops if a registration is
+      // already 'publishing' (never duplicated), so this can never race a
+      // publish already in flight from generate()/hydrate() — that used to
+      // cause a second, concurrent PoW/registration attempt (double PoW
+      // mining + double hit on the relay's per-IP rate limit). See
       // src/utils/socketGate.ts for the companion fix on the connect side.
-      if (__DEV__) logger.debug('[socket] unknown_identity — re-registering via retryPublish and reconnecting');
+      //
+      // `force: true` is required here (CodeRabbit PR #301): unknown_identity
+      // is proof that a persisted publishStatus === 'published' (restored by
+      // hydrate() from the `aegis.published.<slot>` flag) is STALE — the
+      // relay has forgotten us. Without force, retryPublish() would no-op on
+      // that stale 'published' status, we'd reconnect anyway below, and the
+      // relay would reject again — an infinite unknown_identity ⇄ reconnect
+      // loop.
+      if (__DEV__) logger.debug('[socket] unknown_identity — re-registering via retryPublish(force) and reconnecting');
       try {
         const { useIdentity } = await import('../store/identity');
         const before = useIdentity.getState().publishStatus;
-        await useIdentity.getState().retryPublish();
+        await useIdentity.getState().retryPublish(true);
         const after = useIdentity.getState();
         if (after.publishStatus === 'published') {
           if (__DEV__) logger.debug('[socket] re-registered — reconnecting');

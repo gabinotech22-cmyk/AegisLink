@@ -56,8 +56,18 @@ interface IdentityState {
   updateProfile: (displayName: string, avatarColor: string, avatarImage: string | null) => Promise<void>;
   updateStatus: (text: string) => Promise<void>;
 
-  /** Trigger ensureRegistered; updates publishStatus/publishError accordingly. */
-  retryPublish: () => Promise<void>;
+  /**
+   * Trigger ensureRegistered; updates publishStatus/publishError accordingly.
+   * `force=true` bypasses the 'published' early-return ONLY — it never
+   * bypasses the 'publishing' in-flight guard. Used by socket/client.ts's
+   * unknown_identity handler: the relay saying `unknown_identity` is PROOF
+   * that a persisted `publishStatus: 'published'` (restored by hydrate() from
+   * the `aegis.published.<slot>` flag) is stale — the relay has forgotten us.
+   * Without `force`, retryPublish() would no-op on that stale 'published'
+   * status, the handler would reconnect anyway, and the relay would reject
+   * again — an infinite unknown_identity ⇄ reconnect loop.
+   */
+  retryPublish: (force?: boolean) => Promise<void>;
 
   // Multi-E2EE Slots Actions
   createSlot: () => Promise<string>;
@@ -116,6 +126,24 @@ async function persistCooldownUntil(until: number | null): Promise<void> {
  * so the retry loop can re-register.
  */
 async function runPublish(identity: Identity, slotId: string, silent = false): Promise<void> {
+  // Correctness guard (CodeRabbit PR #301, parity w/ desktop): if the user
+  // switches/creates/resets to a DIFFERENT identity or slot while THIS
+  // publish is still resolving — e.g. createSlot() backgrounds a publish for
+  // a brand-new, non-active slot via `void runPublish(identity, newSlotId)`
+  // — the GLOBAL publishStatus/publishError/publishRetryAfterMs fields must
+  // never be overwritten by a now-stale slot's outcome. That would corrupt
+  // the banner/connectSocket-gate (see utils/socketGate.ts) for whatever
+  // identity is actually active now. publishCooldownUntilMs is intentionally
+  // exempt from this guard: it reflects a relay/IP-wide rate limit, not a
+  // per-slot outcome, so it stays accurate to update regardless of which
+  // slot is currently active. The `aegis.published.<slotId>` marker below is
+  // already correctly slot-scoped (uses the captured `slotId` param, not
+  // live store state), so it is also exempt.
+  const isCurrentTarget = () => {
+    const s = useIdentity.getState();
+    return s.identity?.aegisId === identity.aegisId && s.activeSlotId === slotId;
+  };
+
   // Gate BEFORE any network call / PoW mining: if a relay-issued cooldown is
   // still active, never re-mine — that is exactly the retry storm this fix
   // eliminates. This is the single choke point both retryPublish() and the
@@ -123,7 +151,7 @@ async function runPublish(identity: Identity, slotId: string, silent = false): P
   const cooldownUntil = useIdentity.getState().publishCooldownUntilMs;
   if (cooldownUntil != null && Date.now() < cooldownUntil) {
     const retryAfterMs = cooldownUntil - Date.now();
-    if (!silent) {
+    if (!silent && isCurrentTarget()) {
       useIdentity.setState({
         publishStatus: 'failed',
         publishError: 'rate_limited',
@@ -133,15 +161,17 @@ async function runPublish(identity: Identity, slotId: string, silent = false): P
     return;
   }
 
-  if (!silent) useIdentity.setState({ publishStatus: 'publishing', publishError: null });
+  if (!silent && isCurrentTarget()) useIdentity.setState({ publishStatus: 'publishing', publishError: null });
   const result = await ensureRegistered(identity);
   if (result.ok) {
-    useIdentity.setState({
-      publishStatus: 'published',
-      publishError: null,
-      publishRetryAfterMs: null,
-      publishCooldownUntilMs: null,
-    });
+    if (isCurrentTarget()) {
+      useIdentity.setState({
+        publishStatus: 'published',
+        publishError: null,
+        publishRetryAfterMs: null,
+        publishCooldownUntilMs: null,
+      });
+    }
     void persistCooldownUntil(null);
     // Persist the published flag BEFORE returning (was fire-and-forget): if the
     // process is killed right after a slow first registration, an un-flushed
@@ -168,11 +198,13 @@ async function runPublish(identity: Identity, slotId: string, silent = false): P
   }
   if (__DEV__) logger.warn('[identity] publish failed:', result.error);
   const errorMsg = result.error ?? 'Unknown error';
-  useIdentity.setState({
-    publishStatus: 'failed',
-    publishError: errorMsg,
-    publishRetryAfterMs: result.retryAfterMs ?? null,
-  });
+  if (isCurrentTarget()) {
+    useIdentity.setState({
+      publishStatus: 'failed',
+      publishError: errorMsg,
+      publishRetryAfterMs: result.retryAfterMs ?? null,
+    });
+  }
   // Visible (non-silent) registration failures must be seen even if the device
   // is currently offline-gated behind NetworkErrorScreen (App.tsx replaces the
   // whole tree at 5s offline, hiding Home's publishError banner underneath).
@@ -478,11 +510,11 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     }
   },
 
-  async retryPublish() {
+  async retryPublish(force = false) {
     const { identity, publishStatus, activeSlotId } = get();
     if (!identity) return;
-    if (publishStatus === 'published') return; // already confirmed
-    if (publishStatus === 'publishing') return; // in-flight
+    if (!force && publishStatus === 'published') return; // already confirmed (unless forced — see doc comment)
+    if (publishStatus === 'publishing') return; // in-flight — ALWAYS guarded, force never bypasses this
     await runPublish(identity, activeSlotId || 'self');
   },
 

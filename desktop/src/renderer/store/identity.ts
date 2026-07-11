@@ -50,8 +50,18 @@ interface IdentityState {
   ) => Promise<void>;
   updateStatus: (text: string) => Promise<void>;
 
-  /** Trigger publishToServer (single-flight); updates publishStatus/publishError. */
-  retryPublish: () => Promise<void>;
+  /**
+   * Trigger publishToServer (single-flight); updates publishStatus/publishError.
+   * `force=true` bypasses the 'published' early-return ONLY — it never
+   * bypasses the 'publishing' in-flight guard. Used by socket/client.ts's
+   * unknown_identity handler: the relay saying `unknown_identity` is PROOF
+   * that a persisted publishStatus === 'published' (restored by hydrate()
+   * from the `aegis.prekeysPublished.<slot>` flag) is stale — the relay has
+   * forgotten us. Without `force`, retryPublish() would no-op on that stale
+   * 'published' status, leading to an infinite unknown_identity ⇄ reconnect
+   * loop.
+   */
+  retryPublish: (force?: boolean) => Promise<void>;
 
   createSlot: () => Promise<string>;
   switchSlot: (slotId: string) => Promise<void>;
@@ -85,15 +95,15 @@ async function tryBroadcastProfileUpdate(identity: Identity): Promise<void> {
 // then fails and neither bundle is published. Deduplicate instead.
 let publishInFlight: Promise<boolean> | null = null;
 
-function publishToServer(identity: Identity): Promise<boolean> {
+function publishToServer(identity: Identity, slotId: string): Promise<boolean> {
   if (publishInFlight) return publishInFlight;
-  publishInFlight = doPublishToServer(identity).finally(() => {
+  publishInFlight = doPublishToServer(identity, slotId).finally(() => {
     publishInFlight = null;
   });
   return publishInFlight;
 }
 
-async function doPublishToServer(identity: Identity): Promise<boolean> {
+async function doPublishToServer(identity: Identity, slotId: string): Promise<boolean> {
   try {
     const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
     const nonce = await solvePoW(challenge, difficulty);
@@ -153,9 +163,14 @@ async function doPublishToServer(identity: Identity): Promise<boolean> {
     // (which re-runs PoW + re-uploads a fresh bundle, hitting the relay's 429
     // window). The relay re-requests a fresh bundle via unknown_identity if it
     // ever forgets us, so on-demand republishing still works.
+    //
+    // Uses the CAPTURED `slotId` param, not `useIdentity.getState().activeSlotId`
+    // (CodeRabbit PR #301 fix): if the user switches/resets/creates a
+    // different slot while THIS publish is still resolving (e.g. createSlot()
+    // backgrounds a publish for a brand-new, non-active slot), reading the
+    // live active slot here would flag the WRONG slot as published.
     try {
-      const slot = useIdentity.getState().activeSlotId || 'self';
-      await secureStorage().set(getPrefKey('aegis.prekeysPublished', slot), '1');
+      await secureStorage().set(getPrefKey('aegis.prekeysPublished', slotId), '1');
     } catch { /* best-effort flag */ }
     return true;
   } catch (e) {
@@ -174,10 +189,29 @@ async function doPublishToServer(identity: Identity): Promise<boolean> {
  * so connectSocket-gating (utils/socketGate.ts) and the unknown_identity
  * handler always see a consistent, de-duplicated publishStatus rather than
  * racing a second concurrent PoW/registration attempt.
+ *
+ * Correctness guard (CodeRabbit PR #301): publishInFlight is module-wide, and
+ * this function used to update useIdentity's GLOBAL publishStatus
+ * unconditionally after the await. If slot A is publishing and the user
+ * switches/resets/creates slot B while that publish is still in flight, B's
+ * runPublish() (or A's own completion, once B is active) could mark the
+ * WRONG slot as 'published'/'failed'. `isCurrentTarget()` re-checks the live
+ * store right before each state write and skips it if this publish's
+ * identity/slot is no longer the active one — the slot-scoped
+ * `aegis.prekeysPublished.<slotId>` marker (written inside
+ * doPublishToServer using the captured slotId, not live state) is unaffected
+ * and always ends up correct regardless of what's active by the time this
+ * resolves.
  */
-async function runPublish(identity: Identity): Promise<void> {
-  useIdentity.setState({ publishStatus: 'publishing', publishError: null });
-  const ok = await publishToServer(identity);
+async function runPublish(identity: Identity, slotId: string): Promise<void> {
+  const isCurrentTarget = () => {
+    const s = useIdentity.getState();
+    return s.identity?.aegisId === identity.aegisId && s.activeSlotId === slotId;
+  };
+
+  if (isCurrentTarget()) useIdentity.setState({ publishStatus: 'publishing', publishError: null });
+  const ok = await publishToServer(identity, slotId);
+  if (!isCurrentTarget()) return; // stale — a different identity/slot is active now, ignore
   if (ok) {
     useIdentity.setState({ publishStatus: 'published', publishError: null });
   } else {
@@ -289,7 +323,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       await useContacts.getState().hydrate().catch(() => {});
       await useGroups.getState().hydrate().catch(() => {});
 
-      if (!alreadyPublished) void runPublish(identity);
+      if (!alreadyPublished) void runPublish(identity, activeSlotId);
     } catch (e) {
       set({ status: 'idle', hydrated: true, error: (e as Error).message });
     }
@@ -331,7 +365,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       // on disk with the store never reaching 'ready'. Registration runs in the
       // background; publishStatus updates via runPublish (gates connectSocket —
       // see utils/socketGate.ts).
-      void runPublish(identity);
+      void runPublish(identity, activeSlotId);
 
       return identity;
     } catch (e) {
@@ -430,12 +464,12 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     if (identity) await tryBroadcastProfileUpdate(identity);
   },
 
-  async retryPublish() {
-    const { identity, publishStatus } = get();
+  async retryPublish(force = false) {
+    const { identity, publishStatus, activeSlotId } = get();
     if (!identity) return;
-    if (publishStatus === 'published') return; // already confirmed
-    if (publishStatus === 'publishing') return; // in-flight
-    await runPublish(identity);
+    if (!force && publishStatus === 'published') return; // already confirmed (unless forced — see doc comment)
+    if (publishStatus === 'publishing') return; // in-flight — ALWAYS guarded, force never bypasses this
+    await runPublish(identity, activeSlotId || 'self');
   },
 
   async createSlot() {
@@ -464,7 +498,16 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       await secureStorage().set(getPrefKey('aegis.displayName', newSlotId), defaultName);
       await secureStorage().set(getPrefKey('aegis.avatarColor', newSlotId), defaultColor);
 
-      await publishToServer(identity);
+      // Go through runPublish() (not publishToServer() directly) — it is the
+      // single choke point that keeps publishStatus consistent, per its own
+      // docstring. newSlotId is NOT the active slot at this point (the active
+      // slot stays `prevSlot` — see setActiveDbSlot(prevSlot) below), so
+      // runPublish's isCurrentTarget() guard correctly skips writing this
+      // background publish's outcome into the GLOBAL publishStatus (avoiding
+      // the cross-slot corruption CodeRabbit flagged); the slot-scoped
+      // `aegis.prekeysPublished.<newSlotId>` marker still gets persisted
+      // correctly either way.
+      await runPublish(identity, newSlotId);
       setActiveDbSlot(prevSlot);
 
       const newSlotsList = [...slotsList, newSlotId];

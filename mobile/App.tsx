@@ -555,9 +555,7 @@ function Shell() {
     // src/utils/socketGate.ts for the full root-cause writeup. This effect
     // re-runs once publishStatus resolves ('published'/'failed'/'unknown'),
     // at which point it is safe to open the socket.
-    if (shouldConnectSocket({ hasIdentity: !!identity, identityStatus: status, publishStatus })) {
-      // Never connect with the decoy identity — doing so leaks that panic mode is active
-      if (usePreferences.getState().duressActive) return;
+    if (shouldConnectSocket({ hasIdentity: !!identity, identityStatus: status, publishStatus, duressActive })) {
       connectSocket(identity!);
       if (WEBRTC_AVAILABLE) {
         attachCallHandlers();
@@ -595,7 +593,7 @@ function Shell() {
       clearTurnCache();
       setStack([]);
     }
-  }, [identity, status, publishStatus]);
+  }, [identity, status, publishStatus, duressActive]);
 
   // Re-attach call handlers whenever the connection comes back. A reconnect can
   // rebuild the socket.io instance (disconnect() nulls it), which silently drops

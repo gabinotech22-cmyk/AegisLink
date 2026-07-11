@@ -31,13 +31,22 @@ import type { PublishStatus } from '../store/identity';
  *  - 'unknown': the initial/default state. Also resolved (not in-flight), so
  *    connecting preserves pre-fix behavior for any edge case that leaves the
  *    store here.
+ *
+ * `duressActive` (CodeRabbit PR #301): never connect with the decoy identity
+ * — doing so would leak that panic/duress mode is active to the relay. This
+ * used to be a separate inline `if (usePreferences.getState().duressActive)
+ * return;` check duplicated at each connectSocket call site (present on
+ * mobile, MISSING on desktop — a real security gap fixed by folding it into
+ * this single, testable predicate both platforms now share).
  */
 export function shouldConnectSocket(params: {
   hasIdentity: boolean;
   identityStatus: 'idle' | 'loading' | 'generating' | 'ready';
   publishStatus: PublishStatus;
+  duressActive: boolean;
 }): boolean {
-  const { hasIdentity, identityStatus, publishStatus } = params;
+  const { hasIdentity, identityStatus, publishStatus, duressActive } = params;
+  if (duressActive) return false;
   if (!hasIdentity) return false;
   if (identityStatus !== 'ready') return false;
   return publishStatus !== 'publishing';

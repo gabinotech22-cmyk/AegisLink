@@ -223,7 +223,7 @@ describe("error_msg handler — 'unknown_identity' de-duplicated re-registration
     mockIdentityState = { publishStatus: 'failed', publishError: null };
   });
 
-  it('a resolved (non-in-flight) publishStatus calls retryPublish exactly once, then reconnects on success', async () => {
+  it('a resolved (non-in-flight) publishStatus calls retryPublish(true) exactly once, then reconnects on success', async () => {
     mockRetryPublish.mockImplementationOnce(async () => {
       mockIdentityState = { publishStatus: 'published', publishError: null };
     });
@@ -231,6 +231,7 @@ describe("error_msg handler — 'unknown_identity' de-duplicated re-registration
     await onErrorMsg({ code: 'unknown_identity' });
 
     expect(mockRetryPublish).toHaveBeenCalledTimes(1);
+    expect(mockRetryPublish).toHaveBeenCalledWith(true);
     expect(mockFakeSocket.connect).toHaveBeenCalledTimes(1);
     expect(mockSetOnline).not.toHaveBeenCalled();
   });
@@ -238,10 +239,11 @@ describe("error_msg handler — 'unknown_identity' de-duplicated re-registration
   it('does NOT bypass retryPublish with a second concurrent registration attempt when a publish is already in flight', async () => {
     // Simulate: a publish is ALREADY 'publishing' (e.g. generate()/hydrate()
     // fired one moments ago). retryPublish() itself no-ops in that case (its
-    // own internal guard — see store/identity.ts), but the important
-    // regression assertion here is that this handler calls retryPublish()
-    // and ONLY retryPublish() — never a second, independent registration
-    // path — regardless of the in-flight state.
+    // own internal 'publishing' guard is ALWAYS active — force never bypasses
+    // it, see store/identity.ts), but the important regression assertion
+    // here is that this handler calls retryPublish() and ONLY retryPublish()
+    // — never a second, independent registration path — regardless of the
+    // in-flight state.
     mockIdentityState = { publishStatus: 'publishing', publishError: null };
     mockRetryPublish.mockImplementationOnce(async () => {
       // retryPublish's own guard means publishStatus stays 'publishing' —
@@ -251,9 +253,35 @@ describe("error_msg handler — 'unknown_identity' de-duplicated re-registration
     await onErrorMsg({ code: 'unknown_identity' });
 
     expect(mockRetryPublish).toHaveBeenCalledTimes(1);
+    expect(mockRetryPublish).toHaveBeenCalledWith(true);
     // No reconnect attempt yet — the in-flight publish will resolve this,
     // and App.tsx's shouldConnectSocket-gated effect reconnects once it does.
     expect(mockFakeSocket.connect).not.toHaveBeenCalled();
+    expect(mockSetOnline).not.toHaveBeenCalled();
+  });
+
+  it('forces a republish when publishStatus is a STALE "published" marker (relay forgot us) — retryPublish(true) actually republishes instead of no-op\'ing, then reconnects exactly once', async () => {
+    // Reproduces the exact infinite-loop bug this fix closes: hydrate()
+    // restored publishStatus: 'published' from the persisted
+    // `aegis.published.<slot>` flag, but the relay has genuinely forgotten
+    // us (unknown_identity). Without `force`, retryPublish()'s own
+    // `publishStatus === 'published'` early-return would no-op here, the
+    // handler would reconnect anyway below, and the relay would reject again
+    // — unknown_identity <-> reconnect forever.
+    mockIdentityState = { publishStatus: 'published', publishError: null };
+    mockRetryPublish.mockImplementationOnce(async (force?: boolean) => {
+      // The regression assertion: the handler MUST pass force=true, or a
+      // real (non-mocked) retryPublish would no-op on the stale 'published'
+      // status instead of actually republishing.
+      expect(force).toBe(true);
+      mockIdentityState = { publishStatus: 'published', publishError: null };
+    });
+
+    await onErrorMsg({ code: 'unknown_identity' });
+
+    expect(mockRetryPublish).toHaveBeenCalledTimes(1);
+    expect(mockRetryPublish).toHaveBeenCalledWith(true);
+    expect(mockFakeSocket.connect).toHaveBeenCalledTimes(1);
     expect(mockSetOnline).not.toHaveBeenCalled();
   });
 
@@ -265,6 +293,7 @@ describe("error_msg handler — 'unknown_identity' de-duplicated re-registration
     await onErrorMsg({ code: 'unknown_identity' });
 
     expect(mockRetryPublish).toHaveBeenCalledTimes(1);
+    expect(mockRetryPublish).toHaveBeenCalledWith(true);
     expect(mockSetOnline).toHaveBeenCalledWith(false);
     expect(mockFakeSocket.connect).not.toHaveBeenCalled();
   });

@@ -708,11 +708,19 @@ export function connect(identity: Identity): Socket {
       // generate()/hydrate() would race a SECOND one started here, doubling
       // PoW work and hits against the relay's per-IP rate limit. See
       // utils/socketGate.ts for the companion fix on the connect side.
-      if (DEV) logger.debug('[socket] unknown_identity — re-registering via retryPublish and reconnecting');
+      //
+      // `force: true` is required here (CodeRabbit PR #301): unknown_identity
+      // is proof that a persisted publishStatus === 'published' (restored by
+      // hydrate() from the `aegis.prekeysPublished.<slot>` flag) is STALE —
+      // the relay has forgotten us. Without force, retryPublish() would no-op
+      // on that stale 'published' status, we'd reconnect anyway below, and
+      // the relay would reject again — an infinite unknown_identity ⇄
+      // reconnect loop.
+      if (DEV) logger.debug('[socket] unknown_identity — re-registering via retryPublish(force) and reconnecting');
       try {
         const { useIdentity } = await import('../store/identity');
         const before = useIdentity.getState().publishStatus;
-        await useIdentity.getState().retryPublish();
+        await useIdentity.getState().retryPublish(true);
         const after = useIdentity.getState();
         if (after.publishStatus === 'published') {
           if (DEV) logger.debug('[socket] re-registered — reconnecting');
