@@ -17,7 +17,7 @@
 
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import i18n from '../i18n';
+import i18n, { resolveActiveLocale } from '../i18n';
 import { logger } from '../utils/logger';
 import { previewLabel } from '../utils/messagePreview';
 import { usePreferences } from '../store/preferences';
@@ -58,9 +58,14 @@ export async function showChannelPostNotification(
 
     const showContent = prefs.notifPreview;
     const title = `AegisLink · ${channelName}`;
+    // Background-safe: notifications can be built before React's useLocale ran,
+    // so resolve the persisted locale and bind t to it (getFixedT) instead of
+    // relying on i18n's current (possibly default-'en') global language.
+    const lng = await resolveActiveLocale();
+    const t = i18n.getFixedT(lng);
     const notificationBody = showContent
-      ? `${previewLabel(body, i18n.t)} ● E2EE`
-      : `${i18n.t('channels.newPostGeneric', 'New post')} ● E2EE`;
+      ? `${previewLabel(body, t)} ● E2EE`
+      : `${t('channels.newPostGeneric', 'New post')} ● E2EE`;
 
     await Notifications.scheduleNotificationAsync({
       content: {

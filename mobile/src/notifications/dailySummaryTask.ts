@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { logger } from '../utils/logger';
 import { ss } from '../utils/secureStore';
+import { tAsync } from '../i18n';
 import type { StoredContact } from '../db/contacts';
 
 export const DAILY_SUMMARY_TASK = 'aegis.daily-summary';
@@ -56,11 +57,11 @@ export async function runDailySummary(): Promise<boolean> {
 
     if (total > 0) {
       const namesStr = names.slice(0, 3).join(', ') + (names.length > 3 ? '...' : '');
-      const body = `Recibiste ${total} ${total === 1 ? 'mensaje' : 'mensajes'} hoy de ${namesStr}.`;
-      
+      const body = await tAsync('notif.dailySummaryBody', { count: total, names: namesStr });
+
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: 'Resumen Diario',
+          title: await tAsync('notif.dailySummaryTitle'),
           body: body,
           sound: prefs.notifSound ? 'default' : undefined,
           priority: Notifications.AndroidNotificationPriority.DEFAULT,

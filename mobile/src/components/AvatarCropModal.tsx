@@ -22,6 +22,20 @@ interface Props {
   confirmLabel?: string;
   cancelLabel?: string;
   title?: string;
+  /**
+   * Render as a full-screen absolute OVERLAY instead of a React Native `<Modal>`.
+   *
+   * iOS cannot reliably present a second RN Modal on top of an already-open one
+   * (stacked modals): the inner modal's gesture-handler/reanimated surface fails
+   * to attach, so the cropper appears but pinch/drag/confirm silently don't work.
+   * The personal-profile flow opens this cropper from INSIDE the "Edit profile"
+   * modal, which triggered exactly that bug (the group flow opens it over the base
+   * screen, so it was unaffected). In `inline` mode we render the same UI as an
+   * in-tree overlay so it lives in the SAME presentation layer as its parent —
+   * no modal stacking, gestures work. Callers must place it inside the parent
+   * modal's view tree; it absolutely fills that parent.
+   */
+  inline?: boolean;
 }
 
 const WIN = Dimensions.get('window');
@@ -41,6 +55,7 @@ const MAX_S = 4;
 export function AvatarCropModal({
   t, visible, imageUri, imageWidth, imageHeight,
   onConfirm, onCancel, confirmLabel = 'Confirm', cancelLabel = 'Cancel', title = 'Adjust photo',
+  inline = false,
 }: Props) {
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -137,56 +152,81 @@ export function AvatarCropModal({
     }
   }
 
+  const body = (
+    <GestureHandlerRootView style={styles.root}>
+      <View style={[styles.backdrop, { backgroundColor: 'rgba(0,0,0,0.85)' }]}>
+        <Text style={[styles.title, { color: t.text }]}>{title}</Text>
+        <Text style={[styles.hint, { color: t.textDim }]}>
+          {/* pinch + drag hint */}
+          ⤢  zoom · ✣  arrastra
+        </Text>
+
+        {/* Crop viewport with circular mask overlay */}
+        <View style={[styles.viewport, { width: VIEW, height: VIEW }]}>
+          <GestureDetector gesture={composed}>
+            <Animated.View style={styles.imgWrap}>
+              {imageUri ? (
+                <Animated.Image source={{ uri: imageUri }} style={imgStyle} resizeMode="cover" />
+              ) : null}
+            </Animated.View>
+          </GestureDetector>
+          {/* Circular mask: 4 corners dimmed via a ring overlay */}
+          <View pointerEvents="none" style={[styles.ring, { borderColor: 'rgba(0,0,0,0.55)' }]} />
+          <View pointerEvents="none" style={[styles.circleOutline, { borderColor: t.accent }]} />
+        </View>
+
+        <View style={styles.actions}>
+          <Pressable
+            onPress={onCancel}
+            disabled={busy}
+            style={[styles.btn, { backgroundColor: t.surface2, borderColor: t.borderStrong }]}
+          >
+            <Text style={[styles.btnText, { color: t.text }]}>{cancelLabel}</Text>
+          </Pressable>
+          <Pressable
+            onPress={handleConfirm}
+            disabled={busy}
+            style={[styles.btn, { backgroundColor: t.accent, opacity: busy ? 0.6 : 1 }]}
+          >
+            {busy
+              ? <ActivityIndicator color="#06281b" />
+              : <Text style={[styles.btnText, { color: '#06281b' }]}>{confirmLabel}</Text>}
+          </Pressable>
+        </View>
+      </View>
+    </GestureHandlerRootView>
+  );
+
+  // Inline mode: render as an in-tree absolute overlay (covers the parent modal)
+  // so we never stack a second RN Modal — the iOS stacked-modal bug that broke
+  // pinch/drag/confirm when this cropper was opened from inside the Edit-profile
+  // modal. `visible` gates rendering since there is no Modal to hide it.
+  if (inline) {
+    if (!visible) return null;
+    return (
+      <View style={styles.inlineOverlay} pointerEvents="auto">
+        {body}
+      </View>
+    );
+  }
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
-      <GestureHandlerRootView style={styles.root}>
-        <View style={[styles.backdrop, { backgroundColor: 'rgba(0,0,0,0.85)' }]}>
-          <Text style={[styles.title, { color: t.text }]}>{title}</Text>
-          <Text style={[styles.hint, { color: t.textDim }]}>
-            {/* pinch + drag hint */}
-            ⤢  zoom · ✣  arrastra
-          </Text>
-
-          {/* Crop viewport with circular mask overlay */}
-          <View style={[styles.viewport, { width: VIEW, height: VIEW }]}>
-            <GestureDetector gesture={composed}>
-              <Animated.View style={styles.imgWrap}>
-                {imageUri ? (
-                  <Animated.Image source={{ uri: imageUri }} style={imgStyle} resizeMode="cover" />
-                ) : null}
-              </Animated.View>
-            </GestureDetector>
-            {/* Circular mask: 4 corners dimmed via a ring overlay */}
-            <View pointerEvents="none" style={[styles.ring, { borderColor: 'rgba(0,0,0,0.55)' }]} />
-            <View pointerEvents="none" style={[styles.circleOutline, { borderColor: t.accent }]} />
-          </View>
-
-          <View style={styles.actions}>
-            <Pressable
-              onPress={onCancel}
-              disabled={busy}
-              style={[styles.btn, { backgroundColor: t.surface2, borderColor: t.borderStrong }]}
-            >
-              <Text style={[styles.btnText, { color: t.text }]}>{cancelLabel}</Text>
-            </Pressable>
-            <Pressable
-              onPress={handleConfirm}
-              disabled={busy}
-              style={[styles.btn, { backgroundColor: t.accent, opacity: busy ? 0.6 : 1 }]}
-            >
-              {busy
-                ? <ActivityIndicator color="#06281b" />
-                : <Text style={[styles.btnText, { color: '#06281b' }]}>{confirmLabel}</Text>}
-            </Pressable>
-          </View>
-        </View>
-      </GestureHandlerRootView>
+      {body}
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  // Full-screen in-tree overlay for `inline` mode. High elevation/zIndex keeps it
+  // above the parent modal's form content on both platforms.
+  inlineOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    zIndex: 1000,
+    elevation: 1000,
+  },
   backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   title: { fontSize: 18, fontWeight: '700', marginBottom: 6 },
   hint: { fontSize: 13, marginBottom: 20 },

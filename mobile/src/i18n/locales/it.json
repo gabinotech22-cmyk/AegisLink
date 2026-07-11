@@ -1,4 +1,21 @@
 {
+  "notif": {
+    "newMessage": "Nuovo messaggio cifrato",
+    "groupNewMessage": "1 nuovo messaggio nel gruppo",
+    "securityTitle": "AegisLink · Sicurezza",
+    "revokedTitle": "AegisLink · Revocato",
+    "autoWipeTitle": "AegisLink · AUTO-CANCELLAZIONE IMMINENTE",
+    "aContact": "un contatto",
+    "keyChanged": "La chiave di un contatto è cambiata. Riverifica {{name}} prima di continuare.",
+    "sessionRevoked": "Sessione chiusa. Questo dispositivo è stato revocato da remoto da un'altra tua istanza.",
+    "autoWipeBody": "10s alla cancellazione permanente per troppi PIN errati.",
+    "groupVoiceActive": "C'è un canale vocale attivo · tocca per unirti",
+    "incomingVideoCall": "Videochiamata E2EE in arrivo",
+    "incomingVoiceCall": "Chiamata vocale E2EE in arrivo",
+    "dailySummaryTitle": "Riepilogo giornaliero",
+    "dailySummaryBody_one": "Hai ricevuto {{count}} messaggio oggi da {{names}}.",
+    "dailySummaryBody_other": "Hai ricevuto {{count}} messaggi oggi da {{names}}."
+  },
   "common": {
     "cancel": "Annulla",
     "save": "Salva",

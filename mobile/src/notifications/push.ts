@@ -3,6 +3,10 @@ import { logger } from '../utils/logger';
 import { Platform } from 'react-native';
 import { SERVER_URL } from '../config';
 import type { Identity } from '../crypto/identity';
+import { tAsync } from '../i18n';
+
+/** Language-neutral marker appended to message notifications. */
+const E2EE_MARK = ' ● E2EE';
 
 function makeSignal(ms: number): AbortSignal {
   const controller = new AbortController();
@@ -478,17 +482,17 @@ export async function showIncomingNotification(
     if (showContent) {
       if (isGroup && groupName) {
         title = `AegisLink · ${groupName}`;
-        notificationBody = `${senderName}: ${body} ● E2EE`;
+        notificationBody = `${senderName}: ${body}${E2EE_MARK}`;
       } else {
         title = `AegisLink · ${senderName}`;
-        notificationBody = `${body} ● E2EE`;
+        notificationBody = `${body}${E2EE_MARK}`;
       }
     } else {
       if (isGroup && groupName) {
         title = `AegisLink · ${groupName}`;
-        notificationBody = `1 nuevo mensaje en grupo ● E2EE`;
+        notificationBody = (await tAsync('notif.groupNewMessage')) + E2EE_MARK;
       } else {
-        notificationBody = `Nuevo mensaje cifrado ● E2EE`;
+        notificationBody = (await tAsync('notif.newMessage')) + E2EE_MARK;
       }
     }
 
@@ -527,17 +531,17 @@ export async function showCriticalSecurityNotification(
   type: 'key_changed' | 'session_revoked' | 'auto_wipe',
   detail?: string
 ) {
-  let title = 'AegisLink · Seguridad';
+  let title = await tAsync('notif.securityTitle');
   let body = '';
 
   if (type === 'key_changed') {
-    body = `La clave de un contacto cambió. Re-verifica a ${detail ?? 'contacto'} antes de continuar.`;
+    body = await tAsync('notif.keyChanged', { name: detail ?? (await tAsync('notif.aContact')) });
   } else if (type === 'session_revoked') {
-    title = 'AegisLink · Revocado';
-    body = 'Sesión cerrada. Este dispositivo ha sido revocado remotamente por otra de tus instancias.';
+    title = await tAsync('notif.revokedTitle');
+    body = await tAsync('notif.sessionRevoked');
   } else if (type === 'auto_wipe') {
-    title = 'AegisLink · AUTO-WIPE INMINENTE';
-    body = '10s para el borrado permanente por demasiados PINs fallidos.';
+    title = await tAsync('notif.autoWipeTitle');
+    body = await tAsync('notif.autoWipeBody');
   }
 
   try {
@@ -580,7 +584,7 @@ export async function showGroupCallChannelNotification(
     await Notifications.scheduleNotificationAsync({
       content: {
         title: `AegisLink · ${groupName}`,
-        body: 'Hay un canal de voz activo · toca para unirte',
+        body: await tAsync('notif.groupVoiceActive'),
         sound: prefs.notifSound ? 'call_incoming.mp3' : undefined,
         priority: Notifications.AndroidNotificationPriority.HIGH,
         categoryIdentifier: 'aegislink-groupcall',
@@ -603,7 +607,7 @@ export async function showIncomingCallNotification(
     await Notifications.scheduleNotificationAsync({
       content: {
         title: `AegisLink · ${isVideo ? '📹' : '📞'} ${callerName}`,
-        body: isVideo ? 'Videollamada E2EE entrante' : 'Llamada de voz E2EE entrante',
+        body: isVideo ? await tAsync('notif.incomingVideoCall') : await tAsync('notif.incomingVoiceCall'),
         sound: 'call_incoming.mp3',
         priority: Notifications.AndroidNotificationPriority.MAX,
         categoryIdentifier: 'aegislink-call',
