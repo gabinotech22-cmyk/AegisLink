@@ -158,40 +158,58 @@ function buildDecoyContactsAndMessages(
 /**
  * Returns the persisted decoy blob, generating and persisting it on first use.
  * Idempotent and safe to call from multiple stores during the same duress
- * hydration — subsequent calls hit the in-memory cache.
+ * hydration: concurrent first calls share ONE in-flight promise (identity,
+ * contacts and messages stores all hydrate in parallel — without the latch,
+ * two concurrent cache-misses would each generate a DIFFERENT blob and the
+ * stores could show contacts from one decoy with an identity from another,
+ * breaking the "same decoy every time" invariant).
  */
+let inFlight: Promise<DecoyBlob> | null = null;
+
 export async function getOrCreateDecoyBlob(): Promise<DecoyBlob> {
   if (cache) return cache;
+  if (inFlight) return inFlight;
 
-  try {
-    const raw = await ss.get(DECOY_BLOB_KEY);
-    if (raw) {
-      cache = JSON.parse(raw) as DecoyBlob;
-      return cache;
+  inFlight = (async (): Promise<DecoyBlob> => {
+    try {
+      const raw = await ss.get(DECOY_BLOB_KEY);
+      if (raw) {
+        cache = JSON.parse(raw) as DecoyBlob;
+        return cache;
+      }
+    } catch (e) {
+      if (__DEV__) logger.warn('[duressDecoy] failed to read existing decoy blob:', e);
     }
-  } catch (e) {
-    if (__DEV__) logger.warn('[duressDecoy] failed to read existing decoy blob:', e);
-  }
 
-  const now = Date.now();
-  const locale = await resolveActiveLocale();
-  const identity = buildDecoyIdentity();
-  const { contacts, messagesByChat } = buildDecoyContactsAndMessages(now, locale);
-  const blob: DecoyBlob = { identity, contacts, messagesByChat };
+    const now = Date.now();
+    const locale = await resolveActiveLocale();
+    const identity = buildDecoyIdentity();
+    const { contacts, messagesByChat } = buildDecoyContactsAndMessages(now, locale);
+    const blob: DecoyBlob = { identity, contacts, messagesByChat };
+
+    try {
+      await ss.set(DECOY_BLOB_KEY, JSON.stringify(blob));
+    } catch (e) {
+      if (__DEV__) logger.warn('[duressDecoy] failed to persist decoy blob (using in-memory only):', e);
+    }
+
+    cache = blob;
+    return blob;
+  })();
 
   try {
-    await ss.set(DECOY_BLOB_KEY, JSON.stringify(blob));
-  } catch (e) {
-    if (__DEV__) logger.warn('[duressDecoy] failed to persist decoy blob (using in-memory only):', e);
+    return await inFlight;
+  } finally {
+    // Release the latch either way: on success `cache` now short-circuits; on
+    // failure the next caller retries cleanly instead of awaiting a rejection.
+    inFlight = null;
   }
-
-  cache = blob;
-  return blob;
 }
 
 /** Clears the in-memory cache only (does not touch SecureStore). Test helper. */
 export function resetDecoyCache(): void {
   cache = null;
+  inFlight = null;
 }
 
 /**
