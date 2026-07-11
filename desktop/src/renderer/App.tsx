@@ -52,6 +52,7 @@ import { usePreferences } from './store/preferences';
 import { useCall } from './store/call';
 import { useConnection } from './store/connection';
 import { connect as connectSocket, disconnect as disconnectSocket } from './socket/client';
+import { shouldConnectSocket } from './utils/socketGate';
 import { attachCallHandlers, acceptCall, endCall } from './socket/calls';
 import { setNotificationOpenChatHandler } from './notifications/push';
 import { Sidebar } from './components/Sidebar';
@@ -98,7 +99,7 @@ type PushRoute =
 // ─── Shell ────────────────────────────────────────────────────────────────────
 function Shell() {
   const { t } = useTheme();
-  const { identity, status, hydrated, hydrate } = useIdentity();
+  const { identity, status, hydrated, hydrate, publishStatus } = useIdentity();
   const hydratePrefs = usePreferences((s) => s.hydrate);
   const appLockEnabled = usePreferences((s) => s.appLockEnabled);
   const lockTimeoutMin = usePreferences((s) => s.lockTimeoutMin);
@@ -263,8 +264,14 @@ function Shell() {
   }, [online, identity]);
 
   useEffect(() => {
-    if (identity && status === 'ready') {
-      connectSocket(identity);
+    // Gate on publishStatus, not just identity/status: connecting while a
+    // fresh registration is still 'publishing' races the HTTP registration
+    // (PoW + POST /identity + POST /prekeys) — see shouldConnectSocket in
+    // utils/socketGate.ts for the full root-cause writeup. This effect
+    // re-runs once publishStatus resolves ('published'/'failed'/'unknown'),
+    // at which point it is safe to open the socket.
+    if (shouldConnectSocket({ hasIdentity: !!identity, identityStatus: status, publishStatus })) {
+      connectSocket(identity!);
       attachCallHandlers();
       setNotificationOpenChatHandler((aegisId) => {
         void import('./store/contacts').then(({ useContacts }) => {
@@ -277,7 +284,7 @@ function Shell() {
       setStack([]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, status]);
+  }, [identity, status, publishStatus]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

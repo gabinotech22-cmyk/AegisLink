@@ -811,25 +811,36 @@ export function connect(identity: Identity): Socket {
       themedAlert('Contact offline', 'The contact is not currently connected to the server. Try again later.');
     }
     if (e?.code === 'unknown_identity') {
-      // Server doesn't know us — re-register via the single ensureRegistered path.
-      if (__DEV__) logger.debug('[socket] unknown_identity — re-registering and reconnecting');
+      // Server doesn't know us — re-register via the SINGLE de-duplicated path
+      // (store/identity.ts retryPublish()), never a direct ensureRegistered()
+      // call here. retryPublish() no-ops if a registration is already
+      // 'publishing' or already 'published', so this can never race a publish
+      // already in flight from generate()/hydrate() — that used to cause a
+      // second, concurrent PoW/registration attempt (double PoW mining +
+      // double hit on the relay's per-IP rate limit). See
+      // src/utils/socketGate.ts for the companion fix on the connect side.
+      if (__DEV__) logger.debug('[socket] unknown_identity — re-registering via retryPublish and reconnecting');
       try {
-        const { ensureRegistered } = await import('../crypto/ensureRegistered');
         const { useIdentity } = await import('../store/identity');
-        const result = await ensureRegistered(identity);
-        if (result.ok) {
-          // Sync the store's publishStatus so the Home banner clears.
-          useIdentity.setState({ publishStatus: 'published', publishError: null, publishRetryAfterMs: null });
+        const before = useIdentity.getState().publishStatus;
+        await useIdentity.getState().retryPublish();
+        const after = useIdentity.getState();
+        if (after.publishStatus === 'published') {
           if (__DEV__) logger.debug('[socket] re-registered — reconnecting');
           // The relay already closed this socket server-side (reason
           // 'io server disconnect'), and that reason does NOT trigger Socket.IO's
           // auto-reconnect. Re-open the socket explicitly so the new identity
           // gets a fresh auth challenge and comes back online.
           socket?.connect();
-        } else {
-          if (__DEV__) logger.warn('[socket] re-registration failed:', result.error);
-          useIdentity.setState({ publishStatus: 'failed', publishError: result.error ?? 'Re-registration failed', publishRetryAfterMs: result.retryAfterMs ?? null });
+        } else if (after.publishStatus === 'failed') {
+          if (__DEV__) logger.warn('[socket] re-registration failed:', after.publishError);
           useConnection.getState().setOnline(false);
+        } else if (before === 'publishing') {
+          // A registration was already in flight (retryPublish no-op'd) — it
+          // will itself flip publishStatus to 'published'/'failed', and
+          // App.tsx's shouldConnectSocket-gated effect reconnects the socket
+          // once it resolves. Nothing to do here but leave the socket closed.
+          if (__DEV__) logger.debug('[socket] unknown_identity: publish already in flight, deferring reconnect');
         }
       } catch (err) {
         if (__DEV__) logger.warn('[socket] re-registration error:', err);

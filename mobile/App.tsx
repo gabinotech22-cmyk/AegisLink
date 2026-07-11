@@ -59,6 +59,7 @@ import { IncomingGroupCallScreen } from './src/screens/IncomingGroupCall';
 import { FloatingCallBar } from './src/components/FloatingCallBar';
 import { FloatingGroupCallBar } from './src/components/FloatingGroupCallBar';
 import { registerShellNav, navigateToGroupChat } from './src/utils/shellNav';
+import { shouldConnectSocket, shouldArmNetErrorTimer } from './src/utils/socketGate';
 import { NetworkErrorScreen } from './src/screens/NetworkError';
 import { LockSettingsScreen } from './src/screens/LockSettings';
 import { KeysScreen } from './src/screens/Keys';
@@ -205,7 +206,7 @@ function AnimatedScreen({ children, stackDepth }: { children: React.ReactNode; s
 function Shell() {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
-  const { identity, status, hydrated, hydrate } = useIdentity();
+  const { identity, status, hydrated, hydrate, publishStatus } = useIdentity();
   const allContacts = useContactsStore((s) => s.contacts);
   const blockScreenshots = usePreferences((s) => s.blockScreenshots);
   const hideRecents = usePreferences((s) => s.hideRecents);
@@ -527,6 +528,17 @@ function Shell() {
     if (!identity) return;
     // Suppress network errors in decoy mode — no connection is intentional
     if (usePreferences.getState().duressActive) return;
+    // While a fresh registration is still resolving (or onboarding is on
+    // screen) the socket is intentionally not connected yet — see
+    // shouldConnectSocket in src/utils/socketGate.ts. `online === false` here
+    // is expected, not a real network error; arming the timer would plant
+    // NetworkErrorScreen underneath onboarding and pop it the instant
+    // onboarding finishes.
+    if (!shouldArmNetErrorTimer({ showOnboarding, publishStatus })) {
+      if (netTimer.current) clearTimeout(netTimer.current);
+      setNetError(false);
+      return;
+    }
     if (!online) {
       netTimer.current = setTimeout(() => setNetError(true), 5000);
     } else {
@@ -534,13 +546,19 @@ function Shell() {
       setNetError(false);
     }
     return () => { if (netTimer.current) clearTimeout(netTimer.current); };
-  }, [online, identity]);
+  }, [online, identity, publishStatus, showOnboarding]);
 
   useEffect(() => {
-    if (identity && status === 'ready') {
+    // Gate on publishStatus, not just identity/status: connecting while a
+    // fresh registration is still 'publishing' races the HTTP registration
+    // (PoW + POST /identity + POST /prekeys) — see shouldConnectSocket in
+    // src/utils/socketGate.ts for the full root-cause writeup. This effect
+    // re-runs once publishStatus resolves ('published'/'failed'/'unknown'),
+    // at which point it is safe to open the socket.
+    if (shouldConnectSocket({ hasIdentity: !!identity, identityStatus: status, publishStatus })) {
       // Never connect with the decoy identity — doing so leaks that panic mode is active
       if (usePreferences.getState().duressActive) return;
-      connectSocket(identity);
+      connectSocket(identity!);
       if (WEBRTC_AVAILABLE) {
         attachCallHandlers();
         attachGroupCallHandlers();
@@ -569,7 +587,7 @@ function Shell() {
           if (contact) { setStack([]); push({ name: 'chat', contact }); }
         }
       });
-      void registerForPush(identity);
+      void registerForPush(identity!);
       initCallKeep();
       registerVoIPToken();
     } else if (!identity && status === 'idle') {
@@ -577,7 +595,7 @@ function Shell() {
       clearTurnCache();
       setStack([]);
     }
-  }, [identity, status]);
+  }, [identity, status, publishStatus]);
 
   // Re-attach call handlers whenever the connection comes back. A reconnect can
   // rebuild the socket.io instance (disconnect() nulls it), which silently drops

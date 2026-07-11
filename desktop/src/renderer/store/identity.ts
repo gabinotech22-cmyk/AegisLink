@@ -16,6 +16,11 @@ import '../crypto/ipc-types';
 const secureStorage = () => window.aegis.secureStorage;
 const DEV = Boolean(import.meta.env?.DEV);
 
+/** Publication status of this identity on the relay. Mirrors mobile's
+ * src/store/identity.ts PublishStatus — see the mobile file for the full
+ * root-cause writeup (2026-07 registration race). */
+export type PublishStatus = 'unknown' | 'publishing' | 'published' | 'failed';
+
 interface IdentityState {
   identity: Identity | null;
   status: 'idle' | 'loading' | 'generating' | 'ready';
@@ -25,6 +30,11 @@ interface IdentityState {
   avatarColor: string;
   avatarImage: string | null;
   profileStatus: string;
+
+  /** Whether this identity is confirmed published on the relay. Gates
+   * App.tsx's connectSocket() call — see utils/socketGate.ts. */
+  publishStatus: PublishStatus;
+  publishError: string | null;
 
   activeSlotId: string;
   slotsList: string[];
@@ -39,6 +49,9 @@ interface IdentityState {
     avatarImage: string | null,
   ) => Promise<void>;
   updateStatus: (text: string) => Promise<void>;
+
+  /** Trigger publishToServer (single-flight); updates publishStatus/publishError. */
+  retryPublish: () => Promise<void>;
 
   createSlot: () => Promise<string>;
   switchSlot: (slotId: string) => Promise<void>;
@@ -151,6 +164,27 @@ async function doPublishToServer(identity: Identity): Promise<boolean> {
   }
 }
 
+/**
+ * Wraps publishToServer() (single-flight via publishInFlight) with
+ * publishStatus tracking, mirroring mobile's store/identity.ts runPublish().
+ *
+ * This is the SINGLE choke point every publish path goes through — hydrate(),
+ * generate(), createSlot(), and socket/client.ts's unknown_identity handler
+ * (via retryPublish()) all call this instead of publishToServer() directly,
+ * so connectSocket-gating (utils/socketGate.ts) and the unknown_identity
+ * handler always see a consistent, de-duplicated publishStatus rather than
+ * racing a second concurrent PoW/registration attempt.
+ */
+async function runPublish(identity: Identity): Promise<void> {
+  useIdentity.setState({ publishStatus: 'publishing', publishError: null });
+  const ok = await publishToServer(identity);
+  if (ok) {
+    useIdentity.setState({ publishStatus: 'published', publishError: null });
+  } else {
+    useIdentity.setState({ publishStatus: 'failed', publishError: 'Registration failed' });
+  }
+}
+
 export const useIdentity = create<IdentityState>((set, get) => ({
   identity: null,
   status: 'idle',
@@ -160,6 +194,9 @@ export const useIdentity = create<IdentityState>((set, get) => ({
   avatarColor: '#05b875',
   avatarImage: null,
   profileStatus: '',
+
+  publishStatus: 'unknown',
+  publishError: null,
 
   activeSlotId: 'self',
   slotsList: ['self'],
@@ -193,6 +230,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
           profileStatus: 'Safe & Protected',
           status: 'ready',
           hydrated: true,
+          // The decoy must never reach the relay: mark it published so no
+          // background publish/retry ever fires with the decoy identity.
+          publishStatus: 'published',
+          publishError: null,
         });
         return;
       }
@@ -205,7 +246,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
       const stored = await loadIdentity();
       if (!stored) {
-        set({ identity: null, activeSlotId, slotsList, status: 'idle', hydrated: true });
+        set({ identity: null, activeSlotId, slotsList, status: 'idle', hydrated: true, publishStatus: 'unknown', publishError: null });
         return;
       }
       const identity = identityFromStored(stored);
@@ -214,6 +255,18 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       const avatarColor = (await secureStorage().get(getPrefKey('aegis.avatarColor', activeSlotId))) || '#05b875';
       const avatarImage = (await secureStorage().get(getPrefKey('aegis.avatarImage', activeSlotId))) || null;
       const profileStatus = (await secureStorage().get(getPrefKey('aegis.profileStatus', activeSlotId))) || '';
+
+      // Publish AFTER the UI is usable — it runs PoW + network round-trips and
+      // must never block boot. Only on first run for this slot: later boots
+      // skip it (the relay re-requests via unknown_identity if it has
+      // actually forgotten us), so we don't burn the relay rate-limit (429).
+      // If already flagged, treat as 'published' immediately (no re-register)
+      // — mirrors mobile's hydrate() `alreadyPublished` fast path so restored
+      // identities from prior sessions connect the socket right away instead
+      // of waiting on a publish that will never run.
+      const alreadyPublished = await secureStorage()
+        .get(getPrefKey('aegis.prekeysPublished', activeSlotId))
+        .catch(() => null);
 
       set({
         identity,
@@ -225,6 +278,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         profileStatus,
         status: 'ready',
         hydrated: true,
+        publishStatus: alreadyPublished ? 'published' : 'unknown',
+        publishError: null,
       });
 
       // Populate the UI stores from the local DB — without this the sidebar
@@ -234,15 +289,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       await useContacts.getState().hydrate().catch(() => {});
       await useGroups.getState().hydrate().catch(() => {});
 
-      // Publish AFTER the UI is usable — it runs PoW + network round-trips and
-      // must never block boot (it used to run before set(), so a slow or
-      // rate-limited relay froze hydration). Only on first run for this slot:
-      // later boots skip it (the relay re-requests via unknown_identity if it
-      // has actually forgotten us), so we don't burn the relay rate-limit (429).
-      const alreadyPublished = await secureStorage()
-        .get(getPrefKey('aegis.prekeysPublished', activeSlotId))
-        .catch(() => null);
-      if (!alreadyPublished) void publishToServer(identity);
+      if (!alreadyPublished) void runPublish(identity);
     } catch (e) {
       set({ status: 'idle', hydrated: true, error: (e as Error).message });
     }
@@ -275,12 +322,16 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         avatarColor: defaultColor,
         avatarImage: null,
         status: 'ready',
+        publishStatus: 'unknown',
+        publishError: null,
       });
 
       // Publish AFTER the identity is in-memory ready: if the relay rejects or is
       // slow, the identity is already persisted and usable rather than stranded
-      // on disk with the store never reaching 'ready'.
-      void publishToServer(identity);
+      // on disk with the store never reaching 'ready'. Registration runs in the
+      // background; publishStatus updates via runPublish (gates connectSocket —
+      // see utils/socketGate.ts).
+      void runPublish(identity);
 
       return identity;
     } catch (e) {
@@ -317,6 +368,11 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         avatarImage: null,
         status: 'ready',
         hydrated: true,
+        // Mobile already registered this identity on the relay — mark it
+        // published so connectSocket-gating (utils/socketGate.ts) doesn't
+        // wait on a publish that will never run.
+        publishStatus: 'published',
+        publishError: null,
       });
     } catch (e) {
       set({ status: 'idle', error: (e as Error).message });
@@ -348,6 +404,8 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       avatarImage: null,
       profileStatus: '',
       status: 'idle',
+      publishStatus: 'unknown',
+      publishError: null,
     });
   },
 
@@ -370,6 +428,14 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
     const identity = get().identity;
     if (identity) await tryBroadcastProfileUpdate(identity);
+  },
+
+  async retryPublish() {
+    const { identity, publishStatus } = get();
+    if (!identity) return;
+    if (publishStatus === 'published') return; // already confirmed
+    if (publishStatus === 'publishing') return; // in-flight
+    await runPublish(identity);
   },
 
   async createSlot() {
