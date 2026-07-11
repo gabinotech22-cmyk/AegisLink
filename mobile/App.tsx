@@ -3,7 +3,7 @@ import './src/i18n';
 import { logger } from './src/utils/logger';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking } from 'react-native';
-import { View, Text, ActivityIndicator, AppState, Pressable, type AppStateStatus, Dimensions } from 'react-native';
+import { View, Text, ActivityIndicator, AppState, Pressable, Platform, type AppStateStatus, Dimensions } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -299,15 +299,23 @@ function Shell() {
       const e2e = process.env.EXPO_PUBLIC_E2E === '1';
       if (hideRecents && !e2e) {
         // iOS: native app-switcher blur — handled by the OS itself, so there is
-        // no React re-render race with the snapshot.
+        // no React re-render race with the snapshot. preventScreenCaptureAsync
+        // is deliberately NOT called here on iOS: unlike Android's FLAG_SECURE
+        // (which only affects the recents thumbnail), iOS's screen-capture
+        // block also blocks in-app screenshots — that is blockScreenshots'
+        // job, and this toggle must not silently widen its own scope into it.
         SC.enableAppSwitcherProtectionAsync?.().catch(() => {});
-        // Android: FLAG_SECURE also blanks the recents thumbnail. Own key so
-        // toggling this off never cancels blockScreenshots' protection (and
-        // vice versa) — see the comment on that effect above.
-        SC.preventScreenCaptureAsync('hideRecents').catch(() => {});
+        if (Platform.OS === 'android') {
+          // FLAG_SECURE also blanks the recents thumbnail. Own key so toggling
+          // this off never cancels blockScreenshots' protection (and vice
+          // versa) — see the comment on that effect above.
+          SC.preventScreenCaptureAsync('hideRecents').catch(() => {});
+        }
       } else {
         SC.disableAppSwitcherProtectionAsync?.().catch(() => {});
-        SC.allowScreenCaptureAsync('hideRecents').catch(() => {});
+        if (Platform.OS === 'android') {
+          SC.allowScreenCaptureAsync('hideRecents').catch(() => {});
+        }
       }
     } catch { /* package not installed — graceful no-op */ }
     if (!hideRecents) {
