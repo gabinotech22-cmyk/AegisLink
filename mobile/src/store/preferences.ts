@@ -50,8 +50,6 @@ export interface Preferences {
 
   // Profile visibility (persisted from Profile screen)
   photoVis: 'all' | 'contacts' | 'none';
-  lastSeenVisible: boolean;
-  typingVisible: boolean;
 
   // Internationalisation
   language: SupportedLocale;
@@ -81,8 +79,6 @@ const DEFAULTS: Preferences = {
   lockTimeoutMin: 0,
   hideRecents: true,
   photoVis: 'contacts',
-  lastSeenVisible: false,
-  typingVisible: true,
   language: 'en',
   themeDark: true,
   themeAutoMode: false,
@@ -124,8 +120,6 @@ function snapshot(get: () => PrefsState): Preferences {
     lockTimeoutMin: s.lockTimeoutMin,
     hideRecents: s.hideRecents,
     photoVis: s.photoVis,
-    lastSeenVisible: s.lastSeenVisible,
-    typingVisible: s.typingVisible,
     language: s.language,
     themeDark: s.themeDark,
     themeAutoMode: s.themeAutoMode,

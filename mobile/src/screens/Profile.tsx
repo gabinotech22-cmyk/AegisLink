@@ -65,15 +65,11 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
 
   const setPreference = usePreferences((s) => s.set);
   const photoVis = usePreferences((s) => s.photoVis);
-  const lastSeen = usePreferences((s) => s.lastSeenVisible);
-  const typing = usePreferences((s) => s.typingVisible);
   // Isolated-profiles switcher must stay hidden while showing the decoy
   // account — it would reveal that a real, hidden identity exists.
   const duressActive = usePreferences((s) => s.duressActive);
 
   const setPhotoVis = (v: 'all' | 'contacts' | 'none') => void setPreference('photoVis', v);
-  const setLastSeen = (v: boolean) => void setPreference('lastSeenVisible', v);
-  const setTyping = (v: boolean) => void setPreference('typingVisible', v);
 
 
   // Profile Editor States
@@ -378,22 +374,12 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
               alignItems: 'center',
               paddingHorizontal: 16,
               paddingVertical: 12,
-              borderBottomWidth: 1,
-              borderBottomColor: t.divider,
               gap: 12,
             }}
           >
             <Text style={{ flex: 1, fontFamily: t.font, fontSize: 14, color: t.text }}>{i18nT('profile.profilePhoto')}</Text>
             <PhotoVisPicker t={t} value={photoVis} onChange={setPhotoVis} />
           </View>
-          <Toggle
-            t={t}
-            label={i18nT('profile.lastSeen')}
-            sub={i18nT('profile.lastSeenSub')}
-            value={lastSeen}
-            onChange={setLastSeen}
-          />
-          <Toggle t={t} label={i18nT('profile.typingIndicator')} value={typing} onChange={setTyping} noBorder />
         </Section>
 
         <Section t={t} label={i18nT('profile.appearanceSection')}>
