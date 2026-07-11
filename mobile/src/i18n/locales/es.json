@@ -40,7 +40,10 @@
     "processingImage": "PROCESANDO IMAGEN…",
     "permissionDenied": "Permiso denegado",
     "offline": "SIN CONEXIÓN — mensajes en cola",
-    "retryConnection": "Reintentar conexión"
+    "retryConnection": "Reintentar conexión",
+    "contacts": "Contactos",
+    "messages": "Mensajes",
+    "settings": "Ajustes"
   },
   "onboarding": {
     "tagline": "Mensajería sin rastros.",
@@ -72,7 +75,10 @@
     "nicknameLabel": "NOMBRE VISIBLE (OPCIONAL)",
     "nicknameDefault": "Por defecto: {{name}}",
     "colorSwatchLabel": "Color de avatar {{color}}",
-    "skipNickname": "Omitir por ahora"
+    "skipNickname": "Omitir por ahora",
+    "dbInitializing": "Inicializando almacenamiento seguro…",
+    "switchDark": "Cambiar a modo oscuro",
+    "switchLight": "Cambiar a modo claro"
   },
   "home": {
     "identityCreated": "Identidad creada",
@@ -102,7 +108,12 @@
     "registering": "REGISTRANDO IDENTIDAD…",
     "registrationFailed": "FALLO AL REGISTRAR IDENTIDAD",
     "retry": "REINTENTAR",
-    "registrationRateLimited": "Demasiados intentos de registro. Reintento automático en {{minutes}} min"
+    "registrationRateLimited": "Demasiados intentos de registro. Reintento automático en {{minutes}} min",
+    "deleteChat": "Eliminar chat",
+    "deleteChatConfirm": "¿Eliminar el chat con {{name}} de la lista? Se borra la conversación pero el contacto se conserva (puedes eliminarlo desde su perfil). Reaparece si hay un nuevo mensaje.",
+    "pin": "Fijar",
+    "unarchive": "Desarchivar",
+    "unpin": "Desfijar"
   },
   "chat": {
     "encryptedToday": "CIFRADO EXTREMO A EXTREMO · HOY",
@@ -177,7 +188,23 @@
     "joinRequestUnknownGroup": "Grupo no disponible en este dispositivo",
     "joinRequestPreview": "Solicitud de unión",
     "joinRequestErrorTitle": "No se pudo añadir",
-    "joinRequestErrorDesc": "Comprueba tu conexión e inténtalo de nuevo."
+    "joinRequestErrorDesc": "Comprueba tu conexión e inténtalo de nuevo.",
+    "attach": "Adjuntar archivo",
+    "callDeclinedByThem": "Llamada rechazada",
+    "callNoAnswer": "Sin respuesta",
+    "contactAddFailed": "No se pudo añadir",
+    "contactAdded": "Contacto añadido",
+    "idCopied": "ID copiado al portapapeles",
+    "noResults": "Sin resultados",
+    "replyIcon": "↩",
+    "searchMessages": "Buscar mensajes",
+    "searchNext": "Resultado siguiente",
+    "searchPlaceholder": "Buscar mensajes…",
+    "searchPrev": "Resultado anterior",
+    "sendAccessibilityLabel": "Enviar mensaje",
+    "videoCallMade": "Videollamada",
+    "voiceCallMade": "Llamada de voz",
+    "voiceNote": "Grabar nota de voz"
   },
   "contacts": {
     "title": "Contactos",
@@ -254,7 +281,9 @@
     "generatingWorkTitle": "Generando tu par de claves de Trabajo",
     "generatingWorkSubtitle": "Curve25519 · 256-bit · SQLite aislado",
     "keygenError": "Error al generar el par de claves de trabajo",
-    "viewPhoto": "Ver foto"
+    "viewPhoto": "Ver foto",
+    "shareMyId": "Compartir mi ID",
+    "shareMyIdSub": "Comparte tu contacto AegisLink"
   },
   "privacy": {
     "title": "Privacidad",
@@ -400,7 +429,9 @@
     "copied": "¡Copiado!",
     "regenerate": "Regenerar",
     "regenerateConfirmTitle": "¿Regenerar enlace de activación?",
-    "regenerateConfirmDesc": "El enlace anterior dejará de funcionar inmediatamente."
+    "regenerateConfirmDesc": "El enlace anterior dejará de funcionar inmediatamente.",
+    "confirmMsg": "Esta acción es irreversible. Todos los mensajes, contactos y claves serán eliminados.",
+    "confirmTitle": "¿Borrar todo?"
   },
   "networkError": {
     "status": "SIN ACCESO AL RELAY",
@@ -410,7 +441,11 @@
     "emergencyRelay": "USAR RELAY DE EMERGENCIA · ENLACE TOR ▸",
     "emergencyRelayTitle": "Relay de emergencia",
     "emergencyRelayDesc": "El enrutamiento Tor está disponible en la versión de producción. Asegúrate de tener Orbot instalado y activo en tu dispositivo.",
-    "understood": "Entendido"
+    "understood": "Entendido",
+    "probing": "sondeando…",
+    "reachable": "accesible",
+    "relayLabel": "Relay de AegisLink",
+    "unreachable": "inaccesible"
   },
   "tabBar": {
     "chats": "CHATS",
@@ -435,7 +470,13 @@
     "sendError": "Error al enviar",
     "sendOrSchedule": "Enviar — mantén pulsado para programar un post",
     "postScheduledTitle": "Post programado",
-    "postScheduledDesc": "Se publicará automáticamente en el grupo a la hora elegida."
+    "postScheduledDesc": "Se publicará automáticamente en el grupo a la hora elegida.",
+    "anonymousVotes": "Encuesta anónima · {{count}} votos",
+    "deleteMessageConfirm": "¿Eliminar este mensaje?",
+    "deletedMessage": "Mensaje eliminado",
+    "locationShared": "Ubicación compartida",
+    "modBadge": "MOD",
+    "openMaps": "ABRIR EN MAPAS"
   },
   "groups": {
     "title": "Grupos",
@@ -476,7 +517,8 @@
     "errorCreate": "No se pudo crear el grupo.",
     "permissionDeniedGallery": "Necesitamos permiso para acceder a tu galería de imágenes.",
     "permissionDeniedCamera": "Necesitamos permiso para acceder a tu cámara.",
-    "permissionDeniedTitle": "Permiso denegado"
+    "permissionDeniedTitle": "Permiso denegado",
+    "groupPhoto": "Imagen del grupo"
   },
   "addContact": {
     "title": "Añadir contacto",
@@ -609,7 +651,8 @@
     "accountRecovered": "Cuenta recuperada",
     "identityRestoredSuccess": "Identidad {{aegisId}} restaurada con éxito.",
     "successLabel": "Éxito",
-    "successfullyRecovered": "¡Cuenta {{aegisId}} recuperada con éxito!"
+    "successfullyRecovered": "¡Cuenta {{aegisId}} recuperada con éxito!",
+    "invalidEnvelope": "El archivo no es una copia de seguridad válida de AegisLink"
   },
   "notifications": {
     "title": "Notificaciones",
@@ -618,13 +661,49 @@
     "sound": "Sonido",
     "badge": "Contador de badge",
     "summary": "Notificaciones de resumen",
-    "keywords": "Palabras clave de alerta"
+    "keywords": "Palabras clave de alerta",
+    "addBtn": "+ añadir",
+    "always": "siempre",
+    "badgeSub": "Contador de punto rojo en el icono de la app",
+    "dailySummary": "RESUMEN DIARIO",
+    "generalSection": "GENERAL",
+    "keywordPlaceholder": "palabra clave...",
+    "keywordsDesc": "Los mensajes que contengan estas palabras clave siempre te notificarán, incluso si el chat está silenciado.",
+    "keywordsLabel": "PALABRAS CLAVE PRIORITARIAS",
+    "localSummary": "Generar resumen local",
+    "localSummarySub": "Procesado en el dispositivo · 19:30",
+    "masterSub": "Interruptor maestro · desactiva todas las notificaciones",
+    "mutedSectionTitle": "SILENCIADOS · {{count}}",
+    "mutedUntil": "HASTA {{until}}",
+    "notifLabel": "Notificaciones",
+    "showContent": "Mostrar contenido",
+    "showContentSub": "Si está desactivado, solo muestra \"nuevo mensaje cifrado\"",
+    "unmuteBtn": "REACTIVAR"
   },
   "devices": {
     "title": "Dispositivos vinculados",
     "noDevices": "Sin dispositivos vinculados",
     "linkDevice": "Vincular nuevo dispositivo",
-    "remove": "Eliminar dispositivo"
+    "remove": "Eliminar dispositivo",
+    "activeNow": "Activo ahora",
+    "deviceKeyLabel": "CLAVE DEL DISPOSITIVO",
+    "emptyDesc": "Vincula tu escritorio para sincronizar conversaciones de forma segura sin compartir claves",
+    "emptyTitle": "Sin dispositivos vinculados",
+    "infoDesc": "Cada dispositivo tiene su propia clave. Si pierdes uno, revócalo aquí — los mensajes nuevos se volverán ilegibles de inmediato.",
+    "invalidDesktopPubKey": "Clave pública de escritorio no válida.",
+    "invalidQrFormat": "QR no válido — formato incorrecto.",
+    "invalidQrJson": "QR no válido — no es un JSON.",
+    "link": "Vincular",
+    "linkDesktopBtn": "+ Vincular escritorio",
+    "linkDesktopConfirmDesc": "Este escritorio podrá enviar y recibir mensajes usando tu identidad AegisLink. Las claves nunca salen de tus dispositivos.",
+    "linkDesktopConfirmTitle": "¿Vincular AegisLink Desktop?",
+    "linkTimeout": "La solicitud expiró",
+    "linkedAt": "Vinculado {{time}}",
+    "pointAtDesktopQr": "APUNTA AL QR DEL ESCRITORIO",
+    "revoke": "Revocar",
+    "revokeDeviceConfirm": "Revocar \"{{name}}\"? Los mensajes nuevos se volverán ilegibles de inmediato.",
+    "revokeDeviceTitle": "Revocar dispositivo",
+    "thisDevice": "ESTE DISPOSITIVO"
   },
   "search": {
     "title": "Buscar",
@@ -639,7 +718,10 @@
     "mlsEncrypted": "Cifrado E2EE",
     "fileFromIn": "{{size}} · de {{from}} · {{time}} · en {{chat}}",
     "fromYou": "tú",
-    "file": "archivo"
+    "file": "archivo",
+    "emptyDesc": "Encuentra mensajes, contactos, archivos y grupos",
+    "emptyTitle": "Buscar en AegisLink",
+    "noResultsTitle": "Sin resultados"
   },
   "scheduled": {
     "title": "Mensajes programados",
@@ -736,7 +818,9 @@
     "cancel": "Cancelar",
     "permissionTitle": "Permiso requerido",
     "permissionMessage": "Se necesita acceso al micrófono para grabar una nota de voz.",
-    "playing": "Reproduciendo…"
+    "playing": "Reproduciendo…",
+    "record": "Grabar nota de voz",
+    "stop": "Detener grabación"
   },
   "location": {
     "title": "Compartir ubicación",
@@ -943,7 +1027,27 @@
     "title": "Tus datos",
     "export": "Exportar datos",
     "deleteAccount": "Eliminar cuenta",
-    "gdpr": "Solicitud GDPR"
+    "gdpr": "Solicitud GDPR",
+    "contactsSub": "Exportar agenda",
+    "deleteAccountCaps": "ELIMINAR CUENTA",
+    "deleteBtn": "Eliminar mi cuenta para siempre",
+    "deleteConfirmBtn": "Sí, eliminar",
+    "deleteConfirmMsg": "Esto eliminará permanentemente todas tus claves y mensajes locales de este dispositivo. No se puede deshacer. ¿Continuar?",
+    "deleteDesc": "Eliminar tu cuenta borra permanentemente todas las claves, mensajes y contactos locales de este dispositivo. Los mensajes ya recibidos por tus contactos permanecen en sus dispositivos.",
+    "dialogTitle": "Exportar datos de AegisLink",
+    "exportError": "Error al exportar",
+    "exportSection": "EXPORTAR · ARCHIVO LOCAL",
+    "fileSaved": "Archivo guardado",
+    "format": "FORMATO",
+    "formatValue": "JSON",
+    "generateBtn": "Generar archivo",
+    "infoDesc": "AegisLink no guarda nada en el servidor más allá de blobs cifrados opacos. Aquí controlas qué sale del dispositivo — y cómo borrarlo todo si te vas.",
+    "irreversible": "IRREVERSIBLE",
+    "media": "Medios",
+    "mediaSub": "Aún no disponible",
+    "messagesSub": "Exportar historial de chats",
+    "savedTo": "Guardado en: {{uri}}",
+    "settingsSub": "Preferencias"
   },
   "call": {
     "connecting": "Conectando…",
@@ -955,12 +1059,43 @@
     "video": "Vídeo",
     "noVideo": "Sin vídeo",
     "minimize": "Minimizar llamada",
-    "tapToReturn": "Volver a la llamada"
+    "tapToReturn": "Volver a la llamada",
+    "alertDesc": "Esta llamada usa DTLS-SRTP con intercambio de claves efímero CURVE25519. Ningún servidor puede descifrar ni interceptar el flujo de audio/vídeo.",
+    "alertTitle": "Llamada cifrada de extremo a extremo",
+    "audio": "AUDIO",
+    "badgeShort": "E2EE · CIFRADO",
+    "calling": "LLAMANDO…",
+    "cameraA11yOff": "Cámara desactivada",
+    "cameraA11yOn": "Cámara activada",
+    "cameraOff": "Cám. apagada",
+    "cameraOn": "Cám. encendida",
+    "ended": "LLAMADA FINALIZADA",
+    "fingerprintDesc": "Compara con tu contacto para verificar",
+    "fingerprintPending": "Derivando huella de sesión…",
+    "hangup": "Colgar",
+    "more": "Más",
+    "muteA11y": "Silenciado",
+    "muteA11yOff": "Micro activado",
+    "sessionFingerprintTitle": "HUELLA DE SESIÓN",
+    "speakerOff": "Auricular",
+    "speakerOn": "Altavoz",
+    "verifyDesc": "Lee este código en voz alta con tu contacto. Si coincide en ambos teléfonos, nadie está interceptando la llamada.",
+    "verifyFingerprint": "Verificar huella",
+    "verifyTitle": "Verificar huella"
   },
   "incomingCall": {
     "incoming": "Llamada entrante",
     "accept": "Aceptar",
-    "decline": "Rechazar"
+    "decline": "Rechazar",
+    "e2eeCall": "LLAMADA E2EE · CIFRADA",
+    "quickReply1": "No puedo hablar ahora",
+    "quickReply2": "Te llamo en 5 minutos",
+    "quickReply3": "¿Qué necesitas?",
+    "quickReply4": "Estoy en una reunión",
+    "quickReply5": "Escríbeme mejor",
+    "reply": "RESPONDER",
+    "replyAndReject": "RESPONDER Y RECHAZAR",
+    "verified": "Identidad verificada"
   },
   "lockSetup": {
     "title": "Configurar bloqueo",
@@ -1011,14 +1146,25 @@
     "minutes_one": "1 minuto",
     "minutes_other": "{{count}} minutos",
     "hours_one": "1 hora",
-    "hours_other": "{{count}} horas"
+    "hours_other": "{{count}} horas",
+    "bioLabel": "BIOMETRÍA",
+    "configLabel": "CONFIGURACIÓN",
+    "pinLabel": "PIN"
   },
   "lockSettings": {
     "title": "Ajustes de bloqueo",
     "timeout": "Bloqueo automático después de",
     "immediately": "Inmediatamente",
     "hideRecents": "Ocultar en recientes",
-    "hideRecentsDesc": "Difuminar el contenido de la app en el selector de tareas"
+    "hideRecentsDesc": "Difuminar el contenido de la app en el selector de tareas",
+    "afterMinutes": "Después de {{count}} min",
+    "autoLockTimer": "TEMPORIZADOR DE BLOQUEO AUTOMÁTICO",
+    "bioUnlockDesc": "Desbloqueo con Face ID / huella",
+    "biometricsAlertMsg": "Se usará Face ID / huella para desbloquear la app.",
+    "biometricsAlertTitle": "Biometría",
+    "notEnrolled": "No hay biometría configurada en este dispositivo. Configura Face ID / huella en los ajustes del dispositivo primero.",
+    "requireBiometrics": "Requerir biometría",
+    "security": "SEGURIDAD"
   },
   "lockConfig": {
     "title": "Pantalla de bloqueo",
@@ -1029,7 +1175,26 @@
     "timeout": "Bloqueo automático después de",
     "hideRecents": "Ocultar en recientes",
     "hideRecentsSub": "Difuminar la app en el selector de tareas",
-    "setup": "Configurar PIN"
+    "setup": "Configurar PIN",
+    "accessProtection": "PROTECCIÓN DE ACCESO",
+    "advanced": "AVANZADO",
+    "appLockActive": "Activo · Se requiere autenticación para abrir",
+    "appLockDisabled": "Desactivado",
+    "bioDisclaimer": "AegisLink no tiene acceso a tus datos biométricos. Se procesan localmente en el Secure Enclave de tu dispositivo. El PIN nunca sale del dispositivo.",
+    "changePin": "Cambiar PIN",
+    "confirmPinPrompt": "Confirma tu PIN",
+    "deletePin": "Eliminar PIN",
+    "deletePinAlertMsg": "El bloqueo de la app se desactivará y el PIN se eliminará. Necesitarás configurar uno nuevo para volver a activarlo.",
+    "deletePinAlertTitle": "Eliminar PIN",
+    "enterPinPrompt": "Introduce un PIN de 6 dígitos",
+    "inactivityTime": "Tiempo de inactividad",
+    "lockNowTest": "Bloquear ahora (Prueba) ▸",
+    "lockSettings": "Ajustes de bloqueo",
+    "pinMismatch": "Los PINs no coinciden. Inténtalo de nuevo.",
+    "sameAsDecoy": "El PIN no puede ser igual al PIN señuelo.",
+    "screenPrivacy": "PRIVACIDAD DE PANTALLA",
+    "setPin": "Configurar PIN",
+    "titleBar": "Bloqueo de la app"
   },
   "appIcon": {
     "title": "Icono de la app",
@@ -1086,7 +1251,8 @@
     "alreadyVerified": "IDENTIDAD YA VERIFICADA",
     "markedTitle": "Verificado",
     "markedDesc": "{{name}} está verificado. Tus mensajes están protegidos contra ataques de intermediario.",
-    "contactNotFound": "Contacto no encontrado."
+    "contactNotFound": "Contacto no encontrado.",
+    "loading": "Cargando identidad…"
   },
   "firstContact": {
     "title": "Primer contacto",
@@ -1158,7 +1324,14 @@
     "loading": "CARGANDO...",
     "permissionRequired": "Permiso requerido",
     "galleryPermission": "Se requiere acceso a la galería.",
-    "cameraPermission": "Se requiere acceso a la cámara."
+    "cameraPermission": "Se requiere acceso a la cámara.",
+    "errorCamera": "No se pudo acceder a la cámara",
+    "errorGallery": "No se pudo abrir la galería",
+    "errorProcessImage": "No se pudo procesar la imagen de forma segura",
+    "poll": "Encuesta",
+    "sticker": "Sticker",
+    "video": "Vídeo",
+    "videoGallery": "Galería · E2EE"
   },
   "groupAdmin": {
     "title": "Admin del grupo",
@@ -1212,7 +1385,9 @@
     "viewPhoto": "Ver foto del grupo",
     "removePhoto": "Quitar foto",
     "removePhotoTitle": "Quitar foto del grupo",
-    "removePhotoDesc": "El grupo volverá a su ícono generado."
+    "removePhotoDesc": "El grupo volverá a su ícono generado.",
+    "changeAvatar": "Cambiar imagen del grupo",
+    "memberLimitReached": "Este grupo alcanzó el máximo de 1024 miembros."
   },
   "groupJoin": {
     "title": "Unirse al grupo",
@@ -1486,7 +1661,8 @@
     "awaitingApproval": "esperando aprobación",
     "deletePostTitle": "Eliminar publicación",
     "deletePostDesc": "¿Eliminar esta publicación para todos en el canal? No se puede deshacer.",
-    "deletePostHint": "Mantén pulsado para eliminar la publicación"
+    "deletePostHint": "Mantén pulsado para eliminar la publicación",
+    "schedulePost": "Programar publicación"
   },
   "channelInfo": {
     "title": "Info del canal",
@@ -1539,6 +1715,44 @@
     "notificationsSection": "Notificaciones",
     "notificationsToggle": "Notificaciones de publicaciones",
     "notificationsToggleSub": "Solo en este dispositivo — nunca se comparte con el servidor",
-    "viewPhoto": "Ver foto"
+    "viewPhoto": "Ver foto",
+    "avatarActionsDesc": "Reemplaza o elimina la foto del canal.",
+    "avatarActionsTitle": "Foto del canal"
+  },
+  "groupCall": {
+    "adminOnlyDetail": "Solo los administradores pueden iniciar llamadas en este grupo.",
+    "adminOnlyTitle": "Solo admins",
+    "alone": "Solo en el canal",
+    "callerLabel": "Iniciado por",
+    "calling": "Llamando…",
+    "channelActive": "Canal de voz activo",
+    "connecting": "Conectando…",
+    "e2ee": "E2EE · MESH",
+    "ended": "Llamada finalizada",
+    "expandCall": "Ver pantalla completa",
+    "groupCall": "Llamada grupal",
+    "inCallCount": "{{count}} en llamada",
+    "join": "Unirse",
+    "joinBanner": "Unirse a la llamada de voz",
+    "noMembers": "Sin miembros",
+    "noMembersDetail": "No hay otros miembros en este grupo.",
+    "participantCountShort": "{{count}} en llamada",
+    "startCall": "Iniciar llamada grupal",
+    "tapToExpand": "Volver a la llamada grupal",
+    "tooMany": "Demasiados participantes",
+    "tooManyDetail": "Máx. 8 participantes en llamadas grupales.",
+    "waitingForParticipants": "Esperando participantes…"
+  },
+  "multiPreview": {
+    "captionPlaceholder": "Añadir un mensaje… (opcional)",
+    "file": "archivo",
+    "send": "Enviar",
+    "sendTo": "ENVIAR A",
+    "title": "adjuntos"
+  },
+  "shareLink": {
+    "copy": "Copiar enlace",
+    "shareVia": "Compartir por app…",
+    "title": "Enlace para compartir"
   }
 }

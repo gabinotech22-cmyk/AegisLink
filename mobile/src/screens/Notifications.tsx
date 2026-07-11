@@ -89,10 +89,10 @@ export function NotificationsScreen({ onBack }: Props) {
               value={preview}
               onChange={setPreview}
             />
-            <Toggle t={t} label={i18nT('notifications.soundLabel', 'Sound')} value={sound} onChange={setSound} />
+            <Toggle t={t} label={i18nT('notifications.sound', 'Sound')} value={sound} onChange={setSound} />
             <Toggle
               t={t}
-              label={i18nT('notifications.badgeLabel', 'Badge counter')}
+              label={i18nT('notifications.badge', 'Badge counter')}
               sub={i18nT('notifications.badgeSub', 'Red dot counter on app icon')}
               value={badge}
               onChange={setBadge}
