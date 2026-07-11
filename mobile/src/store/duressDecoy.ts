@@ -20,6 +20,7 @@
 import { logger } from '../utils/logger';
 import { ss } from '../utils/secureStore';
 import { createIdentity, type Identity } from '../crypto/identity';
+import { resolveActiveLocale, type SupportedLocale } from '../i18n';
 import type { StoredContact } from '../db/local';
 import type { StoredMessage } from '../db/local';
 
@@ -55,14 +56,39 @@ const DECOY_NAMES = [
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Small, deliberately mundane conversation starters — nothing sensitive. */
-const DECOY_SCRIPTS: string[][] = [
-  ['hola! llegaste bien?', 'si, todo tranquilo jaja', 'buenisimo, nos vemos el finde entonces'],
-  ['viste el partido de ayer?', 'no pude, como quedo?', 'un desastre jajaja te cuento luego'],
-  ['te mando la receta que te dije', 'dale, gracias!', 'de nada, avisame como te sale'],
-  ['mañana café a las 5?', 'perfecto, en el de siempre?', 'si, ahi te espero'],
-  ['me pasas la foto del cumple?', 'ya te la mando', 'gracias! salio buenisima'],
-];
+/**
+ * Small, deliberately mundane conversation starters — nothing sensitive.
+ * One set per supported UI language: a decoy chatting in a language the
+ * device was never set to would itself be a giveaway that something is off.
+ * Picked ONCE at first generation (see getOrCreateDecoyBlob) via the SAME
+ * resolveActiveLocale() background notifications use — the blob is then
+ * persisted forever, so it stays consistent across unlocks regardless of
+ * later language changes (matching the "same decoy every time" invariant
+ * this module already guarantees for the identity/contacts).
+ */
+const DECOY_SCRIPTS_BY_LOCALE: Record<SupportedLocale, string[][]> = {
+  es: [
+    ['hola! llegaste bien?', 'si, todo tranquilo jaja', 'buenisimo, nos vemos el finde entonces'],
+    ['viste el partido de ayer?', 'no pude, como quedo?', 'un desastre jajaja te cuento luego'],
+    ['te mando la receta que te dije', 'dale, gracias!', 'de nada, avisame como te sale'],
+    ['mañana café a las 5?', 'perfecto, en el de siempre?', 'si, ahi te espero'],
+    ['me pasas la foto del cumple?', 'ya te la mando', 'gracias! salio buenisima'],
+  ],
+  en: [
+    ['hey! did you get there ok?', 'yep, all good haha', 'awesome, see you this weekend then'],
+    ['did you watch the game yesterday?', 'couldn’t, how’d it go?', 'a disaster lol, tell you later'],
+    ['sending you that recipe I mentioned', 'cool, thanks!', 'np, let me know how it turns out'],
+    ['coffee tomorrow at 5?', 'sounds good, usual spot?', 'yep, see you there'],
+    ['can you send the birthday photo?', 'sending it now', 'thanks! it came out great'],
+  ],
+  it: [
+    ['ciao! sei arrivato bene?', 'sì, tutto tranquillo haha', 'perfetto, ci vediamo nel weekend allora'],
+    ['hai visto la partita di ieri?', 'non ho potuto, com’è andata?', 'un disastro haha ti racconto dopo'],
+    ['ti mando la ricetta che ti dicevo', 'dai, grazie!', 'di niente, fammi sapere come viene'],
+    ['caffè domani alle 5?', 'perfetto, al solito posto?', 'sì, ti aspetto lì'],
+    ['mi mandi la foto del compleanno?', 'te la mando subito', 'grazie! è venuta benissimo'],
+  ],
+};
 
 function buildDecoyIdentity(): DecoyIdentity {
   // Real, cryptographically random key material — never all-zero. Forensic
@@ -81,9 +107,13 @@ function buildDecoyIdentity(): DecoyIdentity {
   };
 }
 
-function buildDecoyContactsAndMessages(now: number): { contacts: StoredContact[]; messagesByChat: Record<string, StoredMessage[]> } {
+function buildDecoyContactsAndMessages(
+  now: number,
+  locale: SupportedLocale,
+): { contacts: StoredContact[]; messagesByChat: Record<string, StoredMessage[]> } {
   const contacts: StoredContact[] = [];
   const messagesByChat: Record<string, StoredMessage[]> = {};
+  const scripts = DECOY_SCRIPTS_BY_LOCALE[locale] ?? DECOY_SCRIPTS_BY_LOCALE.en;
 
   DECOY_NAMES.forEach((person, i) => {
     // Plausible-looking but fake AegisID-shaped identifier for the decoy peer.
@@ -101,7 +131,7 @@ function buildDecoyContactsAndMessages(now: number): { contacts: StoredContact[]
       profile: 'personal',
     });
 
-    const script = DECOY_SCRIPTS[i % DECOY_SCRIPTS.length];
+    const script = scripts[i % scripts.length];
     const chatMsgs: StoredMessage[] = script.map((body, j) => ({
       id: `decoy-${i}-${j}`,
       chatId: aegisId,
@@ -144,8 +174,9 @@ export async function getOrCreateDecoyBlob(): Promise<DecoyBlob> {
   }
 
   const now = Date.now();
+  const locale = await resolveActiveLocale();
   const identity = buildDecoyIdentity();
-  const { contacts, messagesByChat } = buildDecoyContactsAndMessages(now);
+  const { contacts, messagesByChat } = buildDecoyContactsAndMessages(now, locale);
   const blob: DecoyBlob = { identity, contacts, messagesByChat };
 
   try {
