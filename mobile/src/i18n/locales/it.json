@@ -1005,7 +1005,8 @@
     "title": "Impostazioni blocco",
     "timeout": "Blocco automatico dopo",
     "immediately": "Immediatamente",
-    "hideRecents": "Nascondi nelle recenti"
+    "hideRecents": "Nascondi nelle recenti",
+    "hideRecentsDesc": "Offusca il contenuto dell'app nel task switcher"
   },
   "lockConfig": {
     "title": "Schermata di blocco",
