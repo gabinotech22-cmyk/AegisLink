@@ -64,16 +64,21 @@ jest.mock('../registration', () => ({
 
 // ── import SUT after mocks ─────────────────────────────────────────────────────
 // Loaded via require() AFTER the jest.mock registrations above instead of a
-// top-level `import`. In CI (Linux workers, full parallel suite) this exact
-// suite failed 12/12 with the REAL expo-file-system/legacy loaded through
-// media.ts — i.e. the hoisted jest.mock('expo-file-system/legacy') factory did
-// not intercept, only in that environment, only when the worker had run other
-// suites first (the failure appeared/disappeared with unrelated commits that
-// merely shifted jest's size-based scheduling). A plain require() after the
-// jest.mock calls does not depend on babel hoisting order at all: by the time
-// it runs, every factory above is registered no matter what the transformer
-// did, so the SUT can never bind the real native module.
+// top-level `import`, and AFTER jest.resetModules(). In CI (Linux workers,
+// full parallel suite) this exact suite failed 12/12 with the REAL
+// expo-file-system/legacy bound by media.ts — even once the SUT was loaded via
+// a require() that provably ran after every factory registration. The only
+// mechanism consistent with that: the real module was ALREADY in the module
+// registry before this file's mocks registered (jest-expo's setupFiles can
+// pull in expo-modules-core/expo-file-system transitively, environment-
+// dependently — which is why it never reproduces locally and tracked
+// worker/scheduling changes in CI, not code changes). jest.mock() after a
+// module is already required is a no-op for the cached instance.
+// jest.resetModules() clears that primed registry while KEEPING the mock
+// factories registered above, so the require below re-resolves everything
+// fresh and the factories are guaranteed to intercept.
 /* eslint-disable @typescript-eslint/no-var-requires */
+jest.resetModules();
 const {
   encryptAndUploadMedia,
   persistEncryptedBlob,
