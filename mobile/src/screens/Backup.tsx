@@ -12,6 +12,7 @@ import { TopBar } from '../components/TopBar';
 import { Stat } from '../components/Section';
 import { PrimaryButton, GhostButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
+import { usePreferences } from '../store/preferences';
 import { useContacts } from '../store/contacts';
 import { useGroups } from '../store/groups';
 import { useMessages } from '../store/messages';
@@ -224,6 +225,13 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       themedAlert(i18nT('backup.passphraseTooShort'), i18nT('backup.useAtLeast', { count: BACKUP_MIN_PASSPHRASE_LEN }));
       return;
     }
+    // Duress containment: restoring writes the payload identity over the REAL
+    // SecureStore/SQLite (destroying the real secret keys). Refuse with the
+    // same generic error an invalid file shows — reveals nothing to a coercer.
+    if (usePreferences.getState().duressActive) {
+      themedAlert(i18nT('backup.restoreFailed', 'Restore failed'), i18nT('backup.invalidEnvelope', 'File is not a valid AegisLink backup'));
+      return;
+    }
     setBusy(true);
     try {
       const envelope = JSON.parse(pendingEnvelope) as unknown;
@@ -293,6 +301,12 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   async function handleMnemonicRestore(): Promise<void> {
     const words = mnemonicInput.trim().toLowerCase().split(/\s+/);
     if (words.length !== 32) {
+      themedAlert(i18nT('backup.invalidMnemonic'), i18nT('backup.mnemonicExactly32'));
+      return;
+    }
+    // Duress containment — same reason as confirmRestore: saveIdentity would
+    // overwrite the REAL keys. Generic error, indistinguishable from a typo.
+    if (usePreferences.getState().duressActive) {
       themedAlert(i18nT('backup.invalidMnemonic'), i18nT('backup.mnemonicExactly32'));
       return;
     }

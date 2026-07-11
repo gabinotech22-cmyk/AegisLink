@@ -130,6 +130,16 @@ export const useBackup = create<BackupState>((set) => ({
   },
 
   async importBackup(fileUri, passphrase, onRestored) {
+    // Duress containment: a restore writes the payload's identity/contacts
+    // into the REAL SecureStore + SQLite (overwriting the user's real secret
+    // keys). Under coercion that is a data-destruction vector — refuse with
+    // the same generic error a corrupt file produces, revealing nothing.
+    {
+      const { usePreferences } = require('./preferences') as typeof import('./preferences');
+      if (usePreferences.getState().duressActive) {
+        throw new Error('File is not a valid AegisLink backup envelope');
+      }
+    }
     set({ isRestoring: true });
     try {
       // Read file as text (envelope is JSON)

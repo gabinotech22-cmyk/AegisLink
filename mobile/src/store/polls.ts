@@ -181,6 +181,17 @@ export const usePollsStore = create<PollState>((set, get) => ({
   },
 
   async hydrate() {
+    // Duress containment: don't read real poll data from the real DB while
+    // the decoy account is showing (the decoy has no groups, hence no polls) —
+    // and CLEAR whatever real poll state was already loaded in memory before
+    // the duress unlock, including the user's own vote secrets.
+    {
+      const { usePreferences } = require('./preferences') as typeof import('./preferences');
+      if (usePreferences.getState().duressActive) {
+        set({ results: {}, seenCommitments: new Set(), myVoteSecrets: {} });
+        return;
+      }
+    }
     const rows = await loadPolls();
     if (rows.length === 0) return;
     set((s) => {

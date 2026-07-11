@@ -355,6 +355,20 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   banned: {},
 
   async hydrateSubscribed() {
+    // Duress (coercion PIN) containment: NEVER list the user's real channel
+    // subscriptions to a coercer — which channels someone follows is exactly
+    // the kind of association the duress mode exists to hide. The decoy
+    // account simply follows no channels (plausible; the public directory
+    // itself stays browsable, it's public data). Mirrors groups/contacts.
+    {
+      const { usePreferences } = require('./preferences') as typeof import('./preferences');
+      if (usePreferences.getState().duressActive) {
+        // Clear EVERY slice holding real channel state — pending join
+        // applications and ban lists included, both loaded at cold start.
+        set({ subscribed: [], feeds: {}, heads: {}, pendingApplications: [], banned: {}, hydrated: true });
+        return;
+      }
+    }
     if (hydrateInFlight) return hydrateInFlight;
     hydrateInFlight = (async () => {
       const ids = await listChannelIds();

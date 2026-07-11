@@ -295,6 +295,17 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                     window.alert('Frase de recuperación inválida. Debe contener exactamente 32 palabras.');
                     return;
                   }
+                  // Duress containment (parity with mobile Backup.tsx):
+                  // linkDevice() writes the supplied identity over the REAL
+                  // stored keys — under coercion that is a data-destruction
+                  // vector. Refuse with the same generic error a typo shows.
+                  {
+                    const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
+                    if (usePreferences.getState().duressActive) {
+                      window.alert('Error al recuperar identidad: frase de recuperación inválida.');
+                      return;
+                    }
+                  }
                   let secretKeyBytes: Uint8Array | null = null;
                   let keypair: nacl.BoxKeyPair | null = null;
                   let signKeys: nacl.SignKeyPair | null = null;
