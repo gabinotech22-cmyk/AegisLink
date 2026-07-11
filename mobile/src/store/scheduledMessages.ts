@@ -516,11 +516,29 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
   },
 
   async loadPending() {
+    // Duress containment: never list the user's REAL scheduled messages to a
+    // coercer (their content + recipients are exactly what duress mode hides).
+    {
+      const { usePreferences } = require('./preferences') as typeof import('./preferences');
+      if (usePreferences.getState().duressActive) {
+        set({ scheduled: [] });
+        return;
+      }
+    }
     const all = await loadAllScheduled();
     set({ scheduled: all });
   },
 
   async processDue() {
+    // Duress containment: App.tsx runs this on a 10s interval. Under duress it
+    // must not read the real scheduled queue, enqueue real outbox jobs, or
+    // touch the network with the decoy identity showing. The real user's
+    // scheduled sends simply resume on the next real unlock — strictly better
+    // than any real-account activity while a coercer is watching the screen.
+    {
+      const { usePreferences } = require('./preferences') as typeof import('./preferences');
+      if (usePreferences.getState().duressActive) return;
+    }
     const now = Date.now();
     const pending = await loadPendingScheduled();
     const due = pending.filter((m) => m.sendAt <= now);

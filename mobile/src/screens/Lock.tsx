@@ -465,6 +465,21 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
         await useIdentity.getState().hydrate();
         await useContacts.getState().hydrate();
         useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
+        // Re-hydrate EVERY store that renders real user data. Each of these
+        // hydrates is duress-aware (returns empty/decoy state) — but without
+        // re-running them here, the REAL groups/channels/scheduled/profiles
+        // loaded at cold start would remain in zustand memory and be shown to
+        // the coercer, defeating the decoy entirely (real leak found in QA).
+        {
+          const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+          const { useChannels } = require('../store/channels') as typeof import('../store/channels');
+          const { useScheduledMessages } = require('../store/scheduledMessages') as typeof import('../store/scheduledMessages');
+          const { useProfiles } = require('../store/profiles') as typeof import('../store/profiles');
+          await useGroups.getState().hydrate();
+          await useChannels.getState().hydrateSubscribed();
+          await useScheduledMessages.getState().loadPending();
+          await useProfiles.getState().hydrate();
+        }
       } catch (err) {
         if (__DEV__) logger.warn('[lock-panic] failed to load decoy state:', err);
       }
@@ -518,6 +533,18 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
           });
           await useMessages.getState().loadAllUnreads();
           await useMessages.getState().loadAllEphemeralTimers();
+          // Mirror of the duress-entry path: restore the REAL groups/channels/
+          // scheduled/profiles that the decoy hydrates emptied out.
+          {
+            const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+            const { useChannels } = require('../store/channels') as typeof import('../store/channels');
+            const { useScheduledMessages } = require('../store/scheduledMessages') as typeof import('../store/scheduledMessages');
+            const { useProfiles } = require('../store/profiles') as typeof import('../store/profiles');
+            await useGroups.getState().hydrate();
+            await useChannels.getState().hydrateSubscribed();
+            await useScheduledMessages.getState().loadPending();
+            await useProfiles.getState().hydrate();
+          }
         } catch {
           setPinError('');
           setPinCode('');

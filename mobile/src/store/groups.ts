@@ -11,11 +11,41 @@ import {
 import { effectivePermissions } from '../crypto/groupRoles';
 import {
   loadGroups,
-  saveGroup,
-  deleteGroup,
-  deleteContactMessages,
+  saveGroup as saveGroupDb,
+  deleteGroup as deleteGroupDb,
+  deleteContactMessages as deleteContactMessagesDb,
   type StoredGroup,
 } from '../db/local';
+
+/**
+ * Duress (coercion PIN) containment — mirrors contacts.ts/messages.ts.
+ * While the decoy account is showing, the REAL SQLite DB must be neither
+ * READ (hydrate would list the user's real groups to the coercer — exactly
+ * the leak the duress mode exists to prevent) nor WRITTEN (a group the
+ * coercer creates/edits must not contaminate the real account). The decoy
+ * intentionally has NO groups: an account with no groups is perfectly
+ * plausible; fake groups would add surface to slip up on.
+ *
+ * Wrapping the two DB helpers here covers EVERY persistence call site in
+ * this store at once — mutators still update the in-memory zustand state,
+ * so the decoy UI stays coherent within the duress session.
+ */
+function isDuressActive(): boolean {
+  const { usePreferences } = require('./preferences') as typeof import('./preferences');
+  return usePreferences.getState().duressActive;
+}
+async function saveGroup(g: StoredGroup): Promise<void> {
+  if (isDuressActive()) return;
+  return saveGroupDb(g);
+}
+async function deleteGroup(id: string): Promise<void> {
+  if (isDuressActive()) return;
+  return deleteGroupDb(id);
+}
+async function deleteContactMessages(id: string): Promise<void> {
+  if (isDuressActive()) return;
+  return deleteContactMessagesDb(id);
+}
 
 // Re-export the canonical roster hash so existing importers (e.g. tests in
 // store/__tests__/groups.largeRoster.test.ts) keep resolving it from here.
@@ -144,6 +174,12 @@ export const useGroups = create<GroupsState>((set, get) => ({
   groups: [],
 
   async hydrate() {
+    if (isDuressActive()) {
+      // Decoy mode: the real DB is never read. The decoy account simply has
+      // no groups (plausible, and zero extra surface to keep consistent).
+      set({ groups: [] });
+      return;
+    }
     const list = await loadGroups();
     set({ groups: list });
   },

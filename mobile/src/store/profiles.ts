@@ -113,6 +113,34 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
   activeSlotId: 'self',
 
   async hydrate() {
+    // Duress containment: the REAL profiles list would reveal both that
+    // multiple isolated identities exist AND their display names — the exact
+    // "there is a hidden real account" signal duress mode must never emit.
+    // Serve a single self profile mirroring the DECOY identity instead
+    // (Profile.tsx already hides the switcher under duress; this covers every
+    // other consumer of useProfiles too).
+    {
+      const { usePreferences } = require('./preferences') as typeof import('./preferences');
+      if (usePreferences.getState().duressActive) {
+        const { useIdentity } = require('./identity') as typeof import('./identity');
+        const idState = useIdentity.getState();
+        set({
+          profiles: attachActive(
+            [{
+              slotId: 'self',
+              aegisId: idState.identity?.aegisId ?? '',
+              displayName: idState.displayName,
+              avatarColor: idState.avatarColor,
+              createdAt: idState.identity?.createdAt ?? Date.now(),
+              isActive: true,
+            }],
+            'self',
+          ),
+          activeSlotId: 'self',
+        });
+        return;
+      }
+    }
     try {
       const raw = await ss.get(PROFILES_STORE_KEY);
       if (!raw) {
