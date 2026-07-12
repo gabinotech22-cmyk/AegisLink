@@ -180,7 +180,7 @@ Lo que cambia:
 - **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
   selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
   `from` igual que un 1:1.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟢 IMPLEMENTADO tras flag OFF — Slices 1, 2, 3a, 3b, 4, 5, 6 hechas y testeadas; transporte Tor embebido shipped (#171/#172). Pendiente para cerrarla del todo: 2b=push por mailbox (vive en Fase 5), validación en vivo 2-dispositivos y flip del flag a ON.** (El antiguo bloque "PENDIENTE (el grueso, XL)" de más abajo describía trabajo que estas slices YA cubren — prueba: `server/src/__tests__/mailboxAuth.relay.test.ts`.)
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟢 IMPLEMENTADO tras flag OFF — Slices 1, 2, 3a, 3b, 4, 5, 6 hechas y testeadas; transporte Tor embebido shipped (#171/#172). 2b.0/2b.1 (push wake-up server+infra) también hechos — ver `docs/FASE4-SLICE2B-PUSH-DESIGN.md` §9. Pendiente para cerrarla del todo: 2b.2+ = suscripción móvil al wake-up, validación en vivo 2-dispositivos y flip del flag a ON.** (El antiguo bloque "PENDIENTE (el grueso, XL)" de más abajo describía trabajo que estas slices YA cubren — prueba: `server/src/__tests__/mailboxAuth.relay.test.ts`.)
   **Slice 1 ✅ (server):** auth de socket por mailbox — handshake `{mailboxId,
   mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
   el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
@@ -249,6 +249,13 @@ Lo que cambia:
   Slices restantes: 2b=push por mailbox (Fase 5) — diseño en
   `docs/FASE4-SLICE2B-PUSH-DESIGN.md` (decisión: UnifiedPush/ntfy self-hosted con
   topic por época sobre Tor; FCM/APNs sólo como fallback opt-in tras flag).
+  **2b.0 (infra) y 2b.1 (server wake-up publish) ✅ HECHO** — ntfy co-hospedado
+  con el relay (`docker-compose.yml`, hidden service adicional en
+  `infra/tor/torrc`), publish flag-gated en `server/src/push/ntfy.ts` +
+  `relay/handler.ts` (`envelope:mb` offline → `notifyMailbox(M)`), tests
+  `server/src/__tests__/ntfyMailboxPush.relay.test.ts` +
+  `ntfy.unit.test.ts`. **Pendiente:** suscripción del cliente móvil al topic
+  (2b.2) — sin esto el wake-up se publica pero nadie escucha todavía.
   Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un
@@ -260,8 +267,10 @@ Lo que cambia:
   multi-firma) y paridad desktop+server — todo implementado en las Slices 1–6 y
   testeado (`server/src/__tests__/mailboxAuth.relay.test.ts` 8/8, mobile
   `mailboxSocket` 7/7, known-answer vector cross-plataforma en `mailbox.test.ts`).
-  Único resto: el mapping `mailbox→push` (Slice 2b), que vive en Fase 5. Era el
-  cambio de plumbing más profundo y fue después de estabilizar ocultar `from` (✅).
+  Único resto: la suscripción móvil al wake-up de mailbox (Slice 2b.2+, Fase
+  5) — el publish del relay ya está implementado (2b.0/2b.1, ver arriba). Era
+  el cambio de plumbing más profundo y fue después de estabilizar ocultar
+  `from` (✅).
 - **Fase 5 — anti-correlación + push.** Cover traffic / jitter; notifier
   separado o push self-hosted (UnifiedPush/ntfy) para cortar el último reducto.
 - **Fase 6 — retirar v1.** Cuando todos los clientes estén en v2, eliminar el

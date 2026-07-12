@@ -8,6 +8,7 @@ import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '.
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';
 import { notifyRecipient } from '../push/expo.js';
+import { notifyMailbox } from '../push/ntfy.js';
 import {
   AEGIS_ID_RE,
   EnvelopeIn,
@@ -361,7 +362,7 @@ export function attachRelay(io: SocketServer) {
         // Offline (Slice 2): queue under the opaque mailbox id, reusing the same
         // message store as the aegisId path. No sender info is stored (the row
         // keeps only the sealed ciphertext + epk). Drained on the mailbox's next
-        // connect. Push wake-up by mailbox is Slice 2b.
+        // connect.
         const result = await messageRepo.enqueue({
           id: d.id, recipient: d.to,
           ciphertext_b64: d.ciphertext, nonce_b64: d.nonce,
@@ -372,6 +373,10 @@ export function attachRelay(io: SocketServer) {
           sender_pub_b64: null, epk_b64: d.epk,
         });
         if (!result.ok) { ack?.({ ok: false, error: result.reason ?? 'queue_full' }); return; }
+        // Slice 2b: best-effort, zero-metadata wake-up publish to the ntfy
+        // topic = d.to (co-hosted ntfy, docs/FASE4-SLICE2B-PUSH-DESIGN.md §5.1
+        // v1). Flag-gated (PUSH_MAILBOX_ENABLED); never blocks the ack.
+        void notifyMailbox(d.to);
         ack?.({ ok: true, delivered: false, queued: true });
       });
 

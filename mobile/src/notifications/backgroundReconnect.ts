@@ -46,7 +46,8 @@ function extractKind(data: unknown): string | undefined {
   return undefined;
 }
 
-async function wakeAndReconnect(): Promise<void> {
+/** Exported for tests. Also the function the background task invokes on wake. */
+export async function wakeAndReconnect(): Promise<void> {
   const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
 
   // Headless cold start: stores aren't hydrated yet. Hydrate preferences first
@@ -71,6 +72,17 @@ async function wakeAndReconnect(): Promise<void> {
 
   const client = require('../socket/client') as typeof import('../socket/client');
   if (!client.isConnected()) client.connect(identity);
+
+  // Slice 2b: also drain the mailbox socket on background wake. client.connect()
+  // already wires the mailbox internally on a fresh socket AND on the
+  // "same identity, kick the dead handle" fast path (see connectMailboxForIdentity
+  // in socket/client.ts) — this call is a deliberate, idempotent belt-and-suspenders
+  // for the headless background task, whose module state may not match whatever
+  // branch connect() took. connectMailboxForIdentity() itself no-ops unless
+  // MAILBOX_ENABLED and reuses a live mailbox socket, so this is always safe to
+  // call. The duress check above already gates this: we never reach here (and
+  // therefore never open ANY socket, mailbox included) while duressActive.
+  client.connectMailboxForIdentity(identity);
 
   // Re-attach call handlers so the heartbeat → local-notification path is wired
   // even though App's React effects never ran in this headless launch. Both are

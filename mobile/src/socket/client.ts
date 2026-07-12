@@ -658,6 +658,31 @@ function armForegroundReconnect(): void {
   });
 }
 
+/**
+ * Fase 4 / Slice 2b: open the dedicated mailbox delivery socket for `identity`
+ * when mailbox mode is enabled (and Tor is available — fail-closed inside
+ * connectMailboxSocket). That socket authenticates by mailbox possession proof
+ * and receives `envelope:mb` addressed to our opaque rotating mailbox id.
+ * Incoming mailbox envelopes are sealed v2 with the same shape as envelope:v2,
+ * so they reuse the exact same decrypt+append path.
+ *
+ * Exported (not just inlined in connect()) so callers that reuse an already-open
+ * aegisId socket without re-running the full connect() body — e.g. the
+ * background wake-up path in notifications/backgroundReconnect.ts, which only
+ * kicks a dead socket via socket.connect() on the "same identity" fast path —
+ * can still ensure the mailbox drains. No-op when mailbox mode is off.
+ * Idempotent: a live mailbox socket is reused, never duplicated.
+ */
+export function connectMailboxForIdentity(identity: Identity): void {
+  if (!MAILBOX_ENABLED) return;
+  void connectMailboxSocket((env) => {
+    rdiag(`[RDIAG] envelope:mb RECV id=${env.id}`);
+    void handleIncomingV2(env, identity).catch((e) => {
+      if (__DEV__) logger.warn('[socket] handleIncomingV2(mb) failed:', (e as Error).message);
+    });
+  });
+}
+
 export function connect(identity: Identity): Socket {
   // Idempotent (flag-guarded): arm the foreground-reconnect listener on the
   // first connect of the app's lifetime, regardless of which branch we take.
@@ -675,6 +700,10 @@ export function connect(identity: Identity): Socket {
     // reply, foreground) would otherwise receive that dead socket and never come
     // back online. Kicking it is a no-op when already connected.
     if (!socket.connected) socket.connect();
+    // The fast path never re-runs the mailbox wiring below — cover it here too
+    // so a reused aegisId socket (e.g. background wake-up kicking a dead
+    // handle) doesn't leave mailbox-queued messages stuck undrained.
+    connectMailboxForIdentity(identity);
     return socket;
   }
   if (socket) socket.disconnect();
@@ -1061,20 +1090,8 @@ export function connect(identity: Identity): Socket {
   });
 
   // ── Fase 4: dedicated mailbox delivery socket ────────────────────────────────
-  // When mailbox mode is enabled (and Tor is available — fail-closed inside
-  // connectMailboxSocket), open a SEPARATE Tor-routed socket that authenticates
-  // by mailbox possession proof and receives `envelope:mb` addressed to our
-  // opaque rotating mailbox id. Incoming mailbox envelopes are sealed v2 with the
-  // same shape as envelope:v2, so they reuse the exact same decrypt+append path.
   // No-op when mailbox mode is off. Idempotent: a live socket is reused.
-  if (MAILBOX_ENABLED) {
-    void connectMailboxSocket((env) => {
-      rdiag(`[RDIAG] envelope:mb RECV id=${env.id}`);
-      void handleIncomingV2(env, identity).catch((e) => {
-        if (__DEV__) logger.warn('[socket] handleIncomingV2(mb) failed:', (e as Error).message);
-      });
-    });
-  }
+  connectMailboxForIdentity(identity);
 
   // ── Group re-key fan-out (forward secrecy on member removal) ─────────────────
   // The admin who removed a member sealed a fresh group SenderKey for each
