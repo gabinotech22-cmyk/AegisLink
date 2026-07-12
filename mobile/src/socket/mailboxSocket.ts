@@ -31,6 +31,7 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import { AppState, type AppStateStatus } from 'react-native';
 import { logger } from '../utils/logger';
 import { ONION_URL, MAILBOX_ENABLED } from '../config';
 import {
@@ -40,7 +41,7 @@ import {
   setLastMailboxConnectEpoch,
 } from '../crypto/mailboxStore';
 import { mailboxAuthProof, epochFor, MAILBOX_EPOCH_MS, type Mailbox } from '../crypto/mailbox';
-import { TorSioSocket, isTorAvailable, startTor } from '../net/tor';
+import { TorSioSocket, isTorAvailable, startTor, onTorStatus, type TorStatus } from '../net/tor';
 
 /**
  * The mailbox socket only ever rides embedded Tor (Tier 2 — no Orbot, no plain
@@ -102,6 +103,103 @@ let authed = false;
 let onEnvelopeCb: ((env: IncomingMailboxEnvelope) => void) | null = null;
 let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
 
+// ── Resilient bootstrap + reconnection ───────────────────────────────────────
+// TorSioSocket has NO built-in reconnection (unlike socket.io-client on desktop)
+// and Tor bootstrap on mobile routinely misses the 45s window on a cold start.
+// Without this, one failed startTor() at app launch meant the mailbox NEVER came
+// up for the whole session — the recipient never drained, and (pre-#304) senders'
+// mailbox-queued messages silently expired. We retry with exponential backoff +
+// jitter for as long as the caller wants the mailbox up (`wantMailbox`), and
+// re-arm on socket disconnect and on auth stalls. Deliberate teardown
+// (disconnectMailboxSocket) cancels everything.
+const RECONNECT_BASE_MS = 15_000; // first retry — Tor keeps bootstrapping natively meanwhile
+const RECONNECT_MAX_MS = 5 * 60_000; // cap; also the steady-state "is Tor up yet?" poll
+/** No auth:ok within this window after a connect attempt → tear down and retry. */
+const AUTH_STALL_MS = 60_000;
+let wantMailbox = false; // true from connectMailboxSocket() until deliberate disconnect
+let reconnectAttempt = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let authStallTimer: ReturnType<typeof setTimeout> | null = null;
+let connecting = false; // collapse concurrent connect attempts
+
+// Extra wake-up triggers so a stuck backoff wait doesn't outlive the moment the
+// mailbox is actually likely to succeed: Tor finishing bootstrap, or the app
+// coming back to the foreground (network path often changes on resume/BG-kill
+// recovery). Both are best-effort nudges — the backoff loop above is still the
+// source of truth and self-heals even if these never fire.
+let torStatusUnsub: (() => void) | null = null;
+let appStateSub: { remove: () => void } | null = null;
+
+/** Wake-up nudge shared by the Tor-status and AppState triggers. Idempotent/safe. */
+function nudgeReconnect(): void {
+  if (!wantMailbox || authed || connecting) return;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  void retryConnect();
+}
+
+/** Subscribe the wake-up triggers once per `wantMailbox` session. Idempotent. */
+function armWakeTriggers(): void {
+  if (!torStatusUnsub && isTorAvailable()) {
+    torStatusUnsub = onTorStatus((status: TorStatus) => {
+      if (status.state === 'on') nudgeReconnect();
+    });
+  }
+  if (!appStateSub) {
+    appStateSub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') nudgeReconnect();
+    });
+  }
+}
+
+/** Tear down the wake-up trigger subscriptions (mirrors clearReconnectTimers). */
+function disarmWakeTriggers(): void {
+  if (torStatusUnsub) { torStatusUnsub(); torStatusUnsub = null; }
+  if (appStateSub) { appStateSub.remove(); appStateSub = null; }
+}
+
+function clearReconnectTimers(): void {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (authStallTimer) { clearTimeout(authStallTimer); authStallTimer = null; }
+}
+
+/** Schedule the next connect attempt (backoff + ±20% jitter). Idempotent. */
+function scheduleReconnect(): void {
+  if (!wantMailbox || reconnectTimer) return;
+  const base = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempt, RECONNECT_MAX_MS);
+  const jitter = base * 0.2 * (Math.random() * 2 - 1);
+  const delay = Math.max(1_000, Math.round(base + jitter));
+  reconnectAttempt++;
+  if (__DEV__) logger.debug(`[mailbox] retry #${reconnectAttempt} in ${Math.round(delay / 1000)}s`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    void retryConnect();
+  }, delay);
+}
+
+/** Tear down any half-open socket and re-run the full connect path. */
+async function retryConnect(): Promise<void> {
+  const cb = onEnvelopeCb;
+  if (!wantMailbox || !cb) return;
+  if (isMailboxAuthed()) return; // recovered by other means (e.g. epoch rotation)
+  if (mboxSocket) {
+    try { mboxSocket.removeAllListeners(); mboxSocket.disconnect(); } catch { /* noop */ }
+    mboxSocket = null;
+  }
+  authed = false;
+  await connectMailboxSocket(cb);
+}
+
+/** Arm the auth-stall watchdog: connect attempts that never reach auth:ok retry. */
+function armAuthStallWatchdog(): void {
+  if (authStallTimer) clearTimeout(authStallTimer);
+  authStallTimer = setTimeout(() => {
+    authStallTimer = null;
+    if (!wantMailbox || isMailboxAuthed()) return;
+    if (__DEV__) logger.warn('[mailbox] auth stalled, recycling socket');
+    scheduleReconnect();
+  }, AUTH_STALL_MS);
+}
+
 /** True once the mailbox socket is connected and possession-proof authenticated. */
 export function isMailboxAuthed(): boolean {
   return authed && mboxSocket?.connected === true;
@@ -119,28 +217,50 @@ export async function connectMailboxSocket(
   if (!MAILBOX_ENABLED || !ONION_URL) return null; // fail-closed: needs Tor
   if (mboxSocket && mboxSocket.connected) return mboxSocket;
   if (!isTorAvailable()) return null; // fail-closed: no embedded Tor module (Expo Go / non-prebuilt)
+  // From here on the caller WANTS the mailbox up: remember the callback and keep
+  // retrying (backoff) until deliberate disconnect — a cold-start Tor bootstrap
+  // miss must not silence the mailbox for the whole session.
+  onEnvelopeCb = onEnvelope;
+  wantMailbox = true;
+  armWakeTriggers(); // idempotent: no-op if already subscribed for this session
+  if (connecting) return null; // an attempt is already in flight; retries collapse
+  connecting = true;
   try {
     await startTor(); // resolves only once bootstrapped (STATUS_ON); throws on failure
   } catch (e) {
-    if (__DEV__) logger.warn('[mailbox] Tor start failed, staying disabled:', (e as Error).message);
+    if (__DEV__) logger.warn('[mailbox] Tor start failed, will retry:', (e as Error).message);
+    connecting = false;
+    scheduleReconnect(); // Tor keeps bootstrapping natively; next attempt may resolve instantly
     return null;
   }
-  onEnvelopeCb = onEnvelope;
 
   // Derive the mailbox valid right now (id + auth keypair) from our own root, plus
   // a catch-up window of recent epochs we may have been offline across (Slice 5b).
   // Always include the just-passed epoch (E-1) for sender clock skew at a boundary.
-  const now = Date.now();
-  const E = epochFor(now);
-  const last = await getLastMailboxConnectEpoch();
-  let start = last !== null ? Math.min(last, E - 1) : E - 1;
-  start = Math.max(start, E - MAX_CATCHUP_EPOCHS, 0);
-  const extraEpochs: number[] = [];
-  for (let e = start; e <= E - 1; e++) extraEpochs.push(e);
+  let mb: Mailbox;
+  let E: number;
+  try {
+    const now = Date.now();
+    E = epochFor(now);
+    const last = await getLastMailboxConnectEpoch();
+    let start = last !== null ? Math.min(last, E - 1) : E - 1;
+    start = Math.max(start, E - MAX_CATCHUP_EPOCHS, 0);
+    const extraEpochs: number[] = [];
+    for (let e = start; e <= E - 1; e++) extraEpochs.push(e);
 
-  const mb = await getOwnCurrentMailbox(now);
-  currentEpochMailbox = mb;
-  extraEpochMailboxes = extraEpochs.length ? await getOwnMailboxesForEpochs(extraEpochs) : [];
+    mb = await getOwnCurrentMailbox(now);
+    currentEpochMailbox = mb;
+    extraEpochMailboxes = extraEpochs.length ? await getOwnMailboxesForEpochs(extraEpochs) : [];
+  } catch (e) {
+    // Derivation/store hiccup (e.g. SecureStore not ready) — retry, don't die.
+    if (__DEV__) logger.warn('[mailbox] mailbox derivation failed, will retry:', (e as Error).message);
+    connecting = false;
+    scheduleReconnect();
+    return null;
+  }
+  // Deliberate teardown (logout/panic) may have raced the awaits above — do NOT
+  // open a fresh socket the teardown can no longer see.
+  if (!wantMailbox) { connecting = false; return null; }
   authed = false;
 
   const sock = new TorSioSocket(ONION_URL, {
@@ -152,6 +272,10 @@ export async function connectMailboxSocket(
       : {}),
   });
   mboxSocket = sock;
+  connecting = false;
+  // If this attempt never reaches auth:ok (dead circuit, relay down, silent
+  // native failure), the watchdog recycles the socket and schedules a retry.
+  armAuthStallWatchdog();
 
   sock.on('connect', () => {
     authed = false;
@@ -161,6 +285,9 @@ export async function connectMailboxSocket(
   sock.on('disconnect', (reason) => {
     authed = false;
     if (__DEV__) logger.debug('[mailbox] disconnected:', reason);
+    // TorSioSocket has no native auto-reconnect: re-arm the retry loop so a
+    // dropped circuit / relay restart doesn't leave the mailbox down for good.
+    scheduleReconnect();
   });
 
   // Possession proof: sign the relay's random challenge with the mailbox secret.
@@ -190,6 +317,9 @@ export async function connectMailboxSocket(
 
   sock.on('auth:ok', () => {
     authed = true;
+    // Healthy again: reset the backoff and stand down the stall watchdog.
+    reconnectAttempt = 0;
+    if (authStallTimer) { clearTimeout(authStallTimer); authStallTimer = null; }
     void setLastMailboxConnectEpoch(E);
     scheduleEpochRotation();
     if (__DEV__) logger.debug('[mailbox] authenticated');
@@ -262,6 +392,11 @@ async function rotateForNewEpoch(): Promise<void> {
 
 /** Tear down the mailbox socket (e.g. on logout / profile switch / panic). */
 export function disconnectMailboxSocket(): void {
+  wantMailbox = false; // deliberate: stop the retry loop before touching the socket
+  connecting = false;
+  reconnectAttempt = 0;
+  clearReconnectTimers();
+  disarmWakeTriggers();
   authed = false;
   currentEpochMailbox = null;
   extraEpochMailboxes = [];

@@ -39,14 +39,43 @@ const mockTorSioSocket = jest.fn((url: string, auth: Record<string, unknown>) =>
   return lastSocket;
 });
 const mockStartTor = jest.fn(async () => ({ state: 'on' as const, socksPort: 9050 }));
+type TorStatusCb = (status: { state: string; socksPort: number }) => void;
+let torStatusListeners: TorStatusCb[] = [];
+const mockOnTorStatus = jest.fn((cb: TorStatusCb) => {
+  torStatusListeners.push(cb);
+  return () => { torStatusListeners = torStatusListeners.filter((c) => c !== cb); };
+});
 jest.mock('../../net/tor', () => ({
   __esModule: true,
   isTorAvailable: () => true,
   startTor: () => mockStartTor(),
+  onTorStatus: (cb: TorStatusCb) => mockOnTorStatus(cb),
   TorSioSocket: function (this: unknown, url: string, auth: Record<string, unknown>) {
     return mockTorSioSocket(url, auth);
   },
 }));
+
+// AppState — controllable fake, mirrors react-native's addEventListener shape.
+type AppStateCb = (state: string) => void;
+let appStateListeners: AppStateCb[] = [];
+const mockAppStateAddEventListener = jest.fn((event: string, cb: AppStateCb) => {
+  appStateListeners.push(cb);
+  return { remove: () => { appStateListeners = appStateListeners.filter((c) => c !== cb); } };
+});
+jest.mock('react-native', () => ({
+  __esModule: true,
+  AppState: { addEventListener: (event: string, cb: AppStateCb) => mockAppStateAddEventListener(event, cb) },
+}));
+
+/** Test helper: fire a Tor status update to all subscribed listeners. */
+function fireTorStatus(state: string): void {
+  for (const cb of torStatusListeners) cb({ state, socksPort: state === 'on' ? 9050 : 0 });
+}
+
+/** Test helper: fire an AppState transition to all subscribed listeners. */
+function fireAppState(state: string): void {
+  for (const cb of appStateListeners) cb(state);
+}
 
 // Config gate — mutated per test via the mock object below.
 const mockConfig = { ONION_URL: 'http://onion.test', MAILBOX_ENABLED: true };
@@ -91,6 +120,8 @@ describe('mailboxSocket — dedicated mailbox delivery socket', () => {
     mockLastEpoch = null;
     lastSocket = null;
     lastIoArgs = null;
+    torStatusListeners = [];
+    appStateListeners = [];
     disconnectMailboxSocket();
   });
 
@@ -191,5 +222,134 @@ describe('mailboxSocket — dedicated mailbox delivery socket', () => {
     disconnectMailboxSocket();
     expect(ownCurrentMailboxId()).toBeNull();
     expect(isMailboxAuthed()).toBe(false);
+  });
+});
+
+describe('mailboxSocket — resilient reconnection over Tor', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+    mockConfig.ONION_URL = 'http://onion.test';
+    mockConfig.MAILBOX_ENABLED = true;
+    mockMailbox = deriveMailbox(mockRoot, 19_000);
+    mockLastEpoch = null;
+    lastSocket = null;
+    lastIoArgs = null;
+    torStatusListeners = [];
+    appStateListeners = [];
+    mockStartTor.mockImplementation(async () => ({ state: 'on' as const, socksPort: 9050 }));
+    disconnectMailboxSocket();
+  });
+
+  afterEach(() => {
+    disconnectMailboxSocket();
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it('schedules a reconnect when startTor rejects, and connects on the next attempt', async () => {
+    mockStartTor.mockRejectedValueOnce(new Error('bootstrap timed out'));
+    const sock1 = await connectMailboxSocket(() => {});
+    expect(sock1).toBeNull();
+    expect(mockTorSioSocket).not.toHaveBeenCalled();
+
+    // Base backoff is 15s (±20% jitter) — advance past the max possible delay.
+    await jest.advanceTimersByTimeAsync(15_000 * 1.2 + 100);
+    expect(mockStartTor).toHaveBeenCalledTimes(2);
+    expect(mockTorSioSocket).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconnects on socket disconnect', async () => {
+    await connectMailboxSocket(() => {});
+    lastSocket!.connected = true;
+    lastSocket!.fire('auth:ok'); // reset backoff to base
+
+    const firstSocket = mockTorSioSocket.mock.calls.length;
+    lastSocket!.fire('disconnect', 'transport close');
+
+    await jest.advanceTimersByTimeAsync(15_000 * 1.2 + 100);
+    expect(mockTorSioSocket.mock.calls.length).toBe(firstSocket + 1);
+  });
+
+  it('recycles the socket and reconnects when auth stalls past 60s', async () => {
+    await connectMailboxSocket(() => {});
+    lastSocket!.connected = true;
+    expect(isMailboxAuthed()).toBe(false);
+
+    // Auth stall watchdog fires at 60s → schedules a retry (base backoff on top).
+    await jest.advanceTimersByTimeAsync(60_000 + 15_000 * 1.2 + 100);
+    expect(mockTorSioSocket.mock.calls.length).toBe(2);
+  });
+
+  it('resets the backoff attempt counter on auth:ok (next disconnect backs off at base again)', async () => {
+    // First cycle: fail once to bump reconnectAttempt, then succeed.
+    mockStartTor.mockRejectedValueOnce(new Error('fail'));
+    await connectMailboxSocket(() => {});
+    await jest.advanceTimersByTimeAsync(15_000 * 1.2 + 100); // attempt #2 connects
+    lastSocket!.connected = true;
+    lastSocket!.fire('auth:ok'); // resets reconnectAttempt to 0
+
+    const countBeforeDisconnect = mockTorSioSocket.mock.calls.length;
+    lastSocket!.fire('disconnect', 'transport close');
+    // If the counter had NOT reset, the next backoff would start at attempt #3
+    // (base * 2^2 = 60s) and this shorter wait would not be enough.
+    await jest.advanceTimersByTimeAsync(15_000 * 1.2 + 100);
+    expect(mockTorSioSocket.mock.calls.length).toBe(countBeforeDisconnect + 1);
+  });
+
+  it('disconnectMailboxSocket cancels pending timers and subscriptions — no retry after teardown', async () => {
+    await connectMailboxSocket(() => {});
+    lastSocket!.connected = true;
+    lastSocket!.fire('disconnect', 'transport close'); // schedules a reconnect
+
+    disconnectMailboxSocket();
+    const countAfterTeardown = mockTorSioSocket.mock.calls.length;
+
+    await jest.advanceTimersByTimeAsync(5 * 60_000 + 60_000); // well past any backoff/stall window
+    expect(mockTorSioSocket.mock.calls.length).toBe(countAfterTeardown);
+
+    // Subscriptions are gone too — firing events post-teardown must not reconnect.
+    fireTorStatus('on');
+    fireAppState('active');
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(mockTorSioSocket.mock.calls.length).toBe(countAfterTeardown);
+  });
+
+  it('Tor status "on" while waiting in backoff triggers an immediate retry (cancels the timer)', async () => {
+    mockStartTor.mockRejectedValueOnce(new Error('bootstrap timed out'));
+    await connectMailboxSocket(() => {});
+    expect(mockTorSioSocket).not.toHaveBeenCalled();
+
+    // Well before the scheduled backoff would fire — the Tor status trigger
+    // short-circuits it.
+    fireTorStatus('on');
+    await jest.advanceTimersByTimeAsync(0);
+    expect(mockTorSioSocket).toHaveBeenCalledTimes(1);
+
+    // The now-stale backoff timer must not fire a second, redundant attempt.
+    await jest.advanceTimersByTimeAsync(15_000 * 1.2 + 100);
+    expect(mockTorSioSocket).toHaveBeenCalledTimes(1);
+  });
+
+  it('AppState "active" while the mailbox is down triggers an immediate retry', async () => {
+    mockStartTor.mockRejectedValueOnce(new Error('bootstrap timed out'));
+    await connectMailboxSocket(() => {});
+    expect(mockTorSioSocket).not.toHaveBeenCalled();
+
+    fireAppState('active');
+    await jest.advanceTimersByTimeAsync(0);
+    expect(mockTorSioSocket).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not double-fire when already authed or a connect is already in flight', async () => {
+    await connectMailboxSocket(() => {});
+    lastSocket!.connected = true;
+    lastSocket!.fire('auth:ok');
+
+    fireTorStatus('on');
+    fireAppState('active');
+    await jest.advanceTimersByTimeAsync(0);
+    // Already authed — no extra socket created.
+    expect(mockTorSioSocket).toHaveBeenCalledTimes(1);
   });
 });
