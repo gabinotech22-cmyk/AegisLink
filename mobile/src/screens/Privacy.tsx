@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
-import { View, Text, ScrollView, Pressable, Linking } from 'react-native';
+import { View, Text, ScrollView, Pressable, Linking, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -44,6 +44,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const typing = usePreferences((s) => s.typingIndicator);
   const screenshot = usePreferences((s) => s.blockScreenshots);
   const routeViaTor = usePreferences((s) => s.routeViaTor);
+  const callWakeService = usePreferences((s) => s.callWakeService);
   const requireGroupApproval = usePreferences((s) => s.requireGroupApproval);
   const duressActive = usePreferences((s) => s.duressActive);
   const setPref = usePreferences((s) => s.set);
@@ -212,6 +213,26 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             noBorder
           />
         </Section>
+
+        {Platform.OS === 'android' && (
+          <Section t={t} label={i18nT('privacy.callsSection')}>
+            <Toggle
+              t={t}
+              label={i18nT('privacy.callWakeLabel')}
+              sub={i18nT('privacy.callWakeSub')}
+              value={callWakeService}
+              onChange={(v) => {
+                void setPref('callWakeService', v);
+                // Apply immediately: the FGS start/stop is idempotent and also
+                // re-synced on every connect() from the same preference.
+                const { startCallWakeService, stopCallWakeService } =
+                  require('../webrtc/callWakeService') as typeof import('../webrtc/callWakeService');
+                if (v) startCallWakeService();
+                else stopCallWakeService();
+              }}
+            />
+          </Section>
+        )}
 
         <Section t={t} label={i18nT('privacy.alertsSection')}>
           <Row
