@@ -150,10 +150,14 @@ describe('wipeDatabase — SecureStore key material', () => {
     expect(deletedKeys).toContain('aegis.polls.v1');
     // The decoy blob itself: surviving it would prove duress mode existed.
     expect(deletedKeys).toContain('aegis.duress.decoy.v1');
-    // App-lock PIN material: a surviving hash/salt keeps the old PIN gating
+    // App-lock PIN material: a surviving hash/salt/len keeps the old PIN gating
     // the lock screen post-wipe and proves an app-lock existed (forensic leak).
     expect(deletedKeys).toContain('aegis.pin.hash');
     expect(deletedKeys).toContain('aegis.pin.salt.v2');
+    expect(deletedKeys).toContain('aegis.pin.len.v1');
+    // Lock attempt counter + legacy keys.
+    expect(deletedKeys).toContain('aegis.lock.attempts.v1');
+    expect(deletedKeys).toContain('aegis.pin.v1');
     // Legacy v1 lock-settings blob (still present on upgraded devices).
     expect(deletedKeys).toContain('aegis.lockSettings');
   });

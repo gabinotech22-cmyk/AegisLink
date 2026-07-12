@@ -7,6 +7,7 @@ import {
   setActiveDbSlot,
   closeActiveDatabase,
   deleteIdentitySlot,
+  purgeLockAndDuressSecrets,
 } from '../db/local';
 import { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } from '../crypto/registration';
 import { generatePreKeys } from '../crypto/signal/x3dh';
@@ -387,6 +388,11 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     }
     await secureStorage().delete('aegis.activeSlotId').catch(() => {});
     await secureStorage().delete('aegis.slotsList').catch(() => {});
+
+    // Delete-identity must NOT leave the app-lock PIN or coercion (duress) PIN
+    // behind (parity with mobile useIdentity.reset()). This also covers the
+    // desktop escape hatch where a failed wipeDatabase() falls back to reset().
+    await purgeLockAndDuressSecrets().catch(() => {});
 
     const { useContacts } = await import('./contacts');
     const { useGroups } = await import('./groups');
