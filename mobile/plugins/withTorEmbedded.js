@@ -394,7 +394,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
           response.use { resp ->
             if (!resp.isSuccessful) {
               httpCalls.remove(id)
-              forwardHttp(id, "error", "http_" + resp.code())
+              forwardHttp(id, "error", "http_" + resp.code)
               return
             }
             forwardHttp(id, "open", "")
