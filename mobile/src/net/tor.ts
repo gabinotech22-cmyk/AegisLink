@@ -34,6 +34,9 @@ interface AegisTorNative {
   sioConnect(id: string, url: string, authJson: string, eventsJson: string): Promise<boolean>;
   sioEmit(id: string, event: string, payloadJson: string, ackId: string | null): Promise<boolean>;
   sioDisconnect(id: string): Promise<boolean>;
+  // Slice 2b.2: ntfy topic subscription over Tor (dumb HTTP streaming pipe).
+  httpSubscribe(id: string, url: string): Promise<boolean>;
+  httpUnsubscribe(id: string): Promise<boolean>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -109,6 +112,44 @@ export function onTorStatus(cb: (status: TorStatus) => void): () => void {
   if (!emitter) return () => {};
   const sub: EmitterSubscription = emitter.addListener('AegisTorStatus', cb);
   return () => sub.remove();
+}
+
+// ─── Slice 2b.2: ntfy topic subscription over Tor ─────────────────────────────
+
+/** Native bridge event payload for an HTTP stream line. */
+interface HttpForward { id: string; event: 'open' | 'line' | 'close' | 'error'; line: string }
+
+let _httpCounter = 0;
+
+/**
+ * Subscribe to an ntfy topic over Tor by streaming its `/<topic>/json` endpoint
+ * on the relay's .onion. Each newline-delimited JSON line arrives via `onLine`
+ * (the caller parses it and decides what a `message` event means — here: drain
+ * the mailbox). `onError` fires on a dropped circuit / HTTP error so the caller
+ * can re-subscribe. Returns an unsubscribe function. No-op (returns a noop) when
+ * the native module is absent (Expo Go / non-prebuilt) — fail-closed like the
+ * rest of the Tor layer.
+ */
+export function subscribeNtfyOverTor(
+  url: string,
+  onLine: (line: string) => void,
+  onError?: (reason: string) => void,
+): () => void {
+  if (!Native || !emitter) return () => {};
+  const id = `ntfy-${++_httpCounter}`;
+  const sub: EmitterSubscription = emitter.addListener('AegisTorHttp', (p: HttpForward) => {
+    if (p.id !== id) return;
+    if (p.event === 'line') onLine(p.line);
+    else if (p.event === 'error' || p.event === 'close') onError?.(p.event === 'error' ? p.line : 'closed');
+  });
+  void Native.httpSubscribe(id, url).catch((e: Error) => {
+    if (__DEV__) logger.warn('[tor] httpSubscribe failed:', e.message);
+    onError?.(e.message);
+  });
+  return () => {
+    sub.remove();
+    if (Native) void Native.httpUnsubscribe(id).catch(() => { /* best effort */ });
+  };
 }
 
 // ─── F2: socket.io-over-Tor transport ─────────────────────────────────────────

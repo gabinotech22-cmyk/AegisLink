@@ -10,6 +10,7 @@ import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRa
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery } from './mailboxSocket';
+import { startMailboxPushSubscription, stopMailboxPushSubscription } from '../notifications/mailboxPushSubscription';
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { deriveAegisId } from '../crypto/identity';
@@ -681,6 +682,11 @@ export function connectMailboxForIdentity(identity: Identity): void {
       if (__DEV__) logger.warn('[socket] handleIncomingV2(mb) failed:', (e as Error).message);
     });
   });
+  // Slice 2b.2: also subscribe to our ntfy wake topic over Tor. If the mailbox
+  // socket drops (dead circuit) and the relay queues a message, this wakes us to
+  // reconnect+drain without waiting for the blind reconnect backoff. Idempotent;
+  // no-op when Tor/mailbox mode is unavailable. Draining = re-open the mailbox.
+  startMailboxPushSubscription(() => connectMailboxForIdentity(identity));
 }
 
 export function connect(identity: Identity): Socket {
@@ -3725,6 +3731,8 @@ export function disconnect(): void {
   // Fase 4: tear down the dedicated mailbox delivery socket alongside the
   // aegisId socket (no-op when mailbox mode was never enabled).
   disconnectMailboxSocket();
+  // Slice 2b.2: stop the ntfy wake subscription too (logout / panic / switch).
+  stopMailboxPushSubscription();
   // Reset per-session tracking so each new session re-sends images once,
   // ensuring freshness after identity or group avatar updates.
   profiledContacts.clear();

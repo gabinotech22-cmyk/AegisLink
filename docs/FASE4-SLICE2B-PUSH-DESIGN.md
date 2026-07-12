@@ -1,8 +1,9 @@
 # Fase 4 · Slice 2b — Push wake-up por mailbox (documento de decisión)
 
-> Estado: **decisión resuelta; 2b.0 y 2b.1 implementados** (server + infra,
-> co-hosted ntfy, v1 `topic=M`). 2b.2–2b.4 (suscripción móvil, fallback,
-> APNs) siguen pendientes — ver §9. Slice 2b es, en realidad, trabajo de
+> Estado: **decisión resuelta; 2b.0, 2b.1 y 2b.2 (app viva) implementados**
+> (server + infra desplegados en el VM 2026-07-12; suscripción móvil sobre onion
+> con validación en dispositivo pendiente). 2b.3 (app matada / UnifiedPush) y
+> 2b.4 (iOS APNs) siguen pendientes — ver §9. Slice 2b es, en realidad, trabajo de
 > **Fase 5** (ver `SEALED-SENDER-ARCHITECTURE.md:247`): cierra el último
 > reducto que las Slices 1–6 dejaron abierto a propósito. Referencias:
 > `SEALED-SENDER-ARCHITECTURE.md` §3.4 y §"Límite honesto",
@@ -198,10 +199,25 @@ Google/Apple; el topic rota por época como todo lo demás.
   (gate real sin mock: flag off / sin `NTFY_URL` / caso feliz, contra `fetch`
   stubbeado). `mailboxTopic()` cubierto en el mismo archivo relay
   (conversión base64→base64url sin padding).
-- **2b.2** — mobile: suscripción UnifiedPush por época sobre Tor + re-suscripción en
-  rotación. Validación en vivo = **APK release 2-dispositivos** (no automatizable en
-  Jest), igual que las Slices 3b/4.
-- **2b.3** — fallback Android sin distribuidor + flags de degradación honesta.
+- **2b.2 (app viva)** — 🟢 IMPLEMENTADO (pendiente validación en dispositivo).
+  Suscripción por streaming HTTP (ntfy `/<topic>/json`) **sobre el onion** (mismo
+  `.onion` que el mailbox, puerto virtual 8090) usando un método nativo nuevo
+  `httpSubscribe`/`httpUnsubscribe` en el bridge Tor (`mobile/plugins/withTorEmbedded.js`,
+  patrón dumb-pipe idéntico a `sioConnect`). Gestor JS
+  `mobile/src/notifications/mailboxPushSubscription.ts`: topic = `mailboxTopic(mailboxId)`
+  (base64url, byte-idéntico al server), re-suscripción en el boundary de época,
+  retry a los 30 s ante circuito caído; al recibir un evento `message` drena el
+  mailbox (`connectMailboxForIdentity`). Tests JS: `mailboxPushSubscription.test.ts`.
+  Cubre **app viva/background**; app matada necesita 2b.3. Validación en vivo =
+  **APK dev-client 2-dispositivos** (no automatizable en Jest).
+  - **Acceso ntfy (decidido)**: exponer ntfy también por **HTTPS clearnet** con
+    `access_log off` en nginx (para el distribuidor UnifiedPush de 2b.3, que no
+    habla SOCKS) **y** mantener el onion documentado para quien use Orbot. La
+    suscripción de 2b.2 (app viva) usa SIEMPRE el onion; el clearnet es solo para
+    el distribuidor externo de 2b.3.
+- **2b.3** — app matada: distribuidor UnifiedPush (ntfy app / Sunup) por
+  topic-época + fallback FCM sin distribuidor, con flags de degradación honesta.
+  Requiere la exposición clearnet de arriba. Trabajo nativo/config-plugin.
 - **2b.4** — iOS APNs tras flag (fast-follow, no bloquea Android).
 
 ## 10. Pregunta abierta antes de implementar 2b.0 — RESUELTA
