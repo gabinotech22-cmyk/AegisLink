@@ -30,8 +30,9 @@ export interface Preferences {
   // an incoming call rings with the app killed, WITHOUT Google/FCM (zero-metadata
   // wake). Costs a permanent notification + battery. Android-only (no-op on iOS,
   // which is forced onto VoIP/APNs). See docs/FASE4-CALL-WAKE-DESIGN.md.
-  // Default OFF until device-validated; the product target is default-ON on
-  // Android once battery + OEM behaviour are confirmed on real hardware.
+  // Default ON on Android (functionally validated on device 2026-07-12: an
+  // incoming call rings with the app killed, zero Google). No-op on iOS. Follow-
+  // up: measure battery / aggressive-OEM behaviour on physical hardware.
   callWakeService: boolean;
 
   // Notifications
@@ -73,7 +74,7 @@ const DEFAULTS: Preferences = {
   blockScreenshots: true,
   requireGroupApproval: false,
   routeViaTor: false,
-  callWakeService: false,
+  callWakeService: true,
   notifMaster: true,
   notifPreview: false,
   notifSound: true,
