@@ -110,13 +110,19 @@ import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.engineio.client.transports.Polling
 import io.socket.engineio.client.transports.WebSocket
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 import org.json.JSONArray
 import org.json.JSONObject
 import org.torproject.jni.TorService
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * AegisTor — embedded Tor (Fase 4 Tier 2).
@@ -143,6 +149,8 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
   private var cachedSocksPort: Int = 0
   // Live socket.io-over-Tor connections, keyed by the JS-supplied id.
   private val sockets = ConcurrentHashMap<String, Socket>()
+  // Live HTTP streaming subscriptions (ntfy /json SSE-style) keyed by JS id.
+  private val httpCalls = ConcurrentHashMap<String, Call>()
 
   override fun getName(): String = "AegisTor"
 
@@ -348,6 +356,87 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
     } catch (e: Exception) {
       promise.reject("E_SIO_DISCONNECT", e)
     }
+  }
+
+  /**
+   * Subscribe to an ntfy topic over Tor (Slice 2b.2). Opens a long-lived
+   * streaming GET to <url> (the ntfy /<topic>/json endpoint on the relay's
+   * .onion) and forwards each newline-delimited JSON line to JS verbatim as an
+   * "AegisTorHttp" event. A DUMB pipe like the sio bridge: the native side never
+   * interprets the payload — JS decides what "open"/"keepalive"/"message" means
+   * and reacts (drain the mailbox). readTimeout(0) keeps the stream open; ntfy
+   * emits periodic keepalive lines so a dead circuit still surfaces via onFailure.
+   */
+  @ReactMethod
+  fun httpSubscribe(id: String, url: String, promise: Promise) {
+    try {
+      val port = socksPort()
+      if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
+      // Clone the SOCKS-bound client but disable the read timeout for streaming.
+      val client = torOkHttp(port).newBuilder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+      val req = Request.Builder()
+        .url(url)
+        .header("Accept", "application/x-ndjson")
+        .build()
+      val call = client.newCall(req)
+      httpCalls[id] = call
+      dlog("httpSubscribe id=" + id + " url=" + url + " viaSocksPort=" + port)
+      call.enqueue(object : Callback {
+        override fun onFailure(c: Call, e: IOException) {
+          if (c.isCanceled()) return // deliberate unsubscribe, not an error
+          dwarn("httpSubscribe failure id=" + id + " " + e.message)
+          httpCalls.remove(id)
+          forwardHttp(id, "error", e.message ?: "io_error")
+        }
+        override fun onResponse(c: Call, response: Response) {
+          response.use { resp ->
+            if (!resp.isSuccessful) {
+              httpCalls.remove(id)
+              forwardHttp(id, "error", "http_" + resp.code())
+              return
+            }
+            forwardHttp(id, "open", "")
+            val source = resp.body?.source()
+            try {
+              while (source != null && !source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                if (line.isNotBlank()) forwardHttp(id, "line", line)
+              }
+            } catch (e: IOException) {
+              if (!c.isCanceled()) forwardHttp(id, "error", e.message ?: "stream_closed")
+            } finally {
+              httpCalls.remove(id)
+              forwardHttp(id, "close", "")
+            }
+          }
+        }
+      })
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("E_HTTP_SUBSCRIBE", e)
+    }
+  }
+
+  @ReactMethod
+  fun httpUnsubscribe(id: String, promise: Promise) {
+    try {
+      httpCalls.remove(id)?.cancel()
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("E_HTTP_UNSUBSCRIBE", e)
+    }
+  }
+
+  private fun forwardHttp(id: String, event: String, line: String) {
+    val map = Arguments.createMap()
+    map.putString("id", id)
+    map.putString("event", event)
+    map.putString("line", line)
+    reactApplicationContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit("AegisTorHttp", map)
   }
 
   private fun forward(id: String, event: String, args: JSONArray) {
