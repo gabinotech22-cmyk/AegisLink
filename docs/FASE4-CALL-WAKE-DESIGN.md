@@ -74,18 +74,27 @@ FCM ciego — el inverso del default. No se implementa en el primer corte.
 
 ## 5. Plan de implementación (sub-slices)
 
-- **cw.0** — este doc + wiring de la decisión en `SEALED-SENDER-ARCHITECTURE.md`
-  ("Límite honesto": Android sin proveedor, iOS APNs declarado).
-- **cw.1** — Android: nuevo Expo config plugin (persistente, `dataSync`/
-  `connectedDevice`), servicio Kotlin que hospeda/mantiene el socket de
-  señalización sobre Tor, con Doze-aware backoff. Arranque en boot + al
-  loguear. Modela sobre `withCallForegroundService.js` pero con ciclo de vida
-  y tipo distintos.
-- **cw.2** — cliente: preferir el FGS como transporte de wake en Android; el
-  relay NO envía FCM de llamada a un device con FGS activo (evitar doble ring).
-  Requiere que el relay sepa "este destinatario tiene sesión viva" — ya lo sabe
-  por el socket conectado, así que `sendCallWakeUp` ya se salta el push cuando
-  hay socket online (verificar en `handler.ts`).
+- **cw.0** — ✅ HECHO. Este doc + wiring de la decisión en
+  `SEALED-SENDER-ARCHITECTURE.md` ("Límite honesto": Android sin proveedor, iOS
+  APNs declarado). (#307)
+- **cw.1** — 🟢 IMPLEMENTADO (pendiente validación en dispositivo). Expo config
+  plugin `mobile/plugins/withCallWakeService.js`: servicio `AegisWakeService`
+  como **HeadlessJsTaskService** (`foregroundServiceType=dataSync`) que, al
+  (re)arrancar (START_STICKY o `AegisWakeBootReceiver` tras reboot), lanza el
+  task JS `AegisCallWake` (`mobile/src/webrtc/callWakeTask.ts`) que conecta el
+  socket sobre Tor + handlers de llamada y **mantiene el proceso residente** (la
+  crypto sealed-sender sigue en JS; el nativo nunca ve claves). Wrapper JS
+  `callWakeService.ts` (start/stop), preferencia `callWakeService` (store), y
+  cableado en `connect()`/teardown de `client.ts`. Tests JS:
+  `callWakeService.test.ts`. **Default OFF** hasta validar en dispositivo; el
+  objetivo de producto es default-ON en Android tras confirmar batería/OEM en
+  hardware real. Boot receiver gated por marcador `SharedPreferences` (opt-in).
+  Validación en vivo = **APK dev-client 2-dispositivos** (matar app → recibir
+  llamada sin FCM), no automatizable en Jest.
+- **cw.2** — pendiente: UI toggle en Ajustes (i18n en todos los locales) + flip
+  del default a ON en Android tras validación; y evitar doble-ring — el relay NO
+  envía FCM de llamada a un device con sesión viva (ya lo sabe por el socket
+  online, verificar en `handler.ts` que `sendCallWakeUp` se salta el push).
 - **cw.3** — iOS: sin cambios de transporte (VoIP/APNs ya vive); solo copy en UI
   del límite honesto.
 - **cw.4** — Play Store: preparar el video-demo y el texto de justificación del

@@ -111,7 +111,8 @@
         "android.permission.WAKE_LOCK",
         "android.permission.BLUETOOTH",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MICROPHONE"
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC"
       ],
       "blockedPermissions": [
         "android.permission.ACTIVITY_RECOGNITION"
@@ -120,6 +121,7 @@
     "plugins": [
       "./app.plugin.js",
       "./plugins/withCallForegroundService.js",
+      "./plugins/withCallWakeService.js",
       "./plugins/withTorEmbedded.js",
       "./plugins/withIosVoip.js",
       "./plugins/withIosBackupExclusion.js",
