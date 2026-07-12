@@ -91,10 +91,12 @@ FCM ciego — el inverso del default. No se implementa en el primer corte.
   hardware real. Boot receiver gated por marcador `SharedPreferences` (opt-in).
   Validación en vivo = **APK dev-client 2-dispositivos** (matar app → recibir
   llamada sin FCM), no automatizable en Jest.
-- **cw.2** — pendiente: UI toggle en Ajustes (i18n en todos los locales) + flip
-  del default a ON en Android tras validación; y evitar doble-ring — el relay NO
-  envía FCM de llamada a un device con sesión viva (ya lo sabe por el socket
-  online, verificar en `handler.ts` que `sendCallWakeUp` se salta el push).
+- **cw.2** — 🟢 UI toggle HECHO (Ajustes › LLAMADAS, Android-only, i18n en/es/it;
+  `Privacy.tsx` + preferencia `callWakeService`). **Doble-ring: ya prevenido por
+  diseño** — el relay solo hace `sendCallWakeUp` cuando `!delivered`
+  (`server/src/relay/callSignaling.ts:239`); con el FGS el socket está vivo, el
+  `call:invite:v2` se entrega directo y no se emite FCM. **Pendiente**: flip del
+  default a ON en Android tras validación en dispositivo (batería/OEM).
 - **cw.3** — iOS: sin cambios de transporte (VoIP/APNs ya vive); solo copy en UI
   del límite honesto.
 - **cw.4** — Play Store: preparar el video-demo y el texto de justificación del
