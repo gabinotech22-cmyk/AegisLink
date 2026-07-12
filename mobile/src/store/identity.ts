@@ -372,13 +372,20 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
   async reset() {
     const slotsList = get().slotsList || ['self'];
-    const { deleteIdentitySlot } = require('../db/local');
+    const { deleteIdentitySlot, purgeLockAndDuressSecrets } = require('../db/local');
     for (const slot of slotsList) {
       await deleteIdentitySlot(slot).catch(() => {});
     }
     // Also delete global activeSlotId and slotsList keys
     await SecureStore.deleteItemAsync('aegis.activeSlotId').catch(() => {});
     await SecureStore.deleteItemAsync('aegis.slotsList').catch(() => {});
+
+    // Delete-identity must NOT leave the app-lock PIN or coercion (duress) PIN
+    // behind: a surviving coercion PIN would still arm the decoy for whatever
+    // identity comes next, and a surviving lock PIN would gate it. Clears the
+    // same lock/duress/PIN material as a panic wipe and resets in-memory prefs
+    // (so appLockEnabled can't strand a PIN-less identity in a permanent lock).
+    await (purgeLockAndDuressSecrets as () => Promise<void>)().catch(() => {});
 
     // Purge any plaintext-decrypted media from the filesystem cache
     const { purgeCachedDecryptedMedia } = require('../crypto/media');

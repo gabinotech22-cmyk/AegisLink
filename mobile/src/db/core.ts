@@ -659,6 +659,47 @@ export async function decryptSecretOrNull(encryptedBody: string): Promise<string
   }
 }
 
+// ─── purgeLockAndDuressSecrets ───────────────────────────────────────────────
+//
+// Deletes ALL app-lock + duress/panic + PIN material from SecureStore and
+// resets the in-memory preferences store. Shared by wipeDatabase() (panic wipe)
+// and useIdentity.reset() (delete-identity from Profile) so the two can never
+// drift: deleting your identity must NOT leave the old lock PIN or coercion PIN
+// behind. A surviving coercion PIN would still arm the decoy on the next
+// identity; a surviving lock PIN would gate a brand-new identity (or, with
+// appLockEnabled still true in RAM but the hash gone, permanently lock it out).
+export async function purgeLockAndDuressSecrets(): Promise<void> {
+  // Panic/duress config + user-preference blobs.
+  await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.preferences.v1').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.polls.v1').catch(() => {});
+
+  // Reset the IN-MEMORY preferences store too — deleting the SecureStore blob
+  // above is not enough, since usePreferences (Zustand) keeps the last hydrated
+  // values in RAM. Without this, appLockEnabled stays true, the lock-gate
+  // re-arms for the next identity, and — since the PIN hash was just deleted —
+  // NO PIN can ever unlock it: a permanent lockout. Lazy require avoids a cycle.
+  try {
+    const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
+    await usePreferences.getState().reset();
+  } catch { /* non-fatal — the SecureStore key above is already gone either way */ }
+
+  // Decoy blob — a survivor would prove the duress feature was configured.
+  await SecureStore.deleteItemAsync('aegis.duress.decoy.v1').catch(() => {});
+
+  // App-lock PIN material (global keys, no slot prefix — see lock/pin.ts). A
+  // surviving hash/salt/len would keep the OLD PIN gating an identity that no
+  // longer exists and prove an app-lock was configured.
+  await SecureStore.deleteItemAsync('aegis.pin.hash').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.pin.salt.v2').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.pin.len.v1').catch(() => {});
+  // Lock attempt counter + legacy keys — best-effort so nothing left behind
+  // proves an app-lock was ever configured on this device.
+  await SecureStore.deleteItemAsync('aegis.lock.attempts.v1').catch(() => {});
+  await SecureStore.deleteItemAsync('aegis.pin.v1').catch(() => {});      // legacy pre-v2 PIN hash
+  await SecureStore.deleteItemAsync('aegis.lockSettings').catch(() => {}); // legacy v1 lock-settings blob
+}
+
 // ─── wipeDatabase ────────────────────────────────────────────────────────────
 
 export async function wipeDatabase(): Promise<void> {
@@ -740,37 +781,8 @@ export async function wipeDatabase(): Promise<void> {
   await SecureStore.deleteItemAsync('aegis.slotsList').catch(() => {});
   await SecureStore.deleteItemAsync('aegis.activeSlotId').catch(() => {});
 
-  // Forensic remnants: panic config + user preferences.
-  // Without this, a post-wipe forensic analysis could detect that a
-  // panic-enabled account existed on the device.
-  await SecureStore.deleteItemAsync('aegis.panic.v1').catch(() => {});
-  await SecureStore.deleteItemAsync('aegis.preferences.v1').catch(() => {});
-  await SecureStore.deleteItemAsync('aegis.polls.v1').catch(() => {});
-
-  // Reset the IN-MEMORY preferences store too — deleting the SecureStore blob
-  // above is not enough, since usePreferences (Zustand) keeps the last
-  // hydrated values in RAM. Without this, appLockEnabled stays true after a
-  // panic wipe, the lock-gate re-arms for the freshly regenerated identity,
-  // and — since aegis.pin.hash was just deleted — NO PIN can ever unlock it:
-  // a permanent lockout on a brand-new account. Lazy require avoids a cycle
-  // (preferences.ts doesn't import db/core.ts, but keep this defensive).
-  try {
-    const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
-    await usePreferences.getState().reset();
-  } catch { /* non-fatal — SecureStore key above is already gone either way */ }
-  // A surviving decoy blob would prove the duress feature was configured.
-  await SecureStore.deleteItemAsync('aegis.duress.decoy.v1').catch(() => {});
-
-  // App-lock PIN material (global keys, no slot prefix — see lock/pin.ts).
-  // A surviving PIN hash/salt would (a) keep the OLD PIN gating the lock
-  // screen for an identity that no longer exists, and (b) prove to a
-  // forensic analysis that an app-lock was configured, contradicting the
-  // "leaves nothing behind" promise of panic mode.
-  await SecureStore.deleteItemAsync('aegis.pin.hash').catch(() => {});
-  await SecureStore.deleteItemAsync('aegis.pin.salt.v2').catch(() => {});
-  // Legacy v1 lock-settings blob: current builds persist lock prefs inside
-  // aegis.preferences.v1 (already purged above), but devices upgraded from v1
-  // still carry this key. Best-effort delete so an upgraded device leaves no
-  // proof that an app-lock was ever configured.
-  await SecureStore.deleteItemAsync('aegis.lockSettings').catch(() => {});
+  // App-lock + duress/panic + PIN material, and the in-memory preferences
+  // reset. Shared with useIdentity.reset() so a panic wipe and a delete-identity
+  // clear exactly the same lock/coercion secrets (see purgeLockAndDuressSecrets).
+  await purgeLockAndDuressSecrets();
 }

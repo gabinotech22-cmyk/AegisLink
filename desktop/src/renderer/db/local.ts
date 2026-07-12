@@ -268,23 +268,32 @@ export async function wipeDatabase(): Promise<void> {
   // Panic must leave nothing recoverable.
   await secureStorage().wipePrekeys().catch(() => {});
   await db().wipeDatabase(activeSlot);
+  // App-lock + duress/panic + PIN material and the in-memory preferences reset.
+  // Shared with useIdentity.reset() so a panic wipe and a delete-identity clear
+  // exactly the same lock/coercion secrets (see purgeLockAndDuressSecrets).
+  await purgeLockAndDuressSecrets();
+}
+
+// Deletes ALL app-lock + duress/panic + PIN material from the keystore and
+// resets the in-memory preferences store. Shared by wipeDatabase() (panic wipe)
+// and useIdentity.reset() (delete-identity) so the two can never drift:
+// deleting your identity must NOT leave the old lock PIN or coercion PIN behind
+// — a surviving hash/salt would keep the old PIN gating the lock screen for an
+// identity that no longer exists, and prove an app-lock was configured,
+// contradicting panic mode's "leaves nothing behind" promise. Mirrors
+// mobile/src/db/core.ts purgeLockAndDuressSecrets.
+export async function purgeLockAndDuressSecrets(): Promise<void> {
   await secureStorage().delete('aegis.panic.v1').catch(() => {});
   await secureStorage().delete('aegis.preferences.v1').catch(() => {});
   await secureStorage().delete('aegis.polls.v1').catch(() => {});
-  // App-lock PIN material (mirrors mobile/src/db/core.ts wipeDatabase — a
-  // surviving hash/salt would keep the old PIN gating the lock screen for an
-  // identity that no longer exists, and its mere presence would prove an
-  // app-lock was configured, contradicting panic mode's "leaves nothing
-  // behind" promise).
   await secureStorage().delete('aegis.pin.v1').catch(() => {});
   await secureStorage().delete('aegis.pin.salt.v2').catch(() => {});
 
   // Reset the IN-MEMORY preferences store too — deleting the persisted blob
-  // above is not enough, since usePreferences (Zustand) keeps the last
-  // hydrated values in RAM. Without this, appLockEnabled stays true after a
-  // panic wipe, the lock-gate re-arms for the freshly regenerated identity,
-  // and — since the PIN hash was just deleted — NO PIN can ever unlock it: a
-  // permanent lockout on a brand-new account. Mirrors mobile/src/db/core.ts.
+  // above is not enough, since usePreferences (Zustand) keeps the last hydrated
+  // values in RAM. Without this, appLockEnabled stays true, the lock-gate
+  // re-arms for the next identity, and — since the PIN hash was just deleted —
+  // NO PIN can ever unlock it: a permanent lockout on a brand-new account.
   try {
     const { usePreferences } = await import('../store/preferences');
     await usePreferences.getState().reset();
