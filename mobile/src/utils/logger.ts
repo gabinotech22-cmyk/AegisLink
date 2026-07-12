@@ -31,8 +31,13 @@ const ORDER: Record<LogLevel, number> = {
 // `__DEV__` is the React Native / Expo global — `false` in release bundles.
 const IS_DEV = typeof __DEV__ !== 'undefined' && __DEV__;
 
-/** Default: everything in dev, silent in production to prevent metadata leakage. */
-const DEFAULT_LEVEL: LogLevel = IS_DEV ? 'debug' : 'silent';
+// DIAGNOSTIC ESCAPE HATCH (throwaway diag builds ONLY — never ship). When the
+// diag flag is baked in, a release-style build logs at 'debug' so field issues
+// are visible in logcat. Paired with babel keeping console.* (see babel.config.js).
+const IS_DIAG = process.env.EXPO_PUBLIC_AEGIS_DIAG === '1';
+
+/** Default: everything in dev/diag, silent in production to prevent metadata leakage. */
+const DEFAULT_LEVEL: LogLevel = IS_DEV || IS_DIAG ? 'debug' : 'silent';
 
 let currentLevel: LogLevel = DEFAULT_LEVEL;
 

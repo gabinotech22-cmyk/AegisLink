@@ -35,9 +35,9 @@ import type {
 // source of truth; SecureStore writes are non-fatal. The slot prefix is read
 // lazily from db/local via dynamic import inside the upload function.
 
-/** Prekey-store diagnostics — dev builds only (see rdiag in socket/client.ts). */
+/** Prekey-store diagnostics — dev + diag builds only (see rdiag in socket/client.ts). */
 function rdiag(msg: string): void {
-  if (__DEV__) logger.warn(msg);
+  if (__DEV__ || process.env.EXPO_PUBLIC_AEGIS_DIAG === '1') logger.warn(msg);
 }
 
 function secureKeyHelpers(slotPrefix: string) {

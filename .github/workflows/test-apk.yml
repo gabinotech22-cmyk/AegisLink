@@ -45,6 +45,10 @@ jobs:
       EXPO_PUBLIC_ONION_URL: http://fhxnal5jmuuqsbtzz7avos4drhqmuy4c7ffd35gi3hw2uwbe5iqshfyd.onion
       EXPO_PUBLIC_MAILBOX_MODE: 'on'
       AEGIS_EXPO_GO: '0'
+      # DIAGNOSTIC build ONLY (diag/* branch — never merge): keep console.* and
+      # enable [RDIAG]/logger output so 1:1 delivery can be traced in logcat.
+      AEGIS_DIAG: '1'
+      EXPO_PUBLIC_AEGIS_DIAG: '1'
     steps:
       - uses: actions/checkout@v7
 

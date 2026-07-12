@@ -65,8 +65,9 @@ import {
  * (logcat is readable by adb and privileged apps). Belt and suspenders with
  * babel's transform-remove-console, which also strips warn in production.
  */
+const AEGIS_DIAG = process.env.EXPO_PUBLIC_AEGIS_DIAG === '1';
 function rdiag(msg: string): void {
-  if (__DEV__) logger.warn(msg);
+  if (__DEV__ || AEGIS_DIAG) logger.warn(msg);
 }
 
 const getSlotPrefix = () => {
@@ -3866,6 +3867,8 @@ export async function sendMessage(opts: {
   }
   await saveSessionState(opts.recipientAegisId, newState);
 
+  rdiag(`[RDIAG] send1to1 to=${opts.recipientAegisId} evt=${emitEvent} v2Token=${v2Token ? 'yes' : 'no'} x3dhInit=${session.x3dhInit ? 'yes' : 'no'} MAILBOX_ENABLED=${MAILBOX_ENABLED} mailboxAuthed=${isMailboxAuthed()}`);
+
   // ── Fase 4: mailbox addressing ──────────────────────────────────────────────
   // When mailbox mode is up and we hold the recipient's mailbox root, route the
   // SAME v2 wire over the dedicated mailbox socket, addressed to their opaque
@@ -3877,6 +3880,7 @@ export async function sendMessage(opts: {
   // transport when not eligible: no root yet, or the socket isn't authed.
   if (emitEvent === 'envelope:v2' && MAILBOX_ENABLED && isMailboxAuthed()) {
     const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
+    rdiag(`[RDIAG] send1to1 mailbox path: mboxTo=${mboxTo ? 'present' : 'MISSING(no root)'}`);
     if (mboxTo) {
       const ack = await sendViaMailbox({
         id,
@@ -3886,6 +3890,7 @@ export async function sendMessage(opts: {
         epk: emitPayload.epk as string,
         ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
       });
+      rdiag(`[RDIAG] send1to1 mailbox ack: ${ack ? `ok=${ack.ok}` : 'null'}`);
       if (ack && ack.ok) {
         try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
         // Multi-device self-copy stays on the aegisId control socket (it is
@@ -3912,6 +3917,7 @@ export async function sendMessage(opts: {
             // `.timeout()` changes the ack callback to (err, ack): err is set
             // when the server never responds in time (zombie transport / lost
             // frame) — treat identically to an explicit !ok failure below.
+            rdiag(`[RDIAG] send1to1 aegisId-transport ack: err=${err ? err.message : 'none'} ok=${ack?.ok} queued=${ack?.queued} error=${ack?.error ?? 'none'}`);
             if (err) { reject(err); return; }
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
             else resolve();
@@ -3922,6 +3928,7 @@ export async function sendMessage(opts: {
     try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
   } catch (e) {
     // Emit failed — job stays in outbox for retry on next reconnect
+    rdiag(`[RDIAG] send1to1 emit FAILED, job retained in outbox: ${(e as Error)?.message}`);
     if (__DEV__) logger.warn('[socket] sendMessage emit failed, job retained in outbox:', e);
     try { await incrementOutboxAttempts(jobId); } catch { /* non-fatal */ }
     throw e; // surface to caller so UI can show error
