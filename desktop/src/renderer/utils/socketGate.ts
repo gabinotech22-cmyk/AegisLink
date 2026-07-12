@@ -24,13 +24,24 @@ import type { PublishStatus } from '../store/identity';
  *  - 'failed' / 'unknown': resolved (non-in-flight) states — connecting
  *    anyway is safe, since any resulting `unknown_identity` is now funneled
  *    through the guarded retryPublish() instead of racing a fresh publish.
+ *
+ * `duressActive` (CodeRabbit PR #301, CRITICAL security fix): never connect
+ * with the decoy identity — doing so would leak that panic/duress mode is
+ * active to the relay. Mobile already guarded every connectSocket call site
+ * with `if (usePreferences.getState().duressActive) return;`; desktop's
+ * App.tsx was MISSING this guard entirely, so the decoy identity (AEGIS-MOCK)
+ * could reach the relay under coercion. Folded into this single, testable
+ * predicate so both platforms share one source of truth instead of a
+ * duplicated inline check that's easy to forget at a new call site.
  */
 export function shouldConnectSocket(params: {
   hasIdentity: boolean;
   identityStatus: 'idle' | 'loading' | 'generating' | 'ready';
   publishStatus: PublishStatus;
+  duressActive: boolean;
 }): boolean {
-  const { hasIdentity, identityStatus, publishStatus } = params;
+  const { hasIdentity, identityStatus, publishStatus, duressActive } = params;
+  if (duressActive) return false;
   if (!hasIdentity) return false;
   if (identityStatus !== 'ready') return false;
   return publishStatus !== 'publishing';
