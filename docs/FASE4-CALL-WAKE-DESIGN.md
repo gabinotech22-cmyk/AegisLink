@@ -91,12 +91,15 @@ FCM ciego — el inverso del default. No se implementa en el primer corte.
   hardware real. Boot receiver gated por marcador `SharedPreferences` (opt-in).
   Validación en vivo = **APK dev-client 2-dispositivos** (matar app → recibir
   llamada sin FCM), no automatizable en Jest.
-- **cw.2** — 🟢 UI toggle HECHO (Ajustes › LLAMADAS, Android-only, i18n en/es/it;
+- **cw.2** — ✅ HECHO. UI toggle (Ajustes › LLAMADAS, Android-only, i18n en/es/it;
   `Privacy.tsx` + preferencia `callWakeService`). **Doble-ring: ya prevenido por
   diseño** — el relay solo hace `sendCallWakeUp` cuando `!delivered`
   (`server/src/relay/callSignaling.ts:239`); con el FGS el socket está vivo, el
-  `call:invite:v2` se entrega directo y no se emite FCM. **Pendiente**: flip del
-  default a ON en Android tras validación en dispositivo (batería/OEM).
+  `call:invite:v2` se entrega directo y no se emite FCM. **Default ON en Android**
+  tras **validación funcional en dispositivo (2026-07-12)**: con el toggle activo
+  y la app matada, la llamada entrante suena (heads-up "Chiamata E2EE in arrivo"),
+  cero Google. Seguimiento abierto (no bloquea): medir batería + OEMs agresivos
+  (Xiaomi/Samsung matan FGS) en **hardware físico** — el emulador no estresa Doze.
 - **cw.3** — iOS: sin cambios de transporte (VoIP/APNs ya vive); solo copy en UI
   del límite honesto.
 - **cw.4** — Play Store: preparar el video-demo y el texto de justificación del
