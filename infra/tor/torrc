@@ -42,3 +42,7 @@ HiddenServiceSingleHopMode 1
 HiddenServiceDir /var/lib/tor/aegislink_relay
 HiddenServiceVersion 3
 HiddenServicePort 80 relay:3001
+# Fase 4 · Slice 2b: same onion, additional virtual port for mailbox clients
+# to subscribe to their ntfy wake-up topic over Tor (co-hosted ntfy, never
+# exposed on clearnet). Publish stays relay-internal (push/ntfy.ts -> ntfy:80).
+HiddenServicePort 8090 ntfy:80

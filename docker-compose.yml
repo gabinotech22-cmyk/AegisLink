@@ -63,6 +63,13 @@ services:
       # Same gotcha as TURN_HOST/KLIPY_KEY: it MUST be listed here or the
       # container never sees the value from .env and the flag stays off forever.
       PUBLIC_CHANNELS: ${PUBLIC_CHANNELS:-off}
+      # PUSH_MAILBOX_ENABLED gates the Slice 2b ntfy wake-up publish on the
+      # mailbox offline-enqueue path (relay/handler.ts -> push/ntfy.ts).
+      # Default OFF. NTFY_URL must point at the co-hosted ntfy service below
+      # (service name "ntfy" on aegis_internal) — same gotcha as PUBLIC_CHANNELS/
+      # TURN_HOST: both MUST be listed here or the container never sees them.
+      PUSH_MAILBOX_ENABLED: ${PUSH_MAILBOX_ENABLED:-off}
+      NTFY_URL: ${NTFY_URL:-http://ntfy:80}
     volumes:
       # Persistent SQLite database
       - relay_data:/data
@@ -117,6 +124,39 @@ services:
       driver: "json-file"
       options:
         # torrc pins Log to notice — no per-connection data reaches stdout.
+        max-size: "10m"
+        max-file: "3"
+
+  # ── ntfy (Fase 4 · Slice 2b — mailbox wake-up push) ───────────────────────
+  # Co-hosted with the relay (docs/FASE4-SLICE2B-PUSH-DESIGN.md §5.1, §10):
+  # same operator, so v1 topic = mailboxId adds no new correlation beyond what
+  # the relay already routes on. The relay publishes an EMPTY, high-priority
+  # message to topic=<mailboxId> when it enqueues an offline envelope:mb
+  # (push/ntfy.ts); no aegisId, no sender, no content ever reaches ntfy.
+  # No published ports here: reachable only via the relay (server -> publish,
+  # loopback) and, for client subscribe, via the Tor hidden service below
+  # (infra/tor/torrc virtual port 8090). Zero-metadata: cache/log level kept
+  # minimal — no per-connection/IP logging, short cache TTL, warn-only logs.
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    container_name: aegislink-ntfy
+    restart: unless-stopped
+    command: serve
+    environment:
+      NTFY_BASE_URL: http://aegislink-ntfy
+      NTFY_BEHIND_PROXY: "false"
+      # Keep at rest minimal: messages are wake-up pings, not history a client
+      # needs to replay — the queued ciphertext lives in the relay's own DB.
+      NTFY_CACHE_DURATION: "12h"
+      # warn-only: no per-publish/subscribe access logging.
+      NTFY_LOG_LEVEL: warn
+    # No published ports: subscribe reaches ntfy only over the .onion (tor
+    # container proxies virtual port 8090 -> ntfy:80); publish is relay-internal.
+    networks:
+      - aegis_internal
+    logging:
+      driver: "json-file"
+      options:
         max-size: "10m"
         max-file: "3"
 

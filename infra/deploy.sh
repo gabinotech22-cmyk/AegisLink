@@ -92,12 +92,25 @@ for i in $(seq 1 $MAX_RETRIES); do
   sleep "$RETRY_INTERVAL"
 done
 
+# ── ntfy (Fase 4 · Slice 2b — mailbox wake-up push) ─────────────────────────
+# Must be up BEFORE tor restarts below: tor resolves BOTH HiddenServicePort
+# targets ("relay" and "ntfy") once at (re)start, so a stale/absent ntfy
+# container at that moment leaves virtual port 8090 dangling until the next
+# tor restart. No image to build (upstream binwiederhier/ntfy:latest).
+echo "[deploy] Restarting ntfy service..."
+if docker compose -f "$PROJECT_ROOT/docker-compose.yml" ps ntfy 2>/dev/null | grep -q "running"; then
+  docker compose -f "$PROJECT_ROOT/docker-compose.yml" restart ntfy
+else
+  docker compose -f "$PROJECT_ROOT/docker-compose.yml" up -d ntfy
+fi
+
 # ── Tor onion service (Fase 4 · mailbox mode) ───────────────────────────────
-# tor resolves the HiddenServicePort target ("relay") when it (re)starts, so
-# this runs AFTER the relay is up and healthy — a recreated relay container can
-# get a new IP on aegis_internal, and a stale tor would keep dialing the old
-# one. Restarting tor is cheap: the onion key persists in the tor_keys volume,
-# so the .onion address never changes across restarts.
+# tor resolves the HiddenServicePort targets ("relay", "ntfy" — Slice 2b) when
+# it (re)starts, so this runs AFTER both the relay and ntfy are up — a
+# recreated relay container can get a new IP on aegis_internal, and a stale
+# tor would keep dialing the old one. Restarting tor is cheap: the onion key
+# persists in the tor_keys volume, so the .onion address never changes across
+# restarts.
 echo "[deploy] Building Tor onion-service image..."
 docker compose -f "$PROJECT_ROOT/docker-compose.yml" build tor
 

@@ -1,10 +1,12 @@
 # Fase 4 · Slice 2b — Push wake-up por mailbox (documento de decisión)
 
-> Estado: **decisión de diseño, pre-implementación.** Bloquea el cableado del
-> wake-up en el path mailbox. Slice 2b es, en realidad, trabajo de **Fase 5**
-> (ver `SEALED-SENDER-ARCHITECTURE.md:247`): cierra el último reducto que las
-> Slices 1–6 dejaron abierto a propósito. Referencias: `SEALED-SENDER-ARCHITECTURE.md`
-> §3.4 y §"Límite honesto", `FASE4-CONTROL-PLANE-DESIGN.md`.
+> Estado: **decisión resuelta; 2b.0 y 2b.1 implementados** (server + infra,
+> co-hosted ntfy, v1 `topic=M`). 2b.2–2b.4 (suscripción móvil, fallback,
+> APNs) siguen pendientes — ver §9. Slice 2b es, en realidad, trabajo de
+> **Fase 5** (ver `SEALED-SENDER-ARCHITECTURE.md:247`): cierra el último
+> reducto que las Slices 1–6 dejaron abierto a propósito. Referencias:
+> `SEALED-SENDER-ARCHITECTURE.md` §3.4 y §"Límite honesto",
+> `FASE4-CONTROL-PLANE-DESIGN.md`.
 
 ## 1. El problema en una frase
 
@@ -107,6 +109,12 @@ así que no puede derivar nada nuevo por sí mismo. Dos variantes:
 > control; `M` ya es conocido por el relay → no añade reducto). Dejar v2 documentada
 > como upgrade si el push se externaliza.
 
+**Amendment — charset del topic (implementado en `push/ntfy.ts:mailboxTopic`):**
+ntfy solo acepta `[-_A-Za-z0-9]` en nombres de topic; `M` viaja como base64
+estándar (con `+`, `/`, `=`). `mailboxTopic()` lo convierte a base64url sin
+padding (`+`→`-`, `/`→`_`, strip `=`) antes de usarlo como topic — sin cambiar
+la propiedad de rotación por época, solo el encoding de superficie.
+
 ### 5.2 Suscripción sobre Tor
 
 El cliente se suscribe a `topic = M` **vía el .onion** (mismo `ONION_URL` que ya
@@ -173,21 +181,38 @@ Google/Apple; el topic rota por época como todo lo demás.
 
 ## 9. Plan de implementación (sub-slices)
 
-- **2b.0** — desplegar ntfy self-hosted + hidden service (infra). Verificable con
-  `curl` publish/subscribe sobre el .onion.
-- **2b.1** — server: `push/ntfy.ts` + hook en `handler.ts` + flag. **Test de relay**:
-  un `envelope:mb` para un mailbox offline dispara exactamente un publish a `topic=M`
-  (mock de ntfy), y **ninguno** cuando hay socket online. (Un test por fix.)
+- **2b.0** — ✅ HECHO. ntfy self-hosted co-hospedado con el relay: servicio
+  `ntfy` en `docker-compose.yml` (imagen `binwiederhier/ntfy:latest`, sin
+  puertos publicados, `aegis_internal`), hidden service adicional
+  `HiddenServicePort 8090 ntfy:80` en `infra/tor/torrc` (mismo onion que el
+  relay), y orden de restart en `infra/deploy.sh` (ntfy antes que tor, ya que
+  tor resuelve hostnames al arrancar). Pendiente de verificación en vivo con
+  `curl` publish/subscribe sobre el .onion tras el próximo deploy (no
+  desplegado en esta rama).
+- **2b.1** — ✅ HECHO. `server/src/push/ntfy.ts` (`mailboxTopic()` +
+  `notifyMailbox()`, flag-gated `PUSH_MAILBOX_ENABLED` + `NTFY_URL`), hook en
+  `handler.ts` (rama offline de `envelope:mb`, tras `messageRepo.enqueue`
+  con `result.ok`). Tests: `server/src/__tests__/ntfyMailboxPush.relay.test.ts`
+  (offline+flag ON → exactamente un publish a `topic=mailboxTopic(M)`; online
+  → cero; mock a nivel de módulo) y `server/src/__tests__/ntfy.unit.test.ts`
+  (gate real sin mock: flag off / sin `NTFY_URL` / caso feliz, contra `fetch`
+  stubbeado). `mailboxTopic()` cubierto en el mismo archivo relay
+  (conversión base64→base64url sin padding).
 - **2b.2** — mobile: suscripción UnifiedPush por época sobre Tor + re-suscripción en
   rotación. Validación en vivo = **APK release 2-dispositivos** (no automatizable en
   Jest), igual que las Slices 3b/4.
 - **2b.3** — fallback Android sin distribuidor + flags de degradación honesta.
 - **2b.4** — iOS APNs tras flag (fast-follow, no bloquea Android).
 
-## 10. Pregunta abierta antes de implementar 2b.0
+## 10. Pregunta abierta antes de implementar 2b.0 — RESUELTA
 
 ¿ntfy **co-hospedado** con el relay (mismo operador, justifica `topic=M` de §5.1 v1)
 o **host separado** desde el día 1 (entonces conviene `topic` derivado v2 para no
 dar a un futuro operador distinto el join `M↔topic`)? La respuesta fija si 2b.1
-necesita la ronda de binding o no. Recomendación: co-hospedar para v1 (mínimo
-estado, mínimo reducto), migrar a v2 sólo si el push se externaliza.
+necesita la ronda de binding o no.
+
+**Decisión: co-hospedado.** ntfy corre como servicio adicional en el mismo
+`docker-compose.yml` que el relay, mismo host, mismo operador — v1
+(`topic=M`, sin tabla de binding) es correcto tal como está implementado en
+2b.0/2b.1. Migrar a v2 (topic derivado, ronda de binding autenticada) sólo si
+el push se externaliza a un operador de ntfy distinto en el futuro.
