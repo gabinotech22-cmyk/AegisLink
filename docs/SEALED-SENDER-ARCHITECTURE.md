@@ -124,6 +124,13 @@ Resultado: el relay solo ve `{ mailboxTo, ciphertext, nonce, epk }` — **ni
 2. **Push**: el relay mapea `mailbox → push token` sin aegisId. Pero FCM/APNs
    siguen viendo el dispositivo físico → para ocultarlo del proveedor hace falta
    push self-hosted (UnifiedPush/ntfy) opcional o un notifier separado (SimpleX).
+   - **Mensajes**: wake self-hosted vía ntfy co-hosteado, `topic = mailboxId`
+     rotatorio (Slice 2b, `FASE4-SLICE2B-PUSH-DESIGN.md`). Relay-side implementado.
+   - **Llamadas** (caducan en 30 s, no toleran fallback lento): decisión
+     confirmada en `FASE4-CALL-WAKE-DESIGN.md` — **Android** usa un
+     foreground-service propio con socket 24/7 sobre Tor por defecto (cero
+     Google); **iOS** queda forzado a VoIP/APNs por la plataforma (Apple no
+     permite sockets en background), reducto de timing declarado, no silencioso.
 
 **Límite irreducible:** el relay sabe "el mailbox X está conectado en esta
 conexión ahora mismo". Con rotación + un socket por mailbox no puede relinkear
