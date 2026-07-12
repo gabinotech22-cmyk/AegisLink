@@ -69,7 +69,20 @@ export interface OutgoingMailboxEnvelope {
   ephemeralTtl?: number;
 }
 
-type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string };
+export type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string };
+
+/**
+ * True only when the relay confirms the wire was handed to a LIVE recipient
+ * mailbox socket (`delivered:true`). A merely-`queued` ack (recipient's mailbox
+ * offline) is NOT confirmation: the recipient's Tor mailbox may never come up to
+ * drain it, so the caller must fall back to the reliable aegisId transport rather
+ * than treat the message as sent. Centralised so mobile ↔ desktop stay in lock-step
+ * and a future edit can't silently revert to trusting a bare `ok` (which is true
+ * for queued too) — parity with mobile/src/socket/mailboxSocket.ts.
+ */
+export function mailboxAckConfirmsDelivery(ack: EnvelopeAck | null | undefined): boolean {
+  return ack?.delivered === true;
+}
 
 let mboxSocket: Socket | null = null;
 let currentEpochMailbox: Mailbox | null = null;

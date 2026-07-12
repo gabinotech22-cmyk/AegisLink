@@ -21,7 +21,7 @@ import { RELAY_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED } from '../config'
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
-import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed } from './mailboxSocket';
+import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery } from './mailboxSocket';
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { spkRotationDecision, spkPruneTargetKeyId } from './spkRotation';
@@ -2378,8 +2378,20 @@ export async function sendMessage(opts: {
   // mailbox socket is itself possession-authenticated, so no deliveryToken is
   // needed (the relay rate-limits per sending mailbox). Ephemeral messages ride
   // the mailbox too (Slice 5): the TTL bounds only the relay's offline-queue life;
-  // the recipient burns from the decrypted payload. Falls back to the aegisId
-  // transport when not eligible: no root yet, or the socket isn't authed.
+  // the recipient burns from the decrypted payload.
+  //
+  // DELIVERY-CONFIRMED (no silent loss): we treat the mailbox send as terminal
+  // success ONLY when the relay reports `delivered:true` — i.e. the recipient's
+  // mailbox socket was LIVE and got the wire immediately. A merely-`queued` ack
+  // (recipient's mailbox offline) is NOT trusted: the recipient's Tor mailbox may
+  // never come up (slow/flaky bootstrap), leaving the queued blob to silently
+  // expire undelivered. On queued/null/!ok we fall through to the aegisId
+  // transport, whose offline queue the recipient reliably drains on its normal
+  // (non-Tor) socket connect. The queued mailbox copy is harmless — it dedups by
+  // `id` (INSERT OR REPLACE) if ever drained, or expires. Mailbox stays the
+  // preferred path whenever both peers are online; the fallback only fires when
+  // mailbox delivery cannot be confirmed. Also falls back when not eligible: no
+  // recipient root yet, or our own mailbox socket isn't authed. Parity: mobile.
   if (emitEvent === 'envelope:v2' && MAILBOX_ENABLED && isMailboxAuthed()) {
     const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
     if (mboxTo) {
@@ -2391,7 +2403,9 @@ export async function sendMessage(opts: {
         epk: emitPayload.epk as string,
         ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
       });
-      if (ack && ack.ok) {
+      // Only a LIVE mailbox delivery is terminal. `queued` (recipient mailbox
+      // offline) falls through so the reliable aegisId transport also delivers.
+      if (mailboxAckConfirmsDelivery(ack)) {
         // Multi-device self-copy stays on the aegisId control socket (it is
         // identity-scoped sync, not a recipient-graph leak). Same as below.
         const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
@@ -2401,7 +2415,7 @@ export async function sendMessage(opts: {
         });
         return;
       }
-      // ack null/!ok → fall through to the aegisId transport (robust degrade).
+      // queued / null / !ok → fall through to the aegisId transport (no silent loss).
     }
   }
 
