@@ -26,6 +26,14 @@ export interface Preferences {
   // Network
   routeViaTor: boolean;
 
+  // Calls — Android persistent foreground service that keeps the socket alive so
+  // an incoming call rings with the app killed, WITHOUT Google/FCM (zero-metadata
+  // wake). Costs a permanent notification + battery. Android-only (no-op on iOS,
+  // which is forced onto VoIP/APNs). See docs/FASE4-CALL-WAKE-DESIGN.md.
+  // Default OFF until device-validated; the product target is default-ON on
+  // Android once battery + OEM behaviour are confirmed on real hardware.
+  callWakeService: boolean;
+
   // Notifications
   notifMaster: boolean;
   notifPreview: boolean;
@@ -65,6 +73,7 @@ const DEFAULTS: Preferences = {
   blockScreenshots: true,
   requireGroupApproval: false,
   routeViaTor: false,
+  callWakeService: false,
   notifMaster: true,
   notifPreview: false,
   notifSound: true,
@@ -106,6 +115,7 @@ function snapshot(get: () => PrefsState): Preferences {
     blockScreenshots: s.blockScreenshots,
     requireGroupApproval: s.requireGroupApproval,
     routeViaTor: s.routeViaTor,
+    callWakeService: s.callWakeService,
     notifMaster: s.notifMaster,
     notifPreview: s.notifPreview,
     notifSound: s.notifSound,

@@ -11,6 +11,7 @@ import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getCon
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery } from './mailboxSocket';
 import { startMailboxPushSubscription, stopMailboxPushSubscription } from '../notifications/mailboxPushSubscription';
+import { startCallWakeService, stopCallWakeService } from '../webrtc/callWakeService';
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { deriveAegisId } from '../crypto/identity';
@@ -693,6 +694,12 @@ export function connect(identity: Identity): Socket {
   // Idempotent (flag-guarded): arm the foreground-reconnect listener on the
   // first connect of the app's lifetime, regardless of which branch we take.
   armForegroundReconnect();
+
+  // Sync the Android call-wake foreground service to the user's preference on
+  // every connect (idempotent; Android-only, no-op elsewhere). When enabled it
+  // keeps the process resident so a call rings with the app killed — zero-Google.
+  if (usePreferences.getState().callWakeService) startCallWakeService();
+  else stopCallWakeService();
 
   if (
     socket &&
@@ -3733,6 +3740,10 @@ export function disconnect(): void {
   disconnectMailboxSocket();
   // Slice 2b.2: stop the ntfy wake subscription too (logout / panic / switch).
   stopMailboxPushSubscription();
+  // Call-wake FGS is tied to an active session — tear it down on full disconnect
+  // (logout / panic / profile switch) so a logged-out app shows no persistent
+  // notification. Re-armed by connect() per the preference. No-op if not running.
+  stopCallWakeService();
   // Reset per-session tracking so each new session re-sends images once,
   // ensuring freshness after identity or group avatar updates.
   profiledContacts.clear();

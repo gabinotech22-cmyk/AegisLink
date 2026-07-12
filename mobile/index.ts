@@ -16,6 +16,12 @@ import './src/notifications/channelBackgroundSync';
 // launches us headless, before App ever mounts.
 import './src/notifications/dailySummaryTask';
 
+// Register the persistent call-wake headless task (Android) BEFORE App mounts,
+// so AegisWakeService can find "AegisCallWake" when it launches us headless
+// (START_STICKY restart or boot receiver). No-op on iOS / Expo Go / jest.
+import { registerCallWakeTask } from './src/webrtc/callWakeTask';
+registerCallWakeTask();
+
 import { registerRootComponent } from 'expo';
 import App from './App';
 
