@@ -2,9 +2,14 @@
  * ntfy.unit.test.ts
  *
  * Fase 4 · Slice 2b.1 — unit-level gating for notifyMailbox() against a
- * stubbed `fetch`. Kept in its own file (no `jest.mock('../push/ntfy.js')`
- * hoisting like ntfyMailboxPush.relay.test.ts) so the real gate logic runs.
+ * stubbed `fetch`. Kept in its own file (no module mock like
+ * ntfyMailboxPush.relay.test.ts) so the real gate logic runs.
+ *
+ * Server jest config is ESM (ts-jest/presets/default-esm, jest globals NOT
+ * injected) — `jest` must come from '@jest/globals' (see blob.test.ts).
  */
+
+import { jest } from '@jest/globals';
 
 describe('notifyMailbox() gate', () => {
   test('flag off -> no fetch call', async () => {
