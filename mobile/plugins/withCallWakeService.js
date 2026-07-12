@@ -244,9 +244,9 @@ import android.os.Build
  */
 class AegisWakeBootReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context?, intent: Intent?) {
-    val action = intent?.action ?: return
-    if (action != Intent.ACTION_BOOT_COMPLETED &&
-        action != "android.intent.action.LOCKED_BOOT_COMPLETED") return
+    val act = intent?.action ?: return
+    if (act != Intent.ACTION_BOOT_COMPLETED &&
+        act != "android.intent.action.LOCKED_BOOT_COMPLETED") return
     val ctx = context ?: return
     // Opt-in marker written by the JS layer (see callWakeService.ts).
     val enabled = ctx.getSharedPreferences("aegis_wake", Context.MODE_PRIVATE)
