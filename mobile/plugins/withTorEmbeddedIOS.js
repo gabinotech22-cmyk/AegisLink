@@ -171,7 +171,18 @@ NS_ASSUME_NONNULL_END
 `;
 
 const BRIDGE_M = `#import "AegisTorBridge.h"
-#import <Tor/Tor.h>
+// No umbrella "Tor/Tor.h" - it doesn't exist. At pod version 409.11.1 (branch
+// pure_pod, confirmed against the actual repo tree) TORThread/TORConfiguration/
+// TORController are plain Objective-C SOURCE FILES the "Tor" pod compiles
+// directly (Tor/Classes/Core/**, Tor/Classes/CTor/**), not headers inside the
+// vendored tor.xcframework (that xcframework is just the low-level C-Tor
+// binary those classes link against internally) - each class gets its own
+// CocoaPods-generated public header, imported individually below. Confirmed
+// build fa12407e/9ddde5c7: "'Tor/Tor.h' file not found... Did not find header
+// 'Tor.h' in framework 'Tor' (loaded from '.../XCFrameworkIntermediates/Tor/CTor')".
+#import <Tor/TORThread.h>
+#import <Tor/TORConfiguration.h>
+#import <Tor/TORController.h>
 
 @interface AegisTorBridge ()
 @property (nonatomic, strong, nullable) TORThread *torThread;
