@@ -332,7 +332,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   // NOTE: do NOT call [controller connect:] here. -initWithSocketHost:port:
   // already calls [self connect:nil] internally (see TORController.m) -
   // swallowing whatever NSError it produced. Calling connect: again here
-  // always hit connect:'s very first guard, `if (_channel) return NO;`,
+  // always hit connect:'s very first guard, "if (_channel) return NO;",
   // which returns NO WITHOUT touching *error* - that's exactly why every
   // build kept surfacing "failed after retries: ... returned no error
   // detail" byte-for-byte identical regardless of what we changed upstream:
