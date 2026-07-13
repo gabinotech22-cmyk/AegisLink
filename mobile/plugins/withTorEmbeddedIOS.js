@@ -273,7 +273,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   NSDictionary<NSFileAttributeKey, id> *attrs = cpf ? [[NSFileManager defaultManager] attributesOfItemAtPath:cpf.path error:nil] : nil;
   NSNumber *fileSize = attrs[NSFileSize];
   if (fileSize && fileSize.unsignedLongLongValue > 0) {
-    [self connectAndAuthenticate:configuration socksPort:socksPort connectAttempt:0 completion:completion];
+    [self connectAndAuthenticate:configuration socksPort:socksPort completion:completion];
     return;
   }
   if (attempt > 60) { // ~15s at 250ms
@@ -319,7 +319,6 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 
 - (void)connectAndAuthenticate:(TORConfiguration *)configuration
                       socksPort:(NSInteger)socksPort
-                 connectAttempt:(NSInteger)connectAttempt
                      completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
   NSError *parseError = nil;
@@ -330,40 +329,21 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   }
   self.torController = controller;
 
-  NSError *connectError = nil;
-  if (![controller connect:&connectError]) {
-    // Belt-and-suspenders on top of the non-empty-file check above: the
-    // file being fully written doesn't strictly guarantee the listener is
-    // already accepting connections. Retry connect: itself briefly before
-    // surfacing "Connection refused" to the caller.
-    if (connectAttempt < 8) { // ~2s at 250ms
-      __weak typeof(self) weakSelf = self;
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [weakSelf connectAndAuthenticate:configuration socksPort:socksPort connectAttempt:connectAttempt + 1 completion:completion];
-      });
-      return;
-    }
-    // Diagnostic (build 7106c97): connect: fails all 8 retries with NO error
-    // detail every time (not a plain "Connection refused" - that DID carry a
-    // real NSError in an earlier test). That pattern fits a control-port-file
-    // that is non-empty (passes our size>0 check) but INCOMPLETE/malformed -
-    // Tor may write "PORT=127.0.0.1:" and the port digits in separate writes.
-    // Dump the file's actual raw content into the error so we can see
-    // exactly what Tor wrote instead of guessing again.
-    NSError *readError = nil;
-    NSString *rawContent = [NSString stringWithContentsOfURL:configuration.controlPortFile
-                                                       encoding:NSUTF8StringEncoding
-                                                          error:&readError];
-    NSString *contentDesc = rawContent
-      ? [NSString stringWithFormat:@"content=%@", rawContent]
-      : [NSString stringWithFormat:@"unreadable (%@)", readError.localizedDescription ?: @"?"];
-    NSString *baseMessage = connectError.localizedDescription ?: @"Tor.framework returned no error detail";
-    NSError *finalError = [NSError errorWithDomain:@"AegisTor" code:3
-      userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:
-        @"connect: failed after retries: %@ | controlPortFile %@", baseMessage, contentDesc]}];
-    completion(NO, 0, finalError);
-    return;
-  }
+  // NOTE: do NOT call [controller connect:] here. -initWithSocketHost:port:
+  // already calls [self connect:nil] internally (see TORController.m) -
+  // swallowing whatever NSError it produced. Calling connect: again here
+  // always hit connect:'s very first guard, `if (_channel) return NO;`,
+  // which returns NO WITHOUT touching *error* - that's exactly why every
+  // build kept surfacing "failed after retries: ... returned no error
+  // detail" byte-for-byte identical regardless of what we changed upstream:
+  // we were never observing the real connection attempt, just this no-op
+  // second call bouncing off its own channel guard 8/8 times.
+  //
+  // We can't recover the swallowed NSError from the init-time connect, but
+  // we don't need to: if that internal connect failed, the control socket
+  // was never opened, so authenticateWithData: below will fail with its own
+  // real, specific NSError (write-to-closed-channel / EOF), which is a much
+  // better diagnostic than fabricating one here.
 
   NSData *cookie = configuration.cookie;
   if (!cookie) {
