@@ -309,13 +309,24 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
       });
       return;
     }
-    // Diagnostic (build 183fb08): a prior test hit this exact fallback with
-    // connectError == nil, surfacing only the generic "Tor failed to start"
-    // and leaving us unable to tell whether connect: or authenticate: was
-    // the actual failing stage. Never let a nil framework error reach the
-    // caller silently again.
-    NSError *finalError = connectError ?: [NSError errorWithDomain:@"AegisTor" code:3
-      userInfo:@{NSLocalizedDescriptionKey: @"connect: failed after retries (Tor.framework returned no error detail)"}];
+    // Diagnostic (build 7106c97): connect: fails all 8 retries with NO error
+    // detail every time (not a plain "Connection refused" - that DID carry a
+    // real NSError in an earlier test). That pattern fits a control-port-file
+    // that is non-empty (passes our size>0 check) but INCOMPLETE/malformed -
+    // Tor may write "PORT=127.0.0.1:" and the port digits in separate writes.
+    // Dump the file's actual raw content into the error so we can see
+    // exactly what Tor wrote instead of guessing again.
+    NSError *readError = nil;
+    NSString *rawContent = [NSString stringWithContentsOfURL:configuration.controlPortFile
+                                                       encoding:NSUTF8StringEncoding
+                                                          error:&readError];
+    NSString *contentDesc = rawContent
+      ? [NSString stringWithFormat:@"content=%@", rawContent]
+      : [NSString stringWithFormat:@"unreadable (%@)", readError.localizedDescription ?: @"?"];
+    NSString *baseMessage = connectError.localizedDescription ?: @"Tor.framework returned no error detail";
+    NSError *finalError = [NSError errorWithDomain:@"AegisTor" code:3
+      userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:
+        @"connect: failed after retries: %@ | controlPortFile %@", baseMessage, contentDesc]}];
     completion(NO, 0, finalError);
     return;
   }
