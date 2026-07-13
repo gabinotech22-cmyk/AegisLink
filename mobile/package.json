@@ -82,7 +82,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@config-plugins/react-native-webrtc": "^13.0.0",
+    "@config-plugins/react-native-webrtc": "^14.0.0",
     "@resvg/resvg-js": "^2.6.2",
     "@types/jest": "^29.5.14",
     "@types/react": "~19.1.0",
