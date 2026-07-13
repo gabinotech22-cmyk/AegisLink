@@ -66,7 +66,17 @@ function withTorPod(config) {
 }
 
 // ── 2. Bridging header: React + our own ObjC wrapper visible to Swift ────
-const BRIDGING_IMPORTS = ['#import <React/RCTBridgeModule.h>', '#import <React/RCTEventEmitter.h>', '#import "AegisTorBridge.h"'];
+// NOTE: no RCTEventEmitter.h import here on purpose. This project's prebuilt
+// React-Core XCFramework's umbrella header does NOT include RCTEventEmitter.h
+// (confirmed: build fa12407e failed with "cannot find type 'RCTEventEmitter'
+// in scope" despite the header physically existing and other .mm files in
+// the same build successfully using headers from the same family) - Swift's
+// Clang-importer needs the type in the MODULE's umbrella, not just importable
+// textually, and this prebuilt framework's umbrella excludes it. So the
+// RCTEventEmitter subclass lives in Objective-C (AegisTor.m) instead, which
+// only needs a textual #import and compiles fine; it forwards to the plain-
+// NSObject Swift logic class below via the AegisTorEventSink protocol.
+const BRIDGING_IMPORTS = ['#import <React/RCTBridgeModule.h>', '#import "AegisTorBridge.h"'];
 
 function withTorBridgingHeaderFile(config) {
   return withDangerousMod(config, [
@@ -281,10 +291,22 @@ const SWIFT_SOURCE = `import Foundation
 import CFNetwork
 
 /**
- * AegisTor — embedded Tor (Fase 4 Tier 2, iOS). Same public surface as the
- * Android Kotlin module (AegisTorModule.kt via withTorEmbedded.js) so
- * mobile/src/net/tor.ts drives both platforms unchanged. See
- * docs/FASE4-TOR-IOS-DESIGN.md.
+ * ObjC-visible sink AegisTor.m (the real RCTEventEmitter subclass) conforms
+ * to, so this plain-NSObject Swift class can emit RN events without itself
+ * needing to see RCTEventEmitter (see the plugin file's bridging-header
+ * comment for why that type isn't visible to Swift in this project).
+ */
+@objc protocol AegisTorEventSink: AnyObject {
+  func aegisTorEmit(_ name: String, body: Any)
+}
+
+/**
+ * AegisTorLogic — embedded Tor (Fase 4 Tier 2, iOS) business logic. Same
+ * public surface as the Android Kotlin module (AegisTorModule.kt via
+ * withTorEmbedded.js) so mobile/src/net/tor.ts drives both platforms
+ * unchanged - AegisTor.m (Objective-C) is the actual RN native module and
+ * RCTEventEmitter subclass; every RN-facing method here is called by that
+ * thin ObjC forwarder. See docs/FASE4-TOR-IOS-DESIGN.md.
  *
  *   F1: Tor lifecycle, delegated to AegisTorBridge (Tor.framework).
  *   F2: a DUMB socket.io-over-SOCKS pipe, hand-rolled on top of
@@ -295,8 +317,10 @@ import CFNetwork
  *       socket.io v5 (CONNECT=0/DISCONNECT=1/EVENT=2/ACK=3/CONNECT_ERROR=4),
  *       default namespace "/" only (no namespace prefix on the wire).
  */
-@objc(AegisTor)
-class AegisTorModule: RCTEventEmitter {
+@objc(AegisTorLogic)
+class AegisTorLogic: NSObject {
+
+  @objc weak var eventSink: AegisTorEventSink?
 
   private let bridge = AegisTorBridge()
   private var state: String = "off"
@@ -317,18 +341,12 @@ class AegisTorModule: RCTEventEmitter {
   // use of the JS ackId only to route the callback, not as the wire number).
   private var pendingAcks: [String: [Int: String]] = [:]
 
-  override static func requiresMainQueueSetup() -> Bool { return false }
-
-  override func supportedEvents() -> [String]! {
-    return ["AegisTorStatus", "AegisTorSio"]
-  }
-
-  override func startObserving() { hasListeners = true }
-  override func stopObserving() { hasListeners = false }
+  @objc(setHasListeners:)
+  func setHasListeners(_ value: Bool) { hasListeners = value }
 
   private func emitStatus() {
     guard hasListeners else { return }
-    sendEvent(withName: "AegisTorStatus", body: ["state": state, "socksPort": state == "on" ? socksPort : 0])
+    eventSink?.aegisTorEmit("AegisTorStatus", body: ["state": state, "socksPort": state == "on" ? socksPort : 0])
   }
 
   private func makeStatus() -> [String: Any] {
@@ -535,7 +553,7 @@ class AegisTorModule: RCTEventEmitter {
 
   private func forward(_ id: String, _ event: String, _ argsJson: String) {
     guard hasListeners else { return }
-    sendEvent(withName: "AegisTorSio", body: ["id": id, "event": event, "args": argsJson])
+    eventSink?.aegisTorEmit("AegisTorSio", body: ["id": id, "event": event, "args": argsJson])
   }
 
   @objc(sioEmit:event:payloadJson:ackId:resolver:rejecter:)
@@ -587,44 +605,103 @@ class AegisTorModule: RCTEventEmitter {
     ackCounters.removeValue(forKey: id)
     pendingAcks.removeValue(forKey: id)
   }
-
-  // RN event-emitter contract (no-ops; required so NativeEventEmitter is happy).
-  @objc func addListener(_ eventName: String) {}
-  @objc func removeListeners(_ count: NSNumber) {}
 }
 `;
 
 const OBJC_BRIDGE_SOURCE = `#import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
+#import "AegisLink-Swift.h"
 
-@interface RCT_EXTERN_MODULE(AegisTor, RCTEventEmitter)
+/**
+ * AegisTor — the real RN native module (RCTEventEmitter subclass lives here
+ * in Objective-C, not Swift: see the plugin file's bridging-header comment
+ * for why - this project's prebuilt React-Core XCFramework's umbrella header
+ * excludes RCTEventEmitter.h, so Swift can't see the type even with it
+ * #imported in the bridging header, while plain ObjC textual import works
+ * fine). Every method just forwards to AegisTorLogic (Swift, all the real
+ * F1/F2 work), and relays its events via AegisTorEventSink.
+ */
+@interface AegisTor : RCTEventEmitter <RCTBridgeModule, AegisTorEventSink>
+@property (nonatomic, strong) AegisTorLogic *logic;
+@end
 
-RCT_EXTERN_METHOD(start:(RCTPromiseResolveBlock)resolve
+@implementation AegisTor
+
+RCT_EXPORT_MODULE(AegisTor);
+
++ (BOOL)requiresMainQueueSetup {
+  return NO;
+}
+
+- (instancetype)init {
+  self = [super init];
+  if (self) {
+    _logic = [AegisTorLogic new];
+    _logic.eventSink = self;
+  }
+  return self;
+}
+
+- (NSArray<NSString *> *)supportedEvents {
+  return @[@"AegisTorStatus", @"AegisTorSio"];
+}
+
+- (void)startObserving {
+  [self.logic setHasListeners:YES];
+}
+
+- (void)stopObserving {
+  [self.logic setHasListeners:NO];
+}
+
+- (void)aegisTorEmit:(NSString *)name body:(id)body {
+  [self sendEventWithName:name body:body];
+}
+
+RCT_EXPORT_METHOD(start:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic start:resolve rejecter:reject];
+}
 
-RCT_EXTERN_METHOD(getStatus:(RCTPromiseResolveBlock)resolve
+RCT_EXPORT_METHOD(getStatus:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic getStatus:resolve rejecter:reject];
+}
 
-RCT_EXTERN_METHOD(stop:(RCTPromiseResolveBlock)resolve
+RCT_EXPORT_METHOD(stop:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic stop:resolve rejecter:reject];
+}
 
-RCT_EXTERN_METHOD(sioConnect:(NSString *)id
+RCT_EXPORT_METHOD(sioConnect:(NSString *)identifier
                   url:(NSString *)url
                   authJson:(NSString *)authJson
                   eventsJson:(NSString *)eventsJson
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic sioConnect:identifier url:url authJson:authJson eventsJson:eventsJson resolver:resolve rejecter:reject];
+}
 
-RCT_EXTERN_METHOD(sioEmit:(NSString *)id
+RCT_EXPORT_METHOD(sioEmit:(NSString *)identifier
                   event:(NSString *)event
                   payloadJson:(NSString *)payloadJson
                   ackId:(NSString *)ackId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic sioEmit:identifier event:event payloadJson:payloadJson ackId:ackId resolver:resolve rejecter:reject];
+}
 
-RCT_EXTERN_METHOD(sioDisconnect:(NSString *)id
+RCT_EXPORT_METHOD(sioDisconnect:(NSString *)identifier
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic sioDisconnect:identifier resolver:resolve rejecter:reject];
+}
 
 @end
 `;
@@ -641,7 +718,7 @@ function withTorNativeSources(config) {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, 'AegisTorBridge.h'), BRIDGE_H);
       fs.writeFileSync(path.join(dir, 'AegisTorBridge.m'), BRIDGE_M);
-      fs.writeFileSync(path.join(dir, 'AegisTor.swift'), SWIFT_SOURCE);
+      fs.writeFileSync(path.join(dir, 'AegisTorLogic.swift'), SWIFT_SOURCE);
       fs.writeFileSync(path.join(dir, 'AegisTor.m'), OBJC_BRIDGE_SOURCE);
       return config;
     },
@@ -663,7 +740,7 @@ function withTorXcodeProjectFiles(config) {
     if (!groupKey) {
       throw new Error(`[withTorEmbeddedIOS] could not find the "${projectName}" PBXGroup to attach source files to.`);
     }
-    for (const file of ['AegisTorBridge.h', 'AegisTorBridge.m', 'AegisTor.swift', 'AegisTor.m']) {
+    for (const file of ['AegisTorBridge.h', 'AegisTorBridge.m', 'AegisTorLogic.swift', 'AegisTor.m']) {
       const relPath = `${projectName}/${file}`;
       if (xcodeProject.hasFile(relPath)) continue;
       const added = xcodeProject.addSourceFile(relPath, {}, groupKey);
