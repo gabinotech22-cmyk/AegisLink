@@ -122,7 +122,11 @@
       "PowerShell(gh run view --job 84898765478 --log-failed)",
       "Bash(git status *)",
       "PowerShell(git -C \"D:\\\\progectos APPS\\\\AegisLink\" status --short)",
-      "PowerShell(git -C \"D:\\\\progectos APPS\\\\AegisLink\" diff --stat)"
+      "PowerShell(git -C \"D:\\\\progectos APPS\\\\AegisLink\" diff --stat)",
+      "Bash(wc -l mobile/src/calls/voip-push.ts)",
+      "Bash(wc -l mobile/src/calls/callkeep.ts)",
+      "PowerShell(gh pr list --head fix/duress-containment-groups-channels --state all)",
+      "Bash(git check-ignore *)"
     ]
   }
 }
