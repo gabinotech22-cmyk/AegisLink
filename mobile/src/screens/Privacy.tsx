@@ -210,8 +210,37 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             label={i18nT('privacy.disappearingMessages')}
             sub={i18nT('privacy.disappearingMessagesSub')}
             onPress={() => onNav('ephemeral')}
-            noBorder
+            noBorder={Platform.OS !== 'ios'}
           />
+          {/* TEMPORARY — F1 verification only (docs/FASE4-TOR-IOS-DESIGN.md).
+              The preview build profile has no EXPO_PUBLIC_MAILBOX_MODE/
+              EXPO_PUBLIC_ONION_URL, so the real mailbox gate never calls
+              startTor(). Remove once F3 wires isTorAvailable() into the real
+              gate and this becomes exercised by normal app use. */}
+          {Platform.OS === 'ios' && (
+            <Row
+              t={t}
+              icon={<I.Shield size={20} color={t.textDim} />}
+              label="Tor F1 debug (dev)"
+              sub="Start embedded Tor and show bootstrap status"
+              onPress={() => {
+                const { startTor, isTorAvailable } = require('../net/tor') as typeof import('../net/tor');
+                if (!isTorAvailable()) {
+                  themedAlert('Tor F1 debug', 'Native module unavailable (Expo Go or non-prebuilt build)');
+                  return;
+                }
+                themedAlert('Tor F1 debug', 'Starting… (bootstrapping can take up to 45s)');
+                startTor()
+                  .then((status) => {
+                    themedAlert('Tor F1 debug ✅', `state=${status.state} socksPort=${status.socksPort}`);
+                  })
+                  .catch((e: Error) => {
+                    themedAlert('Tor F1 debug ❌', e.message);
+                  });
+              }}
+              noBorder
+            />
+          )}
         </Section>
 
         {Platform.OS === 'android' && (
