@@ -288,12 +288,46 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   });
 }
 
+/**
+ * Parses "PORT=host:port" ourselves instead of trusting
+ * -[TORController initWithControlPortFile:] to do it: that method validates
+ * its own file read with NSAssert, which is compiled to a no-op in Release
+ * builds (this one is) - if ITS internal read ever silently failed, it
+ * would fall through to a nil host with no crash and no signal, landing
+ * connect: on the "no host/port configured" branch, which returns NO
+ * without ever populating *error* - exactly the symptom we saw (connect:
+ * failing 8/8 retries with error=nil, despite the file content being
+ * perfectly well-formed when WE read it independently for diagnostics).
+ */
+- (nullable TORController *)controllerFromControlPortFile:(NSURL *)file error:(NSError **)error {
+  NSString *content = [NSString stringWithContentsOfURL:file encoding:NSUTF8StringEncoding error:error];
+  if (!content) return nil;
+  NSString *afterEquals = [content componentsSeparatedByString:@"="].lastObject;
+  NSString *trimmed = [afterEquals stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSArray<NSString *> *parts = [trimmed componentsSeparatedByString:@":"];
+  NSString *host = parts.firstObject;
+  NSString *portStr = parts.count > 1 ? parts.lastObject : nil;
+  if (host.length == 0 || portStr.length == 0) {
+    if (error) {
+      *error = [NSError errorWithDomain:@"AegisTor" code:6 userInfo:@{NSLocalizedDescriptionKey:
+        [NSString stringWithFormat:@"could not parse control port file content: %@", content]}];
+    }
+    return nil;
+  }
+  return [[TORController alloc] initWithSocketHost:host port:(in_port_t)portStr.integerValue];
+}
+
 - (void)connectAndAuthenticate:(TORConfiguration *)configuration
                       socksPort:(NSInteger)socksPort
                  connectAttempt:(NSInteger)connectAttempt
                      completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
-  TORController *controller = [[TORController alloc] initWithControlPortFile:configuration.controlPortFile];
+  NSError *parseError = nil;
+  TORController *controller = [self controllerFromControlPortFile:configuration.controlPortFile error:&parseError];
+  if (!controller) {
+    completion(NO, 0, parseError);
+    return;
+  }
   self.torController = controller;
 
   NSError *connectError = nil;
