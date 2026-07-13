@@ -49,7 +49,12 @@ const path = require('path');
 // ── 1. Podfile: add the Tor pod ───────────────────────────────────────────
 function withTorPod(config) {
   return withPodfile(config, (config) => {
-    if (config.modResults.contents.includes("pod 'Tor'")) return config;
+    // GeoIP subspec (pulls in Tor/CTor transitively) - not just Tor/CTor
+    // alone. The pod maintainer's own reference integration (TorManager)
+    // always sets geoipFile/geoip6File; our first attempt omitted both the
+    // subspec and the config properties, and Tor's thread never opened its
+    // control port at all.
+    if (config.modResults.contents.includes("pod 'Tor/GeoIP'")) return config;
     // Insert right after the first `target '<name>' do` line (the app
     // target), matching the common community pattern for config-plugin
     // Podfile edits since @expo/config-plugins has no addPod() helper.
@@ -59,7 +64,7 @@ function withTorPod(config) {
     }
     config.modResults.contents = config.modResults.contents.replace(
       targetRe,
-      (match) => `${match}  # AegisLink: embedded Tor (injected by withTorEmbeddedIOS.js)\n  pod 'Tor'\n`,
+      (match) => `${match}  # AegisLink: embedded Tor (injected by withTorEmbeddedIOS.js)\n  pod 'Tor/GeoIP'\n`,
     );
     return config;
   });
@@ -197,6 +202,19 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   return self.running;
 }
 
+/// GeoIP.bundle comes from the "Tor/GeoIP" podspec subspec (Podfile). Not
+/// strictly documented as required, but the pod maintainer's own reference
+/// integration (github.com/tladesignz/TorManager) always sets it, and
+/// omitting it was one of several differences from that reference when our
+/// own first attempt never got Tor to open its control port at all.
+- (nullable NSURL *)geoipFileNamed:(NSString *)name {
+  NSString *bundlePath = [[NSBundle mainBundle] pathForResource:@"GeoIP" ofType:@"bundle"];
+  if (!bundlePath) return nil;
+  NSBundle *geoBundle = [NSBundle bundleWithPath:bundlePath];
+  NSString *filePath = [geoBundle pathForResource:name ofType:nil];
+  return filePath ? [NSURL fileURLWithPath:filePath] : nil;
+}
+
 - (void)startWithSocksPort:(NSInteger)socksPort
                  completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
@@ -208,14 +226,25 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   TORConfiguration *configuration = [TORConfiguration new];
   configuration.ignoreMissingTorrc = YES;
   configuration.cookieAuthentication = YES;
+  // Let Tor pick and announce its own control port (writes it to
+  // controlPortFile once its control listener is up), instead of us dictating
+  // a controlSocket path - matches the pod maintainer's own TorManager
+  // reference, which is what actually gets Tor to open a control port.
+  configuration.autoControlPort = YES;
+  configuration.avoidDiskWrites = YES;
+  configuration.geoipFile = [self geoipFileNamed:@"geoip"];
+  configuration.geoip6File = [self geoipFileNamed:@"geoip6"];
   NSURL *dataDir = [NSURL fileURLWithPath:
     [NSTemporaryDirectory() stringByAppendingPathComponent:@"aegistor"]];
-  [[NSFileManager defaultManager] createDirectoryAtURL:dataDir
-                             withIntermediateDirectories:YES
-                                              attributes:nil
-                                                   error:nil];
+  NSError *dirError = nil;
+  if (![[NSFileManager defaultManager] createDirectoryAtURL:dataDir
+                                 withIntermediateDirectories:YES
+                                                  attributes:nil
+                                                       error:&dirError]) {
+    completion(NO, 0, dirError);
+    return;
+  }
   configuration.dataDirectory = dataDir;
-  configuration.controlSocket = [dataDir URLByAppendingPathComponent:@"control_port"];
   configuration.socksURL = [NSURL URLWithString:
     [NSString stringWithFormat:@"socks5://127.0.0.1:%ld", (long)socksPort]];
   self.torConfiguration = configuration;
@@ -224,29 +253,31 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   self.torThread = thread;
   [thread start];
 
-  // The control socket file doesn't exist until Tor's thread has run far
-  // enough to create it - poll briefly rather than guessing a fixed sleep.
-  [self pollForControlSocket:configuration socksPort:socksPort attempt:0 completion:completion];
+  // controlPortFile only has real content once Tor's thread has bootstrapped
+  // far enough to open its control listener - poll briefly rather than
+  // guessing a fixed sleep.
+  [self pollForControlPortFile:configuration socksPort:socksPort attempt:0 completion:completion];
 }
 
-- (void)pollForControlSocket:(TORConfiguration *)configuration
-                    socksPort:(NSInteger)socksPort
-                      attempt:(NSInteger)attempt
-                   completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
+- (void)pollForControlPortFile:(TORConfiguration *)configuration
+                      socksPort:(NSInteger)socksPort
+                        attempt:(NSInteger)attempt
+                     completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
-  if ([[NSFileManager defaultManager] fileExistsAtPath:configuration.controlSocket.path]) {
+  NSURL *cpf = configuration.controlPortFile;
+  if (cpf && [[NSFileManager defaultManager] fileExistsAtPath:cpf.path]) {
     [self connectAndAuthenticate:configuration socksPort:socksPort completion:completion];
     return;
   }
-  if (attempt > 40) { // ~10s at 250ms
+  if (attempt > 60) { // ~15s at 250ms
     NSError *error = [NSError errorWithDomain:@"AegisTor" code:1
-      userInfo:@{NSLocalizedDescriptionKey: @"control socket did not appear (Tor thread failed to start?)"}];
+      userInfo:@{NSLocalizedDescriptionKey: @"control port file did not appear (Tor thread failed to start?)"}];
     completion(NO, 0, error);
     return;
   }
   __weak typeof(self) weakSelf = self;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    [weakSelf pollForControlSocket:configuration socksPort:socksPort attempt:attempt + 1 completion:completion];
+    [weakSelf pollForControlPortFile:configuration socksPort:socksPort attempt:attempt + 1 completion:completion];
   });
 }
 
@@ -254,7 +285,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
                       socksPort:(NSInteger)socksPort
                      completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
-  TORController *controller = [[TORController alloc] initWithSocketURL:configuration.controlSocket];
+  TORController *controller = [[TORController alloc] initWithControlPortFile:configuration.controlPortFile];
   self.torController = controller;
 
   NSError *connectError = nil;
