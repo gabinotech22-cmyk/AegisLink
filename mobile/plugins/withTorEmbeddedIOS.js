@@ -309,14 +309,31 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
       });
       return;
     }
-    completion(NO, 0, connectError);
+    // Diagnostic (build 183fb08): a prior test hit this exact fallback with
+    // connectError == nil, surfacing only the generic "Tor failed to start"
+    // and leaving us unable to tell whether connect: or authenticate: was
+    // the actual failing stage. Never let a nil framework error reach the
+    // caller silently again.
+    NSError *finalError = connectError ?: [NSError errorWithDomain:@"AegisTor" code:3
+      userInfo:@{NSLocalizedDescriptionKey: @"connect: failed after retries (Tor.framework returned no error detail)"}];
+    completion(NO, 0, finalError);
     return;
   }
 
   NSData *cookie = configuration.cookie;
   if (!cookie) {
     NSError *error = [NSError errorWithDomain:@"AegisTor" code:2
-      userInfo:@{NSLocalizedDescriptionKey: @"no Tor control-port auth cookie"}];
+      userInfo:@{NSLocalizedDescriptionKey: @"no Tor control-port auth cookie (configuration.cookie was nil)"}];
+    completion(NO, 0, error);
+    return;
+  }
+  if (cookie.length != 32) {
+    // Tor's control-auth-cookie is always exactly 32 bytes - a different
+    // length means we read the file mid-write (same class of race as the
+    // control-port-file one, just for the cookie file this time).
+    NSError *error = [NSError errorWithDomain:@"AegisTor" code:4
+      userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:
+        @"auth cookie has wrong length: %lu bytes (expected 32) - read mid-write?", (unsigned long)cookie.length]}];
     completion(NO, 0, error);
     return;
   }
@@ -324,7 +341,9 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   __weak typeof(self) weakSelf = self;
   [controller authenticateWithData:cookie completion:^(BOOL success, NSError * _Nullable error) {
     if (!success) {
-      completion(NO, 0, error);
+      NSError *finalError = error ?: [NSError errorWithDomain:@"AegisTor" code:5
+        userInfo:@{NSLocalizedDescriptionKey: @"authenticateWithData: failed (Tor.framework returned no error detail)"}];
+      completion(NO, 0, finalError);
       return;
     }
     [controller addObserverForCircuitEstablished:^(BOOL established) {
