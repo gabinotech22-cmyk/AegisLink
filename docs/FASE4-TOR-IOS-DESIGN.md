@@ -36,17 +36,24 @@ Swift**, un cliente socket.io sobre una sesión con SOCKS, puenteado a JS. **La
 criptografía auditada NO se mueve** — Swift es un tubo tonto; firmar el
 challenge, derivar el mailbox y sellar el sobre siguen en JS (`mobile/src/crypto/*`).
 
+> **✅ Riesgo #1 RESUELTO (2026-07-13).** Spike F2 confirmado en dispositivo
+> real (iPhone, build EAS): `URLSessionConfiguration.connectionProxyDictionary`
+> SÍ enruta el handshake de un `URLSessionWebSocketTask` a través de un proxy
+> SOCKS5 en iOS. Probado con Foundation/CFNetwork puro (sin `Tor.framework` ni
+> `socket.io-client-swift` todavía) contra un proxy SOCKS5 autenticado y un
+> servidor de eco socket.io desechables en la VM del relay. **Opción A
+> confirmada — no hace falta la opción B.** Evidencia: rama
+> `feat/ios-tor-socks-spike`, commits `e850610`/`373b95d`/`b34aa44`.
+
 Dos opciones de transporte SOCKS en iOS:
 
-- **A (recomendada): `socket.io-client-swift` sobre `URLSession` con
+- **A (confirmada — ver arriba): `socket.io-client-swift` sobre `URLSession` con
   `connectionProxyDictionary`** apuntando al SOCKS local de Tor. Es el equivalente
   directo del `OkHttpClient`+SOCKS de Android. `connectionProxyDictionary` soporta
   SOCKS (`kCFStreamPropertySOCKSProxy`), y socket.io-swift permite inyectar la
   `URLSessionConfiguration`.
-- **B (fallback): `CFStream`/`Network.framework` con SOCKS manual** si
-  `connectionProxyDictionary` no enruta el WebSocket upgrade por SOCKS de forma
-  fiable (a validar en spike — históricamente `NSURLSession` ignora el proxy SOCKS
-  para WebSocket en algunas versiones de iOS). El spike de F2 decide A vs B.
+- **B (descartada): `CFStream`/`Network.framework` con SOCKS manual.** Ya no
+  hace falta — el spike F2 confirmó que A funciona.
 
 ## 2. Ladrillos iOS (a fijar en el spike F1)
 
@@ -112,10 +119,15 @@ cual. Cero cambios de lógica JS.
 
 - **F1 — Ciclo de vida de Tor.** Pod `Tor` + módulo Swift 3.1 + `tor.ts` ya lo
   consume. *Verificación:* build EAS, `startTor()` lleva STATUS→ON y `socksPort>0`
-  en un iPhone/simulador real.
-- **F2 — Spike de transporte SOCKS.** Decidir opción A vs B (§1) conectando
-  `TorSioSocket` a un echo socket.io por SOCKS. **Es el mayor riesgo técnico** —
-  hacerlo primero.
+  en un iPhone/simulador real. Seguro de arrancar ahora — el riesgo #1 (§1) ya
+  está resuelto.
+- **F2 — Spike de transporte SOCKS. ✅ HECHO (2026-07-13).** Decidir opción A vs
+  B (§1) — **A confirmada** en dispositivo real con `URLSessionWebSocketTask` +
+  `connectionProxyDictionary` puro (sin `Tor.framework` ni socket.io-client-swift
+  todavía, para aislar la pregunta). Evidencia: rama `feat/ios-tor-socks-spike`.
+  La rama es desechable — no se mergea tal cual; el módulo Swift real F1/F2 se
+  construye desde cero usando `Tor.framework` + `socket.io-client-swift` según
+  §2/§3, ahora con la certeza de que el mecanismo de proxy funciona.
 - **F3 — Cablear mailbox.** `mailboxSocket.ts` ya usa `TorSioSocket`; solo hace
   falta que `isTorAvailable()` sea true en iOS. *Verificación:* gate + selección
   de transporte (los unit tests JS ya existen, corren igual).
@@ -127,9 +139,8 @@ cual. Cero cambios de lógica JS.
 
 ## 7. Riesgos y decisiones abiertas
 
-1. **`connectionProxyDictionary` + WebSocket** (§1): riesgo #1. Si iOS no enruta el
-   WS upgrade por SOCKS, cae a opción B (más trabajo). **Spike F2 antes de
-   comprometer plazos.**
+1. ~~**`connectionProxyDictionary` + WebSocket** (§1): riesgo #1.~~ **RESUELTO
+   2026-07-13** — spike F2 confirmó que sí enruta. Ver §1.
 2. **Sin Mac local**: toda iteración es EAS cloud (~20 min). Ritmo lento; conviene
    maximizar lo verificable por unit test JS (que no cambia) y minimizar ciclos
    nativos.
