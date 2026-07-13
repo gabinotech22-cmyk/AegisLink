@@ -265,8 +265,15 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
                      completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
   NSURL *cpf = configuration.controlPortFile;
-  if (cpf && [[NSFileManager defaultManager] fileExistsAtPath:cpf.path]) {
-    [self connectAndAuthenticate:configuration socksPort:socksPort completion:completion];
+  // Require non-empty content, not just existence: Tor may create the file
+  // before it has finished writing "PORT=host:port" to it, and reading an
+  // empty/partial file here was very likely the cause of the "Connection
+  // refused" we saw next - initWithControlPortFile: would parse garbage/no
+  // address and connect: would (correctly) fail against nothing listening.
+  NSDictionary<NSFileAttributeKey, id> *attrs = cpf ? [[NSFileManager defaultManager] attributesOfItemAtPath:cpf.path error:nil] : nil;
+  NSNumber *fileSize = attrs[NSFileSize];
+  if (fileSize && fileSize.unsignedLongLongValue > 0) {
+    [self connectAndAuthenticate:configuration socksPort:socksPort connectAttempt:0 completion:completion];
     return;
   }
   if (attempt > 60) { // ~15s at 250ms
@@ -283,6 +290,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 
 - (void)connectAndAuthenticate:(TORConfiguration *)configuration
                       socksPort:(NSInteger)socksPort
+                 connectAttempt:(NSInteger)connectAttempt
                      completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
   TORController *controller = [[TORController alloc] initWithControlPortFile:configuration.controlPortFile];
@@ -290,6 +298,17 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 
   NSError *connectError = nil;
   if (![controller connect:&connectError]) {
+    // Belt-and-suspenders on top of the non-empty-file check above: the
+    // file being fully written doesn't strictly guarantee the listener is
+    // already accepting connections. Retry connect: itself briefly before
+    // surfacing "Connection refused" to the caller.
+    if (connectAttempt < 8) { // ~2s at 250ms
+      __weak typeof(self) weakSelf = self;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [weakSelf connectAndAuthenticate:configuration socksPort:socksPort connectAttempt:connectAttempt + 1 completion:completion];
+      });
+      return;
+    }
     completion(NO, 0, connectError);
     return;
   }
