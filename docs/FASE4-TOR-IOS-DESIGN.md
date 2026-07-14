@@ -110,12 +110,19 @@ cual. Cero cambios de lógica JS.
 
 ## 6. Fases (verificable cada una, vía EAS cloud + iPhone/simulador)
 
-- **F1 — Ciclo de vida de Tor.** Pod `Tor` + módulo Swift 3.1 + `tor.ts` ya lo
-  consume. *Verificación:* build EAS, `startTor()` lleva STATUS→ON y `socksPort>0`
-  en un iPhone/simulador real.
-- **F2 — Spike de transporte SOCKS.** Decidir opción A vs B (§1) conectando
-  `TorSioSocket` a un echo socket.io por SOCKS. **Es el mayor riesgo técnico** —
-  hacerlo primero.
+- **F1 — Ciclo de vida de Tor.** ✅ HECHO (2026-07-14, PR #325). Pod `Tor` +
+  módulo Swift 3.1 + `tor.ts` ya lo consume. *Verificado en iPhone real:*
+  `startTor()` → bootstrap 100% + circuito + `socksPort>0`, tanto en arranque
+  frío como con caché de consensus persistida (reconexión casi instantánea).
+  Los 4 bugs reales de Tor.framework que lo bloqueaban están documentados en
+  comentarios de `mobile/plugins/withTorEmbeddedIOS.js` (doble `connect:`,
+  hang silencioso de `authenticateWithData:`, carrera del listener, archivo
+  `controlport` viejo persistido).
+- **F2 — Spike de transporte SOCKS.** ✅ HECHO (spike `feat/ios-tor-socks-spike`,
+  2026-07-13): opción A confirmada — `connectionProxyDictionary` SÍ enruta
+  `URLSessionWebSocketTask` por SOCKS5 en un iPhone real. Implementación
+  socket.io-over-SOCKS integrada en el mismo plugin (PR #325); validación
+  end-to-end contra el relay = F5.
 - **F3 — Cablear mailbox.** `mailboxSocket.ts` ya usa `TorSioSocket`; solo hace
   falta que `isTorAvailable()` sea true en iOS. *Verificación:* gate + selección
   de transporte (los unit tests JS ya existen, corren igual).
