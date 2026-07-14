@@ -271,6 +271,21 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
     [NSString stringWithFormat:@"socks5://127.0.0.1:%ld", (long)socksPort]];
   self.torConfiguration = configuration;
 
+  // Making dataDirectory persistent (for the consensus cache) had a nasty
+  // side effect confirmed on-device (build d90a2da, "Connection refused"
+  // after all 8 connect retries): controlPortFile and control_auth_cookie
+  // ALSO live inside dataDirectory (TORConfiguration.m hardcodes
+  // dataDirectory/controlport and dataDirectory/control_auth_cookie), so a
+  // STALE controlport file from the previous app launch survives - our
+  // non-empty-content poll then "finds" it instantly and we dial the OLD
+  // process's port, where nothing is listening anymore. Delete both before
+  // starting the new Tor thread so the only controlport file we can ever
+  // read is the one THIS Tor instance writes. (The consensus cache lives in
+  // other files - cached-microdescs etc. - and is untouched.)
+  [[NSFileManager defaultManager] removeItemAtURL:configuration.controlPortFile error:nil];
+  [[NSFileManager defaultManager]
+    removeItemAtURL:[dataDir URLByAppendingPathComponent:@"control_auth_cookie"] error:nil];
+
   TORThread *thread = [[TORThread alloc] initWithConfiguration:configuration];
   self.torThread = thread;
   [thread start];
