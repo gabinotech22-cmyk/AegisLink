@@ -123,6 +123,7 @@
       "./plugins/withCallForegroundService.js",
       "./plugins/withCallWakeService.js",
       "./plugins/withTorEmbedded.js",
+      "./plugins/withTorEmbeddedIOS.js",
       "./plugins/withIosVoip.js",
       "./plugins/withIosBackupExclusion.js",
       "expo-secure-store",

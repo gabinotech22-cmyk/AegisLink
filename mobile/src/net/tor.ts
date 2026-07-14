@@ -54,13 +54,16 @@ export function isTorAvailable(): boolean {
 /**
  * Bootstrap timeout: the native `start()` promise only resolves on STATUS_ON —
  * if Tor never bootstraps (no network, carrier/firewall blocking, cold first-run
- * fetching consensus) it would otherwise hang forever. 45s is generous for a
- * normal bootstrap but still bounds the fail-closed fallback to the aegisId
- * transport (mailboxSocket.ts) to a finite wait. Bootstrap continues natively
- * after we give up — a later `startTor()` call resolves immediately if it
- * eventually reaches STATUS_ON.
+ * fetching consensus) it would otherwise hang forever. The native side now
+ * persists Tor's consensus/descriptor cache to disk (withTorEmbeddedIOS.js),
+ * so only the very first launch pays the full cold-bootstrap cost — but that
+ * first cost on a mobile network can genuinely exceed 45s. 90s bounds the
+ * fail-closed fallback to the aegisId transport (mailboxSocket.ts) to a
+ * still-finite wait without cutting off a first bootstrap that's merely slow.
+ * Bootstrap continues natively after we give up — a later `startTor()` call
+ * resolves immediately if it eventually reaches STATUS_ON.
  */
-const BOOTSTRAP_TIMEOUT_MS = 45_000;
+const BOOTSTRAP_TIMEOUT_MS = 90_000;
 
 /**
  * Start the embedded Tor and resolve once it has bootstrapped (STATUS_ON),
@@ -111,6 +114,27 @@ export async function stopTor(): Promise<void> {
 export function onTorStatus(cb: (status: TorStatus) => void): () => void {
   if (!emitter) return () => {};
   const sub: EmitterSubscription = emitter.addListener('AegisTorStatus', cb);
+  return () => sub.remove();
+}
+
+export interface TorBootstrapProgress {
+  /** 0-100. */
+  progress: number;
+  /** Tor's own bootstrap phase summary, e.g. "Loading relay descriptors". */
+  summary: string;
+}
+
+/**
+ * Subscribe to Tor's own control-port BOOTSTRAP progress events (iOS only for
+ * now — see AegisTorBootstrapProgress in withTorEmbeddedIOS.js; Android has no
+ * emitter for this yet). This is the only visibility into WHERE a slow/stuck
+ * bootstrap is spending its time instead of just waiting on startTor()'s
+ * black-box promise until BOOTSTRAP_TIMEOUT_MS fires. No-op on platforms/
+ * builds without the native module.
+ */
+export function onTorBootstrapProgress(cb: (p: TorBootstrapProgress) => void): () => void {
+  if (!emitter) return () => {};
+  const sub: EmitterSubscription = emitter.addListener('AegisTorBootstrapProgress', cb);
   return () => sub.remove();
 }
 

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
@@ -59,6 +59,13 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
     if (!secDiagHydrated) void secDiagHydrate();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // TEMPORARY — F1 verification only. On-screen because logger.debug/NSLog
+  // are both invisible on this dev setup: Windows (no Xcode console) + a
+  // "preview" build profile (no Metro dev-server attached, so JS console
+  // output goes nowhere). This Text is the only channel that actually
+  // reaches the person testing it — read it directly off the screen.
+  const [torDebugStatus, setTorDebugStatus] = useState<string | null>(null);
 
   const setRR = (v: boolean) => void setPref('readReceipts', v);
   const setTyping = (v: boolean) => void setPref('typingIndicator', v);
@@ -210,8 +217,59 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             label={i18nT('privacy.disappearingMessages')}
             sub={i18nT('privacy.disappearingMessagesSub')}
             onPress={() => onNav('ephemeral')}
-            noBorder
+            noBorder={Platform.OS !== 'ios'}
           />
+          {/* TEMPORARY — F1 verification only (docs/FASE4-TOR-IOS-DESIGN.md).
+              The preview build profile has no EXPO_PUBLIC_MAILBOX_MODE/
+              EXPO_PUBLIC_ONION_URL, so the real mailbox gate never calls
+              startTor(). Remove once F3 wires isTorAvailable() into the real
+              gate and this becomes exercised by normal app use. */}
+          {Platform.OS === 'ios' && (
+            <>
+              <Row
+                t={t}
+                icon={<I.Shield size={20} color={t.textDim} />}
+                label="Tor F1 debug (dev)"
+                sub="Start embedded Tor and show bootstrap status"
+                onPress={() => {
+                  const { startTor, isTorAvailable, onTorBootstrapProgress } =
+                    require('../net/tor') as typeof import('../net/tor');
+                  if (!isTorAvailable()) {
+                    setTorDebugStatus('❌ native module unavailable (Expo Go or non-prebuilt build)');
+                    return;
+                  }
+                  setTorDebugStatus('starting… (up to 90s)');
+                  const unsubscribe = onTorBootstrapProgress(({ progress, summary }) => {
+                    setTorDebugStatus(`${progress}% — ${summary}`);
+                  });
+                  startTor()
+                    .then((status) => {
+                      unsubscribe();
+                      setTorDebugStatus(`✅ state=${status.state} socksPort=${status.socksPort}`);
+                    })
+                    .catch((e: Error) => {
+                      unsubscribe();
+                      setTorDebugStatus(`❌ ${e.message}`);
+                    });
+                }}
+                noBorder
+              />
+              {torDebugStatus != null && (
+                <Text
+                  selectable
+                  style={{
+                    fontFamily: t.fontMono,
+                    fontSize: 12,
+                    color: t.textDim,
+                    paddingHorizontal: 18,
+                    paddingBottom: 12,
+                  }}
+                >
+                  {torDebugStatus}
+                </Text>
+              )}
+            </>
+          )}
         </Section>
 
         {Platform.OS === 'android' && (

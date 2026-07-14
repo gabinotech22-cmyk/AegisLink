@@ -117,17 +117,22 @@ cual. Cero cambios de lógica JS.
 
 ## 6. Fases (verificable cada una, vía EAS cloud + iPhone/simulador)
 
-- **F1 — Ciclo de vida de Tor.** Pod `Tor` + módulo Swift 3.1 + `tor.ts` ya lo
-  consume. *Verificación:* build EAS, `startTor()` lleva STATUS→ON y `socksPort>0`
-  en un iPhone/simulador real. Seguro de arrancar ahora — el riesgo #1 (§1) ya
-  está resuelto.
-- **F2 — Spike de transporte SOCKS. ✅ HECHO (2026-07-13).** Decidir opción A vs
-  B (§1) — **A confirmada** en dispositivo real con `URLSessionWebSocketTask` +
-  `connectionProxyDictionary` puro (sin `Tor.framework` ni socket.io-client-swift
-  todavía, para aislar la pregunta). Evidencia: rama `feat/ios-tor-socks-spike`.
-  La rama es desechable — no se mergea tal cual; el módulo Swift real F1/F2 se
-  construye desde cero usando `Tor.framework` + `socket.io-client-swift` según
-  §2/§3, ahora con la certeza de que el mecanismo de proxy funciona.
+- **F1 — Ciclo de vida de Tor.** ✅ HECHO (2026-07-14, PR #325). Pod `Tor` +
+  módulo Swift 3.1 + `tor.ts` ya lo consume. *Verificado en iPhone real:*
+  `startTor()` → bootstrap 100% + circuito + `socksPort>0`, tanto en arranque
+  frío como con caché de consensus persistida (reconexión casi instantánea).
+  Los 4 bugs reales de Tor.framework que lo bloqueaban están documentados en
+  comentarios de `mobile/plugins/withTorEmbeddedIOS.js` (doble `connect:`,
+  hang silencioso de `authenticateWithData:`, carrera del listener, archivo
+  `controlport` viejo persistido).
+- **F2 — Spike de transporte SOCKS.** ✅ HECHO (spike `feat/ios-tor-socks-spike`,
+  2026-07-13, desechable — no se mergeó tal cual): opción A confirmada —
+  `connectionProxyDictionary` SÍ enruta `URLSessionWebSocketTask` por SOCKS5 en
+  un iPhone real. La implementación real socket.io-over-SOCKS se construyó desde
+  cero en el plugin (PR #325), hand-rolled sobre URLSessionWebSocketTask en vez
+  de `socket.io-client-swift` (su engine Starscream no acepta un SOCKS
+  programático — ver comentario top-of-file del plugin). Validación end-to-end
+  contra el relay = F5.
 - **F3 — Cablear mailbox.** `mailboxSocket.ts` ya usa `TorSioSocket`; solo hace
   falta que `isTorAvailable()` sea true en iOS. *Verificación:* gate + selección
   de transporte (los unit tests JS ya existen, corren igual).
