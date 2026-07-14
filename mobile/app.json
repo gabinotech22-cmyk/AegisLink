@@ -214,15 +214,15 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "b7622ace-13a1-4bd0-84de-550bfdfe14d2"
+        "projectId": "599be334-3b85-4ecb-b954-a194b0ab303f"
       }
     },
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/b7622ace-13a1-4bd0-84de-550bfdfe14d2"
+      "url": "https://u.expo.dev/599be334-3b85-4ecb-b954-a194b0ab303f"
     },
-    "owner": "aegislink"
+    "owner": "aegislinkspejo3"
   }
 }
