@@ -405,8 +405,36 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
     return;
   }
 
+  // Per-stage watchdogs, ported from Onion Browser's own hand-rolled
+  // control-port client (github.com/OnionBrowser/OnionBrowser - the only
+  // shipping iOS app that embeds Tor directly and treats it as reliable
+  // enough for production): it NEVER trusts a single async completion
+  // callback to fire, wrapping every stage (connect/authenticate/bootstrap-
+  // poll/heartbeat) in its own short NSTimer that assumes failure and
+  // force-retries/reports if the expected response doesn't arrive. We
+  // already hit exactly this failure class once (sendCommand:'s silent
+  // "if (!_channel) { return; }" no-op leaving authenticateWithData:'s
+  // completion block never called) - the isConnected check above covers
+  // ONE way into that hang, but not every way a Tor.framework callback
+  // could go silent. A watchdog on every remaining async stage means any
+  // future silent hang surfaces as OUR specific, timed-out-at-stage-X error
+  // within seconds, instead of the JS-side generic 90s bootstrap timeout.
   __weak typeof(self) weakSelf = self;
+
+  __block BOOL authSettled = NO;
+  void (^authTimeout)(void) = ^{
+    if (authSettled) return;
+    authSettled = YES;
+    NSError *error = [NSError errorWithDomain:@"AegisTor" code:8 userInfo:@{NSLocalizedDescriptionKey:
+      @"authenticateWithData: watchdog: no completion callback within 15s (Tor.framework went silent - "
+      @"see the Onion Browser control-port watchdog pattern this guards against)"}];
+    completion(NO, 0, error);
+  };
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), authTimeout);
+
   [controller authenticateWithData:cookie completion:^(BOOL success, NSError * _Nullable error) {
+    if (authSettled) return; // watchdog already fired and reported; drop this late callback
+    authSettled = YES;
     if (!success) {
       NSError *finalError = error ?: [NSError errorWithDomain:@"AegisTor" code:5
         userInfo:@{NSLocalizedDescriptionKey: @"authenticateWithData: failed (Tor.framework returned no error detail)"}];
@@ -432,8 +460,23 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
       }
       return YES;
     }];
+
+    __block BOOL circuitSettled = NO;
+    void (^circuitTimeout)(void) = ^{
+      if (circuitSettled) return;
+      circuitSettled = YES;
+      NSError *error = [NSError errorWithDomain:@"AegisTor" code:9 userInfo:@{NSLocalizedDescriptionKey:
+        @"addObserverForCircuitEstablished: watchdog: no circuit established within 60s - Tor "
+        @"authenticated and (per bootstrap progress, if any was logged above) may be stuck building "
+        @"circuits, or SETEVENTS/notifications went silent after auth"}];
+      completion(NO, 0, error);
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(60.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), circuitTimeout);
+
     [controller addObserverForCircuitEstablished:^(BOOL established) {
       if (!established) return;
+      if (circuitSettled) return; // watchdog already fired and reported; drop this late callback
+      circuitSettled = YES;
       typeof(self) strongSelf = weakSelf;
       if (strongSelf) strongSelf.running = YES;
       completion(YES, socksPort, nil);
