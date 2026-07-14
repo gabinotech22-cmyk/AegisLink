@@ -94,6 +94,50 @@ Notifications.setNotificationHandler({
 });
 
 /**
+ * Handle the Accept/Decline buttons on an incoming-call notification, from
+ * either notification listener (live response or cold-start last-response).
+ *
+ * Two cases, distinguished by whether the offer has already reached this
+ * device:
+ *  - App was alive in the background: the socket already delivered
+ *    call:invite:v2 in real time, so `useCall` already holds the pendingOffer
+ *    for this exact call — act directly via acceptCall()/endCall().
+ *  - App was killed: only the generic zero-metadata wake push arrived (no
+ *    offer, sealed-sender). Mark the intent in the call store and reconnect;
+ *    the relay redelivers the queued call:invite on auth (see
+ *    server/src/relay/handler.ts takePendingCallInvite), and
+ *    processIncomingInvite (socket/calls.ts) consumes pendingAction to act
+ *    immediately instead of just ringing.
+ */
+function handleCallNotificationAction(action: 'accept' | 'decline', data: Record<string, unknown>): void {
+  try {
+    const { useCall } = require('../store/call') as typeof import('../store/call');
+    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+    const client = require('../socket/client') as typeof import('../socket/client');
+
+    const fromAegisId = data?.fromAegisId as string | undefined;
+    const state = useCall.getState();
+    const hasLocalOffer =
+      state.status === 'incoming-ringing' &&
+      !!state.pendingOffer &&
+      (!fromAegisId || state.peer === fromAegisId);
+
+    if (hasLocalOffer) {
+      const { acceptCall, endCall } = require('../socket/calls') as typeof import('../socket/calls');
+      if (action === 'accept') void acceptCall();
+      else endCall('declined');
+      return;
+    }
+
+    state.setPendingAction(action);
+    const identity = useIdentity.getState().identity;
+    if (identity) client.connect(identity);
+  } catch (e) {
+    if (__DEV__) logger.warn(`[push] call ${action} action failed:`, e);
+  }
+}
+
+/**
  * Wire up everything LOCAL about notifications: Android channels, tap/action
  * response routing, the cold-start deep link, the background→activeChatId reset,
  * and the action categories. Idempotent and side-effect-only.
@@ -146,6 +190,7 @@ function attachLocalNotificationHandlers(): void {
     const data = response.notification.request.content.data as Record<string, unknown>;
     const fromAegisId = data?.fromAegisId as string | undefined;
     const actionId = response.actionIdentifier;
+    const isCallNotification = (data?.type as string) === 'call' || (data?.kind as string) === 'call_wakeup';
 
     if (actionId === 'REPLY') {
       // User replied from notification — encrypt and send without opening the app.
@@ -201,16 +246,21 @@ function attachLocalNotificationHandlers(): void {
           if (__DEV__) logger.warn('[push] mark-read action failed:', e);
         }
       }
-    } else if ((data?.type as string) === 'call_invite') {
-      // App was woken by a call push — reconnect socket so the relay can
-      // re-deliver call:invite once the authenticated socket is established.
+    } else if (actionId === 'ACCEPT_CALL') {
+      handleCallNotificationAction('accept', data);
+    } else if (actionId === 'DECLINE_CALL') {
+      handleCallNotificationAction('decline', data);
+    } else if (isCallNotification) {
+      // Plain tap on the notification body (not the Accept/Decline button) —
+      // reconnect so the relay can re-deliver call:invite (killed-app case)
+      // and surface the ring/call screen. Does NOT auto-answer — matches a
+      // normal notification tap, which should never silently accept a call.
       try {
         const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
         const identity = useIdentity.getState().identity;
         const client = require('../socket/client') as typeof import('../socket/client');
-        if (identity) client.connect(identity);
+        if (identity && !client.isConnected()) client.connect(identity);
       } catch { /* socket module not yet loaded — no-op */ }
-      // Also surface the incoming call screen if caller info is available
       if (fromAegisId && _onOpenChat) {
         _onOpenChat({ aegisId: fromAegisId });
       }
@@ -256,8 +306,19 @@ function attachLocalNotificationHandlers(): void {
       if (!lastResponse) return;
       const data = lastResponse.notification.request.content.data as Record<string, unknown>;
       const fromAegisId = data?.fromAegisId as string | undefined;
-      if ((data?.type as string) === 'call_invite') {
-        // Cold-start from a call push — reconnect socket first, then navigate
+      const coldActionId = lastResponse.actionIdentifier;
+      const isCallNotification = (data?.type as string) === 'call' || (data?.kind as string) === 'call_wakeup';
+      if (coldActionId === 'ACCEPT_CALL' || coldActionId === 'DECLINE_CALL') {
+        // App was fully killed and the user pressed Accept/Decline on the OS
+        // banner — this cold-start check is the ONLY place that can observe
+        // it. No offer exists locally yet; handleCallNotificationAction marks
+        // pendingAction and reconnects so the relay's redelivered call:invite
+        // (see server/src/relay/handler.ts takePendingCallInvite) is acted on
+        // immediately by processIncomingInvite instead of just ringing.
+        handleCallNotificationAction(coldActionId === 'ACCEPT_CALL' ? 'accept' : 'decline', data);
+      } else if (isCallNotification) {
+        // Cold-start from a plain tap on a call notification — reconnect and
+        // surface the ring screen, but do not auto-answer.
         try {
           const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
           const identity = useIdentity.getState().identity;
@@ -598,13 +659,21 @@ export async function showGroupCallChannelNotification(
   }
 }
 
+// Identifier of the most recently scheduled incoming-call banner, so it can be
+// retracted the instant the in-app ring UI actually becomes visible (see
+// dismissIncomingCallNotification) — belt-and-suspenders against the
+// AppState.currentState race in socket/calls.ts's processIncomingInvite,
+// which usually (but not provably always) prevents this banner from firing
+// while the app is genuinely foregrounded.
+let _lastCallNotificationId: string | null = null;
+
 export async function showIncomingCallNotification(
   callerAegisId: string,
   callerName: string,
   isVideo: boolean
 ): Promise<void> {
   try {
-    await Notifications.scheduleNotificationAsync({
+    _lastCallNotificationId = await Notifications.scheduleNotificationAsync({
       content: {
         title: `AegisLink · ${isVideo ? '📹' : '📞'} ${callerName}`,
         body: isVideo ? await tAsync('notif.incomingVideoCall') : await tAsync('notif.incomingVoiceCall'),
@@ -619,4 +688,20 @@ export async function showIncomingCallNotification(
   } catch (err) {
     if (__DEV__) logger.warn('[push] showIncomingCallNotification failed:', err);
   }
+}
+
+/**
+ * Dismiss the most recent incoming-call banner, if any. Call this the moment
+ * the in-app ring UI is actually visible (IncomingCallScreen mount) or the
+ * call is answered/declined by any path — closes the race where the OS
+ * banner and the full-screen ring UI both showed at once while the app was
+ * genuinely in foreground.
+ */
+export async function dismissIncomingCallNotification(): Promise<void> {
+  if (!_lastCallNotificationId) return;
+  const id = _lastCallNotificationId;
+  _lastCallNotificationId = null;
+  try {
+    await Notifications.dismissNotificationAsync(id);
+  } catch { /* already dismissed / not found — fine */ }
 }

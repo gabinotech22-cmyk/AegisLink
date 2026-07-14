@@ -20,6 +20,7 @@ import { useCall } from '../store/call';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { sendMessage } from '../socket/client';
+import { dismissIncomingCallNotification } from '../notifications/push';
 import { SoundFX } from '../hooks/useSoundFX';
 
 interface Props {
@@ -73,9 +74,13 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reduceMotion]);
 
-  // Start ringing when the screen mounts; stop on unmount regardless of outcome
+  // Start ringing when the screen mounts; stop on unmount regardless of outcome.
+  // Also retract any OS call banner the instant this full-screen ring UI is
+  // actually visible — belt-and-suspenders against the AppState race that can
+  // let both show at once while the app is genuinely in foreground.
   useEffect(() => {
     void SoundFX.callIncoming();
+    void dismissIncomingCallNotification();
     return () => {
       void SoundFX.stopAll();
     };
@@ -99,11 +104,13 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
 
   function handleAccept() {
     void SoundFX.callConnected();
+    void dismissIncomingCallNotification();
     onAccept();
   }
 
   function handleReject() {
     void SoundFX.callEnded();
+    void dismissIncomingCallNotification();
     onReject();
   }
 

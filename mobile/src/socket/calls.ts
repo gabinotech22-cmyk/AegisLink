@@ -271,6 +271,9 @@ async function processIncomingInvite(
   const state = useCall.getState();
   if (state.status !== 'idle' && state.status !== 'ended') {
     // Busy — auto-reject via the sealed v2 channel (the only channel).
+    // Any notification-press intent belonged to THIS rejected invite; drop it
+    // so it cannot leak onto a later call.
+    if (state.pendingAction !== null) state.setPendingAction(null);
     socket.emit('call:hangup:v2', { callId, to: from, reason: 'busy' });
     saveCall({ id: callId, contactId: from, direction: 'in', media, status: 'declined', startedAt: Date.now(), durationS: 0 }).catch(() => {});
     const { useMessages } = require('../store/messages');
@@ -287,9 +290,32 @@ async function processIncomingInvite(
     }
     return;
   }
+  // Captured BEFORE startIncoming() below, which resets it to null (spreads
+  // ...initial) — this is the user's Accept/Decline pressed on the OS call
+  // notification while the app was killed and only the generic wake push had
+  // arrived (no offer yet). Now that the relay redelivered the real invite,
+  // act on it immediately instead of just ringing.
+  //
+  // Freshness gate: the relay holds a queued invite at most 35s and the caller
+  // rings 45s, so a press older than 60s can no longer belong to this invite.
+  // Without this, a press whose invite was never redelivered would linger and
+  // silently auto-answer the NEXT incoming call — hours later, without consent.
+  const { pendingAction, pendingActionAt } = state;
+  const pendingActionFresh =
+    pendingAction !== null && pendingActionAt !== null && Date.now() - pendingActionAt < 60_000;
+
   resetIceQueue();
   _finalizedCallId = null;
   state.startIncoming(from, callId, media, offer);
+
+  if (pendingActionFresh && pendingAction === 'accept') {
+    void acceptCall();
+    return;
+  }
+  if (pendingActionFresh && pendingAction === 'decline') {
+    endCall('declined');
+    return;
+  }
 
   const callerName = (() => {
     try {
