@@ -231,11 +231,21 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   // a controlSocket path - matches the pod maintainer's own TorManager
   // reference, which is what actually gets Tor to open a control port.
   configuration.autoControlPort = YES;
-  configuration.avoidDiskWrites = YES;
+  // avoidDiskWrites=YES + a tmp-dir dataDirectory means Tor can NEVER cache
+  // the consensus/descriptors it downloads, so every single launch pays the
+  // full cold-bootstrap cost (fetch consensus + enough relay descriptors to
+  // build a circuit) from scratch. On mobile networks that routinely exceeds
+  // the JS-side 45s timeout (tor.ts BOOTSTRAP_TIMEOUT_MS) - "tor bootstrap
+  // timed out" is that timer firing, not a hang. Persist the cache instead:
+  // this is Tor's own public network directory data (same for every client
+  // on earth), not user metadata, so caching it doesn't touch the
+  // cero-metadatos rule.
+  configuration.avoidDiskWrites = NO;
   configuration.geoipFile = [self geoipFileNamed:@"geoip"];
   configuration.geoip6File = [self geoipFileNamed:@"geoip6"];
-  NSURL *dataDir = [NSURL fileURLWithPath:
-    [NSTemporaryDirectory() stringByAppendingPathComponent:@"aegistor"]];
+  NSArray<NSURL *> *appSupportDirs = [[NSFileManager defaultManager]
+    URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask];
+  NSURL *dataDir = [appSupportDirs.firstObject URLByAppendingPathComponent:@"aegistor"];
   NSError *dirError = nil;
   if (![[NSFileManager defaultManager] createDirectoryAtURL:dataDir
                                  withIntermediateDirectories:YES
@@ -244,6 +254,10 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
     completion(NO, 0, dirError);
     return;
   }
+  // Non-user data (Tor's public network cache), regenerable, and can be
+  // sizeable (several MB) - exclude it from iCloud/iTunes device backups.
+  NSError *excludeError = nil;
+  [dataDir setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&excludeError];
   configuration.dataDirectory = dataDir;
   configuration.socksURL = [NSURL URLWithString:
     [NSString stringWithFormat:@"socks5://127.0.0.1:%ld", (long)socksPort]];

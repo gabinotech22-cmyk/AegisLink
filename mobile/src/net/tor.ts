@@ -54,13 +54,16 @@ export function isTorAvailable(): boolean {
 /**
  * Bootstrap timeout: the native `start()` promise only resolves on STATUS_ON —
  * if Tor never bootstraps (no network, carrier/firewall blocking, cold first-run
- * fetching consensus) it would otherwise hang forever. 45s is generous for a
- * normal bootstrap but still bounds the fail-closed fallback to the aegisId
- * transport (mailboxSocket.ts) to a finite wait. Bootstrap continues natively
- * after we give up — a later `startTor()` call resolves immediately if it
- * eventually reaches STATUS_ON.
+ * fetching consensus) it would otherwise hang forever. The native side now
+ * persists Tor's consensus/descriptor cache to disk (withTorEmbeddedIOS.js),
+ * so only the very first launch pays the full cold-bootstrap cost — but that
+ * first cost on a mobile network can genuinely exceed 45s. 90s bounds the
+ * fail-closed fallback to the aegisId transport (mailboxSocket.ts) to a
+ * still-finite wait without cutting off a first bootstrap that's merely slow.
+ * Bootstrap continues natively after we give up — a later `startTor()` call
+ * resolves immediately if it eventually reaches STATUS_ON.
  */
-const BOOTSTRAP_TIMEOUT_MS = 45_000;
+const BOOTSTRAP_TIMEOUT_MS = 90_000;
 
 /**
  * Start the embedded Tor and resolve once it has bootstrapped (STATUS_ON),
