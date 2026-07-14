@@ -156,9 +156,16 @@ NS_ASSUME_NONNULL_BEGIN
  * established (fully bootstrapped). Safe to call while already
  * running/starting - resolves immediately with the cached result.
  */
+/**
+ * \`progress\` fires repeatedly with Tor's own control-port BOOTSTRAP status
+ * events (0-100, plus Tor's summary string e.g. "Loading relay descriptors")
+ * while starting - the only way to see WHERE a slow or stuck bootstrap is
+ * actually spending its time instead of just waiting on a black-box promise.
+ */
 - (void)startWithSocksPort:(NSInteger)socksPort
+                   progress:(void (^)(NSInteger percent, NSString * _Nullable summary))progress
                  completion:(void (^)(BOOL success, NSInteger socksPort, NSError * _Nullable error))completion
-    NS_SWIFT_NAME(start(socksPort:completion:));
+    NS_SWIFT_NAME(start(socksPort:progress:completion:));
 
 /**
  * Best-effort stop. Tor.framework/tor does not support a fully clean,
@@ -216,6 +223,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 }
 
 - (void)startWithSocksPort:(NSInteger)socksPort
+                   progress:(void (^)(NSInteger, NSString * _Nullable))progress
                  completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
   if (self.running) {
@@ -270,11 +278,12 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   // controlPortFile only has real content once Tor's thread has bootstrapped
   // far enough to open its control listener - poll briefly rather than
   // guessing a fixed sleep.
-  [self pollForControlPortFile:configuration socksPort:socksPort attempt:0 completion:completion];
+  [self pollForControlPortFile:configuration socksPort:socksPort progress:progress attempt:0 completion:completion];
 }
 
 - (void)pollForControlPortFile:(TORConfiguration *)configuration
                       socksPort:(NSInteger)socksPort
+                       progress:(void (^)(NSInteger, NSString * _Nullable))progress
                         attempt:(NSInteger)attempt
                      completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
@@ -287,7 +296,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   NSDictionary<NSFileAttributeKey, id> *attrs = cpf ? [[NSFileManager defaultManager] attributesOfItemAtPath:cpf.path error:nil] : nil;
   NSNumber *fileSize = attrs[NSFileSize];
   if (fileSize && fileSize.unsignedLongLongValue > 0) {
-    [self connectAndAuthenticate:configuration socksPort:socksPort completion:completion];
+    [self connectAndAuthenticate:configuration socksPort:socksPort progress:progress completion:completion];
     return;
   }
   if (attempt > 60) { // ~15s at 250ms
@@ -298,7 +307,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   }
   __weak typeof(self) weakSelf = self;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    [weakSelf pollForControlPortFile:configuration socksPort:socksPort attempt:attempt + 1 completion:completion];
+    [weakSelf pollForControlPortFile:configuration socksPort:socksPort progress:progress attempt:attempt + 1 completion:completion];
   });
 }
 
@@ -333,6 +342,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 
 - (void)connectAndAuthenticate:(TORConfiguration *)configuration
                       socksPort:(NSInteger)socksPort
+                       progress:(void (^)(NSInteger, NSString * _Nullable))progress
                      completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
   NSError *parseError = nil;
@@ -385,6 +395,25 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
       completion(NO, 0, finalError);
       return;
     }
+    // Only an AUTHENTICATE'd control connection is allowed to SETEVENTS, so
+    // this can only be registered here, after authenticateWithData: succeeds
+    // - not earlier. This is our only window into WHERE a slow/stuck
+    // bootstrap is actually spending its time (0%? stuck fetching consensus?
+    // stuck building circuits at 100%?) instead of staring at a black-box
+    // promise until the JS-side timeout fires.
+    [controller addObserverForStatusEvents:
+      ^BOOL(NSString * _Nonnull type, NSString * _Nonnull severity,
+            NSString * _Nonnull action, NSDictionary<NSString *, NSString *> * _Nonnull arguments) {
+      if ([type isEqualToString:@"STATUS_CLIENT"] && [action isEqualToString:@"BOOTSTRAP"]) {
+        NSInteger percent = [arguments[@"PROGRESS"] integerValue];
+        NSString *summary = arguments[@"SUMMARY"] ?: @"";
+        NSLog(@"[AegisTor] bootstrap %ld%% - %@", (long)percent, summary);
+        if (progress) progress(percent, summary);
+      } else {
+        NSLog(@"[AegisTor] status type=%@ severity=%@ action=%@ args=%@", type, severity, action, arguments);
+      }
+      return YES;
+    }];
     [controller addObserverForCircuitEstablished:^(BOOL established) {
       if (!established) return;
       typeof(self) strongSelf = weakSelf;
@@ -468,6 +497,11 @@ class AegisTorLogic: NSObject {
     eventSink?.aegisTorEmit("AegisTorStatus", body: ["state": state, "socksPort": state == "on" ? socksPort : 0])
   }
 
+  private func emitBootstrapProgress(_ percent: Int, _ summary: String?) {
+    guard hasListeners else { return }
+    eventSink?.aegisTorEmit("AegisTorBootstrapProgress", body: ["progress": percent, "summary": summary ?? ""])
+  }
+
   private func makeStatus() -> [String: Any] {
     return ["state": state, "socksPort": state == "on" ? socksPort : 0]
   }
@@ -485,7 +519,9 @@ class AegisTorLogic: NSObject {
     state = "starting"
     emitStatus()
 
-    bridge.start(socksPort: socksPort) { [weak self] success, port, error in
+    bridge.start(socksPort: socksPort, progress: { [weak self] percent, summary in
+      DispatchQueue.main.async { self?.emitBootstrapProgress(percent, summary) }
+    }) { [weak self] success, port, error in
       guard let self = self else { return }
       DispatchQueue.main.async {
         let resolvers = self.pendingStartResolvers
@@ -762,7 +798,7 @@ RCT_EXPORT_MODULE(AegisTor);
 }
 
 - (NSArray<NSString *> *)supportedEvents {
-  return @[@"AegisTorStatus", @"AegisTorSio"];
+  return @[@"AegisTorStatus", @"AegisTorSio", @"AegisTorBootstrapProgress"];
 }
 
 - (void)startObserving {

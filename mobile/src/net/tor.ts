@@ -117,6 +117,27 @@ export function onTorStatus(cb: (status: TorStatus) => void): () => void {
   return () => sub.remove();
 }
 
+export interface TorBootstrapProgress {
+  /** 0-100. */
+  progress: number;
+  /** Tor's own bootstrap phase summary, e.g. "Loading relay descriptors". */
+  summary: string;
+}
+
+/**
+ * Subscribe to Tor's own control-port BOOTSTRAP progress events (iOS only for
+ * now — see AegisTorBootstrapProgress in withTorEmbeddedIOS.js; Android has no
+ * emitter for this yet). This is the only visibility into WHERE a slow/stuck
+ * bootstrap is spending its time instead of just waiting on startTor()'s
+ * black-box promise until BOOTSTRAP_TIMEOUT_MS fires. No-op on platforms/
+ * builds without the native module.
+ */
+export function onTorBootstrapProgress(cb: (p: TorBootstrapProgress) => void): () => void {
+  if (!emitter) return () => {};
+  const sub: EmitterSubscription = emitter.addListener('AegisTorBootstrapProgress', cb);
+  return () => sub.remove();
+}
+
 // ─── Slice 2b.2: ntfy topic subscription over Tor ─────────────────────────────
 
 /** Native bridge event payload for an HTTP stream line. */

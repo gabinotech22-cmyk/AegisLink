@@ -16,6 +16,7 @@ import { usePreferences } from '../store/preferences';
 import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import type { Theme } from '../theme/vault';
 import { themedAlert } from '../components/AlertHost';
+import { logger } from '../utils/logger';
 
 // Public legal documents. GitHub-blob URLs are what the landing footer links to
 // and are accepted by the stores as the required public policy URL.
@@ -224,17 +225,27 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
               label="Tor F1 debug (dev)"
               sub="Start embedded Tor and show bootstrap status"
               onPress={() => {
-                const { startTor, isTorAvailable } = require('../net/tor') as typeof import('../net/tor');
+                const { startTor, isTorAvailable, onTorBootstrapProgress } =
+                  require('../net/tor') as typeof import('../net/tor');
                 if (!isTorAvailable()) {
                   themedAlert('Tor F1 debug', 'Native module unavailable (Expo Go or non-prebuilt build)');
                   return;
                 }
-                themedAlert('Tor F1 debug', 'Starting… (bootstrapping can take up to 45s)');
+                themedAlert('Tor F1 debug', 'Starting… (bootstrapping can take up to 90s — watch Metro logs for live %)');
+                // Metro log, not themedAlert: bootstrap fires many updates and
+                // an Alert can't be live-updated, so this is the only way to
+                // see progress while it's happening instead of just the final
+                // success/timeout.
+                const unsubscribe = onTorBootstrapProgress(({ progress, summary }) => {
+                  logger.debug(`[tor F1 debug] bootstrap ${progress}% - ${summary}`);
+                });
                 startTor()
                   .then((status) => {
+                    unsubscribe();
                     themedAlert('Tor F1 debug ✅', `state=${status.state} socksPort=${status.socksPort}`);
                   })
                   .catch((e: Error) => {
+                    unsubscribe();
                     themedAlert('Tor F1 debug ❌', e.message);
                   });
               }}
