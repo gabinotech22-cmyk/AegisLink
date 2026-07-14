@@ -363,11 +363,29 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   // we were never observing the real connection attempt, just this no-op
   // second call bouncing off its own channel guard 8/8 times.
   //
-  // We can't recover the swallowed NSError from the init-time connect, but
-  // we don't need to: if that internal connect failed, the control socket
-  // was never opened, so authenticateWithData: below will fail with its own
-  // real, specific NSError (write-to-closed-channel / EOF), which is a much
-  // better diagnostic than fabricating one here.
+  // We CANNOT just proceed to authenticateWithData: and let it surface a
+  // "real" error if the internal connect failed, like the previous version
+  // of this comment assumed - authenticateWithData: is built on
+  // sendCommand:arguments:data:observer:, which starts with
+  // "if (!_channel) { return; }" and, on that guard, NEVER calls its
+  // completion block at all. If the init-time connect: silently failed
+  // (TCP connect() error OR dispatch_io_create returning NULL - both are
+  // swallowed by that internal "connect:nil"), _channel stays nil and
+  // authenticateWithData: hangs forever with no error, no crash, and no
+  // bootstrap-progress events (registered only after auth succeeds) - the
+  // JS-side promise then just sits until BOOTSTRAP_TIMEOUT_MS fires, which
+  // is exactly the "0%, only a final timeout" symptom. TORController DOES
+  // expose isConnected (backed by "_channel != nil") - check it explicitly
+  // so a real connect failure surfaces immediately as a real, specific
+  // error instead of silently hanging for 90s.
+  if (!controller.isConnected) {
+    NSError *error = [NSError errorWithDomain:@"AegisTor" code:7 userInfo:@{NSLocalizedDescriptionKey:
+      @"control socket failed to connect (connect() or dispatch_io_create failed inside "
+      @"-initWithSocketHost:port: - see TORController.m connect:); authenticateWithData: would "
+      @"have hung forever here instead of erroring"}];
+    completion(NO, 0, error);
+    return;
+  }
 
   NSData *cookie = configuration.cookie;
   if (!cookie) {
