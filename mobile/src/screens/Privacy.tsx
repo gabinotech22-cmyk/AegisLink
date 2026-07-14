@@ -219,11 +219,13 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
             onPress={() => onNav('ephemeral')}
             noBorder={Platform.OS !== 'ios'}
           />
-          {/* TEMPORARY — F1 verification only (docs/FASE4-TOR-IOS-DESIGN.md).
-              The preview build profile has no EXPO_PUBLIC_MAILBOX_MODE/
-              EXPO_PUBLIC_ONION_URL, so the real mailbox gate never calls
-              startTor(). Remove once F3 wires isTorAvailable() into the real
-              gate and this becomes exercised by normal app use. */}
+          {/* TEMPORARY — F1/F5 verification only (docs/FASE4-TOR-IOS-DESIGN.md).
+              F3 added the preview-mirror2-tor build profile (eas.json), which
+              sets EXPO_PUBLIC_MAILBOX_MODE/EXPO_PUBLIC_ONION_URL so the REAL
+              mailbox gate (mailboxSocket.ts) exercises Tor by itself in that
+              build. This row stays as the manual bootstrap probe until F5
+              (end-to-end envelope delivery over the hidden service) is
+              verified on-device, then dies. */}
           {Platform.OS === 'ios' && (
             <>
               <Row

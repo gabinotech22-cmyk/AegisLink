@@ -50,6 +50,15 @@
         "EAS_MIRROR": "2"
       }
     },
+    "preview-mirror2-tor": {
+      "extends": "preview",
+      "channel": "preview-tor",
+      "env": {
+        "EAS_MIRROR": "2",
+        "EXPO_PUBLIC_MAILBOX_MODE": "on",
+        "EXPO_PUBLIC_ONION_URL": "http://fhxnal5jmuuqsbtzz7avos4drhqmuy4c7ffd35gi3hw2uwbe5iqshfyd.onion"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "channel": "production",
