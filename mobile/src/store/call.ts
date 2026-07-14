@@ -34,6 +34,20 @@ export interface CallState {
    * shows for non-interactive states.
    */
   minimized: boolean;
+  /**
+   * Set when the user pressed Accept/Decline on the OS call notification
+   * before the call:invite offer had arrived locally (killed-app case: only
+   * the generic zero-metadata wake push landed, no SDP yet). processIncomingInvite
+   * consults this once the relay redelivers the queued invite and acts
+   * immediately instead of just ringing. Cleared as soon as it's consumed.
+   *
+   * pendingActionAt guards against a stale flag auto-answering a FUTURE call:
+   * if the queued invite never gets redelivered (relay TTL expired), the flag
+   * would otherwise survive until the next incoming call — hours or days
+   * later — and answer it without consent. Consumers must check freshness.
+   */
+  pendingAction: 'accept' | 'decline' | null;
+  pendingActionAt: number | null;
 
   setStatus: (s: CallStatus) => void;
   setStreams: (local: MediaStream | null, remote: MediaStream | null) => void;
@@ -42,6 +56,7 @@ export interface CallState {
   setMuted: (m: boolean) => void;
   setCameraOff: (off: boolean) => void;
   setMinimized: (v: boolean) => void;
+  setPendingAction: (a: 'accept' | 'decline' | null) => void;
   reset: () => void;
   startOutgoing: (peer: string, callId: string, media: CallMedia) => void;
   startIncoming: (peer: string, callId: string, media: CallMedia, offer: string) => void;
@@ -56,6 +71,7 @@ const initial: Omit<
   | 'setMuted'
   | 'setCameraOff'
   | 'setMinimized'
+  | 'setPendingAction'
   | 'reset'
   | 'startOutgoing'
   | 'startIncoming'
@@ -73,6 +89,8 @@ const initial: Omit<
   muted: false,
   cameraOff: false,
   minimized: false,
+  pendingAction: null,
+  pendingActionAt: null,
 };
 
 export const useCall = create<CallState>((set) => ({
@@ -93,6 +111,7 @@ export const useCall = create<CallState>((set) => ({
   setMuted: (m) => set({ muted: m }),
   setCameraOff: (off) => set({ cameraOff: off }),
   setMinimized: (v) => set({ minimized: v }),
+  setPendingAction: (a) => set({ pendingAction: a, pendingActionAt: a === null ? null : Date.now() }),
   reset: () => set({ ...initial }),
   startOutgoing: (peer, callId, media) =>
     set({ ...initial, peer, callId, media, direction: 'out', status: 'outgoing-ringing' }),
