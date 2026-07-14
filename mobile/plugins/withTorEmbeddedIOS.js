@@ -296,7 +296,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   NSDictionary<NSFileAttributeKey, id> *attrs = cpf ? [[NSFileManager defaultManager] attributesOfItemAtPath:cpf.path error:nil] : nil;
   NSNumber *fileSize = attrs[NSFileSize];
   if (fileSize && fileSize.unsignedLongLongValue > 0) {
-    [self connectAndAuthenticate:configuration socksPort:socksPort progress:progress completion:completion];
+    [self connectAndAuthenticate:configuration socksPort:socksPort progress:progress connectAttempt:0 completion:completion];
     return;
   }
   if (attempt > 60) { // ~15s at 250ms
@@ -343,48 +343,53 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 - (void)connectAndAuthenticate:(TORConfiguration *)configuration
                       socksPort:(NSInteger)socksPort
                        progress:(void (^)(NSInteger, NSString * _Nullable))progress
+                 connectAttempt:(NSInteger)connectAttempt
                      completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
-  NSError *parseError = nil;
-  TORController *controller = [self controllerFromControlPortFile:configuration.controlPortFile error:&parseError];
+  // Reuse the same controller across retries (built once on attempt 0) -
+  // -initWithSocketHost:port:'s own internal connect attempt already fired
+  // when it was constructed, so re-parsing the file and re-constructing on
+  // every retry would just repeat that same first, possibly-too-early
+  // attempt instead of giving Tor's listener more time to come up.
+  TORController *controller = self.torController;
   if (!controller) {
-    completion(NO, 0, parseError);
-    return;
+    NSError *parseError = nil;
+    controller = [self controllerFromControlPortFile:configuration.controlPortFile error:&parseError];
+    if (!controller) {
+      completion(NO, 0, parseError);
+      return;
+    }
+    self.torController = controller;
   }
-  self.torController = controller;
 
-  // NOTE: do NOT call [controller connect:] here. -initWithSocketHost:port:
-  // already calls [self connect:nil] internally (see TORController.m) -
-  // swallowing whatever NSError it produced. Calling connect: again here
-  // always hit connect:'s very first guard, "if (_channel) return NO;",
-  // which returns NO WITHOUT touching *error* - that's exactly why every
-  // build kept surfacing "failed after retries: ... returned no error
-  // detail" byte-for-byte identical regardless of what we changed upstream:
-  // we were never observing the real connection attempt, just this no-op
-  // second call bouncing off its own channel guard 8/8 times.
-  //
-  // We CANNOT just proceed to authenticateWithData: and let it surface a
-  // "real" error if the internal connect failed, like the previous version
-  // of this comment assumed - authenticateWithData: is built on
-  // sendCommand:arguments:data:observer:, which starts with
-  // "if (!_channel) { return; }" and, on that guard, NEVER calls its
-  // completion block at all. If the init-time connect: silently failed
-  // (TCP connect() error OR dispatch_io_create returning NULL - both are
-  // swallowed by that internal "connect:nil"), _channel stays nil and
-  // authenticateWithData: hangs forever with no error, no crash, and no
-  // bootstrap-progress events (registered only after auth succeeds) - the
-  // JS-side promise then just sits until BOOTSTRAP_TIMEOUT_MS fires, which
-  // is exactly the "0%, only a final timeout" symptom. TORController DOES
-  // expose isConnected (backed by "_channel != nil") - check it explicitly
-  // so a real connect failure surfaces immediately as a real, specific
-  // error instead of silently hanging for 90s.
   if (!controller.isConnected) {
-    NSError *error = [NSError errorWithDomain:@"AegisTor" code:7 userInfo:@{NSLocalizedDescriptionKey:
-      @"control socket failed to connect (connect() or dispatch_io_create failed inside "
-      @"-initWithSocketHost:port: - see TORController.m connect:); authenticateWithData: would "
-      @"have hung forever here instead of erroring"}];
-    completion(NO, 0, error);
-    return;
+    // Confirmed on-device (build 5df035c): this branch DOES fire - the
+    // control-port-file can have valid, well-formed content before Tor's
+    // control listener is actually accept()-ready, so the very first
+    // connect() attempt (the one -initWithSocketHost:port: fired internally,
+    // silently, with error:nil) can lose that race and fail. It is safe to
+    // call connect: again HERE, unlike calling it a second time right after
+    // construction: connect: opens with "if (_channel) return NO;", and
+    // _channel is still nil (that first internal attempt failed) - so this
+    // is a genuine retry, not a no-op collision with an already-successful
+    // channel. It also finally gives us Tor's own real NSError instead of a
+    // fabricated one, once retries are exhausted.
+    NSError *connectError = nil;
+    if (![controller connect:&connectError]) {
+      if (connectAttempt < 8) { // ~2s at 250ms
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          [weakSelf connectAndAuthenticate:configuration socksPort:socksPort progress:progress
+                             connectAttempt:connectAttempt + 1 completion:completion];
+        });
+        return;
+      }
+      NSError *finalError = connectError ?: [NSError errorWithDomain:@"AegisTor" code:7 userInfo:@{NSLocalizedDescriptionKey:
+        @"control socket failed to connect after 8 retries (connect() or dispatch_io_create failed "
+        @"inside TORController.m connect:) - Tor.framework returned no further error detail"}];
+      completion(NO, 0, finalError);
+      return;
+    }
   }
 
   NSData *cookie = configuration.cookie;
