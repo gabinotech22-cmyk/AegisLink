@@ -50,6 +50,15 @@ updates:
         update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: react-native-worklets
         update-types: [version-update:semver-major, version-update:semver-minor]
+      # react-test-renderer's peer dep requires its version to match `react`
+      # EXACTLY — and react is pinned to the Expo SDK's line (19.1.x on SDK 54,
+      # ignored above). Letting dependabot bump the renderer alone produced an
+      # unresolvable ERESOLVE group PR (#321: renderer 19.2.7 vs react 19.1.8).
+      # Same lockstep for @types/react. Both move only in the SDK-upgrade PR.
+      - dependency-name: react-test-renderer
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "@types/react"
+        update-types: [version-update:semver-major, version-update:semver-minor]
 
   # ── Relay server (Node/Bun, AGPL) ────────────────────────────────────────
   - package-ecosystem: npm
