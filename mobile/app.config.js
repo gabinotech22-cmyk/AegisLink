@@ -19,8 +19,10 @@ const MIRRORS = {
     owner: "aegislink2026",
     projectId: "5540f1e5-c21a-4047-9ab7-7128fabb1ee0",
   },
-  // 2: filled in once the new account's `eas init` output gives us its
-  // owner slug + projectId (see docs/scratch notes from account creation).
+  2: {
+    owner: "aegislinkspejo3",
+    projectId: "599be334-3b85-4ecb-b954-a194b0ab303f",
+  },
 };
 
 const MIRROR = {
