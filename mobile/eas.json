@@ -38,6 +38,18 @@
         "AEGIS_EXPO_GO": "0"
       }
     },
+    "preview-mirror1": {
+      "extends": "preview",
+      "env": {
+        "EAS_MIRROR": "1"
+      }
+    },
+    "preview-mirror2": {
+      "extends": "preview",
+      "env": {
+        "EAS_MIRROR": "2"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "channel": "production",
