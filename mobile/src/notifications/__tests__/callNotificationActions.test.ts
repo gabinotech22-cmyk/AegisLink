@@ -94,15 +94,19 @@ describe('push.ts — ACCEPT_CALL / DECLINE_CALL notification actions', () => {
     mockIsConnected.mockReturnValue(false);
   });
 
-  it('ACCEPT_CALL answers directly when the offer already arrived (app alive in background)', () => {
+  it('ACCEPT_CALL records the accept intent (never answers in the background) when the offer already arrived', () => {
     mockCallState.status = 'incoming-ringing';
     mockCallState.pendingOffer = 'sdp-offer';
     mockCallState.peer = 'caller-1';
 
     listener(fakeResponse('ACCEPT_CALL', { fromAegisId: 'caller-1', type: 'call', isVideo: false }));
 
-    expect(mockAcceptCall).toHaveBeenCalledTimes(1);
-    expect(mockCallState.setPendingAction).not.toHaveBeenCalled();
+    // acceptCall() needs the mic + a foreground service, so it must NOT run from
+    // the notification handler. The intent is recorded for IncomingCallScreen.
+    expect(mockAcceptCall).not.toHaveBeenCalled();
+    expect(mockCallState.pendingAction).toBe('accept');
+    // Offer already local → socket is up → no reconnect needed.
+    expect(mockConnect).not.toHaveBeenCalled();
   });
 
   it('DECLINE_CALL ends the call directly when the offer already arrived', () => {

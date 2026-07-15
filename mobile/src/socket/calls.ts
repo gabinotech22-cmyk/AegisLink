@@ -293,8 +293,8 @@ async function processIncomingInvite(
   // Captured BEFORE startIncoming() below, which resets it to null (spreads
   // ...initial) — this is the user's Accept/Decline pressed on the OS call
   // notification while the app was killed and only the generic wake push had
-  // arrived (no offer yet). Now that the relay redelivered the real invite,
-  // act on it immediately instead of just ringing.
+  // arrived (no offer yet). Now that the relay redelivered the real invite, act
+  // on that intent instead of just ringing.
   //
   // Freshness gate: the relay holds a queued invite at most 35s and the caller
   // rings 45s, so a press older than 60s can no longer belong to this invite.
@@ -306,15 +306,23 @@ async function processIncomingInvite(
 
   resetIceQueue();
   _finalizedCallId = null;
-  state.startIncoming(from, callId, media, offer);
+  state.startIncoming(from, callId, media, offer); // NOTE: resets pendingAction → null
 
-  if (pendingActionFresh && pendingAction === 'accept') {
-    void acceptCall();
-    return;
-  }
+  // Decline needs neither foreground nor mic — safe to run right here.
   if (pendingActionFresh && pendingAction === 'decline') {
     endCall('declined');
     return;
+  }
+  // Accept must NOT run here: acceptCall() opens the mic + starts a
+  // foregroundServiceType=microphone service, both of which only work with the
+  // app actually in the foreground (Android 12+). Running it from this
+  // background/headless path is what made "answer from the notification" flaky
+  // (connect-then-drop, or the call screen opening without connecting). Instead
+  // re-arm the intent (startIncoming just cleared it) and let IncomingCallScreen
+  // — which only mounts once the app IS foregrounded — consume it and call
+  // acceptCall() there, exactly where the manual Accept button already works.
+  if (pendingActionFresh && pendingAction === 'accept') {
+    useCall.getState().setPendingAction('accept');
   }
 
   const callerName = (() => {

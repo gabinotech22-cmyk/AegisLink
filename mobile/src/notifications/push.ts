@@ -128,16 +128,26 @@ function handleCallNotificationAction(action: 'accept' | 'decline', data: Record
       !!state.pendingOffer &&
       (!fromAegisId || state.peer === fromAegisId);
 
-    if (hasLocalOffer) {
-      const { acceptCall, endCall } = require('../socket/calls') as typeof import('../socket/calls');
-      if (action === 'accept') void acceptCall();
-      else endCall('declined');
+    // Decline needs neither the foreground nor the mic, so when the offer is
+    // already here we can end the call straight from the notification.
+    if (action === 'decline' && hasLocalOffer) {
+      const { endCall } = require('../socket/calls') as typeof import('../socket/calls');
+      endCall('declined');
       return;
     }
 
+    // Accept (always) and decline-without-offer: record the intent. We do NOT
+    // call acceptCall() here — it needs the mic + a foreground microphone
+    // service, which only work once the app is actually in the foreground.
+    // ACCEPT_CALL's opensAppToForeground brings the app up; IncomingCallScreen
+    // then consumes this flag and calls acceptCall() there (foreground
+    // guaranteed). For a killed app the offer isn't here yet, so also reconnect
+    // so the relay can redeliver the queued invite.
     state.setPendingAction(action);
-    const identity = useIdentity.getState().identity;
-    if (identity) client.connect(identity);
+    if (!hasLocalOffer) {
+      const identity = useIdentity.getState().identity;
+      if (identity) client.connect(identity);
+    }
   } catch (e) {
     if (__DEV__) logger.warn(`[push] call ${action} action failed:`, e);
   }
