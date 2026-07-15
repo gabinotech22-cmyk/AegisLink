@@ -2,8 +2,9 @@
 
 > Estado: **decisión resuelta; 2b.0, 2b.1 y 2b.2 (app viva) implementados**
 > (server + infra desplegados en el VM 2026-07-12; suscripción móvil sobre onion
-> con validación en dispositivo pendiente). 2b.3 (app matada / UnifiedPush) y
-> 2b.4 (iOS APNs, tras flag) implementado — ver §9. Slice 2b es, en realidad, trabajo de
+> con validación en dispositivo pendiente). 2b.3a/2b.3b-relay y 2b.4 (iOS APNs,
+> tras flag) implementados; 2b.3c (conector UnifiedPush) en backlog — ver §9.
+> Slice 2b es, en realidad, trabajo de
 > **Fase 5** (ver `SEALED-SENDER-ARCHITECTURE.md:247`): cierra el último
 > reducto que las Slices 1–6 dejaron abierto a propósito. Referencias:
 > `SEALED-SENDER-ARCHITECTURE.md` §3.4 y §"Límite honesto",
