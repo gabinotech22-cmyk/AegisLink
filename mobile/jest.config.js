@@ -28,6 +28,7 @@ module.exports = {
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   moduleNameMapper: {
     '^expo-asset$': '<rootDir>/__mocks__/expo-asset.js',
+    '^expo-file-system/legacy$': '<rootDir>/__mocks__/expo-file-system-legacy.js',
     '^expo-secure-store$': '<rootDir>/__mocks__/expo-secure-store.js',
     '^expo-sqlite$': '<rootDir>/__mocks__/expo-sqlite.js',
     '^expo-av$': '<rootDir>/__mocks__/expo-av.js',
