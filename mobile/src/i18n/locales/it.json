@@ -12,6 +12,7 @@
     "groupVoiceActive": "C'è un canale vocale attivo · tocca per unirti",
     "incomingVideoCall": "Videochiamata E2EE in arrivo",
     "incomingVoiceCall": "Chiamata vocale E2EE in arrivo",
+    "missedCall": "Chiamata persa",
     "dailySummaryTitle": "Riepilogo giornaliero",
     "dailySummaryBody_one": "Hai ricevuto {{count}} messaggio oggi da {{names}}.",
     "dailySummaryBody_other": "Hai ricevuto {{count}} messaggi oggi da {{names}}."

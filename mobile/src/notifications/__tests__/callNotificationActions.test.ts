@@ -115,6 +115,18 @@ describe('push.ts — ACCEPT_CALL / DECLINE_CALL notification actions', () => {
     expect(mockEndCall).toHaveBeenCalledWith('declined');
   });
 
+  it('acting on the notification retracts that call banner up front (by callId)', () => {
+    mockCallState.status = 'incoming-ringing';
+    mockCallState.pendingOffer = 'sdp-offer';
+    mockCallState.peer = 'caller-1';
+    const mockDismiss = Notifications.dismissNotificationAsync as jest.Mock;
+
+    listener(fakeResponse('ACCEPT_CALL', { fromAegisId: 'caller-1', type: 'call', callId: 'call-42' }));
+
+    // Deterministic id keyed by callId — the same one showIncomingCallNotification used.
+    expect(mockDismiss).toHaveBeenCalledWith('incoming-call-call-42');
+  });
+
   it('ACCEPT_CALL marks pendingAction and reconnects when no offer has arrived yet (killed app)', () => {
     listener(fakeResponse('ACCEPT_CALL', { kind: 'call_wakeup' }));
 
