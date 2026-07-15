@@ -9,26 +9,12 @@
  */
 
 // ── expo-file-system/legacy ───────────────────────────────────────────────────
-const mockGetInfoAsync = jest.fn();
-const mockReadAsStringAsync = jest.fn();
-const mockWriteAsStringAsync = jest.fn();
-const mockUploadAsync = jest.fn();
-const mockDeleteAsync = jest.fn();
-const mockDownloadAsync = jest.fn();
-const mockMakeDirectoryAsync = jest.fn();
-
-jest.mock('expo-file-system/legacy', () => ({
-  cacheDirectory: 'file://cache/',
-  getInfoAsync: (...args: unknown[]) => mockGetInfoAsync(...args),
-  readAsStringAsync: (...args: unknown[]) => mockReadAsStringAsync(...args),
-  writeAsStringAsync: (...args: unknown[]) => mockWriteAsStringAsync(...args),
-  uploadAsync: (...args: unknown[]) => mockUploadAsync(...args),
-  deleteAsync: (...args: unknown[]) => mockDeleteAsync(...args),
-  downloadAsync: (...args: unknown[]) => mockDownloadAsync(...args),
-  makeDirectoryAsync: (...args: unknown[]) => mockMakeDirectoryAsync(...args),
-  FileSystemUploadType: { BINARY_CONTENT: 'BINARY_CONTENT' },
-  EncodingType: { Base64: 'base64' },
-}));
+// NOT mocked here: the module is mapped to __mocks__/expo-file-system-legacy.js
+// via jest.config.js moduleNameMapper, so the SUT binds the mapped mock no
+// matter when the registry was primed (the CI failure mode a suite-level
+// jest.mock() could not survive — see the mapper mock's header). The jest.fn()s
+// are required below, AFTER jest.resetModules(), so test and SUT provably share
+// the same instance.
 
 // ── config ────────────────────────────────────────────────────────────────────
 jest.mock('../../config', () => ({
@@ -79,6 +65,25 @@ jest.mock('../registration', () => ({
 // fresh and the factories are guaranteed to intercept.
 /* eslint-disable @typescript-eslint/no-var-requires */
 jest.resetModules();
+// Same fresh registry as the SUT below → guaranteed same mock instance.
+const {
+  getInfoAsync: mockGetInfoAsync,
+  readAsStringAsync: mockReadAsStringAsync,
+  writeAsStringAsync: mockWriteAsStringAsync,
+  uploadAsync: mockUploadAsync,
+  deleteAsync: mockDeleteAsync,
+  downloadAsync: mockDownloadAsync,
+  makeDirectoryAsync: mockMakeDirectoryAsync,
+} = require('expo-file-system/legacy') as Record<
+  | 'getInfoAsync'
+  | 'readAsStringAsync'
+  | 'writeAsStringAsync'
+  | 'uploadAsync'
+  | 'deleteAsync'
+  | 'downloadAsync'
+  | 'makeDirectoryAsync',
+  jest.Mock
+>;
 const {
   encryptAndUploadMedia,
   persistEncryptedBlob,
