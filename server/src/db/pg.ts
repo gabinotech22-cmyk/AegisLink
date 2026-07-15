@@ -74,6 +74,13 @@ export async function initPgSchema(): Promise<void> {
       updated_at     BIGINT NOT NULL
     );
 
+    -- Slice 2b.3b: UnifiedPush endpoint per mailbox id — see SQLite schema.
+    CREATE TABLE IF NOT EXISTS push_endpoints (
+      mailbox_id TEXT PRIMARY KEY,
+      endpoint   TEXT NOT NULL,
+      updated_at BIGINT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS prekeys_signed (
       aegis_id       TEXT NOT NULL,
       device_id      TEXT NOT NULL DEFAULT 'default',

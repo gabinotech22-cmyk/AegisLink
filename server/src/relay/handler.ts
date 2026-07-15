@@ -3,12 +3,12 @@ import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 
 const { decodeBase64, encodeBase64 } = naclUtil;
-import { messageRepo, senderKeyDistRepo, prekeysRepo, identityRepo, deliveryTokenRepo } from '../db/client.js';
+import { messageRepo, senderKeyDistRepo, prekeysRepo, identityRepo, deliveryTokenRepo, pushEndpointRepo } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';
 import { notifyRecipient } from '../push/expo.js';
-import { notifyMailbox } from '../push/ntfy.js';
+import { notifyMailbox, isSafeUpEndpoint } from '../push/ntfy.js';
 import {
   AEGIS_ID_RE,
   EnvelopeIn,
@@ -378,6 +378,36 @@ export function attachRelay(io: SocketServer) {
         // v1). Flag-gated (PUSH_MAILBOX_ENABLED); never blocks the ack.
         void notifyMailbox(d.to);
         ack?.({ ok: true, delivered: false, queued: true });
+      });
+
+      // Slice 2b.3b: register/clear a UnifiedPush endpoint for one of THIS
+      // socket's authenticated mailbox ids. Possession of the mailbox signing
+      // key was already proven above (golden rule #3) — a caller can only bind
+      // endpoints for ids it authenticated, never for arbitrary mailboxes.
+      // endpoint: string → bind (validated against SSRF); null → unbind.
+      socket.on('mailbox:push:endpoint', async (
+        raw: unknown,
+        ack?: (r: { ok: boolean; error?: string }) => void,
+      ) => {
+        if (!limiter.consume()) { ack?.({ ok: false, error: 'rate_limited' }); return; }
+        const mailboxId = (raw as { mailboxId?: unknown })?.mailboxId;
+        const endpoint = (raw as { endpoint?: unknown })?.endpoint;
+        if (typeof mailboxId !== 'string' || !boundIds.includes(mailboxId)) {
+          ack?.({ ok: false, error: 'not_authenticated_for_mailbox' }); return;
+        }
+        try {
+          if (endpoint === null) {
+            await pushEndpointRepo.delete(mailboxId);
+            ack?.({ ok: true }); return;
+          }
+          if (typeof endpoint !== 'string' || !isSafeUpEndpoint(endpoint)) {
+            ack?.({ ok: false, error: 'invalid_endpoint' }); return;
+          }
+          await pushEndpointRepo.set(mailboxId, endpoint, Date.now());
+          ack?.({ ok: true });
+        } catch {
+          ack?.({ ok: false, error: 'internal' });
+        }
       });
 
       socket.on('disconnect', () => {

@@ -137,6 +137,43 @@ export const deliveryTokenRepo = {
   },
 };
 
+// ── pushEndpointRepo ──────────────────────────────────────────────────────────
+
+/**
+ * Slice 2b.3b: UnifiedPush endpoint bindings, one per (per-epoch) mailbox id.
+ * Written ONLY from an authenticated mailbox socket (handler.ts verifies
+ * possession of the mailbox signing key before accepting a binding — golden
+ * rule #3). Bindings inherit the mailbox's rotation: the client re-registers
+ * each epoch and stale rows are purged, so no stable push token ever bridges
+ * two epochs on the relay (R1).
+ */
+export const pushEndpointRepo = {
+  /** Register or replace the endpoint for a mailbox. Upsert keyed by mailbox id. */
+  async set(mailboxId: string, endpoint: string, updatedAt: number): Promise<void> {
+    await dbRun(
+      `INSERT INTO push_endpoints (mailbox_id, endpoint, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(mailbox_id) DO UPDATE SET endpoint = excluded.endpoint, updated_at = excluded.updated_at`,
+      [mailboxId, endpoint, updatedAt]
+    );
+  },
+  /** Fetch the bound endpoint for a mailbox, or undefined if none. */
+  async get(mailboxId: string): Promise<string | undefined> {
+    const row = await dbGet<{ endpoint: string }>(
+      `SELECT endpoint FROM push_endpoints WHERE mailbox_id = ?`,
+      [mailboxId]
+    );
+    return row?.endpoint;
+  },
+  /** Remove the binding (client unregistered, or the endpoint is dead/410). */
+  async delete(mailboxId: string): Promise<void> {
+    await dbRun(`DELETE FROM push_endpoints WHERE mailbox_id = ?`, [mailboxId]);
+  },
+  /** Purge bindings older than `cutoff` (epoch rotation hygiene, R1). */
+  async purgeOlderThan(cutoff: number): Promise<void> {
+    await dbRun(`DELETE FROM push_endpoints WHERE updated_at < ?`, [cutoff]);
+  },
+};
+
 // ── messageRepo ───────────────────────────────────────────────────────────────
 
 /**

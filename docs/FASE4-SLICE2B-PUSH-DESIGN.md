@@ -215,9 +215,24 @@ Google/Apple; el topic rota por época como todo lo demás.
     habla SOCKS) **y** mantener el onion documentado para quien use Orbot. La
     suscripción de 2b.2 (app viva) usa SIEMPRE el onion; el clearnet es solo para
     el distribuidor externo de 2b.3.
-- **2b.3** — app matada: distribuidor UnifiedPush (ntfy app / Sunup) por
-  topic-época + fallback FCM sin distribuidor, con flags de degradación honesta.
-  Requiere la exposición clearnet de arriba. Trabajo nativo/config-plugin.
+- **2b.3a (infra: ntfy clearnet)** — ✅ HECHO (PR #335,
+  `feat/ntfy-clearnet-exposure`): nginx :8443 → ntfy con `access_log off`, sin
+  reenviar IPs; compose publica `127.0.0.1:8090` y fija `NTFY_BASE_URL` público.
+- **2b.3b-relay (binding `M(época) → endpoint`)** — ✅ HECHO (rama
+  `feat/up-endpoint-binding`). Evento `mailbox:push:endpoint` SOLO sobre el
+  socket de mailbox ya autenticado por challenge (regla de oro #3: el binding
+  exige posesión de la clave de firma del mailbox; un atacante que conozca el
+  id no puede secuestrar sus wakes — test dedicado). Tabla `push_endpoints`
+  (SQLite+PG) + `pushEndpointRepo`; `notifyMailbox()` publica al endpoint si
+  hay binding (y lo elimina ante 404/410), si no cae al topic co-hosteado de
+  2b.1/2b.2. Guard SSRF `isSafeUpEndpoint` (solo https, sin IP literales /
+  localhost / single-label / .local/.internal/.onion / credenciales, cap 512).
+  Purga de bindings >48 h (2 épocas) en el scheduler (R1: nada estable
+  sobrevive la rotación). Tests: `upEndpointBinding.relay.test.ts`.
+- **2b.3c (mobile: conector UnifiedPush)** — PENDIENTE. Receiver Android vía
+  config-plugin, registro con el distribuidor instalado (ntfy app / Sunup),
+  emitir `mailbox:push:endpoint` al conectar/rotar época, y fallback FCM
+  opt-in tras flag (§7). Trabajo nativo → requiere prebuild + APK.
 - **2b.4** — iOS APNs tras flag (fast-follow, no bloquea Android).
 
 ## 10. Pregunta abierta antes de implementar 2b.0 — RESUELTA
