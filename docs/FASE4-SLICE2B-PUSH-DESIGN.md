@@ -215,9 +215,17 @@ Google/Apple; el topic rota por época como todo lo demás.
     habla SOCKS) **y** mantener el onion documentado para quien use Orbot. La
     suscripción de 2b.2 (app viva) usa SIEMPRE el onion; el clearnet es solo para
     el distribuidor externo de 2b.3.
-- **2b.3a (infra: ntfy clearnet)** — ✅ HECHO (PR #335,
-  `feat/ntfy-clearnet-exposure`): nginx :8443 → ntfy con `access_log off`, sin
-  reenviar IPs; compose publica `127.0.0.1:8090` y fija `NTFY_BASE_URL` público.
+- **2b.3a (infra: ntfy clearnet)** — ✅ HECHO (rama `feat/ntfy-clearnet-exposure`).
+  nginx sirve ntfy por HTTPS en `aegislink.duckdns.org:8443` (bloque nuevo en
+  `infra/nginx/aegislink.conf`): `access_log off`, **sin** `X-Real-IP`/
+  `X-Forwarded-For` hacia ntfy (`behind-proxy=false` → ntfy solo ve loopback),
+  upgrade WebSocket + streaming. `docker-compose.yml`: ntfy publica
+  `127.0.0.1:8090:80` (solo loopback, patrón idéntico al relay:3001),
+  `NTFY_BASE_URL=https://aegislink.duckdns.org:8443` (los endpoints UnifiedPush
+  que ntfy reparte embeben esta URL) y límites de visitante ampliados (todos los
+  clientes clearnet comparten el visitante loopback al no reenviar IPs).
+  **Paso manual al desplegar: abrir el puerto 8443/tcp en el firewall del VM.**
+  El onion (8090) queda intacto para la suscripción in-app de 2b.2.
 - **2b.3b-relay (binding `M(época) → endpoint`)** — ✅ HECHO (rama
   `feat/up-endpoint-binding`). Evento `mailbox:push:endpoint` SOLO sobre el
   socket de mailbox ya autenticado por challenge (regla de oro #3: el binding
