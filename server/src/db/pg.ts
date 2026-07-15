@@ -81,6 +81,13 @@ export async function initPgSchema(): Promise<void> {
       updated_at BIGINT NOT NULL
     );
 
+    -- Slice 2b.4: Expo/APNs wake token per mailbox id — see SQLite schema.
+    CREATE TABLE IF NOT EXISTS push_mailbox_tokens (
+      mailbox_id TEXT PRIMARY KEY,
+      expo_token TEXT NOT NULL,
+      updated_at BIGINT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS prekeys_signed (
       aegis_id       TEXT NOT NULL,
       device_id      TEXT NOT NULL DEFAULT 'default',

@@ -3,12 +3,12 @@ import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 
 const { decodeBase64, encodeBase64 } = naclUtil;
-import { messageRepo, senderKeyDistRepo, prekeysRepo, identityRepo, deliveryTokenRepo, pushEndpointRepo } from '../db/client.js';
+import { messageRepo, senderKeyDistRepo, prekeysRepo, identityRepo, deliveryTokenRepo, pushEndpointRepo, pushMailboxTokenRepo } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';
 import { notifyRecipient } from '../push/expo.js';
-import { notifyMailbox, isSafeUpEndpoint } from '../push/ntfy.js';
+import { notifyMailbox, isSafeUpEndpoint, isExpoWakeToken, isTokenWakeEnabled } from '../push/ntfy.js';
 import {
   AEGIS_ID_RE,
   EnvelopeIn,
@@ -404,6 +404,45 @@ export function attachRelay(io: SocketServer) {
             ack?.({ ok: false, error: 'invalid_endpoint' }); return;
           }
           await pushEndpointRepo.set(mailboxId, endpoint, Date.now());
+          ack?.({ ok: true });
+        } catch {
+          ack?.({ ok: false, error: 'internal' });
+        }
+      });
+
+      // Slice 2b.4: register/clear an Expo/APNs wake token for one of THIS
+      // socket's authenticated mailbox ids (iOS app-killed path — no
+      // UnifiedPush on iOS). Same possession rule as mailbox:push:endpoint.
+      // The wake only ever fires when PUSH_MAILBOX_TOKEN_WAKE is on
+      // server-side; storing the binding is harmless without the flag.
+      socket.on('mailbox:push:token', async (
+        raw: unknown,
+        ack?: (r: { ok: boolean; error?: string }) => void,
+      ) => {
+        if (!limiter.consume()) { ack?.({ ok: false, error: 'rate_limited' }); return; }
+        const mailboxId = (raw as { mailboxId?: unknown })?.mailboxId;
+        const expoToken = (raw as { expoToken?: unknown })?.expoToken;
+        if (typeof mailboxId !== 'string' || !boundIds.includes(mailboxId)) {
+          ack?.({ ok: false, error: 'not_authenticated_for_mailbox' }); return;
+        }
+        try {
+          if (expoToken === null) {
+            // Deletion is ALWAYS allowed, flag or no flag — a client must be
+            // able to retract its binding even after the operator disables
+            // the feature.
+            await pushMailboxTokenRepo.delete(mailboxId);
+            ack?.({ ok: true }); return;
+          }
+          // Fail-closed at PERSISTENCE, not just delivery: a relay with the
+          // flag off never collects stable tokens (nothing to leak, nothing
+          // to activate later if the flag flips on).
+          if (!isTokenWakeEnabled()) {
+            ack?.({ ok: false, error: 'feature_disabled' }); return;
+          }
+          if (typeof expoToken !== 'string' || !isExpoWakeToken(expoToken)) {
+            ack?.({ ok: false, error: 'invalid_token' }); return;
+          }
+          await pushMailboxTokenRepo.set(mailboxId, expoToken, Date.now());
           ack?.({ ok: true });
         } catch {
           ack?.({ ok: false, error: 'internal' });

@@ -97,6 +97,19 @@ export function initSqliteSchema(db: DatabaseSync) {
       updated_at INTEGER NOT NULL
     );
 
+    -- Slice 2b.4: Expo/APNs wake token per (per-epoch) mailbox id — the iOS
+    -- app-killed path, where UnifiedPush is impossible. OPT-IN ONLY (flag on
+    -- both sides): a stable push token bound to rotating mailbox ids lets the
+    -- relay re-link epochs, the documented residual reduct of §7.3 (R5 —
+    -- degrade honestly, never silently). Same auth + purge rules as
+    -- push_endpoints: written only over an authenticated mailbox socket,
+    -- purged after 48 h without re-registration.
+    CREATE TABLE IF NOT EXISTS push_mailbox_tokens (
+      mailbox_id TEXT PRIMARY KEY,
+      expo_token TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS prekeys_signed (
       aegis_id       TEXT NOT NULL,
       device_id      TEXT NOT NULL DEFAULT 'default',

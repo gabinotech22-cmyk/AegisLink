@@ -33,7 +33,8 @@ import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { AppState, type AppStateStatus } from 'react-native';
 import { logger } from '../utils/logger';
-import { ONION_URL, MAILBOX_ENABLED } from '../config';
+import { Platform } from 'react-native';
+import { ONION_URL, MAILBOX_ENABLED, MAILBOX_IOS_WAKE } from '../config';
 import {
   getOwnCurrentMailbox,
   getOwnMailboxesForEpochs,
@@ -211,6 +212,27 @@ export function isMailboxAuthed(): boolean {
  * `onEnvelope`; the caller decrypts (sealed v2) and routes into the normal
  * incoming pipeline. Idempotent: a live socket is reused.
  */
+/**
+ * Slice 2b.4: emit the Expo/APNs wake-token binding for `mailboxIdB64` over an
+ * already-authenticated mailbox socket. iOS + client flag only (Android has
+ * reduct-free app-killed coverage); best-effort — a miss just means no
+ * app-killed wake until the next connect. Exported for tests.
+ */
+export function registerIosWakeBinding(
+  sock: Pick<Socket, 'emit'>,
+  mailboxIdB64: string,
+): void {
+  if (!MAILBOX_IOS_WAKE || Platform.OS !== 'ios') return;
+  try {
+    const { getLastExpoToken } = require('../notifications/push') as typeof import('../notifications/push');
+    const token = getLastExpoToken();
+    if (!token) return;
+    sock.emit('mailbox:push:token', { mailboxId: mailboxIdB64, expoToken: token });
+  } catch (e) {
+    if (__DEV__) logger.warn('[mailbox] wake-token binding failed:', (e as Error).message);
+  }
+}
+
 export async function connectMailboxSocket(
   onEnvelope: (env: IncomingMailboxEnvelope) => void,
 ): Promise<Socket | null> {
@@ -322,6 +344,14 @@ export async function connectMailboxSocket(
     if (authStallTimer) { clearTimeout(authStallTimer); authStallTimer = null; }
     void setLastMailboxConnectEpoch(E);
     scheduleEpochRotation();
+    // Slice 2b.4 (iOS only, DOUBLE opt-in — client flag here + server flag):
+    // register our Expo/APNs token as the wake binding for the CURRENT epoch
+    // mailbox, so a killed iOS app still gets the generic wake when a mailbox
+    // message queues. Epoch rotation re-runs this whole connect flow with the
+    // next epoch's id, so the binding rotates with the mailbox. The reduct
+    // (stable token can re-link epochs at the relay) is documented in
+    // FASE4-SLICE2B-PUSH-DESIGN.md §7.3 — this NEVER runs with the flag off.
+    registerIosWakeBinding(sock, mb.mailboxIdB64);
     if (__DEV__) logger.debug('[mailbox] authenticated');
   });
 
