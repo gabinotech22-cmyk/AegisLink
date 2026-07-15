@@ -115,6 +115,12 @@ function handleCallNotificationAction(action: 'accept' | 'decline', data: Record
     const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
     const client = require('../socket/client') as typeof import('../socket/client');
 
+    // Retract this call's banner immediately — the user just acted on it, so it
+    // must not linger. (finalizeCall also dismisses on end, but that may be
+    // seconds away for accept; dismiss up front so the shade is clean now.)
+    const notifCallId = data?.callId as string | undefined;
+    if (notifCallId) void dismissIncomingCallNotification(notifCallId);
+
     const fromAegisId = data?.fromAegisId as string | undefined;
     const state = useCall.getState();
     const hasLocalOffer =
@@ -659,28 +665,32 @@ export async function showGroupCallChannelNotification(
   }
 }
 
-// Identifier of the most recently scheduled incoming-call banner, so it can be
-// retracted the instant the in-app ring UI actually becomes visible (see
-// dismissIncomingCallNotification) — belt-and-suspenders against the
-// AppState.currentState race in socket/calls.ts's processIncomingInvite,
-// which usually (but not provably always) prevents this banner from firing
-// while the app is genuinely foregrounded.
-let _lastCallNotificationId: string | null = null;
+// Deterministic notification identifier for an incoming-call banner, keyed by
+// callId, so the SAME call can always be retracted later — whether the ring UI
+// became visible (IncomingCallScreen mount), the user answered/declined, or the
+// call ended on its own while the app was minimized (caller hung up, no-answer
+// timeout). Without a stable id, an ended call's "Contestar / Rechazar" banner
+// lingers in the shade forever, looking like a still-active call.
+function incomingCallNotificationId(callId: string): string {
+  return `incoming-call-${callId}`;
+}
 
 export async function showIncomingCallNotification(
   callerAegisId: string,
   callerName: string,
-  isVideo: boolean
+  isVideo: boolean,
+  callId: string,
 ): Promise<void> {
   try {
-    _lastCallNotificationId = await Notifications.scheduleNotificationAsync({
+    await Notifications.scheduleNotificationAsync({
+      identifier: incomingCallNotificationId(callId),
       content: {
         title: `AegisLink · ${isVideo ? '📹' : '📞'} ${callerName}`,
         body: isVideo ? await tAsync('notif.incomingVideoCall') : await tAsync('notif.incomingVoiceCall'),
         sound: 'call_incoming.mp3',
         priority: Notifications.AndroidNotificationPriority.MAX,
         categoryIdentifier: 'aegislink-call',
-        data: { fromAegisId: callerAegisId, type: 'call', isVideo },
+        data: { fromAegisId: callerAegisId, type: 'call', isVideo, callId },
         ...(Platform.OS === 'android' ? { channelId: 'aegislink-calls' } : {}),
       },
       trigger: null,
@@ -691,17 +701,44 @@ export async function showIncomingCallNotification(
 }
 
 /**
- * Dismiss the most recent incoming-call banner, if any. Call this the moment
- * the in-app ring UI is actually visible (IncomingCallScreen mount) or the
- * call is answered/declined by any path — closes the race where the OS
- * banner and the full-screen ring UI both showed at once while the app was
- * genuinely in foreground.
+ * Retract the incoming-call banner for a specific call. Called the moment the
+ * in-app ring UI becomes visible (IncomingCallScreen mount), when the call is
+ * answered/declined by any path, AND — critically — when the call ends on its
+ * own (finalizeCall), so a "Contestar / Rechazar" banner never outlives the
+ * call it belongs to.
  */
-export async function dismissIncomingCallNotification(): Promise<void> {
-  if (!_lastCallNotificationId) return;
-  const id = _lastCallNotificationId;
-  _lastCallNotificationId = null;
+export async function dismissIncomingCallNotification(callId: string): Promise<void> {
   try {
-    await Notifications.dismissNotificationAsync(id);
+    await Notifications.dismissNotificationAsync(incomingCallNotificationId(callId));
   } catch { /* already dismissed / not found — fine */ }
+}
+
+/**
+ * Replace a just-ended, unanswered incoming call's banner with a passive
+ * "missed call" notification — no Contestar/Rechazar actions, no ring, just a
+ * record the user can see later (parity with every other calling app). Only for
+ * genuinely MISSED calls: an answered or user-declined call leaves no missed
+ * record. The incoming banner must already be dismissed by the caller.
+ */
+export async function showMissedCallNotification(
+  callerAegisId: string,
+  callerName: string,
+  callId: string,
+): Promise<void> {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      identifier: `missed-call-${callId}`,
+      content: {
+        title: `AegisLink · ${callerName}`,
+        body: await tAsync('notif.missedCall'),
+        // Passive: no sound (the ring already played), no action category.
+        priority: Notifications.AndroidNotificationPriority.DEFAULT,
+        data: { fromAegisId: callerAegisId, type: 'missed_call', callId },
+        ...(Platform.OS === 'android' ? { channelId: 'aegislink-messages' } : {}),
+      },
+      trigger: null,
+    });
+  } catch (err) {
+    if (__DEV__) logger.warn('[push] showMissedCallNotification failed:', err);
+  }
 }

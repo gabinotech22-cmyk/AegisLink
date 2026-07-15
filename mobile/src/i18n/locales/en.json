@@ -12,6 +12,7 @@
     "groupVoiceActive": "A voice channel is active · tap to join",
     "incomingVideoCall": "Incoming E2EE video call",
     "incomingVoiceCall": "Incoming E2EE voice call",
+    "missedCall": "Missed call",
     "dailySummaryTitle": "Daily summary",
     "dailySummaryBody_one": "You received {{count}} message today from {{names}}.",
     "dailySummaryBody_other": "You received {{count}} messages today from {{names}}."

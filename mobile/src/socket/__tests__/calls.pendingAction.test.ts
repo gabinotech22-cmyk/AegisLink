@@ -110,6 +110,16 @@ jest.mock('../../store/messages', () => ({
 // ── db/local ─────────────────────────────────────────────────────────────────
 jest.mock('../../db/local', () => ({ saveCall: jest.fn().mockResolvedValue(undefined) }));
 
+// ── notifications/push — finalizeCall dismisses the incoming banner and, for a
+//    missed call, posts a "Llamada perdida" record. Stub both so we can assert. ─
+const mockDismissIncomingCall = jest.fn().mockResolvedValue(undefined);
+const mockShowMissedCall = jest.fn().mockResolvedValue(undefined);
+jest.mock('../../notifications/push', () => ({
+  showIncomingCallNotification: jest.fn().mockResolvedValue(undefined),
+  dismissIncomingCallNotification: (...a: unknown[]) => mockDismissIncomingCall(...a),
+  showMissedCallNotification: (...a: unknown[]) => mockShowMissedCall(...a),
+}));
+
 // ── socket/client ────────────────────────────────────────────────────────────
 const mockEmit = jest.fn();
 const mockOn = jest.fn();
@@ -133,7 +143,7 @@ jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
 
 import { useCall } from '../../store/call';
 import { openCallInvite } from '../../crypto/callSession';
-import { attachCallHandlers } from '../calls';
+import { attachCallHandlers, endCall } from '../calls';
 
 const mockOpenCallInvite = openCallInvite as jest.Mock;
 
@@ -141,6 +151,12 @@ const mockOpenCallInvite = openCallInvite as jest.Mock;
 function capturedInviteHandler(): (msg: unknown) => Promise<void> {
   const call = (mockOn.mock.calls as [string, unknown][]).find(([ev]) => ev === 'call:invite:v2');
   return call![1] as (msg: unknown) => Promise<void>;
+}
+
+/** The handler registered for `call:hangup:v2` (remote hangup). */
+function capturedHangupHandler(): (msg: unknown) => void {
+  const call = (mockOn.mock.calls as [string, unknown][]).find(([ev]) => ev === 'call:hangup:v2');
+  return call![1] as (msg: unknown) => void;
 }
 
 /** Drain a chain of already-resolved promises (acceptCall's fire-and-forget tail). */
@@ -223,5 +239,43 @@ describe('calls.ts — pendingAction consumed on invite (re)delivery', () => {
 
   afterEach(() => {
     useCall.getState().reset();
+  });
+});
+
+describe('calls.ts — incoming-call notification cleanup on end (Llamada perdida)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSocketReturnValue = mockSocket;
+    mockPeerState.handlers = null;
+    useCall.getState().reset();
+    mockOpenCallInvite.mockReturnValue({ from: 'peer-A', offer: 'sdp-offer', callKey: new Uint8Array(32) });
+  });
+  afterEach(() => useCall.getState().reset());
+
+  it('caller hangs up while ringing → dismisses the banner AND posts a missed-call record', async () => {
+    attachCallHandlers();
+    const onInvite = capturedInviteHandler();
+    const onHangup = capturedHangupHandler();
+
+    // Incoming call rings (no pendingAction → no auto-answer).
+    await onInvite({ callId: 'call-M', media: 'audio', ciphertext: 'ct', nonce: 'n', epk: 'epk' });
+    expect(useCall.getState().status).toBe('incoming-ringing');
+
+    // Caller hangs up before we answer → remote hangup → finalizeCall('missed').
+    onHangup({ callId: 'call-M', reason: 'remote_hangup' });
+
+    expect(mockDismissIncomingCall).toHaveBeenCalledWith('call-M');
+    expect(mockShowMissedCall).toHaveBeenCalledWith('peer-A', expect.any(String), 'call-M');
+  });
+
+  it('user declines → dismisses the banner but posts NO missed-call record', async () => {
+    attachCallHandlers();
+    const onInvite = capturedInviteHandler();
+    await onInvite({ callId: 'call-D', media: 'audio', ciphertext: 'ct', nonce: 'n', epk: 'epk' });
+
+    endCall('declined');
+
+    expect(mockDismissIncomingCall).toHaveBeenCalledWith('call-D');
+    expect(mockShowMissedCall).not.toHaveBeenCalled();
   });
 });

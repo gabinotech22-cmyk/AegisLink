@@ -328,9 +328,9 @@ async function processIncomingInvite(
   const { AppState } = require('react-native') as typeof import('react-native');
   if (AppState.currentState !== 'active') {
     const { showIncomingCallNotification } = require('../notifications/push') as {
-      showIncomingCallNotification: (callerAegisId: string, callerName: string, isVideo: boolean) => Promise<void>;
+      showIncomingCallNotification: (callerAegisId: string, callerName: string, isVideo: boolean, callId: string) => Promise<void>;
     };
-    void showIncomingCallNotification(from, callerName, media === 'video').catch(() => {});
+    void showIncomingCallNotification(from, callerName, media === 'video', callId).catch(() => {});
   }
 }
 
@@ -664,6 +664,28 @@ function finalizeCall(reason: string, opts: { emitHangup: boolean }): void {
         createdAt: Date.now(),
         type: 'text',
       });
+    }
+
+    // Clean up the OS call notification for THIS incoming call. Whatever the
+    // outcome, the "Contestar / Rechazar" banner must never outlive the call.
+    // If it was genuinely missed (not answered, not user-declined), leave a
+    // passive "Llamada perdida" record in its place — parity with other apps.
+    if (wasIncoming) {
+      const { dismissIncomingCallNotification, showMissedCallNotification } =
+        require('../notifications/push') as {
+          dismissIncomingCallNotification: (callId: string) => Promise<void>;
+          showMissedCallNotification: (callerAegisId: string, callerName: string, callId: string) => Promise<void>;
+        };
+      void dismissIncomingCallNotification(callId).catch(() => {});
+      if (callStatus === 'missed') {
+        const callerName = (() => {
+          try {
+            const { useContacts } = require('../store/contacts') as { useContacts: { getState: () => { get: (id: string) => { name: string } | undefined } } };
+            return useContacts.getState().get(peerId)?.name ?? peerId;
+          } catch { return peerId; }
+        })();
+        void showMissedCallNotification(peerId, callerName, callId).catch(() => {});
+      }
     }
   }
 

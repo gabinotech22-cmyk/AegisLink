@@ -122,6 +122,15 @@ jest.mock('../../store/messages', () => ({
 // ── db/local — capture persisted call-history rows ─────────────────────────
 jest.mock('../../db/local', () => ({ saveCall: jest.fn().mockResolvedValue(undefined) }));
 
+// ── notifications/push — finalizeCall cleans up the incoming-call banner for
+//    incoming calls (dismiss + missed-call record); stub so requiring it under
+//    jest doesn't pull in the real expo-notifications module chain. ──────────
+jest.mock('../../notifications/push', () => ({
+  showIncomingCallNotification: jest.fn().mockResolvedValue(undefined),
+  dismissIncomingCallNotification: jest.fn().mockResolvedValue(undefined),
+  showMissedCallNotification: jest.fn().mockResolvedValue(undefined),
+}));
+
 // ── socket/client ──────────────────────────────────────────────────────────
 const mockEmit = jest.fn();
 const mockOn = jest.fn();

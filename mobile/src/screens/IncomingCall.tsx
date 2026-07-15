@@ -38,6 +38,7 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const peerId = useCall((s) => s.peer);
+  const callId = useCall((s) => s.callId);
   const media = useCall((s) => s.media);
   const peer = useContacts((s) => (peerId ? s.get(peerId) : undefined));
   const name = peer?.name ?? peerId ?? 'unknown';
@@ -80,10 +81,11 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
   // let both show at once while the app is genuinely in foreground.
   useEffect(() => {
     void SoundFX.callIncoming();
-    void dismissIncomingCallNotification();
+    if (callId) void dismissIncomingCallNotification(callId);
     return () => {
       void SoundFX.stopAll();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const pulseStyle = useAnimatedStyle(() => ({
@@ -104,13 +106,13 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
 
   function handleAccept() {
     void SoundFX.callConnected();
-    void dismissIncomingCallNotification();
+    if (callId) void dismissIncomingCallNotification(callId);
     onAccept();
   }
 
   function handleReject() {
     void SoundFX.callEnded();
-    void dismissIncomingCallNotification();
+    if (callId) void dismissIncomingCallNotification(callId);
     onReject();
   }
 
