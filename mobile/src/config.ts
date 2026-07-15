@@ -101,6 +101,18 @@ export const MAILBOX_MODE: boolean =
 export const MAILBOX_ENABLED: boolean = MAILBOX_MODE && ONION_URL !== null;
 
 /**
+ * Slice 2b.4 — iOS app-killed wake for the mailbox path via Expo/APNs token
+ * binding. OPT-IN ONLY and default OFF: a stable push token bound to rotating
+ * mailbox ids lets the relay re-link epochs — a documented privacy reduct
+ * (FASE4-SLICE2B-PUSH-DESIGN.md §7.3, R5: degrade honestly, never silently).
+ * Only meaningful on iOS (Android covers app-killed via the call-wake
+ * foreground service / UnifiedPush, both reduct-free). The server enforces its
+ * own flag (PUSH_MAILBOX_TOKEN_WAKE) independently.
+ */
+export const MAILBOX_IOS_WAKE: boolean =
+  (process.env.EXPO_PUBLIC_MAILBOX_IOS_WAKE as string | undefined) === 'on';
+
+/**
  * Fail-fast transport guard. In a production build every backend base URL MUST
  * be https — a misconfigured build that fell back to cleartext would defeat
  * cert pinning and leak identity keys / push tokens / blob ciphertext over the

@@ -3,7 +3,7 @@
 > Estado: **decisión resuelta; 2b.0, 2b.1 y 2b.2 (app viva) implementados**
 > (server + infra desplegados en el VM 2026-07-12; suscripción móvil sobre onion
 > con validación en dispositivo pendiente). 2b.3 (app matada / UnifiedPush) y
-> 2b.4 (iOS APNs) siguen pendientes — ver §9. Slice 2b es, en realidad, trabajo de
+> 2b.4 (iOS APNs, tras flag) implementado — ver §9. Slice 2b es, en realidad, trabajo de
 > **Fase 5** (ver `SEALED-SENDER-ARCHITECTURE.md:247`): cierra el último
 > reducto que las Slices 1–6 dejaron abierto a propósito. Referencias:
 > `SEALED-SENDER-ARCHITECTURE.md` §3.4 y §"Límite honesto",
@@ -241,7 +241,19 @@ Google/Apple; el topic rota por época como todo lo demás.
   config-plugin, registro con el distribuidor instalado (ntfy app / Sunup),
   emitir `mailbox:push:endpoint` al conectar/rotar época, y fallback FCM
   opt-in tras flag (§7). Trabajo nativo → requiere prebuild + APK.
-- **2b.4** — iOS APNs tras flag (fast-follow, no bloquea Android).
+- **2b.4 (iOS app matada, tras flag)** — 🟢 IMPLEMENTADO (rama
+  `feat/mailbox-ios-apns-wake`; validación en iPhone pendiente). Binding
+  `mailbox(época) → token Expo/APNs` con **doble opt-in**: flag cliente
+  `EXPO_PUBLIC_MAILBOX_IOS_WAKE=on` (solo emite en iOS) **y** flag server
+  `PUSH_MAILBOX_TOKEN_WAKE=on` (sin él, el binding se ignora y el wake cae al
+  topic — fail-closed, test dedicado). Evento `mailbox:push:token` con las
+  mismas reglas que el endpoint UnifiedPush (solo socket autenticado, regla de
+  oro #3; purga 48 h). El wake es el genérico R2 ("Nuevo mensaje cifrado ·
+  E2EE") vía API de Expo; DeviceNotRegistered elimina el binding. **Reducto
+  documentado y aceptado (§7.3/R5)**: el token estable permite al relay
+  re-linkear épocas — por eso NUNCA activo por defecto. Tests:
+  `mailboxTokenWake.relay.test.ts` (server) y
+  `mailboxIosWakeBinding.test.ts` (mobile, gating del doble opt-in).
 
 ## 10. Pregunta abierta antes de implementar 2b.0 — RESUELTA
 

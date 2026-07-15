@@ -14,7 +14,7 @@
  * Best-effort: never throws, never blocks the caller, short timeout.
  */
 
-import { pushEndpointRepo } from '../db/client.js';
+import { pushEndpointRepo, pushMailboxTokenRepo } from '../db/client.js';
 
 // ntfy topics only allow [-_A-Za-z0-9]. Our mailbox ids are standard base64
 // (mailboxIdForSignPublicKey/mailboxId(epoch) — see crypto/mailbox.ts), so
@@ -58,6 +58,59 @@ export function isSafeUpEndpoint(raw: string): boolean {
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return false; // IPv4 literal
   if (host.startsWith('[') || host.includes(':')) return false; // IPv6 literal
   return true;
+}
+
+// ── Slice 2b.4: Expo/APNs token bindings (iOS app-killed wake) ───────────────
+
+/** Server-side opt-in for the token wake path (documented reduct, §7.3/R5). */
+function isTokenWakeEnabled(): boolean {
+  return (process.env['PUSH_MAILBOX_TOKEN_WAKE'] ?? 'off').toLowerCase() === 'on';
+}
+
+/** Expo push token shape: ExponentPushToken[...] / ExpoPushToken[...]. */
+export function isExpoWakeToken(raw: string): boolean {
+  return typeof raw === 'string' && raw.length <= 128 && /^Expo(nent)?PushToken\[[^\]\s]+\]$/.test(raw);
+}
+
+/**
+ * Send the generic zero-metadata wake ("Nuevo mensaje cifrado · E2EE", same
+ * body as the aegisId path — R2) to one Expo token via the Expo push API.
+ * Uses fetch directly (not expo-server-sdk) so tests can spy the same global
+ * seam as every other publish here. Returns 'gone' when Expo reports
+ * DeviceNotRegistered so the caller can drop the dead binding.
+ */
+async function sendTokenWake(expoToken: string): Promise<'ok' | 'gone'> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PUBLISH_TIMEOUT_MS);
+  try {
+    const res = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        to: expoToken,
+        sound: 'default',
+        priority: 'high',
+        title: 'AegisLink',
+        body: 'Nuevo mensaje cifrado · E2EE',
+        data: { kind: 'wakeup' },
+        _contentAvailable: true,
+        channelId: 'aegislink-messages',
+      }),
+      signal: controller.signal,
+    });
+    const parsed = (await res.json().catch(() => null)) as
+      | { data?: { status?: string; details?: { error?: string } } }
+      | null;
+    if (parsed?.data?.status === 'error' && parsed.data.details?.error === 'DeviceNotRegistered') {
+      return 'gone';
+    }
+    return 'ok';
+  } catch (e) {
+    if (isDev) console.warn('[push:ntfy] token wake failed', (e as Error).message);
+    return 'ok';
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -111,7 +164,23 @@ export async function notifyMailbox(mailboxIdB64: string): Promise<void> {
     }
   } catch (e) {
     if (isDev) console.warn('[push:ntfy] endpoint lookup failed', (e as Error).message);
-    // fall through to the topic publish — best-effort either way
+    // fall through — best-effort either way
+  }
+
+  // Slice 2b.4: iOS app-killed path — a flag-gated Expo/APNs token binding.
+  // Checked after UnifiedPush (no-reduct path wins) and before the topic
+  // publish (which a killed iOS app cannot hear).
+  if (isTokenWakeEnabled()) {
+    try {
+      const token = await pushMailboxTokenRepo.get(mailboxIdB64);
+      if (token) {
+        const outcome = await sendTokenWake(token);
+        if (outcome === 'gone') await pushMailboxTokenRepo.delete(mailboxIdB64);
+        return;
+      }
+    } catch (e) {
+      if (isDev) console.warn('[push:ntfy] token lookup failed', (e as Error).message);
+    }
   }
 
   const ntfyUrl = process.env['NTFY_URL'];

@@ -174,6 +174,39 @@ export const pushEndpointRepo = {
   },
 };
 
+// ── pushMailboxTokenRepo ──────────────────────────────────────────────────────
+
+/**
+ * Slice 2b.4: Expo/APNs wake-token bindings per mailbox id — the iOS
+ * app-killed wake path (no UnifiedPush on iOS). OPT-IN ONLY: a stable token
+ * bound to rotating mailbox ids lets the relay re-link epochs; that residual
+ * reduct is documented (§7.3, R5) and both the client and server sides are
+ * flag-gated. Same rules as pushEndpointRepo: written only from an
+ * authenticated mailbox socket, purged after 48 h without re-registration.
+ */
+export const pushMailboxTokenRepo = {
+  async set(mailboxId: string, expoToken: string, updatedAt: number): Promise<void> {
+    await dbRun(
+      `INSERT INTO push_mailbox_tokens (mailbox_id, expo_token, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(mailbox_id) DO UPDATE SET expo_token = excluded.expo_token, updated_at = excluded.updated_at`,
+      [mailboxId, expoToken, updatedAt]
+    );
+  },
+  async get(mailboxId: string): Promise<string | undefined> {
+    const row = await dbGet<{ expo_token: string }>(
+      `SELECT expo_token FROM push_mailbox_tokens WHERE mailbox_id = ?`,
+      [mailboxId]
+    );
+    return row?.expo_token;
+  },
+  async delete(mailboxId: string): Promise<void> {
+    await dbRun(`DELETE FROM push_mailbox_tokens WHERE mailbox_id = ?`, [mailboxId]);
+  },
+  async purgeOlderThan(cutoff: number): Promise<void> {
+    await dbRun(`DELETE FROM push_mailbox_tokens WHERE updated_at < ?`, [cutoff]);
+  },
+};
+
 // ── messageRepo ───────────────────────────────────────────────────────────────
 
 /**

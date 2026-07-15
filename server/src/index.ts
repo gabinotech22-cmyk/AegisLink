@@ -21,7 +21,7 @@ import { createPublicChannelsRouter } from './routes/publicChannels.js';
 import { attachRelay } from './relay/handler.js';
 import { attachSocketIoRedisAdapter } from './relay/socketIoRedisAdapter.js';
 import { attachSocketIoClusterAdapter } from './relay/socketIoClusterAdapter.js';
-import { initDb, messageRepo, senderKeyDistRepo, pruneExpiredWorkMessages, pushEndpointRepo } from './db/client.js';
+import { initDb, messageRepo, senderKeyDistRepo, pruneExpiredWorkMessages, pushEndpointRepo, pushMailboxTokenRepo } from './db/client.js';
 
 // ── Last-resort error handlers ───────────────────────────────────────────────
 // Log only the error itself (never envelope payloads or user identifiers) to
@@ -298,9 +298,10 @@ initDb().then(() => {
   setInterval(() => {
     void messageRepo.purgeExpired();
     void senderKeyDistRepo.purgeExpired();
-    // Slice 2b.3b (R1): UnifiedPush bindings must not outlive the epoch
+    // Slice 2b.3b/2b.4 (R1): push bindings must not outlive the epoch
     // rotation — drop anything not re-registered within 2 epochs (48 h).
     void pushEndpointRepo.purgeOlderThan(Date.now() - 48 * 60 * 60 * 1000);
+    void pushMailboxTokenRepo.purgeOlderThan(Date.now() - 48 * 60 * 60 * 1000);
   }, 10 * 60 * 1000).unref();
 
   // Prune work messages that exceed channel retention policies.

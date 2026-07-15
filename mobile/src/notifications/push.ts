@@ -409,6 +409,16 @@ function attachLocalNotificationHandlers(): void {
   ]);
 }
 
+// Last Expo push token acquired this session, for consumers that need it after
+// the fact (Slice 2b.4: the mailbox socket registers it as an iOS wake binding
+// once authenticated — see socket/mailboxSocket.ts). Never persisted here.
+let lastExpoToken: string | null = null;
+
+/** The Expo push token obtained by registerForPush this session, or null. */
+export function getLastExpoToken(): string | null {
+  return lastExpoToken;
+}
+
 export async function registerForPush(identity: Identity): Promise<{ token: string | null }> {
   // Local notification UX (tap routing, cold-start, activeChatId reset, channels,
   // categories) must work even when the remote push token can't be obtained —
@@ -452,6 +462,7 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
 
     const tokenResponse = await Notifications.getExpoPushTokenAsync();
     const expoToken = tokenResponse.data;
+    lastExpoToken = expoToken;
 
     // The actual token→aegisId association happens over the AUTHENTICATED
     // Socket.IO path (socket.on('push:register') after the Ed25519
