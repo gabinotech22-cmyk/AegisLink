@@ -58,3 +58,6 @@ server/.expo/
 
 # Runtime upload dir — transient blobs, never commit (relay writes here)
 /uploads/
+
+# EAS local signing credentials (never commit)
+mobile/credentials.json
