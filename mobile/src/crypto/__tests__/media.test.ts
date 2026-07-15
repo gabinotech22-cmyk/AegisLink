@@ -74,7 +74,16 @@ const {
   deleteAsync: mockDeleteAsync,
   downloadAsync: mockDownloadAsync,
   makeDirectoryAsync: mockMakeDirectoryAsync,
-} = require('expo-file-system/legacy') as Record<string, jest.Mock>;
+} = require('expo-file-system/legacy') as Record<
+  | 'getInfoAsync'
+  | 'readAsStringAsync'
+  | 'writeAsStringAsync'
+  | 'uploadAsync'
+  | 'deleteAsync'
+  | 'downloadAsync'
+  | 'makeDirectoryAsync',
+  jest.Mock
+>;
 const {
   encryptAndUploadMedia,
   persistEncryptedBlob,
