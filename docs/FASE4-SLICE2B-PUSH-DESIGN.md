@@ -246,8 +246,13 @@ Google/Apple; el topic rota por época como todo lo demás.
   `feat/mailbox-ios-apns-wake`; validación en iPhone pendiente). Binding
   `mailbox(época) → token Expo/APNs` con **doble opt-in**: flag cliente
   `EXPO_PUBLIC_MAILBOX_IOS_WAKE=on` (solo emite en iOS) **y** flag server
-  `PUSH_MAILBOX_TOKEN_WAKE=on` (sin él, el binding se ignora y el wake cae al
-  topic — fail-closed, test dedicado). Evento `mailbox:push:token` con las
+  `PUSH_MAILBOX_TOKEN_WAKE=on`. El flag server gobierna **registro Y
+  persistencia, no solo el envío**: con el flag apagado el relay RECHAZA la
+  registración (`feature_disabled`) y no almacena ningún token — nada que
+  filtrar, nada que activar si el flag se enciende después (la eliminación
+  del binding sí se permite siempre). Fail-closed con tests dedicados.
+  Si el envío a Expo falla (ticket no aceptado), el wake cae al topic ntfy
+  en vez de perderse. Evento `mailbox:push:token` con las
   mismas reglas que el endpoint UnifiedPush (solo socket autenticado, regla de
   oro #3; purga 48 h). El wake es el genérico R2 ("Nuevo mensaje cifrado ·
   E2EE") vía API de Expo; DeviceNotRegistered elimina el binding. **Reducto

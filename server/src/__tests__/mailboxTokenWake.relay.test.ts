@@ -186,22 +186,68 @@ describe('Slice 2b.4 — flag-gated Expo token wake on the mailbox path', () => 
     await new Promise((r) => setTimeout(r, 50));
   }, 30_000);
 
-  test('flag OFF -> binding ignored, wake falls back to the topic (fail-closed)', async () => {
+  test('flag OFF -> registration REJECTED and nothing persisted (fail-closed at persistence)', async () => {
     delete process.env['PUSH_MAILBOX_TOKEN_WAKE'];
     const sender = makeMailbox(93011);
     const recipient = makeMailbox(93012);
 
+    // Registration with the flag off must be refused outright — a disabled
+    // relay never collects stable tokens.
     const recSock = await connectMailbox(recipient);
-    expect((await setToken(recSock, recipient.mailboxId, TOKEN)).ok).toBe(true);
+    const regAck = await setToken(recSock, recipient.mailboxId, TOKEN);
+    expect(regAck.ok).toBe(false);
+    expect(regAck.error).toBe('feature_disabled');
     recSock.disconnect();
     await new Promise((r) => setTimeout(r, 50));
 
+    // Regression proof that nothing was persisted: even flipping the flag ON
+    // afterwards, the wake goes to the topic (no stale binding to activate).
+    process.env['PUSH_MAILBOX_TOKEN_WAKE'] = 'on';
     const senderSock = await connectMailbox(sender);
     await sendMb(senderSock, makeMbWire(recipient.mailboxId, 'tk-w2'));
     await new Promise((r) => setTimeout(r, 100));
 
     const calls = publishCalls(fetchSpy);
     expect(calls).not.toContain(EXPO_API);
+    expect(calls).toContain(`${NTFY_URL}/${mailboxTopic(recipient.mailboxId)}`);
+
+    senderSock.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+  }, 30_000);
+
+  test('deletion is allowed even with the flag off', async () => {
+    delete process.env['PUSH_MAILBOX_TOKEN_WAKE'];
+    const keys = makeMailbox(93015);
+    const sock = await connectMailbox(keys);
+    const ack = await setToken(sock, keys.mailboxId, null);
+    expect(ack.ok).toBe(true);
+    sock.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+  }, 30_000);
+
+  test('Expo failure (non-accepted ticket) falls back to the topic publish', async () => {
+    process.env['PUSH_MAILBOX_TOKEN_WAKE'] = 'on';
+    const sender = makeMailbox(93017);
+    const recipient = makeMailbox(93018);
+
+    const recSock = await connectMailbox(recipient);
+    expect((await setToken(recSock, recipient.mailboxId, TOKEN)).ok).toBe(true);
+    recSock.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Expo answers 500 for the wake POST — the wake must not be lost.
+    fetchSpy.mockImplementation(async (url: unknown) =>
+      String(url) === EXPO_API
+        ? new Response('oops', { status: 500 })
+        : new Response(null, { status: 200 }),
+    );
+
+    const senderSock = await connectMailbox(sender);
+    await sendMb(senderSock, makeMbWire(recipient.mailboxId, 'tk-w5'));
+    await new Promise((r) => setTimeout(r, 100));
+
+    const calls = publishCalls(fetchSpy);
+    expect(calls).toContain(EXPO_API);
     expect(calls).toContain(`${NTFY_URL}/${mailboxTopic(recipient.mailboxId)}`);
 
     senderSock.disconnect();
@@ -220,6 +266,7 @@ describe('Slice 2b.4 — flag-gated Expo token wake on the mailbox path', () => 
   }, 30_000);
 
   test('malformed token rejected with invalid_token', async () => {
+    process.env['PUSH_MAILBOX_TOKEN_WAKE'] = 'on';
     const keys = makeMailbox(93031);
     const sock = await connectMailbox(keys);
     const ack = await setToken(sock, keys.mailboxId, 'https://not-a-token.example.org');

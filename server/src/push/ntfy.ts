@@ -62,8 +62,13 @@ export function isSafeUpEndpoint(raw: string): boolean {
 
 // ── Slice 2b.4: Expo/APNs token bindings (iOS app-killed wake) ───────────────
 
-/** Server-side opt-in for the token wake path (documented reduct, §7.3/R5). */
-function isTokenWakeEnabled(): boolean {
+/**
+ * Server-side opt-in for the token wake path (documented reduct, §7.3/R5).
+ * Exported: handler.ts also gates token REGISTRATION on it, so a disabled
+ * relay never collects stable tokens in the first place (fail-closed at
+ * persistence, not just at delivery).
+ */
+export function isTokenWakeEnabled(): boolean {
   return (process.env['PUSH_MAILBOX_TOKEN_WAKE'] ?? 'off').toLowerCase() === 'on';
 }
 
@@ -74,12 +79,17 @@ export function isExpoWakeToken(raw: string): boolean {
 
 /**
  * Send the generic zero-metadata wake ("Nuevo mensaje cifrado · E2EE", same
- * body as the aegisId path — R2) to one Expo token via the Expo push API.
+ * VISIBLE body as the aegisId path — R2, and deliberately not a silent push:
+ * iOS aggressively rate-limits content-available-only pushes and may never
+ * deliver them to a killed app, exactly the case this path exists for. See the
+ * identical rationale on notifyRecipient (push/expo.ts).
  * Uses fetch directly (not expo-server-sdk) so tests can spy the same global
- * seam as every other publish here. Returns 'gone' when Expo reports
- * DeviceNotRegistered so the caller can drop the dead binding.
+ * seam as every other publish here. Returns 'ok' ONLY on an explicit accepted
+ * ticket; 'gone' when Expo reports DeviceNotRegistered (caller drops the
+ * binding); 'failed' for everything else (non-2xx, malformed body, timeout) so
+ * the caller can fall back to the ntfy topic instead of losing the wake.
  */
-async function sendTokenWake(expoToken: string): Promise<'ok' | 'gone'> {
+async function sendTokenWake(expoToken: string): Promise<'ok' | 'gone' | 'failed'> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PUBLISH_TIMEOUT_MS);
   try {
@@ -104,10 +114,13 @@ async function sendTokenWake(expoToken: string): Promise<'ok' | 'gone'> {
     if (parsed?.data?.status === 'error' && parsed.data.details?.error === 'DeviceNotRegistered') {
       return 'gone';
     }
-    return 'ok';
+    // Success ONLY on an explicit accepted ticket — anything else (non-2xx,
+    // malformed body, other Expo errors) must let the caller fall back.
+    if (res.ok && parsed?.data?.status === 'ok') return 'ok';
+    return 'failed';
   } catch (e) {
     if (isDev) console.warn('[push:ntfy] token wake failed', (e as Error).message);
-    return 'ok';
+    return 'failed';
   } finally {
     clearTimeout(timer);
   }
@@ -176,7 +189,10 @@ export async function notifyMailbox(mailboxIdB64: string): Promise<void> {
       if (token) {
         const outcome = await sendTokenWake(token);
         if (outcome === 'gone') await pushMailboxTokenRepo.delete(mailboxIdB64);
-        return;
+        // Only a confirmed accepted ticket ends here; 'gone' and 'failed' fall
+        // through to the topic publish so the wake is never silently lost
+        // (e.g. the 2b.2 in-app subscription can still hear it).
+        if (outcome === 'ok') return;
       }
     } catch (e) {
       if (isDev) console.warn('[push:ntfy] token lookup failed', (e as Error).message);

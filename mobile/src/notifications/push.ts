@@ -492,6 +492,9 @@ export async function unregisterPush(aegisId: string): Promise<void> {
     });
   } catch { /* best effort */ }
   registered = false;
+  // Drop the cached token so a later mailbox auth (new profile / next login)
+  // can never re-emit the previous session's wake binding.
+  lastExpoToken = null;
 }
 
 let activeChatId: string | null = null;

@@ -8,7 +8,7 @@ import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '.
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';
 import { notifyRecipient } from '../push/expo.js';
-import { notifyMailbox, isSafeUpEndpoint, isExpoWakeToken } from '../push/ntfy.js';
+import { notifyMailbox, isSafeUpEndpoint, isExpoWakeToken, isTokenWakeEnabled } from '../push/ntfy.js';
 import {
   AEGIS_ID_RE,
   EnvelopeIn,
@@ -427,8 +427,17 @@ export function attachRelay(io: SocketServer) {
         }
         try {
           if (expoToken === null) {
+            // Deletion is ALWAYS allowed, flag or no flag — a client must be
+            // able to retract its binding even after the operator disables
+            // the feature.
             await pushMailboxTokenRepo.delete(mailboxId);
             ack?.({ ok: true }); return;
+          }
+          // Fail-closed at PERSISTENCE, not just delivery: a relay with the
+          // flag off never collects stable tokens (nothing to leak, nothing
+          // to activate later if the flag flips on).
+          if (!isTokenWakeEnabled()) {
+            ack?.({ ok: false, error: 'feature_disabled' }); return;
           }
           if (typeof expoToken !== 'string' || !isExpoWakeToken(expoToken)) {
             ack?.({ ok: false, error: 'invalid_token' }); return;
