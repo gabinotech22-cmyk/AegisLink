@@ -226,13 +226,21 @@ Google/Apple; el topic rota por época como todo lo demás.
   clientes clearnet comparten el visitante loopback al no reenviar IPs).
   **Paso manual al desplegar: abrir el puerto 8443/tcp en el firewall del VM.**
   El onion (8090) queda intacto para la suscripción in-app de 2b.2.
-- **2b.3b (mobile+relay: conector UnifiedPush)** — PENDIENTE. Conector
-  UnifiedPush propio (receiver Android vía config-plugin), registro con el
-  distribuidor instalado (ntfy app / Sunup), binding autenticado
-  `M(época) → endpoint` declarado al relay (v2 de §5.1: probado por posesión de
-  la clave de mailbox), publish del relay al endpoint en vez de al topic cuando
-  hay binding, rotación del binding por época, y fallback FCM opt-in tras flag
-  (§7). Trabajo nativo → requiere prebuild + APK.
+- **2b.3b-relay (binding `M(época) → endpoint`)** — ✅ HECHO (rama
+  `feat/up-endpoint-binding`). Evento `mailbox:push:endpoint` SOLO sobre el
+  socket de mailbox ya autenticado por challenge (regla de oro #3: el binding
+  exige posesión de la clave de firma del mailbox; un atacante que conozca el
+  id no puede secuestrar sus wakes — test dedicado). Tabla `push_endpoints`
+  (SQLite+PG) + `pushEndpointRepo`; `notifyMailbox()` publica al endpoint si
+  hay binding (y lo elimina ante 404/410), si no cae al topic co-hosteado de
+  2b.1/2b.2. Guard SSRF `isSafeUpEndpoint` (solo https, sin IP literales /
+  localhost / single-label / .local/.internal/.onion / credenciales, cap 512).
+  Purga de bindings >48 h (2 épocas) en el scheduler (R1: nada estable
+  sobrevive la rotación). Tests: `upEndpointBinding.relay.test.ts`.
+- **2b.3c (mobile: conector UnifiedPush)** — PENDIENTE. Receiver Android vía
+  config-plugin, registro con el distribuidor instalado (ntfy app / Sunup),
+  emitir `mailbox:push:endpoint` al conectar/rotar época, y fallback FCM
+  opt-in tras flag (§7). Trabajo nativo → requiere prebuild + APK.
 - **2b.4** — iOS APNs tras flag (fast-follow, no bloquea Android).
 
 ## 10. Pregunta abierta antes de implementar 2b.0 — RESUELTA

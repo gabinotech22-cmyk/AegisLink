@@ -85,6 +85,18 @@ export function initSqliteSchema(db: DatabaseSync) {
       updated_at     INTEGER NOT NULL
     );
 
+    -- Slice 2b.3b: UnifiedPush endpoint per (opaque, per-epoch) mailbox id.
+    -- Registered ONLY over an authenticated mailbox socket (possession of the
+    -- mailbox signing key), so knowing a mailbox id is not enough to hijack
+    -- its wake-ups. Rotates with the epoch like the mailbox itself: stale rows
+    -- are purged after PUSH_ENDPOINT_TTL_MS (no stable token survives rotation,
+    -- design constraint R1 in docs/FASE4-SLICE2B-PUSH-DESIGN.md).
+    CREATE TABLE IF NOT EXISTS push_endpoints (
+      mailbox_id TEXT PRIMARY KEY,
+      endpoint   TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS prekeys_signed (
       aegis_id       TEXT NOT NULL,
       device_id      TEXT NOT NULL DEFAULT 'default',
