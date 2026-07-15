@@ -215,9 +215,24 @@ Google/Apple; el topic rota por época como todo lo demás.
     habla SOCKS) **y** mantener el onion documentado para quien use Orbot. La
     suscripción de 2b.2 (app viva) usa SIEMPRE el onion; el clearnet es solo para
     el distribuidor externo de 2b.3.
-- **2b.3** — app matada: distribuidor UnifiedPush (ntfy app / Sunup) por
-  topic-época + fallback FCM sin distribuidor, con flags de degradación honesta.
-  Requiere la exposición clearnet de arriba. Trabajo nativo/config-plugin.
+- **2b.3a (infra: ntfy clearnet)** — ✅ HECHO (rama `feat/ntfy-clearnet-exposure`).
+  nginx sirve ntfy por HTTPS en `aegislink.duckdns.org:8443` (bloque nuevo en
+  `infra/nginx/aegislink.conf`): `access_log off`, **sin** `X-Real-IP`/
+  `X-Forwarded-For` hacia ntfy (`behind-proxy=false` → ntfy solo ve loopback),
+  upgrade WebSocket + streaming. `docker-compose.yml`: ntfy publica
+  `127.0.0.1:8090:80` (solo loopback, patrón idéntico al relay:3001),
+  `NTFY_BASE_URL=https://aegislink.duckdns.org:8443` (los endpoints UnifiedPush
+  que ntfy reparte embeben esta URL) y límites de visitante ampliados (todos los
+  clientes clearnet comparten el visitante loopback al no reenviar IPs).
+  **Paso manual al desplegar: abrir el puerto 8443/tcp en el firewall del VM.**
+  El onion (8090) queda intacto para la suscripción in-app de 2b.2.
+- **2b.3b (mobile+relay: conector UnifiedPush)** — PENDIENTE. Conector
+  UnifiedPush propio (receiver Android vía config-plugin), registro con el
+  distribuidor instalado (ntfy app / Sunup), binding autenticado
+  `M(época) → endpoint` declarado al relay (v2 de §5.1: probado por posesión de
+  la clave de mailbox), publish del relay al endpoint en vez de al topic cuando
+  hay binding, rotación del binding por época, y fallback FCM opt-in tras flag
+  (§7). Trabajo nativo → requiere prebuild + APK.
 - **2b.4** — iOS APNs tras flag (fast-follow, no bloquea Android).
 
 ## 10. Pregunta abierta antes de implementar 2b.0 — RESUELTA

@@ -143,15 +143,30 @@ services:
     restart: unless-stopped
     command: serve
     environment:
-      NTFY_BASE_URL: http://aegislink-ntfy
+      # Public HTTPS base URL (Slice 2b.3): UnifiedPush endpoint URLs that ntfy
+      # hands to distributors embed this value, so it must be the clearnet URL
+      # nginx serves on :8443 — NOT the internal container name.
+      NTFY_BASE_URL: https://aegislink.duckdns.org:8443
+      # We ARE behind nginx now, but we deliberately do NOT forward client IPs
+      # (privacy: zero metadata). behind-proxy stays false so ntfy never trusts
+      # an X-Forwarded-For header; every clearnet visitor is keyed on nginx's
+      # loopback IP. That collapses per-IP rate limits onto one shared visitor,
+      # so raise the visitor limits enough for a fleet of wake subscriptions.
       NTFY_BEHIND_PROXY: "false"
+      NTFY_VISITOR_SUBSCRIPTION_LIMIT: "5000"
+      NTFY_VISITOR_REQUEST_LIMIT_BURST: "500"
+      NTFY_VISITOR_REQUEST_LIMIT_REPLENISH: "1s"
       # Keep at rest minimal: messages are wake-up pings, not history a client
       # needs to replay — the queued ciphertext lives in the relay's own DB.
       NTFY_CACHE_DURATION: "12h"
       # warn-only: no per-publish/subscribe access logging.
       NTFY_LOG_LEVEL: warn
-    # No published ports: subscribe reaches ntfy only over the .onion (tor
-    # container proxies virtual port 8090 -> ntfy:80); publish is relay-internal.
+    # Loopback-only publish port for nginx (clearnet HTTPS :8443 -> here).
+    # Same pattern as the relay's 3001: never published on 0.0.0.0 — TLS
+    # termination and the no-IP-logging policy both live in nginx. Tor
+    # subscribe path (onion virtual port 8090 -> ntfy:80) is unchanged.
+    ports:
+      - "127.0.0.1:8090:80"
     networks:
       - aegis_internal
     logging:
