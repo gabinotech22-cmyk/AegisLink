@@ -39,6 +39,7 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
   const insets = useSafeAreaInsets();
   const peerId = useCall((s) => s.peer);
   const callId = useCall((s) => s.callId);
+  const pendingAction = useCall((s) => s.pendingAction);
   const media = useCall((s) => s.media);
   const peer = useContacts((s) => (peerId ? s.get(peerId) : undefined));
   const name = peer?.name ?? peerId ?? 'unknown';
@@ -115,6 +116,23 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
     if (callId) void dismissIncomingCallNotification(callId);
     onReject();
   }
+
+  // Auto-accept/decline when the user already pressed the action on the OS
+  // incoming-call notification. This screen only mounts once the app is in the
+  // foreground, so acceptCall() (fired by onAccept) always has mic +
+  // foreground-service access here — unlike running it straight from the
+  // notification handler in the background, which connected unreliably. The
+  // flag is one-shot: clear it before acting so a re-render can't double-fire.
+  useEffect(() => {
+    if (pendingAction === 'accept') {
+      useCall.getState().setPendingAction(null);
+      handleAccept();
+    } else if (pendingAction === 'decline') {
+      useCall.getState().setPendingAction(null);
+      handleReject();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAction]);
 
   async function handleQuickReply(text: string) {
     setShowReplies(false);

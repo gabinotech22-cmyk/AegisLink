@@ -175,25 +175,23 @@ describe('calls.ts — pendingAction consumed on invite (re)delivery', () => {
     mockOpenCallInvite.mockReturnValue({ from: 'peer-A', offer: 'sdp-offer', callKey: new Uint8Array(32) });
   });
 
-  it('auto-accepts as soon as the invite lands, if the user already pressed Accept on the notification', async () => {
+  it('re-arms the Accept intent for the foreground ring screen — never answers in the background', async () => {
     useCall.getState().setPendingAction('accept');
     attachCallHandlers();
     const onInvite = capturedInviteHandler();
 
     await onInvite({ callId: 'call-Z', media: 'audio', ciphertext: 'ct', nonce: 'n', epk: 'epk' });
 
-    // acceptCall() is fired via `void acceptCall()` (not awaited by
-    // processIncomingInvite), but its synchronous prefix — setStatus —
-    // already ran by the time onInvite resolves.
-    expect(useCall.getState().status).toBe('connecting');
-    // The one-shot flag must not survive being consumed.
-    expect(useCall.getState().pendingAction).toBeNull();
-
-    // Let acceptCall()'s remaining awaited chain (turnConfig, createPeer,
-    // setRemoteOffer, flushPendingIce, createAnswer, emitSealedSignal) drain
-    // before asserting its tail effect (pendingOffer cleared once answered).
+    // acceptCall() must NOT run here: it opens the mic + a foreground microphone
+    // service, which only work with the app foregrounded. So the call stays
+    // ringing and no peer connection was created in this background path.
+    expect(useCall.getState().status).toBe('incoming-ringing');
+    expect(useCall.getState().pendingOffer).toBe('sdp-offer');
     await flushMicrotasks();
-    expect(useCall.getState().pendingOffer).toBeNull();
+    expect(useCall.getState().status).toBe('incoming-ringing');
+    // The intent survives (startIncoming cleared it; processIncomingInvite
+    // re-armed it) so IncomingCallScreen can consume it once foregrounded.
+    expect(useCall.getState().pendingAction).toBe('accept');
   });
 
   it('auto-declines as soon as the invite lands, if the user already pressed Decline on the notification', async () => {
