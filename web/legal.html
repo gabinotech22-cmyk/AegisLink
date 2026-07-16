@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Legal Requests & Transparency — AegisLink</title>
+<meta name="description" content="What AegisLink can and cannot produce in response to a legal order — written from the architecture, which is open source and verifiable.">
+<style>
+  :root {
+    --bg: #07090a; --bg-2: #0d1112; --text: #e8f5ef; --dim: #9fb8ac;
+    --accent: #5bf2b9; --border: rgba(91,242,185,0.18);
+    --sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono: 'Cascadia Code', 'JetBrains Mono', monospace;
+  }
+  * { margin: 0; box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { font-family: var(--sans); color: var(--text); line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 48px 22px 80px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; }
+  header a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 20px; display: flex; align-items: center; gap: 12px; }
+  h1 { font-size: 34px; line-height: 1.15; margin-bottom: 10px; }
+  .meta { font-family: var(--mono); font-size: 13px; color: var(--accent); margin-bottom: 36px; }
+  h2 { font-size: 21px; margin: 40px 0 12px; padding-top: 22px; border-top: 1px solid var(--border); }
+  p, li { color: var(--dim); font-size: 16px; }
+  p { margin: 12px 0; }
+  strong { color: var(--text); }
+  code { font-family: var(--mono); font-size: 14px; color: var(--accent); }
+  ul, ol { padding-left: 22px; margin: 12px 0; }
+  li { margin: 6px 0; }
+  a { color: var(--accent); }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 10px 12px; border: 1px solid var(--border); color: var(--dim); vertical-align: top; }
+  th { color: var(--text); background: var(--bg-2); }
+  .note { font-style: italic; margin-top: 42px; color: var(--dim); font-size: 14.5px; }
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a href="/">
+      <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/><rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/><rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/></svg>
+      AegisLink
+    </a>
+  </header>
+
+  <h1>Legal Requests &amp; Transparency</h1>
+  <p><strong>What AegisLink can — and cannot — produce in response to a legal order.</strong></p>
+  <p>This page exists so that users, journalists and authorities all know the answer <em>before</em> anyone asks. It is written from the system's architecture, which is open source and independently verifiable: the honest answer to most requests is that <strong>the data does not exist</strong>, not that we refuse to hand it over.</p>
+  <h2>The short version</h2>
+  <p>AegisLink is designed so that the operator holds as close to nothing as possible. We cannot decrypt messages, we do not know users' names, phone numbers or email addresses (we never collect them), and we do not keep logs of who talks to whom, when, or how often. A subpoena cannot compel us to produce records that were never created.</p>
+  <h2>What we do NOT have</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Commonly requested</th><th>Our answer</th></tr>
+    <tr><td>User's real name, phone number, email</td><td><strong>Never collected.</strong> Registration creates a keypair on the user's device; no personal data is requested at any point.</td></tr>
+    <tr><td>Message content</td><td><strong>Cannot decrypt.</strong> All messages are end-to-end encrypted (X3DH + Double Ratchet); private keys exist only on user devices.</td></tr>
+    <tr><td>Attachments, voice/video call content</td><td><strong>Cannot decrypt.</strong> Attachments are encrypted client-side; calls are peer-to-peer with DTLS-SRTP, and call signaling is sealed before it reaches the relay.</td></tr>
+    <tr><td>Contact lists / social graph</td><td><strong>Not stored.</strong> Contacts live only on the user's device. The relay routes individual encrypted envelopes and keeps no record of relationships.</td></tr>
+    <tr><td>Message history</td><td><strong>Not stored.</strong> The relay queues an encrypted message only until it is delivered, then deletes it.</td></tr>
+    <tr><td>Access logs, IP logs, login timestamps</td><td><strong>Not logged</strong>, by configuration and by design (<code>access_log off</code>; the application keeps no per-user access records).</td></tr>
+    <tr><td>Message frequency / traffic analysis records</td><td><strong>Not stored.</strong> Additionally, messages are padded to fixed size buckets, so even stored ciphertexts leak minimal information.</td></tr>
+    <tr><td>Location data</td><td><strong>Never collected.</strong> The app does not request location permissions.</td></tr>
+    <tr><td>Payment information</td><td><strong>Not applicable.</strong> No accounts, no billing data tied to identities.</td></tr>
+  </table></div>
+  <h2>What we DO have (complete list)</h2>
+  <p>Being honest about the residue matters more than a clean marketing claim:</p>
+  <ul>
+    <li><strong>Public key material</strong>: identity public keys, signed prekeys and one-time prekeys published by devices so others can initiate encrypted sessions. This is public-by-design cryptographic material.</li>
+    <li><strong>Undelivered encrypted envelopes</strong>: opaque ciphertexts queued for offline recipients, deleted on delivery. We cannot read them.</li>
+    <li><strong>Push tokens</strong>: an FCM/APNs token per device that wants wake-up notifications. The push payload never contains content or sender identity — it is a generic "wake up". The token is held by Google/Apple infrastructure as with any app that uses push.</li>
+    <li><strong>Transient connection data</strong>: like any Internet server, the relay sees the IP address of a connected client <em>at the moment of connection</em>. We do not log it or associate it with identities. Users whose threat model includes network-level observation should connect through Tor or a VPN.</li>
+  </ul>
+  <h2>Our commitments</h2>
+  <ul>
+    <li>We will never add a backdoor, key escrow, or client-side scanning. The clients are GPL-3.0 and the relay is AGPL-3.0 — a modified server must publish its source, and the protocol treats the server as untrusted anyway: even a fully malicious relay cannot read messages or forge identities (see <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>, threat model).</li>
+    <li>We will respond to valid legal process with what exists — which is the list above — and will not fabricate capabilities we do not have.</li>
+    <li>Where legally permitted, we will notify affected users of requests concerning them and publish aggregate statistics about requests received.</li>
+    <li>If we are ever legally compelled to change any of the above, we will say so to the maximum extent the law allows. The strongest guarantee, however, is structural: <strong>anyone can self-host the relay</strong> and be subject to no operator at all.</li>
+  </ul>
+  <h2>Verify, don't trust</h2>
+  <p>Every claim on this page is checkable in the source code: the relay (<code>server/</code>), the metadata-stripping and padding layer (<code>mobile/src/crypto/metadata.ts</code>), and the protocol document (<a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>). If you find a discrepancy between this page and the code, that is a security issue — please report it via <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+  <p class="note">Contact for legal process: <a href="mailto:gabinotech22@gmail.com">gabinotech22@gmail.com</a></p>
+
+  <footer>&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacy</a> &middot; <a href="/terms.html">Terms</a> &middot; <a href="/legal.html">Legal requests</a></footer>
+</div>
+</body>
+</html>
