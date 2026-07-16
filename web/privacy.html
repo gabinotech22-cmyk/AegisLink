@@ -45,7 +45,7 @@
   </header>
 
   <h1>Privacy Policy</h1>
-  <p class="meta">Effective date: 2026-05-21 · Last updated: 2026-05-21</p>
+  <p class="meta">Effective date: 2026-05-21 · Last updated: 2026-07-16</p>
 
   <p>AegisLink is a privacy-first encrypted messaging application. This policy explains exactly what data we collect, what we do not collect, and why. We have written it to be read, not to obscure.</p>
 
@@ -59,10 +59,10 @@
     <tr><td>A randomly generated pseudonymous identifier (&ldquo;AegisID&rdquo;)</td><td>To route encrypted messages to your device</td><td>Until you delete your account</td></tr>
     <tr><td>Public cryptographic keys (identity key, signed pre-key, one-time pre-keys)</td><td>To enable other users to establish an E2EE session with you without a central authority</td><td>Until you rotate or delete them</td></tr>
     <tr><td>Encrypted message ciphertext in transit</td><td>To forward messages to recipients who are temporarily offline</td><td>Deleted immediately upon delivery or after 30 days maximum if undelivered</td></tr>
-    <tr><td>FCM/APNs device token</td><td>To send a silent wake-up notification when a message is waiting</td><td>Stored only while you are registered; deleted on account deletion</td></tr>
+    <tr><td>Push token (an app-scoped routing identifier issued by Apple/Google — <strong>not</strong> a hardware or advertising ID)</td><td>To send a generic wake-up notification when a message is waiting</td><td>Stored only while you are registered; deleted on account deletion</td></tr>
   </table></div>
   <p>That is the complete list.</p>
-  <p>We do not use analytics SDKs, crash reporting services that phone home, or any third-party SDK that transmits data outside the AegisLink infrastructure.</p>
+  <p>We do not use analytics SDKs or crash-reporting services that phone home. The one external service we rely on is push delivery: wake-up notifications are routed through Expo's push service and Apple/Google push infrastructure, which receive only your push token and a generic, contentless payload ("new encrypted message" / "incoming call") — never message content, sender, recipient, or any other metadata.</p>
 
   <h2>3. What We Do NOT Collect</h2>
   <p>The following data is <strong>never</strong> collected, stored, or transmitted to our servers:</p>
@@ -81,7 +81,7 @@
 
   <h2>4. End-to-End Encryption</h2>
   <p>All messages, attachments, voice calls, and video calls are encrypted end-to-end using the Double Ratchet Algorithm (forward-secret session keys) with X3DH key agreement, implemented using the TweetNaCl library (auditable open-source cryptography).</p>
-  <p><strong>Your private keys never leave your device.</strong> They are generated on your device at setup, stored in the operating system's secure enclave (iOS Secure Enclave / Android Keystore via <code>expo-secure-store</code>), and are never transmitted anywhere.</p>
+  <p><strong>Your private keys never leave your device.</strong> They are generated on your device at setup, stored in the operating system's protected credential storage (iOS Keychain Services / Android Keystore, via <code>expo-secure-store</code>), and are never transmitted anywhere.</p>
   <p>The AegisLink relay server is architecturally incapable of reading your messages. Even if the server were compromised or served with a legal order, the ciphertext it holds would be computationally infeasible to decrypt without the private keys that exist only on your device.</p>
 
   <h2>5. Ephemeral Messages</h2>

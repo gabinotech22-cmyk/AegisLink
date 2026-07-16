@@ -95,7 +95,7 @@ These cannot be automated and must be done by the team before the first submissi
       - SKU: e.g. `aegislink-ios-001`
       - Primary language: English
 - [ ] Note the numeric Apple ID assigned by ASC — this is `ASC_APP_ID`
-- [ ] Add Privacy Policy URL in ASC → App Information (use `https://aegislink.io/privacy` or GitHub Pages URL once docs/privacy-policy.md is published)
+- [ ] Add Privacy Policy URL in ASC → App Information (`https://aegis-link.it/privacy.html` — live since PR #343; smoke-test it after `infra/deploy-web.sh`)
 - [ ] Complete App Privacy questionnaire (Data Types: select "We do not collect data")
 - [ ] Upload screenshots for all required device sizes (6.7", 6.5", 5.5" iPhone; 12.9" iPad if supportsTablet is enabled — currently false, so iPad not required)
 - [ ] Set age rating (Unrestricted — no objectionable content)
