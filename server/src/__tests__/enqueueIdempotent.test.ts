@@ -42,6 +42,23 @@ describe('messageRepo.enqueue idempotency', () => {
     expect(retry.ok).toBe(true);
   });
 
+  it('a retried duplicate still resolves ok when the recipient queue is full', async () => {
+    const recipient = 'recipient-full';
+    const dupId = 'msg-dup-full';
+    expect((await messageRepo.enqueue(row(dupId, recipient))).ok).toBe(true);
+    // Fill the queue to the cap (the duplicate above counts as one).
+    const { MAX_QUEUED_PER_RECIPIENT } = await import('../db/client.js');
+    for (let i = 1; i < MAX_QUEUED_PER_RECIPIENT; i++) {
+      await messageRepo.enqueue(row(`msg-fill-${i}`, recipient));
+    }
+    // A genuinely NEW message is rejected...
+    const fresh = await messageRepo.enqueue(row('msg-overflow', recipient));
+    expect(fresh).toEqual({ ok: false, reason: 'queue_full' });
+    // ...but the retry of an already-queued id must still be success.
+    const retry = await messageRepo.enqueue(row(dupId, recipient));
+    expect(retry.ok).toBe(true);
+  });
+
   it('the duplicate does not create a second queued copy', async () => {
     await messageRepo.enqueue(row('msg-dup-2', 'recipient-b'));
     await messageRepo.enqueue(row('msg-dup-2', 'recipient-b'));

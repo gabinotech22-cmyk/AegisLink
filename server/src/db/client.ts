@@ -250,6 +250,11 @@ export const MAX_QUEUED_PER_RECIPIENT = 500;
 export const messageRepo = {
   async enqueue(row: Omit<MessageRow, 'drained_by'>): Promise<{ ok: boolean; reason?: string }> {
     const expiresAt = row.expires_at > 0 ? row.expires_at : row.created_at + MESSAGE_TTL_MS;
+    // Idempotency first: a retried envelope id that is already queued is
+    // success, and must not be re-judged against the capacity gate below
+    // (a full queue would otherwise reject the retry with queue_full).
+    const existing = await dbGet<{ id: string }>(`SELECT id FROM messages WHERE id = ?`, [row.id]);
+    if (existing) return { ok: true };
     // Enforce per-recipient queue limit before inserting.
     const countRow = await dbGet<{ n: number }>(
       `SELECT COUNT(*) as n FROM messages WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)`,
