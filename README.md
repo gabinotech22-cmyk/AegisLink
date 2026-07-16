@@ -1,5 +1,7 @@
 # AegisLink
 
+![AegisLink — the messenger that knows nothing about you: E2EE chat with sealed sender, encrypted calls, and panic mode with decoy profile](https://raw.githubusercontent.com/gabinotech22-cmyk/aegislink-assets/main/readme/hero.png)
+
 **End-to-end encrypted messenger. Zero metadata. Anonymous by default.**
 
 AegisLink is a privacy-first messaging app: no email, no phone number, no real
