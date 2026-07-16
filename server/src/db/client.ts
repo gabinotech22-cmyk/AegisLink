@@ -258,8 +258,13 @@ export const messageRepo = {
     if (countRow && countRow.n >= MAX_QUEUED_PER_RECIPIENT) {
       return { ok: false, reason: 'queue_full' };
     }
+    // ON CONFLICT DO NOTHING (works on both SQLite and PG): senders retry
+    // delivery after reconnects, so the same envelope id can arrive twice. A
+    // duplicate means the message is already queued — that IS success. Without
+    // this, the UNIQUE(messages.id) violation became an unhandledRejection
+    // that crash-looped the relay (seen live 2026-07-16).
     await dbRun(
-      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64, epk_b64) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?)`,
+      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64, epk_b64) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?) ON CONFLICT(id) DO NOTHING`,
       [row.id, row.recipient, row.ciphertext_b64, row.nonce_b64, row.created_at, expiresAt, row.sender_pub_b64 ?? null, row.epk_b64 ?? null]
     );
     return { ok: true };
