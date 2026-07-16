@@ -735,6 +735,20 @@ export async function dismissIncomingCallNotification(callId: string): Promise<v
   try {
     await Notifications.dismissNotificationAsync(incomingCallNotificationId(callId));
   } catch { /* already dismissed / not found — fine */ }
+  // iOS: the killed/background wake is a REMOTE push ("Llamada entrante · E2EE",
+  // category aegislink-call) whose identifier is assigned by the OS — the local
+  // dismiss above can never retract it, so its Contestar/Rechazar banner used
+  // to outlive the call (and compete with the in-app ring UI). Sweep every
+  // presented call_wakeup notification; zero-metadata means it carries no
+  // callId, but at most one call rings at a time so a blanket sweep is exact.
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    await Promise.all(
+      presented
+        .filter((n) => (n.request.content.data as { kind?: string } | null)?.kind === 'call_wakeup')
+        .map((n) => Notifications.dismissNotificationAsync(n.request.identifier).catch(() => {})),
+    );
+  } catch { /* notification center unavailable — fine */ }
 }
 
 /**
