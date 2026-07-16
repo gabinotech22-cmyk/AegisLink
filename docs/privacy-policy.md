@@ -85,7 +85,7 @@ We do not accept credit cards, PayPal, or any payment method that would require 
 |-----------|-----------------|
 | Undelivered encrypted messages | Max 30 days; deleted immediately upon delivery |
 | Public keys (pre-keys) | Until rotated or account deleted |
-| FCM/APNs tokens | Until account deleted |
+| Push token | While registered; deleted on account deletion |
 | Server-side system logs (aggregate, no user attribution) | 7 days rolling |
 
 On account deletion, all data associated with your AegisID is permanently deleted within 24 hours. There is no retention beyond this window.
