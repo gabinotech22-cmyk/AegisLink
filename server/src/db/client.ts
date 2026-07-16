@@ -250,6 +250,11 @@ export const MAX_QUEUED_PER_RECIPIENT = 500;
 export const messageRepo = {
   async enqueue(row: Omit<MessageRow, 'drained_by'>): Promise<{ ok: boolean; reason?: string }> {
     const expiresAt = row.expires_at > 0 ? row.expires_at : row.created_at + MESSAGE_TTL_MS;
+    // Idempotency first: a retried envelope id that is already queued is
+    // success, and must not be re-judged against the capacity gate below
+    // (a full queue would otherwise reject the retry with queue_full).
+    const existing = await dbGet<{ id: string }>(`SELECT id FROM messages WHERE id = ?`, [row.id]);
+    if (existing) return { ok: true };
     // Enforce per-recipient queue limit before inserting.
     const countRow = await dbGet<{ n: number }>(
       `SELECT COUNT(*) as n FROM messages WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)`,
@@ -258,8 +263,13 @@ export const messageRepo = {
     if (countRow && countRow.n >= MAX_QUEUED_PER_RECIPIENT) {
       return { ok: false, reason: 'queue_full' };
     }
+    // ON CONFLICT DO NOTHING (works on both SQLite and PG): senders retry
+    // delivery after reconnects, so the same envelope id can arrive twice. A
+    // duplicate means the message is already queued — that IS success. Without
+    // this, the UNIQUE(messages.id) violation became an unhandledRejection
+    // that crash-looped the relay (seen live 2026-07-16).
     await dbRun(
-      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64, epk_b64) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?)`,
+      `INSERT INTO messages (id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64, epk_b64) VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?) ON CONFLICT(id) DO NOTHING`,
       [row.id, row.recipient, row.ciphertext_b64, row.nonce_b64, row.created_at, expiresAt, row.sender_pub_b64 ?? null, row.epk_b64 ?? null]
     );
     return { ok: true };
