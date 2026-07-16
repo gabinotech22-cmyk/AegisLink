@@ -116,9 +116,9 @@ If we make material changes to this policy, we will update the effective date ab
 
 For privacy questions, data deletion requests, or security disclosures:
 
-- Email: privacy@aegislink.io (PGP key available in the repository)
+- Email: aegislink.report@gmail.com
 - GitHub: https://github.com/gabinotech22-cmyk/AegisLink/security/advisories/new (for security issues)
 
 ---
 
-*Una versión en español de esta política está disponible bajo petición. Envíe un correo a privacy@aegislink.io con el asunto "Privacy Policy — Español".*
+*Una versión en español de esta política está disponible bajo petición. Envíe un correo a aegislink.report@gmail.com con el asunto "Privacy Policy — Español".*
