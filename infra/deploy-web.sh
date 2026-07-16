@@ -31,6 +31,7 @@ SCP=(scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new)
 
 echo "[deploy-web] Uploading landing page and nginx config..."
 "${SCP[@]}" "$ROOT/web/index.html" "$USER@$HOST:/tmp/aegislink-web-index.html"
+"${SCP[@]}" "$ROOT/web/privacy.html" "$USER@$HOST:/tmp/aegislink-web-privacy.html"
 "${SCP[@]}" "$SCRIPT_DIR/nginx/aegislink-web.conf" "$USER@$HOST:/tmp/aegislink-web.conf"
 
 "${SSH[@]}" 'bash -s' <<'ENDSSH'
@@ -38,6 +39,7 @@ set -euo pipefail
 
 sudo mkdir -p /var/www/aegislink-web /var/www/certbot
 sudo mv /tmp/aegislink-web-index.html /var/www/aegislink-web/index.html
+sudo mv /tmp/aegislink-web-privacy.html /var/www/aegislink-web/privacy.html
 sudo chown -R www-data:www-data /var/www/aegislink-web /var/www/certbot
 
 if sudo test -f /etc/letsencrypt/live/aegis-link.it/fullchain.pem; then

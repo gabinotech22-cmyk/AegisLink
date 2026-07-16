@@ -1,7 +1,7 @@
 # AegisLink Privacy Policy
 
 **Effective date:** 2026-05-21
-**Last updated:** 2026-05-21
+**Last updated:** 2026-07-16
 
 AegisLink is a privacy-first encrypted messaging application. This policy explains exactly what data we collect, what we do not collect, and why. We have written it to be read, not to obscure.
 
@@ -22,11 +22,11 @@ We collect the absolute minimum required to operate a relay-based messaging serv
 | A randomly generated pseudonymous identifier ("AegisID") | To route encrypted messages to your device | Until you delete your account |
 | Public cryptographic keys (identity key, signed pre-key, one-time pre-keys) | To enable other users to establish an E2EE session with you without a central authority | Until you rotate or delete them |
 | Encrypted message ciphertext in transit | To forward messages to recipients who are temporarily offline | Deleted immediately upon delivery or after 30 days maximum if undelivered |
-| FCM/APNs device token | To send a silent wake-up notification when a message is waiting | Stored only while you are registered; deleted on account deletion |
+| Push token (an app-scoped routing identifier issued by Apple/Google — **not** a hardware or advertising ID) | To send a generic wake-up notification when a message is waiting | Stored only while you are registered; deleted on account deletion |
 
 That is the complete list.
 
-We do not use analytics SDKs, crash reporting services that phone home, or any third-party SDK that transmits data outside the AegisLink infrastructure.
+We do not use analytics SDKs or crash-reporting services that phone home. The one external service we rely on is push delivery: wake-up notifications are routed through Expo's push service and Apple/Google push infrastructure, which receive only your push token and a generic, contentless payload ("new encrypted message" / "incoming call") — never message content, sender, recipient, or any other metadata.
 
 ---
 
@@ -51,7 +51,7 @@ The following data is **never** collected, stored, or transmitted to our servers
 
 All messages, attachments, voice calls, and video calls are encrypted end-to-end using the Double Ratchet Algorithm (forward-secret session keys) with X3DH key agreement, implemented using the TweetNaCl library (auditable open-source cryptography).
 
-**Your private keys never leave your device.** They are generated on your device at setup, stored in the operating system's secure enclave (iOS Secure Enclave / Android Keystore via `expo-secure-store`), and are never transmitted anywhere.
+**Your private keys never leave your device.** They are generated on your device at setup, stored in the operating system's protected credential storage (iOS Keychain Services / Android Keystore, via `expo-secure-store`), and are never transmitted anywhere.
 
 The AegisLink relay server is architecturally incapable of reading your messages. Even if the server were compromised or served with a legal order, the ciphertext it holds would be computationally infeasible to decrypt without the private keys that exist only on your device.
 
@@ -85,7 +85,7 @@ We do not accept credit cards, PayPal, or any payment method that would require 
 |-----------|-----------------|
 | Undelivered encrypted messages | Max 30 days; deleted immediately upon delivery |
 | Public keys (pre-keys) | Until rotated or account deleted |
-| FCM/APNs tokens | Until account deleted |
+| Push token | While registered; deleted on account deletion |
 | Server-side system logs (aggregate, no user attribution) | 7 days rolling |
 
 On account deletion, all data associated with your AegisID is permanently deleted within 24 hours. There is no retention beyond this window.
@@ -116,9 +116,9 @@ If we make material changes to this policy, we will update the effective date ab
 
 For privacy questions, data deletion requests, or security disclosures:
 
-- Email: privacy@aegislink.io (PGP key available in the repository)
+- Email: aegislink.report@gmail.com
 - GitHub: https://github.com/gabinotech22-cmyk/AegisLink/security/advisories/new (for security issues)
 
 ---
 
-*Una versión en español de esta política está disponible bajo petición. Envíe un correo a privacy@aegislink.io con el asunto "Privacy Policy — Español".*
+*Una versión en español de esta política está disponible bajo petición. Envíe un correo a aegislink.report@gmail.com con el asunto "Privacy Policy — Español".*

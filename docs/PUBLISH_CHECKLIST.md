@@ -95,7 +95,7 @@ These cannot be automated and must be done by the team before the first submissi
       - SKU: e.g. `aegislink-ios-001`
       - Primary language: English
 - [ ] Note the numeric Apple ID assigned by ASC — this is `ASC_APP_ID`
-- [ ] Add Privacy Policy URL in ASC → App Information (use `https://aegislink.io/privacy` or GitHub Pages URL once docs/privacy-policy.md is published)
+- [ ] Add Privacy Policy URL in ASC → App Information (`https://aegis-link.it/privacy.html` — live since PR #343; smoke-test it after `infra/deploy-web.sh`)
 - [ ] Complete App Privacy questionnaire (Data Types: select "We do not collect data")
 - [ ] Upload screenshots for all required device sizes (6.7", 6.5", 5.5" iPhone; 12.9" iPad if supportsTablet is enabled — currently false, so iPad not required)
 - [ ] Set age rating (Unrestricted — no objectionable content)
@@ -125,12 +125,13 @@ These cannot be automated and must be done by the team before the first submissi
 
 Both stores require a publicly accessible URL — not just a local file.
 
-Options (in order of preference):
-1. **GitHub Pages**: Enable Pages on the repo, serve `docs/` folder. URL format: `https://gabinotech22-cmyk.github.io/AegisLink/privacy-policy`
-2. **Custom domain**: Host at `https://aegislink.io/privacy` and `https://aegislink.io/terms`
-3. **Raw GitHub**: Use raw.githubusercontent.com URL as a temporary measure (not ideal for stores)
+**Canonical URL (decided, PR #343): `https://aegis-link.it/privacy.html`** — a branded
+static page generated 1:1 from `docs/privacy-policy.md` (keep both in sync in the same
+PR when the policy changes). Deployed by `infra/deploy-web.sh` alongside the landing.
 
-Action required: decide on URL and set it in App Store Connect and Google Play Console before review submission.
+Action required: after merging a policy change, run `infra/deploy-web.sh` and smoke-test
+`curl -s -o /dev/null -w '%{http_code}' https://aegis-link.it/privacy.html` (expect 200)
+before submitting to review. Use this exact URL in App Store Connect and Play Console.
 
 ---
 
