@@ -1,7 +1,7 @@
 # AegisLink Terms of Service
 
 **Effective date:** 2026-05-21
-**Last updated:** 2026-05-21
+**Last updated:** 2026-07-17
 
 Please read these Terms of Service ("Terms") carefully before using AegisLink. By installing or using the application, you agree to be bound by them.
 
@@ -47,7 +47,7 @@ You agree not to use AegisLink to:
 - Circumvent, reverse engineer, or attempt to compromise the relay server infrastructure, other users' encrypted sessions, or the application's security mechanisms
 - Impersonate AegisLink, its operators, or other users in a way that deceives or defrauds
 
-AegisLink's end-to-end encryption means we cannot proactively monitor message content. We rely on users to report abuse through the in-app reporting mechanism or by contacting abuse@aegislink.io. We will take appropriate action within the limits of what is technically possible.
+AegisLink's end-to-end encryption means we cannot proactively monitor message content. We rely on users to report abuse through the in-app reporting mechanism or by contacting aegislink.report@gmail.com. We will take appropriate action within the limits of what is technically possible.
 
 ---
 
@@ -139,9 +139,9 @@ Nothing in this clause prevents you from lodging a complaint with a supervisory 
 
 Legal notices and Terms-related questions:
 
-- Email: legal@aegislink.io
+- Email: aegislink.report@gmail.com
 - GitHub: https://github.com/gabinotech22-cmyk/AegisLink
 
 ---
 
-*Una versión en español de estos términos está disponible bajo petición. Envíe un correo a legal@aegislink.io con el asunto "Terms of Service — Español".*
+*Una versión en español de estos términos está disponible bajo petición. Envíe un correo a aegislink.report@gmail.com con el asunto "Terms of Service — Español".*
