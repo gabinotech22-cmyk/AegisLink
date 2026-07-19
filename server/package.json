@@ -13,7 +13,7 @@
   "dependencies": {
     "@socket.io/cluster-adapter": "^0.3.0",
     "@socket.io/redis-adapter": "^8.3.0",
-    "@socket.io/sticky": "^1.0.4",
+    "@socket.io/sticky": "^2.0.0",
     "cors": "^2.8.5",
     "expo-server-sdk": "^6.1.0",
     "express": "^5.2.1",
