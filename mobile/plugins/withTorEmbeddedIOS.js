@@ -153,8 +153,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 /**
  * Starts Tor bound to 127.0.0.1:socksPort and resolves once a circuit is
- * established (fully bootstrapped). Safe to call while already
- * running/starting - resolves immediately with the cached result.
+ * established (fully bootstrapped). Resolves immediately when already
+ * running. Safe to re-call after a FAILED/timed-out attempt: it re-attaches
+ * to the in-process Tor that is still bootstrapping natively - C-Tor cannot
+ * restart in-process, and allocating a second TORThread aborts the whole app
+ * (SIGABRT) - so this class never creates more than one thread per process.
+ * Concurrent calls are not supported (the Swift layer coalesces them); a
+ * second call while one is in flight fails fast with a typed error.
  */
 /**
  * \`progress\` fires repeatedly with Tor's own control-port BOOTSTRAP status
@@ -201,6 +206,21 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 @property (nonatomic, strong, nullable) TORController *torController;
 @property (nonatomic, strong, nullable) TORConfiguration *torConfiguration;
 @property (nonatomic, assign) BOOL running;
+// True once AUTHENTICATE succeeded on the current control connection - a
+// re-attach attempt must NOT re-AUTHENTICATE (tor rejects a second one on the
+// same connection) and skips straight to waiting on the circuit observer.
+@property (nonatomic, assign) BOOL controllerAuthed;
+// SETEVENTS observers are per control connection and must be registered once.
+@property (nonatomic, assign) BOOL observersAdded;
+@property (nonatomic, assign) NSInteger boundSocksPort;
+// Monotonic id of the CURRENT start attempt. Async callbacks (watchdogs,
+// retry/poll loops) capture the generation that armed them and become inert
+// when a newer attempt supersedes them - so a stale 60s watchdog from an
+// abandoned attempt can never fail a later, healthy one.
+@property (nonatomic, assign) NSInteger attemptGeneration;
+@property (nonatomic, copy, nullable) void (^progressBlock)(NSInteger, NSString * _Nullable);
+// The in-flight attempt's completion. One-shot: consumed via settleWithSuccess.
+@property (nonatomic, copy, nullable) void (^pendingCompletion)(BOOL, NSInteger, NSError * _Nullable);
 @end
 
 @implementation AegisTorBridge
@@ -222,12 +242,54 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   return filePath ? [NSURL fileURLWithPath:filePath] : nil;
 }
 
+/**
+ * One-shot resolution of the in-flight start attempt. \`generation\` guards
+ * stale async callbacks (watchdogs, retry loops) of an ABANDONED attempt from
+ * settling a LATER one: only callbacks armed by the current attempt may
+ * settle it. Pass 0 to bypass the guard (circuit observer, stop()): whatever
+ * attempt is pending when Tor actually comes up deserves the resolution.
+ */
+- (void)settleWithSuccess:(BOOL)success error:(NSError * _Nullable)error generation:(NSInteger)generation {
+  if (generation != 0 && generation != self.attemptGeneration) return;
+  void (^completion)(BOOL, NSInteger, NSError * _Nullable) = self.pendingCompletion;
+  if (!completion) return;
+  self.pendingCompletion = nil;
+  completion(success, success ? self.boundSocksPort : 0, error);
+}
+
 - (void)startWithSocksPort:(NSInteger)socksPort
                    progress:(void (^)(NSInteger, NSString * _Nullable))progress
                  completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
   if (self.running) {
     completion(YES, socksPort, nil);
+    return;
+  }
+  if (self.pendingCompletion) {
+    // One attempt at a time. The Swift layer already coalesces concurrent JS
+    // callers into a single bridge call; this guard is belt-and-braces so a
+    // second in-flight attempt can never race the first one's state machine.
+    completion(NO, 0, [NSError errorWithDomain:@"AegisTor" code:10
+      userInfo:@{NSLocalizedDescriptionKey: @"a Tor start attempt is already in flight"}]);
+    return;
+  }
+  self.boundSocksPort = socksPort;
+  self.progressBlock = progress;
+  self.pendingCompletion = completion;
+  self.attemptGeneration += 1;
+  NSInteger gen = self.attemptGeneration;
+
+  // C-Tor runs ONCE per process (upstream limitation: embedded tor has no
+  // clean in-process restart). Allocating a SECOND TORThread while one exists
+  // aborts the whole app: tor's global state is not re-entrant, so instance
+  // #2 hits a fatal assertion / data-directory lock and calls abort() -
+  // confirmed in a production .ips (SIGABRT, TWO "Tor" threads, ~90s after
+  // launch: the JS bootstrap timeout triggered a retry while the first
+  // bootstrap was still in flight and running was still NO). If a thread
+  // already exists we RE-ATTACH to it - fresh control-port poll, connect/auth
+  // only if not already done - and NEVER create another thread.
+  if (self.torThread) {
+    [self pollForControlPortFile:self.torConfiguration socksPort:socksPort generation:gen attempt:0];
     return;
   }
 
@@ -259,7 +321,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
                                  withIntermediateDirectories:YES
                                                   attributes:nil
                                                        error:&dirError]) {
-    completion(NO, 0, dirError);
+    [self settleWithSuccess:NO error:dirError generation:gen];
     return;
   }
   // Non-user data (Tor's public network cache), regenerable, and can be
@@ -293,15 +355,15 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   // controlPortFile only has real content once Tor's thread has bootstrapped
   // far enough to open its control listener - poll briefly rather than
   // guessing a fixed sleep.
-  [self pollForControlPortFile:configuration socksPort:socksPort progress:progress attempt:0 completion:completion];
+  [self pollForControlPortFile:configuration socksPort:socksPort generation:gen attempt:0];
 }
 
 - (void)pollForControlPortFile:(TORConfiguration *)configuration
                       socksPort:(NSInteger)socksPort
-                       progress:(void (^)(NSInteger, NSString * _Nullable))progress
+                     generation:(NSInteger)gen
                         attempt:(NSInteger)attempt
-                     completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
+  if (gen != self.attemptGeneration) return; // attempt superseded or stopped
   NSURL *cpf = configuration.controlPortFile;
   // Require non-empty content, not just existence: Tor may create the file
   // before it has finished writing "PORT=host:port" to it, and reading an
@@ -311,18 +373,18 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   NSDictionary<NSFileAttributeKey, id> *attrs = cpf ? [[NSFileManager defaultManager] attributesOfItemAtPath:cpf.path error:nil] : nil;
   NSNumber *fileSize = attrs[NSFileSize];
   if (fileSize && fileSize.unsignedLongLongValue > 0) {
-    [self connectAndAuthenticate:configuration socksPort:socksPort progress:progress connectAttempt:0 completion:completion];
+    [self connectAndAuthenticate:configuration socksPort:socksPort generation:gen connectAttempt:0];
     return;
   }
   if (attempt > 60) { // ~15s at 250ms
     NSError *error = [NSError errorWithDomain:@"AegisTor" code:1
       userInfo:@{NSLocalizedDescriptionKey: @"control port file did not appear (Tor thread failed to start?)"}];
-    completion(NO, 0, error);
+    [self settleWithSuccess:NO error:error generation:gen];
     return;
   }
   __weak typeof(self) weakSelf = self;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    [weakSelf pollForControlPortFile:configuration socksPort:socksPort progress:progress attempt:attempt + 1 completion:completion];
+    [weakSelf pollForControlPortFile:configuration socksPort:socksPort generation:gen attempt:attempt + 1];
   });
 }
 
@@ -357,10 +419,10 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 
 - (void)connectAndAuthenticate:(TORConfiguration *)configuration
                       socksPort:(NSInteger)socksPort
-                       progress:(void (^)(NSInteger, NSString * _Nullable))progress
+                     generation:(NSInteger)gen
                  connectAttempt:(NSInteger)connectAttempt
-                     completion:(void (^)(BOOL, NSInteger, NSError * _Nullable))completion
 {
+  if (gen != self.attemptGeneration) return; // attempt superseded or stopped
   // Reuse the same controller across retries (built once on attempt 0) -
   // -initWithSocketHost:port:'s own internal connect attempt already fired
   // when it was constructed, so re-parsing the file and re-constructing on
@@ -371,7 +433,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
     NSError *parseError = nil;
     controller = [self controllerFromControlPortFile:configuration.controlPortFile error:&parseError];
     if (!controller) {
-      completion(NO, 0, parseError);
+      [self settleWithSuccess:NO error:parseError generation:gen];
       return;
     }
     self.torController = controller;
@@ -394,24 +456,33 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
       if (connectAttempt < 8) { // ~2s at 250ms
         __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-          [weakSelf connectAndAuthenticate:configuration socksPort:socksPort progress:progress
-                             connectAttempt:connectAttempt + 1 completion:completion];
+          [weakSelf connectAndAuthenticate:configuration socksPort:socksPort generation:gen
+                             connectAttempt:connectAttempt + 1];
         });
         return;
       }
       NSError *finalError = connectError ?: [NSError errorWithDomain:@"AegisTor" code:7 userInfo:@{NSLocalizedDescriptionKey:
         @"control socket failed to connect after 8 retries (connect() or dispatch_io_create failed "
         @"inside TORController.m connect:) - Tor.framework returned no further error detail"}];
-      completion(NO, 0, finalError);
+      [self settleWithSuccess:NO error:finalError generation:gen];
       return;
     }
+  }
+
+  if (self.controllerAuthed) {
+    // Re-attach fast path: a previous attempt already authenticated this
+    // control connection (tor rejects a second AUTHENTICATE) and registered
+    // the observers. The circuit-established observer settles the pending
+    // attempt the moment Tor is usable - just re-arm the bounded wait.
+    [self armCircuitWatchdogForGeneration:gen];
+    return;
   }
 
   NSData *cookie = configuration.cookie;
   if (!cookie) {
     NSError *error = [NSError errorWithDomain:@"AegisTor" code:2
       userInfo:@{NSLocalizedDescriptionKey: @"no Tor control-port auth cookie (configuration.cookie was nil)"}];
-    completion(NO, 0, error);
+    [self settleWithSuccess:NO error:error generation:gen];
     return;
   }
   if (cookie.length != 32) {
@@ -421,7 +492,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
     NSError *error = [NSError errorWithDomain:@"AegisTor" code:4
       userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:
         @"auth cookie has wrong length: %lu bytes (expected 32) - read mid-write?", (unsigned long)cookie.length]}];
-    completion(NO, 0, error);
+    [self settleWithSuccess:NO error:error generation:gen];
     return;
   }
 
@@ -436,80 +507,110 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   // "if (!_channel) { return; }" no-op leaving authenticateWithData:'s
   // completion block never called) - the isConnected check above covers
   // ONE way into that hang, but not every way a Tor.framework callback
-  // could go silent. A watchdog on every remaining async stage means any
-  // future silent hang surfaces as OUR specific, timed-out-at-stage-X error
-  // within seconds, instead of the JS-side generic 90s bootstrap timeout.
+  // could go silent. settleWithSuccess is one-shot and generation-guarded,
+  // so a watchdog firing late (or a real callback arriving after its
+  // watchdog) is inert instead of double-completing.
   __weak typeof(self) weakSelf = self;
 
-  __block BOOL authSettled = NO;
-  void (^authTimeout)(void) = ^{
-    if (authSettled) return;
-    authSettled = YES;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    typeof(self) strongSelf = weakSelf;
+    if (!strongSelf) return;
     NSError *error = [NSError errorWithDomain:@"AegisTor" code:8 userInfo:@{NSLocalizedDescriptionKey:
       @"authenticateWithData: watchdog: no completion callback within 15s (Tor.framework went silent - "
       @"see the Onion Browser control-port watchdog pattern this guards against)"}];
-    completion(NO, 0, error);
-  };
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), authTimeout);
+    [strongSelf settleWithSuccess:NO error:error generation:gen];
+  });
 
   [controller authenticateWithData:cookie completion:^(BOOL success, NSError * _Nullable error) {
-    if (authSettled) return; // watchdog already fired and reported; drop this late callback
-    authSettled = YES;
+    typeof(self) strongSelf = weakSelf;
+    if (!strongSelf) return;
     if (!success) {
       NSError *finalError = error ?: [NSError errorWithDomain:@"AegisTor" code:5
         userInfo:@{NSLocalizedDescriptionKey: @"authenticateWithData: failed (Tor.framework returned no error detail)"}];
-      completion(NO, 0, finalError);
+      [strongSelf settleWithSuccess:NO error:finalError generation:gen];
       return;
     }
-    // Only an AUTHENTICATE'd control connection is allowed to SETEVENTS, so
-    // this can only be registered here, after authenticateWithData: succeeds
-    // - not earlier. This is our only window into WHERE a slow/stuck
-    // bootstrap is actually spending its time (0%? stuck fetching consensus?
-    // stuck building circuits at 100%?) instead of staring at a black-box
-    // promise until the JS-side timeout fires.
-    [controller addObserverForStatusEvents:
-      ^BOOL(NSString * _Nonnull type, NSString * _Nonnull severity,
-            NSString * _Nonnull action, NSDictionary<NSString *, NSString *> * _Nonnull arguments) {
-      if ([type isEqualToString:@"STATUS_CLIENT"] && [action isEqualToString:@"BOOTSTRAP"]) {
-        NSInteger percent = [arguments[@"PROGRESS"] integerValue];
-        NSString *summary = arguments[@"SUMMARY"] ?: @"";
-        NSLog(@"[AegisTor] bootstrap %ld%% - %@", (long)percent, summary);
-        if (progress) progress(percent, summary);
-      } else {
-        NSLog(@"[AegisTor] status type=%@ severity=%@ action=%@ args=%@", type, severity, action, arguments);
-      }
-      return YES;
-    }];
-
-    __block BOOL circuitSettled = NO;
-    void (^circuitTimeout)(void) = ^{
-      if (circuitSettled) return;
-      circuitSettled = YES;
-      NSError *error = [NSError errorWithDomain:@"AegisTor" code:9 userInfo:@{NSLocalizedDescriptionKey:
-        @"addObserverForCircuitEstablished: watchdog: no circuit established within 60s - Tor "
-        @"authenticated and (per bootstrap progress, if any was logged above) may be stuck building "
-        @"circuits, or SETEVENTS/notifications went silent after auth"}];
-      completion(NO, 0, error);
-    };
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(60.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), circuitTimeout);
-
-    [controller addObserverForCircuitEstablished:^(BOOL established) {
-      if (!established) return;
-      if (circuitSettled) return; // watchdog already fired and reported; drop this late callback
-      circuitSettled = YES;
-      typeof(self) strongSelf = weakSelf;
-      if (strongSelf) strongSelf.running = YES;
-      completion(YES, socksPort, nil);
-    }];
+    // Record the auth UNCONDITIONALLY - even when the watchdog above already
+    // failed this attempt, the control connection IS authenticated now, and
+    // the next start() must take the re-attach fast path instead of sending
+    // a second AUTHENTICATE (which tor rejects).
+    strongSelf.controllerAuthed = YES;
+    [strongSelf registerControlObservers];
+    [strongSelf armCircuitWatchdogForGeneration:gen];
   }];
+}
+
+/**
+ * SETEVENTS observers, registered ONCE per control connection: the bootstrap
+ * progress forwarder, and the circuit-established observer - the ONLY place
+ * \`running\` flips YES. The old code set \`running\` behind the per-attempt
+ * watchdog guard, so a circuit that established AFTER the 60s watchdog left
+ * \`running\` NO forever - and the next start() call, seeing !running, would
+ * allocate the second TORThread that aborts the process. Here the flip is
+ * unconditional, and the settle is one-shot: whatever attempt is pending
+ * when the circuit lands gets the success (generation 0 = bypass).
+ */
+- (void)registerControlObservers {
+  if (self.observersAdded || !self.torController) return;
+  self.observersAdded = YES;
+  __weak typeof(self) weakSelf = self;
+  // Only an AUTHENTICATE'd control connection is allowed to SETEVENTS - the
+  // caller invokes this right after authenticateWithData: succeeds. This is
+  // our only window into WHERE a slow/stuck bootstrap is spending its time
+  // (0%? stuck fetching consensus? stuck building circuits at 100%?).
+  [self.torController addObserverForStatusEvents:
+    ^BOOL(NSString * _Nonnull type, NSString * _Nonnull severity,
+          NSString * _Nonnull action, NSDictionary<NSString *, NSString *> * _Nonnull arguments) {
+    typeof(self) strongSelf = weakSelf;
+    if ([type isEqualToString:@"STATUS_CLIENT"] && [action isEqualToString:@"BOOTSTRAP"]) {
+      NSInteger percent = [arguments[@"PROGRESS"] integerValue];
+      NSString *summary = arguments[@"SUMMARY"] ?: @"";
+      NSLog(@"[AegisTor] bootstrap %ld%% - %@", (long)percent, summary);
+      if (strongSelf && strongSelf.progressBlock) strongSelf.progressBlock(percent, summary);
+    } else {
+      NSLog(@"[AegisTor] status type=%@ severity=%@ action=%@ args=%@", type, severity, action, arguments);
+    }
+    return YES;
+  }];
+
+  [self.torController addObserverForCircuitEstablished:^(BOOL established) {
+    if (!established) return;
+    typeof(self) strongSelf = weakSelf;
+    if (!strongSelf) return;
+    strongSelf.running = YES; // ALWAYS - see method doc above
+    [strongSelf settleWithSuccess:YES error:nil generation:0];
+  }];
+}
+
+/** Bounded wait for the circuit observer to settle the current attempt. */
+- (void)armCircuitWatchdogForGeneration:(NSInteger)gen {
+  __weak typeof(self) weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(60.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    typeof(self) strongSelf = weakSelf;
+    if (!strongSelf || strongSelf.running) return;
+    NSError *error = [NSError errorWithDomain:@"AegisTor" code:9 userInfo:@{NSLocalizedDescriptionKey:
+      @"no circuit established within 60s - Tor keeps bootstrapping natively; "
+      @"the next start() re-attaches to the same in-process Tor instead of spawning a second one"}];
+    [strongSelf settleWithSuccess:NO error:error generation:gen];
+  });
 }
 
 - (void)stopWithCompletion:(void (^)(void))completion
 {
+  // Abandon any in-flight attempt: bump the generation so its async
+  // callbacks turn inert, and fail its caller now (generation 0 = bypass).
+  self.attemptGeneration += 1;
+  [self settleWithSuccess:NO error:[NSError errorWithDomain:@"AegisTor" code:11
+    userInfo:@{NSLocalizedDescriptionKey: @"stopped"}] generation:0];
   [self.torController disconnect];
   [self.torThread cancel];
   self.torController = nil;
+  self.controllerAuthed = NO;
+  self.observersAdded = NO;
   self.running = NO;
+  // self.torThread is DELIBERATELY kept: C-Tor cannot restart in-process
+  // (header doc), and nil-ing the pointer would let a later start() allocate
+  // the second TORThread that aborts the app.
   completion();
 }
 
