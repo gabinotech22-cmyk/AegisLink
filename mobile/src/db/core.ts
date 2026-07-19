@@ -74,6 +74,22 @@ export function resetDbConnection(): void {
   dbFatalError = null;
 }
 
+/**
+ * Profile metadata keys for a slot. The 'self' slot stores them UNPREFIXED
+ * ('aegis.displayName', …) — see getPrefKey in store/identity.ts. The old
+ * cleanup spelled them 'aegis.self.displayName', a key that never existed, so
+ * the wiped identity's displayName/avatar/status silently survived every wipe
+ * and re-hydrated into the NEXT identity (factory-reset leak, user-reported
+ * 2026-07-19). Shared by deleteIdentitySlot and wipeDatabase so the two can
+ * never drift on the spelling again.
+ */
+async function deleteSlotProfilePrefs(slot: string): Promise<void> {
+  for (const pk of ['displayName', 'avatarColor', 'avatarImage', 'profileStatus']) {
+    const key = slot === 'self' ? `aegis.${pk}` : `aegis.${slot}.${pk}`;
+    await SecureStore.deleteItemAsync(key).catch(() => {});
+  }
+}
+
 export async function deleteIdentitySlot(slot: string): Promise<void> {
   // 1. Delete credentials and E2EE keys
   await SecureStore.deleteItemAsync(getSecretKeySlot(slot)).catch(() => {});
@@ -81,15 +97,7 @@ export async function deleteIdentitySlot(slot: string): Promise<void> {
   await SecureStore.deleteItemAsync(getDbEncKeySlot(slot)).catch(() => {});
 
   // 2. Delete preferences for this slot
-  const prefKeys = [
-    'displayName',
-    'avatarColor',
-    'avatarImage',
-    'profileStatus',
-  ];
-  for (const pk of prefKeys) {
-    await SecureStore.deleteItemAsync(`aegis.${slot}.${pk}`).catch(() => {});
-  }
+  await deleteSlotProfilePrefs(slot);
 
   // 3. Delete X3DH prekey secrets — these live outside the SQLite file
   const prefix = slot === 'self' ? '' : `${slot}.`;
@@ -700,6 +708,95 @@ export async function purgeLockAndDuressSecrets(): Promise<void> {
   await SecureStore.deleteItemAsync('aegis.lockSettings').catch(() => {}); // legacy v1 lock-settings blob
 }
 
+// ─── purgeGlobalAppState ─────────────────────────────────────────────────────
+//
+// Deletes every DEVICE-GLOBAL persisted remnant not covered by the per-slot
+// cleanup (deleteIdentitySlot) or the lock/duress purge above. Comes from a
+// full inventory of SecureStore/filesystem writes (2026-07-19): each of these
+// survived a "factory reset" wipe, so a wiped device still carried the old
+// identity's mailbox roots, delivery tokens, sender chain keys, push tokens
+// and profile metadata — a metadata leak (a panic wipe must leave NOTHING
+// that proves who you talked to) and visible leftovers for the next identity.
+//
+// `peerIds`/`groupIds` exist because SecureStore has no key-enumeration API:
+// the per-contact (mailboxRoot.peer.<id>, deliveryToken.peer.<id>) and
+// per-group (channelKeyIndex.v1.<id> + its sender keys) families can only be
+// deleted by walking ids the caller still knows, so callers read them BEFORE
+// deleting the DB / in-memory stores. Best-effort by design (ids from other
+// profile slots may not be enumerable); every delete is idempotent.
+export async function purgeGlobalAppState(opts: {
+  peerIds?: string[];
+  groupIds?: string[];
+  aegisId?: string | null;
+} = {}): Promise<void> {
+  const peerIds = opts.peerIds ?? [];
+  const groupIds = opts.groupIds ?? [];
+
+  // In-memory security-diagnostics counters FIRST (their reset re-persists a
+  // defaults blob — same RAM-survivor class as the preferences reset above);
+  // the key delete right after removes even that empty blob.
+  try {
+    const { useSecurityDiagnostics } = require('../store/securityDiagnostics') as typeof import('../store/securityDiagnostics');
+    await useSecurityDiagnostics.getState().reset();
+  } catch { /* non-fatal — the SecureStore key below is deleted either way */ }
+
+  const staticKeys = [
+    'aegis.pushToken',
+    'aegis.voipToken',
+    'aegis.voipToken.sent',
+    'aegis.linked_devices.json',
+    'aegis.backup.lastAt',
+    'aegis.secdiag.v1',
+    'aegis.profiles.v1',
+    'lastDailySummary',
+    // Sealed-sender roots: whoever holds a root can derive that identity's
+    // mailbox id for EVERY epoch — key material, must die with the identity.
+    'aegis.mailboxRoot.self',
+    'aegis.mailboxRoot.lastEpoch',
+    'aegis.deliveryToken.self',
+  ];
+  for (const key of staticKeys) {
+    await SecureStore.deleteItemAsync(key).catch(() => {});
+  }
+
+  // Per-contact secrets (sealed-sender mailbox roots + delivery tokens).
+  for (const id of peerIds) {
+    await SecureStore.deleteItemAsync(`aegis.mailboxRoot.peer.${id}`).catch(() => {});
+    await SecureStore.deleteItemAsync(`aegis.deliveryToken.peer.${id}`).catch(() => {});
+  }
+
+  // Per-group channel sender keys (chain keys — real key material).
+  try {
+    const { deleteAllSenderKeysForChannel } = require('../crypto/channelKeyStore') as typeof import('../crypto/channelKeyStore');
+    for (const gid of groupIds) {
+      await deleteAllSenderKeysForChannel(gid).catch(() => {});
+    }
+  } catch { /* non-fatal */ }
+
+  // Public-channel secrets (CEK/capability/signing keys, ban lists, join
+  // requests): that store keeps its own index, so it wipes itself completely.
+  try {
+    const { deleteAllChannels } = require('../crypto/publicChannelStore') as typeof import('../crypto/publicChannelStore');
+    await deleteAllChannels();
+  } catch { /* non-fatal */ }
+
+  // Optional Web3 DIDs for the wiped identity (personal + work scopes).
+  if (opts.aegisId) {
+    try {
+      const { clearAllProfileDIDs } = require('../web3/did/ProfileIsolation') as typeof import('../web3/did/ProfileIsolation');
+      await clearAllProfileDIDs(opts.aegisId);
+    } catch { /* non-fatal */ }
+  }
+
+  // On-disk media outside SQLite: encrypted chat attachments and avatar
+  // copies. deleteAsync is recursive and idempotent covers "never existed".
+  const docDir = FileSystem.documentDirectory ?? '';
+  if (docDir) {
+    await FileSystem.deleteAsync(`${docDir}media`, { idempotent: true }).catch(() => {});
+    await FileSystem.deleteAsync(`${docDir}avatars`, { idempotent: true }).catch(() => {});
+  }
+}
+
 // ─── wipeDatabase ────────────────────────────────────────────────────────────
 
 export async function wipeDatabase(): Promise<void> {
@@ -720,7 +817,18 @@ export async function wipeDatabase(): Promise<void> {
   // Inline the DELETEs that clearIdentity() would do so we never call withDb
   // from inside a withDb callback. clearIdentity() itself is left untouched for
   // its other call-sites; we just don't invoke it from here.
+  // First read the id families whose SecureStore keys can only be enumerated
+  // through these rows (see purgeGlobalAppState) — same queue slot as the
+  // deletes, BEFORE them, so there is no re-entrancy and no lost window.
+  let peerIds: string[] = [];
+  let groupIds: string[] = [];
   await withDb(async (d) => {
+    try {
+      const contactRows = await d.getAllAsync<{ aegis_id: string }>('SELECT aegis_id FROM contacts');
+      peerIds = contactRows.map((r) => r.aegis_id);
+      const groupRows = await d.getAllAsync<{ id: string }>('SELECT id FROM groups');
+      groupIds = groupRows.map((r) => r.id);
+    } catch { /* enumeration is best-effort; the destructive wipe below still runs */ }
     await d.execAsync(
       `DELETE FROM identity;
        DELETE FROM messages;
@@ -781,8 +889,22 @@ export async function wipeDatabase(): Promise<void> {
   await SecureStore.deleteItemAsync('aegis.slotsList').catch(() => {});
   await SecureStore.deleteItemAsync('aegis.activeSlotId').catch(() => {});
 
+  // Profile metadata for the active slot (correct 'self' spelling — see
+  // deleteSlotProfilePrefs for the leak this fixes).
+  await deleteSlotProfilePrefs(slot);
+
   // App-lock + duress/panic + PIN material, and the in-memory preferences
   // reset. Shared with useIdentity.reset() so a panic wipe and a delete-identity
   // clear exactly the same lock/coercion secrets (see purgeLockAndDuressSecrets).
   await purgeLockAndDuressSecrets();
+
+  // Device-global remnants (mailbox roots, delivery tokens, sender keys,
+  // push/VoIP tokens, profile list, media dirs, …) — the id-keyed families
+  // use the enumeration read in Phase 2, before the rows died.
+  let aegisId: string | null = null;
+  try {
+    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+    aegisId = useIdentity.getState().identity?.aegisId ?? null;
+  } catch { /* store unavailable (unit tests) — DID purge is best-effort */ }
+  await purgeGlobalAppState({ peerIds, groupIds, aegisId });
 }

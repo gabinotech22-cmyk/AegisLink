@@ -68,6 +68,13 @@ jest.mock('../../store/preferences', () => ({
   },
 }));
 
+// purgeGlobalAppState lazy-requires the identity store only to resolve the
+// aegisId for the DID purge — stub it so the test never drags in the real
+// store graph (socket client, crypto, …).
+jest.mock('../../store/identity', () => ({
+  useIdentity: { getState: () => ({ identity: null }) },
+}));
+
 function makeMockDb() {
   return {
     execAsync: jest.fn().mockResolvedValue(undefined),
@@ -86,7 +93,11 @@ const EXPECTED_TABLES = [
   'chat_state', 'call_history', 'polls', 'scheduled_messages', 'prekey_secrets',
 ];
 
-async function runWipe(opts?: { opkIds?: number[] }): Promise<{ db: MockDb; deletedKeys: string[] }> {
+async function runWipe(opts?: {
+  opkIds?: number[];
+  contactIds?: string[];
+  groupIds?: string[];
+}): Promise<{ db: MockDb; deletedKeys: string[]; ssDeleted: string[]; fsDeleted: string[] }> {
   jest.resetModules();
   jest.clearAllMocks();
   // Simulate a device where app-lock was enabled before the wipe, matching
@@ -95,6 +106,17 @@ async function runWipe(opts?: { opkIds?: number[] }): Promise<{ db: MockDb; dele
 
   const sqlite = require('expo-sqlite') as { openDatabaseAsync: jest.Mock };
   const db = makeMockDb();
+  // Phase-2 enumeration reads (contacts/groups) feed the SecureStore
+  // per-id purges — everything else returns no rows.
+  db.getAllAsync.mockImplementation((sql: string) => {
+    if (sql.includes('FROM contacts')) {
+      return Promise.resolve((opts?.contactIds ?? []).map((id) => ({ aegis_id: id })));
+    }
+    if (sql.includes('FROM groups')) {
+      return Promise.resolve((opts?.groupIds ?? []).map((id) => ({ id })));
+    }
+    return Promise.resolve([]);
+  });
   sqlite.openDatabaseAsync.mockResolvedValue(db);
 
   const SecureStore = require('expo-secure-store') as {
@@ -106,14 +128,18 @@ async function runWipe(opts?: { opkIds?: number[] }): Promise<{ db: MockDb; dele
     return Promise.resolve(null);
   });
 
-  const { ss } = require('../../utils/secureStore') as { ss: { get: jest.Mock } };
+  const { ss } = require('../../utils/secureStore') as { ss: { get: jest.Mock; delete: jest.Mock } };
   ss.get.mockResolvedValue(mockFixedKeyB64);
+
+  const FS = require('expo-file-system/legacy') as { deleteAsync: jest.Mock };
 
   const { wipeDatabase } = require('../local') as typeof import('../local');
   await wipeDatabase();
 
   const deletedKeys = SecureStore.deleteItemAsync.mock.calls.map((c: string[]) => c[0]);
-  return { db, deletedKeys };
+  const ssDeleted = ss.delete.mock.calls.map((c: string[]) => c[0]);
+  const fsDeleted = FS.deleteAsync.mock.calls.map((c: string[]) => c[0]);
+  return { db, deletedKeys, ssDeleted, fsDeleted };
 }
 
 describe('wipeDatabase — SQLite', () => {
@@ -171,6 +197,62 @@ describe('wipeDatabase — SecureStore key material', () => {
     expect(deletedKeys).toContain('aegis.opkIds.json');
     expect(deletedKeys).toContain('aegis.spkSecret.b64');
     expect(deletedKeys).toContain('aegis.spk.keyId');
+  });
+});
+
+describe('wipeDatabase — factory reset (device-global remnants, 2026-07-19 regression)', () => {
+  it("purges the active slot's profile metadata under its REAL 'self' spelling", async () => {
+    // The old cleanup deleted 'aegis.self.displayName' — a key that never
+    // existed (getPrefKey stores the self slot UNPREFIXED) — so the wiped
+    // identity's name/avatar/status re-hydrated into the next identity.
+    const { deletedKeys } = await runWipe();
+    expect(deletedKeys).toContain('aegis.displayName');
+    expect(deletedKeys).toContain('aegis.avatarColor');
+    expect(deletedKeys).toContain('aegis.avatarImage');
+    expect(deletedKeys).toContain('aegis.profileStatus');
+  });
+
+  it('purges every device-global SecureStore remnant', async () => {
+    const { deletedKeys } = await runWipe();
+    for (const key of [
+      'aegis.pushToken',
+      'aegis.voipToken',
+      'aegis.voipToken.sent',
+      'aegis.linked_devices.json',
+      'aegis.backup.lastAt',
+      'aegis.secdiag.v1',
+      'aegis.profiles.v1',
+      'lastDailySummary',
+      'aegis.mailboxRoot.self',
+      'aegis.mailboxRoot.lastEpoch',
+      'aegis.deliveryToken.self',
+    ]) {
+      expect(deletedKeys).toContain(key);
+    }
+  });
+
+  it('purges per-contact mailbox roots + delivery tokens using the pre-wipe enumeration', async () => {
+    const { deletedKeys } = await runWipe({ contactIds: ['PEER-A', 'PEER-B'] });
+    expect(deletedKeys).toContain('aegis.mailboxRoot.peer.PEER-A');
+    expect(deletedKeys).toContain('aegis.deliveryToken.peer.PEER-A');
+    expect(deletedKeys).toContain('aegis.mailboxRoot.peer.PEER-B');
+    expect(deletedKeys).toContain('aegis.deliveryToken.peer.PEER-B');
+  });
+
+  it('purges per-group sender-key indexes and the public-channel indexes', async () => {
+    const { ssDeleted } = await runWipe({ groupIds: ['GRP-1'] });
+    // channelKeyStore: the per-channel index (its listed sender keys go with
+    // it — empty in this mock, the index delete proves the walk ran).
+    expect(ssDeleted).toContain('aegis.channelKeyIndex.v1.GRP-1');
+    // publicChannelStore.deleteAllChannels: both of its own indexes.
+    expect(ssDeleted).toContain('aegis.pubchannel.index.v1');
+    expect(ssDeleted).toContain('aegis.pubchannel.applyindex.v1');
+  });
+
+  it('deletes the on-disk media and avatar directories', async () => {
+    const { fsDeleted } = await runWipe();
+    expect(fsDeleted).toContain('file:///test/media');
+    expect(fsDeleted).toContain('file:///test/avatars');
   });
 });
 
