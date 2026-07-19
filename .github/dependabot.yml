@@ -44,8 +44,13 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: react-native
         update-types: [version-update:semver-major, version-update:semver-minor]
+      # `react` is pinned to the EXACT version React Native bundles its
+      # `react-native-renderer` at (19.1.4 on SDK 54). Even a PATCH bump breaks
+      # every RNTL test with "Incompatible React versions: react 19.1.8 vs
+      # react-native-renderer 19.1.4" (PR #351) — so ignore patch too, not just
+      # major/minor. React moves only when the SDK's RN moves.
       - dependency-name: react
-        update-types: [version-update:semver-major, version-update:semver-minor]
+        update-types: [version-update:semver-major, version-update:semver-minor, version-update:semver-patch]
       - dependency-name: react-native-reanimated
         update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: react-native-worklets
@@ -55,8 +60,10 @@ updates:
       # ignored above). Letting dependabot bump the renderer alone produced an
       # unresolvable ERESOLVE group PR (#321: renderer 19.2.7 vs react 19.1.8).
       # Same lockstep for @types/react. Both move only in the SDK-upgrade PR.
+      # Patch included for the renderer too: it must equal `react` exactly, and
+      # `react` is now frozen on all three update types (see the note above).
       - dependency-name: react-test-renderer
-        update-types: [version-update:semver-major, version-update:semver-minor]
+        update-types: [version-update:semver-major, version-update:semver-minor, version-update:semver-patch]
       - dependency-name: "@types/react"
         update-types: [version-update:semver-major, version-update:semver-minor]
       # babel-preset-expo's MAJOR tracks the Expo SDK line (54.x ↔ SDK 54):
