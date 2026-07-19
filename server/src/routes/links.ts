@@ -20,11 +20,15 @@ import { createHash } from 'node:crypto';
 const router = Router();
 
 // SHA-256 signing-cert fingerprints allowed to handle the domain links:
-// release keystore (Play builds) + Android debug keystore (local/emulator
-// builds, which currently sign release APKs too).
+// upload/release keystore (local release builds) + Google Play App Signing
+// certificate (Play re-signs the AAB with its own key, and App Links domain
+// verification checks against THAT cert on Play-installed builds).
+// The universal Android debug-keystore fingerprint is deliberately NOT listed:
+// anyone can sign an APK with it and hijack our links. Debug builds can test
+// deep links via `adb shell pm set-app-links` instead.
 const CERT_FINGERPRINTS = [
   '4E:D3:A7:32:E8:A1:B2:03:08:60:C7:6D:D3:EE:8C:5D:E9:97:6A:49:95:2C:4D:E3:60:C6:9D:09:3E:CA:4E:D3',
-  'FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C',
+  'B7:97:D2:43:DE:C9:8D:C5:3A:12:85:13:D8:5E:3F:59:26:C1:28:FD:1F:97:AE:50:5E:32:0A:85:AF:E0:F0:81',
 ];
 
 const ASSETLINKS = [
