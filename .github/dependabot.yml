@@ -59,6 +59,19 @@ updates:
         update-types: [version-update:semver-major, version-update:semver-minor]
       - dependency-name: "@types/react"
         update-types: [version-update:semver-major, version-update:semver-minor]
+      # babel-preset-expo's MAJOR tracks the Expo SDK line (54.x ↔ SDK 54):
+      # bumping it alone points the Babel preset at the NEXT SDK's toolchain
+      # and npm ci can't even install (PR #324). Moves in the SDK-upgrade PR.
+      - dependency-name: babel-preset-expo
+        update-types: [version-update:semver-major]
+      # @config-plugins/* majors also track the Expo SDK line (PR #323).
+      - dependency-name: "@config-plugins/*"
+        update-types: [version-update:semver-major]
+      # TypeScript majors are blocked by the toolchain's peer ranges (ts-jest@29
+      # pins typescript >=4.3 <7 — PR #322): the bump alone can never install.
+      # Bump deliberately together with the toolchain, then drop this rule.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   # ── Relay server (Node/Bun, AGPL) ────────────────────────────────────────
   - package-ecosystem: npm
@@ -75,6 +88,12 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # ts-jest@29 pins typescript >=4.3 <7 (PR #317): a TS major alone can
+      # never npm-ci. Bump together with ts-jest once it supports TS 7, then
+      # drop this rule.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   # ── Desktop (Electron) ───────────────────────────────────────────────────
   - package-ecosystem: npm
@@ -95,6 +114,10 @@ updates:
     # packaged smoke-test before merge — keep them as separate, visible PRs.
     ignore:
       - dependency-name: electron
+        update-types: [version-update:semver-major]
+      # electron-vite@5 pins vite ^4–^7 (PR #320): vite 8 can't install until
+      # electron-vite ships support. Bump both together, then drop this rule.
+      - dependency-name: vite
         update-types: [version-update:semver-major]
 
   # ── GitHub Actions (pin and keep CI actions current) ─────────────────────
