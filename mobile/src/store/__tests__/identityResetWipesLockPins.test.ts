@@ -33,12 +33,14 @@ jest.mock('../../utils/secureStore', () => ({
 // db/local is the barrel that re-exports purgeLockAndDuressSecrets from db/core.
 // Mock it so we can assert reset() invokes the purge without dragging in SQLite.
 const mockPurge = jest.fn().mockResolvedValue(undefined);
+const mockPurgeGlobal = jest.fn().mockResolvedValue(undefined);
 const mockDeleteIdentitySlot = jest.fn().mockResolvedValue(undefined);
 jest.mock('../../db/local', () => ({
   loadIdentity: jest.fn().mockResolvedValue(null),
   saveIdentity: jest.fn().mockResolvedValue(undefined),
   deleteIdentitySlot: mockDeleteIdentitySlot,
   purgeLockAndDuressSecrets: mockPurge,
+  purgeGlobalAppState: mockPurgeGlobal,
   setActiveDbSlot: jest.fn(),
   resetDbConnection: jest.fn(),
 }));
@@ -70,6 +72,29 @@ describe('useIdentity.reset() — wipes lock + coercion PINs (delete-identity re
     // Both the per-slot key material and the global lock/duress secrets go.
     expect(mockDeleteIdentitySlot).toHaveBeenCalled();
     expect(mockPurge).toHaveBeenCalled();
+  });
+
+  it('also purges the device-global remnants (factory-reset regression)', async () => {
+    // The 2026-07-19 report: after delete-identity + re-onboarding, the old
+    // profile name/avatar and panic-adjacent state were still around. reset()
+    // must route through purgeGlobalAppState with the ids it can still
+    // enumerate (contacts/groups die with the stores right after).
+    const { useContacts } = require('../contacts') as typeof import('../contacts');
+    const { useGroups } = require('../groups') as typeof import('../groups');
+    useContacts.setState({
+      contacts: [{ aegisId: 'PEER-1' } as never, { aegisId: 'PEER-2' } as never],
+    } as never);
+    useGroups.setState({ groups: [{ id: 'GRP-1' } as never] } as never);
+
+    const { useIdentity } = require('../identity') as typeof import('../identity');
+    await useIdentity.getState().reset();
+
+    expect(mockPurgeGlobal).toHaveBeenCalledTimes(1);
+    const arg = mockPurgeGlobal.mock.calls[0][0] as {
+      peerIds: string[]; groupIds: string[];
+    };
+    expect(arg.peerIds).toEqual(['PEER-1', 'PEER-2']);
+    expect(arg.groupIds).toEqual(['GRP-1']);
   });
 });
 

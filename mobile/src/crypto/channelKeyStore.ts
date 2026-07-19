@@ -100,3 +100,17 @@ export async function loadAllSenderKeysForChannel(
   }
   return result;
 }
+
+/**
+ * Delete EVERY sender chain key for a channel plus its index — the
+ * factory-reset path (purgeGlobalAppState). Per-channel because the store's
+ * only enumeration is the per-channel sender index; the wipe caller walks the
+ * group/channel ids it can still read before the DB rows die.
+ */
+export async function deleteAllSenderKeysForChannel(channelId: string): Promise<void> {
+  const index = await loadIndex(channelId);
+  for (const senderAegisId of index) {
+    await ss.delete(keyFor(channelId, senderAegisId)).catch(() => {});
+  }
+  await ss.delete(indexKeyFor(channelId)).catch(() => {});
+}

@@ -404,7 +404,22 @@ export const useIdentity = create<IdentityState>((set, get) => ({
 
   async reset() {
     const slotsList = get().slotsList || ['self'];
-    const { deleteIdentitySlot, purgeLockAndDuressSecrets } = require('../db/local');
+    // Gather everything only the LIVE state can still enumerate BEFORE any
+    // deletion: the per-contact / per-group SecureStore families and the
+    // identity's DIDs are keyed by ids that die with the DB and the stores
+    // (see purgeGlobalAppState — SecureStore has no key-enumeration API).
+    const aegisIdForPurge = get().identity?.aegisId ?? null;
+    let peerIds: string[] = [];
+    let groupIds: string[] = [];
+    try {
+      const { useContacts } = require('./contacts') as typeof import('./contacts');
+      peerIds = useContacts.getState().contacts.map((c) => c.aegisId);
+    } catch { /* best-effort */ }
+    try {
+      const { useGroups } = require('./groups') as typeof import('./groups');
+      groupIds = useGroups.getState().groups.map((g) => g.id);
+    } catch { /* best-effort */ }
+    const { deleteIdentitySlot, purgeLockAndDuressSecrets, purgeGlobalAppState } = require('../db/local');
     for (const slot of slotsList) {
       await deleteIdentitySlot(slot).catch(() => {});
     }
@@ -418,6 +433,15 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     // same lock/duress/PIN material as a panic wipe and resets in-memory prefs
     // (so appLockEnabled can't strand a PIN-less identity in a permanent lock).
     await (purgeLockAndDuressSecrets as () => Promise<void>)().catch(() => {});
+
+    // Device-global remnants (mailbox roots, delivery tokens, sender keys,
+    // push/VoIP tokens, profile list, media dirs, DIDs) — delete-identity must
+    // be as factory-clean as a panic wipe.
+    try {
+      await (purgeGlobalAppState as (o: {
+        peerIds?: string[]; groupIds?: string[]; aegisId?: string | null;
+      }) => Promise<void>)({ peerIds, groupIds, aegisId: aegisIdForPurge });
+    } catch { /* best-effort — per-slot + lock purges above already ran */ }
 
     // Purge any plaintext-decrypted media from the filesystem cache
     const { purgeCachedDecryptedMedia } = require('../crypto/media');
