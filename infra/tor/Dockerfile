@@ -1,7 +1,7 @@
 # AegisLink — Tor onion-service sidecar for the relay (Fase 4 · mailbox mode).
 # Built from the official Alpine tor package instead of a third-party image:
 # auditable supply chain, ~15 MB, and apk keeps tor patched on rebuild.
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN apk add --no-cache tor
 
