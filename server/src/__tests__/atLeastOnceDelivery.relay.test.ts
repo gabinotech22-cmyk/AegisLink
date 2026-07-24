@@ -69,13 +69,16 @@ interface MbConn { socket: ClientSocket; received: { id: string }[] }
  * client (mailboxSocket.ts registers its handler before auth). Resolves once the
  * queue has been drained (auth:ok).
  */
-function connectMailbox(keys: MailboxKeys): Promise<MbConn> {
+function connectMailbox(keys: MailboxKeys, ackCapable = true): Promise<MbConn> {
   return new Promise((resolve, reject) => {
     const socket = clientIo(serverUrl, {
       auth: {
         mailboxId: keys.mailboxId,
         mailboxSignPubKey: encodeBase64(keys.signKeyPair.publicKey),
         platform: 'mobile',
+        // New clients advertise this so the relay defers deletion to the ack.
+        // Legacy clients omit it → relay keeps delete-on-emit (backward compat).
+        ...(ackCapable ? { ackDelivery: true } : {}),
       },
       transports: ['websocket'],
       reconnection: false,
@@ -150,6 +153,23 @@ describe('at-least-once mailbox delivery (audit 2026-07-24)', () => {
     const c2 = await connectMailbox(box);
     expect(c2.received.map((w) => w.id)).toContain('alo-2');
     c2.socket.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+  }, 30_000);
+
+  test('legacy client (no ackDelivery) keeps delete-on-emit — no backlog storm', async () => {
+    const box = makeMailbox(70003);
+    await enqueueFor(box.mailboxId, 'alo-3');
+
+    // Connect WITHOUT advertising the ackDelivery capability (an old client).
+    const { socket, received } = await connectMailbox(box, false);
+    expect(received.map((w) => w.id)).toContain('alo-3');
+
+    // Backward-compat: the relay must have deleted on emit (legacy at-most-once),
+    // so the queue drains and the old client never re-downloads the backlog.
+    await new Promise((r) => setTimeout(r, 150));
+    expect(await queuedIds(box.mailboxId)).toHaveLength(0);
+
+    socket.disconnect();
     await new Promise((r) => setTimeout(r, 50));
   }, 30_000);
 });

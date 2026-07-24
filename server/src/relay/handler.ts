@@ -478,6 +478,13 @@ export function attachRelay(io: SocketServer) {
       // forever (this was the root cause of "some messages never arrive"). Deletion
       // now happens only on the client's 'envelope:ack' above; the client dedups by
       // id (INSERT OR REPLACE) so a re-drain of an un-acked row is harmless.
+      // Backward-compat (audit 2026-07-25): OLD clients don't advertise the
+      // 'ackDelivery' capability and never send 'envelope:ack'. For them we keep the
+      // legacy delete-on-emit — otherwise their queue would never drain and they'd
+      // re-download the whole backlog on every reconnect. NEW clients (ackDelivery)
+      // defer deletion to the ack handler above. This lets the relay ship before the
+      // client is fully rolled out.
+      const ackCapable = (socket.handshake.auth as Record<string, unknown> | undefined)?.['ackDelivery'] === true;
       void (async () => {
         for (const id of boundIds) {
           const pending = await messageRepo.drainFor(id);
@@ -487,6 +494,7 @@ export function attachRelay(io: SocketServer) {
               ciphertext: row.ciphertext_b64, nonce: row.nonce_b64,
               epk: row.epk_b64 ?? '', createdAt: row.created_at,
             });
+            if (!ackCapable) await messageRepo.delete(row.id);
           }
         }
         socket.emit('auth:ok', {});
@@ -545,6 +553,12 @@ export function attachRelay(io: SocketServer) {
       if (id) void messageRepo.delete(id, deviceId);
     });
 
+    // Backward-compat (audit 2026-07-25): old clients don't advertise 'ackDelivery'
+    // and never ack, so keep the legacy delete-on-emit for them (else their queue
+    // never drains and they re-download the backlog on every reconnect). New clients
+    // defer to the ack handler above. Lets the relay ship before the client rollout.
+    const ackCapable = (socket.handshake.auth as Record<string, unknown> | undefined)?.['ackDelivery'] === true;
+
     // Drain offline queue for this specific device. Sender identity is NOT
     // stored in DB (FND-05) so the queued envelopes are forwarded without a
     // `from` field — the recipient's sealed-sender logic recovers the sender
@@ -577,10 +591,11 @@ export function attachRelay(io: SocketServer) {
         if (row.sender_pub_b64) queued.senderPublicKeyB64 = row.sender_pub_b64;
         socket.emit('envelope', queued);
       }
-      // AT-LEAST-ONCE (audit 2026-07-24): do NOT mark drained on emit. Deletion
-      // (per-device via delete(id, deviceId)) happens only on the client's
-      // 'envelope:ack' (handler registered below), so a lost emit does not lose
-      // the message — it re-drains on the next connect. Client dedups by id.
+      // AT-LEAST-ONCE (audit 2026-07-24): new clients defer deletion to the
+      // 'envelope:ack' handler above (a lost emit re-drains, no loss). OLD clients
+      // (no ackDelivery capability) never ack, so keep the legacy per-device delete
+      // on emit for them — else their queue never drains.
+      if (!ackCapable) await messageRepo.delete(row.id, deviceId);
     }
 
     // Drain queued SenderKey distributions for this device. Each distribution was

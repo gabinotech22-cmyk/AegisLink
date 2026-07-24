@@ -131,6 +131,9 @@ export async function connectMailboxSocket(
     auth: {
       mailboxId: mb.mailboxIdB64,
       mailboxSignPubKey: encodeBase64(mb.signPublicKey),
+      // Capability: we send 'envelope:ack' after persisting each incoming envelope
+      // → the relay defers deletion until confirmed (at-least-once). audit 2026-07-25.
+      ackDelivery: true,
       // Slice 5b: extra epoch mailboxes to bind + drain in this same handshake.
       ...(extraEpochMailboxes.length
         ? { binds: extraEpochMailboxes.map((m) => ({ mailboxId: m.mailboxIdB64, mailboxSignPubKey: encodeBase64(m.signPublicKey) })) }
