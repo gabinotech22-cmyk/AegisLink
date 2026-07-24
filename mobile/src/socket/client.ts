@@ -679,9 +679,10 @@ export function connectMailboxForIdentity(identity: Identity): void {
   if (!MAILBOX_ENABLED) return;
   void connectMailboxSocket((env) => {
     rdiag(`[RDIAG] envelope:mb RECV id=${env.id}`);
-    void handleIncomingV2(env, identity).catch((e) => {
-      if (__DEV__) logger.warn('[socket] handleIncomingV2(mb) failed:', (e as Error).message);
-    });
+    // Return the promise (NO .catch here) so mailboxSocket emits 'envelope:ack'
+    // ONLY after handleIncomingV2 has persisted the message. A throw propagates →
+    // no ack → the relay re-drains it (at-least-once, audit 2026-07-24).
+    return handleIncomingV2(env, identity);
   });
   // Slice 2b.2: also subscribe to our ntfy wake topic over Tor. If the mailbox
   // socket drops (dead circuit) and the relay queues a message, this wakes us to
@@ -1091,9 +1092,14 @@ export function connect(identity: Identity): Socket {
 
   socket.on('envelope', async (env: WireSealedEnvelope) => {
     rdiag(`[RDIAG] envelope RECV from=${env.from ?? '(none)'} hasSenderPub=${!!env.senderPublicKeyB64} self=${!!env.selfCopy}`);
-    await handleIncoming(env, identity).catch((e) => {
+    try {
+      await handleIncoming(env, identity);
+      // AT-LEAST-ONCE (audit 2026-07-24): ack after persisting so the relay deletes
+      // the queued row only once we durably have it. No ack on failure → re-drains.
+      try { socket!.emit('envelope:ack', { id: env.id }); } catch { /* noop */ }
+    } catch (e) {
       if (__DEV__) logger.warn('[socket] handleIncoming failed:', (e as Error).message);
-    });
+    }
   });
 
   // Sealed-sender v2: no `from` on the wire. The ephemeral box opens with our
@@ -1101,9 +1107,15 @@ export function connect(identity: Identity): Socket {
   // exact same downstream as v1 via decryptAndAppend.
   socket.on('envelope:v2', async (env: WireSealedEnvelopeV2) => {
     rdiag(`[RDIAG] envelope:v2 RECV id=${env.id}`);
-    await handleIncomingV2(env, identity).catch((e) => {
+    try {
+      await handleIncomingV2(env, identity);
+      // AT-LEAST-ONCE (audit 2026-07-24): ack ONLY after persisting, so the relay
+      // marks this device drained (and eventually deletes) only once we durably
+      // have the message. No ack on failure → the relay re-drains on next connect.
+      try { socket!.emit('envelope:ack', { id: env.id }); } catch { /* noop */ }
+    } catch (e) {
       if (__DEV__) logger.warn('[socket] handleIncomingV2 failed:', (e as Error).message);
-    });
+    }
   });
 
   // ── Fase 4: dedicated mailbox delivery socket ────────────────────────────────

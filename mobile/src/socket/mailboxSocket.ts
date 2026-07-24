@@ -101,7 +101,7 @@ let mboxSocket: Socket | null = null;
 let currentEpochMailbox: Mailbox | null = null;
 let extraEpochMailboxes: Mailbox[] = []; // catch-up epochs bound alongside the current one
 let authed = false;
-let onEnvelopeCb: ((env: IncomingMailboxEnvelope) => void) | null = null;
+let onEnvelopeCb: ((env: IncomingMailboxEnvelope) => void | Promise<void>) | null = null;
 let boundaryTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── Resilient bootstrap + reconnection ───────────────────────────────────────
@@ -234,7 +234,7 @@ export function registerIosWakeBinding(
 }
 
 export async function connectMailboxSocket(
-  onEnvelope: (env: IncomingMailboxEnvelope) => void,
+  onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
 ): Promise<Socket | null> {
   if (!MAILBOX_ENABLED || !ONION_URL) return null; // fail-closed: needs Tor
   if (mboxSocket && mboxSocket.connected) return mboxSocket;
@@ -362,11 +362,15 @@ export async function connectMailboxSocket(
   sock.on('envelope:mb', (raw: unknown) => {
     const env = raw as IncomingMailboxEnvelope;
     if (!env || typeof env.id !== 'string' || typeof env.ciphertext !== 'string') return;
-    try {
-      onEnvelope(env);
-    } catch (e) {
-      if (__DEV__) logger.warn('[mailbox] onEnvelope handler threw:', e);
-    }
+    // AT-LEAST-ONCE (audit 2026-07-24): ack ONLY after onEnvelope has PERSISTED the
+    // message. The relay keeps the queued copy until this 'envelope:ack' arrives, so
+    // an emit lost over Tor (or a crash before persist) is re-drained on the next
+    // connect instead of lost forever. On failure we deliberately do NOT ack. The
+    // downstream decryptAndAppend dedups by id, so a re-drain is harmless.
+    void Promise.resolve()
+      .then(() => onEnvelope(env))
+      .then(() => { try { sock.emit('envelope:ack', { id: env.id }); } catch { /* noop */ } })
+      .catch((e) => { if (__DEV__) logger.warn('[mailbox] onEnvelope handler threw:', e); });
   });
 
   return sock;
