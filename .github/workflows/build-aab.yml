@@ -74,6 +74,16 @@ jobs:
       - name: Prebuild Android project
         run: npx expo prebuild --platform android --no-install
 
+      # Expo's generated gradle.properties caps the daemon at -Xmx2048m, which OOMs
+      # at release bundling/packaging (PackageAndroidArtifact$IncrementalSplitterRunnable)
+      # for this heavy build (R8 + Hermes + Tor/WebRTC native libs). android/ is
+      # gitignored (regenerated here), so raise the heap on the generated file —
+      # within the 7GB runner. Same fix as test-apk.yml. See audit 2026-07.
+      - name: Raise Gradle heap (avoid bundleRelease OOM)
+        run: |
+          sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m/' android/gradle.properties
+          grep '^org.gradle.jvmargs=' android/gradle.properties
+
       - name: Decode upload keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
