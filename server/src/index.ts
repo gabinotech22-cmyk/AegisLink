@@ -135,7 +135,15 @@ app.get('/health', (_req, res) => {
 
 app.use('/identity', identityRoutes);
 app.use('/push', pushRoutes);
-app.use('/web3', web3Routes);
+// Web3 (DIDs, device revocation, subscription payments) is NOT in production use
+// yet. The device-revocation endpoint currently accepts an unauthenticated write
+// keyed by a client-supplied didHash with no pubkey↔did binding (audit 2026-07,
+// H3), so the whole surface stays OFF by default until the real, identity-bound
+// design lands. The client's revocation POST is best-effort and ignores the 404.
+// Enable with WEB3_ENDPOINTS=on once wired. See docs / audit 2026-07.
+if ((process.env['WEB3_ENDPOINTS'] ?? 'off').toLowerCase() === 'on') {
+  app.use('/web3', web3Routes);
+}
 app.use('/prekeys', prekeysRoutes);
 app.use('/blob', blobRoutes);
 app.use('/backup', backupRoutes);
