@@ -778,7 +778,9 @@ export function connect(identity: Identity): Socket {
     // 4.8+) makes Engine.IO attempt polling in the same shot instead of giving up.
     transports: ['websocket', 'polling'],
     tryAllTransports: true,
-    auth: { aegisId: identity.aegisId, platform: 'mobile' },
+    // ackDelivery: we send 'envelope:ack' after persisting each incoming envelope,
+    // so the relay defers deletion until confirmed (at-least-once). audit 2026-07-25.
+    auth: { aegisId: identity.aegisId, platform: 'mobile', ackDelivery: true },
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 8000,
