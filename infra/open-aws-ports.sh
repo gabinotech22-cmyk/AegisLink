@@ -46,7 +46,10 @@ authorize() { # proto port description
 authorize tcp 22   "SSH"
 authorize tcp 80   "HTTP"
 authorize tcp 443  "HTTPS"
-authorize tcp 3001 "AegisLink relay"
+# NOTE: port 3001 (relay cleartext) is intentionally NOT exposed. The relay is
+# bound to 127.0.0.1 (see docker-compose.yml) and reachable only via nginx on 443.
+# Publishing 3001 to 0.0.0.0/0 would expose the relay in cleartext (no TLS, no
+# cert-pinning) and leak metadata. See security audit 2026-07.
 authorize tcp 3478 "TURN TCP"
 authorize udp 3478 "TURN UDP"
 
@@ -56,7 +59,7 @@ if [ -f "$SSH_KEY" ]; then
   echo "🔥 Abriendo puertos en iptables del servidor..."
   ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
     "${SSH_USER}@${PUBLIC_IP}" "
-      sudo iptables -I INPUT 1 -p tcp -m multiport --dports 22,80,443,3001,3478 -j ACCEPT
+      sudo iptables -I INPUT 1 -p tcp -m multiport --dports 22,80,443,3478 -j ACCEPT
       sudo iptables -I INPUT 1 -p udp --dport 3478 -j ACCEPT
       sudo apt-get install -y -q iptables-persistent netfilter-persistent 2>/dev/null || true
       sudo netfilter-persistent save 2>/dev/null || sudo sh -c 'iptables-save > /etc/iptables/rules.v4'

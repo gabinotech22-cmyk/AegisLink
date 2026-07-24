@@ -32,15 +32,22 @@ const decPathFor = (id: string, ext: string): string => `${FileSystem.cacheDirec
  * base64 never contains ':', so positional splitting is unambiguous. Returns
  * null for non-blob or malformed URIs.
  */
+// Server blob ids are `crypto.randomUUID()` (see server/src/routes/blob.ts). The id
+// is interpolated straight into on-device filesystem paths (`${MEDIA_DIR}${id}.enc`,
+// `dec_${id}.${ext}`), so a malicious sender's `blob:` URI could otherwise steer
+// writes out of the media dir via `../` or absolute-path segments. Reject anything
+// that isn't a plain id token. See security audit 2026-07 (M1, path traversal).
+const BLOB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
 function parseBlobUri(
   mediaUri: string
 ): { id: string; keyB64: string; nonceB64: string; token: string } | null {
   if (!mediaUri.startsWith('blob:')) return null;
   const parts = mediaUri.split(':');
-  if (parts.length === 5) {
+  if (parts.length === 5 && BLOB_ID_RE.test(parts[1])) {
     return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: parts[4] };
   }
-  if (parts.length === 4) {
+  if (parts.length === 4 && BLOB_ID_RE.test(parts[1])) {
     return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: '' };
   }
   return null;

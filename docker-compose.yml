@@ -33,7 +33,11 @@ services:
       # (EACCES under the non-root container user). Keep this name in sync.
       AEGIS_DB_PATH: /data/aegislink.db
       TRUST_PROXY: ${TRUST_PROXY:-1}
-      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      # Fail closed (golden rule #6): if the operator does not set CORS_ORIGIN,
+      # default to EMPTY (not '*'). An empty value makes index.ts restrict browser
+      # CORS to the known own-domain instead of allowing every origin. A '*' default
+      # here silently overrode the relay's own fail-closed logic. See audit 2026-07.
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
       # KLIPY_KEY enables the GIF proxy (routes/proxyGif.ts). Like the other
       # secrets it lives in /etc/aegislink.env (-> .env); the relay returns 503
       # gif_provider_not_configured when it is unset. Must be listed here or the

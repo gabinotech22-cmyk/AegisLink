@@ -2,7 +2,7 @@ import type { Socket } from 'socket.io';
 import { z } from 'zod';
 import { sendCallWakeUp, sendGroupCallWakeUp, type CallMedia } from '../push/expo.js';
 import { AEGIS_ID_RE } from './schemas.js';
-import { redisIncrAtomic, RATE_LIMIT_MAP_MAX } from './rateLimits.js';
+import { redisIncrAtomic, evictExpired } from './rateLimits.js';
 
 import { liveSockets } from './liveSockets.js';
 
@@ -79,11 +79,10 @@ async function checkCallOfferRateLimit(aegisId: string): Promise<boolean> {
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
   entry.count++;
   callOfferRateLimit.set(aegisId, entry);
-  // LRU eviction to prevent unbounded memory growth
-  if (callOfferRateLimit.size > RATE_LIMIT_MAP_MAX) {
-    const oldest = callOfferRateLimit.keys().next().value;
-    if (oldest !== undefined) callOfferRateLimit.delete(oldest);
-  }
+  // Evict EXPIRED buckets (parity with rateLimits.ts) rather than the oldest
+  // inserted: the FIFO form could evict a still-active window and reset its
+  // counter — a rate-limit bypass. See security audit 2026-07.
+  evictExpired(callOfferRateLimit);
   return entry.count <= 5;
 }
 
@@ -102,10 +101,9 @@ async function checkGroupCallChannelRateLimit(aegisId: string): Promise<boolean>
   if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
   entry.count++;
   groupCallChannelRateLimit.set(aegisId, entry);
-  if (groupCallChannelRateLimit.size > RATE_LIMIT_MAP_MAX) {
-    const oldest = groupCallChannelRateLimit.keys().next().value;
-    if (oldest !== undefined) groupCallChannelRateLimit.delete(oldest);
-  }
+  // Evict EXPIRED buckets rather than oldest-inserted (see checkCallOfferRateLimit
+  // above / security audit 2026-07).
+  evictExpired(groupCallChannelRateLimit);
   return entry.count <= 20;
 }
 
