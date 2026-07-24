@@ -126,7 +126,12 @@
       "Bash(wc -l mobile/src/calls/voip-push.ts)",
       "Bash(wc -l mobile/src/calls/callkeep.ts)",
       "PowerShell(gh pr list --head fix/duress-containment-groups-channels --state all)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Read(//c/Users/gabin/Desktop/**)",
+      "Read(//c/Users/gabin/Downloads/**)",
+      "Read(//c/Users/gabin/**)",
+      "Bash(ssh -i ~/.ssh/aegislink_hetzner *)",
+      "Bash(scp -i ~/.ssh/aegislink_hetzner *)"
     ]
   }
 }
