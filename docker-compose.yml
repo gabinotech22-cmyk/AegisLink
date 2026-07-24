@@ -62,6 +62,15 @@ services:
       FCM_SERVER_KEY: ${FCM_SERVER_KEY:-}
       APNS_KEY_ID: ${APNS_KEY_ID:-}
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      # APNS_KEY_P8 — the .p8 private-key CONTENTS (single line with \n escapes, or
+      # a multiline value). REQUIRED for the VoIP call wake (push/apns-voip.ts reads
+      # process.env.APNS_KEY_P8). It was NOT listed here, so the key never reached
+      # the container and the killed-iOS call wake could never fire even with the key
+      # set in .env — same compose gotcha as APNS_KEY_ID above. Bundle/host default
+      # correctly when unset. See security/reliability audit 2026-07.
+      APNS_KEY_P8: ${APNS_KEY_P8:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-com.aegislink.app}
+      APNS_HOST: ${APNS_HOST:-}
       # PUBLIC_CHANNELS gates the /public-channels routes (routes/publicChannels.ts).
       # Default OFF: the relay returns 404 FEATURE_DISABLED until this is 'on'.
       # Same gotcha as TURN_HOST/KLIPY_KEY: it MUST be listed here or the
