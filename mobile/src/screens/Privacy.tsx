@@ -44,6 +44,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
   const typing = usePreferences((s) => s.typingIndicator);
   const screenshot = usePreferences((s) => s.blockScreenshots);
   const routeViaTor = usePreferences((s) => s.routeViaTor);
+  const hideCallIp = usePreferences((s) => s.hideCallIp);
   const callWakeService = usePreferences((s) => s.callWakeService);
   const requireGroupApproval = usePreferences((s) => s.requireGroupApproval);
   const duressActive = usePreferences((s) => s.duressActive);
@@ -214,8 +215,17 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
           />
         </Section>
 
-        {Platform.OS === 'android' && (
-          <Section t={t} label={i18nT('privacy.callsSection')}>
+        <Section t={t} label={i18nT('privacy.callsSection')}>
+          {/* Cross-platform: relay-only ICE hides the real IP from the peer (M4). */}
+          <Toggle
+            t={t}
+            label={i18nT('privacy.hideCallIpLabel', 'Ocultar mi IP en llamadas')}
+            sub={i18nT('privacy.hideCallIpSub', 'Enruta la llamada por el relay para que el otro no vea tu IP real (algo más de latencia)')}
+            value={hideCallIp}
+            onChange={(v) => void setPref('hideCallIp', v)}
+            noBorder={Platform.OS !== 'android'}
+          />
+          {Platform.OS === 'android' && (
             <Toggle
               t={t}
               label={i18nT('privacy.callWakeLabel')}
@@ -230,9 +240,10 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
                 if (v) startCallWakeService();
                 else stopCallWakeService();
               }}
+              noBorder
             />
-          </Section>
-        )}
+          )}
+        </Section>
 
         <Section t={t} label={i18nT('privacy.alertsSection')}>
           <Row

@@ -925,7 +925,11 @@ export function connect(identity: Identity): Socket {
     // call setup simply fetches (or falls back to STUN-only) as before.
     try {
       const { fetchTurnConfig } = require('../webrtc/ice') as typeof import('../webrtc/ice');
-      void fetchTurnConfig(identity.aegisId, false).catch(() => {});
+      // Warm the cache for the policy the call will actually use (relay when the
+      // hideCallIp preference is ON, default) so the first call isn't a cache miss.
+      // Audit 2026-07 (M4).
+      const hideCallIp = (require('../store/preferences') as typeof import('../store/preferences')).usePreferences.getState().hideCallIp;
+      void fetchTurnConfig(identity.aegisId, hideCallIp).catch(() => {});
     } catch { /* webrtc module unavailable (tests/Expo Go) */ }
 
     // Ensure deviceId is resolved before using it below

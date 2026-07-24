@@ -307,6 +307,8 @@
     "torOrbot": "When active, all relay traffic is routed through the Tor network via Orbot. Your IP is hidden from the relay server.",
     "openOrbot": "Open Orbot",
     "callsSection": "CALLS",
+    "hideCallIpLabel": "Hide my IP in calls",
+    "hideCallIpSub": "Route calls through the TURN relay so the other person never sees your real IP (slightly higher latency).",
     "callWakeLabel": "Ring calls when app is closed",
     "callWakeSub": "Android only · keeps a background service alive so calls ring without Google. Uses more battery and shows a permanent notification.",
     "encryptedBackup": "Encrypted backup",

@@ -39,9 +39,25 @@ COTURN_CONF_RENDERED="/etc/coturn/turnserver.conf"
 
 echo "[deploy] Rendering coturn config (secret stays server-side)..."
 mkdir -p "$(dirname "$COTURN_CONF_RENDERED")"
+
+# external-ip MUST be the server's PUBLIC IP. coturn runs in host-network mode and
+# sees several interfaces (public + docker bridges 172.x); with external-ip EMPTY
+# it advertises a WRONG relay candidate (a private 172.x, unreachable by the peer)
+# and relay-only calls get ONE-WAY audio (security audit 2026-07). If EXTERNAL_IP
+# is not provided, auto-detect the source IP used for outbound traffic — the public
+# IP on Hetzner and most clouds where the address is bound directly to the NIC.
+if [ -z "${EXTERNAL_IP:-}" ]; then
+  EXTERNAL_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)"
+  echo "[deploy] EXTERNAL_IP not set — auto-detected public IP: ${EXTERNAL_IP:-<none>}"
+fi
+if [ -z "${EXTERNAL_IP:-}" ]; then
+  echo "[deploy] WARNING: EXTERNAL_IP could not be determined. coturn will advertise" \
+       "a wrong relay candidate and calls may be one-way. Export EXTERNAL_IP=<public-ip>." >&2
+fi
+
 # envsubst only expands TURN_SECRET and EXTERNAL_IP — not other shell vars
 TURN_SECRET="$TURN_SECRET" \
-EXTERNAL_IP="${EXTERNAL_IP:-}" \
+EXTERNAL_IP="$EXTERNAL_IP" \
   envsubst '${TURN_SECRET} ${EXTERNAL_IP}' \
   < "$COTURN_CONF_TEMPLATE" \
   > "$COTURN_CONF_RENDERED"

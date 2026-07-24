@@ -307,6 +307,8 @@
     "torOrbot": "Con esta opción activa, todo el tráfico al relay pasa por la red Tor vía Orbot. Tu IP queda oculta para el servidor.",
     "openOrbot": "Abrir Orbot",
     "callsSection": "LLAMADAS",
+    "hideCallIpLabel": "Ocultar mi IP en llamadas",
+    "hideCallIpSub": "Enruta la llamada por el relay TURN para que el otro nunca vea tu IP real (algo más de latencia).",
     "callWakeLabel": "Sonar llamadas con la app cerrada",
     "callWakeSub": "Solo Android · mantiene un servicio en segundo plano para que las llamadas suenen sin Google. Consume más batería y muestra una notificación permanente.",
     "encryptedBackup": "Copia de seguridad cifrada",
