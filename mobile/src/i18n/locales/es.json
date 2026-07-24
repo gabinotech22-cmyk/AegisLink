@@ -107,6 +107,8 @@
     "deleteContactConfirm": "¿Eliminar a {{name}} y todos sus mensajes? Esta acción no se puede deshacer.",
     "archiveAction": "ARCHIVAR",
     "registering": "REGISTRANDO IDENTIDAD…",
+    "notifBlocked": "Notificaciones desactivadas — no recibirás avisos de mensajes nuevos. Toca para activarlas.",
+    "notifEnable": "ACTIVAR",
     "registrationFailed": "FALLO AL REGISTRAR IDENTIDAD",
     "retry": "REINTENTAR",
     "registrationRateLimited": "Demasiados intentos de registro. Reintento automático en {{minutes}} min",
