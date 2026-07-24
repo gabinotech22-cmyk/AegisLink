@@ -650,7 +650,9 @@ export function connect(identity: Identity): Socket {
 
   socket = io(RELAY_URL, {
     transports: ['websocket'],
-    auth: { aegisId: identity.aegisId, platform: 'desktop' },
+    // ackDelivery: we send 'envelope:ack' after persisting each incoming envelope,
+    // so the relay defers deletion until confirmed (at-least-once). audit 2026-07-25.
+    auth: { aegisId: identity.aegisId, platform: 'desktop', ackDelivery: true },
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 8000,

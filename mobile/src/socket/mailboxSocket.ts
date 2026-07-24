@@ -288,6 +288,10 @@ export async function connectMailboxSocket(
   const sock = new TorSioSocket(ONION_URL, {
     mailboxId: mb.mailboxIdB64,
     mailboxSignPubKey: encodeBase64(mb.signPublicKey),
+    // Capability: we send 'envelope:ack' after persisting each incoming envelope,
+    // so the relay uses at-least-once delivery (defers deletion until we confirm).
+    // audit 2026-07-25.
+    ackDelivery: true,
     // Slice 5b: extra epoch mailboxes to bind + drain in this same handshake.
     ...(extraEpochMailboxes.length
       ? { binds: extraEpochMailboxes.map((m) => ({ mailboxId: m.mailboxIdB64, mailboxSignPubKey: encodeBase64(m.signPublicKey) })) }
