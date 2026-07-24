@@ -207,13 +207,19 @@ describe('mailboxSocket — dedicated mailbox delivery socket', () => {
     await expect(p).resolves.toEqual({ ok: true, delivered: true });
   });
 
-  it('hands incoming envelope:mb to the onEnvelope callback', async () => {
+  it('hands incoming envelope:mb to onEnvelope and acks only after it resolves', async () => {
     const received: unknown[] = [];
-    await connectMailboxSocket((e) => received.push(e));
+    await connectMailboxSocket((e) => { received.push(e); });
     lastSocket!.connected = true;
     const env = { id: 'i1', to: 'me', ciphertext: 'ct', nonce: 'n', epk: 'e', createdAt: 1 };
     lastSocket!.fire('envelope:mb', env);
+    // onEnvelope now runs inside a promise chain (ack-after-persist), so flush.
+    await new Promise((r) => setTimeout(r, 0));
     expect(received).toEqual([env]);
+    // AT-LEAST-ONCE (audit 2026-07-24): the client must emit 'envelope:ack' AFTER
+    // persisting, so the relay keeps the queued copy until receipt is confirmed.
+    const ackEmit = lastSocket!.emitted.find((e) => e.event === 'envelope:ack');
+    expect(ackEmit?.payload).toEqual({ id: 'i1' });
   });
 
   it('exposes our current mailbox id once connected, cleared on disconnect', async () => {

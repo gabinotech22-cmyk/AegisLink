@@ -846,6 +846,11 @@ export function connect(identity: Identity): Socket {
 
   socket.on('envelope', async (env: WireSealedEnvelope) => {
     await handleIncoming(env, identity);
+    // AT-LEAST-ONCE (audit 2026-07-24): ack ONLY after persisting so the relay
+    // deletes the queued row once we durably have it. If handleIncoming throws, the
+    // await rejects and this is skipped → no ack → the relay re-drains. Parity with
+    // mobile; the client dedups by id.
+    try { socket!.emit('envelope:ack', { id: env.id }); } catch { /* noop */ }
   });
 
   // Sealed-sender v2 (parity with mobile): no `from` on the wire; the ephemeral
@@ -853,6 +858,8 @@ export function connect(identity: Identity): Socket {
   // sender, then the v1 downstream (decryptAndAppend) is reused.
   socket.on('envelope:v2', async (env: WireSealedEnvelopeV2) => {
     await handleIncomingV2(env, identity);
+    // AT-LEAST-ONCE (audit 2026-07-24): ack only after persisting. Parity with mobile.
+    try { socket!.emit('envelope:ack', { id: env.id }); } catch { /* noop */ }
   });
 
   // ── Fase 4: dedicated mailbox delivery socket ────────────────────────────────
@@ -864,7 +871,10 @@ export function connect(identity: Identity): Socket {
   // No-op when mailbox mode is off. Idempotent: a live socket is reused.
   if (MAILBOX_ENABLED) {
     void connectMailboxSocket((env) => {
-      void handleIncomingV2(env, identity);
+      // Return the promise (no swallow) so the mailbox socket emits 'envelope:ack'
+      // ONLY after handleIncomingV2 has persisted the message (at-least-once, audit
+      // 2026-07-24). Parity with mobile.
+      return handleIncomingV2(env, identity);
     });
   }
 

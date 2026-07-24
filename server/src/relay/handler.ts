@@ -352,17 +352,12 @@ export function attachRelay(io: SocketServer) {
         const d = parsed.data;
         // The relay never stamps a sender — the source mailbox is sealed inside.
         const env = { id: d.id, to: d.to, ciphertext: d.ciphertext, nonce: d.nonce, epk: d.epk, createdAt: Date.now() };
-        const recipients = mailboxSockets.get(d.to);
-        const liveRecipients = recipients ? liveSockets(recipients).filter((s) => s !== socket) : [];
-        if (liveRecipients.length > 0) {
-          for (const s of liveRecipients) s.emit('envelope:mb', env);
-          ack?.({ ok: true, delivered: true });
-          return;
-        }
-        // Offline (Slice 2): queue under the opaque mailbox id, reusing the same
-        // message store as the aegisId path. No sender info is stored (the row
-        // keeps only the sealed ciphertext + epk). Drained on the mailbox's next
-        // connect.
+        // AT-LEAST-ONCE (audit 2026-07-24): ALWAYS enqueue first — a durable backup
+        // under the opaque mailbox id — THEN attempt live delivery. The row is
+        // deleted only when the recipient confirms receipt via 'envelope:ack'; if a
+        // live emit is lost over Tor (or the recipient drops before persisting), the
+        // row survives and re-drains on the next connect. The client dedups by id.
+        // No sender info is stored (only the sealed ciphertext + epk).
         const result = await messageRepo.enqueue({
           id: d.id, recipient: d.to,
           ciphertext_b64: d.ciphertext, nonce_b64: d.nonce,
@@ -373,11 +368,18 @@ export function attachRelay(io: SocketServer) {
           sender_pub_b64: null, epk_b64: d.epk,
         });
         if (!result.ok) { ack?.({ ok: false, error: result.reason ?? 'queue_full' }); return; }
-        // Slice 2b: best-effort, zero-metadata wake-up publish to the ntfy
-        // topic = d.to (co-hosted ntfy, docs/FASE4-SLICE2B-PUSH-DESIGN.md §5.1
-        // v1). Flag-gated (PUSH_MAILBOX_ENABLED); never blocks the ack.
-        void notifyMailbox(d.to);
-        ack?.({ ok: true, delivered: false, queued: true });
+        const recipients = mailboxSockets.get(d.to);
+        const liveRecipients = recipients ? liveSockets(recipients).filter((s) => s !== socket) : [];
+        if (liveRecipients.length > 0) {
+          for (const s of liveRecipients) s.emit('envelope:mb', env);
+          ack?.({ ok: true, delivered: true });
+        } else {
+          // Slice 2b: best-effort, zero-metadata wake-up publish to the ntfy
+          // topic = d.to (co-hosted ntfy, docs/FASE4-SLICE2B-PUSH-DESIGN.md §5.1
+          // v1). Flag-gated (PUSH_MAILBOX_ENABLED); never blocks the ack.
+          void notifyMailbox(d.to);
+          ack?.({ ok: true, delivered: false, queued: true });
+        }
       });
 
       // Slice 2b.3b: register/clear a UnifiedPush endpoint for one of THIS
@@ -457,9 +459,25 @@ export function attachRelay(io: SocketServer) {
         }
       });
 
+      // AT-LEAST-ONCE ack (audit 2026-07-24): the client emits 'envelope:ack' after
+      // it has PERSISTED an incoming mailbox envelope. Only then do we hard-delete
+      // the queued row (a mailbox is a single logical inbox → no deviceId). This is
+      // the transport-safe (works over Tor) counterpart of the drain below, which no
+      // longer deletes on emit. Delete-if-present: a no-op for live messages that
+      // were never queued. Un-acked rows survive and re-drain on the next connect.
+      socket.on('envelope:ack', (raw: unknown) => {
+        const id = typeof (raw as { id?: unknown } | null)?.id === 'string'
+          ? (raw as { id: string }).id
+          : null;
+        if (id) void messageRepo.delete(id);
+      });
+
       // Drain every bound id (current epoch + catch-up epochs), THEN signal ready —
-      // mirrors the aegisId drain order (drain → auth:ok). No deviceId → hard
-      // delete on drain (a mailbox is a single logical inbox).
+      // mirrors the aegisId drain order (drain → auth:ok). We emit WITHOUT deleting:
+      // over Tor an emit can be lost mid-drain, and deleting here loses the message
+      // forever (this was the root cause of "some messages never arrive"). Deletion
+      // now happens only on the client's 'envelope:ack' above; the client dedups by
+      // id (INSERT OR REPLACE) so a re-drain of an un-acked row is harmless.
       void (async () => {
         for (const id of boundIds) {
           const pending = await messageRepo.drainFor(id);
@@ -469,7 +487,6 @@ export function attachRelay(io: SocketServer) {
               ciphertext: row.ciphertext_b64, nonce: row.nonce_b64,
               epk: row.epk_b64 ?? '', createdAt: row.created_at,
             });
-            await messageRepo.delete(row.id);
           }
         }
         socket.emit('auth:ok', {});
@@ -515,6 +532,19 @@ export function attachRelay(io: SocketServer) {
       mySenderPublicKeyB64 = myIdentity?.public_key_b64 ?? undefined;
     } catch { /* non-fatal — omit field from envelopes */ }
 
+    // AT-LEAST-ONCE ack (audit 2026-07-24): the client emits 'envelope:ack' after
+    // it has PERSISTED an incoming envelope (live or drained). Mark this device as
+    // having drained the row (delete(id, deviceId) hard-deletes once all the
+    // recipient's devices have acked, matching the queue's per-device model). We do
+    // this ONLY here — never on emit — so a lost delivery re-drains instead of being
+    // lost. Delete-if-present: a no-op for a live message that was never queued.
+    socket.on('envelope:ack', (raw: unknown) => {
+      const id = typeof (raw as { id?: unknown } | null)?.id === 'string'
+        ? (raw as { id: string }).id
+        : null;
+      if (id) void messageRepo.delete(id, deviceId);
+    });
+
     // Drain offline queue for this specific device. Sender identity is NOT
     // stored in DB (FND-05) so the queued envelopes are forwarded without a
     // `from` field — the recipient's sealed-sender logic recovers the sender
@@ -547,7 +577,10 @@ export function attachRelay(io: SocketServer) {
         if (row.sender_pub_b64) queued.senderPublicKeyB64 = row.sender_pub_b64;
         socket.emit('envelope', queued);
       }
-      await messageRepo.delete(row.id, deviceId);
+      // AT-LEAST-ONCE (audit 2026-07-24): do NOT mark drained on emit. Deletion
+      // (per-device via delete(id, deviceId)) happens only on the client's
+      // 'envelope:ack' (handler registered below), so a lost emit does not lose
+      // the message — it re-drains on the next connect. Client dedups by id.
     }
 
     // Drain queued SenderKey distributions for this device. Each distribution was
