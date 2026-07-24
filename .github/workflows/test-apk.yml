@@ -23,6 +23,11 @@ on:
         options: [release, debug]
         default: release
 
+# Least-privilege GITHUB_TOKEN: builds an APK and uploads it as an artifact —
+# no repo writes. See security audit 2026-07 (broad-permissions hardening).
+permissions:
+  contents: read
+
 jobs:
   build-test-apk:
     name: Build debug-signed release APK

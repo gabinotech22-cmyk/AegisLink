@@ -31,6 +31,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege GITHUB_TOKEN: CI only reads code, builds and tests — it never
+# writes to the repo. Explicit block instead of the account-wide default. See
+# security audit 2026-07 (broad-permissions hardening).
+permissions:
+  contents: read
+
 jobs:
   # ─── Server — lint + typecheck ────────────────────────────────────────────
   server-typecheck:

@@ -142,3 +142,26 @@ updates:
         update-types:
           - minor
           - patch
+
+  # ── Docker base images (supply-chain: watch relay + tor sidecar) ──────────
+  # Closes "base image can auto-upgrade silently" (audit 2026-07) the durable
+  # way — monitored, reviewable bumps of node:22-alpine / alpine:3.x instead of
+  # a hand-pinned digest that goes stale and misses security patches.
+  - package-ecosystem: docker
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+  - package-ecosystem: docker
+    directory: /infra/tor
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
