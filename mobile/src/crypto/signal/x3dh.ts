@@ -434,9 +434,13 @@ export function shouldUsePqReceiver(
   msgHasCiphertext: boolean,
 ): 'v1' | 'v2' {
   if (weAdvertisedPq && !msgHasCiphertext) {
-    // Downgrade observed — fall back to v1 instead of aborting. Logged so the
-    // rate of v1 fallbacks is observable (a spike could indicate an attack OR a
-    // bundle-publish regression).
+    // Downgrade observed — fall back to v1 instead of aborting. NOTE (audit
+    // 2026-07): this warning is __DEV__-only, so in shipped builds a PQ downgrade
+    // leaves NO trace — a spike that "could indicate an attack OR a bundle-publish
+    // regression" is currently NOT observable in production. Do not claim
+    // telemetry here until a privacy-preserving aggregate counter (no key
+    // material) actually emits in release builds. Confidentiality is unaffected:
+    // v1 remains full X25519 E2EE; only the post-quantum guarantee is lost.
     if (__DEV__) {
       logger.warn(
         '[PQXDH] downgrade fallback: advertised a PQ prekey but inbound init carried no ML-KEM ciphertext — proceeding with classic v1 X3DH',

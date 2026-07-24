@@ -42,23 +42,49 @@ const PreviewQuerySchema = z.object({
 });
 
 // ── SSRF block list ───────────────────────────────────────────────────────────
+/**
+ * If `h` (a lowercased, bracket-stripped host) denotes an IPv4 address — plain
+ * dotted, IPv4-mapped IPv6 in dotted form (`::ffff:127.0.0.1`) OR the hex form
+ * (`::ffff:7f00:1`, `::7f00:1`, or fully-expanded `0:0:0:0:0:ffff:7f00:1`) —
+ * return its canonical dotted-decimal string, else null. The hex form was the
+ * SSRF bypass: `::ffff:a9fe:a9fe` == 169.254.169.254 slipped past a dotted-only
+ * regex, reaching cloud metadata / loopback. See security audit 2026-07.
+ */
+export function canonicalIpv4(h: string): string | null {
+  const dotted = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (dotted) {
+    const o = dotted.slice(1, 5).map(Number);
+    return o.every((n) => n <= 255) ? o.join('.') : null;
+  }
+  const hex = /^(?:::ffff:|::|0:0:0:0:0:ffff:|0:0:0:0:0:0:)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    if (hi <= 0xffff && lo <= 0xffff) {
+      return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+    }
+  }
+  return null;
+}
+
 /** True when a literal IP string is in a private/loopback/link-local/metadata range. */
 export function isBlockedIp(ip: string): boolean {
   const h = ip.replace(/^\[|\]$/g, '').toLowerCase();
 
-  // IPv4 (also matches IPv4-mapped IPv6 like ::ffff:169.254.169.254 via the suffix)
-  const ipv4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
-  if (ipv4) {
-    const [, a, b] = ipv4.map(Number) as [string, number, number, number, number];
-    if (a === 127) return true;                 // loopback
-    if (a === 0) return true;                    // unspecified / invalid
-    if (a === 10) return true;                   // RFC 1918
-    if (a === 172 && b >= 16 && b <= 31) return true; // RFC 1918
-    if (a === 192 && b === 168) return true;     // RFC 1918
-    if (a === 169 && b === 254) return true;     // link-local (AWS IMDS 169.254.169.254)
+  // Canonicalise any embedded IPv4 (plain, dotted-mapped, or hex-mapped IPv6) to
+  // dotted form BEFORE the range checks, so `::ffff:a9fe:a9fe` is treated exactly
+  // like 169.254.169.254 instead of slipping through as an opaque IPv6 literal.
+  const v4 = canonicalIpv4(h);
+  if (v4) {
+    const [a, b] = v4.split('.').map(Number);
+    if (a === 127) return true;                       // loopback 127.0.0.0/8
+    if (a === 0) return true;                          // unspecified / invalid
+    if (a === 10) return true;                         // RFC 1918
+    if (a === 172 && b >= 16 && b <= 31) return true;  // RFC 1918
+    if (a === 192 && b === 168) return true;           // RFC 1918
+    if (a === 169 && b === 254) return true;           // link-local (AWS/GCP/Hetzner IMDS)
     if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
-    // Note: do not early-return false here — fall through to IPv6 checks for
-    // mapped forms; the IPv4 regex is anchored to the END of the string.
+    // Public address — fall through to the IPv6 literal checks below.
   }
 
   if (h === '::1' || h === '0:0:0:0:0:0:0:1') return true; // IPv6 loopback
@@ -185,39 +211,64 @@ router.get('/', previewLimiter, async (req, res) => {
   const timeout = setTimeout(() => controller.abort(), 5_000);
 
   try {
-    const upstream = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        // Request only the first 8 KB; many servers honour this.
-        Range: 'bytes=0-8191',
-        'User-Agent': 'AegisLinkRelay/1.0 (+linkpreview)',
-        // Do not send cookies or credentials to the upstream host.
-        Cookie: '',
-      },
-      redirect: 'follow',
-    });
-
-    clearTimeout(timeout);
-
-    // The final URL after any redirects — used to resolve relative image URLs.
-    const finalUrl = upstream.url ?? url;
-
-    // Re-check hostname after redirects (open-redirect SSRF mitigation) — both
-    // textually and via DNS resolution (rebinding through a redirect target).
-    try {
-      const finalParsed = new URL(finalUrl);
+    // Manual redirect handling: validate EVERY hop's host (textual + DNS) BEFORE
+    // issuing the request to it. `redirect:'follow'` let undici reach intermediate
+    // hosts (internal services, cloud metadata) before the code could re-check —
+    // a blind SSRF via open-redirect. Now each Location is re-validated as a fresh
+    // target and never followed blindly. See security audit 2026-07 (M6).
+    const MAX_REDIRECTS = 5;
+    let currentUrl = url;
+    let upstream: Response | null = null;
+    for (let hop = 0; ; hop++) {
+      const hopParsed = new URL(currentUrl);
       if (
-        (finalParsed.protocol !== 'http:' && finalParsed.protocol !== 'https:') ||
-        isBlockedHostname(finalParsed.hostname)
+        (hopParsed.protocol !== 'http:' && hopParsed.protocol !== 'https:') ||
+        isBlockedHostname(hopParsed.hostname)
       ) {
         res.status(400).json({ error: 'INVALID_PAYLOAD' });
         return;
       }
-      await assertPublicHost(finalParsed.hostname);
-    } catch {
-      res.status(400).json({ error: 'INVALID_PAYLOAD' });
+      // Throws on a blocked/unresolvable host; the outer catch turns it into a
+      // generic error response WITHOUT the request ever being issued.
+      await assertPublicHost(hopParsed.hostname);
+
+      const resp = await fetch(currentUrl, {
+        signal: controller.signal,
+        headers: {
+          // Request only the first 8 KB; many servers honour this.
+          Range: 'bytes=0-8191',
+          'User-Agent': 'AegisLinkRelay/1.0 (+linkpreview)',
+          // Do not send cookies or credentials to the upstream host.
+          Cookie: '',
+        },
+        redirect: 'manual',
+      });
+
+      const location =
+        resp.status >= 300 && resp.status < 400 ? resp.headers.get('location') : null;
+      if (location) {
+        if (hop >= MAX_REDIRECTS) {
+          res.status(400).json({ error: 'INVALID_PAYLOAD' });
+          return;
+        }
+        // Resolve relative Location against the current URL; the next loop
+        // iteration validates it before any request is made.
+        currentUrl = new URL(location, currentUrl).href;
+        continue;
+      }
+      upstream = resp;
+      break;
+    }
+
+    clearTimeout(timeout);
+
+    if (!upstream) {
+      res.status(504).json({ error: 'preview_unavailable' });
       return;
     }
+
+    // The final URL after any redirects — used to resolve relative image URLs.
+    const finalUrl = upstream.url || currentUrl;
 
     if (!upstream.ok) {
       // Only log aggregated status codes — never the URL.

@@ -26,6 +26,16 @@ export interface Preferences {
   // Network
   routeViaTor: boolean;
 
+  /**
+   * Hide your real IP address from the peer during 1:1 calls by forcing all
+   * media through the TURN relay (relay-only ICE) instead of allowing direct
+   * host/srflx candidates. Default ON — anonymity by default (audit 2026-07,
+   * M4). Costs a little latency/bandwidth via the relay. NOTE: group calls stay
+   * direct-capable for now (relay-only currently causes one-way audio via coturn
+   * hairpinning — see socket/groupCalls.ts); this toggle applies to 1:1 calls.
+   */
+  hideCallIp: boolean;
+
   // Calls — Android persistent foreground service that keeps the socket alive so
   // an incoming call rings with the app killed, WITHOUT Google/FCM (zero-metadata
   // wake). Costs a permanent notification + battery. Android-only (no-op on iOS,
@@ -74,6 +84,7 @@ const DEFAULTS: Preferences = {
   blockScreenshots: true,
   requireGroupApproval: false,
   routeViaTor: false,
+  hideCallIp: true,
   callWakeService: true,
   notifMaster: true,
   notifPreview: false,
@@ -116,6 +127,7 @@ function snapshot(get: () => PrefsState): Preferences {
     blockScreenshots: s.blockScreenshots,
     requireGroupApproval: s.requireGroupApproval,
     routeViaTor: s.routeViaTor,
+    hideCallIp: s.hideCallIp,
     callWakeService: s.callWakeService,
     notifMaster: s.notifMaster,
     notifPreview: s.notifPreview,

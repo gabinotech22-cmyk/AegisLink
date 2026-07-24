@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell, session } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import { registerSecureStorageHandlers } from './ipc/secureStorage'
 import { registerDatabaseHandlers, openMainDbIfUnwrapped, closeDatabase } from './ipc/database'
@@ -43,12 +44,25 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // H-1: Block all navigations to external origins
+  // H-1 / audit 2026-07 (M5): restrict navigation to the app's OWN document.
+  // The renderer is the privileged context (preload exposes window.aegis IPC to
+  // the encrypted DB), so allowing ANY file:// let a planted local HTML file
+  // navigate into it and drive those IPC calls (→ full E2EE compromise). Pin to
+  // the exact packaged index.html (prod) or the Vite dev URL (dev); permit only
+  // #hash / ?query suffixes of that same document, block everything else.
+  const appUrl =
+    is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? process.env['ELECTRON_RENDERER_URL']
+      : pathToFileURL(join(__dirname, '../renderer/index.html')).href
   win.webContents.on('will-navigate', (ev, url) => {
-    const allowed =
-      url.startsWith('file://') ||
-      (is.dev && url.startsWith(process.env['ELECTRON_RENDERER_URL'] ?? 'http://localhost'))
-    if (!allowed) ev.preventDefault()
+    const sameDoc =
+      url === appUrl || url.startsWith(appUrl + '#') || url.startsWith(appUrl + '?')
+    // In dev, Vite navigates within its own origin (HMR, sub-paths).
+    const devOk =
+      is.dev &&
+      !!process.env['ELECTRON_RENDERER_URL'] &&
+      url.startsWith(process.env['ELECTRON_RENDERER_URL'])
+    if (!sameDoc && !devOk) ev.preventDefault()
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

@@ -24,6 +24,12 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+# Least-privilege GITHUB_TOKEN: this workflow checks out code and deploys over
+# SSH using dedicated secrets — it never writes back to the repo. See security
+# audit 2026-07 (broad-permissions hardening).
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: Deploy relay via SSH

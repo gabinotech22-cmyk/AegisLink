@@ -392,14 +392,14 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
-  // forceRelay=false: allow host/srflx (direct + STUN) candidates alongside TURN.
-  // Relay-only produced one-way audio when both peers shared the same coturn
-  // (hairpinning asymmetry). Direct/STUN connects bidirectionally; TURN stays as
-  // fallback. Trade-off: peer IPs may be visible to each other on a direct path —
-  // acceptable for a working first release; can re-tighten to relay-only later.
-  // Kicked off BEFORE the audio-mode setup so the network round-trip (up to 3s
-  // uncached) overlaps with it instead of adding to the pre-ring latency.
-  const turnConfigPromise = fetchTurnConfig(ownAegisId, false);
+  // M4 (audit 2026-07): honor the `hideCallIp` preference (default ON) → relay-only
+  // ICE so the peer never sees a host/srflx candidate carrying our real IP. The
+  // prior one-way-audio caveat was a coturn empty-external-ip bug (relay advertised
+  // a docker-bridge 172.x), fixed at the relay; relay-only now connects both ways.
+  // Kicked off BEFORE the audio-mode setup so the round-trip (up to 3s uncached)
+  // overlaps with it instead of adding to the pre-ring latency.
+  const hideCallIp = (require('../store/preferences') as typeof import('../store/preferences')).usePreferences.getState().hideCallIp;
+  const turnConfigPromise = fetchTurnConfig(ownAegisId, hideCallIp);
 
   // Set audio mode for call — earpiece for audio, speakerphone for video
   try {
@@ -516,14 +516,13 @@ export async function acceptCall(): Promise<void> {
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
-  // forceRelay=false: allow host/srflx (direct + STUN) candidates alongside TURN.
-  // Relay-only produced one-way audio when both peers shared the same coturn
-  // (hairpinning asymmetry). Direct/STUN connects bidirectionally; TURN stays as
-  // fallback. Trade-off: peer IPs may be visible to each other on a direct path —
-  // acceptable for a working first release; can re-tighten to relay-only later.
-  // Kicked off BEFORE the audio-mode setup so the network round-trip overlaps
-  // with it instead of delaying the answer.
-  const turnConfigPromise = fetchTurnConfig(ownAegisId, false);
+  // M4 (audit 2026-07): honor the `hideCallIp` preference (default ON) → relay-only
+  // ICE so the peer never sees a host/srflx candidate carrying our real IP. The
+  // prior one-way-audio caveat was a coturn empty-external-ip bug, fixed at the
+  // relay; relay-only now connects both ways. Kicked off BEFORE the audio-mode
+  // setup so the network round-trip overlaps with it instead of delaying the answer.
+  const hideCallIp = (require('../store/preferences') as typeof import('../store/preferences')).usePreferences.getState().hideCallIp;
+  const turnConfigPromise = fetchTurnConfig(ownAegisId, hideCallIp);
 
   // NOTE: do NOT resetIceQueue() here — the buffer was armed in the call:invite
   // handler and has been collecting the caller's trickled candidates during the

@@ -107,6 +107,7 @@ const mockPrefs: Record<string, unknown> = {
   typingIndicator: true,
   blockScreenshots: false,
   routeViaTor: false,
+  hideCallIp: true,
   requireGroupApproval: false,
   set: mockSetPref,
 };

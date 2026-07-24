@@ -437,6 +437,10 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
     const { channelId, ts, sig: sigB64 } = parsed.data;
 
     void (async () => {
+      // Anti-replay: reject stale owner actions, same guard as pubchannel:pending
+      // and :approve. Without it a captured tombstone stayed replayable. See
+      // security audit 2026-07.
+      if (Math.abs(Date.now() - ts) > OWNER_ACTION_MAX_SKEW_MS) { ack?.({ ok: false, error: 'stale_timestamp' }); return; }
       const channel = await publicChannelRepo.get(channelId);
       if (!channel) { ack?.({ ok: false, error: 'channel_not_found' }); return; }
       // Authoritative signing key from the STORED manifest — never from the wire.

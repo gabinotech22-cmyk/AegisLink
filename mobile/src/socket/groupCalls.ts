@@ -359,9 +359,13 @@ async function createGroupPeerAsOfferer(
   if (!socket || !me) return;
 
   let turnConfig: import('../webrtc/ice').RTCConfigShape | undefined;
-  // forceRelay=false: allow direct/STUN candidates (relay-only gave one-way audio
-  // via coturn hairpinning). TURN stays as fallback.
-  try { turnConfig = await fetchTurnConfig(me.aegisId, false); } catch { /* default */ }
+  // M4 (audit 2026-07): honor hideCallIp (default ON) → relay-only hides our IP.
+  // The one-way-audio note was a coturn empty-external-ip bug, fixed at the relay;
+  // relay-only now connects both ways.
+  try {
+    const hideCallIp = (require('../store/preferences') as typeof import('../store/preferences')).usePreferences.getState().hideCallIp;
+    turnConfig = await fetchTurnConfig(me.aegisId, hideCallIp);
+  } catch { /* default */ }
 
   const peer = await createPeer(
     'audio',
@@ -877,9 +881,13 @@ export function attachGroupCallHandlers(): void {
 
       void (async () => {
         let turnConfig: import('../webrtc/ice').RTCConfigShape | undefined;
-        // forceRelay=false: allow direct/STUN candidates (relay-only gave one-way audio
-  // via coturn hairpinning). TURN stays as fallback.
-  try { turnConfig = await fetchTurnConfig(me.aegisId, false); } catch { /* default */ }
+        // M4 (audit 2026-07): honor hideCallIp (default ON) → relay-only hides our IP.
+        // The one-way-audio note was a coturn empty-external-ip bug, fixed at the
+        // relay; relay-only now connects both ways.
+        try {
+          const hideCallIp = (require('../store/preferences') as typeof import('../store/preferences')).usePreferences.getState().hideCallIp;
+          turnConfig = await fetchTurnConfig(me.aegisId, hideCallIp);
+        } catch { /* default */ }
 
         const peer = await createPeer(
           'audio',
