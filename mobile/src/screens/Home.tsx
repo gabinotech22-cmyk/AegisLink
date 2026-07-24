@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AppState, View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, PanResponder, ActivityIndicator } from 'react-native';
+import { AppState, View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, PanResponder, ActivityIndicator, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -60,10 +60,29 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
   const clearChat = useMessages((s) => s.clearChat);
   const [showArchived, setShowArchived] = useState(false);
   const [menuContact, setMenuContact] = useState<StoredContact | null>(null);
+  const [notifBlocked, setNotifBlocked] = useState(false);
 
   useEffect(() => {
     void hydrate();
     void loadAllUnreads();
+  }, []);
+
+  // Notification-permission recovery (audit 2026-07-24, problem C): if the OS is
+  // blocking our notifications the user silently misses every message alert and
+  // believes delivery is broken. Surface a banner and re-check whenever the app
+  // returns to the foreground (the user may have just toggled it in Settings).
+  useEffect(() => {
+    let cancelled = false;
+    const check = async (): Promise<void> => {
+      try {
+        const { areNotificationsBlocked } = require('../notifications/push') as typeof import('../notifications/push');
+        const blocked = await areNotificationsBlocked();
+        if (!cancelled) setNotifBlocked(blocked);
+      } catch { /* module unavailable (Expo Go) — no banner */ }
+    };
+    void check();
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') void check(); });
+    return () => { cancelled = true; sub.remove(); };
   }, []);
 
   // ── Publish-status retry (AppState foreground + backoff) ───────────────────
@@ -377,6 +396,42 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
             {i18nT('home.registering')}
           </Text>
         </View>
+      )}
+
+      {/* Notification-permission recovery banner (audit 2026-07-24, problem C):
+          without notification permission the user silently misses every message
+          alert. Tapping re-requests (Android re-prompts while allowed) or deep-links
+          to system settings. */}
+      {notifBlocked && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={async () => {
+            const { requestNotificationPermission } = require('../notifications/push') as typeof import('../notifications/push');
+            const granted = await requestNotificationPermission();
+            if (granted) { setNotifBlocked(false); return; }
+            void Linking.openSettings();
+          }}
+          style={{
+            marginHorizontal: 18,
+            marginBottom: 8,
+            paddingVertical: 10,
+            paddingHorizontal: 14,
+            backgroundColor: `${t.danger}18`,
+            borderWidth: 1,
+            borderColor: `${t.danger}55`,
+            borderRadius: t.radius,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.text, letterSpacing: 0.4, flex: 1, lineHeight: 16 }}>
+            {i18nT('home.notifBlocked', 'Notificaciones desactivadas — no recibirás avisos de mensajes nuevos. Toca para activarlas.')}
+          </Text>
+          <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger, letterSpacing: 0.5 }}>
+            {i18nT('home.notifEnable', 'ACTIVAR')}
+          </Text>
+        </Pressable>
       )}
 
       {publishStatus === 'failed' && (

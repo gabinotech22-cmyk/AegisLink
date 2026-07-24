@@ -107,6 +107,8 @@
     "deleteContactConfirm": "Delete {{name}} and all their messages? This action cannot be undone.",
     "archiveAction": "ARCHIVE",
     "registering": "REGISTERING IDENTITY…",
+    "notifBlocked": "Notifications are off — you won't be alerted about new messages. Tap to enable.",
+    "notifEnable": "ENABLE",
     "registrationFailed": "IDENTITY REGISTRATION FAILED",
     "retry": "RETRY",
     "registrationRateLimited": "Too many registration attempts. Automatic retry in {{minutes}} min",

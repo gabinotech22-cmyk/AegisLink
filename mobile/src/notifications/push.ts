@@ -419,6 +419,39 @@ export function getLastExpoToken(): string | null {
   return lastExpoToken;
 }
 
+/**
+ * True when the OS is currently BLOCKING our notifications (permission not
+ * granted). Used to surface a recovery banner: a messaging app whose user
+ * silently misses/denies the notification prompt gets no message alerts and
+ * thinks delivery is broken (audit 2026-07-24, problem C). Never throws — a
+ * missing module (Expo Go) reports "not blocked" so we don't nag in dev.
+ */
+export async function areNotificationsBlocked(): Promise<boolean> {
+  try {
+    const perm = await Notifications.getPermissionsAsync();
+    return !(perm.granted || perm.status === 'granted');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Best-effort re-request of the notification permission. Returns true if granted.
+ * Android only re-prompts while canAskAgain is true; once permanently denied the
+ * caller should deep-link to system settings instead (Linking.openSettings()).
+ */
+export async function requestNotificationPermission(): Promise<boolean> {
+  try {
+    const perm = await Notifications.getPermissionsAsync();
+    if (perm.granted || perm.status === 'granted') return true;
+    if (!perm.canAskAgain) return false;
+    const asked = await Notifications.requestPermissionsAsync();
+    return asked.granted || asked.status === 'granted';
+  } catch {
+    return false;
+  }
+}
+
 export async function registerForPush(identity: Identity): Promise<{ token: string | null }> {
   // Local notification UX (tap routing, cold-start, activeChatId reset, channels,
   // categories) must work even when the remote push token can't be obtained —

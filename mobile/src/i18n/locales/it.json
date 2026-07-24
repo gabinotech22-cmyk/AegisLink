@@ -107,6 +107,8 @@
     "deleteContactConfirm": "Eliminare {{name}} e tutti i suoi messaggi? Questa azione non può essere annullata.",
     "archiveAction": "ARCHIVIA",
     "registering": "REGISTRAZIONE IDENTITÀ…",
+    "notifBlocked": "Notifiche disattivate — non riceverai avvisi dei nuovi messaggi. Tocca per attivarle.",
+    "notifEnable": "ATTIVA",
     "registrationFailed": "REGISTRAZIONE IDENTITÀ FALLITA",
     "retry": "RIPROVA",
     "registrationRateLimited": "Troppi tentativi di registrazione. Nuovo tentativo automatico tra {{minutes}} min",
