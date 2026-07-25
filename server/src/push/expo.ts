@@ -29,20 +29,35 @@ export async function notifyRecipient(aegisId: string): Promise<void> {
       void pushRepo.delete(row.expo_token);
       continue;
     }
+    // iOS and Android differ on ONE field — `_contentAvailable` — and it is the
+    // difference between "the banner always shows" and "the banner silently never
+    // shows" (audit 2026-07-26). On iOS, pairing content-available with a visible
+    // alert makes the OS classify the push as a BACKGROUND notification subject to
+    // the background-refresh budget; under normal message volume iOS throttles it
+    // and the visible alert vanishes with it — a force-quit app then gets NO
+    // notification at all. Reproduced on-device: the identical payload WITHOUT the
+    // flag always displays; calls stayed reliable only because they are rare and
+    // never exhaust the budget. A plain high-priority alert is never throttled.
+    // Android KEEPS the flag: its headless background-reconnect task relies on the
+    // background-fetch wake to drain the queue, and FCM high-priority data messages
+    // are not throttled this way.
+    const isIos = row.platform === 'ios';
     messages.push({
       to: row.expo_token,
-      // Visible push: generic title + body so the OS shows a banner even when
-      // the app cannot be woken for background execution (Doze mode, battery
-      // optimization, iOS rate-limiting of silent pushes). Zero-metadata —
-      // no sender, no count, no content. The app, when it wakes, replaces this
-      // with a richer local notification via showIncomingNotification().
+      // Visible push: generic title + body so the OS shows a banner even when the
+      // app cannot be woken for background execution (Doze mode, battery
+      // optimization). Zero-metadata — no sender, no count, no content. The app,
+      // while it is alive, replaces this with a richer local notification via
+      // showIncomingNotification().
       sound: 'default',
       priority: 'high',
       title: 'AegisLink',
       body: 'Nuevo mensaje cifrado · E2EE',
       data: { kind: 'wakeup' },
-      _contentAvailable: true,   // iOS background fetch flag
-      channelId: 'aegislink-messages', // Android notification channel
+      // iOS: omit content-available so the alert is GUARANTEED to display.
+      // Android: keep it as the background-fetch wake for the reconnect task.
+      ...(isIos ? {} : { _contentAvailable: true }),
+      channelId: 'aegislink-messages', // Android notification channel (ignored on iOS)
     });
   }
 
