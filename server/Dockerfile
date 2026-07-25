@@ -1,5 +1,5 @@
 # ── Build stage ────────────────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY . .
 RUN npx tsc --noEmit
 
 # ── Runtime stage ──────────────────────────────────────────────────────────
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 
 # Non-root user for least-privilege operation
 RUN addgroup -S aegis && adduser -S aegis -G aegis
