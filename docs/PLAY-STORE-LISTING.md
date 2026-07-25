@@ -84,6 +84,23 @@ LIMITACIONES CONOCIDAS (léelas antes de confiar datos sensibles)
 AegisLink no pide tu contacto, no vende datos y no puede leer tus mensajes.
 ```
 
+## Traducciones de la ficha
+
+A diferencia de App Store Connect, **Play Console sí traduce automáticamente y
+gratis**: Play Console → *Crecer* → *Presencia en la tienda* → *Ficha principal
+de Play Store* → **Gestionar traducciones** → *Traducción automática gratuita*
+(29 idiomas, minutos). Se elige el idioma de origen y se marcan título,
+descripción corta y descripción larga.
+
+Sirve como primer borrador, pero **no se publica a ciegas**: la traducción
+automática destroza términos de criptografía ("sealed sender", "double
+ratchet", "clave privada") y esta ficha hace afirmaciones de seguridad que no
+pueden quedar ambiguas. Para los idiomas que la app ya soporta en su UI
+(inglés e italiano, ver `mobile/src/i18n/locales/`) usar el copy revisado a mano
+de `docs/APP-STORE-LISTING.md` → "Localizaciones de la ficha", adaptando
+longitudes a los límites de Play (título 30, descripción corta 80). Para el
+resto de idiomas, la traducción automática es aceptable como alcance extra.
+
 ## Íconos y gráficos
 
 | Asset | Especificación Play | Estado |
