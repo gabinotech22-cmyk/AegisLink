@@ -965,15 +965,36 @@ export function connect(identity: Identity): Socket {
 
         const tokenData = await Notifications.getExpoPushTokenAsync();
         const freshToken: string = tokenData.data;
-        const savedToken = await SecureStore.getItemAsync('aegis.pushToken');
-
-        if (savedToken !== freshToken) {
+        // Re-register until the relay CONFIRMS the write via ack. The old code
+        // emitted fire-and-forget and cached the token as "done" immediately, so
+        // a lost frame or a rate-limited emit was never retried — the relay kept
+        // ZERO tokens for the identity and a killed iOS app never woke
+        // (notifyRecipient had nothing to send to). We now gate the cache on the
+        // ack and re-emit on every auth until 'aegis.pushToken.confirmed' matches
+        // the live token. Keying on a *confirmed* marker also self-heals installs
+        // already stuck by the old bug (their stale 'aegis.pushToken' never
+        // re-emitted). Idempotent server-side (pushRepo.upsert).
+        const confirmedToken = await SecureStore.getItemAsync('aegis.pushToken.confirmed');
+        if (confirmedToken !== freshToken) {
           const { Platform } = require('react-native');
-          socket!.emit('push:register', {
-            token: freshToken,
-            platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'unknown',
-          });
-          await SecureStore.setItemAsync('aegis.pushToken', freshToken);
+          const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'unknown';
+          try {
+            await new Promise<void>((resolve, reject) => {
+              socket!
+                .timeout(EMIT_ACK_TIMEOUT_MS)
+                .emit('push:register', { token: freshToken, platform }, (err: Error | null, ack?: { ok?: boolean }) => {
+                  if (err) { reject(err); return; }
+                  if (!ack?.ok) { reject(new Error('push_register_rejected')); return; }
+                  resolve();
+                });
+            });
+            await SecureStore.setItemAsync('aegis.pushToken.confirmed', freshToken);
+            await SecureStore.setItemAsync('aegis.pushToken', freshToken);
+          } catch (e) {
+            // Not confirmed (lost frame / rate-limited / timeout) → leave the
+            // marker unset so the next auth retries. Never fatal to the connect.
+            if (__DEV__) logger.warn('[socket] push:register not confirmed, will retry next auth:', e);
+          }
         }
       } catch (e) {
         if (__DEV__) logger.warn('[socket] push token registration failed:', e);
