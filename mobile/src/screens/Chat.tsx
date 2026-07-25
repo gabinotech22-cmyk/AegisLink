@@ -93,6 +93,9 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const [gifPickerVisible, setGifPickerVisible] = useState(false);
   const [viewer, setViewer] = useState<{ images: string[]; index: number } | null>(null);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Last text handed to the debounced saver — used to flush on unmount so a
+  // draft typed and abandoned in under 800ms isn't lost.
+  const pendingDraftRef = useRef('');
   const [replyTo, setReplyTo] = useState<StoredMessage | null>(null);
   const [actionsMsg, setActionsMsg] = useState<StoredMessage | null>(null);
   const [forwardBody, setForwardBody] = useState<string | null>(null);
@@ -243,10 +246,19 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   useEffect(() => {
     return () => {
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      // A debounced save still in flight would never land once we're unmounted,
+      // so flush it instead of just dropping it — otherwise text typed and
+      // abandoned within the 800ms window is lost.
+      if (draftSaveTimer.current) {
+        clearTimeout(draftSaveTimer.current);
+        draftSaveTimer.current = null;
+        void saveDraft(contact.aegisId, pendingDraftRef.current);
+        pendingDraftRef.current = '';
+      }
       emitTyping(contact.aegisId, false);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contact.aegisId]);
 
   // When AttachSheet picks an image, open the in-app media editor (crop/rotate,
@@ -314,11 +326,28 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     }
   }
 
+  // Drop a debounced draft save that hasn't fired yet. MUST be called before
+  // clearing the composer on send: otherwise the in-flight timer lands ~800ms
+  // later and re-persists the text of the message we just sent, so it comes
+  // back into the input box the next time the chat is opened.
+  function cancelPendingDraftSave() {
+    if (draftSaveTimer.current) {
+      clearTimeout(draftSaveTimer.current);
+      draftSaveTimer.current = null;
+    }
+    pendingDraftRef.current = '';
+  }
+
   function handleDraftChange(text: string) {
     setDraft(text);
     // Debounce draft persistence
     if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
-    draftSaveTimer.current = setTimeout(() => void saveDraft(contact.aegisId, text), 800);
+    pendingDraftRef.current = text;
+    draftSaveTimer.current = setTimeout(() => {
+      draftSaveTimer.current = null;
+      pendingDraftRef.current = '';
+      void saveDraft(contact.aegisId, text);
+    }, 800);
     if (!online || !typingIndicator) return;
     emitTyping(contact.aegisId, text.length > 0);
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
@@ -451,6 +480,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     const imageUri = stagedImageUri;
     setDraft('');
     setStagedImageUri(null);
+    cancelPendingDraftSave();
     void saveDraft(contact.aegisId, '');
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     if (typingIndicator) emitTyping(contact.aegisId, false);
@@ -498,7 +528,10 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       }
       void SoundFX.msgSent();
     } catch (e) {
+      // Send failed: put the text back in the composer *and* in the store, so
+      // it survives leaving the screen or killing the app.
       setDraft(text);
+      void saveDraft(contact.aegisId, text);
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     } finally {
       sendingRef.current = false;
@@ -1471,6 +1504,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
               sendAt,
             });
             setDraft('');
+            cancelPendingDraftSave();
             void saveDraft(contact.aegisId, '');
           } catch (e) {
             themedAlert('Error al programar', (e as Error).message);
