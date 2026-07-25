@@ -61,19 +61,32 @@ export function attachMessagingEphemeral(socket: Socket, { me, sockets }: Messag
   // opaque envelope. Do NOT reintroduce a plaintext delete event.
 
   // ─── Push token registration ─────────────────────────────────────────────
-  socket.on('push:register', async (raw) => {
+  // ACK after the write resolves (mirrors voip:register). Previously this was
+  // fire-and-forget: the client emitted and cached the token as "registered"
+  // immediately, so a lost frame or a rate-limited emit left the relay with NO
+  // token for the identity while the client never retried — killed-app iOS then
+  // had nothing to wake (notifyRecipient found zero tokens). The ack lets the
+  // client re-register until the relay confirms. Never log the token/aegisId.
+  socket.on('push:register', async (raw, ack) => {
+    const sendAck = (ok: boolean): void => { if (typeof ack === 'function') ack({ ok }); };
     if (!(await checkLowFreqRateLimit(me))) {
       socket.emit('error_msg', { code: 'rate_limited', for: 'push:register' });
+      sendAck(false);
       return;
     }
     const parsed = PushRegister.safeParse(raw);
-    if (!parsed.success) return;
-    void pushRepo.upsert({
-      aegis_id: me,
-      expo_token: parsed.data.token,
-      platform: parsed.data.platform,
-      updated_at: Date.now(),
-    }).catch(() => { /* silent — do not log token or aegisId */ });
+    if (!parsed.success) { sendAck(false); return; }
+    try {
+      await pushRepo.upsert({
+        aegis_id: me,
+        expo_token: parsed.data.token,
+        platform: parsed.data.platform,
+        updated_at: Date.now(),
+      });
+      sendAck(true);
+    } catch {
+      sendAck(false);
+    }
   });
 
   // ─── iOS VoIP (PushKit) token registration ───────────────────────────────
