@@ -553,6 +553,54 @@ describe('handleSend — texto', () => {
     // Draft is restored after failure
     expect(input.props.value).toBe('mensaje fallido');
   });
+
+  // Regression: sending before the 800ms draft debounce fired left the timer
+  // in flight; it then landed and re-persisted the text of the message that was
+  // just sent, so it reappeared in the composer on reopening the chat.
+  it('9b. enviar antes del debounce de 800ms NO re-guarda el texto como borrador', async () => {
+    jest.useFakeTimers();
+    try {
+      const { UNSAFE_getByType, getByTestId } = render(
+        <ChatScreen {...DEFAULT_PROPS} />
+      );
+
+      const input = UNSAFE_getByType(TextInput);
+      fireEvent.changeText(input, 'mensaje enviado');
+      // Send immediately — well inside the 800ms debounce window
+      fireEvent.press(getByTestId('send-button'));
+
+      await act(async () => {
+        jest.advanceTimersByTime(2000);
+      });
+
+      expect(mockSendMessage).toHaveBeenCalledTimes(1);
+      // The pending debounce must never resurrect the sent text
+      expect(mockSaveDraft).not.toHaveBeenCalledWith('alice-id', 'mensaje enviado');
+      expect(mockSaveDraft).toHaveBeenCalledWith('alice-id', '');
+      expect(input.props.value).toBe('');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('9c. salir del chat antes del debounce guarda el borrador en vez de perderlo', async () => {
+    jest.useFakeTimers();
+    try {
+      const { UNSAFE_getByType, unmount } = render(
+        <ChatScreen {...DEFAULT_PROPS} />
+      );
+
+      fireEvent.changeText(UNSAFE_getByType(TextInput), 'borrador a medias');
+      // Leave the screen before the debounce fires
+      await act(async () => {
+        unmount();
+      });
+
+      expect(mockSaveDraft).toHaveBeenCalledWith('alice-id', 'borrador a medias');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
