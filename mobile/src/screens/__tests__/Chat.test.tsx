@@ -11,6 +11,8 @@
  *  7.  SoundFX.msgSent() se llama tras envío exitoso
  *  8.  con input vacío send NO llama sendMessage
  *  9.  si sendMessage rechaza, el texto se restaura en el input
+ *  9b. enviar antes del debounce NO re-guarda el texto como borrador
+ *  9c. salir del chat antes del debounce guarda el borrador
  *  10. al confirmar delete, softDelete llamado con (chatId, messageId)
  *  11. softDelete recibe exactamente 'alice-id' y 'msg-1'
  *  12. handleDeleteForAll: softDelete llamado con (chatId, messageId)
