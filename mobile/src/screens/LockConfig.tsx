@@ -220,6 +220,38 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
       openPinModal(true);
       return;
     }
+    if (!val) {
+      // Turning the lock OFF silently disarms panic/duress: every trigger (decoy
+      // PIN, panic gestures, auto-wipe) fires from the lock screen, which only
+      // shows while appLockEnabled is true. Warn before stranding a configured
+      // decoy so the user never believes panic is armed when it isn't.
+      let panicConfigured = false;
+      try {
+        const { ss } = require('../utils/secureStore') as typeof import('../utils/secureStore');
+        const raw = await ss.get('aegis.panic.v1');
+        if (raw) {
+          const c = JSON.parse(raw) as { duressPin?: boolean; pinHash?: string; gesture?: string; autoWipe?: boolean };
+          const hasDecoy = c.duressPin === true && typeof c.pinHash === 'string' && c.pinHash.length > 0;
+          const hasGesture = typeof c.gesture === 'string' && c.gesture !== 'off' && c.gesture.length > 0;
+          panicConfigured = hasDecoy || hasGesture || c.autoWipe === true;
+        }
+      } catch { /* read error — don't block disabling the lock */ }
+      if (panicConfigured) {
+        themedAlert(
+          i18nT('lockConfig.disablePanicTitle', 'Disable panic protection too?'),
+          i18nT('lockConfig.disablePanicMsg', 'Panic mode and the decoy PIN only work while the app lock is on. Turning the lock off leaves them inactive until you enable it again.'),
+          [
+            { text: i18nT('common.cancel', 'Cancel'), style: 'cancel' },
+            {
+              text: i18nT('lockConfig.disableAnyway', 'Disable anyway'),
+              style: 'destructive',
+              onPress: () => void setPref('appLockEnabled', false),
+            },
+          ],
+        );
+        return;
+      }
+    }
     void setPref('appLockEnabled', val);
   }
 

@@ -48,6 +48,16 @@ jest.mock('../../store/identity', () => ({
   },
 }));
 
+// Panic requires the app lock to be ENABLED, not just a stored PIN. Default the
+// preference ON so the full config renders; individual tests flip it off.
+let mockAppLockEnabled = true;
+jest.mock('../../store/preferences', () => ({
+  usePreferences: (sel?: (s: object) => unknown) => {
+    const state = { appLockEnabled: mockAppLockEnabled };
+    return sel ? sel(state) : state;
+  },
+}));
+
 jest.mock('../../db/local', () => ({
   wipeDatabase: jest.fn().mockResolvedValue(undefined),
 }));
@@ -89,6 +99,10 @@ import { hasStoredPIN } from '../../lock/pin';
 import { setItemAsync } from 'expo-secure-store';
 
 describe('PanicScreen — accessibility', () => {
+  beforeEach(() => {
+    mockAppLockEnabled = true;
+  });
+
   it('has at least one button with accessibilityRole', async () => {
     const { getAllByRole } = render(<PanicScreen onBack={jest.fn()} onConfigureLock={jest.fn()} />);
     // The PIN-lock gate check resolves async; wait for the full config to render.
@@ -165,6 +179,21 @@ describe('PanicScreen — accessibility', () => {
       <PanicScreen onBack={jest.fn()} onConfigureLock={onConfigureLock} />,
     );
     // Gate shows the "configure lock" CTA and hides the panic config entirely.
+    const cta = await waitFor(() => getByText('panic.configureLock'));
+    expect(queryByText('panic.activatePanic')).toBeNull();
+    fireEvent.press(cta);
+    expect(onConfigureLock).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression (user-reported): disabling the app lock keeps the PIN hash, so
+  // hasStoredPIN() stays true — but the lock screen no longer shows, so every
+  // panic trigger is dead. The gate MUST require appLockEnabled, not just a hash.
+  it('gates the screen when a PIN exists but the app lock is DISABLED', async () => {
+    mockAppLockEnabled = false; // toggled off; hash lingers (hasStoredPIN=true)
+    const onConfigureLock = jest.fn();
+    const { getByText, queryByText } = render(
+      <PanicScreen onBack={jest.fn()} onConfigureLock={onConfigureLock} />,
+    );
     const cta = await waitFor(() => getByText('panic.configureLock'));
     expect(queryByText('panic.activatePanic')).toBeNull();
     fireEvent.press(cta);

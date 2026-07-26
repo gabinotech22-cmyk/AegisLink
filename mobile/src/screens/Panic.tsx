@@ -11,6 +11,7 @@ import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
+import { usePreferences } from '../store/preferences';
 import { wipeDatabase } from '../db/local';
 import { hashPinWithSalt, DURESS_PIN_SALT, verifyPIN, hasStoredPIN } from '../lock/pin';
 
@@ -32,9 +33,14 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
-  // Panic mode requires the app PIN lock — the decoy PIN, the lock-screen
-  // gestures and auto-wipe all live on the lock screen. null = still checking;
-  // false = gate the whole screen behind "set up your PIN lock first".
+  // Panic mode requires the app PIN lock to be ENABLED — the decoy PIN, the
+  // lock-screen gestures and auto-wipe ALL fire from the lock screen, which only
+  // appears while appLockEnabled is true. A stored PIN hash is NOT enough:
+  // toggling the lock off (LockConfig master switch) keeps the hash but stops the
+  // lock screen from ever showing, silently disarming every panic trigger. So we
+  // gate on the live preference, not just "a hash exists" (hasStoredPIN).
+  const appLockEnabled = usePreferences((s) => s.appLockEnabled);
+  // null = still confirming the PIN read; false = no hash at all (fail-closed).
   const [hasLockPin, setHasLockPin] = useState<boolean | null>(null);
   const [gesture, setGesture] = useState<string>('off');
   // Off until a decoy PIN is actually configured — an ON switch with no PIN set
@@ -125,10 +131,10 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
   }, []);
 
   useEffect(() => {
-    // Panic mode is gated behind the PIN lock, so don't load panic config — and
-    // above all don't generate/persist a signed remote-wipe token — until the
-    // lock is confirmed present. Re-runs when hasLockPin resolves to true.
-    if (hasLockPin !== true) return;
+    // Panic mode is gated behind an ENABLED PIN lock, so don't load panic config
+    // — and above all don't generate/persist a signed remote-wipe token — unless
+    // the lock is both present AND enabled. Re-runs when either resolves.
+    if (hasLockPin !== true || !appLockEnabled) return;
     ss.get(PANIC_KEY).then((raw) => {
       if (!raw) {
         void generateAndSaveToken();
@@ -156,14 +162,17 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
     }).catch(() => {});
   // generateAndSaveToken is stable (useCallback with stable dep)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasLockPin]);
+  }, [hasLockPin, appLockEnabled]);
 
-  // ── Gate: panic mode requires the app PIN lock ─────────────────────────────
-  if (hasLockPin === null) {
-    // Still checking — empty shell avoids a flash of either state.
-    return <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }} />;
-  }
-  if (!hasLockPin) {
+  // ── Gate: panic mode requires the app PIN lock to be ENABLED ───────────────
+  const lockReady = appLockEnabled && hasLockPin === true;
+  if (!lockReady) {
+    // Only wait on the async hash read while the lock is actually enabled;
+    // a disabled lock is a definitive "not ready", show the gate immediately.
+    if (appLockEnabled && hasLockPin === null) {
+      // Still checking — empty shell avoids a flash of either state.
+      return <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }} />;
+    }
     return (
       <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
         <TopBar
