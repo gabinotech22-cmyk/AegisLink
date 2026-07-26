@@ -41,6 +41,7 @@ interface Props {
    */
   initialSeg?: 'groups' | 'channels';
   onSegChange?: (seg: 'groups' | 'channels') => void;
+  onCreateProfile?: () => void;
 }
 
 const GROUP_COLORS = [
@@ -66,7 +67,7 @@ const GROUP_EMOJIS = [
   { label: 'Cubo', val: '🧊' },
 ];
 
-export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChannel, onDiscoverChannels, onCreateChannel, initialSeg, onSegChange }: Props) {
+export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChannel, onDiscoverChannels, onCreateChannel, initialSeg, onSegChange, onCreateProfile }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -998,7 +999,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat, onJoinByLink, onOpenChann
         onConfirm={(uri) => { void handleConfirmGroupImage(uri); }}
       />
 
-      <TabBar t={t} current="groups" onChange={onTab} />
+      <TabBar t={t} current="groups" onChange={onTab} onCreateProfile={onCreateProfile} />
     </View>
   );
 }

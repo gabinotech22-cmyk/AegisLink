@@ -463,6 +463,13 @@
     "dashboard": "DASHBOARD",
     "channels": "CHANNELS"
   },
+  "profileSwitch": {
+    "title": "Change profile",
+    "newProfile": "New profile",
+    "activeLabel": "Active profile",
+    "switchTo": "Switch to {{name}}",
+    "openHint": "Open profile switcher"
+  },
   "settings": {
     "language": "Language / Lingua"
   },

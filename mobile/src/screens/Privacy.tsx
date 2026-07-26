@@ -27,9 +27,10 @@ const LEGAL_URLS = {
 interface Props {
   onTab: (tab: Tab) => void;
   onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices') => void;
+  onCreateProfile?: () => void;
 }
 
-export function PrivacyScreen({ onTab, onNav }: Props) {
+export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
   const { t, setDark, autoMode, setAutoMode } = useTheme();
   const { t: i18nT } = useTranslation();
   const { locale, setLocale } = useLocale();
@@ -349,7 +350,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
         <DeleteAccountSection />
       </ScrollView>
 
-      <TabBar t={t} current="settings" onChange={onTab} />
+      <TabBar t={t} current="settings" onChange={onTab} onCreateProfile={onCreateProfile} />
     </View>
   );
 }

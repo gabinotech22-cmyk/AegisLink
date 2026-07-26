@@ -463,6 +463,13 @@
     "dashboard": "PANEL",
     "channels": "CANALES"
   },
+  "profileSwitch": {
+    "title": "Cambiar perfil",
+    "newProfile": "Nuevo perfil",
+    "activeLabel": "Perfil activo",
+    "switchTo": "Cambiar al perfil {{name}}",
+    "openHint": "Abrir selector de perfiles"
+  },
   "settings": {
     "language": "Idioma / Language"
   },

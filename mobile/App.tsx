@@ -1784,6 +1784,7 @@ function Shell() {
             onContacts={() => push({ name: 'contacts' })}
             onDistribution={() => push({ name: 'distribution' })}
             onProfileSwitcher={() => push({ name: 'profileSwitcher' })}
+            onCreateProfile={() => push({ name: 'createProfile' })}
             onTab={setTab}
           />
         </View>
@@ -1792,6 +1793,7 @@ function Shell() {
       return (
         <GroupsScreen
           onTab={setTab}
+          onCreateProfile={() => push({ name: 'createProfile' })}
           onOpenGroupChat={(group) => push({ name: 'groupChat', group })}
           onJoinByLink={(groupId, groupName, adminId) =>
             push({ name: 'groupJoin', groupId, groupName, adminId })
@@ -1808,6 +1810,7 @@ function Shell() {
         <PrivacyScreen
           onTab={setTab}
           onNav={(name) => push({ name } as PushRoute)}
+          onCreateProfile={() => push({ name: 'createProfile' })}
         />
       );
   }
