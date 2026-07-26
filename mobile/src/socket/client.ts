@@ -50,6 +50,7 @@ import {
 } from '../db/local';
 import { decideV2GroupMetadata, decideGovernanceUpdate } from './groupMetadataDecision';
 import { serializeRatchetState, reviveRatchetState } from './ratchetSerde';
+import { shouldSendSealedTyping } from './typingThrottle';
 import {
   computeRosterHash,
   signGroupMetadata,
@@ -2353,6 +2354,27 @@ async function decryptAndAppendLocked(
         return true;
       }
 
+      // E2EE typing indicator (mailbox mode): the peer reports composing/stopping.
+      // payload.text = JSON {isTyping}. Rides the sealed channel so the relay never
+      // sees the me↔to aegisId edge (the plaintext `typing` event would relink the
+      // two identities mailbox mode separates). The authenticated sender is the
+      // sealed-sender contact.aegisId, never a forgeable payload field. Apply to
+      // the transient typing store; do NOT append a chat row. Still persist ratchet
+      // state. Best-effort + latent — the 5 s auto-clear covers a lost/late stop.
+      if (parsedPayload.type === 'typing') {
+        try {
+          const parsed = JSON.parse(parsedPayload.text as string) as { isTyping?: boolean };
+          const isTyping = parsed.isTyping === true;
+          const { useTyping } = require('../store/typing') as typeof import('../store/typing');
+          useTyping.getState().setTyping(contact.aegisId, isTyping);
+          if (isTyping) {
+            setTimeout(() => useTyping.getState().setTyping(contact.aegisId, false), 5000);
+          }
+        } catch { /* malformed typing payload — ignore */ }
+        await saveSessionState(contact.aegisId, ratchetState);
+        return true;
+      }
+
       if (parsedPayload.type === 'group_msg') {
         const groupId: string = parsedPayload.groupId;
         const claimedName: string = parsedPayload.groupName;
@@ -4257,15 +4279,37 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
   }
 }
 
+// Per-peer record of the last sealed typing signal sent (mailbox mode), used by
+// shouldSendSealedTyping to throttle keystroke-rate refreshes. Keyed by aegisId.
+const sealedTypingState = new Map<string, { isTyping: boolean; at: number }>();
+
 export function emitTyping(to: string, isTyping: boolean): void {
   if (!socket || !authenticated) return;
-  // In mailbox mode the recipient (`to`) is hidden from the relay by design.
-  // The plaintext `typing` event carries the peer's aegisId on the control-plane
-  // socket, which would relink the me↔to edge mailbox mode just sealed. Typing
-  // is a best-effort, ephemeral UX signal (durable sealed delivery would show a
-  // stale "typing…" late), so we simply suppress it under mailbox mode rather
-  // than leak the edge. Outside mailbox mode, behaviour is unchanged.
-  if (MAILBOX_ENABLED) return;
+  if (MAILBOX_ENABLED) {
+    // The plaintext `typing` event carries the peer's aegisId on the control-
+    // plane socket, relinking the me↔to edge mailbox mode just sealed. Send it
+    // SEALED through the E2EE channel instead (same pattern as read receipts).
+    // It arrives with mailbox/Tor latency — acceptable for a best-effort signal.
+    const now = Date.now();
+    if (!shouldSendSealedTyping(sealedTypingState.get(to), isTyping, now)) return;
+    sealedTypingState.set(to, { isTyping, at: now });
+    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+    const identity = useIdentity.getState().identity;
+    const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+    if (!identity || !contact?.publicKeyB64) return;
+    void sendMessage({
+      identity,
+      recipientAegisId: to,
+      recipientPublicKey: decodeBase64(contact.publicKeyB64),
+      plaintext: JSON.stringify({ isTyping }),
+      type: 'typing',
+      expiresAt: null,
+      skipLocalAppend: true,
+    }).catch((e) => {
+      if (__DEV__) logger.warn('[socket] sealed typing failed:', (e as Error).message);
+    });
+    return;
+  }
   socket.emit('typing', { to, isTyping });
 }
 
