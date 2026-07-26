@@ -15,6 +15,8 @@ import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { useProfiles, AVATAR_PALETTE } from '../store/profiles';
+import { Avatar } from '../components/Avatar';
+import type { Identity } from '../crypto/identity';
 import { themedAlert } from '../components/AlertHost';
 
 interface Props {
@@ -32,9 +34,17 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
 
   const [step, setStep] = useState<Step>('generating');
   const [newAegisId, setNewAegisId] = useState('');
+  // Captured so the color-step preview shows the SAME identicon (seeded by the
+  // public key) the profile displays everywhere else in the app.
+  const [newPublicKeyB64, setNewPublicKeyB64] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [avatarColor, setAvatarColor] = useState(AVATAR_PALETTE[1]);
   const [busy, setBusy] = useState(false);
+
+  // The identity generated during the 'generating' step. Held in a ref (not
+  // state) so the secret key never drives a re-render, and passed verbatim to
+  // createProfile so the persisted profile matches the previewed AegisID.
+  const newIdentityRef = useRef<Identity | null>(null);
 
   // Spinner animation for the generating step
   const spinAnim = useRef(new Animated.Value(0)).current;
@@ -52,7 +62,9 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
       // Import lazily to avoid circular deps
       const { createIdentity } = require('../crypto/identity') as typeof import('../crypto/identity');
       const id = createIdentity();
+      newIdentityRef.current = id;
       setNewAegisId(id.aegisId);
+      setNewPublicKeyB64(id.publicKeyB64);
       setDisplayName(id.aegisId.slice(0, 8).toLowerCase().replace(/-/g, ''));
 
       loop.stop();
@@ -74,7 +86,11 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
     if (busy) return;
     setBusy(true);
     try {
-      const profile = await createProfile(displayName.trim() || newAegisId.slice(0, 8).toLowerCase(), avatarColor);
+      const profile = await createProfile(
+        displayName.trim() || newAegisId.slice(0, 8).toLowerCase(),
+        avatarColor,
+        newIdentityRef.current ?? undefined,
+      );
       await switchProfile(profile.slotId);
       onCreated();
     } catch (e) {
@@ -203,20 +219,16 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
             Identifica rápidamente este perfil por su color en el selector.
           </Text>
 
-          {/* Avatar preview */}
+          {/* Avatar preview — the same identicon (seeded by the public key,
+              tinted with the chosen color) the profile shows everywhere else. */}
           <View style={{ alignItems: 'center', marginBottom: 32 }}>
-            <View style={{
-              width: 80,
-              height: 80,
-              borderRadius: 40,
-              backgroundColor: avatarColor,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <Text style={{ fontFamily: t.fontMono, fontSize: 28, color: '#fff', fontWeight: '700' }}>
-                {(displayName || newAegisId)[0]?.toUpperCase() ?? '?'}
-              </Text>
-            </View>
+            <Avatar
+              t={t}
+              name={displayName || newAegisId}
+              color={avatarColor}
+              size={80}
+              seed={newPublicKeyB64 || newAegisId}
+            />
             <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.textDim, marginTop: 10 }}>
               {displayName || newAegisId.slice(0, 8)}
             </Text>

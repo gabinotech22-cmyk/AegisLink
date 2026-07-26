@@ -15,7 +15,7 @@
 
 import { create } from 'zustand';
 import { ss } from '../utils/secureStore';
-import { createIdentity } from '../crypto/identity';
+import { createIdentity, type Identity } from '../crypto/identity';
 import {
   secretKeySlot,
   signSecretKeySlot,
@@ -67,8 +67,12 @@ interface ProfilesState {
 
   /** Loads profile list from SecureStore on cold-start. */
   hydrate: () => Promise<void>;
-  /** Create a fresh E2EE identity and add it to the profile list. */
-  createProfile: (displayName: string, avatarColor: string) => Promise<Profile>;
+  /**
+   * Add a profile to the list. Pass the identity already generated/previewed by
+   * the wizard so the AegisID + identicon the user saw is the one persisted;
+   * omit it to mint a fresh identity here.
+   */
+  createProfile: (displayName: string, avatarColor: string, presetIdentity?: Identity) => Promise<Profile>;
   /** Switch active profile: flushes all in-memory state, opens new DB. */
   switchProfile: (slotId: string) => Promise<void>;
   /** Wipe a profile's keys + SQLite DB. Cannot remove the last profile. */
@@ -177,10 +181,13 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     }
   },
 
-  async createProfile(displayName, avatarColor) {
-    // 1. Generate a fresh cryptographic identity.
-    const identity = createIdentity();
+  async createProfile(displayName, avatarColor, presetIdentity) {
+    // 1. Use the wizard's already-previewed identity (so the AegisID/identicon
+    //    shown during creation is the one that gets persisted); mint a fresh one
+    //    only when no caller supplied it.
+    const identity = presetIdentity ?? createIdentity();
     const slotId = identity.aegisId;
+    const finalName = displayName || identity.aegisId.slice(0, 8).toLowerCase();
 
     // 2. Temporarily switch DB to the new slot to initialise the schema.
     const prevSlot = get().activeSlotId;
@@ -203,30 +210,40 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
       createdAt: identity.createdAt,
     });
 
-    // 5. Register on relay (best-effort; failure does not block profile creation).
-    //    This MUST run while the NEW slot is still the active DB slot, so the
-    //    prekey secrets persist into the new profile's own database and
-    //    ensureDevicePreKeys reads/creates that profile's single source of
-    //    truth — not the previous slot's.
+    // 4b. Persist the chosen name/color under THIS slot's own preference keys
+    //     (same scheme as useIdentity.getPrefKey: 'aegis.<slotId>.displayName').
+    //     Without this, switchProfile → useIdentity.hydrate() finds no per-slot
+    //     name/color and falls back to the aegisId-derived default, so the name
+    //     the user typed never reached Profile/Ajustes (user-reported: "el
+    //     nombre que coloco no sale en la configuración de perfil").
+    await ss.set(`aegis.${slotId}.displayName`, finalName);
+    await ss.set(`aegis.${slotId}.avatarColor`, avatarColor);
+
+    // 4c. Register this slot in the global slotsList so a panic wipe / delete
+    //     reaches its DB + secret keys — those are keyed by aegisId and are ONLY
+    //     enumerable through slotsList (see wipeDatabase / deleteIdentitySlot).
+    //     Missing here, a created profile's DB survived a factory-reset wipe
+    //     (cero-metadatos leak) and the two multi-identity views drifted apart.
     try {
-      const { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } = require('../crypto/registration') as typeof import('../crypto/registration');
-      const { ensureDevicePreKeys } = require('../crypto/signal/x3dh') as typeof import('../crypto/signal/x3dh');
-      const { SERVER_URL } = require('../config') as typeof import('../config');
-      const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
-      const nonce = await solvePoW(challenge, difficulty);
-      const preKeys = await ensureDevicePreKeys(identity);
-      await uploadIdentityAndPrekeys(
-        identity,
-        { signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey }, opkSecrets: preKeys.opkSecrets },
-        SERVER_URL,
-        challenge,
-        nonce,
-        preKeys.oneTimePreKeys,
-        { keyId: preKeys.signedPreKey.keyId, publicKeyB64: preKeys.signedPreKey.publicKeyB64, signatureB64: preKeys.signedPreKey.signatureB64 },
-      );
-    } catch {
-      /* relay registration failed — will retry on next connect */
-    }
+      const raw = await ss.get('aegis.slotsList');
+      const slotsList: string[] = raw ? (JSON.parse(raw) as string[]) : ['self'];
+      if (!slotsList.includes(slotId)) {
+        slotsList.push(slotId);
+        await ss.set('aegis.slotsList', JSON.stringify(slotsList));
+      }
+    } catch { /* non-fatal — slot is still usable; next hydrate re-syncs */ }
+
+    // 5. Relay registration (PoW → prekey upload → verify) is intentionally NOT
+    //    done inline here. It runs through the SINGLE authoritative path
+    //    (ensureRegistered, via useIdentity.hydrate → runPublish) the moment the
+    //    caller switches into this profile — with the correct PQXDH PQ prekey,
+    //    the persisted `published` flag, the shared 429 cooldown, and a VISIBLE
+    //    failure banner. The previous inline upload here was doubly broken: it
+    //    (a) blocked the "Creando…" spinner on CPU-heavy PoW mining, and
+    //    (b) omitted the PQXDH PQ prekey, so the relay bundle had no PQSPK —
+    //    every inbound handshake hit the receiver's anti-downgrade gate and
+    //    aborted, leaving the new identity unreachable from other devices
+    //    ("se registra pero … como si no fuera un perfil real").
 
     // 6. Reset (not close) the new slot's connection before switching back.
     //    closeAsync here would block the WAL flush for no reason; a simple
@@ -240,7 +257,7 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     const newProfile: Profile = {
       slotId,
       aegisId: identity.aegisId,
-      displayName: displayName || identity.aegisId.slice(0, 8).toLowerCase(),
+      displayName: finalName,
       avatarColor,
       createdAt: identity.createdAt,
       isActive: false,
@@ -316,6 +333,18 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
 
     // Wipe SecureStore slots and SQLite DB.
     await deleteIdentitySlot(slotId);
+
+    // Drop the slot from the global slotsList too (createProfile added it there
+    // so panic-wipe can reach its DB). Leaving a stale entry would make a later
+    // wipe try to re-delete an already-gone slot and keep the two multi-identity
+    // views out of sync.
+    try {
+      const raw = await ss.get('aegis.slotsList');
+      if (raw) {
+        const slotsList = (JSON.parse(raw) as string[]).filter((s) => s !== slotId);
+        await ss.set('aegis.slotsList', JSON.stringify(slotsList));
+      }
+    } catch { /* non-fatal — deleteIdentitySlot already removed the key material */ }
 
     // Remove from profile list.
     const updated = profiles.filter((p) => p.slotId !== slotId);

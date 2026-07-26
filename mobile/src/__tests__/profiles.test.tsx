@@ -76,6 +76,7 @@ jest.mock('expo-secure-store', () => ({
 // Mock db/local
 jest.mock('../db/local', () => ({
   setActiveDbSlot: jest.fn(),
+  resetDbConnection: jest.fn(),
   closeActiveDatabase: jest.fn().mockResolvedValue(undefined),
   saveIdentity: jest.fn().mockResolvedValue(undefined),
   deleteIdentitySlot: jest.fn().mockResolvedValue(undefined),
@@ -329,5 +330,71 @@ describe('useProfiles store', () => {
     await expect(useProfiles.getState().removeProfile('self')).rejects.toThrow(
       'Cannot remove the primary profile.'
     );
+  });
+});
+
+// ─── createProfile — regresión: segunda identidad "real" y sincronizable ───────
+
+describe('useProfiles.createProfile (regresión multi-perfil)', () => {
+  function presetIdentity(aegisId: string) {
+    const base = require('../crypto/identity').createIdentity();
+    return { ...base, aegisId, publicKeyB64: `pk-${aegisId}` };
+  }
+
+  beforeEach(() => {
+    const SecureStore = require('expo-secure-store');
+    SecureStore.setItemAsync.mockClear();
+    SecureStore.getItemAsync.mockClear();
+    SecureStore.getItemAsync.mockResolvedValue(null);
+    useProfiles.setState({
+      profiles: [
+        { slotId: 'self', aegisId: 'ABC-DEF1-GH23', displayName: 'Personal', avatarColor: '#05b875', createdAt: 0, isActive: true },
+      ],
+      activeSlotId: 'self',
+    });
+  });
+
+  it('persiste displayName/avatarColor bajo las claves por-slot (el nombre sí llega a Ajustes)', async () => {
+    const SecureStore = require('expo-secure-store');
+    await act(async () => {
+      await useProfiles.getState().createProfile('JOSE', '#8b5cf6', presetIdentity('NB6-YTJ3-6ETM') as never);
+    });
+    const setCalls = SecureStore.setItemAsync.mock.calls;
+    expect(setCalls).toEqual(expect.arrayContaining([
+      expect.arrayContaining(['aegis.NB6-YTJ3-6ETM.displayName', 'JOSE']),
+    ]));
+    expect(setCalls).toEqual(expect.arrayContaining([
+      expect.arrayContaining(['aegis.NB6-YTJ3-6ETM.avatarColor', '#8b5cf6']),
+    ]));
+  });
+
+  it('NO hace registro PoW inline (ese camino omitía el PQSPK y colgaba "Creando…")', async () => {
+    const reg = require('../crypto/registration');
+    reg.fetchPowChallenge.mockClear();
+    reg.uploadIdentityAndPrekeys.mockClear();
+    await act(async () => {
+      await useProfiles.getState().createProfile('X', '#3b82f6', presetIdentity('NEW-3333-4444') as never);
+    });
+    expect(reg.fetchPowChallenge).not.toHaveBeenCalled();
+    expect(reg.uploadIdentityAndPrekeys).not.toHaveBeenCalled();
+  });
+
+  it('persiste la identidad pre-generada por el wizard (mismo AegisID que se mostró)', async () => {
+    let profile: { slotId: string; aegisId: string } | undefined;
+    await act(async () => {
+      profile = await useProfiles.getState().createProfile('X', '#3b82f6', presetIdentity('WIZ-5555-6666') as never);
+    });
+    expect(profile?.slotId).toBe('WIZ-5555-6666');
+    expect(profile?.aegisId).toBe('WIZ-5555-6666');
+  });
+
+  it('registra el slot en aegis.slotsList (para que el wipe alcance su DB y claves)', async () => {
+    const SecureStore = require('expo-secure-store');
+    await act(async () => {
+      await useProfiles.getState().createProfile('X', '#3b82f6', presetIdentity('SLT-7777-8888') as never);
+    });
+    const slotsListCall = SecureStore.setItemAsync.mock.calls.find((c: unknown[]) => c[0] === 'aegis.slotsList');
+    expect(slotsListCall).toBeTruthy();
+    expect(JSON.parse(slotsListCall[1] as string)).toContain('SLT-7777-8888');
   });
 });
