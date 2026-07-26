@@ -25,6 +25,7 @@ import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailbo
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { spkRotationDecision, spkPruneTargetKeyId } from './spkRotation';
+import { profileFingerprint, profileBroadcastHashKey } from './profileBroadcast';
 import { serializeRatchetState, reviveRatchetState } from './ratchetSerde';
 import { useContacts } from '../store/contacts';
 import { useConnection } from '../store/connection';
@@ -2483,6 +2484,28 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
   const senderStatus = idState.profileStatus;
   const senderImage = await toDataUri(idState.avatarImage);
 
+  // Identity-global fields (identical for every contact) — compute once, out of
+  // the loop, and fold them into the change fingerprint below.
+  const deliveryTokenField = await ownDeliveryTokenField();
+  const mailboxRootField = await ownMailboxRootField();
+
+  // Phantom-notification guard (audit 2026-07-26, parity with mobile). A profile
+  // broadcast is a real E2EE envelope: to an OFFLINE contact the relay queues it
+  // and fires the SAME generic "Nuevo mensaje cifrado" wake-up push as a real
+  // message — but on open there is nothing to show (profile_update is applied
+  // silently). Broadcasting on EVERY auth:ok therefore spammed every established
+  // contact with a phantom notification on each reconnect. The broadcast only
+  // needs to propagate a CHANGE — brand-new contacts receive the profile with the
+  // first message — so skip the whole thing when nothing has changed since the
+  // last broadcast for THIS identity.
+  const fingerprint = profileFingerprint(
+    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, ...deliveryTokenField, ...mailboxRootField }),
+  );
+  const hashKey = profileBroadcastHashKey(identity.aegisId);
+  try {
+    if ((await SecureStore.getItemAsync(hashKey)) === fingerprint) return;
+  } catch { /* unreadable → fall through and broadcast (correctness over dedupe) */ }
+
   const contacts = useContacts.getState().contacts;
   for (const contact of contacts) {
     try {
@@ -2493,8 +2516,8 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
         senderColor,
         senderImage,
         senderStatus,
-        ...(await ownDeliveryTokenField()),
-        ...(await ownMailboxRootField()),
+        ...deliveryTokenField,
+        ...mailboxRootField,
       });
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
       const { envelope, newState } = encryptMessage(
@@ -2517,6 +2540,13 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
       if (DEV) logger.warn('[socket] profile broadcast failed:', (e as Error).message);
     }
   }
+
+  // Persist the fingerprint only AFTER the broadcast attempt, so a change is
+  // always sent at least once. Best-effort: a write failure just re-broadcasts on
+  // the next connect — a bounded, self-healing cost, never a lost update.
+  try {
+    await SecureStore.setItemAsync(hashKey, fingerprint);
+  } catch { /* best-effort */ }
 }
 
 export async function sendProfileTo(
