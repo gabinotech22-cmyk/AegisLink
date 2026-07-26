@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../theme/vault';
 import { I } from './icons';
-import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
+import { usePreferences } from '../store/preferences';
+import { ProfileSwitchOverlay } from './ProfileSwitchOverlay';
 
 export type Tab = 'home' | 'groups' | 'settings';
 
@@ -12,6 +14,12 @@ interface Props {
   t: Theme;
   current: Tab;
   onChange: (tab: Tab) => void;
+  /**
+   * Opens the create-profile wizard. Wired from the app shell; when provided,
+   * long-pressing the Privacy tab reveals the quick profile switcher (which also
+   * offers "New profile"). Omitted → long-press does nothing.
+   */
+  onCreateProfile?: () => void;
 }
 
 const PERSONAL_ITEMS: { id: Tab; icon: keyof typeof I }[] = [
@@ -20,11 +28,19 @@ const PERSONAL_ITEMS: { id: Tab; icon: keyof typeof I }[] = [
   { id: 'settings', icon: 'Shield'  },
 ];
 
-export function TabBar({ t, current, onChange }: Props) {
+export function TabBar({ t, current, onChange, onCreateProfile }: Props) {
   const insets = useSafeAreaInsets();
   const { t: i18nT } = useTranslation();
   const activeColor = t.accent;
   const items = PERSONAL_ITEMS;
+
+  // Long-press the Privacy tab → quick profile switcher. Suppressed under a
+  // duress session: revealing that multiple isolated identities exist is exactly
+  // the signal duress mode must never emit (parity with Profile.tsx hiding the
+  // switcher entry).
+  const duressActive = usePreferences((s) => s.duressActive);
+  const [showSwitcher, setShowSwitcher] = useState(false);
+  const canQuickSwitch = !duressActive && !!onCreateProfile;
 
   // Aggregate unread counts so each tab shows a badge for activity the user
   // can't see from another tab. Group conversations use a `group_` id prefix;
@@ -47,6 +63,7 @@ export function TabBar({ t, current, onChange }: Props) {
   };
 
   return (
+    <>
     <View
       style={{
         flexDirection: 'row',
@@ -69,6 +86,9 @@ export function TabBar({ t, current, onChange }: Props) {
           <Pressable
             key={it.id}
             onPress={() => onChange(it.id)}
+            onLongPress={it.id === 'settings' && canQuickSwitch ? () => setShowSwitcher(true) : undefined}
+            delayLongPress={450}
+            accessibilityHint={it.id === 'settings' && canQuickSwitch ? i18nT('profileSwitch.openHint') : undefined}
             hitSlop={6}
             style={{ alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8 }}
           >
@@ -112,5 +132,16 @@ export function TabBar({ t, current, onChange }: Props) {
         );
       })}
     </View>
+    {canQuickSwitch && (
+      <ProfileSwitchOverlay
+        visible={showSwitcher}
+        onClose={() => setShowSwitcher(false)}
+        onCreateProfile={() => {
+          setShowSwitcher(false);
+          onCreateProfile?.();
+        }}
+      />
+    )}
+    </>
   );
 }

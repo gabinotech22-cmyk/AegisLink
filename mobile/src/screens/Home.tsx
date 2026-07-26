@@ -28,9 +28,10 @@ interface Props {
   onTab: (tab: Tab) => void;
   onDistribution?: () => void;
   onProfileSwitcher?: () => void;
+  onCreateProfile?: () => void;
 }
 
-export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onContacts, onTab, onDistribution, onProfileSwitcher }: Props) {
+export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onContacts, onTab, onDistribution, onProfileSwitcher, onCreateProfile }: Props) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -565,7 +566,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         />
       )}
 
-      <TabBar t={t} current="home" onChange={onTab} />
+      <TabBar t={t} current="home" onChange={onTab} onCreateProfile={onCreateProfile} />
 
       {/* Chat actions floating menu — replaces a 5-button Alert (Android caps
           native alerts at 3 buttons, which hid the delete options). */}
