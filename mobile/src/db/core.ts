@@ -742,6 +742,8 @@ export async function purgeGlobalAppState(opts: {
 
   const staticKeys = [
     'aegis.pushToken',
+    'aegis.pushToken.confirmed',
+    'aegis.apnsToken.confirmed',
     'aegis.voipToken',
     'aegis.voipToken.sent',
     'aegis.linked_devices.json',

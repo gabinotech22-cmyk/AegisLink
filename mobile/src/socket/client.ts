@@ -997,6 +997,38 @@ export function connect(identity: Identity): Socket {
             if (__DEV__) logger.warn('[socket] push:register not confirmed, will retry next auth:', e);
           }
         }
+
+        // ── iOS: also register the RAW APNs token (direct-APNs message wake) ────
+        // getDevicePushTokenAsync returns the standard APNs device token (hex),
+        // DISTINCT from the Expo token above and the VoIP token below. It lets the
+        // relay wake a killed iPhone straight through APNs — no Expo hop, the way
+        // Session's push server does. Fail-safe: if this never registers, the
+        // relay falls back to the Expo push, so nothing regresses. Same ack-gated
+        // confirmed-marker dedup so a lost frame retries on the next auth.
+        {
+          const { Platform } = require('react-native');
+          if (Platform.OS === 'ios') {
+            try {
+              const dev = await Notifications.getDevicePushTokenAsync();
+              const apnsToken: string = typeof dev?.data === 'string' ? dev.data : '';
+              const confirmedApns = await SecureStore.getItemAsync('aegis.apnsToken.confirmed');
+              if (apnsToken && confirmedApns !== apnsToken) {
+                await new Promise<void>((resolve, reject) => {
+                  socket!
+                    .timeout(EMIT_ACK_TIMEOUT_MS)
+                    .emit('apns:register', { token: apnsToken, platform: 'ios' }, (err: Error | null, ack?: { ok?: boolean }) => {
+                      if (err) { reject(err); return; }
+                      if (!ack?.ok) { reject(new Error('apns_register_rejected')); return; }
+                      resolve();
+                    });
+                });
+                await SecureStore.setItemAsync('aegis.apnsToken.confirmed', apnsToken);
+              }
+            } catch (e) {
+              if (__DEV__) logger.warn('[socket] apns:register not confirmed, will retry next auth:', e);
+            }
+          }
+        }
       } catch (e) {
         if (__DEV__) logger.warn('[socket] push token registration failed:', e);
       }

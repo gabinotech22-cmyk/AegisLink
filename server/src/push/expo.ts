@@ -1,6 +1,7 @@
 import { Expo, type ExpoPushMessage } from 'expo-server-sdk';
 import { pushRepo } from '../db/client.js';
 import { sendVoipWakeUp } from './apns-voip.js';
+import { sendMessageApnsAlert } from './apns-alert.js';
 
 export type CallMedia = 'audio' | 'video';
 
@@ -19,9 +20,23 @@ const expo = new Expo();
 
 export async function notifyRecipient(aegisId: string): Promise<void> {
   // NOTE: aegisId is used only to look up push tokens in-process.
-  // It is never sent to Expo or included in the push payload.
+  // It is never sent to Expo/APNs or included in the push payload.
+
+  // DIRECT-APNs first (Session-style): when the recipient registered a raw APNs
+  // token, the iOS wake goes straight to APNs — no Expo hop. Returns how many
+  // iOS devices APNs accepted, so we can suppress the redundant Expo heads-up.
+  // Fail-safe: 0 when APNs is unconfigured or no raw token exists -> Expo runs.
+  const apnsDelivered = await sendMessageApnsAlert(aegisId);
+
   const tokens = await pushRepo.forRecipient(aegisId);
   if (tokens.length === 0) return;
+
+  // Suppress the redundant Expo push only when direct APNs reached the ONE iOS
+  // device (tokens carry no device id, so with multiple iOS devices we cannot
+  // tell which got the direct push — keep Expo for all then; correctness over a
+  // rare double banner). Android is never suppressed.
+  const iosExpoCount = tokens.filter((r) => r.platform === 'ios').length;
+  const suppressIosExpo = apnsDelivered > 0 && iosExpoCount === 1;
 
   const messages: ExpoPushMessage[] = [];
   for (const row of tokens) {
@@ -29,6 +44,7 @@ export async function notifyRecipient(aegisId: string): Promise<void> {
       void pushRepo.delete(row.expo_token);
       continue;
     }
+    if (suppressIosExpo && row.platform === 'ios') continue;
     // iOS and Android differ on ONE field — `_contentAvailable` — and it is the
     // difference between "the banner always shows" and "the banner silently never
     // shows" (audit 2026-07-26). On iOS, pairing content-available with a visible

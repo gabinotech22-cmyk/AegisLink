@@ -67,6 +67,17 @@ export async function initPgSchema(): Promise<void> {
       PRIMARY KEY (aegis_id, voip_token)
     );
 
+    -- iOS standard APNs tokens (raw hex device token for apns-push-type: alert).
+    -- Separate from push_tokens (Expo) and voip_tokens (PushKit): a message wake
+    -- goes DIRECT to APNs (no Expo hop), like Session's push server. Falls back
+    -- to Expo when absent/unconfigured.
+    CREATE TABLE IF NOT EXISTS apns_tokens (
+      aegis_id    TEXT NOT NULL,
+      apns_token  TEXT NOT NULL,
+      updated_at  BIGINT NOT NULL,
+      PRIMARY KEY (aegis_id, apns_token)
+    );
+
     -- Sealed-sender (Phase 1) — see SQLite schema above for rationale.
     CREATE TABLE IF NOT EXISTS delivery_tokens (
       aegis_id       TEXT PRIMARY KEY,
