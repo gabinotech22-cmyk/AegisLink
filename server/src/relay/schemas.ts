@@ -90,6 +90,14 @@ export const VoipRegister = z.object({
   platform: z.literal('ios').default('ios'),
 });
 
+// iOS standard APNs token registration (raw hex device token) for direct-APNs
+// message wake-ups (apns-push-type: alert). Same shape as VoipRegister but a
+// DIFFERENT token: the standard remote-notification token, not the PushKit one.
+export const ApnsRegister = z.object({
+  token: z.string().min(1).max(256),
+  platform: z.literal('ios').default('ios'),
+});
+
 export interface PreKeyBundle {
   /** Ed25519 identity key of the recipient — required to verify the SPK signature in X3DH. */
   signingPublicKeyB64: string;

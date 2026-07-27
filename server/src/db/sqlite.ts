@@ -75,6 +75,17 @@ export function initSqliteSchema(db: DatabaseSync) {
       PRIMARY KEY (aegis_id, voip_token)
     );
 
+    -- iOS standard APNs tokens (raw hex device token) for apns-push-type: alert.
+    -- Separate from push_tokens (Expo) and voip_tokens (PushKit): a message wake
+    -- goes DIRECT to APNs with no Expo hop (Session-style). Absent/unconfigured
+    -- -> the Expo visible-push fallback still runs, so nothing regresses.
+    CREATE TABLE IF NOT EXISTS apns_tokens (
+      aegis_id    TEXT NOT NULL,
+      apns_token  TEXT NOT NULL,
+      updated_at  INTEGER NOT NULL,
+      PRIMARY KEY (aegis_id, apns_token)
+    );
+
     -- Sealed-sender (Phase 1): the recipient registers ONLY the hash of their
     -- delivery token; senders present the raw token to submit a sealed envelope
     -- without authenticating as a sender. The relay never stores the raw token

@@ -51,6 +51,13 @@ export interface VoipTokenRow {
   updated_at: number;
 }
 
+export interface ApnsTokenRow {
+  aegis_id: string;
+  /** Raw APNs standard device token (hex), for apns-push-type: alert. */
+  apns_token: string;
+  updated_at: number;
+}
+
 export interface SignedPreKeyRow {
   aegis_id: string;
   /** Device identifier for this prekey. Defaults to 'default' for legacy single-device clients. */

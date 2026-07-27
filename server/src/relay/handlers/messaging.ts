@@ -1,7 +1,7 @@
 import type { Socket } from 'socket.io';
-import { TypingEvent, MsgRead, PushRegister, VoipRegister } from '../schemas.js';
+import { TypingEvent, MsgRead, PushRegister, VoipRegister, ApnsRegister } from '../schemas.js';
 import { checkLowFreqRateLimit } from '../rateLimits.js';
-import { pushRepo, voipTokenRepo } from '../../db/client.js';
+import { pushRepo, voipTokenRepo, apnsTokenRepo } from '../../db/client.js';
 
 export interface MessagingEphemeralDeps {
   me: string;
@@ -109,6 +109,31 @@ export function attachMessagingEphemeral(socket: Socket, { me, sockets }: Messag
       await voipTokenRepo.upsert({
         aegis_id: me,
         voip_token: parsed.data.token,
+        updated_at: Date.now(),
+      });
+      sendAck(true);
+    } catch {
+      sendAck(false);
+    }
+  });
+
+  // ─── iOS standard APNs token (direct-APNs message wake) ──────────────────────
+  // Same authenticated path as push:register/voip:register: the raw APNs token is
+  // bound to `me` (aegisId proven via Ed25519 challenge-response). Knowing an
+  // aegisId never lets anyone register a token for it (security golden rule #3).
+  socket.on('apns:register', async (raw, ack) => {
+    const sendAck = (ok: boolean): void => { if (typeof ack === 'function') ack({ ok }); };
+    if (!(await checkLowFreqRateLimit(me))) {
+      socket.emit('error_msg', { code: 'rate_limited', for: 'apns:register' });
+      sendAck(false);
+      return;
+    }
+    const parsed = ApnsRegister.safeParse(raw);
+    if (!parsed.success) { sendAck(false); return; }
+    try {
+      await apnsTokenRepo.upsert({
+        aegis_id: me,
+        apns_token: parsed.data.token,
         updated_at: Date.now(),
       });
       sendAck(true);
