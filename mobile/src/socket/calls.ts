@@ -507,8 +507,16 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
 
 /** Accept an incoming call (we already have the offer in pendingOffer). */
 export async function acceptCall(): Promise<void> {
-  const { peer: peerId, callId, media, pendingOffer } = useCall.getState();
+  const { peer: peerId, callId, media, pendingOffer, status } = useCall.getState();
   if (!peerId || !callId || !pendingOffer) return;
+  // Idempotency: a call has TWO possible Accept surfaces (the in-app
+  // IncomingCallScreen button and the OS notification's "Contestar", the latter
+  // routed through pendingAction → the screen). Both converge here. Only proceed
+  // from the ringing state — a second invocation (double-drive / double-tap)
+  // would otherwise tear into a half-built peer (new createPeer, new offer),
+  // which is exactly what made answering feel slow/flaky when both surfaces were
+  // live. Once we've moved past 'incoming-ringing', ignore re-entry.
+  if (status !== 'incoming-ringing') return;
   const socket = getSocket();
   if (!socket) throw new Error('no_socket');
 

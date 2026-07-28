@@ -732,6 +732,29 @@ function incomingCallNotificationId(callId: string): string {
   return `incoming-call-${callId}`;
 }
 
+// Call ids whose incoming-call banner has been proactively suppressed because the
+// in-app ring UI (IncomingCallScreen) is the authoritative surface for this call.
+// Closes the race where showIncomingCallNotification — which is fired async and
+// unawaited from processIncomingInvite, after awaiting i18n + scheduling — lands
+// AFTER the screen already dismissed, leaving a duplicate "Contestar / Rechazar"
+// banner competing with the full-screen ring UI while the app is open. Single
+// authoritative surface per call (Signal/Session model). Entries self-expire so
+// the set never grows unbounded across a long session.
+const _suppressedCallBanners = new Set<string>();
+
+/**
+ * Mark a call's incoming banner as suppressed so any in-flight or later
+ * showIncomingCallNotification() for it becomes a no-op. Called the moment the
+ * in-app ring UI takes over (via dismissIncomingCallNotification). Idempotent.
+ */
+function suppressCallBanner(callId: string): void {
+  if (_suppressedCallBanners.has(callId)) return;
+  _suppressedCallBanners.add(callId);
+  // A ring lasts <60s; keep the guard a bit longer, then release it. Never keep
+  // it forever — callIds are unique UUIDs so this only bounds memory.
+  setTimeout(() => _suppressedCallBanners.delete(callId), 90_000);
+}
+
 export async function showIncomingCallNotification(
   callerAegisId: string,
   callerName: string,
@@ -739,6 +762,18 @@ export async function showIncomingCallNotification(
   callId: string,
 ): Promise<void> {
   try {
+    // Single authoritative ring surface: when the app is foreground the in-app
+    // IncomingCallScreen already shows and owns Accept/Decline — never also post
+    // a competing OS banner. Re-check AppState HERE (not only at the call site in
+    // processIncomingInvite): this runs async after tAsync + scheduling, and the
+    // app frequently becomes active in that window (the FCM/socket wake leaves
+    // AppState transiently non-active), which is exactly how the banner ended up
+    // lingering next to the screen. Also bail if the screen already claimed this
+    // call (its mount dismiss marks it suppressed), so a late post can't land.
+    const { AppState } = require('react-native') as typeof import('react-native');
+    if (AppState.currentState === 'active') return;
+    if (_suppressedCallBanners.has(callId)) return;
+
     await Notifications.scheduleNotificationAsync({
       identifier: incomingCallNotificationId(callId),
       content: {
@@ -765,6 +800,13 @@ export async function showIncomingCallNotification(
  * call it belongs to.
  */
 export async function dismissIncomingCallNotification(callId: string): Promise<void> {
+  // Claim this call for the in-app surface FIRST — synchronously, before any
+  // await — so a showIncomingCallNotification() still in flight (it awaits i18n +
+  // scheduling) sees the suppression and never posts. This is what actually
+  // closes the "banner competes with the ring screen while the app is open" race:
+  // the screen mounts → calls this → any late banner post for the same call is a
+  // no-op.
+  suppressCallBanner(callId);
   try {
     await Notifications.dismissNotificationAsync(incomingCallNotificationId(callId));
   } catch { /* already dismissed / not found — fine */ }
