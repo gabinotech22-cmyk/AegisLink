@@ -143,9 +143,11 @@ jest.mock('../../components/AlertHost', () => ({ themedAlert: jest.fn() }));
 
 import { useCall } from '../../store/call';
 import { openCallInvite } from '../../crypto/callSession';
-import { attachCallHandlers, endCall } from '../calls';
+import { createPeer } from '../../webrtc/peer';
+import { attachCallHandlers, endCall, acceptCall } from '../calls';
 
 const mockOpenCallInvite = openCallInvite as jest.Mock;
+const mockCreatePeer = createPeer as jest.Mock;
 
 /** The handler registered for `call:invite:v2` via attachCallHandlers(). */
 function capturedInviteHandler(): (msg: unknown) => Promise<void> {
@@ -275,5 +277,43 @@ describe('calls.ts — incoming-call notification cleanup on end (Llamada perdid
 
     expect(mockDismissIncomingCall).toHaveBeenCalledWith('call-D');
     expect(mockShowMissedCall).not.toHaveBeenCalled();
+  });
+});
+
+describe('calls.ts — acceptCall idempotency (two Accept surfaces cannot double-drive)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSocketReturnValue = mockSocket;
+    mockPeerState.handlers = null;
+    useCall.getState().reset();
+    mockOpenCallInvite.mockReturnValue({ from: 'peer-A', offer: 'sdp-offer', callKey: new Uint8Array(32) });
+  });
+  afterEach(() => useCall.getState().reset());
+
+  it('a second acceptCall() while already connecting is a no-op — the peer is built once', async () => {
+    attachCallHandlers();
+    const onInvite = capturedInviteHandler();
+    await onInvite({ callId: 'call-A', media: 'audio', ciphertext: 'ct', nonce: 'n', epk: 'epk' });
+    expect(useCall.getState().status).toBe('incoming-ringing');
+
+    // Both the in-app screen button and the notification's "Contestar" (via
+    // pendingAction) converge on acceptCall. Fire it twice, as the two competing
+    // surfaces did. The guard must let only the first through.
+    const first = acceptCall();
+    const second = acceptCall();
+    await Promise.all([first, second]);
+    await flushMicrotasks();
+
+    // Exactly one peer connection was created — the second call bailed on the
+    // status guard instead of tearing into a half-built peer.
+    expect(mockCreatePeer).toHaveBeenCalledTimes(1);
+    // And only one sealed answer was emitted for this call.
+    const answerEmits = (mockEmit.mock.calls as [string, unknown][]).filter(([ev]) => ev === 'call:answer:v2');
+    expect(answerEmits).toHaveLength(1);
+  });
+
+  it('ignores acceptCall() when no call is ringing (idle)', async () => {
+    await acceptCall();
+    expect(mockCreatePeer).not.toHaveBeenCalled();
   });
 });
