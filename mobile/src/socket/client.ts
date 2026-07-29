@@ -3647,6 +3647,18 @@ async function sendSelfCopy(
 }
 
 /**
+ * Control-plane message types that ride the sealed message transport (so the
+ * relay never sees the me↔peer edge) but carry NO user-visible content and must
+ * therefore NEVER be mirrored to the sender's other devices as a self-copy.
+ * handleSelfCopy renders every self-copy as a direction:'out' chat bubble, so a
+ * self-copied control message shows up as a raw payload bubble — e.g. the literal
+ * `{"isTyping":true}` seen on the sender's own screen while typing under mailbox
+ * mode, or a `["msgId",…]` bubble for a read receipt. Only genuine content
+ * (direct_msg + 1:1 media, location, view_once) is self-copied.
+ */
+const SELF_COPY_EXCLUDED_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete']);
+
+/**
  * Handle an inbound envelope flagged as a self-copy. Decrypts via the
  * self-ratchet, validates `parsed.from === identity.aegisId`, and appends
  * the carried message into the local store as direction:'out'.
@@ -3804,6 +3816,15 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     originalPayload = JSON.parse(selfObj.inner);
   } catch {
     if (__DEV__) logger.warn('[socket] self-copy inner payload not JSON — falling back to raw');
+  }
+
+  // Defense-in-depth: never render a control-plane message as a chat bubble on
+  // this device. A current sender no longer self-copies these, but an older/other
+  // client might — dropping here stops a raw `{"isTyping":true}` / `["msgId"]`
+  // bubble from being injected into the thread.
+  if (typeof originalPayload.type === 'string' && SELF_COPY_EXCLUDED_TYPES.has(originalPayload.type)) {
+    if (__DEV__) logger.debug('[socket] dropping self-copy of control message:', originalPayload.type);
+    return;
   }
 
   const displayBody = typeof originalPayload.text === 'string' ? originalPayload.text : selfObj.inner;
@@ -4033,11 +4054,15 @@ export async function sendMessage(opts: {
         try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
         // Multi-device self-copy stays on the aegisId control socket (it is
         // identity-scoped sync, not a recipient-graph leak). Same as below.
-        const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
-        void sendSelfCopy(socket!, opts.identity, opts.recipientAegisId, id, payload, {
-          viewOnce: msgType === 'view_once',
-          ephemeralSeconds: selfEphemeralSeconds,
-        });
+        // Control messages (typing/read-receipt/delete) are NEVER self-copied —
+        // handleSelfCopy would render them as a raw outgoing bubble.
+        if (!SELF_COPY_EXCLUDED_TYPES.has(msgType)) {
+          const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
+          void sendSelfCopy(socket!, opts.identity, opts.recipientAegisId, id, payload, {
+            viewOnce: msgType === 'view_once',
+            ephemeralSeconds: selfEphemeralSeconds,
+          });
+        }
         return;
       }
       // queued / null / !ok → fall through to the aegisId transport (no silent loss).
@@ -4072,19 +4097,23 @@ export async function sendMessage(opts: {
 
   // Multi-device sync: also push a self-encrypted copy so the user's other
   // devices can render this message as direction:'out'. Best-effort — never
-  // throws, never blocks the primary send result.
-  const ephemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
-  void sendSelfCopy(
-    socket!,
-    opts.identity,
-    opts.recipientAegisId,
-    id,
-    payload,
-    {
-      viewOnce: msgType === 'view_once',
-      ephemeralSeconds,
-    },
-  );
+  // throws, never blocks the primary send result. Control-plane messages
+  // (typing/read-receipt/delete) are excluded — handleSelfCopy would render them
+  // as a raw outgoing bubble (the `{"isTyping":true}` seen under mailbox mode).
+  if (!SELF_COPY_EXCLUDED_TYPES.has(msgType)) {
+    const ephemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
+    void sendSelfCopy(
+      socket!,
+      opts.identity,
+      opts.recipientAegisId,
+      id,
+      payload,
+      {
+        viewOnce: msgType === 'view_once',
+        ephemeralSeconds,
+      },
+    );
+  }
 }
 
 /**
