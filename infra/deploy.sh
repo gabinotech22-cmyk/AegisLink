@@ -31,39 +31,16 @@ fi
 echo "[deploy] Pulling latest code from git..."
 git -C "$PROJECT_ROOT" pull --ff-only
 
-# ── Process coturn config (expand TURN_SECRET placeholder) ─────────────────
-# The template file uses ${TURN_SECRET} literally. We expand it here and
-# write to a root-only temp location so the secret never appears in logs.
-COTURN_CONF_TEMPLATE="$PROJECT_ROOT/infra/coturn/turnserver.conf"
-COTURN_CONF_RENDERED="/etc/coturn/turnserver.conf"
-
-echo "[deploy] Rendering coturn config (secret stays server-side)..."
-mkdir -p "$(dirname "$COTURN_CONF_RENDERED")"
-
-# external-ip MUST be the server's PUBLIC IP. coturn runs in host-network mode and
-# sees several interfaces (public + docker bridges 172.x); with external-ip EMPTY
-# it advertises a WRONG relay candidate (a private 172.x, unreachable by the peer)
-# and relay-only calls get ONE-WAY audio (security audit 2026-07). If EXTERNAL_IP
-# is not provided, auto-detect the source IP used for outbound traffic — the public
-# IP on Hetzner and most clouds where the address is bound directly to the NIC.
-if [ -z "${EXTERNAL_IP:-}" ]; then
-  EXTERNAL_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)"
-  echo "[deploy] EXTERNAL_IP not set — auto-detected public IP: ${EXTERNAL_IP:-<none>}"
-fi
-if [ -z "${EXTERNAL_IP:-}" ]; then
-  echo "[deploy] WARNING: EXTERNAL_IP could not be determined. coturn will advertise" \
-       "a wrong relay candidate and calls may be one-way. Export EXTERNAL_IP=<public-ip>." >&2
-fi
-
-# envsubst only expands TURN_SECRET and EXTERNAL_IP — not other shell vars
-TURN_SECRET="$TURN_SECRET" \
-EXTERNAL_IP="$EXTERNAL_IP" \
-  envsubst '${TURN_SECRET} ${EXTERNAL_IP}' \
-  < "$COTURN_CONF_TEMPLATE" \
-  > "$COTURN_CONF_RENDERED"
-chmod 640 "$COTURN_CONF_RENDERED"
-
-echo "[deploy] coturn config written to $COTURN_CONF_RENDERED"
+# ── coturn: NOT deployed from here any more ─────────────────────────────────
+# coturn moved to its own "calls" VM (Etapa 1 of the infra roadmap). Rendering
+# its config here would be a no-op at best; restarting a container that no longer
+# exists on this box would fail the deploy. See infra/coturn/deploy-coturn.sh and
+# docs/COTURN-VM-RUNBOOK.md.
+#
+# TURN_SECRET is still validated above because the RELAY needs it: it signs the
+# ephemeral credentials (server/src/routes/turn.ts) that the remote coturn then
+# verifies. If you rotate it, you MUST roll it on BOTH VMs or every relayed call
+# breaks with 401.
 
 # ── Build & restart relay container ─────────────────────────────────────────
 echo "[deploy] Building relay Docker image..."
@@ -79,14 +56,6 @@ docker compose -f "$PROJECT_ROOT/docker-compose.yml" up -d --no-deps relay
 # echo "[deploy] Running DB migrations..."
 # docker compose -f "$PROJECT_ROOT/docker-compose.yml" \
 #   exec -T relay node --import tsx src/db/migrate.ts
-
-# ── Restart coturn ──────────────────────────────────────────────────────────
-echo "[deploy] Reloading coturn..."
-if docker compose -f "$PROJECT_ROOT/docker-compose.yml" ps coturn 2>/dev/null | grep -q "running"; then
-  docker compose -f "$PROJECT_ROOT/docker-compose.yml" restart coturn
-else
-  docker compose -f "$PROJECT_ROOT/docker-compose.yml" up -d coturn
-fi
 
 # ── Health check ────────────────────────────────────────────────────────────
 echo "[deploy] Waiting for relay to become healthy..."
@@ -157,11 +126,22 @@ fi
 
 echo "[deploy] Deploy complete."
 
-# ── Rotate TURN_SECRET reminder ─────────────────────────────────────────────
-# The secret should be rotated every 24 h. Automate with a cron entry:
+# ── Rotate TURN_SECRET: MUST be rolled on BOTH VMs ──────────────────────────
+# WARNING: since coturn moved to its own VM, TURN_SECRET is a SHARED secret
+# between two machines. The relay signs credentials with it; the remote coturn
+# verifies that HMAC. Rotating it HERE ONLY silently breaks every relayed call
+# with 401 until coturn is updated too.
+#
+# The previously suggested one-liner
 #   0 3 * * * TURN_SECRET=$(openssl rand -hex 32) bash /opt/aegislink/infra/deploy.sh
-# Or use a GitHub Actions scheduled workflow that SSHes into the server.
-echo "[deploy] Reminder: rotate TURN_SECRET every 24 h (see crontab or scheduled CI job)."
+# is therefore NO LONGER SAFE and must not be installed as-is. (Verified
+# 2026-08-01: no such cron exists on the relay VM — the secret is static today.)
+#
+# To rotate, roll both sides in one operation: write the new value to
+# /etc/aegislink.env here AND to /etc/aegislink-coturn.env on the calls VM, then
+# run this script here and infra/coturn/deploy-coturn.sh there. Brief overlap is
+# unavoidable: in-flight allocations keep the old credential until they expire.
+echo "[deploy] Reminder: TURN_SECRET is SHARED with the calls VM — rotate on BOTH or calls break."
 
 # ── Reload nginx if installed (picks up any config changes) ─────────────────
 # This is a no-op when nginx is absent so the script stays environment-agnostic.

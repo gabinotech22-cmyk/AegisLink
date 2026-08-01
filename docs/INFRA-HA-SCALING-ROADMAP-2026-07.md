@@ -1,6 +1,8 @@
 # Infra — hoja de ruta hacia alta disponibilidad (1 VM → N VMs)
 
-> Estado: **PLANIFICADO, nada ejecutado todavía.** Este doc es la fuente
+> Estado: **Etapa 1 🟡 EN CURSO** (código partido y mergeado; VM de llamadas
+> comprada pero aún sin servir tráfico — ver `docs/COTURN-VM-RUNBOOK.md`).
+> Etapas 0 y 2-5: planificadas, nada ejecutado. Este doc es la fuente
 > canónica de la *topología de VMs* (cuántas, para qué, en qué orden). No
 > duplica `docs/RELAY-HORIZONTAL-SCALING.md` (que sigue siendo la fuente
 > canónica de la *mecánica de código* — PM2 cluster, adapters de Socket.IO)
@@ -60,17 +62,31 @@ individual crashee.
   (no debe haber `REDIS_URL` seteada todavía).
 - Riesgo: bajo, reversible con `pm2 delete` + volver al comando anterior.
 
-### Etapa 1 — Separar coturn a su propia VM pequeña (~+4-5€/mes)
+### Etapa 1 — Separar coturn a su propia VM pequeña (~+4-5€/mes) — 🟡 EN CURSO
 
 Mejora con más impacto por euro: aísla el tráfico impredecible de llamadas
 (UDP, ancho de banda variable) de la disponibilidad del chat. Prerrequisito
 para la redundancia de llamadas de la Etapa 5.
 
-- Nueva VM Hetzner pequeña (CX22 o similar) solo con el contenedor `coturn`
-  de `docker-compose.yml`.
-- Actualizar `TURN_HOST`/`TURN_PORT` en el `.env` del relay.
-- Verificar: llamada de prueba forzando TURN (bloqueando P2P) conecta contra
+**Runbook operativo completo: `docs/COTURN-VM-RUNBOOK.md`** (fuente canónica
+del cutover, verificación y rollback — no se duplica aquí).
+
+- ✅ **Código partido** (rama `feat/coturn-separate-vm`): `coturn` fuera de
+  `docker-compose.yml`, compose propio en `infra/coturn/docker-compose.coturn.yml`,
+  deploy propio `infra/coturn/deploy-coturn.sh`, `infra/deploy.sh` ya no gestiona
+  coturn, `infra/vm-watchdog.sh` parametrizado por VM.
+- 🟡 **VM aprovisionada**: comprada (`138.199.203.109`, nbg1, 4 GB) pero **aún no
+  sirve tráfico**; coturn sigue en la VM del relay.
+- ☐ Flip de `TURN_HOST` en el `.env` del relay.
+- ☐ Verificar: llamada de prueba forzando TURN (bloqueando P2P) conecta contra
   la VM separada.
+
+> Hallazgos al preparar esta etapa (verificados contra la VM, no asumidos):
+> `TURNS_PORT` está vacío y coturn **nunca abrió el listener 5349** pese a
+> declarar `cert`/`pkey` — el TLS del config era una afirmación falsa, ahora
+> condicional a que el cert sea legible. Y **no existe cron de rotación** de
+> `TURN_SECRET`: bien, porque al partir en dos VMs ese secreto pasa a ser
+> compartido y rotarlo en un solo lado rompe todas las llamadas.
 
 ### Etapa 2 — Load testing (antes de gastar más)
 

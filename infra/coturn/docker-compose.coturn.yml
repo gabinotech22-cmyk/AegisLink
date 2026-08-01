@@ -1,0 +1,46 @@
+# AegisLink — coturn (TURN/STUN) — DEDICATED VM compose
+#
+# This file runs on the CALLS VM only. It is intentionally separate from the
+# root docker-compose.yml (relay + tor + ntfy): see docs/COTURN-VM-RUNBOOK.md
+# and Etapa 1 of docs/INFRA-HA-SCALING-ROADMAP-2026-07.md.
+#
+# Why split at all: call media is bursty and bandwidth-heavy (UDP 49152-65535,
+# no bps cap). On a shared box a single busy call degrades the chat path — and
+# the chat path is the one carrying the Tor onion + mailbox delivery. Isolating
+# it means a traffic spike on calls can never take messaging down.
+#
+# Deploy with: bash infra/coturn/deploy-coturn.sh   (renders the config first)
+#
+# Required environment (in /etc/aegislink-coturn.env on the calls VM):
+#   TURN_SECRET  — MUST be byte-identical to the relay's TURN_SECRET. The relay
+#                  signs ephemeral credentials with it; coturn verifies them.
+#                  A mismatch = every relayed call fails with 401.
+#   EXTERNAL_IP  — this VM's PUBLIC IP (auto-detected by deploy-coturn.sh).
+
+version: '3.9'
+
+services:
+  # ── coturn TURN/STUN ────────────────────────────────────────────────────────
+  # host network mode is required so coturn can advertise the correct public IP
+  # in ICE candidates and open arbitrary UDP ports for media relay.
+  coturn:
+    image: coturn/coturn:latest
+    container_name: aegislink-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      # Mount the RENDERED config from the host, not the repo template.
+      # deploy-coturn.sh runs envsubst into /etc/coturn/turnserver.conf so
+      # TURN_SECRET and EXTERNAL_IP are expanded; the repo file keeps literal ${...}.
+      - /etc/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # certbot tree, read-only. Empty today (this VM serves plain TURN on 3478,
+      # matching what production already advertises). Mounted so that adding
+      # TURNS later is a certbot run + redeploy, with no compose change.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    command: -c /etc/coturn/turnserver.conf
+    logging:
+      driver: "json-file"
+      options:
+        # turnserver.conf disables IP logging — only aggregate stats flow here
+        max-size: "10m"
+        max-file: "3"
