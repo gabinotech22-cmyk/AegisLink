@@ -42,7 +42,7 @@ import {
   setLastMailboxConnectEpoch,
 } from '../crypto/mailboxStore';
 import { mailboxAuthProof, epochFor, MAILBOX_EPOCH_MS, type Mailbox } from '../crypto/mailbox';
-import { TorSioSocket, isTorAvailable, startTor, onTorStatus, type TorStatus } from '../net/tor';
+import { TorSioSocket, isTorAvailable, startTor, onTorStatus, torHttpRequest, type TorStatus } from '../net/tor';
 
 /**
  * The mailbox socket only ever rides embedded Tor (Tier 2 — no Orbot, no plain
@@ -449,4 +449,113 @@ export function disconnectMailboxSocket(): void {
 /** Our current-epoch mailbox id (base64), or null if the socket isn't up. Test/debug aid. */
 export function ownCurrentMailboxId(): string | null {
   return currentEpochMailbox?.mailboxIdB64 ?? null;
+}
+
+// ── Stateless mailbox drain over Tor (Slice 6) ───────────────────────────────
+// The reliability FLOOR that works even when the persistent mailbox socket never
+// comes up — the iOS-background / cold-start failure mode. A push wake (or
+// foreground) opens a brief Tor circuit, we authenticate by possession proof and
+// drain the whole queue in ONE request/response, then let the app suspend. The
+// persistent socket stays the preferred path when it IS up; this is the safety
+// net (mirrors Session's swarm-fetch / SimpleX's SMP-fetch: delivery decoupled
+// from a live socket).
+
+// Ids persisted in the PREVIOUS stateless fetch, acked on the NEXT one so a
+// message is never deleted server-side before we've stored it (at-least-once,
+// matching the socket's envelope:ack). Keyed by mailbox id.
+const statelessPendingAcks = new Map<string, string[]>();
+
+/**
+ * Drain the current-epoch mailbox with a single stateless request over Tor.
+ * `onEnvelope` is the SAME sealed-v2 handler the socket uses (client.ts
+ * handleIncomingV2) — decrypt + persist. Returns the number of envelopes
+ * persisted this call. No-op (0) when mailbox mode is off or Tor is unavailable;
+ * fail-soft on every error so the socket path remains the primary transport.
+ */
+export async function fetchMailboxOverTor(
+  onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
+): Promise<number> {
+  if (!MAILBOX_ENABLED || !ONION_URL) return 0;
+  if (!isTorAvailable()) return 0;
+  try {
+    await startTor(); // resolves once bootstrapped; throws on failure
+  } catch {
+    return 0;
+  }
+
+  let mb: Mailbox;
+  try {
+    mb = await getOwnCurrentMailbox(Date.now());
+  } catch {
+    return 0;
+  }
+  const mailboxId = mb.mailboxIdB64;
+  const signPubB64 = encodeBase64(mb.signPublicKey);
+  const jsonHeaders = { 'content-type': 'application/json' };
+
+  // 1. Challenge — the relay issues a random nonce for this proven-derivable id.
+  const chal = await torHttpRequest(
+    `${ONION_URL}/mailbox/challenge`,
+    'POST',
+    JSON.stringify({ mailboxId, mailboxSignPubKey: signPubB64 }),
+    jsonHeaders,
+  );
+  if (!chal || chal.status !== 200) return 0;
+  let nonceB64: string;
+  try {
+    const parsed = JSON.parse(chal.body) as { nonce?: unknown };
+    if (typeof parsed.nonce !== 'string') return 0;
+    nonceB64 = parsed.nonce;
+  } catch {
+    return 0;
+  }
+
+  // 2. Possession proof: Ed25519 over the SERVER nonce (immune to clock skew).
+  let sigB64: string;
+  try {
+    sigB64 = encodeBase64(mailboxAuthProof(mb.signSecretKey, decodeBase64(nonceB64)));
+  } catch {
+    return 0;
+  }
+
+  // 3. Fetch, acking the ids we persisted last round (at-least-once).
+  const ackIds = statelessPendingAcks.get(mailboxId) ?? [];
+  const res = await torHttpRequest(
+    `${ONION_URL}/mailbox/fetch`,
+    'POST',
+    JSON.stringify({
+      mailboxId,
+      mailboxSignPubKey: signPubB64,
+      nonce: nonceB64,
+      sig: sigB64,
+      ...(ackIds.length ? { ackIds } : {}),
+    }),
+    jsonHeaders,
+  );
+  if (!res || res.status !== 200) return 0;
+  // The acks we just sent were honored server-side; forget them.
+  statelessPendingAcks.delete(mailboxId);
+
+  let envelopes: IncomingMailboxEnvelope[];
+  try {
+    const parsed = JSON.parse(res.body) as { envelopes?: unknown };
+    envelopes = Array.isArray(parsed.envelopes) ? (parsed.envelopes as IncomingMailboxEnvelope[]) : [];
+  } catch {
+    return 0;
+  }
+
+  const persisted: string[] = [];
+  for (const env of envelopes) {
+    if (!env || typeof env.id !== 'string' || typeof env.ciphertext !== 'string') continue;
+    try {
+      await onEnvelope(env);
+      persisted.push(env.id);
+    } catch (e) {
+      // Leave un-acked so it re-drains next time; the handler dedups by id.
+      if (__DEV__) logger.warn('[mailbox] stateless drain handler threw:', (e as Error).message);
+    }
+  }
+  // Ack the persisted ids on the NEXT fetch — never before they're stored.
+  if (persisted.length) statelessPendingAcks.set(mailboxId, persisted);
+  return persisted.length;
 }

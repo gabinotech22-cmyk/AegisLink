@@ -37,6 +37,11 @@ interface AegisTorNative {
   // Slice 2b.2: ntfy topic subscription over Tor (dumb HTTP streaming pipe).
   httpSubscribe(id: string, url: string): Promise<boolean>;
   httpUnsubscribe(id: string): Promise<boolean>;
+  // Slice 6: one-shot HTTP request over Tor's SOCKS (stateless mailbox drain).
+  // Resolves a JSON string `{"status":<int>,"body":"<string>"}`. Mirrors the same
+  // torOkHttp(SOCKS) client the sio/httpSubscribe bridges already use — a request
+  // through Tor's local SOCKS5 to the relay's .onion. Native impl: withTorEmbedded*.js.
+  httpRequest(url: string, method: string, headersJson: string, body: string): Promise<string>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -174,6 +179,43 @@ export function subscribeNtfyOverTor(
     sub.remove();
     if (Native) void Native.httpUnsubscribe(id).catch(() => { /* best effort */ });
   };
+}
+
+// ─── F3: one-shot HTTP-over-Tor request (stateless mailbox drain) ─────────────
+
+export interface TorHttpResponse {
+  /** HTTP status code from the relay's .onion. */
+  status: number;
+  /** Response body (JSON string for our mailbox endpoints). */
+  body: string;
+}
+
+/**
+ * Perform a single HTTP request over Tor's SOCKS proxy and return the response.
+ * Used by the stateless mailbox drain (mailboxSocket.fetchMailboxOverTor): unlike
+ * the persistent mailbox socket — which iOS kills on suspend and which loses the
+ * cold-bootstrap race — a one-shot request completes inside a short push-wake /
+ * foreground window and drains the queue without a live connection.
+ *
+ * Returns null (never throws) when the native module is absent (Expo Go /
+ * non-prebuilt) or the request fails, so callers fail-soft to the socket path.
+ */
+export async function torHttpRequest(
+  url: string,
+  method: 'GET' | 'POST',
+  body = '',
+  headers: Record<string, string> = {},
+): Promise<TorHttpResponse | null> {
+  if (!Native) return null;
+  try {
+    const raw = await Native.httpRequest(url, method, JSON.stringify(headers), body);
+    const parsed = JSON.parse(raw) as { status?: unknown; body?: unknown };
+    if (typeof parsed.status !== 'number') return null;
+    return { status: parsed.status, body: typeof parsed.body === 'string' ? parsed.body : '' };
+  } catch (e) {
+    if (__DEV__) logger.warn('[tor] httpRequest failed:', (e as Error).message);
+    return null;
+  }
 }
 
 // ─── F2: socket.io-over-Tor transport ─────────────────────────────────────────
