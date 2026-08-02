@@ -1,10 +1,15 @@
 # coturn en VM dedicada — runbook (Etapa 1 del roadmap de infra)
 
-> Estado: **🟡 CÓDIGO LISTO, VM PENDIENTE DE APROVISIONAR.**
-> El repo ya está partido (compose propio, deploy propio, watchdog por-VM), pero
-> la VM de llamadas **todavía no sirve tráfico**: coturn sigue corriendo en la VM
-> del relay. Este doc pasa a ✅ cuando el paso 7 (verificación con llamada real)
-> esté hecho, con su evidencia al lado.
+> Estado: **🟡 VM APROVISIONADA Y COTURN VERIFICADO — FALTA EL CUTOVER.**
+> (2026-08-02) La calls VM corre coturn con el config **efectivamente cargado**
+> y autenticación **comprobada en ambos sentidos** (credencial válida pasa,
+> credencial falsa da `Cannot complete Allocation`). Lo que falta es el flip de
+> `TURN_HOST` en el relay y la llamada real de validación. Este doc pasa a ✅
+> cuando el paso 7 esté hecho, con su evidencia al lado.
+>
+> **Pendiente urgente y separado**: el coturn de la VM del relay sigue corriendo
+> **abierto** (config ilegible → defaults → sin auth). Ver "trampa nº 0". Se
+> cierra al decomisionarlo en el paso 8 del cutover, o antes con un `chown`.
 >
 > Este doc es la fuente canónica de la *operación* de la VM de llamadas.
 > `docs/INFRA-HA-SCALING-ROADMAP-2026-07.md` (Etapa 1) enlaza aquí y no duplica.
@@ -35,6 +40,56 @@ la dirección `.onion` no rota y ningún build de cliente queda huérfano.
 
 Nota de latencia: Núremberg es más central en Europa que Helsinki, así que para
 usuarios en España el relay de media queda **más cerca**, no más lejos.
+
+## ⚠️ La trampa nº 0 — el config que coturn no puede leer
+
+**Encontrado el 2026-08-02 desplegando esta VM, y estaba VIVO en producción.**
+
+El contenedor `coturn/coturn` ejecuta el demonio como **`nobody` (uid 65534)**,
+no como root. `infra/deploy.sh` escribía el config renderizado como
+`root:root` modo `640`. Resultado: **el demonio no puede leer su propio
+config** — y coturn **no falla ruidosamente**: cae a sus **valores por defecto**
+y sigue sirviendo tráfico como si nada.
+
+Con defaults, TODO lo que este archivo promete deja de existir:
+
+| Directiva | Qué se perdió |
+|---|---|
+| `use-auth-secret` | **TURN abierto**: se aceptan allocations con credenciales inventadas. Deja sin sentido la auth Ed25519 de `/turn/credentials` (ítem A-7 de la auditoría 2026-06). |
+| `denied-peer-ip` | La lista anti-SSRF nunca se aplicó (metadata endpoint incluido). |
+| `external-ip` | Candidatos ICE incorrectos. |
+| `total-quota` | Sin límite de sesiones. |
+| `tls-listening-port` | Explica por qué el listener 5349 nunca existió pese a estar declarado. |
+
+Prueba read-only que lo demuestra:
+
+```bash
+stat -c "%U:%G %a" /etc/coturn/turnserver.conf   # root:root 640
+docker exec aegislink-coturn id -un              # nobody   -> no puede leerlo
+```
+
+`deploy-coturn.sh` ahora (a) hace `chown 65534` al renderizar y (b) **falla el
+deploy** si el usuario del demonio no puede leer el archivo. Un deploy que
+"funciona" mientras coturn corre abierto es peor que un deploy que revienta.
+
+### Corolario: los logs de coturn van a ninguna parte
+
+El config fija `no-stdout-log` + `syslog` (por privacidad). Dentro de un
+contenedor **no hay syslog**, así que `docker logs aegislink-coturn` sale
+**vacío** y esta clase de fallo es invisible. Para diagnosticar sin tocar el
+servicio en marcha, arranca una copia en otro puerto con los logs visibles:
+
+```bash
+grep -vE "^(no-stdout-log|syslog|listening-port)" /etc/coturn/turnserver.conf > /tmp/diag.conf
+echo "listening-port=13478" >> /tmp/diag.conf
+chown 65534:65534 /tmp/diag.conf
+timeout 12 docker run --rm --network host -v /tmp/diag.conf:/tmp/diag.conf:ro \
+  coturn/coturn:latest -c /tmp/diag.conf
+```
+
+Ahí se ve qué carga de verdad: `Default realm:`, las líneas `Black listing:` y
+—crucialmente— cualquier `Bad configuration format:` (directiva **descartada en
+silencio**, que es exactamente como se coló `no-loopback-peers`).
 
 ## El secreto compartido (la trampa nº 1)
 
@@ -116,13 +171,33 @@ docker inspect -f '{{.State.Running}}' aegislink-coturn
 ss -lnu | grep 3478
 ```
 
-Desde fuera (asignación TURN real, requiere `coturn` client tools). El username
-es `<expiry_unix>:<aegisId>` y la password `HMAC-SHA1(TURN_SECRET, username)`
-en base64 — genérala con `infra/scripts/rotate-turn-creds.ts`:
+**La prueba que de verdad importa: que una credencial FALSA sea rechazada.**
+Un allocation exitoso con credencial válida no demuestra nada por sí solo — el
+coturn abierto de producción también lo daba. Hay que ver las dos caras.
+
+Lánzalo **desde otra máquina** (p. ej. la VM del relay, que tiene el secreto):
 
 ```bash
-turnutils_uclient -v -t -u '<username>' -w '<credential>' 138.199.203.109
+SECRET=$(grep "^TURN_SECRET=" /etc/aegislink.env | cut -d= -f2-)
+U=$(( $(date +%s) + 3600 )):smoketest
+P=$(printf "%s" "$U" | openssl dgst -sha1 -hmac "$SECRET" -binary | base64)
+
+# Debe PASAR el allocation:
+docker run --rm coturn/coturn:latest turnutils_uclient -y -u "$U" -w "$P" -p 3478 138.199.203.109
+
+# Debe FALLAR con "Cannot complete Allocation":
+docker run --rm coturn/coturn:latest turnutils_uclient -y -u "$U" -w "inventada" -p 3478 138.199.203.109
 ```
+
+> **Cuidado con la sintaxis**: la IP va **al final** y con `-p 3478`. Con otras
+> combinaciones de flags `turnutils_uclient` ignora la dirección y se conecta a
+> `0.0.0.0:3478` (el coturn LOCAL), dando resultados que parecen del servidor
+> remoto pero no lo son. Comprueba siempre la línea `Connected to:` de la salida.
+
+Un `channel bind: error 403` **después** de un allocation correcto es normal en
+modo `-y`: la dirección de relay cae en un rango de `denied-peer-ip` (p. ej. el
+bridge de docker `172.17.x`). No afecta a llamadas reales, cuyos peers son IPs
+públicas.
 
 En el relay, que la config servida ya apunte a la caja nueva:
 
