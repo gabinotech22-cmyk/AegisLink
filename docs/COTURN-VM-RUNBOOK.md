@@ -115,16 +115,32 @@ Verificado 2026-08-01: **no hay cron de rotación** en la VM del relay; el secre
 es estático hoy. El one-liner de rotación que sugería `infra/deploy.sh` ya está
 marcado como no-seguro: rotar en un solo lado rompe las llamadas.
 
-## Requisitos previos (acción del dueño)
+## Acceso a la VM — cómo se resolvió (✅ 2026-08-02)
 
-1. **Clave SSH en la VM nueva.** Hoy solo tiene login root por contraseña. Usar
-   el `.bat` de escritorio (`aegis-coturn-ssh-key.bat`) que ejecuta `ssh-copy-id`;
-   la contraseña la teclea el dueño, no queda en ningún log ni en el repo.
-2. **Rotar la contraseña root** de la VM nueva y desactivar login por contraseña
-   (la contraseña inicial viajó por email en claro).
-3. **Firewall** (Hetzner Cloud Firewall si está activo, + iptables):
-   `UDP 3478`, `TCP 3478`, `UDP 49152-65535`. SSH 22 restringido.
-   *No* hace falta abrir 5349 mientras no haya TLS (ver abajo).
+Documentado porque el camino "obvio" **no funciona** y costó varios intentos.
+
+1. **Añadir la clave SSH a la cuenta Hetzner NO la instala en servidores que ya
+   existen.** El propio diálogo lo dice en letra pequeña ("does not affect any
+   existing resources"). Solo aplica a servidores creados *después*.
+2. **La vía que sí funciona sin tocar una terminal: modo Rescue.** Servidor →
+   pestaña *Rescue* → *Enable rescue & power cycle*, seleccionando la clave SSH.
+   Arranca un sistema de rescate **con la clave ya autorizada**; desde ahí se
+   monta el disco real (`mount /dev/sda1 /mnt/real`) y se instala la clave en
+   `/root/.ssh/authorized_keys`. El rescate es de **un solo arranque**: se
+   consume al reiniciar, así que hay que reactivarlo si hace falta otra vez.
+3. **Ubuntu llega con la contraseña root CADUCADA.** Bloquea la sesión *aunque
+   la clave sea válida* (`Password change required but no TTY available`). Se
+   quita desde el rescate: `chroot /mnt/real chage -d <hoy> root`.
+4. ✅ **Solo clave SSH** (`10-aegislink-hardening.conf`): `PasswordAuthentication
+   no` + `PermitRootLogin prohibit-password`. Verificado en ambos sentidos: la
+   clave entra, y la contraseña da `Permission denied (publickey)`.
+   > El prefijo **`10-`** es deliberado: OpenSSH se queda con el **primer** valor
+   > de cada opción, y `50-cloud-init.conf` trae `PasswordAuthentication yes`.
+   > Un archivo `99-` se leería después y **perdería en silencio**.
+5. ✅ **Firewall** `ufw`: `deny incoming` por defecto; abiertos 22/tcp,
+   3478 tcp+udp y 49152-65535/udp. **Logging apagado** — venía en `on (low)`,
+   que persiste IPs de origen de los paquetes bloqueados (cero-metadatos).
+   No hace falta 5349 mientras no haya TLS (ver abajo).
 
 ## TLS / TURNS — deliberadamente apagado
 
