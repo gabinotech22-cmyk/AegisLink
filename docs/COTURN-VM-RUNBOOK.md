@@ -78,6 +78,33 @@ docker exec aegislink-coturn id -un              # nobody   -> no puede leerlo
 deploy** si el usuario del demonio no puede leer el archivo. Un deploy que
 "funciona" mientras coturn corre abierto es peor que un deploy que revienta.
 
+## ⚠️ La trampa nº 0-bis — `relay-ip=0.0.0.0` se bloquea a sí mismo
+
+**Causó una caída real de llamadas el 2026-08-02**, destapada justo al arreglar
+la trampa nº 0. Con el config por fin legible, coturn aplicó `denied-peer-ip`…
+y se denegó a sí mismo.
+
+Con `relay-ip=0.0.0.0` el log dice:
+
+```
+WARNING: NO EXPLICIT RELAY ADDRESS(ES) ARE CONFIGURED
+Relay address to use: 138.199.203.109
+Relay address to use: 172.17.0.1        <-- bridge de docker
+```
+
+`172.17.0.1` cae dentro de `denied-peer-ip=172.16.0.0-172.31.255.255`. Cuando
+una allocation aterriza ahí, el channel bind del otro extremo recibe **403** y
+el media nunca fluye. El cliente solo ve *"Could not establish a media
+connection"*, y en el servidor no hay nada evidentemente roto.
+
+Arreglo: `relay-ip=${EXTERNAL_IP}` (pinado a la IP pública). `deploy-coturn.sh`
+**aborta** si `relay-ip` queda en `0.0.0.0` o vacío.
+
+> Lección transversal: el config llevaba mal **desde el principio**; simplemente
+> no se leía. Arreglar un fallo de seguridad puede destapar bugs latentes que
+> llevaban años "funcionando" solo porque la configuración se ignoraba. Tras
+> corregir permisos, **revalida el comportamiento**, no solo el arranque.
+
 ### Corolario: los logs de coturn van a ninguna parte
 
 El config fija `no-stdout-log` + `syslog` (por privacidad). Dentro de un
@@ -93,9 +120,30 @@ timeout 12 docker run --rm --network host -v /tmp/diag.conf:/tmp/diag.conf:ro \
   coturn/coturn:latest -c /tmp/diag.conf
 ```
 
-Ahí se ve qué carga de verdad: `Default realm:`, las líneas `Black listing:` y
-—crucialmente— cualquier `Bad configuration format:` (directiva **descartada en
-silencio**, que es exactamente como se coló `no-loopback-peers`).
+Ahí se ve qué carga de verdad: `Default realm:`, las líneas `Black listing:`,
+`Relay address to use:` y —crucialmente— cualquier `Bad configuration format:`
+(directiva **descartada en silencio**, que es como se coló `no-loopback-peers`).
+
+**Ojo con el truco de comentar `no-stdout-log`/`syslog` en el contenedor en
+marcha**: coturn entonces **no** escribe a stdout, sino a un fichero *dentro*
+del contenedor. `docker logs` sigue saliendo vacío y parece que nada arrancó.
+Se lee así:
+
+```bash
+docker exec aegislink-coturn sh -c 'ls -t /var/tmp/turn_*.log | head -1 | xargs tail -60'
+```
+
+### Cómo NO verificar TURN
+
+`turnutils_uclient` **ignora la dirección posicional** con varias combinaciones
+de flags y se conecta a `0.0.0.0:3478`, es decir, al coturn **local** de la
+máquina donde lo lanzas. Da resultados que parecen del servidor remoto y no lo
+son; aquí llevó a dar por buena una caja que no se había probado.
+
+Comprueba siempre la línea `Connected to:` de la salida, y **contrasta contra el
+contador de líneas del log del servidor** antes y después: si no crece, la
+petición nunca llegó. `turnutils_stunclient` sí respeta la dirección y es fiable
+para verificar alcance.
 
 ## El secreto compartido (la trampa nº 1)
 
