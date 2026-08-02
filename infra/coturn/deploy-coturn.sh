@@ -108,6 +108,21 @@ chown "$COTURN_UID:$COTURN_UID" "$CONF_RENDERED"
 chmod 640 "$CONF_RENDERED"
 echo "[coturn] Config written to $CONF_RENDERED (owner uid $COTURN_UID, mode 640)"
 
+# relay-ip must be a concrete public address. With 0.0.0.0 (or unset) coturn
+# hands out relay addresses on EVERY interface it finds, docker bridge included,
+# and then denies its own 172.17.x relay via denied-peer-ip -> 403 on channel
+# bind -> "Could not establish a media connection" with no obvious server error.
+# That cost a live call outage, so assert it rather than trusting the template.
+RELAY_IP_LINE="$(grep -E '^relay-ip=' "$CONF_RENDERED" | head -1 | cut -d= -f2-)"
+if [[ -z "$RELAY_IP_LINE" || "$RELAY_IP_LINE" == "0.0.0.0" || "$RELAY_IP_LINE" == "::" ]]; then
+  echo "[coturn] ERROR: relay-ip is '${RELAY_IP_LINE:-<unset>}'. coturn would allocate" >&2
+  echo "[coturn]        relay addresses on docker/loopback interfaces that its own" >&2
+  echo "[coturn]        denied-peer-ip blacklist rejects, and media would never flow." >&2
+  echo "[coturn]        Set relay-ip to this host's public IP. Aborting." >&2
+  exit 1
+fi
+echo "[coturn] relay-ip pinned to $RELAY_IP_LINE"
+
 # ── Start / restart the container ───────────────────────────────────────────
 echo "[coturn] Starting coturn..."
 docker compose -f "$COMPOSE_FILE" up -d
