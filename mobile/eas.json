@@ -34,7 +34,7 @@
         "APP_ENV": "preview",
         "EXPO_PUBLIC_SERVER_URL": "https://aegislink.duckdns.org",
         "EXPO_PUBLIC_RELAY_URL": "https://aegislink.duckdns.org",
-        "EXPO_PUBLIC_TURN_URL": "turn:aegislink.duckdns.org:3478",
+        "EXPO_PUBLIC_TURN_URL": "turn:aegislink-turn.duckdns.org:3478",
         "AEGIS_EXPO_GO": "0"
       }
     },
@@ -61,7 +61,7 @@
         "APP_ENV": "production",
         "EXPO_PUBLIC_SERVER_URL": "https://aegislink.duckdns.org",
         "EXPO_PUBLIC_RELAY_URL": "https://aegislink.duckdns.org",
-        "EXPO_PUBLIC_TURN_URL": "turn:aegislink.duckdns.org:3478",
+        "EXPO_PUBLIC_TURN_URL": "turn:aegislink-turn.duckdns.org:3478",
         "EXPO_PUBLIC_ONION_URL": "http://fhxnal5jmuuqsbtzz7avos4drhqmuy4c7ffd35gi3hw2uwbe5iqshfyd.onion",
         "EXPO_PUBLIC_MAILBOX_MODE": "on",
         "EXPO_PUBLIC_MAILBOX_IOS_WAKE": "on"
