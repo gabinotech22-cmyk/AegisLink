@@ -199,22 +199,37 @@ export interface TorHttpResponse {
  *
  * Returns null (never throws) when the native module is absent (Expo Go /
  * non-prebuilt) or the request fails, so callers fail-soft to the socket path.
+ *
+ * A JS-side deadline caps the whole call: the drain runs inside a short push-wake
+ * window, so a native request that hangs (dead circuit, unresponsive .onion) must
+ * fail-soft to null rather than pin the wake open until the OS suspends us mid-way.
  */
+const TOR_HTTP_TIMEOUT_MS = 25_000;
+
 export async function torHttpRequest(
   url: string,
   method: 'GET' | 'POST',
   body = '',
   headers: Record<string, string> = {},
+  timeoutMs = TOR_HTTP_TIMEOUT_MS,
 ): Promise<TorHttpResponse | null> {
   if (!Native) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const raw = await Native.httpRequest(url, method, JSON.stringify(headers), body);
+    const raw = await Promise.race([
+      Native.httpRequest(url, method, JSON.stringify(headers), body),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('tor http timeout')), timeoutMs);
+      }),
+    ]);
     const parsed = JSON.parse(raw) as { status?: unknown; body?: unknown };
     if (typeof parsed.status !== 'number') return null;
     return { status: parsed.status, body: typeof parsed.body === 'string' ? parsed.body : '' };
   } catch (e) {
     if (__DEV__) logger.warn('[tor] httpRequest failed:', (e as Error).message);
     return null;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

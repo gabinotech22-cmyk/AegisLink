@@ -139,6 +139,56 @@ describe('fetchMailboxOverTor', () => {
     expect(fetchBodies[1].ackIds).toEqual(['good']);
   });
 
+  it('refuses to sign a nonce that is not 32 bytes (no signing oracle)', async () => {
+    const { fetchMailboxOverTor } = loadSut();
+    const shortNonce = encodeBase64(new Uint8Array(16).fill(2)); // relay-chosen, wrong size
+    mockTorHttp.mockImplementation(async (url: string) => {
+      if (url.endsWith('/mailbox/challenge')) return { status: 200, body: JSON.stringify({ nonce: shortNonce }) };
+      if (url.endsWith('/mailbox/fetch')) return { status: 200, body: '{"envelopes":[]}' };
+      return null;
+    });
+    const { mailboxAuthProof } = require('../../crypto/mailbox') as { mailboxAuthProof: jest.Mock };
+    const onEnvelope = jest.fn();
+
+    const n = await fetchMailboxOverTor(onEnvelope);
+
+    expect(n).toBe(0);
+    // The mailbox signing key never signed relay-chosen bytes …
+    expect(mailboxAuthProof).not.toHaveBeenCalled();
+    // … and we never reached the fetch step.
+    expect(mockTorHttp.mock.calls.some((c) => (c[0] as string).endsWith('/mailbox/fetch'))).toBe(false);
+  });
+
+  it('single-flight: overlapping calls coalesce onto one in-flight drain', async () => {
+    const { fetchMailboxOverTor } = loadSut();
+    // Hold the challenge response open so the first drain is still in flight
+    // when the second call arrives.
+    let releaseChallenge!: (v: { status: number; body: string }) => void;
+    const challengeGate = new Promise<{ status: number; body: string }>((resolve) => {
+      releaseChallenge = resolve;
+    });
+    mockTorHttp.mockImplementation(async (url: string) => {
+      if (url.endsWith('/mailbox/challenge')) return challengeGate;
+      if (url.endsWith('/mailbox/fetch')) return { status: 200, body: JSON.stringify({ envelopes: [env('m1')] }) };
+      return null;
+    });
+    const onEnvelope = jest.fn(async () => {});
+
+    const p1 = fetchMailboxOverTor(onEnvelope);
+    const p2 = fetchMailboxOverTor(onEnvelope); // must join p1, not start a second drain
+    releaseChallenge({ status: 200, body: JSON.stringify({ nonce: NONCE_B64 }) });
+    const [n1, n2] = await Promise.all([p1, p2]);
+
+    expect(n1).toBe(1);
+    expect(n2).toBe(1);
+    // Exactly one challenge and one fetch happened for the two overlapping calls.
+    const urls = mockTorHttp.mock.calls.map((c) => c[0] as string);
+    expect(urls.filter((u) => u.endsWith('/mailbox/challenge'))).toHaveLength(1);
+    expect(urls.filter((u) => u.endsWith('/mailbox/fetch'))).toHaveLength(1);
+    // The envelope was persisted only once.
+    expect(onEnvelope).toHaveBeenCalledTimes(1);
+  });
+
   it('returns 0 without touching the network when Tor is unavailable', async () => {
     mockIsTorAvailable.mockReturnValue(false);
     const { fetchMailboxOverTor } = loadSut();

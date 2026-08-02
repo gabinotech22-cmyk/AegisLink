@@ -465,14 +465,33 @@ export function ownCurrentMailboxId(): string | null {
 // matching the socket's envelope:ack). Keyed by mailbox id.
 const statelessPendingAcks = new Map<string, string[]>();
 
+// Single-flight: a push wake and a foreground transition (both documented
+// callers of drainMailboxNow) can fire at once. Two concurrent drains corrupt
+// the ack cycle — the second /challenge overwrites the first's server nonce
+// (→ challenge_expired), and the two runs clobber statelessPendingAcks so the
+// losing run's persisted ids are never acked and redeliver forever. Coalesce
+// overlapping calls onto the one in-flight drain.
+let statelessDrainInFlight: Promise<number> | null = null;
+
 /**
  * Drain the current-epoch mailbox with a single stateless request over Tor.
  * `onEnvelope` is the SAME sealed-v2 handler the socket uses (client.ts
  * handleIncomingV2) — decrypt + persist. Returns the number of envelopes
  * persisted this call. No-op (0) when mailbox mode is off or Tor is unavailable;
  * fail-soft on every error so the socket path remains the primary transport.
+ * Re-entrant callers share the single in-flight drain (single-flight guard).
  */
-export async function fetchMailboxOverTor(
+export function fetchMailboxOverTor(
+  onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
+): Promise<number> {
+  if (statelessDrainInFlight) return statelessDrainInFlight;
+  statelessDrainInFlight = drainMailboxStateless(onEnvelope).finally(() => {
+    statelessDrainInFlight = null;
+  });
+  return statelessDrainInFlight;
+}
+
+async function drainMailboxStateless(
   onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
 ): Promise<number> {
   if (!MAILBOX_ENABLED || !ONION_URL) return 0;
@@ -511,9 +530,14 @@ export async function fetchMailboxOverTor(
   }
 
   // 2. Possession proof: Ed25519 over the SERVER nonce (immune to clock skew).
+  //    Only ever sign a well-formed 32-byte challenge — the exact size the relay
+  //    issues (nacl.randomBytes(32)). Signing whatever bytes the relay returns
+  //    would make our mailbox signing key a signing oracle for relay-chosen data.
   let sigB64: string;
   try {
-    sigB64 = encodeBase64(mailboxAuthProof(mb.signSecretKey, decodeBase64(nonceB64)));
+    const nonceBytes = decodeBase64(nonceB64);
+    if (nonceBytes.length !== 32) return 0;
+    sigB64 = encodeBase64(mailboxAuthProof(mb.signSecretKey, nonceBytes));
   } catch {
     return 0;
   }

@@ -182,6 +182,22 @@ describe('POST /mailbox/fetch — at-least-once acking', () => {
     expect((fourth.body.envelopes as { id: string }[]).map((e) => e.id)).toEqual([b]);
   });
 
+  it('caps envelopes per fetch (≤100) so one response fits the Tor wake window', async () => {
+    const mbx = newMailbox();
+    // Queue more than the per-fetch cap.
+    for (let i = 0; i < 130; i++) await enqueue(mbx.id);
+
+    const first = await drain(mbx);
+    expect(first.status).toBe(200);
+    const firstIds = (first.body.envelopes as { id: string }[]).map((e) => e.id);
+    expect(firstIds).toHaveLength(100); // MAX_ENVELOPES_PER_FETCH
+
+    // Nothing was deleted on read; acking the first page drains the remainder
+    // across a second fetch (at-least-once supports repeated calls).
+    const second = await drain(mbx, firstIds);
+    expect((second.body.envelopes as { id: string }[]).length).toBe(30);
+  });
+
   it('acking another mailbox\'s id is a no-op — no cross-mailbox deletion', async () => {
     const alice = newMailbox();
     const bob = newMailbox();

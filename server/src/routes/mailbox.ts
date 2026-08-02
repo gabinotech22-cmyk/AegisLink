@@ -60,6 +60,12 @@ const router = Router();
 const CHALLENGE_TTL_MS = 35_000;
 /** Bound work per fetch: cap how many ids a client may ack in one request. */
 const MAX_ACK_IDS = 500;
+/** Cap envelopes returned per drain so one response always fits inside a short
+ *  Tor push-wake window. A larger backlog drains across successive fetches — the
+ *  at-least-once ack flow already supports repeated calls. Without this a big
+ *  queue builds one oversized JSON body that can't transfer in the wake window,
+ *  times out, acks nothing, and re-builds the same response forever (a stall). */
+const MAX_ENVELOPES_PER_FETCH = 100;
 /** Backstop on the in-memory challenge map so it can never grow unbounded. */
 const MAX_PENDING_CHALLENGES = 100_000;
 /** Rate limit, keyed by mailbox id (NOT ip — over Tor the ip is a shared exit;
@@ -216,6 +222,7 @@ router.post('/fetch', fetchLimiter, async (req, res) => {
 
   const envelopes = rows
     .filter((r) => !ackSet.has(r.id))
+    .slice(0, MAX_ENVELOPES_PER_FETCH)
     .map((r) => ({
       id: r.id,
       to: mailboxId,
