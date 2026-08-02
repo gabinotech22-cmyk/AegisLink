@@ -44,6 +44,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
+import rateLimit from 'express-rate-limit';
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 import { messageRepo } from '../db/client.js';
@@ -61,8 +62,8 @@ const CHALLENGE_TTL_MS = 35_000;
 const MAX_ACK_IDS = 500;
 /** Backstop on the in-memory challenge map so it can never grow unbounded. */
 const MAX_PENDING_CHALLENGES = 100_000;
-/** Sliding-window rate limit, keyed by mailbox id (NOT ip — over Tor the ip is a
- *  shared exit; keying on it would be meaningless and cross-user). */
+/** Rate limit, keyed by mailbox id (NOT ip — over Tor the ip is a shared exit;
+ *  keying on it would be meaningless and cross-user). */
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 60;
 
@@ -95,19 +96,29 @@ function pruneExpiredChallenges(): void {
   }
 }
 
-// ── Per-mailbox sliding-window rate limiter ───────────────────────────────────
-const rateHits = new Map<string, number[]>();
-function rateLimited(key: string): boolean {
-  const now = Date.now();
-  const arr = (rateHits.get(key) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
-  if (arr.length >= RATE_MAX) {
-    rateHits.set(key, arr);
-    return true;
-  }
-  arr.push(now);
-  rateHits.set(key, arr);
-  return false;
+// ── Per-mailbox rate limiter (express-rate-limit middleware) ──────────────────
+// A recognized limiter middleware on each route. Keyed by the OPAQUE mailbox id
+// from the (already-parsed, global express.json) body — never the ip, which over
+// Tor is a shared exit that would collapse every user into one cross-talking
+// bucket. Each route gets its own instance, so /challenge and /fetch keep
+// independent per-mailbox windows.
+function mailboxLimiter() {
+  return rateLimit({
+    windowMs: RATE_WINDOW_MS,
+    max: RATE_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req): string => {
+      const id = (req.body as { mailboxId?: unknown } | undefined)?.mailboxId;
+      return typeof id === 'string' && id.length > 0 ? id : 'anon';
+    },
+    handler: (_req, res) => {
+      res.status(429).json({ error: 'rate_limited' });
+    },
+  });
 }
+const challengeLimiter = mailboxLimiter();
+const fetchLimiter = mailboxLimiter();
 
 /**
  * Validate that `mailboxId` is genuinely derived from `signPubKeyB64` (the
@@ -128,12 +139,11 @@ function validBinding(mailboxId: string, signPubKeyB64: string): Uint8Array | nu
 // ── POST /mailbox/challenge ───────────────────────────────────────────────────
 // Issue a random 32-byte nonce for a proven-derivable mailbox id. The nonce is
 // held in memory (TTL) and consumed one-time by /mailbox/fetch.
-router.post('/challenge', (req, res) => {
+router.post('/challenge', challengeLimiter, (req, res) => {
   const parsed = ChallengeBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
   const { mailboxId, mailboxSignPubKey } = parsed.data;
 
-  if (rateLimited(`c:${mailboxId}`)) return res.status(429).json({ error: 'rate_limited' });
   if (!validBinding(mailboxId, mailboxSignPubKey)) {
     return res.status(400).json({ error: 'bad_binding' });
   }
@@ -153,12 +163,10 @@ router.post('/challenge', (req, res) => {
 // ── POST /mailbox/fetch ───────────────────────────────────────────────────────
 // Prove possession (Ed25519 over the issued nonce), then drain the queue in one
 // shot. Deletes only the caller's own acked ids; never deletes on read.
-router.post('/fetch', async (req, res) => {
+router.post('/fetch', fetchLimiter, async (req, res) => {
   const parsed = FetchBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'bad_request' });
   const { mailboxId, mailboxSignPubKey, nonce, sig, ackIds } = parsed.data;
-
-  if (rateLimited(`f:${mailboxId}`)) return res.status(429).json({ error: 'rate_limited' });
 
   const pk = validBinding(mailboxId, mailboxSignPubKey);
   if (!pk) return res.status(400).json({ error: 'bad_binding' });
