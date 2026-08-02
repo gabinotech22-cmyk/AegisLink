@@ -9,7 +9,7 @@ import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
-import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery } from './mailboxSocket';
+import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery, fetchMailboxOverTor } from './mailboxSocket';
 import { startMailboxPushSubscription, stopMailboxPushSubscription } from '../notifications/mailboxPushSubscription';
 import { startCallWakeService, stopCallWakeService } from '../webrtc/callWakeService';
 import type { SealedWire } from '../crypto/sealedSender';
@@ -690,6 +690,20 @@ export function connectMailboxForIdentity(identity: Identity): void {
   // reconnect+drain without waiting for the blind reconnect backoff. Idempotent;
   // no-op when Tor/mailbox mode is unavailable. Draining = re-open the mailbox.
   startMailboxPushSubscription(() => connectMailboxForIdentity(identity));
+}
+
+/**
+ * Stateless mailbox drain over Tor — the reliability FLOOR for async delivery.
+ * Works even when the persistent mailbox socket never comes up (iOS suspends a
+ * backgrounded app and kills its socket; a cold Tor bootstrap loses the race).
+ * Call on a push wake and on foreground: it drains everything queued in one
+ * request/response, feeding each sealed envelope through the SAME handleIncomingV2
+ * pipeline the socket uses. No-op when mailbox mode is off; never throws.
+ * Returns the number of envelopes persisted.
+ */
+export async function drainMailboxNow(identity: Identity): Promise<number> {
+  if (!MAILBOX_ENABLED) return 0;
+  return fetchMailboxOverTor((env) => handleIncomingV2(env, identity));
 }
 
 export function connect(identity: Identity): Socket {

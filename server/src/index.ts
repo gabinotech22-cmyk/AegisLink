@@ -12,6 +12,7 @@ import web3Routes from './routes/web3.js';
 import prekeysRoutes from './routes/prekeys.js';
 import blobRoutes from './routes/blob.js';
 import backupRoutes from './routes/backup.js';
+import mailboxRoutes from './routes/mailbox.js';
 import linksRoutes from './routes/links.js';
 import turnRoutes from './routes/turn.js';
 import proxyGifRoutes from './routes/proxyGif.js';
@@ -147,6 +148,7 @@ if ((process.env['WEB3_ENDPOINTS'] ?? 'off').toLowerCase() === 'on') {
 app.use('/prekeys', prekeysRoutes);
 app.use('/blob', blobRoutes);
 app.use('/backup', backupRoutes);
+app.use('/mailbox', mailboxRoutes);
 app.use('/', linksRoutes); // /.well-known/assetlinks.json + /g + /a landings
 app.use('/turn', turnRoutes);
 app.use('/proxy/gif', proxyGifRoutes);
