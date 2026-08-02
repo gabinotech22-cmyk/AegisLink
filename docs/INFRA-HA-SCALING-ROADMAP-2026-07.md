@@ -75,18 +75,39 @@ del cutover, verificación y rollback — no se duplica aquí).
   `docker-compose.yml`, compose propio en `infra/coturn/docker-compose.coturn.yml`,
   deploy propio `infra/coturn/deploy-coturn.sh`, `infra/deploy.sh` ya no gestiona
   coturn, `infra/vm-watchdog.sh` parametrizado por VM.
-- 🟡 **VM aprovisionada**: comprada (`138.199.203.109`, nbg1, 4 GB) pero **aún no
-  sirve tráfico**; coturn sigue en la VM del relay.
-- ☐ Flip de `TURN_HOST` en el `.env` del relay.
+- ✅ **VM aprovisionada** (2026-08-02): `138.199.203.109` (nbg1, CX23, Ubuntu
+  26.04), docker + compose instalados, `TURN_SECRET` sincronizado con el relay
+  (huellas sha256 idénticas), coturn corriendo y **autenticación verificada en
+  ambos sentidos** (credencial falsa → `Cannot complete Allocation`).
+- ✅ **Firewall** (2026-08-02): `ufw` con `deny incoming` por defecto; abiertos
+  solo 22/tcp, 3478 tcp+udp y 49152-65535/udp. Logging **apagado** — venía en
+  `on (low)`, que persiste IPs de origen (choca con cero-metadatos). STUN
+  reverificado a través del firewall.
+- ✅ **Flip de `TURN_HOST`** (2026-08-02): el relay anuncia `138.199.203.109`
+  y responde `/health: OK`. Copia previa en `/etc/aegislink.env.bak-turnhost`.
 - ☐ Verificar: llamada de prueba forzando TURN (bloqueando P2P) conecta contra
   la VM separada.
+- ☐ Decomisionar el coturn de la VM del relay (≥1 h después del flip — el
+  cliente cachea la config TURN 50 min).
 
-> Hallazgos al preparar esta etapa (verificados contra la VM, no asumidos):
-> `TURNS_PORT` está vacío y coturn **nunca abrió el listener 5349** pese a
-> declarar `cert`/`pkey` — el TLS del config era una afirmación falsa, ahora
-> condicional a que el cert sea legible. Y **no existe cron de rotación** de
-> `TURN_SECRET`: bien, porque al partir en dos VMs ese secreto pasa a ser
-> compartido y rotarlo en un solo lado rompe todas las llamadas.
+> **Hallazgo de seguridad al desplegar esta etapa — CERRADO el 2026-08-02**
+> (`chown 65534` + restart en la VM del relay; verificado `LEE-SU-CONFIG: SI`).
+> Estuvo vivo en producción hasta entonces.
+> El contenedor coturn corre como `nobody`, pero el deploy escribía el config
+> como `root:root 640` → **el demonio nunca pudo leerlo** y llevaba meses
+> corriendo con **valores por defecto**: sin `use-auth-secret` (TURN abierto,
+> acepta credenciales inventadas — deja sin efecto el ítem A-7 de la auditoría
+> 2026-06), sin `denied-peer-ip` (anti-SSRF), sin `external-ip`, sin quotas.
+> También explica por qué el listener TLS 5349 nunca existió. Detalle,
+> reproducción y arreglo: `docs/COTURN-VM-RUNBOOK.md` § "trampa nº 0".
+>
+> Segundo hallazgo: `no-loopback-peers` es **rechazado** por coturn 4.16
+> ("Bad configuration format") — una directiva descartada en silencio se ve
+> igual que una que funciona. Sustituida por `denied-peer-ip=127.0.0.0-...`.
+>
+> Tercero: **no existe cron de rotación** de `TURN_SECRET`. Bien, porque al
+> partir en dos VMs ese secreto pasa a ser compartido y rotarlo en un solo lado
+> rompe todas las llamadas.
 
 ### Etapa 2 — Load testing (antes de gastar más)
 

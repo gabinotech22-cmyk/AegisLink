@@ -93,8 +93,20 @@ EOF
   fi
 fi
 
+# Ownership is NOT cosmetic — it is the whole ballgame. The coturn image runs
+# the daemon as `nobody` (uid 65534), NOT root. A root-owned 0640 file is
+# therefore UNREADABLE by the daemon, and coturn does not fail loudly: it falls
+# back to BUILT-IN DEFAULTS and keeps serving. That means NO use-auth-secret
+# (an open TURN relay: anyone can allocate without credentials, making the
+# Ed25519 auth on /turn/credentials pointless), NO denied-peer-ip (the anti-SSRF
+# blacklist never applies), NO external-ip and NO quotas. This was live on the
+# relay VM for months and was only caught by testing an allocation with a
+# deliberately bogus credential. 0640 owned by the daemon user keeps the secret
+# off world-readable while letting coturn actually read it.
+COTURN_UID="${COTURN_UID:-65534}"
+chown "$COTURN_UID:$COTURN_UID" "$CONF_RENDERED"
 chmod 640 "$CONF_RENDERED"
-echo "[coturn] Config written to $CONF_RENDERED"
+echo "[coturn] Config written to $CONF_RENDERED (owner uid $COTURN_UID, mode 640)"
 
 # ── Start / restart the container ───────────────────────────────────────────
 echo "[coturn] Starting coturn..."
@@ -104,16 +116,35 @@ docker compose -f "$COMPOSE_FILE" restart coturn
 
 # ── Verify ──────────────────────────────────────────────────────────────────
 echo "[coturn] Verifying..."
-sleep 3
 if ! docker inspect -f '{{.State.Running}}' aegislink-coturn 2>/dev/null | grep -q true; then
   echo "[coturn] ERROR: container is not running." >&2
   docker compose -f "$COMPOSE_FILE" logs --tail=50 coturn >&2
   exit 1
 fi
-if ss -lnu 2>/dev/null | grep -q ":3478"; then
+
+# THE guard for the silent-defaults failure above: prove the DAEMON USER can
+# read the config. Without this the deploy "succeeds" while coturn quietly runs
+# wide open. Fail closed instead (golden rule #6).
+if docker exec aegislink-coturn sh -c "head -c1 $CONF_RENDERED >/dev/null 2>&1"; then
+  echo "[coturn] OK: the coturn daemon user can read its config."
+else
+  echo "[coturn] ERROR: coturn CANNOT read $CONF_RENDERED — it would silently run" >&2
+  echo "[coturn]        on built-in defaults: no auth, no denied-peer-ip, no quotas." >&2
+  echo "[coturn]        Fix ownership (expected uid $COTURN_UID) and re-run." >&2
+  exit 1
+fi
+
+# Listener check needs a retry: coturn opens its sockets a beat after the
+# container reports Running, so a single immediate check is a false negative.
+LISTENING=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if ss -lnu 2>/dev/null | grep -q ":3478"; then LISTENING=1; break; fi
+  sleep 2
+done
+if [[ "$LISTENING" == "1" ]]; then
   echo "[coturn] OK: listening on UDP 3478."
 else
-  echo "[coturn] WARNING: no UDP 3478 listener found — check firewall and logs." >&2
+  echo "[coturn] WARNING: no UDP 3478 listener after 20s — check firewall and logs." >&2
 fi
 
 echo "[coturn] Deploy complete. Public TURN: turn:${EXTERNAL_IP}:3478"
