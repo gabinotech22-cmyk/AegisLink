@@ -21,10 +21,18 @@
 
 set -u
 
-NTFY_LOCAL="http://127.0.0.1:8090"
+# ntfy endpoint. Loopback on the relay VM (ntfy is co-hosted there). The calls VM
+# has no local ntfy, so point it at the relay's clearnet ntfy in
+# /etc/aegislink-watchdog.conf:
+#   NTFY_LOCAL="https://aegislink.duckdns.org:8443"
+NTFY_LOCAL="${NTFY_LOCAL:-http://127.0.0.1:8090}"
 TOPIC_FILE="/etc/aegislink-watchdog.topic"
 STATE_DIR="/run/aegis-watchdog"
 mkdir -p "$STATE_DIR"
+
+# Per-VM overrides (container list, relay-health toggle, ntfy endpoint).
+# Sourced early so every setting below can be overridden.
+[ -r /etc/aegislink-watchdog.conf ] && . /etc/aegislink-watchdog.conf
 
 [ -r "$TOPIC_FILE" ] || exit 0   # not configured — do nothing, never break cron
 TOPIC="$(tr -d '[:space:]' < "$TOPIC_FILE")"
@@ -61,7 +69,12 @@ alert disk "$([ "$DISK_PCT" -gt 85 ] && echo 1 || echo 0)" \
   "Disco lleno en la VM" "Uso de / = ${DISK_PCT}% (umbral 85%)."
 
 # ── 4. Containers that must be running ───────────────────────────────────────
-for c in aegislink-relay aegislink-ntfy aegislink-tor aegislink-coturn; do
+# Overridable per VM: coturn lives on the dedicated calls VM now, so watching it
+# from the relay VM would fire a permanent false "Contenedor caído" alarm. On the
+# calls VM install this same script with:
+#   echo 'AEGIS_WATCH_CONTAINERS="aegislink-coturn"' > /etc/aegislink-watchdog.conf
+# (the file is sourced once at the top of this script)
+for c in ${AEGIS_WATCH_CONTAINERS:-aegislink-relay aegislink-ntfy aegislink-tor}; do
   RUNNING=0
   docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null | grep -q true && RUNNING=1
   alert "container_$c" "$([ "$RUNNING" = "1" ] && echo 0 || echo 1)" \
@@ -69,10 +82,14 @@ for c in aegislink-relay aegislink-ntfy aegislink-tor aegislink-coturn; do
 done
 
 # ── 5. Relay health endpoint, from inside (localhost, sin pasar por nginx) ───
-HEALTHY=0
-curl -sf --max-time 8 http://127.0.0.1:3001/health 2>/dev/null | grep -q '"ok":true' && HEALTHY=1
-alert relay_health "$([ "$HEALTHY" = "1" ] && echo 0 || echo 1)" \
-  "Relay /health KO (interno)" "El proceso del relay corre pero /health no responde ok — probable crash-loop o deadlock."
+# Skipped on the calls VM (no relay there) — set AEGIS_WATCH_RELAY_HEALTH=0 in
+# /etc/aegislink-watchdog.conf, otherwise it would alarm forever.
+if [ "${AEGIS_WATCH_RELAY_HEALTH:-1}" = "1" ]; then
+  HEALTHY=0
+  curl -sf --max-time 8 http://127.0.0.1:3001/health 2>/dev/null | grep -q '"ok":true' && HEALTHY=1
+  alert relay_health "$([ "$HEALTHY" = "1" ] && echo 0 || echo 1)" \
+    "Relay /health KO (interno)" "El proceso del relay corre pero /health no responde ok — probable crash-loop o deadlock."
+fi
 
 # ── 6. Network throughput (TURN es lo primero que saturará) ──────────────────
 # Muestra de 5 s de la interfaz por defecto; alarma sobre 25 MB/s sostenidos
@@ -84,7 +101,7 @@ if [ -n "${IFACE:-}" ]; then
   RX2=$(cat "/sys/class/net/$IFACE/statistics/rx_bytes"); TX2=$(cat "/sys/class/net/$IFACE/statistics/tx_bytes")
   MBPS=$(( ( (RX2-RX1) + (TX2-TX1) ) / 5 / 1024 / 1024 ))
   alert net "$([ "$MBPS" -gt 25 ] && echo 1 || echo 0)" \
-    "Tráfico de red alto" "~${MBPS} MB/s sostenidos en $IFACE (umbral 25). Probable pico TURN — activar split de coturn."
+    "Tráfico de red alto" "~${MBPS} MB/s sostenidos en $IFACE (umbral 25). En la VM de llamadas: pico TURN, mirar redundancia de coturn (Etapa 5). En la VM del relay: ya NO es TURN — investigar relay/Tor."
 fi
 
 exit 0

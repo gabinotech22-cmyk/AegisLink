@@ -194,29 +194,19 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ── coturn TURN/STUN ──────────────────────────────────────────────────────
-  # host network mode is required so coturn can advertise the correct public IP
-  # in ICE candidates and open arbitrary UDP ports for media relay.
-  coturn:
-    image: coturn/coturn:latest
-    container_name: aegislink-coturn
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      # Mount the RENDERED config from the host, not the repo template.
-      # deploy.sh runs envsubst into /etc/coturn/turnserver.conf so TURN_SECRET
-      # and EXTERNAL_IP are expanded; the repo file keeps literal ${...}.
-      - /etc/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
-      # coturn's config references certs under /etc/letsencrypt/live/<domain>,
-      # so mount the certbot tree (read-only) into the container.
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-    command: -c /etc/coturn/turnserver.conf
-    logging:
-      driver: "json-file"
-      options:
-        # turnserver.conf disables IP logging — only aggregate stats flow here
-        max-size: "10m"
-        max-file: "3"
+  # ── coturn TURN/STUN — MOVED to its own VM ────────────────────────────────
+  # coturn is deliberately NOT a service here any more. It runs on a dedicated
+  # "calls" VM via infra/coturn/docker-compose.coturn.yml (Etapa 1 of
+  # docs/INFRA-HA-SCALING-ROADMAP-2026-07.md; runbook: docs/COTURN-VM-RUNBOOK.md).
+  #
+  # Why: call media is bursty and bandwidth-heavy (UDP 49152-65535, no bps cap)
+  # and was competing with the relay, Tor and ntfy on one box. A traffic spike on
+  # calls could degrade the chat path — the one carrying onion + mailbox delivery.
+  #
+  # The relay still needs TURN_SECRET (it SIGNS the ephemeral credentials that
+  # the remote coturn verifies) and TURN_HOST/TURN_PORT (it hands those URLs to
+  # clients from /turn/credentials). Those stay in the relay's env above; only
+  # the container moved.
 
 volumes:
   relay_data:
