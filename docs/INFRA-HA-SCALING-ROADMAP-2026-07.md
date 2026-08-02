@@ -79,12 +79,20 @@ del cutover, verificación y rollback — no se duplica aquí).
   26.04), docker + compose instalados, `TURN_SECRET` sincronizado con el relay
   (huellas sha256 idénticas), coturn corriendo y **autenticación verificada en
   ambos sentidos** (credencial falsa → `Cannot complete Allocation`).
-- ☐ Flip de `TURN_HOST` en el `.env` del relay.
+- ✅ **Firewall** (2026-08-02): `ufw` con `deny incoming` por defecto; abiertos
+  solo 22/tcp, 3478 tcp+udp y 49152-65535/udp. Logging **apagado** — venía en
+  `on (low)`, que persiste IPs de origen (choca con cero-metadatos). STUN
+  reverificado a través del firewall.
+- ✅ **Flip de `TURN_HOST`** (2026-08-02): el relay anuncia `138.199.203.109`
+  y responde `/health: OK`. Copia previa en `/etc/aegislink.env.bak-turnhost`.
 - ☐ Verificar: llamada de prueba forzando TURN (bloqueando P2P) conecta contra
   la VM separada.
-- ☐ Decomisionar el coturn de la VM del relay (≥1 h después del flip).
+- ☐ Decomisionar el coturn de la VM del relay (≥1 h después del flip — el
+  cliente cachea la config TURN 50 min).
 
-> **Hallazgo de seguridad al desplegar esta etapa (VIVO en producción).**
+> **Hallazgo de seguridad al desplegar esta etapa — CERRADO el 2026-08-02**
+> (`chown 65534` + restart en la VM del relay; verificado `LEE-SU-CONFIG: SI`).
+> Estuvo vivo en producción hasta entonces.
 > El contenedor coturn corre como `nobody`, pero el deploy escribía el config
 > como `root:root 640` → **el demonio nunca pudo leerlo** y llevaba meses
 > corriendo con **valores por defecto**: sin `use-auth-secret` (TURN abierto,

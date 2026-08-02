@@ -1,15 +1,21 @@
 # coturn en VM dedicada — runbook (Etapa 1 del roadmap de infra)
 
-> Estado: **🟡 VM APROVISIONADA Y COTURN VERIFICADO — FALTA EL CUTOVER.**
-> (2026-08-02) La calls VM corre coturn con el config **efectivamente cargado**
-> y autenticación **comprobada en ambos sentidos** (credencial válida pasa,
-> credencial falsa da `Cannot complete Allocation`). Lo que falta es el flip de
-> `TURN_HOST` en el relay y la llamada real de validación. Este doc pasa a ✅
-> cuando el paso 7 esté hecho, con su evidencia al lado.
+> Estado: **🟡 CUTOVER HECHO — FALTA VALIDAR CON LLAMADA REAL.**
+> (2026-08-02) La calls VM corre coturn con el config **efectivamente cargado**,
+> autenticación **comprobada en ambos sentidos** (credencial válida pasa;
+> credencial falsa da `Cannot complete Allocation`), y firewall `ufw` activo
+> (`deny incoming`, solo 22/tcp, 3478 tcp+udp y 49152-65535/udp; logging
+> **apagado** — registraba IPs de origen). El relay ya anuncia
+> `TURN_HOST=138.199.203.109` y responde `/health: OK`.
 >
-> **Pendiente urgente y separado**: el coturn de la VM del relay sigue corriendo
-> **abierto** (config ilegible → defaults → sin auth). Ver "trampa nº 0". Se
-> cierra al decomisionarlo en el paso 8 del cutover, o antes con un `chown`.
+> Las **dos** coturn siguen vivas a propósito durante la transición. Pasa a ✅
+> cuando (a) una llamada real entre dos dispositivos conecte contra la VM
+> separada y (b) el coturn viejo esté decomisionado (paso 8).
+>
+> **Cerrado el 2026-08-02**: el coturn de la VM del relay corría **abierto**
+> (config ilegible → defaults → sin auth). Resuelto con `chown 65534` + restart;
+> verificado con `LEE-SU-CONFIG: SI`. Ver "trampa nº 0" — la causa raíz está
+> arreglada en `deploy-coturn.sh`, que ahora aborta el deploy si se repite.
 >
 > Este doc es la fuente canónica de la *operación* de la VM de llamadas.
 > `docs/INFRA-HA-SCALING-ROADMAP-2026-07.md` (Etapa 1) enlaza aquí y no duplica.
