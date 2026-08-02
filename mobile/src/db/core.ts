@@ -567,7 +567,8 @@ export async function clearIdentity(): Promise<void> {
        DELETE FROM groups;
        DELETE FROM chat_state;
        DELETE FROM call_history;
-       DELETE FROM prekey_secrets;`
+       DELETE FROM prekey_secrets;
+       DELETE FROM mailbox_pending_acks;`
     );
   });
 }
@@ -841,7 +842,8 @@ export async function wipeDatabase(): Promise<void> {
        DELETE FROM call_history;
        DELETE FROM polls;
        DELETE FROM scheduled_messages;
-       DELETE FROM prekey_secrets;`
+       DELETE FROM prekey_secrets;
+       DELETE FROM mailbox_pending_acks;`
     );
     // SQLite DELETE only removes pages from the free-list — VACUUM overwrites
     // freed pages with zeros so forensic reads of the raw db file find nothing.
