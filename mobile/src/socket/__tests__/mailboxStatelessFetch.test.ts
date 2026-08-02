@@ -54,6 +54,22 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },
 }));
 
+// Durable pending-ack store, standing in for the mailbox_pending_acks SQLite
+// table. It lives at TEST-FILE scope (not inside the mock factory), so it
+// survives jest.isolateModules re-requiring the SUT — i.e. it persists across a
+// simulated process restart the way the on-disk table does, while the SUT's
+// in-memory Map is wiped. Cleared per test in beforeEach.
+const mockAckStore = new Map<string, string[]>();
+jest.mock('../../db/mailboxAcks', () => ({
+  __esModule: true,
+  loadMailboxPendingAcks: jest.fn(async (mailboxId: string) => mockAckStore.get(mailboxId) ?? []),
+  saveMailboxPendingAcks: jest.fn(async (mailboxId: string, ackIds: string[]) => {
+    if (ackIds.length) mockAckStore.set(mailboxId, [...ackIds]);
+    else mockAckStore.delete(mailboxId);
+  }),
+  deleteMailboxPendingAcks: jest.fn(async (mailboxId: string) => { mockAckStore.delete(mailboxId); }),
+}));
+
 import naclUtil from 'tweetnacl-util';
 const { encodeBase64 } = naclUtil;
 
@@ -81,6 +97,7 @@ const env = (id: string) => ({ id, to: mockOwnMailbox.mailboxIdB64, ciphertext: 
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockAckStore.clear();
   mockIsTorAvailable.mockReturnValue(true);
   mockStartTor.mockResolvedValue({ state: 'on', socksPort: 9050 });
 });
@@ -210,5 +227,36 @@ describe('fetchMailboxOverTor', () => {
     expect(onEnvelope).not.toHaveBeenCalled();
     // Never reached the fetch step.
     expect(mockTorHttp.mock.calls.some((c) => (c[0] as string).endsWith('/mailbox/fetch'))).toBe(false);
+  });
+
+  it('durably carries acks across a process restart (iOS app-kill between persist and next fetch)', async () => {
+    // Round 1 — the app drains and persists m1, m2. The at-least-once ack is
+    // deferred to the NEXT fetch, so those ids now live ONLY in the pending-ack
+    // store (durable) — the in-memory Map goes down with the process.
+    {
+      const { fetchMailboxOverTor } = loadSut();
+      wireTransport([env('m1'), env('m2')]);
+      const n = await fetchMailboxOverTor(jest.fn(async () => {}));
+      expect(n).toBe(2);
+    }
+
+    // iOS kills the backgrounded app: reload the SUT so its module-level
+    // statelessPendingAcks Map is wiped, exactly as after process death. The
+    // durable mockAckStore (standing in for the SQLite table) survives.
+    {
+      const { fetchMailboxOverTor } = loadSut();
+      wireTransport([]); // nothing new queued this wake
+      await fetchMailboxOverTor(jest.fn(async () => {}));
+    }
+
+    // The post-restart fetch STILL carries the acks persisted before the kill —
+    // so the relay finally deletes those rows instead of redelivering forever.
+    const fetchBodies = mockTorHttp.mock.calls
+      .filter((c) => (c[0] as string).endsWith('/mailbox/fetch'))
+      .map((c) => JSON.parse(c[2] as string));
+    expect(fetchBodies[0].ackIds).toBeUndefined();          // round 1: nothing to ack yet
+    expect(fetchBodies[fetchBodies.length - 1].ackIds).toEqual(['m1', 'm2']); // post-restart
+    // And once honored (200), the durable entry is cleared — no perpetual re-ack.
+    expect(mockAckStore.has(mockOwnMailbox.mailboxIdB64)).toBe(false);
   });
 });

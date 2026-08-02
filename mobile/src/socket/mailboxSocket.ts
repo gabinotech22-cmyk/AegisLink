@@ -43,6 +43,7 @@ import {
 } from '../crypto/mailboxStore';
 import { mailboxAuthProof, epochFor, MAILBOX_EPOCH_MS, type Mailbox } from '../crypto/mailbox';
 import { TorSioSocket, isTorAvailable, startTor, onTorStatus, torHttpRequest, type TorStatus } from '../net/tor';
+import { loadMailboxPendingAcks, saveMailboxPendingAcks, deleteMailboxPendingAcks } from '../db/mailboxAcks';
 
 /**
  * The mailbox socket only ever rides embedded Tor (Tier 2 — no Orbot, no plain
@@ -463,6 +464,14 @@ export function ownCurrentMailboxId(): string | null {
 // Ids persisted in the PREVIOUS stateless fetch, acked on the NEXT one so a
 // message is never deleted server-side before we've stored it (at-least-once,
 // matching the socket's envelope:ack). Keyed by mailbox id.
+//
+// This in-memory Map is a WRITE-THROUGH CACHE in front of the durable
+// mailbox_pending_acks table (db/mailboxAcks.ts). It alone did NOT survive
+// process death: iOS killing the backgrounded app between "persist envelopes"
+// and "next fetch" dropped the acks, so the relay kept redelivering those rows
+// on every later wake (bounded, but a never-foreground + steady-inbound pattern
+// grew the server queue). The drain now loads persisted ids when the cache is
+// cold and mirrors every mutation to SQLite, so the acks survive an app kill.
 const statelessPendingAcks = new Map<string, string[]>();
 
 // Single-flight: a push wake and a foreground transition (both documented
@@ -542,8 +551,14 @@ async function drainMailboxStateless(
     return 0;
   }
 
-  // 3. Fetch, acking the ids we persisted last round (at-least-once).
-  const ackIds = statelessPendingAcks.get(mailboxId) ?? [];
+  // 3. Fetch, acking the ids we persisted last round (at-least-once). Prefer the
+  //    in-memory cache; when it's cold (fresh process after an app kill) fall
+  //    back to the durable store so acks persisted before the kill still go out.
+  let ackIds = statelessPendingAcks.get(mailboxId);
+  if (ackIds === undefined) {
+    ackIds = await loadMailboxPendingAcks(mailboxId); // fail-soft → [] on DB error
+    if (ackIds.length) statelessPendingAcks.set(mailboxId, ackIds);
+  }
   const res = await torHttpRequest(
     `${ONION_URL}/mailbox/fetch`,
     'POST',
@@ -557,8 +572,11 @@ async function drainMailboxStateless(
     jsonHeaders,
   );
   if (!res || res.status !== 200) return 0;
-  // The acks we just sent were honored server-side; forget them.
+  // The acks we just sent were honored server-side; forget them (cache + durable
+  // store). Only ever cleared AFTER the 200 that carried them — a failed fetch
+  // above returned early, leaving the persisted ids intact for the next drain.
   statelessPendingAcks.delete(mailboxId);
+  await deleteMailboxPendingAcks(mailboxId);
 
   let envelopes: IncomingMailboxEnvelope[];
   try {
@@ -579,7 +597,12 @@ async function drainMailboxStateless(
       if (__DEV__) logger.warn('[mailbox] stateless drain handler threw:', (e as Error).message);
     }
   }
-  // Ack the persisted ids on the NEXT fetch — never before they're stored.
-  if (persisted.length) statelessPendingAcks.set(mailboxId, persisted);
+  // Ack the persisted ids on the NEXT fetch — never before they're stored. Mirror
+  // to the durable store so an app kill before the next drain doesn't lose them
+  // (fail-soft: a DB error leaves the in-memory cache as the session's fallback).
+  if (persisted.length) {
+    statelessPendingAcks.set(mailboxId, persisted);
+    await saveMailboxPendingAcks(mailboxId, persisted);
+  }
   return persisted.length;
 }

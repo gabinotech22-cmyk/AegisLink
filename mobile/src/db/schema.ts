@@ -209,11 +209,26 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       secret_b64 TEXT NOT NULL,
       PRIMARY KEY (slot, kind, key_id)
     );
+
+    -- Stateless-mailbox-drain pending acks (durable at-least-once, Slice 6).
+    -- The stateless Tor drain (mailboxSocket.fetchMailboxOverTor) acks the
+    -- envelope ids it persisted on the NEXT fetch, so the relay never deletes a
+    -- row before we've stored it. That pending-ack list used to live only in an
+    -- in-memory Map: if iOS killed the backgrounded app between "persist" and
+    -- "next fetch", the acks were lost and the server queue kept redelivering.
+    -- Persisting the list here makes it survive process death. ack_ids =
+    -- encryptBody(JSON string[]) — envelope ids are opaque but still metadata, so
+    -- only ciphertext lands on disk (zero-metadata at-rest, golden rule #10).
+    CREATE TABLE IF NOT EXISTS mailbox_pending_acks (
+      mailbox_id TEXT PRIMARY KEY,
+      ack_ids    TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 12;
+  const USER_DB_VERSION = 13;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -322,6 +337,15 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // GroupBubble falls back to legacy body parsing for backwards compat.
     await addColumn(d, 'messages', 'sender_id TEXT;');
     await d.execAsync('PRAGMA user_version = 12');
+  }
+
+  if (currentVersion < 13) {
+    // v12 → v13: add mailbox_pending_acks table (durable at-least-once acks for
+    // the stateless Tor mailbox drain — survives an iOS app-kill between persist
+    // and next fetch). Brand-new table already created by the CREATE TABLE IF NOT
+    // EXISTS block above for fresh installs; this branch just bumps the version
+    // for existing installs. No ALTER / data migration needed.
+    await d.execAsync('PRAGMA user_version = 13');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.
