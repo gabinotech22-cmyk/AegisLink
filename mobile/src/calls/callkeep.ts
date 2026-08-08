@@ -207,6 +207,17 @@ export function hasNativeCall(callId: string): boolean {
 }
 
 /**
+ * Record that NATIVE code already reported `callId` to CallKit — specifically,
+ * the PushKit delegate that rang this call before JS was even alive (see
+ * calls/voip-push.ts). Without this the socket's later `call:invite` for the
+ * same call would report the same UUID to CallKit a second time, and the answer
+ * would be routed against a call JS believes it never displayed.
+ */
+export function markNativelyDisplayed(callId: string): void {
+  _displayed.add(callId);
+}
+
+/**
  * Tell CallKit the call was answered, when the user accepted from OUR UI rather
  * than from the system call UI.
  *
