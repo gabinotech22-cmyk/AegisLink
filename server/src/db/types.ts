@@ -23,6 +23,13 @@ export interface MessageRow {
   /** JSON-serialized string[]. Device IDs that have already drained this message. */
   drained_by: string;
   /**
+   * How many times this row has been handed out for delivery. Deletion is
+   * ack-driven (see relay/handler.ts), so a row the client can never process
+   * would otherwise be re-emitted on every reconnect forever. Past
+   * MAX_DELIVERY_ATTEMPTS the row is treated as poison and dropped.
+   */
+  delivery_attempts?: number;
+  /**
    * Sender's X25519 public key (base64), attached ONLY for X3DH-initial (`init`)
    * messages so the recipient can identify+decrypt a first-contact message that
    * had to be queued. null for all normal sealed-sender messages — the relay
@@ -226,3 +233,20 @@ export interface WorkInviteRow {
 
 // TTL for queued messages: 30 days in ms
 export const MESSAGE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * How many times a queued row may be handed out for delivery before the relay
+ * gives up on it (audit 2026-08-08).
+ *
+ * Deletion is ack-driven on purpose: deleting on emit lost messages over Tor
+ * (relay/handler.ts). The cost is that a row the recipient can NEVER ack —
+ * permanently undecryptable envelope, ratchet state gone after a reinstall — is
+ * re-emitted on every reconnect for the full 30-day TTL. The recipient re-grinds
+ * that whole backlog through the ratchet before the genuinely new message, which
+ * is what made every iOS cold start stall for 10-15 s.
+ *
+ * 5 keeps at-least-once for any realistic transient failure (a dropped emit, a
+ * busy database, a decrypt that needs an earlier message that itself retries)
+ * while bounding the storm to something that dies out within a few sessions.
+ */
+export const MAX_DELIVERY_ATTEMPTS = 5;

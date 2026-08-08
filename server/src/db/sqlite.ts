@@ -14,6 +14,10 @@ import { dirname } from 'node:path';
 // in Node 22).
 import { DatabaseSync } from 'node:sqlite';
 
+// Pure constant module (no imports of its own) — safe to pull in here without
+// creating a cycle back through the repo barrel.
+import { MESSAGE_TTL_MS } from './types';
+
 let sqlite: DatabaseSync | null = null;
 
 export function getSqlite(): DatabaseSync {
@@ -439,6 +443,25 @@ export function initSqliteSchema(db: DatabaseSync) {
   try { db.exec(`ALTER TABLE messages ADD COLUMN drained_by TEXT NOT NULL DEFAULT '[]';`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN sender_pub_b64 TEXT;`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE messages ADD COLUMN epk_b64 TEXT;`); } catch { /* exists */ }
+  // Drain-storm guard (audit 2026-08-08). A row is deleted only when the client
+  // acks it, so a message the client can NEVER process (ratchet state gone after
+  // a reinstall, permanently undecryptable envelope) is re-emitted on every
+  // single reconnect, forever. The recipient then re-grinds the whole backlog
+  // through the ratchet before the genuinely new message — measured live as a
+  // 10-15 s stall on every iOS cold start (iOS re-connects constantly; Android
+  // keeps the process resident via the call-wake service and so never showed it).
+  // Counting hand-outs lets drainFor drop a poison row after MAX_DELIVERY_ATTEMPTS
+  // without going back to delete-on-emit, which lost messages (see handler.ts).
+  try { db.exec(`ALTER TABLE messages ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0;`); } catch { /* exists */ }
+  // Same audit: rows written before the expires_at migration carry 0, and 0 meant
+  // "never expires" to BOTH drainFor and purgeExpired — immortal rows replayed on
+  // every connect for the life of the deployment (730 of them on the live relay).
+  // Backfill the standard TTL from their own created_at so they age out normally.
+  try {
+    db.exec(
+      `UPDATE messages SET expires_at = created_at + ${MESSAGE_TTL_MS} WHERE expires_at = 0;`
+    );
+  } catch { /* table not migrated yet — enqueue() sets the TTL for new rows anyway */ }
   try { db.exec(`ALTER TABLE prekeys_signed ADD COLUMN device_id TEXT NOT NULL DEFAULT 'default';`); } catch { /* exists */ }
   // M-2: prekeys_onetime per-device. Old PK was (aegis_id, key_id); SQLite can't
   // change a PK in place, and OPKs are ephemeral (clients re-upload on reconnect),
