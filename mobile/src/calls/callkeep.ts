@@ -186,10 +186,66 @@ function bindListeners(RNCallKeep: RNCallKeepType): void {
 }
 
 /**
+ * True when CallKit is the platform's incoming-call surface on this runtime
+ * (a real iOS build). Callers use it to pick exactly ONE ring surface: CallKit
+ * where it exists, our own heads-up notification everywhere else (Android, where
+ * CallKit is deliberately disabled, and Expo Go, which has no native module).
+ * Showing both is what produced the "two competing call UIs" bug.
+ */
+export function isCallKitAvailable(): boolean {
+  return CALLKIT_ENABLED && callKeep() !== null;
+}
+
+/**
+ * True when CallKit currently owns the incoming-call UI for `callId` — i.e. we
+ * reported this call to the system and it has not been torn down yet. When it is
+ * true, the OS (not us) owns the audio session, so answering MUST go through
+ * answerNativeCall(). See the audio note there.
+ */
+export function hasNativeCall(callId: string): boolean {
+  return _displayed.has(callId);
+}
+
+/**
+ * Tell CallKit the call was answered, when the user accepted from OUR UI rather
+ * than from the system call UI.
+ *
+ * This is what makes the audio work. CallKit owns the AVAudioSession for any
+ * call it is displaying, and it only activates that session when the
+ * CXAnswerCallAction is FULFILLED — which happens inside the provider's
+ * performAnswerCallAction, and nowhere else. Answering from our own screen while
+ * CallKit still had the call "ringing" left the session inactive: WebRTC
+ * connected, both sides showed an in-call UI, and NOBODY could hear anything.
+ * (`setCurrentCallActive`, which we do call once media connects, maps to
+ * reportOutgoingCall(connectedAt:) — it is for OUTGOING calls and never
+ * activates anything, which is why outgoing calls were always audible and only
+ * incoming ones were silent.)
+ *
+ * No-op when CallKit never displayed this call (foreground path: our screen rang
+ * it, so our own audio session handling applies, exactly like an outgoing call).
+ */
+export function answerNativeCall(callId: string): void {
+  if (!CALLKIT_ENABLED) return;
+  if (!_displayed.has(callId)) return;
+  const RNCallKeep = callKeep();
+  if (!RNCallKeep) return;
+  try {
+    RNCallKeep.answerIncomingCall(callId);
+  } catch (e) {
+    logger.warn('[callkeep] answerIncomingCall failed', e);
+  }
+}
+
+/**
  * Show the native incoming-call UI. On iOS this is REQUIRED immediately after a
  * PushKit wake-up (Apple platform rule). `handle`/`name` from the caller are
  * intentionally ignored — we always display generic, non-identifying labels so
  * no identity reaches the OS. Idempotent per callId.
+ *
+ * Only call this when the app is NOT in the foreground: with the app open our
+ * own IncomingCallScreen is the ring surface, and reporting the call to CallKit
+ * as well both duplicates the UI and hijacks the audio session (see
+ * answerNativeCall). Enforced at the call site in socket/calls.ts.
  */
 export function displayIncomingCall(
   callId: string,

@@ -5,7 +5,14 @@ import { decodeBase64 } from 'tweetnacl-util';
 ;
 import { getSocket, isConnected } from './client';
 import { useCall } from '../store/call';
-import { displayIncomingCall, endNativeCall, reportCallConnected, setNativeMuted } from '../calls/callkeep';
+import {
+  displayIncomingCall,
+  endNativeCall,
+  reportCallConnected,
+  setNativeMuted,
+  answerNativeCall,
+  isCallKitAvailable,
+} from '../calls/callkeep';
 import { saveCall } from '../db/local';
 import {
   createPeer,
@@ -331,14 +338,78 @@ async function processIncomingInvite(
       return useContacts.getState().get(from)?.name ?? from;
     } catch { return from; }
   })();
-  displayIncomingCall(callId, from, callerName, media === 'video');
-
+  // ── ONE ring surface, always ────────────────────────────────────────────────
+  // App in the FOREGROUND → IncomingCallScreen rings and owns Accept/Decline.
+  // Nothing else is shown: reporting the call to CallKit here too drew a second,
+  // system-owned call UI on top of our screen, and left CallKit holding the
+  // AVAudioSession in a ringing/never-answered state — which is what made an
+  // accepted call connect with NO audio (see answerNativeCall in calls/callkeep).
+  // App NOT in the foreground → only the OS can ring, so exactly one of:
+  // CallKit where it exists (iOS), our heads-up banner everywhere else.
   const { AppState } = require('react-native') as typeof import('react-native');
   if (AppState.currentState !== 'active') {
-    const { showIncomingCallNotification } = require('../notifications/push') as {
-      showIncomingCallNotification: (callerAegisId: string, callerName: string, isVideo: boolean, callId: string) => Promise<void>;
-    };
-    void showIncomingCallNotification(from, callerName, media === 'video', callId).catch(() => {});
+    surfaceIncomingCallOnOs(callId, from, callerName, media === 'video');
+  } else {
+    // Foreground now, but the user may walk away while it is still ringing —
+    // hand the ring over to the OS if that happens, so it can't die on screen.
+    armRingHandoff(callId, from, callerName, media === 'video');
+  }
+}
+
+/**
+ * Ring an incoming call through the OS, picking the single surface that applies
+ * on this platform. Idempotent per callId on both branches (CallKit dedupes via
+ * its own `_displayed` set; the banner via its stable per-callId identifier).
+ */
+function surfaceIncomingCallOnOs(
+  callId: string,
+  from: string,
+  callerName: string,
+  isVideo: boolean,
+): void {
+  if (isCallKitAvailable()) {
+    displayIncomingCall(callId, from, callerName, isVideo);
+    return;
+  }
+  const { showIncomingCallNotification } = require('../notifications/push') as {
+    showIncomingCallNotification: (callerAegisId: string, callerName: string, isVideo: boolean, callId: string) => Promise<void>;
+  };
+  void showIncomingCallNotification(from, callerName, isVideo, callId).catch(() => {});
+}
+
+// Pending "the app left the foreground while this call was still ringing"
+// watcher. At most one is armed at a time (a single call rings at a time), and
+// it is always torn down — on fire, on a status change, and in finalizeCall.
+let _ringHandoff: { remove: () => void } | null = null;
+
+function disarmRingHandoff(): void {
+  try { _ringHandoff?.remove(); } catch { /* already removed */ }
+  _ringHandoff = null;
+}
+
+/**
+ * Watch for the app leaving the foreground while `callId` is still ringing, and
+ * move the ring to the OS surface when it does. Without this, a call that
+ * arrived with the app open would keep ringing only inside a screen the user can
+ * no longer see, and would be missed for no reason.
+ */
+function armRingHandoff(callId: string, from: string, callerName: string, isVideo: boolean): void {
+  disarmRingHandoff();
+  try {
+    const { AppState } = require('react-native') as typeof import('react-native');
+    const sub = AppState.addEventListener('change', (next: string) => {
+      if (next === 'active') return;
+      const { status, callId: currentCallId } = useCall.getState();
+      // Only hand over a call that is STILL ringing and is still this one.
+      if (status === 'incoming-ringing' && currentCallId === callId) {
+        surfaceIncomingCallOnOs(callId, from, callerName, isVideo);
+      }
+      disarmRingHandoff();
+    });
+    _ringHandoff = sub;
+  } catch {
+    // No AppState to subscribe to (non-RN runtime / test harness). The in-app
+    // ring still works; only the leave-the-app handoff is unavailable.
   }
 }
 
@@ -521,6 +592,17 @@ export async function acceptCall(): Promise<void> {
   if (!socket) throw new Error('no_socket');
 
   useCall.getState().setStatus('connecting');
+
+  // The ring is over — stop watching for a leave-the-app handoff.
+  disarmRingHandoff();
+
+  // When CallKit rang this call (app was not in the foreground), the SYSTEM owns
+  // the AVAudioSession and activates it only when the answer action is fulfilled.
+  // Accepting from our own UI without this left the call connected and SILENT.
+  // Re-entrancy is safe: the resulting native 'answerCall' event calls back into
+  // acceptCall(), which returns on the guard above (status is 'connecting' now).
+  // No-op when CallKit never displayed this call (foreground path).
+  answerNativeCall(callId);
 
   const { useIdentity } = require('../store/identity') as { useIdentity: { getState: () => { identity: { aegisId: string } | null } } };
   const ownAegisId = useIdentity.getState().identity?.aegisId ?? 'anon';
@@ -715,6 +797,9 @@ function finalizeCall(reason: string, opts: { emitHangup: boolean }): void {
       playThroughEarpieceAndroid: false,
     });
   } catch { /* no-op */ }
+
+  // The call is over — a ring handoff watcher must never outlive it.
+  disarmRingHandoff();
 
   // Release proximity/audio session and tear down the Android foreground service.
   stopInCallAudio();

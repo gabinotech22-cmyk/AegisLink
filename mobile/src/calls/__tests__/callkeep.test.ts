@@ -20,6 +20,7 @@ jest.mock('react-native-callkeep', () => ({
     setup: jest.fn(() => Promise.resolve(true)),
     addEventListener: jest.fn(),
     displayIncomingCall: jest.fn(),
+    answerIncomingCall: jest.fn(),
     setCurrentCallActive: jest.fn(),
     endCall: jest.fn(),
     setMutedCall: jest.fn(),
@@ -33,11 +34,12 @@ jest.mock('../../socket/calls', () => ({
 }));
 
 import RNCallKeep from 'react-native-callkeep';
-import { initCallKeep, displayIncomingCall } from '../callkeep';
+import { initCallKeep, displayIncomingCall, answerNativeCall, hasNativeCall, endNativeCall } from '../callkeep';
 
 const mockCallKeep = RNCallKeep as unknown as {
   setup: jest.Mock;
   displayIncomingCall: jest.Mock;
+  answerIncomingCall: jest.Mock;
 };
 
 describe('callkeep — zero-metadata CallKit', () => {
@@ -73,6 +75,47 @@ describe('callkeep — zero-metadata CallKit', () => {
     displayIncomingCall('dup-uuid', 'x', 'y', false);
     displayIncomingCall('dup-uuid', 'x', 'y', false);
     expect(mockCallKeep.displayIncomingCall).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Answering a CallKit-displayed call MUST fulfil the CXAnswerCallAction, because
+ * that is the only thing that activates the AVAudioSession (RNCallKeep.m
+ * performAnswerCallAction → configureAudioSession). Field bug 2026-08-07:
+ * accepting from our own screen skipped it, so incoming calls connected mute.
+ */
+describe('callkeep — answering hands the audio session back to CallKit', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('answerNativeCall fulfils the answer action for a call CallKit is showing', () => {
+    displayIncomingCall('audio-uuid', 'peer', 'Peer', false);
+    expect(hasNativeCall('audio-uuid')).toBe(true);
+
+    answerNativeCall('audio-uuid');
+
+    expect(mockCallKeep.answerIncomingCall).toHaveBeenCalledTimes(1);
+    expect(mockCallKeep.answerIncomingCall).toHaveBeenCalledWith('audio-uuid');
+  });
+
+  it('answerNativeCall is a no-op when CallKit never showed the call', () => {
+    // Foreground path: our own screen rang it, so our own audio handling applies
+    // — telling CallKit to answer a call it does not know about would throw.
+    expect(hasNativeCall('never-shown')).toBe(false);
+
+    answerNativeCall('never-shown');
+
+    expect(mockCallKeep.answerIncomingCall).not.toHaveBeenCalled();
+  });
+
+  it('hasNativeCall clears once the call is torn down', () => {
+    displayIncomingCall('teardown-uuid', 'peer', 'Peer', false);
+    expect(hasNativeCall('teardown-uuid')).toBe(true);
+
+    endNativeCall('teardown-uuid');
+
+    expect(hasNativeCall('teardown-uuid')).toBe(false);
   });
 
   it('retries setup after a transient failure (does not latch on reject)', async () => {
