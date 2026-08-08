@@ -56,7 +56,7 @@ export * from './types';
 import {
   IdentityRow, MessageRow, PushTokenRow, VoipTokenRow, ApnsTokenRow, SignedPreKeyRow, OneTimePreKeyRow,
   PqSignedPreKeyRow, LinkedDeviceRow, RevokedDIDHashRow, LightningInvoiceRow,
-  SubscriptionRow, MESSAGE_TTL_MS,
+  SubscriptionRow, MESSAGE_TTL_MS, MAX_DELIVERY_ATTEMPTS,
 } from './types';
 
 // ── identityRepo ──────────────────────────────────────────────────────────────
@@ -215,20 +215,30 @@ export const pushMailboxTokenRepo = {
  * this many distinct devices have drained it OR the cap derived from the
  * recipient's device count is reached — whichever is higher.
  */
-const MIN_DRAIN_CAP = 2;
-
 /**
- * Effective drain cap for a recipient (B-1). Scales to `1 primary + active
- * linked devices` so multi-device users (>2 devices) never lose a queued
- * message before every device pulls it, with `MIN_DRAIN_CAP` as a floor.
- * The cap can only ever rise above the old fixed 2, so this change extends a
- * row's lifetime at worst — it can never cause under-delivery. Overcounting
- * (e.g. if the primary is also tracked in linked_devices) is benign: the row
- * simply lives until its TTL instead of being freed a little earlier.
+ * Effective drain cap for a recipient (B-1): how many devices must ack a queued
+ * row before the relay may delete it. `1 primary + active linked devices`, so a
+ * multi-device user never loses a message before every device pulls it.
+ *
+ * The old floor of 2 (audit 2026-08-08) made this unreachable for everyone.
+ * `linked_devices` is only ever written by `devicesRepo.upsert`, which nothing
+ * in the relay calls — the linking handler only revokes — so countActive is 0 in
+ * production and the cap was a hard 2 while exactly one device could ever ack.
+ * Result: NO row was ever deleted by an ack. Every message the relay has handled
+ * sat there for its full 30-day TTL (816 of them live), and a busy recipient
+ * marches toward MAX_QUEUED_PER_RECIPIENT, where enqueue starts rejecting new
+ * messages with `queue_full`. Retaining delivered user data that long is also
+ * squarely against the zero-metadata rule.
+ *
+ * The floor guarded against a device that exists but is not counted. That cannot
+ * happen: a row lands in linked_devices explicitly and stays until explicitly
+ * revoked, and multi-device copies travel as sealed self-copies (handleSelfCopy)
+ * rather than through this shared queue. If the linking flow ever does populate
+ * the table, `1 + linked` scales on its own — which is what B-1 was always for.
  */
 async function drainCapFor(recipient: string): Promise<number> {
   const linked = await devicesRepo.countActive(recipient);
-  return Math.max(MIN_DRAIN_CAP, 1 + linked);
+  return 1 + linked;
 }
 
 /**
@@ -282,14 +292,35 @@ export const messageRepo = {
    */
   async drainFor(recipient: string, deviceId?: string): Promise<MessageRow[]> {
     const now = Date.now();
+    // `expires_at = 0` used to mean "never expires" here, and purgeExpired skips
+    // those rows too — so legacy rows written before the expires_at migration were
+    // immortal and re-emitted on every reconnect for the life of the deployment.
+    // They now age out on created_at, matching the TTL enqueue() gives new rows.
+    // delivery_attempts bounds the other half of the same problem: a row the
+    // recipient can never ack (see MAX_DELIVERY_ATTEMPTS) stops being handed out.
     const rows = await dbAll<MessageRow>(
-      `SELECT id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64, epk_b64
-       FROM messages WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)
+      `SELECT id, recipient, ciphertext_b64, nonce_b64, created_at, expires_at, drained_by, sender_pub_b64, epk_b64, delivery_attempts
+       FROM messages
+       WHERE recipient = ?
+         AND (CASE WHEN expires_at > 0 THEN expires_at > ? ELSE created_at > ? END)
+         AND delivery_attempts < ?
        ORDER BY created_at ASC`,
-      [recipient, now]
+      [recipient, now, now - MESSAGE_TTL_MS, MAX_DELIVERY_ATTEMPTS]
     );
-    if (!deviceId) return rows;
-    return rows.filter((row) => !parseDrainedBy(row.drained_by).includes(deviceId));
+    const due = deviceId
+      ? rows.filter((row) => !parseDrainedBy(row.drained_by).includes(deviceId))
+      : rows;
+    // Count the hand-out, not the read: every caller of drainFor is a delivery
+    // path (aegisId drain, mailbox socket drain, stateless mailbox fetch), and the
+    // rows we return are about to be emitted. A row the client acks is deleted
+    // outright, so this counter only ever accumulates on rows nobody can process.
+    if (due.length > 0) {
+      await dbRun(
+        `UPDATE messages SET delivery_attempts = delivery_attempts + 1 WHERE id IN (${due.map(() => '?').join(',')})`,
+        due.map((row) => row.id)
+      );
+    }
+    return due;
   },
 
   /**
@@ -317,7 +348,17 @@ export const messageRepo = {
   },
 
   async purgeExpired(): Promise<number> {
-    const result = await dbRun(`DELETE FROM messages WHERE expires_at > 0 AND expires_at <= ?`, [Date.now()]);
+    const now = Date.now();
+    // Three ways a row dies: its own TTL passed; it predates the expires_at
+    // migration (0) and is older than the TTL anyway; or nobody could ever ack it
+    // (delivery_attempts hit the cap) so it is poison and only costs bandwidth.
+    const result = await dbRun(
+      `DELETE FROM messages
+        WHERE (expires_at > 0 AND expires_at <= ?)
+           OR (expires_at = 0 AND created_at <= ?)
+           OR delivery_attempts >= ?`,
+      [now, now - MESSAGE_TTL_MS, MAX_DELIVERY_ATTEMPTS]
+    );
     return result.changes;
   },
 };

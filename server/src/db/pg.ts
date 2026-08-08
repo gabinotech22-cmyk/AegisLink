@@ -6,6 +6,8 @@
  */
 
 import pg from 'pg';
+
+import { MESSAGE_TTL_MS } from './types';
 const { Pool } = pg;
 
 const DATABASE_URL = process.env.DATABASE_URL ?? '';
@@ -368,6 +370,11 @@ export async function initPgSchema(): Promise<void> {
     `ALTER TABLE messages ADD COLUMN drained_by TEXT NOT NULL DEFAULT '[]'`,
     `ALTER TABLE messages ADD COLUMN sender_pub_b64 TEXT`,
     `ALTER TABLE messages ADD COLUMN epk_b64 TEXT`,
+    // Drain-storm guard (audit 2026-08-08) — see the SQLite migration for the why.
+    `ALTER TABLE messages ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0`,
+    // Legacy rows predating expires_at carry 0, which meant "immortal" to both
+    // drainFor and purgeExpired. Give them the standard TTL from their own age.
+    `UPDATE messages SET expires_at = created_at + ${MESSAGE_TTL_MS} WHERE expires_at = 0`,
     `ALTER TABLE work_messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE work_messages ADD COLUMN pinned_by TEXT`,
     `ALTER TABLE work_messages ADD COLUMN pinned_at TEXT`,
