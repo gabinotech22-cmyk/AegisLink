@@ -34,6 +34,14 @@ on:
         required: false
         default: false
         type: boolean
+      distribution:
+        description: 'play = normal build (FCM). foss = no Google Play Services, for F-Droid/Obtainium.'
+        required: false
+        default: 'play'
+        type: choice
+        options:
+          - play
+          - foss
 
 # contents: write is needed only for the optional `attach` step; the build itself
 # reads nothing privileged beyond the signing secrets.
@@ -59,6 +67,10 @@ jobs:
       EXPO_PUBLIC_ONION_URL: http://fhxnal5jmuuqsbtzz7avos4drhqmuy4c7ffd35gi3hw2uwbe5iqshfyd.onion
       EXPO_PUBLIC_MAILBOX_MODE: 'on'
       AEGIS_EXPO_GO: '0'
+      # Read by src/config.ts (REMOTE_PUSH_ENABLED) and by plugins/withFossPush.js
+      # at prebuild. 'foss' produces the Google-free artifact; anything else builds
+      # the normal one, so the default can never accidentally ship a crippled APK.
+      EXPO_PUBLIC_DISTRIBUTION: ${{ inputs.distribution || 'play' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -185,9 +197,31 @@ jobs:
           # APK can `sha256sum -c` it without recreating the CI directory layout.
           (cd "$(dirname "$APK")" && sha256sum "$(basename "$APK")" | tee "$(basename "$APK").sha256")
 
+      # The whole point of the foss flavour is what the APK does NOT contain, so
+      # assert it instead of trusting the plugin ran. This is the evidence an
+      # F-Droid reviewer would reproduce by hand, produced on every build.
+      - name: Verify the foss APK carries no Play Services
+        if: ${{ inputs.distribution == 'foss' }}
+        run: |
+          APK="${{ steps.apk.outputs.path }}"
+          APK="${APK#mobile/}"
+          echo "Scanning $APK for Google Play Services / Firebase classes…"
+          if unzip -l "$APK" | grep -iE 'firebase|com/google/android/gms' ; then
+            echo "::error::foss build still ships Google Play Services — withFossPush.js did not strip it."
+            exit 1
+          fi
+          # Class names live inside classes*.dex, not in the zip listing, so grep
+          # the dex bytes too — a shaded/inlined reference would hide from the
+          # listing above.
+          if unzip -p "$APK" 'classes*.dex' | grep -aqiE 'com/google/firebase|com/google/android/gms' ; then
+            echo "::error::foss build has Google classes inside the dex."
+            exit 1
+          fi
+          echo "Clean: no Play Services / Firebase found."
+
       - uses: actions/upload-artifact@v7
         with:
-          name: aegislink-release-apk
+          name: aegislink-release-apk-${{ inputs.distribution || 'play' }}
           path: |
             mobile/android/app/build/outputs/apk/release/*.apk
             mobile/android/app/build/outputs/apk/release/*.apk.sha256
