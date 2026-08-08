@@ -4,8 +4,13 @@
  *   B-1: the per-message drain cap is no longer a fixed 2. It scales to the
  *        recipient's device count (1 primary + active linked devices) so a user
  *        with >2 devices does not lose a queued message before every device
- *        pulls it. The old fixed cap of 2 is kept only as a floor, so the change
- *        can never shorten a row's life → never causes under-delivery.
+ *        pulls it.
+ *
+ *        Audit 2026-08-08: the floor of 2 that shipped with B-1 was removed. It
+ *        was meant to guarantee the cap could only ever RISE, but `linked_devices`
+ *        is never populated in production, so the cap was a hard 2 while exactly
+ *        one device could ack — no row was ever deleted by an ack at all. See
+ *        drainCapFor in db/client.ts and drain-storm.test.ts.
  *
  *   M-3: `drained_by` is JSON-in-TEXT with no DB-level shape guarantee. A
  *        corrupted / non-array payload must degrade to an empty list instead of
@@ -75,18 +80,16 @@ describe('M-3 — parseDrainedBy validates the JSON-in-TEXT shape', () => {
 });
 
 describe('B-1 — drain cap scales to the recipient device count', () => {
-  it('floors at 2 for a single-device recipient (no regression)', async () => {
+  it('frees the row on the single ack a one-device recipient can give', async () => {
     const R = 'AAA-BBBB-CCCC';
     await enqueueMsg(R);
     const id = `msg-drain-${seq}`;
 
-    // First device drains → row survives (1 < floor 2).
+    // Audit 2026-08-08: this used to floor at 2, which no single-device user
+    // could ever reach — so nothing was ever deleted by an ack and every
+    // delivered message sat until its 30-day TTL. One device, one ack, gone.
     await messageRepo.delete(id, 'dev-1');
-    expect((await messageRepo.drainFor(R, 'dev-2')).some((r) => r.id === id)).toBe(true);
-
-    // Second device drains → cap (2) reached → row deleted.
-    await messageRepo.delete(id, 'dev-2');
-    expect((await messageRepo.drainFor(R, 'dev-3')).some((r) => r.id === id)).toBe(false);
+    expect((await messageRepo.drainFor(R, 'dev-2')).some((r) => r.id === id)).toBe(false);
   });
 
   it('survives past 2 drains when the recipient has 3 devices (the fix)', async () => {
@@ -112,13 +115,14 @@ describe('B-1 — drain cap scales to the recipient device count', () => {
   it('revoked linked devices do not inflate the cap', async () => {
     const R = 'GGG-HHHH-JJJJ';
     await linkDevice(R, 'dev-x');
-    await devicesRepo.revoke('dev-x', R); // back to 0 active → cap = floor 2
+    await devicesRepo.revoke('dev-x', R); // back to 0 active → cap = 1 (primary)
 
     await enqueueMsg(R);
     const id = `msg-drain-${seq}`;
 
+    // A revoked device must not keep the row alive waiting for an ack it will
+    // never send — the primary's ack is enough on its own.
     await messageRepo.delete(id, 'dev-1');
-    await messageRepo.delete(id, 'dev-2');
-    expect((await messageRepo.drainFor(R, 'dev-3')).some((r) => r.id === id)).toBe(false);
+    expect((await messageRepo.drainFor(R, 'dev-2')).some((r) => r.id === id)).toBe(false);
   });
 });

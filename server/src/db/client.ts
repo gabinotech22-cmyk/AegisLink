@@ -215,20 +215,30 @@ export const pushMailboxTokenRepo = {
  * this many distinct devices have drained it OR the cap derived from the
  * recipient's device count is reached — whichever is higher.
  */
-const MIN_DRAIN_CAP = 2;
-
 /**
- * Effective drain cap for a recipient (B-1). Scales to `1 primary + active
- * linked devices` so multi-device users (>2 devices) never lose a queued
- * message before every device pulls it, with `MIN_DRAIN_CAP` as a floor.
- * The cap can only ever rise above the old fixed 2, so this change extends a
- * row's lifetime at worst — it can never cause under-delivery. Overcounting
- * (e.g. if the primary is also tracked in linked_devices) is benign: the row
- * simply lives until its TTL instead of being freed a little earlier.
+ * Effective drain cap for a recipient (B-1): how many devices must ack a queued
+ * row before the relay may delete it. `1 primary + active linked devices`, so a
+ * multi-device user never loses a message before every device pulls it.
+ *
+ * The old floor of 2 (audit 2026-08-08) made this unreachable for everyone.
+ * `linked_devices` is only ever written by `devicesRepo.upsert`, which nothing
+ * in the relay calls — the linking handler only revokes — so countActive is 0 in
+ * production and the cap was a hard 2 while exactly one device could ever ack.
+ * Result: NO row was ever deleted by an ack. Every message the relay has handled
+ * sat there for its full 30-day TTL (816 of them live), and a busy recipient
+ * marches toward MAX_QUEUED_PER_RECIPIENT, where enqueue starts rejecting new
+ * messages with `queue_full`. Retaining delivered user data that long is also
+ * squarely against the zero-metadata rule.
+ *
+ * The floor guarded against a device that exists but is not counted. That cannot
+ * happen: a row lands in linked_devices explicitly and stays until explicitly
+ * revoked, and multi-device copies travel as sealed self-copies (handleSelfCopy)
+ * rather than through this shared queue. If the linking flow ever does populate
+ * the table, `1 + linked` scales on its own — which is what B-1 was always for.
  */
 async function drainCapFor(recipient: string): Promise<number> {
   const linked = await devicesRepo.countActive(recipient);
-  return Math.max(MIN_DRAIN_CAP, 1 + linked);
+  return 1 + linked;
 }
 
 /**

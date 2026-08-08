@@ -26,7 +26,7 @@
 
 process.env['AEGIS_DB_PATH'] = ':memory:';
 
-import { messageRepo } from '../db/client';
+import { messageRepo, devicesRepo } from '../db/client';
 import { MESSAGE_TTL_MS, MAX_DELIVERY_ATTEMPTS } from '../db/types';
 import { getSqlite } from '../db/sqlite';
 
@@ -92,15 +92,53 @@ describe('queued-message drain storm', () => {
     expect((await messageRepo.drainFor(RECIPIENT, DEVICE)).map((r) => r.id)).toEqual(['transient-1']);
     expect((await messageRepo.drainFor(RECIPIENT, DEVICE)).map((r) => r.id)).toEqual(['transient-1']);
 
-    // Now the client acks. The row is marked drained for this device and is
-    // never offered to it again — so a healthy delivery cycle never accumulates
-    // attempts, and the cap can never fire on a working device.
+    // The client acks → the recipient has one device, so the row is done and
+    // freed immediately rather than lingering for its whole TTL.
     await messageRepo.delete('transient-1', DEVICE);
     expect(await messageRepo.drainFor(RECIPIENT, DEVICE)).toEqual([]);
+    expect(attemptsOf('transient-1')).toBe(-1);
+  });
 
-    const before = attemptsOf('transient-1');
+  it('a healthy ack cycle never burns attempts on a second device', async () => {
+    // Two devices → the row outlives the first ack, which is the only case where
+    // an already-acked row is still around to be re-offered. It must be filtered
+    // out for the device that acked, so the poison cap can never fire on a
+    // device that is working perfectly.
+    await devicesRepo.upsert({
+      device_id: 'device-b',
+      aegis_id: RECIPIENT,
+      device_pub_key: 'cHVi',
+      device_name: 'Second',
+      platform: 'desktop',
+      linked_at: Date.now(),
+    });
+    await messageRepo.enqueue({
+      id: 'twodev-1',
+      recipient: RECIPIENT,
+      ciphertext_b64: 'ct',
+      nonce_b64: 'nn',
+      created_at: Date.now(),
+      expires_at: 0,
+    });
+
     await messageRepo.drainFor(RECIPIENT, DEVICE);
-    expect(attemptsOf('transient-1')).toBe(before); // no bump for a filtered row
+    await messageRepo.delete('twodev-1', DEVICE); // acked by device A, still pending for B
+    const afterAck = attemptsOf('twodev-1');
+    expect(afterAck).toBeGreaterThan(0);
+
+    // Device A reconnects repeatedly: the row is filtered out for it every time,
+    // so no amount of reconnecting can push it over MAX_DELIVERY_ATTEMPTS.
+    for (let i = 0; i < MAX_DELIVERY_ATTEMPTS + 2; i++) {
+      expect(await messageRepo.drainFor(RECIPIENT, DEVICE)).toEqual([]);
+    }
+    expect(attemptsOf('twodev-1')).toBe(afterAck);
+
+    // Device B finally shows up and still gets it.
+    expect((await messageRepo.drainFor(RECIPIENT, 'device-b')).map((r) => r.id)).toEqual(['twodev-1']);
+    await messageRepo.delete('twodev-1', 'device-b');
+    expect(attemptsOf('twodev-1')).toBe(-1); // both devices acked → freed
+
+    await devicesRepo.revoke('device-b', RECIPIENT);
   });
 
   it('ages out legacy expires_at=0 rows instead of replaying them forever', async () => {
