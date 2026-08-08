@@ -428,9 +428,10 @@ export const senderKeyDistRepo = {
       `SELECT id, recipient, group_id, sender_aegis_id, ciphertext_b64, nonce_b64, iteration,
               created_at, expires_at, drained_by
        FROM sender_key_dist_queue
-       WHERE recipient = ? AND (expires_at = 0 OR expires_at > ?)
+       WHERE recipient = ?
+         AND (CASE WHEN expires_at > 0 THEN expires_at > ? ELSE created_at > ? END)
        ORDER BY created_at ASC`,
-      [recipient, now]
+      [recipient, now, now - MESSAGE_TTL_MS]
     );
     if (!deviceId) return rows;
     return rows.filter((row) => !parseDrainedBy(row.drained_by).includes(deviceId));
@@ -461,9 +462,15 @@ export const senderKeyDistRepo = {
   },
 
   async purgeExpired(): Promise<number> {
+    const now = Date.now();
+    // Mirrors messageRepo.purgeExpired: `expires_at = 0` (rows predating the
+    // column) meant "immortal" to both the drain and the purge. They now age out
+    // on their own created_at, the same TTL enqueue() gives new rows.
     const result = await dbRun(
-      `DELETE FROM sender_key_dist_queue WHERE expires_at > 0 AND expires_at <= ?`,
-      [Date.now()]
+      `DELETE FROM sender_key_dist_queue
+        WHERE (expires_at > 0 AND expires_at <= ?)
+           OR (expires_at = 0 AND created_at <= ?)`,
+      [now, now - MESSAGE_TTL_MS]
     );
     return result.changes;
   },

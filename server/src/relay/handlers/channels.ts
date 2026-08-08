@@ -15,6 +15,7 @@ import {
   checkChannelMsgRateLimit,
   checkRekeyRateLimit,
 } from '../rateLimits.js';
+import { liveSockets } from '../liveSockets.js';
 import {
   workRepo,
   workChannelRepo,
@@ -394,38 +395,54 @@ export function attachChannels(socket: Socket, deps: ChannelsDeps): void {
     for (const d of distributions) {
       if (d.aegisId === me) continue; // never echo to self
 
+      // AT-LEAST-ONCE: enqueue FIRST, always, then attempt live delivery — the
+      // same order the message paths use (handler.ts, audit 2026-08-08).
+      //
+      // This branch used to gate on `recipientSockets.size > 0`, which is the
+      // ORIGINAL zombie-socket bug liveSockets was written to kill — this call
+      // site was simply never migrated (see zombieSocket.relay.test.ts). And a
+      // live-looking socket is no better: iOS tears an app down without closing
+      // the TCP connection, so the entry reports `connected === true` for up to
+      // ~35s afterwards. Either way the sealed SenderKey was emitted into a dead
+      // transport and never stored.
+      //
+      // A lost message is bad; a lost SenderKey distribution is worse. Without
+      // it the recipient cannot open ANY message for that group, so the group
+      // never appears for them at all — and since nothing was queued there is no
+      // recovery path: not reconnecting, not sending messages, not calling. That
+      // is the "I create a group and it never shows up for the other contact"
+      // report (2026-08-08). Queue it and the next drain fixes it by itself.
+      //
+      // The relay stores the blob opaquely; the distributor's identity is INSIDE
+      // ciphertext_b64, so sender_aegis_id is stored empty (the column is
+      // retained for schema compatibility / older rows only).
+      const distId = randomUUID();
+      enqueuePromises.push(
+        senderKeyDistRepo.enqueue({
+          id: distId,
+          recipient: d.aegisId,
+          group_id: groupId,
+          sender_aegis_id: '',    // sealed sender — relay does not learn the distributor
+          ciphertext_b64: d.ciphertextB64,
+          nonce_b64: d.nonceB64,
+          iteration: d.iteration,
+          created_at: now,
+          expires_at: 0,          // 0 → apply default MESSAGE_TTL_MS in repo
+        }).then(() => { /* enqueue result is advisory — never reveal to sender */ })
+      );
+
+      // Same distId on the wire as in the queue, so the recipient's
+      // 'group:rekey_drain_ack' frees the row it just persisted and a live
+      // delivery still costs nothing.
       const recipientSockets = sockets.get(d.aegisId);
-      if (recipientSockets && recipientSockets.size > 0) {
-        // Recipient is online — forward the opaque blob (no sender identity).
-        const distId = randomUUID();
-        for (const s of recipientSockets) {
-          s.emit('group:rekey_dist', {
-            distId,
-            groupId,
-            ciphertextB64: d.ciphertextB64,
-            nonceB64: d.nonceB64,
-            iteration: d.iteration,
-          });
-        }
-      } else {
-        // Recipient is offline — enqueue the sealed distribution for deferred
-        // delivery. The relay stores the blob opaquely; the sender identity is
-        // INSIDE ciphertext_b64, so sender_aegis_id is stored empty (the column
-        // is retained for schema compatibility / older rows only).
-        const distId = randomUUID();
-        enqueuePromises.push(
-          senderKeyDistRepo.enqueue({
-            id: distId,
-            recipient: d.aegisId,
-            group_id: groupId,
-            sender_aegis_id: '',    // sealed sender — relay does not learn the distributor
-            ciphertext_b64: d.ciphertextB64,
-            nonce_b64: d.nonceB64,
-            iteration: d.iteration,
-            created_at: now,
-            expires_at: 0,          // 0 → apply default MESSAGE_TTL_MS in repo
-          }).then(() => { /* enqueue result is advisory — never reveal to sender */ })
-        );
+      for (const s of recipientSockets ? liveSockets(recipientSockets) : []) {
+        s.emit('group:rekey_dist', {
+          distId,
+          groupId,
+          ciphertextB64: d.ciphertextB64,
+          nonceB64: d.nonceB64,
+          iteration: d.iteration,
+        });
       }
     }
 
