@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { logger } from '../utils/logger';
 import { Platform } from 'react-native';
-import { SERVER_URL } from '../config';
+import { SERVER_URL, REMOTE_PUSH_ENABLED } from '../config';
 import type { Identity } from '../crypto/identity';
 import { tAsync } from '../i18n';
 
@@ -492,6 +492,23 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
       const { registerDailySummaryTask } = require('./dailySummaryTask') as typeof import('./dailySummaryTask');
       await registerDailySummaryTask();
     } catch { /* task module unavailable */ }
+
+    // A `foss` build must run on a device with no Google Play Services, so it
+    // never asks for an FCM/Expo token. Everything above this line still ran —
+    // permission, the background reconnect task, channel sync, daily summary —
+    // and local notifications keep working; wake-ups come from the
+    // ntfy-over-Tor mailbox subscription and the call-wake foreground service
+    // instead. Marked registered so callers don't retry a path that will never
+    // succeed in this build.
+    // Strict `=== false`, not `!REMOTE_PUSH_ENABLED`: only an explicit foss build
+    // may disable push. Anything else — an undefined import, a partial mock, a
+    // missing env var — must leave wake-ups ON, because silently killing push for
+    // Play users is a far worse failure than a foss build that asks once too many.
+    if (REMOTE_PUSH_ENABLED === false) {
+      registered = true;
+      if (__DEV__) logger.debug('[push] foss build — skipping FCM token, using Tor/ntfy wake-ups');
+      return { token: null };
+    }
 
     const tokenResponse = await Notifications.getExpoPushTokenAsync();
     const expoToken = tokenResponse.data;

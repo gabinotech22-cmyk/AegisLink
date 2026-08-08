@@ -113,6 +113,34 @@ export const MAILBOX_IOS_WAKE: boolean =
   (process.env.EXPO_PUBLIC_MAILBOX_IOS_WAKE as string | undefined) === 'on';
 
 /**
+ * DISTRIBUTION — which channel this binary was built for.
+ *
+ * 'play' (default) is the Google Play build and keeps FCM for push wake-ups.
+ * 'foss' is the build for F-Droid, our own F-Droid repo, Obtainium and plain
+ * sideloads: it must reach a device with NO Google Play Services on it, so it
+ * cannot acquire an FCM/Expo push token at all.
+ *
+ * This is not a user preference — it is fixed at build time by
+ * EXPO_PUBLIC_DISTRIBUTION (see the `production-foss` profile in eas.json and
+ * plugins/withFossPush.js, which also strips the Play Services dependency out
+ * of the Android build so the artifact is inspectably Google-free).
+ */
+export const DISTRIBUTION: 'play' | 'foss' =
+  (process.env.EXPO_PUBLIC_DISTRIBUTION as string | undefined) === 'foss' ? 'foss' : 'play';
+
+/**
+ * False in a `foss` build: no proprietary push transport may be contacted, so
+ * every remote-token acquisition (FCM/Expo, raw APNs, PushKit) is skipped.
+ *
+ * Wake-ups do NOT disappear — they fall back to the paths that never needed
+ * Google: the ntfy-over-Tor mailbox subscription while the app is alive or
+ * backgrounded (notifications/mailboxPushSubscription.ts), and the call-wake
+ * foreground service for a killed app. Local notifications, tap routing and the
+ * background tasks are unaffected; they were already independent of the token.
+ */
+export const REMOTE_PUSH_ENABLED: boolean = DISTRIBUTION !== 'foss';
+
+/**
  * Fail-fast transport guard. In a production build every backend base URL MUST
  * be https — a misconfigured build that fell back to cleartext would defeat
  * cert pinning and leak identity keys / push tokens / blob ciphertext over the

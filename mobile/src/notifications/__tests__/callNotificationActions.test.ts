@@ -30,7 +30,13 @@ jest.mock('expo-notifications', () => ({
   AndroidImportance: { HIGH: 4, MAX: 5 },
   AndroidNotificationPriority: { MAX: 'max' },
 }));
-jest.mock('../../config', () => ({ SERVER_URL: 'https://example.test' }));
+// REMOTE_PUSH_ENABLED must be spelled out: push.ts reads it to decide whether to
+// ask for an FCM token, and an absent key would read as `undefined` — i.e. a
+// foss build — silently changing what these tests exercise.
+jest.mock('../../config', () => ({
+  SERVER_URL: 'https://example.test',
+  REMOTE_PUSH_ENABLED: true,
+}));
 
 const mockCallState = {
   status: 'idle' as string,
