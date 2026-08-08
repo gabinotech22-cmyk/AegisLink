@@ -689,7 +689,10 @@ export function connectMailboxForIdentity(identity: Identity): void {
     // Return the promise (NO .catch here) so mailboxSocket emits 'envelope:ack'
     // ONLY after handleIncomingV2 has persisted the message. A throw propagates →
     // no ack → the relay re-drains it (at-least-once, audit 2026-07-24).
-    return handleIncomingV2(env, identity);
+    // The mailbox transports signal "do not ack" by throwing, so translate a
+    // 'retry' outcome into one — otherwise an envelope we could not open would
+    // be acked here exactly as if we had stored it (audit 2026-08-08).
+    return handleIncomingV2(env, identity).then(throwIfNotAckable);
   });
   // Slice 2b.2: also subscribe to our ntfy wake topic over Tor. If the mailbox
   // socket drops (dead circuit) and the relay queues a message, this wakes us to
@@ -727,7 +730,20 @@ export function connectMailboxForIdentity(identity: Identity): void {
  */
 export async function drainMailboxNow(identity: Identity): Promise<number> {
   if (!MAILBOX_ENABLED) return 0;
-  return fetchMailboxOverTor((env) => handleIncomingV2(env, identity));
+  return fetchMailboxOverTor((env) => handleIncomingV2(env, identity).then(throwIfNotAckable));
+}
+
+/**
+ * Bridge between the two "do not ack" conventions: handleIncomingV2 reports a
+ * `retry` outcome, while both mailbox transports (socket + stateless drain)
+ * decide whether to ack by whether the callback's promise rejected. Without
+ * this, `retry` would be acked exactly like a stored message and the relay
+ * would delete its only copy.
+ */
+function throwIfNotAckable(outcome: IncomingOutcome): void {
+  if (outcome === 'retry') {
+    throw new Error('[mailbox] envelope not persisted — leaving it queued for re-drain');
+  }
 }
 
 export function connect(identity: Identity): Socket {
@@ -1187,10 +1203,14 @@ export function connect(identity: Identity): Socket {
   socket.on('envelope', async (env: WireSealedEnvelope) => {
     rdiag(`[RDIAG] envelope RECV from=${env.from ?? '(none)'} hasSenderPub=${!!env.senderPublicKeyB64} self=${!!env.selfCopy}`);
     try {
-      await handleIncoming(env, identity);
       // AT-LEAST-ONCE (audit 2026-07-24): ack after persisting so the relay deletes
       // the queued row only once we durably have it. No ack on failure → re-drains.
-      try { socket!.emit('envelope:ack', { id: env.id }); } catch { /* noop */ }
+      // A 'retry' outcome is a failure too (audit 2026-08-08): it used to ack like
+      // a success and silently delete a message we could not open.
+      const outcome = await handleIncoming(env, identity);
+      if (outcome !== 'retry') {
+        try { socket!.emit('envelope:ack', { id: env.id }); } catch { /* noop */ }
+      }
     } catch (e) {
       if (__DEV__) logger.warn('[socket] handleIncoming failed:', (e as Error).message);
     }
@@ -1202,11 +1222,15 @@ export function connect(identity: Identity): Socket {
   socket.on('envelope:v2', async (env: WireSealedEnvelopeV2) => {
     rdiag(`[RDIAG] envelope:v2 RECV id=${env.id}`);
     try {
-      await handleIncomingV2(env, identity);
       // AT-LEAST-ONCE (audit 2026-07-24): ack ONLY after persisting, so the relay
       // marks this device drained (and eventually deletes) only once we durably
       // have the message. No ack on failure → the relay re-drains on next connect.
-      try { socket!.emit('envelope:ack', { id: env.id }); } catch { /* noop */ }
+      // 'retry' counts as a failure (audit 2026-08-08) — it used to ack like a
+      // success, deleting the relay's only copy of an envelope we never opened.
+      const outcome = await handleIncomingV2(env, identity);
+      if (outcome !== 'retry') {
+        try { socket!.emit('envelope:ack', { id: env.id }); } catch { /* noop */ }
+      }
     } catch (e) {
       if (__DEV__) logger.warn('[socket] handleIncomingV2 failed:', (e as Error).message);
     }
@@ -3348,11 +3372,37 @@ async function ownMailboxRootField(): Promise<Record<string, string>> {
   try { return { mailboxRoot: await getOwnMailboxRootB64() }; } catch { return {}; }
 }
 
-async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
+/**
+ * What happened to an incoming envelope, and therefore whether the relay may
+ * delete its queued copy.
+ *
+ * The relay keeps a queued row until the recipient acks it, so the ack is the
+ * ONLY thing standing between a message and permanent deletion. Every failure
+ * path here used to be a bare `return`, and the callers acked unconditionally
+ * afterwards — so an envelope we could not open was acked exactly like one we
+ * had stored. Fila entregada, ackeada, borrada, nothing on screen: a message
+ * lost with no error anywhere (audit 2026-08-08).
+ *
+ *  - `persisted` — durably stored. Ack.
+ *  - `dropped`   — deliberately discarded (blocked sender). Ack: re-delivering
+ *                  it forever would be pointless, the decision is the user's.
+ *  - `retry`     — we could not make sense of it *yet*. Do NOT ack: the sender's
+ *                  contact record may still be hydrating, or their signing key
+ *                  may not have arrived. The relay re-offers it on the next
+ *                  connect, bounded by MAX_DELIVERY_ATTEMPTS server-side so a
+ *                  genuinely undecryptable envelope stops after a few rounds
+ *                  instead of being replayed for its whole TTL.
+ */
+type IncomingOutcome = 'persisted' | 'dropped' | 'retry';
+
+async function handleIncomingV2(
+  env: WireSealedEnvelopeV2,
+  identity: Identity,
+): Promise<IncomingOutcome> {
   // Already opened this exact envelope in this session (socket and stateless
-  // drain racing each other). Returning here still lets the caller ack, which is
-  // what actually frees the row on the relay.
-  if (isEnvelopeAlreadyPersisted(env.id)) return;
+  // drain racing each other). We really do have it, so this is a genuine
+  // `persisted` — acking is what frees the row on the relay.
+  if (isEnvelopeAlreadyPersisted(env.id)) return 'persisted';
   const contacts = useContacts.getState().contacts;
   // Resolve the sender's Ed25519 signing key by the `from` recovered from inside
   // the sealed box. Unknown sender (or no signing key on file) → reject: v2 is
@@ -3370,12 +3420,19 @@ async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
     Date.now(),
   );
   if (!inner) {
-    if (__DEV__) logger.warn('[socket] envelope:v2 failed to open/authenticate — dropping');
-    return;
+    // NOT a permanent verdict: resolveSigningKey above reads the contact store,
+    // so an envelope that arrives before contacts have hydrated (or before the
+    // sender's signing key has synced) fails here and would succeed moments
+    // later. Acking it would delete the relay's only copy.
+    if (__DEV__) logger.warn('[socket] envelope:v2 failed to open/authenticate — will retry');
+    return 'retry';
   }
 
   const contact = contacts.find((c) => c.aegisId === inner.from);
-  if (!contact || contact.blocked) return;
+  // Blocked is the user's own decision — discard it for good. An unknown sender
+  // is not: the contact record may still be on its way.
+  if (contact?.blocked) return 'dropped';
+  if (!contact) return 'retry';
 
   // Reuse the v1 downstream (ratchet decrypt + glare/desync recovery + dispatch).
   const synthEnv: WireSealedEnvelope = {
@@ -3386,19 +3443,24 @@ async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
     nonce: env.nonce,
     createdAt: env.createdAt,
   };
-  await decryptAndAppend(synthEnv, inner, contact, identity);
+  const stored = await decryptAndAppend(synthEnv, inner, contact, identity);
+  if (!stored) return 'retry'; // ratchet not ready / desync recovery in flight
   // Only after the message is durably down: a throw above leaves the id unmarked
   // so the relay's re-drain is processed rather than silently swallowed.
   markEnvelopePersisted(env.id);
+  return 'persisted';
 }
 
-async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
+async function handleIncoming(
+  env: WireSealedEnvelope,
+  identity: Identity,
+): Promise<IncomingOutcome> {
   // Multi-device self-copy fast path — routed BEFORE contact matching so a
   // self-copy never falls through to the regular incoming-message handler
   // (which would re-trigger profile/group flows and never decrypt correctly).
   if (env.selfCopy === true && env.to === identity.aegisId) {
     await handleSelfCopy(env, identity);
-    return;
+    return 'persisted';
   }
 
   // First-contact recovery: a queued X3DH-initial message arrives with no `from`
@@ -3416,9 +3478,10 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
   const contacts = useContacts.getState().contacts;
   let matchedContact = env.from ? contacts.find(c => c.aegisId === env.from) : null;
 
-  // Drop messages from blocked contacts immediately — do not decrypt, do not store
+  // Drop messages from blocked contacts immediately — do not decrypt, do not
+  // store. Deliberate discard, so it is acked and the relay frees the row.
   if (matchedContact?.blocked) {
-    return;
+    return 'dropped';
   }
 
   if (!matchedContact && env.from) {
@@ -3451,7 +3514,9 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
     try {
       senderPubKey = decodeBase64(matchedContact.publicKeyB64);
     } catch {
-      return;
+      // Corrupt contact record — the envelope itself may be perfectly fine, so
+      // keep the relay's copy rather than acking it away.
+      return 'retry';
     }
     const parsed = openEnvelope(
       { ciphertextB64: env.ciphertext, nonceB64: env.nonce },
@@ -3460,7 +3525,7 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
     );
     if (parsed) {
       const success = await decryptAndAppend(env, parsed, matchedContact, identity);
-      if (success) return;
+      if (success) return 'persisted';
     } else {
       // [RDIAG] Outer box failed against the CONTACT-RECORD key. Compare its
       // prefix with the relay-attached sender key (init envelopes) — a mismatch
@@ -3490,10 +3555,15 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
     if (!parsed) continue;
 
     const success = await decryptAndAppend(env, parsed, contact, identity);
-    if (success) return;
+    if (success) return 'persisted';
   }
 
-  if (__DEV__) logger.warn('[socket] envelope from unknown sender — add the peer as a contact first to decrypt their messages');
+  // Nothing opened it. This used to fall out of the function and the caller
+  // acked anyway, so the relay deleted its only copy of a message we never
+  // showed anyone. Adding the peer as a contact (or their key arriving) makes
+  // the very same envelope decryptable, so keep it queued.
+  if (__DEV__) logger.warn('[socket] envelope from unknown sender — keeping it queued for retry');
+  return 'retry';
 }
 
 // ─── Self-encrypted copy (multi-device sync) ─────────────────────────────────
