@@ -105,49 +105,61 @@ resto de idiomas, la traducción automática es aceptable como alcance extra.
 
 | Asset | Especificación Play | Estado |
 |---|---|---|
-| Ícono de la app | 512×512 PNG, 32-bit con alpha | ✅ `promo-video/play-store/icon-512.png` (verificado 512×512, RGBA con alpha) |
-| Feature graphic | 1024×500 PNG/JPG, sin alpha | ✅ `promo-video/play-store/feature-graphic.png` (verificado 1024×500, RGB sin canal alpha) |
-| Screenshots teléfono | 2-8 imágenes, PNG/JPG, min 320px / max 3840px por lado | ✅ 8 generadas, ver abajo |
+| Ícono de la app | 512×512 PNG, 32-bit con alpha | ✅ generado en `_scratch/playstore/icon-512.png` (verificado 512×512, RGBA con alpha) — no versionado |
+| Feature graphic | 1024×500 PNG/JPG, sin alpha | ✅ generado en `_scratch/playstore/feature-graphic-1024x500.png` (verificado 1024×500, RGB sin canal alpha) — no versionado |
+| Screenshots teléfono | 2-8 imágenes, PNG/JPG, min 320px / max 3840px por lado | ✅ 8 por idioma (en/es/it), ver abajo |
 
-## Screenshots (generadas 2026-07-01)
+## Screenshots (regeneradas localizadas 2026-08-08)
 
-Ubicación: `promo-video/play-store/screenshots/*.png` (1080×1920 cada una).
+Ubicación: `promo-video/play-store/screenshots/<idioma>/NN-<pilar>.png`
+(1080×1920 cada una), con `<idioma>` ∈ `en`, `es`, `it`.
 
-Generadas desde el prototipo (`prototype/playstore-shots.html`, servido con
-`npx serve prototype` y capturado con Playwright headless — script en
-`_scratch/capture-playstore-shots.mjs`, no forma parte del build). Reutilizan
-los componentes reales de `prototype/*.jsx` (tema VAULT, `AndroidDevice`)
-excepto onboarding/home/chat, reescritos a mano — ver nota abajo.
+**Las capturas son un asset por idioma.** En Play Console se suben por ficha:
+*Presencia en la tienda → Ficha principal → selector de idioma → Recursos
+gráficos*. La traducción automática de Play **no toca las imágenes**: si sólo se
+sube un set, ese set aparece en todos los idiomas y la ficha italiana enseña
+capturas en español. El prefijo numérico (`01-`…`08-`) es el orden en que deben
+subirse.
+
+Contenido (captions + copy de las pantallas simuladas, los tres idiomas) en
+**`prototype/store-shots.jsx`** — fuente única, compartida con la ficha de App
+Store (`docs/APP-STORE-LISTING.md`). Los textos de la UI simulada replican las
+cadenas reales de la app (`mobile/src/i18n/locales/*.json`).
 
 | Archivo | Pilar mostrado |
 |---|---|
-| `onboarding.png` | Identidad anónima generada en el dispositivo |
-| `home.png` | Lista de chats sin metadatos (handles pseudónimos) |
-| `chat.png` | E2EE (Double Ratchet/X3DH), efímeros |
-| `verify.png` | Verificación de identidad por QR + 8 palabras |
-| `call.png` | Llamada de voz/video cifrada (WebRTC) |
-| `groups.png` | Grupos privados |
-| `panic.png` | Modo pánico + PIN señuelo |
-| `devices.png` | Multi-dispositivo, clave por dispositivo, revocación |
+| `01-onboarding.png` | Identidad anónima generada en el dispositivo |
+| `02-home.png` | Lista de chats sin metadatos (handles pseudónimos) |
+| `03-chat.png` | E2EE (Double Ratchet/X3DH), efímeros |
+| `04-verify.png` | Verificación de identidad por QR + 8 palabras |
+| `05-call.png` | Llamada de voz/video cifrada (WebRTC) |
+| `06-groups.png` | Grupos privados + votación anónima |
+| `07-panic.png` | Modo pánico + PIN señuelo |
+| `08-devices.png` | Multi-dispositivo, clave por dispositivo, revocación |
+
+> Los PNG **no se versionan** (~32 MB entre las dos tiendas): son output
+> regenerable, ignorado en `.gitignore`. Lo versionado es la fuente
+> (`prototype/store-shots.jsx` + `scripts/capture-store-shots.mjs`).
 
 > ⚠️ **Hallazgo durante la generación**: `prototype/screens.jsx` tiene
 > `ScreenOnboarding`, `ScreenHome` y `ScreenChat` actualmente mostrando el
 > flujo de **AegisLink Work** (enrolamiento corporativo, "Cirrus Labs AG"),
 > no el onboarding anónimo personal descrito en `CLAUDE.md` §1-3. Work es
 > alcance de otro repo (ver memoria `work-separate-repo`). Para no
-> representar mal la app consumer en la ficha pública, esas 3 capturas se
-> reescribieron con contenido propio (mismo sistema de theme/marca) en vez
-> de reusar esos componentes. El prototipo compartido (`AegisLink.html`,
-> usado también para el deck/demo) **no se tocó** — si ese deck también
-> necesita mostrar el onboarding personal real en algún momento, es un
-> trabajo aparte de re-alinear `screens.jsx`.
+> representar mal la app consumer en la ficha pública, las pantallas simuladas
+> se construyen en `store-shots.jsx` con contenido propio (mismo sistema de
+> theme/marca) en vez de reusar esos componentes — que además están hardcodeados
+> en inglés/español y no se pueden localizar. El prototipo compartido
+> (`AegisLink.html`, usado también para el deck/demo) **no se tocó**.
 
 Para regenerar tras cambios de copy/tema:
 ```
 # server "prototype" ya definido en .claude/launch.json (puerto 4180)
 npx --yes serve -l 4180 prototype
-node _scratch/capture-playstore-shots.mjs
+node scripts/capture-store-shots.mjs                 # ambas tiendas, 3 idiomas
+node scripts/capture-store-shots.mjs --store play --lang it   # sólo un set
 ```
+Requiere Playwright (`npm i --no-save playwright && npx playwright install chromium`).
 
 ## Data Safety form — respuestas honestas
 
@@ -187,5 +199,5 @@ Regenerar assets tras cambios de copy/tema/marca:
 npx --yes serve -l 4180 prototype
 node _scratch/capture-feature-graphic.mjs
 node _scratch/capture-icon.mjs
-node _scratch/capture-playstore-shots.mjs
+node scripts/capture-store-shots.mjs --store play
 ```

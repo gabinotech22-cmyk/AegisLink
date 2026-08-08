@@ -56,9 +56,11 @@ Console y honestidad de claims.
 - [ ] **Data Safety form**: declarar honestamente la postura cero-metadatos (es una FORTALEZA —
       "no data collected"/"no data shared"). No exagerar.
 - [x] **Store listing — título/descripciones/screenshots/assets**: borrador
-      completo en `docs/PLAY-STORE-LISTING.md` (2026-07-01). 8 screenshots
-      (`promo-video/play-store/screenshots/*.png`), feature graphic 1024×500 y
-      ícono 512×512 con alpha, todos en `promo-video/play-store/`. **Falta
+      completo en `docs/PLAY-STORE-LISTING.md` (2026-07-01; capturas
+      localizadas 2026-08-08). 8 screenshots **por idioma** en/es/it
+      (`promo-video/play-store/screenshots/<idioma>/`, regenerables con
+      `node scripts/capture-store-shots.mjs --store play`), feature graphic
+      1024×500 y ícono 512×512 con alpha en `promo-video/play-store/`. **Falta
       todavía**: hostear `privacy-policy.md` en URL pública (ver checklist en
       ese doc).
 - [ ] **Privacy Policy URL pública**: `docs/privacy-policy.md` debe estar **hosteada** en una URL

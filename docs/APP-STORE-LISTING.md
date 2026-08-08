@@ -323,51 +323,61 @@ si Apple objeta la categoría social por el enfoque anónimo/sin perfil público
 
 | Asset | Especificación App Store | Estado |
 |---|---|---|
-| Ícono de la app | 1024×1024 PNG, sin alpha, sin esquinas redondeadas | Reusar/derivar de `promo-video/play-store/icon-512.png` (subir versión 1024² sin canal alpha — pendiente de generar) |
-| Capturas iPhone 6.5"/6.7" | 3-10 imágenes, PNG/JPG, 1284×2778 (o 1242×2688) | ✅ 8 generadas, ver abajo |
+| Ícono de la app | 1024×1024 PNG, sin alpha, sin esquinas redondeadas | Reusar/derivar de `_scratch/playstore/icon-512.png` (subir versión 1024² sin canal alpha — pendiente de generar) |
+| Capturas iPhone 6.5"/6.7" | 3-10 imágenes, PNG/JPG, 1284×2778 (o 1242×2688) | ✅ 8 por idioma (en/es/it), ver abajo |
 | Capturas iPad | Solo si `supportsTablet: true` en `app.json` | No aplica — `ios.supportsTablet: false` |
 
-## Capturas (generadas 2026-07-08)
+## Capturas (regeneradas localizadas 2026-08-08)
 
-Ubicación: `promo-video/app-store/screenshots/*.png` (1284×2778 cada una, tamaño
-iPhone 6.5"/6.7" que exige App Store Connect).
+Ubicación: `promo-video/app-store/screenshots/<idioma>/NN-<pilar>.png`
+(1284×2778 cada una, tamaño iPhone 6.5"/6.7" que exige App Store Connect), con
+`<idioma>` ∈ `en`, `es`, `it`.
 
-> ⚠️ **Las capturas actuales están en español.** Las capturas son un asset
-> **por idioma**: con inglés como idioma principal, el set en español quedaría
-> asignado a la ficha inglesa (que es lo que ve la mayoría del mundo). Hay que
-> regenerar el set en inglés desde `prototype/appstore-shots.html` — el
-> prototipo tiene el copy hardcodeado en español, así que hace falta
-> parametrizarlo por idioma antes de recapturar. Ver "Pendientes" abajo.
+**Las capturas son un asset por idioma**, igual que el texto: se suben dentro de
+cada localización (ASC → la versión → selector de idioma arriba a la derecha →
+*Vista previa de App Store*). Con inglés como idioma principal, el set que se
+suba en inglés es el que ve la mayoría del mundo. El prefijo numérico
+(`01-`…`08-`) es el orden de subida.
 
-Generadas desde el prototipo (`prototype/appstore-shots.html`, servido con
-`npx serve -l 4180 prototype` y capturado con Playwright headless — script en
-`_scratch/capture-appstore-shots.mjs`, no forma parte del build). Mismo tema
-VAULT y mismos 8 pilares que la ficha de Play, usando el frame `IOSDevice`
-(`prototype/ios-frame.jsx`) en vez de `AndroidDevice`.
+> ⚠️ La versión publicada de iOS lleva todavía el set **antiguo en español** en
+> las tres fichas (se generó antes de localizar). Sustituirlo en ASC no requiere
+> nueva build: las capturas se pueden actualizar en la próxima versión de la ficha.
+
+Contenido (captions + copy de las pantallas simuladas, los tres idiomas) en
+**`prototype/store-shots.jsx`** — fuente única, compartida con la ficha de Play
+(`docs/PLAY-STORE-LISTING.md`), renderizada aquí con el frame `IOSDevice`
+(`prototype/ios-frame.jsx`) en vez de `AndroidDevice`. Los textos de la UI
+simulada replican las cadenas reales de la app (`mobile/src/i18n/locales/*.json`).
 
 | Archivo | Pilar mostrado |
 |---|---|
-| `onboarding.png` | Identidad anónima generada en el dispositivo |
-| `home.png` | Lista de chats sin metadatos (handles pseudónimos) |
-| `chat.png` | E2EE (Double Ratchet/X3DH), efímeros |
-| `verify.png` | Verificación de identidad por QR + 8 palabras |
-| `call.png` | Llamada de voz/video cifrada (WebRTC + CallKit) |
-| `groups.png` | Grupos privados |
-| `panic.png` | Modo pánico + PIN señuelo |
-| `devices.png` | Multi-dispositivo, clave por dispositivo, revocación |
+| `01-onboarding.png` | Identidad anónima generada en el dispositivo |
+| `02-home.png` | Lista de chats sin metadatos (handles pseudónimos) |
+| `03-chat.png` | E2EE (Double Ratchet/X3DH), efímeros |
+| `04-verify.png` | Verificación de identidad por QR + 8 palabras |
+| `05-call.png` | Llamada de voz/video cifrada (WebRTC + CallKit) |
+| `06-groups.png` | Grupos privados + votación anónima |
+| `07-panic.png` | Modo pánico + PIN señuelo |
+| `08-devices.png` | Multi-dispositivo, clave por dispositivo, revocación |
+
+> Los PNG **no se versionan** (~32 MB entre las dos tiendas): son output
+> regenerable, ignorado en `.gitignore`. Lo versionado es la fuente
+> (`prototype/store-shots.jsx` + `scripts/capture-store-shots.mjs`).
 
 > Igual que en la ficha de Play: `screens.jsx` tiene `ScreenOnboarding`,
 > `ScreenHome` y `ScreenChat` mostrando el flujo de **AegisLink Work**
-> (enrolamiento corporativo), no el onboarding anónimo personal. Esas 3
-> capturas se reescribieron con contenido propio (mismo tema/marca) dentro
-> de `prototype/appstore-shots.html`, igual que ya se hizo en
-> `prototype/playstore-shots.html`.
+> (enrolamiento corporativo), no el onboarding anónimo personal, y el resto de
+> pantallas está hardcodeado en inglés/español. Por eso las 8 pantallas
+> simuladas se construyen en `store-shots.jsx` con contenido propio y
+> parametrizado por idioma, sin tocar el prototipo del deck/demo.
 
 Para regenerar tras cambios de copy/tema:
 ```
 npx --yes serve -l 4180 prototype
-node _scratch/capture-appstore-shots.mjs
+node scripts/capture-store-shots.mjs                # ambas tiendas, 3 idiomas
+node scripts/capture-store-shots.mjs --store app --lang en   # sólo un set
 ```
+Requiere Playwright (`npm i --no-save playwright && npx playwright install chromium`).
 
 ## Privacy Nutrition Label (App Privacy — cuestionario de App Store Connect)
 
@@ -417,8 +427,10 @@ publicar en landing (`web/`) o GitHub Pages y pegar la URL aquí una vez exista.
   Signal/SimpleX, no red social con perfiles públicos).
 
 ## Pendientes para publicar (resumen)
-1. ~~Capturas iPhone 6.5"/6.7"~~ ✅ hecho (en español) — falta el **set en
-   inglés** para la ficha principal, ver aviso en "Capturas".
+1. ~~Capturas iPhone 6.5"/6.7" localizadas (en/es/it)~~ ✅ generadas
+   (`prototype/store-shots.jsx` + `scripts/capture-store-shots.mjs`) — falta
+   **subirlas a ASC** en cada localización; la ficha publicada aún muestra el
+   set antiguo en español.
 2. Ícono 1024×1024 sin alpha (subir a App Store Connect).
 3. Privacy Policy hosteada en URL pública.
 4. Completar App Privacy (Nutrition Label) y Age Rating en App Store Connect.
@@ -434,5 +446,5 @@ publicar en landing (`web/`) o GitHub Pages y pegar la URL aquí una vez exista.
 Regenerar capturas tras cambios de copy/tema/marca:
 ```
 npx --yes serve -l 4180 prototype
-node _scratch/capture-appstore-shots.mjs
+node scripts/capture-store-shots.mjs
 ```
