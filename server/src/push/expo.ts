@@ -131,11 +131,19 @@ export async function sendCallWakeUp(
     }
     // Skip the single iOS Expo token when a VoIP push already went out — CallKit rings.
     if (suppressIosExpo && row.platform === 'ios') continue;
+    // Same iOS rule as notifyRecipient above: `_contentAvailable` next to a visible
+    // alert makes iOS classify the push as a BACKGROUND notification, subject to the
+    // background-refresh budget — and once that budget is spent the alert is dropped
+    // WITH it, so a killed iPhone never learns it is being called. Calls used to look
+    // exempt only because they are rare; they are not (audit 2026-08-07, the fix in
+    // #378 covered messages only). Android keeps the flag: its headless reconnect task
+    // needs the background wake, and FCM high-priority data messages aren't throttled.
+    const isIos = row.platform === 'ios';
     messages.push({
       to: row.expo_token,
       sound: 'default',
       priority: 'high',
-      _contentAvailable: true,
+      ...(isIos ? {} : { _contentAvailable: true }),
       ttl: 30,
       // Generic, zero-metadata title/body so the OS rings + shows a heads-up
       // even when the app is killed. Caller identity stays sealed in call:invite.
@@ -173,11 +181,14 @@ export async function sendGroupCallWakeUp(toAegisId: string): Promise<boolean> {
       void pushRepo.delete(row.expo_token);
       continue;
     }
+    // iOS: omit `_contentAvailable` so the heads-up is never swallowed by the
+    // background-refresh budget (same rationale as notifyRecipient / sendCallWakeUp).
+    const isIos = row.platform === 'ios';
     messages.push({
       to: row.expo_token,
       sound: 'default',
       priority: 'high',
-      _contentAvailable: true,
+      ...(isIos ? {} : { _contentAvailable: true }),
       ttl: 30,
       title: 'AegisLink',
       body: 'Canal de voz activo · E2EE',
