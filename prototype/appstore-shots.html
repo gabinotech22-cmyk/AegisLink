@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8"/>
   <title>AegisLink — App Store Screenshots</title>
@@ -25,163 +25,18 @@
   <script type="text/babel" src="icons.jsx"></script>
   <script type="text/babel" src="logo.jsx"></script>
   <script type="text/babel" src="screens.jsx"></script>
-  <script type="text/babel" src="screens-extra.jsx"></script>
-  <script type="text/babel" src="screens-phase2.jsx"></script>
-  <script type="text/babel" src="screens-states.jsx"></script>
-  <script type="text/babel" src="screens-empty.jsx"></script>
+  <script type="text/babel" src="store-shots.jsx"></script>
 
   <script type="text/babel" data-presets="env,react">
-    const { VAULT, IOSDevice, AegisMark, AegisWord, Avatar, SecuredBadge, I } = window;
+    const { VAULT, IOSDevice, getStoreShots, getStoreShotLang } = window;
 
-    // Same rationale as prototype/playstore-shots.html: screens.jsx' ScreenOnboarding /
-    // ScreenHome / ScreenChat render the "AegisLink Work" enterprise demo, not the anonymous
-    // consumer flow (CLAUDE.md §1-3). These 3 shots are rebuilt with honest personal-app copy;
-    // the rest reuse the real shared screen components.
-
-    function ScreenOnboardingClean({ t }) {
-      const words = ['orbit', 'cedar', 'lantern', 'rhubarb'];
-      return (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column',
-                      padding: '24px 26px 32px', background: t.bg, color: t.text, alignItems: 'center' }}>
-          <AegisMark t={t} size={56}/>
-          <AegisWord t={t} size={26}/>
-          <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: '0.12em', margin: '18px 0 30px' }}>
-            PASO 2 DE 3 · GENERANDO IDENTIDAD
-          </div>
-          <div style={{
-            width: '100%', border: `1px solid ${t.borderStrong}`, borderRadius: t.radius,
-            padding: 16, background: t.surface, marginBottom: 22,
-          }}>
-            <div style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginBottom: 12 }}>
-              Tu llave privada se crea y se queda en este teléfono.
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {words.map((w, i) => (
-                <div key={w} style={{ display: 'flex', alignItems: 'baseline', gap: 8,
-                                       padding: '6px 8px', background: t.surface2, borderRadius: t.radiusS }}>
-                  <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, width: 14 }}>{(i+1).toString().padStart(2,'0')}</span>
-                  <span style={{ fontFamily: t.fontMono, fontSize: 14, color: t.text, fontWeight: 500 }}>{w}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div style={{ width: '100%', height: 6, borderRadius: 3, background: t.surface2, overflow: 'hidden', marginBottom: 22 }}>
-            <div style={{ width: '66%', height: '100%', background: t.accent, borderRadius: 3 }}/>
-          </div>
-          <div style={{
-            width: '100%', padding: '15px 0', borderRadius: t.radius, textAlign: 'center',
-            background: t.accent, color: t.accentInk, fontFamily: t.font, fontWeight: 600, fontSize: 15,
-          }}>Sin teléfono · sin email · sin nombre</div>
-        </div>
-      );
-    }
-
-    const HOME_CHATS = [
-      { name: 'moth19',        preview: 'Llegó el paquete, todo bien 🌿', time: '09:14', color: '#5bf2b9' },
-      { name: '0x7a3f…c1e2',    preview: 'Confirmado por QR ✔',           time: '08:52', color: '#8b5cf6' },
-      { name: 'cipher_reader',  preview: 'Nos vemos a las 7',             time: 'ayer',  color: '#f59e0b' },
-      { name: 'Familia',        preview: 'Foto (se autodestruye en 1h)',  time: 'ayer',  color: '#06b6d4' },
-      { name: 'satoshi.eth',    preview: 'Llamada perdida',               time: 'lun',   color: '#ef4444' },
-    ];
-
-    function ScreenHomeClean({ t }) {
-      return (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: t.bg, color: t.text, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 18px 12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <AegisMark t={t} size={26}/>
-              <AegisWord t={t} size={18}/>
-            </div>
-            <SecuredBadge t={t} label="SIN METADATOS"/>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {HOME_CHATS.map((c, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderBottom: `1px solid ${t.divider}` }}>
-                <Avatar t={t} name={c.name} color={c.color}/>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: t.fontMono, fontWeight: 600, fontSize: 15, color: t.text }}>{c.name}</div>
-                  <div style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.preview}</div>
-                </div>
-                <div style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textFaint }}>{c.time}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    const CHAT_MSGS = [
-      { me: false, text: 'Hola! ¿Llegó el fingerprint que te mandé?' },
-      { me: true,  text: 'Sí, verificado por QR — coincide 🔒' },
-      { me: false, text: 'Perfecto, ya podemos hablar tranquilos.' },
-      { me: true,  text: 'Este mensaje se autodestruye en 1 hora ⏳' },
-    ];
-
-    function ScreenChatClean({ t }) {
-      return (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: t.bg, color: t.text, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 18px 12px', borderBottom: `1px solid ${t.divider}` }}>
-            <Avatar t={t} name="moth19" color="#5bf2b9" size={36}/>
-            <div>
-              <div style={{ fontFamily: t.fontMono, fontWeight: 600, fontSize: 15, color: t.text }}>moth19</div>
-              <SecuredBadge t={t}/>
-            </div>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 10px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {CHAT_MSGS.map((m, i) => (
-              <div key={i} style={{
-                alignSelf: m.me ? 'flex-end' : 'flex-start', maxWidth: '78%',
-                background: m.me ? t.bubbleOut : t.bubbleIn, color: m.me ? t.bubbleOutText : t.bubbleInText,
-                padding: '10px 14px', borderRadius: t.radius, fontFamily: t.font, fontSize: 14.5, lineHeight: 1.4,
-              }}>{m.text}</div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px 18px' }}>
-            <div style={{ flex: 1, height: 44, borderRadius: 22, background: t.surface, border: `1px solid ${t.border}`,
-                          display: 'flex', alignItems: 'center', padding: '0 16px', fontFamily: t.font, fontSize: 14, color: t.textFaint }}>
-              Mensaje cifrado…
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    // Curated App Store shots — one per key product pillar (same set as Play Store listing).
-    const SHOTS = [
-      { id: 'onboarding', screen: 'onboarding', kicker: 'ANÓNIMO POR DEFECTO',
-        headline: 'Sin teléfono.\nSin email.\nSin nombre real.' },
-      { id: 'home', screen: 'home', kicker: 'CERO METADATOS',
-        headline: 'El relay nunca sabe\ncon quién hablas.' },
-      { id: 'chat', screen: 'chat', kicker: 'DOUBLE RATCHET · X3DH',
-        headline: 'Cifrado extremo a extremo\nen cada mensaje.' },
-      { id: 'verify', screen: 'verify', kicker: 'VERIFICACIÓN REAL',
-        headline: 'Confirma identidades\ncon QR y palabras clave.' },
-      { id: 'call', screen: 'call', kicker: 'WEBRTC · DTLS-SRTP',
-        headline: 'Llamadas de voz y video\ntambién cifradas.' },
-      { id: 'groups', screen: 'groups', kicker: 'GRUPOS PRIVADOS',
-        headline: 'Conversaciones grupales\ncon votación anónima.' },
-      { id: 'panic', screen: 'panic', kicker: 'MODO PÁNICO',
-        headline: 'Borrado instantáneo\ny señuelo en un toque.' },
-      { id: 'devices', screen: 'devices', kicker: 'TÚ TIENES LAS LLAVES',
-        headline: 'Cada dispositivo,\nsu propia clave.' },
-    ];
-
-    const screens = {
-      onboarding: ScreenOnboardingClean,
-      home:       ScreenHomeClean,
-      chat:       ScreenChatClean,
-      verify:     window.ScreenVerify,
-      call:       window.ScreenCall,
-      groups:     window.ScreenGroups,
-      devices:    window.ScreenDevices,
-      panic:      window.ScreenPanic,
-    };
-
-    const noop = () => {};
+    // Content (captions + mock screens, all three locales) lives in store-shots.jsx,
+    // shared with playstore-shots.html. This file is only the App Store canvas.
+    // URL: ?shot=<id>&lang=en|es|it — see scripts/capture-store-shots.mjs.
 
     function ShotCanvas({ shot }) {
       const t = VAULT;
-      const Cmp = screens[shot.screen] || window.ScreenHome;
+      const Screen = shot.Screen;
 
       // Canvas 1284×2778 — App Store's iPhone 6.5"/6.7" portrait screenshot size.
       return (
@@ -226,9 +81,7 @@
                 background: t.bg, color: t.text,
                 display: 'flex', flexDirection: 'column', overflow: 'hidden',
               }}>
-                <Cmp t={t} nav={noop} density="regular" contact={null}
-                     isWorkMode={false} setIsWorkMode={noop}
-                     flipped={false} setFlipped={noop}/>
+                <Screen t={t} c={shot.copy} store="app"/>
               </div>
             </IOSDevice>
           </div>
@@ -237,13 +90,12 @@
     }
 
     function App() {
-      const params = new URLSearchParams(window.location.search);
-      const id = params.get('shot') || SHOTS[0].id;
-      const shot = SHOTS.find(s => s.id === id) || SHOTS[0];
+      const shots = getStoreShots(getStoreShotLang());
+      const id = new URLSearchParams(window.location.search).get('shot');
+      const shot = shots.find(s => s.id === id) || shots[0];
       return <ShotCanvas shot={shot}/>;
     }
 
-    window.SHOTS = SHOTS;
     ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
   </script>
 </body>
