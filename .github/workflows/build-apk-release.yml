@@ -1,0 +1,206 @@
+# Build Release APK — signed universal APK for direct install (Obtainium, F-Droid
+# repo, plain sideload).
+#
+# Why this exists next to build-aab.yml: Play takes an .aab, but nothing outside
+# Play can install one. Users who get AegisLink from GitHub need a release-signed
+# .apk, and it has to come from CI rather than a laptop so the artifact is
+# reproducible from a known commit and the keystore never leaves Secrets.
+#
+# SIGNING CAVEAT — the APK produced here is signed with the *upload* key. Play
+# re-signs uploads with its own app signing key, so this APK and a Play install
+# carry different signatures and Android refuses to update one with the other,
+# in both directions. That is expected, not a bug; the release notes tell users
+# to pick one channel and stay on it.
+#
+# Required GitHub Secrets — same four as build-aab.yml:
+#   ANDROID_KEYSTORE_BASE64    — base64 of the upload keystore (base64 -w0 keystore)
+#   ANDROID_KEYSTORE_PASSWORD  — store password
+#   ANDROID_KEY_ALIAS          — key alias
+#   ANDROID_KEY_PASSWORD       — key password
+#
+# Trigger: Actions tab → "Build Release APK" → Run workflow, or
+#   gh workflow run build-apk-release.yml -f tag=v1.0.5 -f attach=true
+name: Build Release APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v1.0.5). Empty builds the default branch.'
+        required: false
+        type: string
+      attach:
+        description: 'Upload the APK + checksum to that tag''s GitHub Release'
+        required: false
+        default: false
+        type: boolean
+
+# contents: write is needed only for the optional `attach` step; the build itself
+# reads nothing privileged beyond the signing secrets.
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Assemble signed release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      # Mirror eas.json `production` (same values as build-aab.yml) so the APK is
+      # the same production build as the store artifact — prod relay + TURN, onion
+      # mailbox, mailbox-mode on. Read at prebuild and by the release JS bundle.
+      APP_ENV: production
+      EXPO_PUBLIC_SERVER_URL: https://aegislink.duckdns.org
+      EXPO_PUBLIC_RELAY_URL: https://aegislink.duckdns.org
+      EXPO_PUBLIC_TURN_URL: turn:aegislink.duckdns.org:3478
+      EXPO_PUBLIC_ONION_URL: http://fhxnal5jmuuqsbtzz7avos4drhqmuy4c7ffd35gi3hw2uwbe5iqshfyd.onion
+      EXPO_PUBLIC_MAILBOX_MODE: 'on'
+      AEGIS_EXPO_GO: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Empty ref → the default branch, which is what checkout does anyway.
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # Same content-addressed cache rationale as build-aab.yml: the *.gradle files
+      # don't exist until prebuild, so setup-java's gradle cache can't key off them.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: build-apk-gradle-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: build-apk-gradle-
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Prebuild Android project
+        run: npx expo prebuild --platform android --no-install
+
+      # Expo's generated gradle.properties caps the daemon at -Xmx2048m, which OOMs
+      # at release packaging for this build (R8 + Hermes + Tor/WebRTC native libs).
+      # android/ is gitignored and regenerated here, so patch the generated file.
+      - name: Raise Gradle heap (avoid release-packaging OOM)
+        run: |
+          sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m/' android/gradle.properties
+          grep '^org.gradle.jvmargs=' android/gradle.properties
+
+      - name: Decode upload keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is empty — cannot sign the APK."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/upload.keystore
+          echo "keystore bytes: $(stat -c %s android/app/upload.keystore)"
+
+      # Identical patch to build-aab.yml: the prebuilt build.gradle signs `release`
+      # with the debug keystore, so add a real release signingConfig that reads the
+      # credentials from the environment at gradle-eval time (never written to disk)
+      # and repoint the release buildType at it.
+      - name: Inject release signing config
+        run: |
+          python3 - <<'PY'
+          import io, re, sys
+          p = "android/app/build.gradle"
+          s = io.open(p, encoding="utf-8").read()
+
+          marker = re.search(r"( *)debug \{\s*\n\s*storeFile file\('debug\.keystore'\)\s*\n\s*storePassword 'android'\s*\n\s*keyAlias 'androiddebugkey'\s*\n\s*keyPassword 'android'\s*\n( *)\}", s)
+          if not marker:
+              sys.exit("FATAL: could not locate the debug signingConfig block to anchor release signing")
+          release_block = marker.group(0) + """
+          release {
+                  storeFile file(System.getenv('ANDROID_KEYSTORE_PATH') ?: 'upload.keystore')
+                  storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                  keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                  keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+              }"""
+          s = s[:marker.start()] + release_block + s[marker.end():]
+
+          anchor = "// see https://reactnative.dev/docs/signed-apk-android.\n            signingConfig signingConfigs.debug"
+          if anchor not in s:
+              sys.exit("FATAL: could not locate the release buildType signingConfig line to repoint")
+          s = s.replace(anchor, "// see https://reactnative.dev/docs/signed-apk-android.\n            signingConfig signingConfigs.release", 1)
+
+          io.open(p, "w", encoding="utf-8").write(s)
+          print("Release signing injected OK")
+          PY
+          grep -n "signingConfig signingConfigs" android/app/build.gradle
+
+      - name: Assemble release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android
+          ./gradlew :app:assembleRelease --no-daemon
+
+      # Fail loudly if ABI splits are ever turned on: several per-ABI APKs would
+      # ship instead of the single universal one users expect from a release page.
+      - name: Locate the APK
+        id: apk
+        run: |
+          mapfile -t APKS < <(find android/app/build/outputs/apk/release -name '*.apk' | sort)
+          printf 'found %d APK(s):\n' "${#APKS[@]}"
+          printf '  %s\n' "${APKS[@]}"
+          if [ "${#APKS[@]}" -eq 0 ]; then
+            echo "::error::assembleRelease produced no APK."
+            exit 1
+          fi
+          if [ "${#APKS[@]}" -gt 1 ]; then
+            echo "::error::Expected one universal APK, got ${#APKS[@]} — ABI splits are on. Publish a single universal APK or teach this workflow which to attach."
+            exit 1
+          fi
+          echo "path=mobile/${APKS[0]}" >> "$GITHUB_OUTPUT"
+
+      # apksigner (not jarsigner) because modern APKs sign with the v2/v3 block,
+      # which jarsigner cannot see — it would report an unsigned-looking APK.
+      - name: Verify signature and emit checksum
+        run: |
+          APK="${{ steps.apk.outputs.path }}"
+          APK="${APK#mobile/}"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          echo "apksigner: $APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          ls -lh "$APK"
+          # Checksum recorded against the bare filename, so a user who downloads the
+          # APK can `sha256sum -c` it without recreating the CI directory layout.
+          (cd "$(dirname "$APK")" && sha256sum "$(basename "$APK")" | tee "$(basename "$APK").sha256")
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aegislink-release-apk
+          path: |
+            mobile/android/app/build/outputs/apk/release/*.apk
+            mobile/android/app/build/outputs/apk/release/*.apk.sha256
+          if-no-files-found: error
+
+      # Publishing to a release is opt-in and requires an explicit tag, so a plain
+      # test build can never overwrite a published artifact by accident.
+      - name: Attach to the GitHub Release
+        if: ${{ inputs.attach && inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="${{ steps.apk.outputs.path }}"
+          APK="${APK#mobile/}"
+          gh release upload "${{ inputs.tag }}" "$APK" "${APK}.sha256" --clobber
+          echo "Attached to ${{ inputs.tag }}"
