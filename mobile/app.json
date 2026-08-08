@@ -126,6 +126,7 @@
       "./plugins/withTorEmbeddedIOS.js",
       "./plugins/withIosVoip.js",
       "./plugins/withIosBackupExclusion.js",
+      "./plugins/withFossPush.js",
       "expo-secure-store",
       [
         "expo-sqlite",

@@ -4,7 +4,7 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED } from '../config';
+import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, REMOTE_PUSH_ENABLED } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
@@ -993,6 +993,14 @@ export function connect(identity: Identity): Socket {
       try {
         const { IS_EXPO_GO } = require('../runtime') as { IS_EXPO_GO: boolean };
         if (IS_EXPO_GO) return; // simulated token — do not forward to server
+        // A `foss` build has no Google Play Services to get a token from, and
+        // must not reach a proprietary push service at all. The mailbox
+        // ntfy-over-Tor subscription and the call-wake foreground service cover
+        // wake-ups instead. Covers the Expo/FCM token AND the raw APNs one
+        // below — neither is reachable in this build.
+        // Strict `=== false` so only an explicit foss build disables push; an
+        // undefined import or partial mock must not silently stop registering.
+        if (REMOTE_PUSH_ENABLED === false) return;
 
         const { registerForPush } = require('../notifications/push') as typeof import('../notifications/push');
         await registerForPush(identity);
@@ -1076,6 +1084,7 @@ export function connect(identity: Identity): Socket {
     // A VoIP token obtained (async, native) before this socket was authed is
     // cached; flush it now over the authenticated channel. No-op off iOS.
     void (async () => {
+      if (REMOTE_PUSH_ENABLED === false) return; // foss: no proprietary push transport
       try {
         const { flushVoipToken } = require('../calls/voip-push') as typeof import('../calls/voip-push');
         await flushVoipToken();

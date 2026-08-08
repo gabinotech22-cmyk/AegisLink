@@ -72,6 +72,12 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "production-foss": {
+      "extends": "production-apk",
+      "env": {
+        "EXPO_PUBLIC_DISTRIBUTION": "foss"
+      }
     }
   },
   "submit": {
