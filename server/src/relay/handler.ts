@@ -638,7 +638,7 @@ export function attachRelay(io: SocketServer) {
 
     socket.on(
       'envelope',
-      (raw, ack?: (response: { ok: boolean; queued?: boolean; error?: string }) => void) => {
+      async (raw, ack?: (response: { ok: boolean; queued?: boolean; error?: string }) => void) => {
         if (!envelopeLimiter.consume()) {
           ack?.({ ok: false, error: 'rate_limited' });
           return;
@@ -672,40 +672,52 @@ export function attachRelay(io: SocketServer) {
           }
           ack?.({ ok: true, queued: false });
         } else {
+          // AT-LEAST-ONCE: enqueue FIRST, always, then attempt live delivery —
+          // the same order envelope:mb has used since the 2026-07-24 audit, and
+          // for the same reason. A socket entry is not proof the phone is there:
+          // iOS tears the app down without closing the TCP connection, so
+          // `s.connected` stays true until the heartbeat gives up (up to ~35s
+          // with pingInterval 15s + pingTimeout 20s). Emitting into that window
+          // counted as delivery, so the message was neither queued nor pushed and
+          // the sender dropped it from its outbox on `queued:false` — silent
+          // loss, measured live on 2026-08-08. The row is deleted on the
+          // recipient's 'envelope:ack', so a real live delivery still frees it
+          // immediately and this costs nothing in the healthy case.
+          //
+          // Sender aegisId is intentionally omitted — the relay must not persist
+          // the social graph (FND-05). EXCEPTION: for X3DH-initial (`init`)
+          // messages we persist ONLY the sender's public key, so a first
+          // message to a new contact survives the offline queue (otherwise the
+          // recipient has no way to identify/decrypt it). Bounded to first
+          // contact; all normal messages still store no sender info.
+          const result = await messageRepo.enqueue({
+            id: env.id,
+            recipient: env.to,
+            ciphertext_b64: env.ciphertext,
+            nonce_b64: env.nonce,
+            created_at: env.createdAt,
+            // A-3: ephemeral messages expire from the queue at createdAt+ttl;
+            // 0 signals "use default TTL" — messageRepo.enqueue applies MESSAGE_TTL_MS.
+            expires_at: parsed.data.ephemeralTtl ? env.createdAt + parsed.data.ephemeralTtl : 0,
+            sender_pub_b64: parsed.data.init ? (mySenderPublicKeyB64 ?? null) : null,
+          });
+          if (!result.ok) {
+            ack?.({ ok: false, error: result.reason ?? 'queue_full' });
+            return;
+          }
           const delivered = recipientSockets ? deliver(env, recipientSockets) : false;
           if (!delivered) {
-            // Sender aegisId is intentionally omitted — the relay must not persist
-            // the social graph (FND-05). EXCEPTION: for X3DH-initial (`init`)
-            // messages we persist ONLY the sender's public key, so a first
-            // message to a new contact survives the offline queue (otherwise the
-            // recipient has no way to identify/decrypt it). Bounded to first
-            // contact; all normal messages still store no sender info.
-            void messageRepo.enqueue({
-              id: env.id,
-              recipient: env.to,
-              ciphertext_b64: env.ciphertext,
-              nonce_b64: env.nonce,
-              created_at: env.createdAt,
-              // A-3: ephemeral messages expire from the queue at createdAt+ttl;
-              // 0 signals "use default TTL" — messageRepo.enqueue applies MESSAGE_TTL_MS.
-              expires_at: parsed.data.ephemeralTtl ? env.createdAt + parsed.data.ephemeralTtl : 0,
-              sender_pub_b64: parsed.data.init ? (mySenderPublicKeyB64 ?? null) : null,
-            }).then((result) => {
-              if (!result.ok) {
-                ack?.({ ok: false, error: result.reason ?? 'queue_full' });
-                return;
-              }
-              // Fire silent push wake-up so the recipient's app reconnects and drains.
-              void notifyRecipient(env.to);
-              ack?.({ ok: true, queued: true });
-            });
-            return; // ack will be called in the .then()
-          } else {
-            ack?.({ ok: true, queued: false });
+            // Fire silent push wake-up so the recipient's app reconnects and drains.
+            void notifyRecipient(env.to);
+            ack?.({ ok: true, queued: true });
+            return;
           }
+          ack?.({ ok: true, queued: false });
 
           // Echo sent-confirmation to other devices of the sender so they can
-          // mark the conversation as "sent from this account".
+          // mark the conversation as "sent from this account". Kept on the
+          // delivered branch only, exactly as before the enqueue-first reorder —
+          // widening it to queued sends is a separate behaviour change.
           // NOTE: ciphertext is intentionally omitted — the body travels via a
           // separate self-addressed envelope (env.to === me).
           const mySockets = sockets.get(me);
@@ -800,18 +812,17 @@ export function attachRelay(io: SocketServer) {
             return;
           }
 
-          const liveRecipients = recipientSockets ? liveSockets(recipientSockets) : [];
-          if (liveRecipients.length > 0) {
-            for (const s of liveRecipients) s.emit('envelope:v2', env);
-            // Confirm delivery to the sender's own (authenticated) socket — this
-            // is the sender's own device, not a social-graph leak.
-            socket.emit('msg:delivered', { msgId: env.id, to: env.to });
-            ack?.({ ok: true, queued: false });
-            return;
-          }
-
-          // Offline: queue with epk so the recipient can open it on drain. No
-          // sender identity is stored (FND-05); epk is non-secret ephemeral key.
+          // AT-LEAST-ONCE: enqueue FIRST, always, then attempt live delivery —
+          // the same order envelope:mb has used since the 2026-07-24 audit. A
+          // socket entry is not proof the phone is there: iOS tears the app down
+          // without closing the TCP connection, and `s.connected` stays true
+          // until the heartbeat gives up (pingInterval 15s + pingTimeout 20s, so
+          // up to ~35s). Emitting into that window used to count as delivery, so
+          // the message was neither queued nor pushed, and the sender got
+          // `queued:false` and dropped it from its outbox — silent loss, measured
+          // live on 2026-08-08 (message sent to a force-quit iPhone left no row
+          // at all). The row is deleted on the recipient's 'envelope:ack', so a
+          // genuinely live delivery still frees it immediately.
           const result = await messageRepo.enqueue({
             id: env.id,
             recipient: env.to,
@@ -825,6 +836,16 @@ export function attachRelay(io: SocketServer) {
           });
           if (!result.ok) {
             ack?.({ ok: false, error: result.reason ?? 'queue_full' });
+            return;
+          }
+
+          const liveRecipients = recipientSockets ? liveSockets(recipientSockets) : [];
+          if (liveRecipients.length > 0) {
+            for (const s of liveRecipients) s.emit('envelope:v2', env);
+            // Confirm delivery to the sender's own (authenticated) socket — this
+            // is the sender's own device, not a social-graph leak.
+            socket.emit('msg:delivered', { msgId: env.id, to: env.to });
+            ack?.({ ok: true, queued: false });
             return;
           }
           void notifyRecipient(env.to);
