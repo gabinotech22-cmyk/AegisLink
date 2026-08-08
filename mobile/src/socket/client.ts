@@ -10,6 +10,7 @@ import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRa
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery, fetchMailboxOverTor } from './mailboxSocket';
+import { isEnvelopeAlreadyPersisted, markEnvelopePersisted } from './envelopeDedupe';
 import { startMailboxPushSubscription, stopMailboxPushSubscription } from '../notifications/mailboxPushSubscription';
 import { startCallWakeService, stopCallWakeService } from '../webrtc/callWakeService';
 import type { SealedWire } from '../crypto/sealedSender';
@@ -650,13 +651,18 @@ function armForegroundReconnect(): void {
   const { AppState } = require('react-native') as typeof import('react-native');
   AppState.addEventListener('change', (next: string) => {
     if (next !== 'active') return;
+    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+    const id = useIdentity.getState().identity;
+    // Independent of whatever the sockets do below: one request/response over
+    // Tor that empties the mailbox. See drainMailboxNow — this is the path that
+    // works when the persistent mailbox socket is losing the cold-bootstrap race
+    // or is stuck in reconnect backoff, which on iOS is most cold starts.
+    if (id) void drainMailboxNow(id);
     if (socket) {
       if (!socket.connected) socket.connect();
       return;
     }
     // No socket at all (e.g. cold resume before connect ran): bring it up.
-    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
-    const id = useIdentity.getState().identity;
     if (id) connect(id);
   });
 }
@@ -689,17 +695,35 @@ export function connectMailboxForIdentity(identity: Identity): void {
   // socket drops (dead circuit) and the relay queues a message, this wakes us to
   // reconnect+drain without waiting for the blind reconnect backoff. Idempotent;
   // no-op when Tor/mailbox mode is unavailable. Draining = re-open the mailbox.
-  startMailboxPushSubscription(() => connectMailboxForIdentity(identity));
+  startMailboxPushSubscription(() => {
+    connectMailboxForIdentity(identity);
+    void drainMailboxNow(identity);
+  });
+  // Race the socket with the stateless drain rather than depending on it. The
+  // socket path has to bootstrap Tor, build a circuit, handshake, challenge and
+  // authenticate before the first envelope moves; the stateless drain needs the
+  // same Tor but then just two round trips, and it still delivers when the
+  // socket attempt fails outright and falls into backoff. Both feed the same
+  // handleIncomingV2, and the relay's per-device ack bookkeeping means whichever
+  // arrives second simply finds nothing left to hand over.
+  void drainMailboxNow(identity);
 }
 
 /**
  * Stateless mailbox drain over Tor — the reliability FLOOR for async delivery.
  * Works even when the persistent mailbox socket never comes up (iOS suspends a
  * backgrounded app and kills its socket; a cold Tor bootstrap loses the race).
- * Call on a push wake and on foreground: it drains everything queued in one
- * request/response, feeding each sealed envelope through the SAME handleIncomingV2
- * pipeline the socket uses. No-op when mailbox mode is off; never throws.
- * Returns the number of envelopes persisted.
+ * Drains everything queued in one request/response, feeding each sealed envelope
+ * through the SAME handleIncomingV2 pipeline the socket uses. No-op when mailbox
+ * mode is off; never throws. Returns the number of envelopes persisted.
+ *
+ * Wired on every path that can find queued mail waiting: app foreground
+ * (armForegroundReconnect), socket connect / push wake (connectMailboxForIdentity)
+ * and the ntfy wake topic. It runs ALONGSIDE the mailbox socket rather than
+ * instead of it — the socket has to bootstrap Tor, build a circuit, handshake,
+ * challenge and authenticate before the first envelope moves, while this needs
+ * the same Tor and then two round trips. Duplicate delivery between the two is
+ * expected and handled by recentEnvelopeIds in handleIncomingV2.
  */
 export async function drainMailboxNow(identity: Identity): Promise<number> {
   if (!MAILBOX_ENABLED) return 0;
@@ -3325,6 +3349,10 @@ async function ownMailboxRootField(): Promise<Record<string, string>> {
 }
 
 async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
+  // Already opened this exact envelope in this session (socket and stateless
+  // drain racing each other). Returning here still lets the caller ack, which is
+  // what actually frees the row on the relay.
+  if (isEnvelopeAlreadyPersisted(env.id)) return;
   const contacts = useContacts.getState().contacts;
   // Resolve the sender's Ed25519 signing key by the `from` recovered from inside
   // the sealed box. Unknown sender (or no signing key on file) → reject: v2 is
@@ -3359,6 +3387,9 @@ async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
     createdAt: env.createdAt,
   };
   await decryptAndAppend(synthEnv, inner, contact, identity);
+  // Only after the message is durably down: a throw above leaves the id unmarked
+  // so the relay's re-drain is processed rather than silently swallowed.
+  markEnvelopePersisted(env.id);
 }
 
 async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
