@@ -17,11 +17,14 @@ import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import type { Theme } from '../theme/vault';
 import { themedAlert } from '../components/AlertHost';
 
-// Public legal documents. GitHub-blob URLs are what the landing footer links to
-// and are accepted by the stores as the required public policy URL.
+// Public legal documents, on the product site. These used to point at raw
+// GitHub blobs, which sent users of a shipped app to a source-code host showing
+// unrendered markdown — and left the in-app links out of sync with the ones the
+// stores were given. web/privacy.html and web/terms.html are the canonical
+// published versions (the landing footer links to these same paths).
 const LEGAL_URLS = {
-  privacy: 'https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/privacy-policy.md',
-  terms: 'https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/terms-of-service.md',
+  privacy: 'https://aegis-link.it/privacy.html',
+  terms: 'https://aegis-link.it/terms.html',
 } as const;
 
 interface Props {

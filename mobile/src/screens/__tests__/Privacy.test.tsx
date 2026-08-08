@@ -223,17 +223,19 @@ describe('PrivacyScreen', () => {
     expect(alertSpy).toHaveBeenCalledWith('privacy.pqStatusAlert', 'privacy.pqStatusAlertOk');
   });
 
-  it('opens the public privacy-policy and terms URLs', () => {
+  it('opens the legal pages on the product site, not raw GitHub blobs', () => {
+    // Shipped-app regression: these pointed at github.com/.../blob/... , so
+    // tapping them dropped users on a source-code host rendering markdown, and
+    // drifted from the URLs the app stores were given.
     const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as never);
     const { getByText } = render(<PrivacyScreen {...makeProps()} />);
     fireEvent.press(getByText('privacy.privacyPolicy'));
-    expect(openSpy).toHaveBeenCalledWith(
-      'https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/privacy-policy.md',
-    );
+    expect(openSpy).toHaveBeenCalledWith('https://aegis-link.it/privacy.html');
     fireEvent.press(getByText('privacy.termsOfService'));
-    expect(openSpy).toHaveBeenCalledWith(
-      'https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/terms-of-service.md',
-    );
+    expect(openSpy).toHaveBeenCalledWith('https://aegis-link.it/terms.html');
+    for (const [url] of openSpy.mock.calls) {
+      expect(String(url)).not.toContain('github.com');
+    }
     openSpy.mockRestore();
   });
 });
