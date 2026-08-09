@@ -156,11 +156,22 @@ La mayor concentración de tragado de errores está en la capa de UI. Hay que
 clasificar cada uno en: legítimo best-effort, **debe avisar al usuario**, o
 **debe fallar cerrado**.
 
-### DOC-1 · `docs/SESSION_HANDOFF.md` describe infraestructura muerta — bajo
+### DOC-1 · `SESSION_HANDOFF.md` describía infraestructura muerta — bajo, **cerrado**
 
-Fechado 2026-06-05, sitúa el relay en AWS `51.20.60.155` con SSH `ubuntu@` y
-`aegislink.pem`, cuando la infra viva es Hetzner (`root@aegislink.duckdns.org`).
-Es exactamente el tipo de doc que hace re-implementar lo ya hecho.
+Fechado 2026-06-05, situaba el relay en AWS `51.20.60.155` con SSH `ubuntu@` y
+`aegislink.pem`, cuando la infra viva es Hetzner (`root@aegislink.duckdns.org`),
+y listaba como "sin commitear" cambios mergeados hace meses.
+
+**Matiz importante que corrige una primera impresión mía:** el archivo está
+**gitignored a propósito** (`.gitignore:50`, *"contains infra/access details, keep
+out of history"*), así que **nunca estuvo en el repo**. No podía engañar a un
+revisor externo ni al CI: el drift era local, en la máquina del dueño. Eso baja
+la severidad de lo que inicialmente parecía una violación de la regla doc↔código
+en el repositorio.
+
+Cerrado: el archivo local lleva ahora una cabecera que enumera qué es falso y
+redirige aquí, y la entrada correspondiente del `ROADMAP.md` (esa sí trackeada)
+queda marcada.
 
 ## 5. Comparativa con los referentes
 
