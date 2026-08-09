@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, Pressable, ActivityIndicator, Animated, Easing } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -28,6 +29,7 @@ type Step = 'generating' | 'name' | 'color';
 
 export function CreateProfileScreen({ onBack, onCreated }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const createProfile = useProfiles((s) => s.createProfile);
   const switchProfile = useProfiles((s) => s.switchProfile);
@@ -94,7 +96,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
       await switchProfile(profile.slotId);
       onCreated();
     } catch (e) {
-      themedAlert('Error', (e as Error).message);
+      themedAlert(i18nT('common.error'), (e as Error).message);
       setBusy(false);
     }
   }
@@ -103,7 +105,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <TopBar
         t={t}
-        title="Nuevo perfil"
+        title={i18nT('createProfile.title')}
         left={
           <Pressable onPress={onBack} hitSlop={8} style={{ padding: 4 }}>
             <I.ChevronL size={22} color={t.textDim} />
@@ -137,10 +139,10 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
             <I.Shield size={56} color={t.accent} stroke={1.5} />
           </Animated.View>
           <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', color: t.text, textAlign: 'center' }}>
-            Generando identidad
+            {i18nT('createProfile.generatingTitle')}
           </Text>
           <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, textAlign: 'center', marginTop: 10, lineHeight: 20 }}>
-            Se están creando tus claves criptográficas X25519 y Ed25519 en este dispositivo.
+            {i18nT('createProfile.generatingDesc')}
           </Text>
           <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 1.2, marginTop: 28 }}>
             LAS CLAVES NUNCA SALEN DEL DISPOSITIVO
@@ -151,10 +153,10 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
       {step === 'name' && (
         <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24 }}>
           <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', color: t.text, marginBottom: 6 }}>
-            Elige un nombre
+            {i18nT('createProfile.nameTitle')}
           </Text>
           <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, marginBottom: 28, lineHeight: 20 }}>
-            Solo visible para ti. Úsalo para identificar este perfil en el selector.
+            {i18nT('createProfile.nameDesc')}
           </Text>
 
           {/* AegisID preview */}
@@ -166,15 +168,15 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
             padding: 14,
             marginBottom: 24,
           }}>
-            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 1, marginBottom: 6 }}>AEGIS ID</Text>
+            <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 1, marginBottom: 6 }}>{i18nT('createProfile.aegisIdLabel')}</Text>
             <Text style={{ fontFamily: t.fontMono, fontSize: 16, color: t.accent, letterSpacing: 1 }}>{newAegisId}</Text>
           </View>
 
-          <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginBottom: 8 }}>Nombre del perfil</Text>
+          <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginBottom: 8 }}>{i18nT('createProfile.nameLabel')}</Text>
           <TextInput
             value={displayName}
             onChangeText={setDisplayName}
-            placeholder="ej. Personal, Trabajo, Anónimo…"
+            placeholder={i18nT('createProfile.namePlaceholder')}
             placeholderTextColor={t.textFaint}
             maxLength={32}
             autoFocus
@@ -194,7 +196,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
 
           <Pressable
             onPress={() => setStep('color')}
-            accessibilityLabel="Continuar al paso de color"
+            accessibilityLabel={i18nT('createProfile.continueA11y')}
             style={({ pressed }) => ({
               backgroundColor: t.accent,
               borderRadius: t.radius,
@@ -204,7 +206,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
             })}
           >
             <Text style={{ fontFamily: t.font, fontWeight: '700', fontSize: 15, color: t.accentInk }}>
-              Continuar
+              {i18nT('createProfile.continue')}
             </Text>
           </Pressable>
         </View>
@@ -213,10 +215,10 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
       {step === 'color' && (
         <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24 }}>
           <Text style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', color: t.text, marginBottom: 6 }}>
-            Color de avatar
+            {i18nT('createProfile.colorTitle')}
           </Text>
           <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, marginBottom: 32, lineHeight: 20 }}>
-            Identifica rápidamente este perfil por su color en el selector.
+            {i18nT('createProfile.colorDesc')}
           </Text>
 
           {/* Avatar preview — the same identicon (seeded by the public key,
@@ -240,7 +242,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
               <Pressable
                 key={color}
                 onPress={() => setAvatarColor(color)}
-                accessibilityLabel={`Color ${color}`}
+                accessibilityLabel={i18nT('createProfile.colorA11y', { color })}
                 style={{
                   width: 48,
                   height: 48,
@@ -262,7 +264,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
           <Pressable
             onPress={handleConfirm}
             disabled={busy}
-            accessibilityLabel="Confirmar y crear perfil"
+            accessibilityLabel={i18nT('createProfile.confirmA11y')}
             style={({ pressed }) => ({
               backgroundColor: t.accent,
               borderRadius: t.radius,
@@ -278,7 +280,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
               <ActivityIndicator color={t.accentInk} size="small" />
             ) : null}
             <Text style={{ fontFamily: t.font, fontWeight: '700', fontSize: 15, color: t.accentInk }}>
-              {busy ? 'Creando…' : 'Crear perfil'}
+              {busy ? i18nT('createProfile.creating') : i18nT('createProfile.create')}
             </Text>
           </Pressable>
         </View>

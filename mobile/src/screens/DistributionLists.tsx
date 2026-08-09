@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable, FlatList, Modal, TextInput, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
@@ -15,6 +16,7 @@ interface Props {
 
 export function DistributionListsScreen({ onBack, onOpenList }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { lists, hydrate, create, remove } = useDistribution();
   const { contacts } = useContacts();
@@ -36,11 +38,11 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
   async function handleCreate() {
     const name = newName.trim();
     if (!name) {
-      themedAlert('Name required', 'Please enter a name for this list.');
+      themedAlert(i18nT('distLists.nameRequiredTitle'), i18nT('distLists.nameRequiredDesc'));
       return;
     }
     if (selectedMembers.length === 0) {
-      themedAlert('No members', 'Select at least one contact.');
+      themedAlert(i18nT('distLists.noMembersTitle'), i18nT('distLists.noMembersDesc'));
       return;
     }
     await create(name, selectedMembers);
@@ -51,12 +53,12 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
 
   function handleDelete(list: DistributionList) {
     themedAlert(
-      `Delete "${list.name}"?`,
-      'This will permanently remove this distribution list.',
+      i18nT('distLists.deleteTitle', { name: list.name }),
+      i18nT('distLists.deleteDesc'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: i18nT('common.cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: i18nT('common.delete'),
           style: 'destructive',
           onPress: () => void remove(list.id),
         },
@@ -68,9 +70,9 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <TopBar
         t={t}
-        title="Distribution Lists"
+        title={i18nT('distLists.title')}
         left={
-          <Pressable onPress={onBack} hitSlop={8} style={{ padding: 4 }} accessibilityLabel="Go back">
+          <Pressable onPress={onBack} hitSlop={8} style={{ padding: 4 }} accessibilityLabel={i18nT('distLists.backA11y')}>
             <I.ChevronL size={22} color={t.textDim} />
           </Pressable>
         }
@@ -79,7 +81,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
             onPress={() => setCreating(true)}
             hitSlop={8}
             style={{ padding: 4 }}
-            accessibilityLabel="Create new distribution list"
+            accessibilityLabel={i18nT('distLists.createA11y')}
           >
             <I.Plus size={22} color={t.accent} />
           </Pressable>
@@ -97,7 +99,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
           </Text>
           <Pressable
             onPress={() => setCreating(true)}
-            accessibilityLabel="Create first distribution list"
+            accessibilityLabel={i18nT('distLists.createFirstA11y')}
             style={{
               paddingHorizontal: 22,
               paddingVertical: 11,
@@ -152,7 +154,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                   {item.name}
                 </Text>
                 <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, marginTop: 3 }}>
-                  {item.members.length} {item.members.length === 1 ? 'MEMBER' : 'MEMBERS'}
+                  {item.members.length} {i18nT(item.members.length === 1 ? 'distLists.member' : 'distLists.members')}
                 </Text>
               </View>
               <I.Chevron size={16} color={t.textFaint} />
@@ -180,7 +182,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
               gap: 12,
             }}
           >
-            <Pressable onPress={() => setCreating(false)} hitSlop={8} style={{ padding: 4 }} accessibilityLabel="Cancel">
+            <Pressable onPress={() => setCreating(false)} hitSlop={8} style={{ padding: 4 }} accessibilityLabel={i18nT('distLists.cancelA11y')}>
               <I.X size={22} color={t.textDim} />
             </Pressable>
             <Text style={{ flex: 1, fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
@@ -190,9 +192,9 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
               onPress={() => void handleCreate()}
               hitSlop={8}
               style={{ padding: 4 }}
-              accessibilityLabel="Save distribution list"
+              accessibilityLabel={i18nT('distLists.saveA11y')}
             >
-              <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.accent }}>Save</Text>
+              <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.accent }}>{i18nT('distLists.save')}</Text>
             </Pressable>
           </View>
 
@@ -211,7 +213,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
               <TextInput
                 value={newName}
                 onChangeText={setNewName}
-                placeholder="List name…"
+                placeholder={i18nT('distLists.namePlaceholder')}
                 placeholderTextColor={t.textFaint}
                 style={{
                   fontFamily: t.font,
@@ -221,7 +223,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                 }}
                 autoFocus
                 returnKeyType="done"
-                accessibilityLabel="Distribution list name"
+                accessibilityLabel={i18nT('distLists.nameA11y')}
               />
             </View>
 
@@ -242,7 +244,10 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                   <Pressable
                     key={contact.aegisId}
                     onPress={() => toggleMember(contact.aegisId)}
-                    accessibilityLabel={`${isSelected ? 'Deselect' : 'Select'} ${contact.name}`}
+                    accessibilityLabel={i18nT(
+                      isSelected ? 'distLists.deselectA11y' : 'distLists.selectA11y',
+                      { name: contact.name },
+                    )}
                     style={({ pressed }) => ({
                       flexDirection: 'row',
                       alignItems: 'center',

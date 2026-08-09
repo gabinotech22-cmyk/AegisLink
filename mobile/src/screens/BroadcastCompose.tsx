@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { decodeBase64 } from 'tweetnacl-util';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
 import { I } from '../components/icons';
@@ -20,6 +21,7 @@ type SendState = 'idle' | 'sending' | 'done';
 
 export function BroadcastComposeScreen({ list, onBack }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
   const { contacts } = useContacts();
@@ -35,11 +37,11 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
   async function handleSend() {
     const body = text.trim();
     if (!body) {
-      themedAlert('Empty message', 'Type a message before sending.');
+      themedAlert(i18nT('broadcast.emptyTitle'), i18nT('broadcast.emptyDesc'));
       return;
     }
     if (!identity) {
-      themedAlert('Not ready', 'Identity not loaded. Please wait.');
+      themedAlert(i18nT('broadcast.notReadyTitle'), i18nT('broadcast.notReadyDesc'));
       return;
     }
 
@@ -98,7 +100,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
           t={t}
           title={list.name}
           left={
-            <Pressable onPress={onBack} hitSlop={8} style={{ padding: 4 }} accessibilityLabel="Go back">
+            <Pressable onPress={onBack} hitSlop={8} style={{ padding: 4 }} accessibilityLabel={i18nT('broadcast.backA11y')}>
               <I.ChevronL size={22} color={t.textDim} />
             </Pressable>
           }
@@ -127,7 +129,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
                 {list.name}
               </Text>
               <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, marginTop: 2 }}>
-                {total} {total === 1 ? 'RECIPIENT' : 'RECIPIENTS'} · INDIVIDUAL MESSAGES
+                {total} {i18nT(total === 1 ? 'broadcast.recipient' : 'broadcast.recipients')} · {i18nT('broadcast.individualMessages')}
               </Text>
             </View>
           </View>
@@ -161,7 +163,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
             <TextInput
               value={text}
               onChangeText={setText}
-              placeholder="Write your broadcast message…"
+              placeholder={i18nT('broadcast.placeholder')}
               placeholderTextColor={t.textFaint}
               multiline
               editable={sendState === 'idle'}
@@ -173,7 +175,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
                 minHeight: 112,
                 textAlignVertical: 'top',
               }}
-              accessibilityLabel="Broadcast message"
+              accessibilityLabel={i18nT('broadcast.messageA11y')}
             />
           </View>
 
@@ -262,7 +264,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
           ) : (
             <Pressable
               onPress={handleDone}
-              accessibilityLabel="Done, go back"
+              accessibilityLabel={i18nT('broadcast.doneA11y')}
               style={({ pressed }) => ({
                 paddingVertical: 14,
                 backgroundColor: t.surface,
@@ -273,7 +275,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
                 opacity: pressed ? 0.8 : 1,
               })}
             >
-              <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>Done</Text>
+              <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.text }}>{i18nT('broadcast.done')}</Text>
             </Pressable>
           )}
         </ScrollView>
