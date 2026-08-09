@@ -24,14 +24,8 @@
 
 process.env['AEGIS_DB_PATH'] = ':memory:';
 
-const mockNotifyRecipient = jest.fn(async () => undefined);
-jest.mock('../push/expo.js', () => ({
-  __esModule: true,
-  notifyRecipient: (...args: unknown[]) => mockNotifyRecipient(...(args as [])),
-  sendCallWakeUp: jest.fn(async () => undefined),
-  sendGroupCallWakeUp: jest.fn(async () => undefined),
-}));
-
+import { jest } from '@jest/globals';
+import { Expo } from 'expo-server-sdk';
 import express from 'express';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -42,7 +36,7 @@ import naclUtil from 'tweetnacl-util';
 
 const { encodeBase64, decodeBase64 } = naclUtil;
 
-import { identityRepo, initDb } from '../db/client.js';
+import { identityRepo, pushRepo, initDb } from '../db/client.js';
 import { attachRelay } from '../relay/handler.js';
 
 const BASE32_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -118,10 +112,20 @@ afterAll(async () => {
   await new Promise((resolve) => setTimeout(resolve, 50));
 }, 10_000);
 
-beforeEach(() => {
-  mockNotifyRecipient.mockClear();
-  jest.useRealTimers();
+afterEach(() => {
+  // Restore AFTER assertions — mockRestore clears spy.mock.calls.
+  jest.restoreAllMocks();
 });
+
+/**
+ * Spy on the Expo SDK rather than mocking ../push/expo.js: the server package is
+ * native ESM, where `jest.mock` does not hoist and `jest` is not a global. This
+ * is the pattern the other push suites use (notifyRecipientPayload.test.ts), and
+ * it exercises the real notifyRecipient path end to end instead of a stub.
+ */
+function spyOnPush(): jest.SpiedFunction<typeof Expo.prototype.sendPushNotificationsAsync> {
+  return jest.spyOn(Expo.prototype, 'sendPushNotificationsAsync').mockResolvedValue([]);
+}
 
 async function registerAgent(keys: AgentKeys): Promise<void> {
   await identityRepo.insert({
@@ -129,6 +133,14 @@ async function registerAgent(keys: AgentKeys): Promise<void> {
     public_key_b64: encodeBase64(keys.boxKeyPair.publicKey),
     signing_public_key_b64: encodeBase64(keys.signKeyPair.publicKey),
     created_at: Date.now(),
+  });
+  // notifyRecipient is a no-op without a token, so every recipient here needs
+  // one for "was a push attempted?" to mean anything.
+  await pushRepo.upsert({
+    aegis_id: keys.aegisId,
+    expo_token: `ExponentPushToken[${keys.deviceId}]`,
+    platform: 'ios',
+    updated_at: Date.now(),
   });
 }
 
@@ -178,15 +190,18 @@ describe('push wake-up when a "live" delivery is never confirmed', () => {
     // a force-quit iPhone looks like before the heartbeat notices.
     const bobSock = await connectAgent(bob);
     const aliceSock = await connectAgent(alice);
+    const spy = spyOnPush();
 
     const ack = await sendEnvelope(aliceSock, bob.aegisId, 'ghost-push-1');
     expect(ack.ok).toBe(true);
     expect(ack.queued).toBe(false); // relay believed it delivered live
 
-    expect(mockNotifyRecipient).not.toHaveBeenCalled(); // nothing yet — it waits
+    expect(spy).not.toHaveBeenCalled(); // nothing yet — it waits for the ack
 
     await new Promise((r) => setTimeout(r, WAIT_PAST_FALLBACK_MS));
-    expect(mockNotifyRecipient).toHaveBeenCalledWith(bob.aegisId);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const sent = spy.mock.calls[0]![0];
+    expect(sent.some((m) => m.to === `ExponentPushToken[${bob.deviceId}]`)).toBe(true);
 
     bobSock.disconnect();
     aliceSock.disconnect();
@@ -200,6 +215,7 @@ describe('push wake-up when a "live" delivery is never confirmed', () => {
 
     const bobSock = await connectAgent(bob);
     const aliceSock = await connectAgent(alice);
+    const spy = spyOnPush();
 
     // A real client acks as soon as it has persisted the envelope.
     bobSock.on('envelope', (w: { id: string }) => bobSock.emit('envelope:ack', { id: w.id }));
@@ -209,7 +225,7 @@ describe('push wake-up when a "live" delivery is never confirmed', () => {
 
     // No push at all: the ack proved the device was really there, so the push
     // provider never learns this conversation happened.
-    expect(mockNotifyRecipient).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
 
     bobSock.disconnect();
     aliceSock.disconnect();
@@ -222,12 +238,15 @@ describe('push wake-up when a "live" delivery is never confirmed', () => {
     await registerAgent(bob);
 
     const aliceSock = await connectAgent(alice); // bob never connects
+    const spy = spyOnPush();
 
     const ack = await sendEnvelope(aliceSock, bob.aegisId, 'offline-push-1');
     expect(ack.queued).toBe(true);
     // Immediate, not deferred — the offline path must not get slower.
-    await new Promise((r) => setTimeout(r, 200));
-    expect(mockNotifyRecipient).toHaveBeenCalledWith(bob.aegisId);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(spy).toHaveBeenCalledTimes(1);
+    const sent = spy.mock.calls[0]![0];
+    expect(sent.some((m) => m.to === `ExponentPushToken[${bob.deviceId}]`)).toBe(true);
 
     aliceSock.disconnect();
   }, 20_000);
