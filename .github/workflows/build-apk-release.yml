@@ -185,10 +185,16 @@ jobs:
 
       # apksigner (not jarsigner) because modern APKs sign with the v2/v3 block,
       # which jarsigner cannot see — it would report an unsigned-looking APK.
+      # Interpolated values reach the shell through `env`, never spliced into the
+      # script text: `${{ … }}` is substituted before bash parses the line, so a
+      # value containing $(…) would execute. The paths here come from `find`
+      # over gradle's own output, but the safe form costs nothing and stops the
+      # pattern being copied somewhere it does matter.
       - name: Verify signature and emit checksum
+        env:
+          APK_PATH: ${{ steps.apk.outputs.path }}
         run: |
-          APK="${{ steps.apk.outputs.path }}"
-          APK="${APK#mobile/}"
+          APK="${APK_PATH#mobile/}"
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
           echo "apksigner: $APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
@@ -202,18 +208,42 @@ jobs:
       # F-Droid reviewer would reproduce by hand, produced on every build.
       - name: Verify the foss APK carries no Play Services
         if: ${{ inputs.distribution == 'foss' }}
+        env:
+          APK_PATH: ${{ steps.apk.outputs.path }}
         run: |
-          APK="${{ steps.apk.outputs.path }}"
-          APK="${APK#mobile/}"
+          APK="${APK_PATH#mobile/}"
           echo "Scanning $APK for Google Play Services / Firebase classes…"
-          if unzip -l "$APK" | grep -iE 'firebase|com/google/android/gms' ; then
+
+          # Extraction and matching are kept as SEPARATE commands on purpose.
+          # `unzip … | grep -q` hides an unzip failure: grep just sees no input,
+          # exits 1, and the `if` reads that as "nothing found" — i.e. an APK we
+          # could not read at all would be reported CLEAN. For a check whose only
+          # job is to prove an absence, silence must never look like proof.
+          LISTING="$RUNNER_TEMP/apk-listing.txt"
+          if ! unzip -l "$APK" > "$LISTING"; then
+            echo "::error::could not read the APK archive listing — cannot prove the foss build is clean."
+            exit 1
+          fi
+          if grep -iE 'firebase|com/google/android/gms' "$LISTING"; then
             echo "::error::foss build still ships Google Play Services — withFossPush.js did not strip it."
             exit 1
           fi
-          # Class names live inside classes*.dex, not in the zip listing, so grep
+
+          # Class names live inside classes*.dex, not in the zip listing, so scan
           # the dex bytes too — a shaded/inlined reference would hide from the
           # listing above.
-          if unzip -p "$APK" 'classes*.dex' | grep -aqiE 'com/google/firebase|com/google/android/gms' ; then
+          DEXDIR="$RUNNER_TEMP/apk-dex"
+          rm -rf "$DEXDIR" && mkdir -p "$DEXDIR"
+          if ! unzip -o -j "$APK" 'classes*.dex' -d "$DEXDIR"; then
+            echo "::error::could not extract classes*.dex from the APK."
+            exit 1
+          fi
+          # An APK with no dex at all would otherwise sail through the grep below.
+          if ! compgen -G "$DEXDIR/classes*.dex" > /dev/null; then
+            echo "::error::no classes*.dex extracted — the APK is not what this check assumes."
+            exit 1
+          fi
+          if grep -aqiE 'com/google/firebase|com/google/android/gms' "$DEXDIR"/classes*.dex; then
             echo "::error::foss build has Google classes inside the dex."
             exit 1
           fi
@@ -233,8 +263,20 @@ jobs:
         if: ${{ inputs.attach && inputs.tag != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          DIST: ${{ inputs.distribution || 'play' }}
         run: |
-          APK="${{ steps.apk.outputs.path }}"
-          APK="${APK#mobile/}"
-          gh release upload "${{ inputs.tag }}" "$APK" "${APK}.sha256" --clobber
-          echo "Attached to ${{ inputs.tag }}"
+          APK="${APK_PATH#mobile/}"
+          # gradle names every build app-release.apk, so attaching play and then
+          # foss to the same tag made the second --clobber DELETE the first: a
+          # release page that silently ends up with one flavour under a name that
+          # claims nothing about which. Publish each under its own name, and
+          # checksum the file under the name users actually download.
+          DEST_DIR="$(dirname "$APK")"
+          DEST_NAME="aegislink-${RELEASE_TAG}-${DIST}.apk"
+          cp "$APK" "$DEST_DIR/$DEST_NAME"
+          (cd "$DEST_DIR" && sha256sum "$DEST_NAME" | tee "$DEST_NAME.sha256")
+          gh release upload "$RELEASE_TAG" \
+            "$DEST_DIR/$DEST_NAME" "$DEST_DIR/$DEST_NAME.sha256" --clobber
+          echo "Attached $DEST_NAME to $RELEASE_TAG"
