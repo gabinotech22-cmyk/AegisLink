@@ -122,7 +122,7 @@ porque YA se inyectó ese fallo una vez. Toda PR debe poder responder "sí" a la
 7. **Confianza derivada por el server, no suministrada por el cliente.** Identificadores de deduplicación/voto (`voterHash`, etc.) se **derivan server-side** de una identidad autenticada, nunca se aceptan tal cual del cliente.
 8. **Comparaciones constant-time** para todo material secreto/clave (XOR-acumulado, no early-return).
 9. **Zeroizar intermedios de clave** (DH outputs, ephemeral secrets, shared secrets) en `try/finally`, como ya hace `ratchet.ts`.
-10. **Minimizar metadatos at-rest.** Las columnas que no necesitan estar en claro se cifran; el objetivo es SQLCipher de DB completa. Ningún dato nuevo (timestamps de acceso, tamaños, frecuencias) se persiste sin justificar contra "cero metadatos".
+10. **Minimizar metadatos at-rest.** El fichero de DB completo va cifrado con SQLCipher (`useSQLCipher: true` en app.json; clave de 256 bits por slot que vive en SecureStore y nunca toca SQLite — `mobile/src/db/core.ts`, test `db/__tests__/sqlcipher.test.ts`), y el cifrado NaCl por campo se mantiene como defensa en profundidad. Ningún dato nuevo (timestamps de acceso, tamaños, frecuencias) se persiste sin justificar contra "cero metadatos".
 11. **Un test por fix.** Todo arreglo de seguridad incluye un test de regresión. El desktop **debe** tener suite de tests para IPC, serialización de ratchet y cifrado de DB.
 12. **Ante la duda, mirar a los expertos.** Para decisiones arquitectónicas de privacidad/cripto, revisar el código/diseño de **Session** y **SimpleX** (ambos open source y battle-tested) antes de inventar. Copiar lo bueno; documentar la referencia en el commit.
 
