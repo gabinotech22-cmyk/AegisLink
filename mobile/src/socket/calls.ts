@@ -27,6 +27,7 @@ import { fetchTurnConfig } from '../webrtc/ice';
 import { startInCallAudio, stopInCallAudio } from '../webrtc/inCall';
 import { startCallService, stopCallService } from '../webrtc/callForegroundService';
 import { themedAlert } from '../components/AlertHost';
+import i18n from '../i18n';
 import {
   sealCallInvite,
   openCallInvite,
@@ -522,10 +523,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
         const neverConnected = status !== 'in-call' && status !== 'ended';
         endCall('rtc_failure');
         if (neverConnected) {
-          themedAlert(
-            'Call failed',
-            'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
-          );
+          themedAlert(i18n.t('call.failedTitle'), i18n.t('call.failedMedia'));
         }
       }
     },
@@ -538,7 +536,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
   // for video, and an Android foreground service so the call survives the app
   // being backgrounded. iOS background is covered by UIBackgroundModes.
   startInCallAudio(media === 'video' ? 'video' : 'audio');
-  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
+  startCallService('AegisLink', i18n.t(media === 'video' ? 'call.ongoingVideo' : 'call.ongoingAudio'));
 
   const offer = await createOffer(peer.pc);
   if (canSeal) {
@@ -549,7 +547,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     const callKey = callKeys.get(callId);
     if (!me || !recipientPub || !callKey) {
       endCall('encrypt_failure');
-      themedAlert('Call failed', 'Could not encrypt the call setup. Make sure the contact is in your contacts list.');
+      themedAlert(i18n.t('call.failedTitle'), i18n.t('call.failedEncrypt'));
       return;
     }
     const sealed = sealCallInvite(recipientPub, me.aegisId, me.signingSecretKey, offer, Date.now(), callKey);
@@ -561,10 +559,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     // (golden rules #4 sealed-sender-in-calls + #6 fail-closed). The call ends
     // cleanly with a clear, actionable message.
     endCall('encrypt_failure');
-    themedAlert(
-      'Call failed',
-      'Could not start a metadata-free call with this contact. They may need to update AegisLink, or try re-adding them to your contacts.',
-    );
+    themedAlert(i18n.t('call.failedTitle'), i18n.t('call.failedNoSealed'));
     return; // don't throw — call is already ended cleanly
   }
 
@@ -669,10 +664,7 @@ export async function acceptCall(): Promise<void> {
         const neverConnected = status !== 'in-call' && status !== 'ended';
         endCall('rtc_failure');
         if (neverConnected) {
-          themedAlert(
-            'Call failed',
-            'Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.',
-          );
+          themedAlert(i18n.t('call.failedTitle'), i18n.t('call.failedMedia'));
         }
       }
     },
@@ -684,7 +676,7 @@ export async function acceptCall(): Promise<void> {
   // for video, and an Android foreground service so the call survives the app
   // being backgrounded. iOS background is covered by UIBackgroundModes.
   startInCallAudio(media === 'video' ? 'video' : 'audio');
-  startCallService('AegisLink', media === 'video' ? 'Videollamada en curso' : 'Llamada en curso');
+  startCallService('AegisLink', i18n.t(media === 'video' ? 'call.ongoingVideo' : 'call.ongoingAudio'));
 
   await setRemoteOffer(peer.pc, pendingOffer);
   // Flush ICE candidates that arrived while we were still ringing
@@ -694,8 +686,8 @@ export async function acceptCall(): Promise<void> {
   if (!emitSealedSignal(socket, 'answer', callId, peerId, answer)) {
     endCall('encrypt_failure');
     themedAlert(
-      'Call failed',
-      'Could not encrypt the call setup. Make sure the contact is in your contacts list.',
+      i18n.t('call.failedTitle'),
+      i18n.t('call.failedEncrypt'),
     );
     return; // don't throw — call is already ended cleanly
   }

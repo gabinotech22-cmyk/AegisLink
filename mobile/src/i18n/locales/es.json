@@ -1096,7 +1096,13 @@
     "speakerOn": "Altavoz",
     "verifyDesc": "Lee este código en voz alta con tu contacto. Si coincide en ambos teléfonos, nadie está interceptando la llamada.",
     "verifyFingerprint": "Verificar huella",
-    "verifyTitle": "Verificar huella"
+    "verifyTitle": "Verificar huella",
+    "failedTitle": "La llamada ha fallado",
+    "failedMedia": "No se pudo establecer la conexión de medios. Asegúrate de que ambos dispositivos están en la misma red o de que hay un servidor TURN configurado.",
+    "failedEncrypt": "No se pudo cifrar el establecimiento de la llamada. Comprueba que el contacto está en tu lista de contactos.",
+    "failedNoSealed": "No se pudo iniciar una llamada sin metadatos con este contacto. Puede que necesite actualizar AegisLink, o prueba a añadirlo de nuevo a tus contactos.",
+    "ongoingVideo": "Videollamada en curso",
+    "ongoingAudio": "Llamada en curso"
   },
   "incomingCall": {
     "incoming": "Llamada entrante",
@@ -1673,6 +1679,9 @@
     "deleteScheduledTitle": "Eliminar post programado",
     "deleteScheduledDesc": "¿Eliminar este post programado? No se podrá deshacer.",
     "draftChip": "BORRADOR",
+    "joinConfirmTitle": "Unirse al canal",
+    "joinConfirmDesc": "¿Quieres unirte a este canal?",
+    "joinConfirmJoin": "Unirse",
     "applySentTitle": "Solicitud enviada",
     "applySentDesc": "Este canal requiere aprobación. Te unirás automáticamente cuando el dueño apruebe tu solicitud.",
     "pendingApplications": "ESPERANDO APROBACIÓN",

@@ -1096,7 +1096,13 @@
     "speakerOn": "Speaker",
     "verifyDesc": "Read this code aloud with your contact. If it matches on both phones, no one is intercepting the call.",
     "verifyFingerprint": "Verify fingerprint",
-    "verifyTitle": "Verify fingerprint"
+    "verifyTitle": "Verify fingerprint",
+    "failedTitle": "Call failed",
+    "failedMedia": "Could not establish a media connection. Make sure both devices are on the same network or a TURN relay server is configured.",
+    "failedEncrypt": "Could not encrypt the call setup. Make sure the contact is in your contacts list.",
+    "failedNoSealed": "Could not start a metadata-free call with this contact. They may need to update AegisLink, or try re-adding them to your contacts.",
+    "ongoingVideo": "Video call in progress",
+    "ongoingAudio": "Call in progress"
   },
   "incomingCall": {
     "incoming": "Incoming call",
@@ -1673,6 +1679,9 @@
     "deleteScheduledTitle": "Delete scheduled post",
     "deleteScheduledDesc": "Delete this scheduled post? This cannot be undone.",
     "draftChip": "DRAFT",
+    "joinConfirmTitle": "Join channel",
+    "joinConfirmDesc": "Do you want to join this channel?",
+    "joinConfirmJoin": "Join",
     "applySentTitle": "Request sent",
     "applySentDesc": "This channel requires approval. You will join automatically when the owner approves your request.",
     "pendingApplications": "WAITING FOR APPROVAL",

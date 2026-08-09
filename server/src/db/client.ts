@@ -347,6 +347,17 @@ export const messageRepo = {
     }
   },
 
+  /**
+   * Is this envelope still sitting in the queue? A row is deleted by the
+   * recipient's ack, so "still here" means nobody has confirmed receipt —
+   * which is how the relay tells a real live delivery from an emit into a
+   * socket whose phone is already gone (see the push fallback in handler.ts).
+   */
+  async isStillQueued(id: string): Promise<boolean> {
+    const row = await dbGet<{ id: string }>(`SELECT id FROM messages WHERE id = ?`, [id]);
+    return row !== undefined && row !== null;
+  },
+
   async purgeExpired(): Promise<number> {
     const now = Date.now();
     // Three ways a row dies: its own TTL passed; it predates the expires_at
