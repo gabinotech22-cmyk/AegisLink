@@ -79,7 +79,8 @@
     "skipNickname": "Omitir por ahora",
     "dbInitializing": "Inicializando almacenamiento seguro…",
     "switchDark": "Cambiar a modo oscuro",
-    "switchLight": "Cambiar a modo claro"
+    "switchLight": "Cambiar a modo claro",
+    "registrationFailedTitle": "Registro fallido"
   },
   "home": {
     "identityCreated": "Identidad creada",
@@ -211,7 +212,8 @@
     "sendAccessibilityLabel": "Enviar mensaje",
     "videoCallMade": "Videollamada",
     "voiceCallMade": "Llamada de voz",
-    "voiceNote": "Grabar nota de voz"
+    "voiceNote": "Grabar nota de voz",
+    "scheduleError": "Error al programar"
   },
   "contacts": {
     "title": "Contactos",
@@ -222,7 +224,9 @@
     "noResultsDesc": "Prueba otro término o borra la búsqueda.",
     "emptyTitle": "Aún no tienes contactos",
     "emptyDesc": "Escanea el QR de alguien o pega su Aegis ID para empezar.",
-    "addContact": "Añadir contacto"
+    "addContact": "Añadir contacto",
+    "offlineTitle": "Contacto desconectado",
+    "offlineDesc": "El contacto no está conectado al servidor ahora mismo. Inténtalo más tarde."
   },
   "profile": {
     "title": "Perfil",
@@ -1798,7 +1802,16 @@
     "tapToExpand": "Volver a la llamada grupal",
     "tooMany": "Demasiados participantes",
     "tooManyDetail": "Máx. 8 participantes en llamadas grupales.",
-    "waitingForParticipants": "Esperando participantes…"
+    "waitingForParticipants": "Esperando participantes…",
+    "noConnTitle": "Sin conexión",
+    "noConnStart": "Necesitas estar conectado para iniciar una llamada grupal.",
+    "noConnJoin": "Necesitas estar conectado para unirte a la llamada.",
+    "noMicTitle": "Sin micrófono",
+    "noMicDesc": "No se pudo acceder al micrófono. Verifica los permisos.",
+    "endedTitle": "Llamada finalizada",
+    "endedDesc": "Esta llamada ya no está activa.",
+    "fullTitle": "Llamada llena",
+    "fullDesc": "Esta llamada alcanzó el máximo de 8 participantes."
   },
   "multiPreview": {
     "captionPlaceholder": "Añadir un mensaje… (opcional)",
@@ -1864,5 +1877,11 @@
     "messageA11y": "Mensaje de difusión",
     "doneA11y": "Hecho, volver",
     "done": "Hecho"
+  },
+  "schedulePicker": {
+    "invalidDateTitle": "Fecha inválida",
+    "invalidDateDesc": "Usa el formato YYYY-MM-DD y HH:MM.",
+    "tooSoonTitle": "Fecha demasiado cercana",
+    "tooSoonDesc": "El mensaje debe programarse al menos 1 minuto en el futuro."
   }
 }

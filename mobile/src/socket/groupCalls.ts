@@ -38,6 +38,7 @@ import {
 } from '../webrtc/peer';
 import type { Identity } from '../crypto/identity';
 import { themedAlert } from '../components/AlertHost';
+import i18n from '../i18n';
 import { startInCallAudio, stopInCallAudio } from '../webrtc/inCall';
 import { startCallService, stopCallService } from '../webrtc/callForegroundService';
 
@@ -533,7 +534,7 @@ export async function startGroupCall(
 ): Promise<void> {
   const socket = getSocket();
   if (!socket || !isConnected()) {
-    themedAlert('Sin conexión', 'Necesitas estar conectado para iniciar una llamada grupal.');
+    themedAlert(i18n.t('groupCall.noConnTitle'), i18n.t('groupCall.noConnStart'));
     return;
   }
 
@@ -561,7 +562,7 @@ export async function startGroupCall(
   try {
     await acquireGroupStream();
   } catch {
-    themedAlert('Sin micrófono', 'No se pudo acceder al micrófono. Verifica los permisos.');
+    themedAlert(i18n.t('groupCall.noMicTitle'), i18n.t('groupCall.noMicDesc'));
     useGroupCall.getState().reset();
     return;
   }
@@ -584,13 +585,13 @@ export async function startGroupCall(
 export async function joinGroupCall(groupId: string): Promise<void> {
   const active = useActiveCalls.getState().getFresh(groupId, Date.now());
   if (!active) {
-    themedAlert('Llamada finalizada', 'Esta llamada ya no está activa.');
+    themedAlert(i18n.t('groupCall.endedTitle'), i18n.t('groupCall.endedDesc'));
     return;
   }
   const socket = getSocket();
   const me = ownKeys();
   if (!socket || !isConnected() || !me) {
-    themedAlert('Sin conexión', 'Necesitas estar conectado para unirte a la llamada.');
+    themedAlert(i18n.t('groupCall.noConnTitle'), i18n.t('groupCall.noConnJoin'));
     return;
   }
 
@@ -600,7 +601,7 @@ export async function joinGroupCall(groupId: string): Promise<void> {
 
   // Enforce the mesh cap on the resulting size (existing peers + us).
   if (others.length >= 8) {
-    themedAlert('Llamada llena', 'Esta llamada alcanzó el máximo de 8 participantes.');
+    themedAlert(i18n.t('groupCall.fullTitle'), i18n.t('groupCall.fullDesc'));
     return;
   }
 
@@ -625,7 +626,7 @@ export async function joinGroupCall(groupId: string): Promise<void> {
   try {
     await acquireGroupStream();
   } catch {
-    themedAlert('Sin micrófono', 'No se pudo acceder al micrófono. Verifica los permisos.');
+    themedAlert(i18n.t('groupCall.noMicTitle'), i18n.t('groupCall.noMicDesc'));
     useGroupCall.getState().reset();
     return;
   }

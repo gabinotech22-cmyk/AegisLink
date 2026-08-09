@@ -7,6 +7,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { View, Text, Modal, Pressable, TextInput, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { themedAlert } from './AlertHost';
@@ -60,6 +61,7 @@ function previewText(dateStr: string, timeStr: string): string {
 
 export function SchedulePicker({ visible, onClose, onConfirm }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
 
   const [dateStr, setDateStr] = useState('');
   const [timeStr, setTimeStr] = useState('');
@@ -73,12 +75,12 @@ export function SchedulePicker({ visible, onClose, onConfirm }: Props) {
   function handleConfirm() {
     const d = parseDateTime(dateStr, timeStr);
     if (!d) {
-      themedAlert('Fecha inválida', 'Usa el formato YYYY-MM-DD y HH:MM.');
+      themedAlert(i18nT('schedulePicker.invalidDateTitle'), i18nT('schedulePicker.invalidDateDesc'));
       return;
     }
     const minMs = Date.now() + 60_000;
     if (d.getTime() < minMs) {
-      themedAlert('Fecha demasiado cercana', 'El mensaje debe programarse al menos 1 minuto en el futuro.');
+      themedAlert(i18nT('schedulePicker.tooSoonTitle'), i18nT('schedulePicker.tooSoonDesc'));
       return;
     }
     onConfirm(d.getTime());
