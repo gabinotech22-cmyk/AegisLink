@@ -120,7 +120,9 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
 - [ ] **M5 — `any`** (~40 restantes, triados): reducir al tocar cada archivo; contrato IPC desktop es el cluster grande.
 - [ ] **God-files**: política vigente = NO retro-acortar los 4 aceptados; escribir archivos nuevos <800 desde el inicio.
 - [ ] **Lint `no-console`** en `desktop/src/renderer/**` para prevenir regresión del logger.
-- [ ] **SESSION_HANDOFF.md** (fechado 2026-06-05, obsoleto): archivar o reescribir — hoy contradice el código (regla doc↔código).
+- [x] **SESSION_HANDOFF.md** (fechado 2026-06-05, obsoleto): **archivado** con banner
+      que enumera qué es falso (infra AWS muerta, §5 ya mergeado) y redirige a
+      [`AUDIT-2026-08-FUNCTIONAL.md`](./AUDIT-2026-08-FUNCTIONAL.md). Auditoría 2026-08, DOC-1.
 
 ---
 

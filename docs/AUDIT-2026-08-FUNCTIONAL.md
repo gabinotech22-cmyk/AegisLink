@@ -1,0 +1,198 @@
+# Auditoría funcional 2026-08 — AegisLink vs. Signal / Session / SimpleX
+
+> **Método:** el código y los tests son la única fuente de verdad (regla de oro
+> doc↔código #6). Cada veredicto lleva su `archivo:línea` o su suite. Nada aquí
+> se afirma desde un `.md` anterior ni desde memoria.
+>
+> **Fecha:** 2026-08-09 · **Rama:** `fix/outbox-delivery-reliability` · **PR:** #435
+
+## 0. Resumen
+
+La base es **mejor de lo que la propia documentación del repo decía**. El relay
+tiene entrega at-least-once real con acks por dispositivo, hay un suelo de
+fiabilidad sobre Tor calcado del de Session/SimpleX, y el CI cubre tres
+plataformas con fuzzing, CodeQL, semgrep y builds reproducibles.
+
+Los fallos que el dueño veía no venían de la arquitectura, sino de **dos huecos
+concretos en el cliente**, ambos ya corregidos en esta tanda: el outbox no tenía
+quién lo condujera y la UI no podía representar un fallo de envío.
+
+Quedan **7 hallazgos abiertos**, uno de ellos de seguridad.
+
+## 1. Superficie medida
+
+| | Archivos | Líneas | Tests |
+|---|---|---|---|
+| `mobile/src` | 390 | 64 443 | 174 |
+| `server/src` | 98 | 12 736 | **371** (53 suites) |
+| `desktop/src` | 117 | — | 23 |
+
+## 2. Lo que está BIEN (verificado, no asumido)
+
+| Área | Evidencia |
+|---|---|
+| **Entrega at-least-once** | Acks por dispositivo, `drained_by`, drain-cap, borrado solo cuando todos los dispositivos persistieron — `server/src/relay/handler.ts:543-598`, `server/src/db/client.ts:214-302` |
+| **Suelo de fiabilidad sobre Tor** | Drenaje stateless con auth por posesión de clave y ack diferido — `server/src/routes/mailbox.ts`. Mismo patrón que el swarm fetch de Session y el SMP fetch de SimpleX, y el archivo lo documenta como tal |
+| **`ackDelivery` cableado de verdad** | El relay solo difiere el borrado para clientes que lo anuncian; **mobile y desktop lo anuncian ambos** — `mobile/src/socket/client.ts:1008`, `desktop/src/renderer/socket/client.ts:657` |
+| **Work autenticado** | **31 de 32 rutas** exigen prueba Ed25519 (`verifyAdminSig`, o firma en línea en `/join:332-347`). La excepción está en §4 |
+| **Llamadas probadas** | 12 suites: signaling, política sealed-sender, superficie única de timbre, acción pendiente, callkeep, wake service, ICE, a11y, minimize, grupo |
+| **Cripto** | Módulos puros (cero imports de React Native), ratchet con zeroización, X3DH con consumo atómico de OPK |
+| **Higiene de código** | 3 `console.*`, 4 `Alert.alert` directos, 28 `any`, **1 sola pantalla huérfana** (`LockSetup`) de 51 |
+| **CI** | Typecheck estricto ×3, tests ×3, fuzz de parsers, CodeQL, semgrep, auditoría de permisos nativos, builds reproducibles |
+
+> **Verificado contra el código, no contra la doc:** el at-most-once
+> ("el relay borra al emitir") que describía la auditoría 2026-07-24 **ya está
+> arreglado** (PR #370 + flag de compatibilidad #373). El resumen de una línea que
+> aún lo daba por vigente se ha corregido en esta pasada.
+
+## 3. Arreglado en esta tanda (PR #435)
+
+### A-1 · El outbox era una cola durable sin conductor
+
+`attempts` se incrementaba en cada fallo y **no lo leía nadie**: sin backoff, sin
+tope, sin estado terminal. `flushOutbox` solo se disparaba en `auth:ok`, en el
+fallback de recovery y al adoptar sesión — los tres, eventos del ciclo de vida
+del socket. Un job que fallaba con la conexión sana esperaba a una reconexión
+que un socket sano nunca produce: **el mensaje no salía nunca**.
+
+Ahora: backoff exponencial con jitter (`mobile/src/db/outboxBackoff.ts`),
+aparcado de forma durable en la columna `next_attempt_at` para que sobreviva a un
+reinicio, ventana de reintento de 24 h y un planificador que duerme hasta que hay
+trabajo. El regreso a foreground empuja también la salida, no solo el buzón de
+entrada. Es el modelo de Signal ([Signal-Android#7914](https://github.com/signalapp/Signal-Android/pull/7914),
+[jitter](https://github.com/signalapp/Signal-Android/commit/8f7fe5c3eeb693e132b3c7d8bc692546bd70d27d)).
+
+### A-2 · La interfaz mentía
+
+El modelo era `sent | delivered | read` con la columna por defecto en `'sent'`, y
+la burbuja derivaba "en cola" de `me && !online` — **un proxy global de
+conectividad**. Resultado doble: al caer el socket *todos* los mensajes salientes
+se marcaban en cola, incluidos los entregados días atrás; y un job realmente
+atascado con el socket vivo mostraba un tick indistinguible de uno entregado.
+
+Ahora: `pending` y `failed` entran en el modelo, los mensajes nacen pendientes y
+solo ascienden cuando el relay acka, la burbuja lee estado por mensaje, y un job
+caducado marca `failed` con reintento manual que **reutiliza el id** para que el
+dedup del receptor trate el original tardío y el reintento como un solo mensaje.
+Todo local: nada de esto viaja al relay, cero metadatos nuevos.
+
+### T-1 · El seam cliente↔relay ya tiene test
+
+`server/src/__tests__/e2e/clientRelayDelivery.e2e.test.ts` levanta el relay real
+(handler, cola, SQLite, registro con PoW, handshake) y le habla con la cripto
+real del móvil. Tres escenarios: envío offline → reconexión → descifrado;
+at-least-once (un drenaje sin ack sobrevive, uno con ack no); y el ratchet
+avanzando en tres mensajes seguidos.
+
+## 4. Hallazgos ABIERTOS
+
+### SEC-1 · `POST /work/workspace` no verifica quién dice ser el admin — **alto**
+
+`server/src/routes/work.ts:678-693` toma `adminAegisId` **del cuerpo de la
+petición** y crea el workspace sin pedir firma. Es la única de las 32 rutas de
+Work sin prueba de posesión de clave: `POST /work/org` (`:131`) sí la exige, y
+`GET /work/workspace/:id` (`:696`) también. El comentario inmediatamente encima
+(`:670`) dice literalmente *"knowing an aegisId ≠ owning it. Mirrors the mutation
+endpoints' sig+ts"* — describiendo el esquema de **lectura**, mientras la
+**mutación** de justo debajo se lo salta.
+
+Viola las reglas de oro de seguridad #3 y #7. Impacto: cualquiera puede crear
+workspaces atribuyendo la administración a un aegisId ajeno (spam de tabla y una
+víctima que ve un workspace que nunca creó). El test `workspace.auth.test.ts`
+solo cubre la lectura.
+
+**Arreglo:** exigir `sig`+`ts` como el resto, con test de regresión que pruebe
+que una firma ajena es rechazada.
+
+### I18N-1 · 15 strings de cara al usuario hardcodeados, **en idiomas mezclados** — medio
+
+| Archivo | Strings | Idioma |
+|---|---|---|
+| `mobile/src/socket/calls.ts:526,552,565,673,697` | 8 | **inglés** |
+| `mobile/src/screens/ProfileSwitcher.tsx:52,53,85` | 3 | **español** |
+| `mobile/src/utils/overlayPermission.ts:45,46` | 2 | **español** |
+| `mobile/src/screens/Scheduled.tsx:66` | 1 | español |
+| `mobile/src/screens/DistributionLists.tsx:55` | 1 | inglés |
+
+Un usuario en español ve **todos** los errores de llamada en inglés; uno en
+inglés ve el cambio de perfil y el permiso de superposición en español. Es la
+misma clase de bug reportada en la build 15, viva todavía en otras pantallas.
+
+### REL-1 · Los mensajes de grupo no pueden tener estado de envío — medio
+
+Un envío de grupo se abre en un job **por miembro**, cada uno con su `msgId`
+aleatorio (`mobile/src/socket/client.ts:4786`), y la burbuja del emisor se añade
+con un tercer id sin relación (`:4896`). No hay forma de ir del job a la burbuja.
+Por eso A-2 se limitó deliberadamente a 1:1: marcar esos jobs pondría un mensaje
+de grupo entero en `failed` porque la entrega a uno de veinte miembros expiró.
+
+**Arreglo:** que el fan-out lleve un id de mensaje compartido; entonces el estado
+de grupo se resuelve por "todos los jobs de este msgId resueltos".
+
+### PAR-1 · El desktop es ciudadano de segunda — medio (viola la regla de oro #5)
+
+La cripto está **duplicada, no compartida**, y ya divergió:
+
+| Módulo | mobile | desktop | Δ |
+|---|---|---|---|
+| `signal/x3dh.ts` | 755 | 438 | **−42 %** |
+| `messaging.ts` | 304 | 248 | −18 % |
+| `sealedSender.ts` | 169 | 136 | −20 % |
+
+317 líneas menos en X3DH no es formato: es lógica ausente. Además faltan **12
+pantallas**: los 5 de canales públicos, los 3 de llamadas de grupo, y
+`CreateProfile` + `ProfileSwitcher` — **la sección 11 (múltiples perfiles) no
+existe en desktop**.
+
+### ARCH-1 · `socket/client.ts` tiene 4953 líneas — medio
+
+Concentra transporte, sesiones, glare/recovery, grupos, self-copy, perfiles y
+mailbox. Es la razón mecánica de que cada arreglo genere el siguiente. Costuras
+naturales: transporte / sesiones / grupos / mailbox.
+
+### TEST-1 · 196 `catch` en `screens/` sin triar — medio
+
+La mayor concentración de tragado de errores está en la capa de UI. Hay que
+clasificar cada uno en: legítimo best-effort, **debe avisar al usuario**, o
+**debe fallar cerrado**.
+
+### DOC-1 · `docs/SESSION_HANDOFF.md` describe infraestructura muerta — bajo
+
+Fechado 2026-06-05, sitúa el relay en AWS `51.20.60.155` con SSH `ubuntu@` y
+`aegislink.pem`, cuando la infra viva es Hetzner (`root@aegislink.duckdns.org`).
+Es exactamente el tipo de doc que hace re-implementar lo ya hecho.
+
+## 5. Comparativa con los referentes
+
+| Capacidad | AegisLink | Signal | Session | SimpleX |
+|---|---|---|---|---|
+| Reintento de envío durable | ✅ 24 h + backoff con jitter (nuevo) | ✅ 24 h + jitter | ✅ | ✅ |
+| Estado de fallo por mensaje + reintento manual | ✅ 1:1 (nuevo) · ❌ grupos (REL-1) | ✅ | ✅ | ✅ |
+| Entrega at-least-once con ack del cliente | ✅ | ✅ | ✅ | ✅ acks del agente SMP |
+| Recepción sin socket persistente | ✅ drenaje stateless sobre Tor | ➖ websocket + REST | ✅ poll al swarm | ✅ fetch SMP |
+| Integridad de cadena (hash del anterior) | ❌ | ➖ | ➖ | ✅ |
+| Sealed sender también en llamadas | ✅ | ➖ | ➖ | ➖ |
+
+**Lo que conviene copiar a continuación:** los **ids secuenciales con hash del
+mensaje anterior** de SimpleX ([agent-protocol](https://github.com/simplex-chat/simplexmq/blob/stable/protocol/agent-protocol.md)).
+Hoy nada detecta un hueco en la cadena: si un mensaje se pierde para siempre, el
+receptor no lo sabe. Es la única capacidad de los tres referentes que no tenemos
+y que ataca directamente la clase de fallo de esta auditoría.
+
+## 6. Áreas aún sin auditar en profundidad
+
+Reconocidas pero no diseccionadas en esta pasada, por orden de riesgo:
+canales públicos, backup cifrado (10), mensajes programados (12), pagos (14),
+web3/DIDs, y el cumplimiento de tiendas. Onboarding (1-2), efímeros (4),
+adjuntos (5), grupos (6), llamadas (7-8), pánico (9) y perfiles (11) quedaron
+cubiertos de forma indirecta por §2 y §4.
+
+## 7. Orden recomendado
+
+1. **SEC-1** — es seguridad y el arreglo es pequeño.
+2. **I18N-1** — visible para todo usuario no anglófono, arreglo mecánico.
+3. **REL-1** — cierra el estado de envío que A-2 dejó a medias.
+4. **TEST-1** y **ARCH-1** — reducen la tasa de bugs futuros.
+5. **PAR-1** — el desktop necesita decisión de producto antes que código
+   (¿paridad completa, o desktop declarado como cliente reducido?).
+6. **DOC-1** — cinco minutos.
