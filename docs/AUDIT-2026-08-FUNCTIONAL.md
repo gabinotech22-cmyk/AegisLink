@@ -17,7 +17,9 @@ Los fallos que el dueño veía no venían de la arquitectura, sino de **dos huec
 concretos en el cliente**, ambos ya corregidos en esta tanda: el outbox no tenía
 quién lo condujera y la UI no podía representar un fallo de envío.
 
-Quedan **7 hallazgos abiertos**, uno de ellos de seguridad.
+Quedan **8 hallazgos abiertos**, uno de ellos de seguridad — y uno de ellos es
+que la única prueba end-to-end de la app real lleva tiempo en rojo sin bloquear
+nada (TEST-2), que es probablemente la razón de que estos huecos duraran.
 
 ## 1. Superficie medida
 
@@ -156,6 +158,28 @@ La mayor concentración de tragado de errores está en la capa de UI. Hay que
 clasificar cada uno en: legítimo best-effort, **debe avisar al usuario**, o
 **debe fallar cerrado**.
 
+### TEST-2 · La única prueba end-to-end de la app real lleva tiempo en rojo y no bloquea nada — medio
+
+El job `mobile-e2e` (Maestro sobre emulador Android) está marcado
+`continue-on-error: true` en `.github/workflows/ci.yml`, así que su resultado
+**nunca ha bloqueado un merge**. Comprobado en la ejecución 31301655118 (PR #431,
+que solo añade un markdown — no toca código de app):
+
+- `01-launch-smoke` ✅ — la app compila, arranca y pinta la bienvenida.
+- `02-onboarding` ❌ — **falla tras 11 min 5 s**: se genera la identidad y nunca
+  se llega a la UI principal.
+
+Que falle en un PR de solo-documentación descarta que lo rompa el cambio: está
+roto de base. **Causa raíz no determinada** — puede ser el minado PoW en hardware
+débil (la misma sospecha que la investigación de registro en iPhone 8 del
+`ROADMAP-2026-07.md` §2), un timeout de red contra el relay real desde CI, o
+inestabilidad del emulador. No lo afirmo sin medirlo.
+
+Lo relevante para esta auditoría: **el único test que ejercita la app compilada
+de principio a fin lleva tiempo rojo y nadie está obligado a mirarlo**. Si el
+fallo es el PoW, entonces CI llevaba meses reproduciendo el bug de registro que
+se estaba investigando a mano sobre TestFlight.
+
 ### DOC-1 · `SESSION_HANDOFF.md` describía infraestructura muerta — bajo, **cerrado**
 
 Fechado 2026-06-05, situaba el relay en AWS `51.20.60.155` con SSH `ubuntu@` y
@@ -200,10 +224,14 @@ cubiertos de forma indirecta por §2 y §4.
 
 ## 7. Orden recomendado
 
-1. **SEC-1** — es seguridad y el arreglo es pequeño.
-2. **I18N-1** — visible para todo usuario no anglófono, arreglo mecánico.
-3. **REL-1** — cierra el estado de envío que A-2 dejó a medias.
-4. **TEST-1** y **ARCH-1** — reducen la tasa de bugs futuros.
-5. **PAR-1** — el desktop necesita decisión de producto antes que código
+1. **SEC-1** — es seguridad y el arreglo es pequeño. **→ hecho, PR #436.**
+2. **TEST-2** — diagnosticar por qué falla `02-onboarding`. Si es el PoW, arregla
+   de paso el registro en hardware viejo; sea lo que sea, hasta que no esté verde
+   el proyecto no tiene señal end-to-end. Ponerlo a bloquear después.
+3. **I18N-1** — visible para todo usuario no anglófono, arreglo mecánico.
+   **→ parcial, PR #436** (llamadas); quedan 5 pantallas sin i18n.
+4. **REL-1** — cierra el estado de envío que A-2 dejó a medias.
+5. **TEST-1** y **ARCH-1** — reducen la tasa de bugs futuros.
+6. **PAR-1** — el desktop necesita decisión de producto antes que código
    (¿paridad completa, o desktop declarado como cliente reducido?).
-6. **DOC-1** — cinco minutos.
+7. **DOC-1** — ✅ cerrado en esta pasada.
