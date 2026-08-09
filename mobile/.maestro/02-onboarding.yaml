@@ -4,11 +4,16 @@
 # Generates a real cryptographic identity (TweetNaCl keypair + X3DH prekeys)
 # and confirms the app advances past onboarding into the main UI.
 #
-# Why this works offline in CI: identity is generated ON-DEVICE first; the
-# relay registration that follows may fail (no server in CI), but Onboarding
-# deliberately calls onDone() in its catch block (Onboarding.tsx) so the user
-# still reaches Home. This exercises the real crypto + SecureStore + SQLite
+# Why this works offline in CI: identity is generated ON-DEVICE first; the relay
+# registration that follows fails, but Onboarding advances anyway (a 10 s
+# fallback in the 'generating' step, Onboarding.tsx), so the flow still leaves
+# the welcome screen. This exercises the real crypto + SecureStore + SQLite
 # paths — the parts that behave identically on an emulator and a physical phone.
+#
+# "No server in CI" used to be an ASSUMPTION, and a wrong one: the bundle is
+# built with `--dev false`, so config.ts resolved SERVER_URL to production and
+# every run registered a real identity against the live relay. ci.yml now pins
+# EXPO_PUBLIC_SERVER_URL to the emulator loopback so the assumption holds.
 #
 # What this does NOT cover (needs a physical device): camera QR scanning, push
 # delivery, WebRTC calls, biometrics. See README.md.
