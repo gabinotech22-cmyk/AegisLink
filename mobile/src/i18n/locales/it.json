@@ -79,7 +79,8 @@
     "skipNickname": "Salta per ora",
     "dbInitializing": "Inizializzazione archiviazione sicura…",
     "switchDark": "Passa alla modalità scura",
-    "switchLight": "Passa alla modalità chiara"
+    "switchLight": "Passa alla modalità chiara",
+    "registrationFailedTitle": "Registrazione non riuscita"
   },
   "home": {
     "identityCreated": "Identità creata",
@@ -207,7 +208,8 @@
     "sendAccessibilityLabel": "Invia messaggio",
     "videoCallMade": "Videochiamata",
     "voiceCallMade": "Chiamata vocale",
-    "voiceNote": "Registra nota vocale"
+    "voiceNote": "Registra nota vocale",
+    "scheduleError": "Impossibile programmare"
   },
   "contacts": {
     "title": "Contatti",
@@ -218,7 +220,9 @@
     "noResultsDesc": "Prova con un altro termine o cancella la ricerca.",
     "emptyTitle": "Nessun contatto ancora",
     "emptyDesc": "Scansiona il QR di un peer o incolla il suo Aegis ID per iniziare.",
-    "addContact": "Aggiungi contatto"
+    "addContact": "Aggiungi contatto",
+    "offlineTitle": "Contatto offline",
+    "offlineDesc": "Il contatto non è attualmente connesso al server. Riprova più tardi."
   },
   "profile": {
     "title": "Profilo",
@@ -1790,7 +1794,16 @@
     "tapToExpand": "Torna alla chiamata di gruppo",
     "tooMany": "Troppi partecipanti",
     "tooManyDetail": "Max. 8 partecipanti nelle chiamate di gruppo.",
-    "waitingForParticipants": "In attesa di partecipanti…"
+    "waitingForParticipants": "In attesa di partecipanti…",
+    "noConnTitle": "Nessuna connessione",
+    "noConnStart": "Devi essere connesso per avviare una chiamata di gruppo.",
+    "noConnJoin": "Devi essere connesso per unirti alla chiamata.",
+    "noMicTitle": "Nessun microfono",
+    "noMicDesc": "Impossibile accedere al microfono. Controlla i permessi.",
+    "endedTitle": "Chiamata terminata",
+    "endedDesc": "Questa chiamata non è più attiva.",
+    "fullTitle": "Chiamata piena",
+    "fullDesc": "Questa chiamata ha raggiunto il massimo di 8 partecipanti."
   },
   "multiPreview": {
     "captionPlaceholder": "Aggiungi un messaggio… (opzionale)",
@@ -1856,5 +1869,11 @@
     "messageA11y": "Messaggio broadcast",
     "doneA11y": "Fatto, torna indietro",
     "done": "Fatto"
+  },
+  "schedulePicker": {
+    "invalidDateTitle": "Data non valida",
+    "invalidDateDesc": "Usa il formato YYYY-MM-DD e HH:MM.",
+    "tooSoonTitle": "Data troppo vicina",
+    "tooSoonDesc": "Il messaggio deve essere programmato almeno 1 minuto nel futuro."
   }
 }

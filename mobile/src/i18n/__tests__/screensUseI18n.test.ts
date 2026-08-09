@@ -68,3 +68,52 @@ describe('every screen is wired to i18n', () => {
     }
   });
 });
+
+// ─── Alerts, anywhere in src/ ────────────────────────────────────────────────
+//
+// The screen check above was not enough, and CI proved it: the E2E screenshot
+// of a failed run showed the banner "Registro fallido" on an en_US emulator.
+// That string lives in store/identity.ts, not in a screen — along with seven
+// more in socket/groupCalls.ts, components/SchedulePicker.tsx and
+// socket/client.ts. Alerts are the most user-visible text in the app and the
+// easiest to hardcode, because they are written far from any JSX.
+//
+// So this walks ALL of src/ and fails on a themedAlert whose first argument is
+// a bare string literal. A translated call passes t('…') / i18nT('…') /
+// i18n.t('…'), never a quote.
+
+const SRC_DIR = path.join(__dirname, '..', '..');
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === '__tests__' || entry.name === '_unused') continue;
+      walk(full, out);
+    } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+describe('no hardcoded alert copy anywhere in src/', () => {
+  it('every themedAlert title goes through i18n', () => {
+    // A quote right after the paren is a literal; anything else is an expression.
+    const LITERAL_FIRST_ARG = /themedAlert\(\s*['"`]/;
+    const offenders: string[] = [];
+
+    for (const file of walk(SRC_DIR)) {
+      // AlertHost defines themedAlert and documents it with a literal example.
+      if (path.basename(file) === 'AlertHost.tsx') continue;
+      const lines = fs.readFileSync(file, 'utf8').split('\n');
+      lines.forEach((line, i) => {
+        if (LITERAL_FIRST_ARG.test(line)) {
+          offenders.push(`${path.relative(SRC_DIR, file)}:${i + 1}  ${line.trim().slice(0, 80)}`);
+        }
+      });
+    }
+
+    expect(offenders).toEqual([]);
+  });
+});

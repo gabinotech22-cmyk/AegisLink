@@ -1507,7 +1507,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
             cancelPendingDraftSave();
             void saveDraft(contact.aegisId, '');
           } catch (e) {
-            themedAlert('Error al programar', (e as Error).message);
+            themedAlert(i18nT('chat.scheduleError'), (e as Error).message);
           }
         }}
       />

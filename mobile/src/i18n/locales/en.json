@@ -79,7 +79,8 @@
     "skipNickname": "Skip for now",
     "dbInitializing": "Initializing secure storage…",
     "switchDark": "Switch to dark mode",
-    "switchLight": "Switch to light mode"
+    "switchLight": "Switch to light mode",
+    "registrationFailedTitle": "Registration failed"
   },
   "home": {
     "identityCreated": "Identity created",
@@ -207,7 +208,8 @@
     "sendAccessibilityLabel": "Send message",
     "videoCallMade": "Video call",
     "voiceCallMade": "Voice call",
-    "voiceNote": "Record voice note"
+    "voiceNote": "Record voice note",
+    "scheduleError": "Could not schedule"
   },
   "contacts": {
     "title": "Contacts",
@@ -218,7 +220,9 @@
     "noResultsDesc": "Try another term or clear the search.",
     "emptyTitle": "No contacts yet",
     "emptyDesc": "Scan a peer's QR or paste their Aegis ID to start.",
-    "addContact": "Add contact"
+    "addContact": "Add contact",
+    "offlineTitle": "Contact offline",
+    "offlineDesc": "The contact is not currently connected to the server. Try again later."
   },
   "profile": {
     "title": "Profile",
@@ -1790,7 +1794,16 @@
     "tapToExpand": "Return to group call",
     "tooMany": "Too many participants",
     "tooManyDetail": "Max. 8 participants in group calls.",
-    "waitingForParticipants": "Waiting for participants…"
+    "waitingForParticipants": "Waiting for participants…",
+    "noConnTitle": "No connection",
+    "noConnStart": "You need to be connected to start a group call.",
+    "noConnJoin": "You need to be connected to join the call.",
+    "noMicTitle": "No microphone",
+    "noMicDesc": "Could not access the microphone. Check permissions.",
+    "endedTitle": "Call ended",
+    "endedDesc": "This call is no longer active.",
+    "fullTitle": "Call full",
+    "fullDesc": "This call has reached its maximum of 8 participants."
   },
   "multiPreview": {
     "captionPlaceholder": "Add a message… (optional)",
@@ -1856,5 +1869,11 @@
     "messageA11y": "Broadcast message",
     "doneA11y": "Done, go back",
     "done": "Done"
+  },
+  "schedulePicker": {
+    "invalidDateTitle": "Invalid date",
+    "invalidDateDesc": "Use the format YYYY-MM-DD and HH:MM.",
+    "tooSoonTitle": "Too soon",
+    "tooSoonDesc": "The message must be scheduled at least 1 minute in the future."
   }
 }
