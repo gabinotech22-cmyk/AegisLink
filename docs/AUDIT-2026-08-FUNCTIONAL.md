@@ -173,20 +173,36 @@ hermanos siguen resolviendo tras el primer fallo, y un `sent` tardío no puede
 decirte que sí llegó después de haberte dicho que no. Solo un reintento explícito
 lo levanta, y en grupos ese reintento re-hace el fan-out contra el roster ACTUAL.
 
-### PAR-1 · El desktop es ciudadano de segunda — medio (viola la regla de oro #5)
+### PAR-1 · Alcance del desktop — bajo/medio, **abierto** (decisión de producto)
 
-La cripto está **duplicada, no compartida**, y ya divergió:
+**Corrijo mi propio hallazgo: la mitad grave era falsa.** Lo medí por líneas
+(`x3dh.ts` 755 vs 438, −42 %) y escribí que "no es formato, es lógica ausente".
+Al comprobarlo contra el código no se sostiene:
 
-| Módulo | mobile | desktop | Δ |
-|---|---|---|---|
-| `signal/x3dh.ts` | 755 | 438 | **−42 %** |
-| `messaging.ts` | 304 | 248 | −18 % |
-| `sealedSender.ts` | 169 | 136 | −20 % |
+| Comprobación | mobile | desktop |
+|---|---|---|
+| Funciones exportadas en `messaging.ts` / `sealedSender.ts` | 7 / 4 | **7 / 4 — idénticas** |
+| ML-KEM (post-cuántico), PQXDH, `shouldUsePqReceiver` | sí | **sí** |
+| `encryptMessageV2` / `openEnvelopeV2` (sealed-sender v2) | sí | **sí** |
+| `ratchetDecrypt` transaccional (descifra sobre clon) | sí | **sí** (`ratchet.ts:502`) |
 
-317 líneas menos en X3DH no es formato: es lógica ausente. Además faltan **12
-pantallas**: los 5 de canales públicos, los 3 de llamadas de grupo, y
-`CreateProfile` + `ProfileSwitcher` — **la sección 11 (múltiples perfiles) no
-existe en desktop**.
+La diferencia de líneas es densidad de comentarios y código defensivo, no
+capacidad. `cloneState` "faltaba" solo porque en desktop no está exportado — se
+usa igual. La única función realmente ausente es `ensureDevicePreKeys`
+(aprovisionamiento de prekeys por slot de DB), y es plausible que sea correcto:
+el desktop es un dispositivo vinculado, no una identidad primaria.
+
+**Lo que sí queda, y es una decisión de producto, no un bug:** faltan 12
+pantallas — los 5 de canales públicos, los 3 de llamadas de grupo, y
+`CreateProfile` + `ProfileSwitcher`, es decir **la sección 11 (múltiples
+perfiles) no existe en desktop**.
+
+Eso no es deuda técnica que se arregle sola: es *qué quieres que sea el
+desktop*. Las dos salidas honestas son (a) paridad completa, con el coste de
+portar canales + llamadas de grupo + perfiles, o (b) declararlo cliente reducido
+y decirlo donde el usuario lo vea, en vez de dejar que lo descubra buscando una
+pestaña que no está. Lo que no se sostiene es el estado actual: paridad
+implícita que no existe.
 
 ### ARCH-1 · `socket/client.ts` — medio, **abierto** (plan medido, sin ejecutar)
 
