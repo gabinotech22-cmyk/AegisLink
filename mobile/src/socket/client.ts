@@ -24,14 +24,17 @@ import { performX3DH, performX3DHReceiver, generatePreKeys, shouldUsePqReceiver,
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
 import { themedAlert } from '../components/AlertHost';
+import { nextOutboxDelayMs, isOutboxJobExpired } from '../db/outboxBackoff';
 import {
   loadRatchetSession,
   saveRatchetSession,
   deleteContactRatchetSession,
   enqueueOutboxJob,
-  loadOutboxJobs,
+  loadDueOutboxJobs,
+  nextOutboxDueAt,
+  countOutboxJobsForBubble,
   deleteOutboxJob,
-  incrementOutboxAttempts,
+  markOutboxAttemptFailed,
   saveSpkSecret,
   loadSpkSecret,
   loadLatestSpkSecret,
@@ -48,6 +51,7 @@ import {
   setPqSpkKeyId,
   getPqSpkKeyId,
   type OutboxJob,
+  type DeliveryStatus,
 } from '../db/local';
 import { decideV2GroupMetadata, decideGovernanceUpdate } from './groupMetadataDecision';
 import { serializeRatchetState, reviveRatchetState } from './ratchetSerde';
@@ -285,28 +289,85 @@ export async function buildOutgoingEnvelope(
 }
 
 /**
- * Drain all pending outbox jobs in FIFO order.
+ * Mark the message behind an outbox job with a delivery state, in DB and in the
+ * live store. Best-effort: a bookkeeping failure must never abort a real send.
  *
- * Each job is re-encrypted with the CURRENT ratchet state at drain time —
- * the outbox only stores plaintext (at-rest encrypted via encryptBody).
- * Jobs that deliver successfully are deleted; failures increment attempts
- * and leave the job in place for the next reconnect / drain cycle.
+ * GROUPS AGGREGATE. A group send fans out into one job per member, each with its
+ * own wire msgId, and they all carry the same `bubbleId` — the single row the
+ * sender actually sees. So:
+ *
+ *   success  → only settle to `sent` once NO jobs remain for that bubble.
+ *              Otherwise the first of twenty members would flip the whole
+ *              message to sent while nineteen were still queued.
+ *   expiry   → mark `failed` immediately. One member who never received it
+ *              after 24 h means this message did not fully deliver, and saying
+ *              so is the honest answer; a later sibling success must not
+ *              silently un-fail it (see nextDeliveryStatus — `failed` is sticky
+ *              until an explicit retry sets `pending`).
+ *
+ * 1:1 has one job whose bubbleId IS its msgId, so both rules collapse to the
+ * obvious behaviour.
+ */
+async function setJobMessageStatus(job: OutboxJob, status: DeliveryStatus): Promise<void> {
+  const bubbleId = job.bubbleId ?? (job.kind === 'direct' ? job.msgId : null);
+  // Pre-v14 group jobs have no bubble link; there is nothing to update.
+  if (!bubbleId) return;
+  const chatId = job.kind === 'group' && job.groupId ? job.groupId : job.recipientAegisId;
+  try {
+    if (status === 'sent') {
+      // The caller deletes the row before calling us, so a remaining count of
+      // zero means this was the last one.
+      const remaining = await countOutboxJobsForBubble(bubbleId);
+      if (remaining > 0) return;
+    }
+    await useMessages.getState().updateDelivery(chatId, bubbleId, status);
+  } catch (e) {
+    if (__DEV__) logger.warn('[socket] could not update delivery status', bubbleId, e);
+  }
+}
+
+/**
+ * Drain every outbox job whose backoff has elapsed, in FIFO order.
+ *
+ * Each job is re-encrypted with the CURRENT ratchet state at drain time — the
+ * outbox only stores plaintext (at-rest encrypted via encryptBody).
+ *
+ * Outcomes per job:
+ *   delivered  → row deleted, message marked `sent`
+ *   failed     → attempts++ and the row parked until its backoff elapses
+ *   too old    → row deleted, message marked `failed` so the user can retry
+ *
+ * Before this had a schedule, `attempts` was incremented and never read: a job
+ * that failed while the socket stayed up waited for the next reconnect, which on
+ * a stable connection may never come. See db/outboxBackoff for the schedule.
  *
  * CRITICAL: drain in SERIES (await each before the next) to preserve FIFO
  * order and avoid concurrent ratchet state mutations.
  */
 async function flushOutbox(identity: Identity): Promise<void> {
   let jobs: OutboxJob[];
+  const startedAt = Date.now();
   try {
-    jobs = await loadOutboxJobs();
+    jobs = await loadDueOutboxJobs(startedAt);
   } catch (e) {
     if (__DEV__) logger.warn('[socket] flushOutbox: could not load jobs', e);
     return;
   }
-  if (jobs.length === 0) return;
+  if (jobs.length === 0) {
+    armOutboxScheduler(identity);
+    return;
+  }
 
   for (const job of jobs) {
     if (!socket || !connected || !authenticated) break; // gone offline mid-drain
+    // Give up on anything older than the retry window and TELL the user, rather
+    // than keeping a message "sending" forever behind a bubble that looks sent.
+    if (isOutboxJobExpired(job.createdAt, Date.now())) {
+      if (__DEV__) logger.warn('[socket] flushOutbox: job expired, marking failed', job.jobId);
+      await setJobMessageStatus(job, 'failed');
+      try { await deleteOutboxJob(job.jobId); } catch { /* retried next pass */ }
+      continue;
+    }
     try {
       const recipientPublicKey = decodeBase64(job.recipientPubkeyB64);
       const session = await getOrCreateSession(job.recipientAegisId, job.recipientPubkeyB64, identity);
@@ -344,14 +405,155 @@ async function flushOutbox(identity: Identity): Promise<void> {
           );
       });
       await deleteOutboxJob(job.jobId);
+      await setJobMessageStatus(job, 'sent');
     } catch (e) {
       // Includes ack-timeout failures: the job is left in the outbox (NOT
-      // deleted) so it retries on the next reconnect/drain instead of being
-      // silently lost when the server never acked.
-      if (__DEV__) logger.warn('[socket] flushOutbox: job failed, will retry on next reconnect', job.jobId, e);
-      try { await incrementOutboxAttempts(job.jobId); } catch { /* non-fatal */ }
+      // deleted) so it retries instead of being silently lost when the server
+      // never acked. Parked until its backoff elapses so a fast drain loop
+      // cannot hammer a job that is failing for a persistent reason.
+      if (__DEV__) logger.warn('[socket] flushOutbox: job failed, backing off', job.jobId, e);
+      try {
+        await markOutboxAttemptFailed(job.jobId, Date.now() + nextOutboxDelayMs(job.attempts));
+      } catch { /* non-fatal */ }
     }
   }
+
+  // Re-arm for whatever is still queued (backed-off jobs, or ones we skipped
+  // because the socket dropped mid-drain). Without this the queue would again
+  // depend on a reconnect that may never come.
+  armOutboxScheduler(identity);
+}
+
+// ── Outbox scheduler ─────────────────────────────────────────────────────────
+//
+// flushOutbox used to run ONLY on auth:ok, on the recovery fallback, and on
+// session adoption. All three are socket-lifecycle events, so a job that failed
+// while the socket stayed up waited for a reconnect that a healthy connection
+// never produces — the message sat in the queue indefinitely.
+//
+// This is the missing driver: after every drain we look up when the next job is
+// actually due and sleep exactly that long. Combined with the foreground trigger
+// in armForegroundReconnect, the outbox now makes progress on its own.
+//
+// Deliberately a timer and not a new dependency: adding NetInfo for a
+// connectivity signal would pull a native module into the build for something
+// socket.io's own reconnect already tells us via auth:ok.
+
+let outboxTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Never sleep less than this — a job due "now" must not spin the loop. */
+const OUTBOX_MIN_SLEEP_MS = 1_000;
+/** Never sleep longer than this, so a wrong clock cannot park the queue. */
+const OUTBOX_MAX_SLEEP_MS = 60_000;
+
+export function cancelOutboxScheduler(): void {
+  if (outboxTimer) { clearTimeout(outboxTimer); outboxTimer = null; }
+}
+
+/**
+ * Sleep until the earliest queued job is due, then drain. No-op when the outbox
+ * is empty — the next enqueue arms it again.
+ */
+function armOutboxScheduler(identity: Identity): void {
+  cancelOutboxScheduler();
+  void (async () => {
+    let dueAt: number | null;
+    try {
+      dueAt = await nextOutboxDueAt();
+    } catch {
+      return; // DB not ready; the next enqueue or auth:ok re-arms us
+    }
+    if (dueAt === null) return; // empty outbox — nothing to wake up for
+    const delay = Math.min(
+      OUTBOX_MAX_SLEEP_MS,
+      Math.max(OUTBOX_MIN_SLEEP_MS, dueAt - Date.now()),
+    );
+    // A drain that raced in while we were querying already re-armed us.
+    if (outboxTimer) return;
+    outboxTimer = setTimeout(() => {
+      outboxTimer = null;
+      if (!socket || !connected || !authenticated) {
+        // Offline: do not burn a drain. auth:ok flushes on reconnect, and the
+        // foreground handler covers a resume that beats the socket.
+        return;
+      }
+      void flushOutbox(identity);
+    }, delay);
+  })();
+}
+
+/**
+ * Re-send a message the outbox gave up on (delivery status `failed`).
+ *
+ * The original job was deleted when it expired, so this enqueues a fresh one
+ * from the message we still hold locally and kicks a drain. The message id is
+ * REUSED so the recipient's envelope dedup treats a late original and this retry
+ * as the same message rather than showing it twice.
+ *
+ * Returns false when the message is not in a retryable state.
+ */
+export async function retryFailedMessage(
+  identity: Identity,
+  chatId: string,
+  msgId: string,
+): Promise<boolean> {
+  const msg = (useMessages.getState().byChat[chatId] ?? []).find((m) => m.id === msgId);
+  if (!msg || msg.direction !== 'out' || msg.deliveryStatus !== 'failed') return false;
+
+  // Group retry: re-run the fan-out against the CURRENT roster, reusing the
+  // bubble so the row the user tapped is the one that updates. Membership may
+  // have changed in the 24 h since the original attempt, which is exactly why
+  // this re-fans out rather than replaying the old per-member jobs.
+  const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+  if (useGroups.getState().groups.some((g) => g.id === chatId)) {
+    await useMessages.getState().updateDelivery(chatId, msgId, 'pending');
+    await sendGroupMessage({
+      identity,
+      groupId: chatId,
+      plaintext: msg.body,
+      msgType: msg.type,
+      mediaUri: msg.mediaUri ?? undefined,
+      skipLocalAppend: true,
+      bubbleId: msgId,
+    });
+    return true;
+  }
+
+  const contact = useContacts.getState().contacts.find((c) => c.aegisId === chatId);
+  if (!contact) return false;
+
+  // Inline require, like every other identity read in this module — a top-level
+  // import of the store would close a require cycle through socket/client.
+  const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+  const idState = useIdentity.getState();
+  const payload = JSON.stringify({
+    type: msg.type ?? 'text',
+    text: msg.body,
+    senderName: idState.displayName,
+    senderColor: idState.avatarColor,
+    senderStatus: idState.profileStatus,
+    senderImage: null,
+    replyToId: msg.replyToId ?? undefined,
+    expiresAt: msg.expiresAt ?? undefined,
+  });
+
+  await enqueueOutboxJob({
+    jobId: Crypto.randomUUID(),
+    msgId,
+    recipientAegisId: chatId,
+    recipientPubkeyB64: contact.publicKeyB64,
+    payload,
+    kind: 'direct',
+    groupId: null,
+    // NOW, not the original createdAt — otherwise the 24 h expiry check would
+    // declare the retry stale the instant it is queued.
+    createdAt: Date.now(),
+  });
+  await useMessages.getState().updateDelivery(chatId, msgId, 'pending');
+
+  if (socket && connected && authenticated) void flushOutbox(identity);
+  else armOutboxScheduler(identity);
+  return true;
 }
 
 // Ratchet state JSON revival — see ./ratchetSerde (pure, unit-tested).
@@ -658,6 +860,10 @@ function armForegroundReconnect(): void {
     // works when the persistent mailbox socket is losing the cold-bootstrap race
     // or is stuck in reconnect backoff, which on iOS is most cold starts.
     if (id) void drainMailboxNow(id);
+    // Push the OUTBOX too, not just the inbound mailbox. Resuming is the moment
+    // the user expects their queued messages to go out, and it is the one signal
+    // we get that does not depend on the socket having dropped first.
+    if (id) void flushOutbox(id);
     if (socket) {
       if (!socket.connected) socket.connect();
       return;
@@ -4038,6 +4244,10 @@ export async function sendMessage(opts: {
       replyToId: opts.replyToId ?? null,
       type: msgType as any,
       expiresAt,
+      // Born pending, promoted to `sent` only once the relay acks. The old
+      // default of `sent` meant a message that never left the device rendered
+      // with a tick, indistinguishable from a delivered one.
+      deliveryStatus: 'pending',
     });
   }
 
@@ -4210,12 +4420,17 @@ export async function sendMessage(opts: {
           },
         );
     });
-    // ACK received — remove from outbox
+    // ACK received — remove from outbox and settle the bubble.
     try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
+    try {
+      await useMessages.getState().updateDelivery(opts.recipientAegisId, id, 'sent');
+    } catch { /* non-fatal */ }
   } catch (e) {
-    // Emit failed — job stays in outbox for retry on next reconnect
+    // Emit failed — job stays in outbox, parked until its backoff elapses, and
+    // the scheduler (not a hypothetical future reconnect) will retry it.
     if (__DEV__) logger.warn('[socket] sendMessage emit failed, job retained in outbox:', e);
-    try { await incrementOutboxAttempts(jobId); } catch { /* non-fatal */ }
+    try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
+    armOutboxScheduler(opts.identity);
     throw e; // surface to caller so UI can show error
   }
 
@@ -4565,6 +4780,14 @@ export async function sendGroupMessage(opts: {
    */
   skipLocalAppend?: boolean;
   /**
+   * Reuse an existing local message row instead of creating one. Set by the
+   * retry path so a re-send updates the bubble the user tapped rather than
+   * spawning a second one. Callers that pre-append their own bubble (media)
+   * should pass its id here together with skipLocalAppend, otherwise the
+   * fan-out jobs cannot report back to it.
+   */
+  bubbleId?: string;
+  /**
    * Admin-only, signed group-dissolution marker (see groupSig.ts,
    * canonicalGroupDissolveBytes). When present the payload carries
    * `dissolved: true` + `dissolveSig` so every member's receive path can
@@ -4639,6 +4862,12 @@ export async function sendGroupMessage(opts: {
   if (groupAvatarImage) profiledGroupImages.add(group.id);
 
   const nowMs = Date.now();
+
+  // One id for the single bubble the sender sees, shared by every member's job.
+  // Generated BEFORE the fan-out because the jobs need it; the local append
+  // below reuses it. Without this the jobs, the wire envelopes and the bubble
+  // all had different ids and a group message could carry no send state at all.
+  const bubbleId = opts.bubbleId ?? Crypto.randomUUID();
 
   // ── Per-member outbox fan-out ────────────────────────────────────────────────
   // Fan-out is sequential so that ratchet state advances monotonically and
@@ -4735,6 +4964,7 @@ export async function sendGroupMessage(opts: {
         kind: 'group',
         groupId: opts.groupId,
         createdAt: nowMs,
+        bubbleId,
       });
     } catch (e) {
       // Outbox write failed — still attempt the send (best-effort path)
@@ -4774,16 +5004,17 @@ export async function sendGroupMessage(opts: {
       // Delivery failed for this member — job stays in outbox for retry.
       // DO NOT swallow silently: log and increment attempts so monitoring can detect stuck jobs.
       if (__DEV__) logger.warn('[socket] group message delivery failed for member', contact.aegisId, '— job retained in outbox', e);
-      try { await incrementOutboxAttempts(jobId); } catch { /* non-fatal */ }
+      try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
+      armOutboxScheduler(opts.identity);
       // Continue to next member — one failure must not block others.
     }
   }
 
   // Optimistic local append — skip when caller already pre-appended (e.g. media messages)
   if (!opts.skipLocalAppend) {
-    const localId = Crypto.randomUUID();
     await useMessages.getState().append({
-      id: localId,
+      // Same id the fan-out jobs carry, so they can settle this row.
+      id: bubbleId,
       chatId: opts.groupId,
       direction: 'out',
       // Store the RAW body (no "name: " prefix). The sender's own bubble never
@@ -4795,6 +5026,9 @@ export async function sendGroupMessage(opts: {
       createdAt: nowMs,
       type: (opts.msgType as 'text' | 'image' | 'audio' | 'file' | 'poll' | 'location' | 'view_once' | undefined) ?? 'text',
       mediaUri: opts.mediaUri ?? undefined,
+      // Born pending like 1:1; settles to sent when the LAST member's job
+      // resolves, or failed if any of them expires (see setJobMessageStatus).
+      deliveryStatus: 'pending',
     });
   }
 }

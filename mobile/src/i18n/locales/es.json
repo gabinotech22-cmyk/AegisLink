@@ -153,6 +153,10 @@
     "verifyNudgeAction": "Verificar",
     "verifyNudgeDismiss": "Más tarde",
     "queued": "EN COLA · SE ENVIARÁ AL RECONECTARSE",
+    "sendingNow": "ENVIANDO…",
+    "sendFailed": "NO ENVIADO · TOCA PARA REINTENTAR",
+    "retrySend": "Reintentar envío",
+    "retrySendDesc": "Este mensaje nunca llegó al relay. ¿Intentar enviarlo de nuevo?",
     "deleteMessage": "Eliminar mensaje",
     "deleteMessageDesc": "Este mensaje se eliminará localmente.",
     "deleteForAll": "Eliminar para todos",
@@ -1218,7 +1222,8 @@
     "sameAsDecoy": "El PIN no puede ser igual al PIN señuelo.",
     "screenPrivacy": "PRIVACIDAD DE PANTALLA",
     "setPin": "Configurar PIN",
-    "titleBar": "Bloqueo de la app"
+    "titleBar": "Bloqueo de la app",
+    "decoyCheckFailed": "No se pudo comprobar este PIN contra el PIN señuelo. Inténtalo de nuevo."
   },
   "appIcon": {
     "title": "Icono de la app",

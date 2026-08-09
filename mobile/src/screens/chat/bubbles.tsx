@@ -13,22 +13,23 @@ import { I } from '../../components/icons';
 import { useIdentity } from '../../store/identity';
 import { useContacts } from '../../store/contacts';
 import { useGroups } from '../../store/groups';
-import type { StoredMessage } from '../../db/local';
+import type { StoredMessage, DeliveryStatus } from '../../db/local';
 import { parseLocationMessage } from '../../utils/parseLocationMessage';
 import { themedAlert } from '../../components/AlertHost';
 
 function ViewOnceAudioBubble({
-  t, m, me, isReceived, durSec, queued, time, onLongPress,
+  t, m, me, isReceived, durSec, sendState, time, onLongPress,
 }: {
   t: Theme;
   m: StoredMessage;
   me: boolean;
   isReceived: boolean;
   durSec: number;
-  queued: boolean;
+  sendState: SendState;
   time: string;
   onLongPress: () => void;
 }) {
+  const queued = sendState !== null;
   const [played, setPlayed] = useState(false);
   const [playing, setPlaying] = useState(false);
   type AudioSound = import('expo-av').Audio.Sound;
@@ -118,7 +119,7 @@ function ViewOnceAudioBubble({
           </Text>
         </View>
       </Pressable>
-      <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+      <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
     </View>
   );
 }
@@ -300,7 +301,18 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
   const { t: i18nT } = useTranslation();
   const me = m.direction === 'out';
   const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const queued = me && !online;
+  // Per-message truth, not a global connectivity proxy. `me && !online` marked
+  // EVERY outgoing message as queued the moment the socket dropped — including
+  // ones delivered days ago — while a job genuinely stuck in the outbox with the
+  // socket up rendered as sent. The outbox owns this state now; `online` only
+  // decides the wording for a message that really is still in the queue.
+  const sendState: SendState =
+    !me ? null
+    : m.deliveryStatus === 'failed' ? 'failed'
+    : m.deliveryStatus === 'pending' ? (online ? 'sending' : 'queued')
+    : null;
+  /** Dim anything that has not settled yet (in flight or failed). */
+  const queued = sendState !== null;
   const loc = !m.deleted ? parseLocationMessage(m.body) : null;
   const reactions = m.reactions ? Object.entries(m.reactions).filter(([, ids]) => ids.length > 0) : [];
 
@@ -429,7 +441,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
           </View>
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
-        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+        <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
       </View>
     );
   }
@@ -455,19 +467,19 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
           />
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
-        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+        <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
       </View>
     );
   }
 
   // Video bubble
   if (m.type === 'video') {
-    return <VideoBubble t={t} m={m} me={me} queued={queued} time={time} onLongPress={onLongPress} caption={m.body ?? undefined} />;
+    return <VideoBubble t={t} m={m} me={me} sendState={sendState} time={time} onLongPress={onLongPress} caption={m.body ?? undefined} />;
   }
 
   // Audio bubble
   if (m.type === 'audio' && m.mediaUri) {
-    return <AudioBubble t={t} m={m} me={me} queued={queued} time={time} reactions={reactions} onLongPress={onLongPress} />;
+    return <AudioBubble t={t} m={m} me={me} sendState={sendState} time={time} reactions={reactions} onLongPress={onLongPress} />;
   }
 
   // File bubble
@@ -497,7 +509,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
           </Text>
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
-        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+        <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
       </View>
     );
   }
@@ -523,7 +535,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
           me={me}
           isReceived={isReceived}
           durSec={audioDurSec}
-          queued={queued}
+          sendState={sendState}
           time={time}
           onLongPress={onLongPress}
         />
@@ -567,7 +579,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
             </Text>
           </View>
         </Pressable>
-        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+        <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
       </View>
     );
   }
@@ -613,7 +625,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
           ) : null}
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
-        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+        <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
       </View>
     );
   }
@@ -749,7 +761,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
           </View>
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
-        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+        <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
       </View>
     );
   }
@@ -777,7 +789,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
         >
           <VaultSticker stickerKey={stickerMatch[1]} size={120} />
         </Pressable>
-        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+        <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
       </View>
     );
   }
@@ -813,7 +825,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
           </Text>
         </Pressable>
         <ReactionPills t={t} reactions={reactions} me={me} />
-        <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+        <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
       </View>
     );
   }
@@ -868,7 +880,7 @@ export function Bubble({ t, m, online, quotedMsg, onLongPress, onViewOnce, onIma
         {previewUrl ? <LinkPreview url={previewUrl} t={t} /> : null}
       </Pressable>
       <ReactionPills t={t} reactions={reactions} me={me} />
-      <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+      <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
     </View>
   );
 }
@@ -904,30 +916,49 @@ function ReactionPills({ t, reactions, me }: { t: Theme; reactions: [string, str
   );
 }
 
+/**
+ * What the sender needs to know about an outgoing message right now.
+ *  null      — settled (or incoming): show the timestamp and tick marks
+ *  'sending' — in the outbox, we have a connection, it is on its way
+ *  'queued'  — in the outbox, no connection; it goes out on reconnect
+ *  'failed'  — the outbox gave up after 24 h; tap the bubble to retry
+ */
+export type SendState = null | 'sending' | 'queued' | 'failed';
+
 function TimestampRow({
-  t, queued, time, starred, deliveryStatus,
+  t, sendState, time, starred, deliveryStatus,
 }: {
   t: Theme;
-  queued: boolean;
+  sendState: SendState;
   time: string;
   starred?: boolean;
-  deliveryStatus?: 'sent' | 'delivered' | 'read';
+  deliveryStatus?: DeliveryStatus;
 }) {
   const { t: i18nT } = useTranslation();
+  const label =
+    sendState === 'failed' ? i18nT('chat.sendFailed')
+    : sendState === 'sending' ? i18nT('chat.sendingNow')
+    : sendState === 'queued' ? i18nT('chat.queued')
+    : null;
+  const labelColor = sendState === 'failed' ? t.danger : t.warn;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4, marginTop: 3 }}>
       {starred ? <I.Star size={9} color={t.accent} /> : null}
-      {queued ? (
+      {label ? (
         <>
-          <I.Timer size={10} color={t.warn} />
-          <Text style={{ fontFamily: t.fontMono, fontSize: 9.5, color: t.warn, letterSpacing: 0.4 }}>
-            {i18nT('chat.queued')}
+          {sendState === 'failed'
+            ? <I.RotateCW size={10} color={t.danger} />
+            : <I.Timer size={10} color={t.warn} />}
+          <Text style={{ fontFamily: t.fontMono, fontSize: 9.5, color: labelColor, letterSpacing: 0.4 }}>
+            {label}
           </Text>
         </>
       ) : (
         <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint }}>{time}</Text>
       )}
-      {!queued && deliveryStatus ? (
+      {/* Ticks only once the message has actually left: an unsettled message
+          showing a tick is exactly the lie this whole change removes. */}
+      {!label && deliveryStatus ? (
         deliveryStatus === 'delivered' || deliveryStatus === 'read' ? (
           <I.CheckCheck size={13} color={deliveryStatus === 'read' ? t.accent : t.textFaint} />
         ) : (
@@ -941,16 +972,17 @@ function TimestampRow({
 const PLAYBACK_RATES: number[] = [1.0, 1.5, 2.0, 0.5];
 
 function AudioBubble({
-  t, m, me, queued, time, reactions, onLongPress,
+  t, m, me, sendState, time, reactions, onLongPress,
 }: {
   t: Theme;
   m: StoredMessage;
   me: boolean;
-  queued: boolean;
+  sendState: SendState;
   time: string;
   reactions: [string, string[]][];
   onLongPress: () => void;
 }) {
+  const queued = sendState !== null;
   const [playing, setPlaying] = useState(false);
   const [posMs, setPosMs] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1.0);
@@ -1088,7 +1120,7 @@ function AudioBubble({
         <I.Mic size={14} color={me ? t.bubbleOutText : t.textDim} />
       </Pressable>
       <ReactionPills t={t} reactions={reactions} me={me} />
-      <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
+      <TimestampRow t={t} sendState={sendState} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
     </View>
   );
 }

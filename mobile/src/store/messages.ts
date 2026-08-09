@@ -16,6 +16,7 @@ import {
   getAllChatEphemeralTimers,
   type StoredMessage,
   type Attachment,
+  type DeliveryStatus,
 } from '../db/local';
 
 interface MessagesState {
@@ -55,7 +56,8 @@ interface MessagesState {
   toggleStar: (chatId: string, id: string) => Promise<void>;
   softDelete: (chatId: string, id: string) => Promise<void>;
   toggleReaction: (chatId: string, id: string, emoji: string, aegisId?: string) => Promise<void>;
-  updateDelivery: (chatId: string, id: string, status: 'sent' | 'delivered' | 'read') => Promise<void>;
+  /** Advance a message's delivery state. Never moves backwards — see nextDeliveryStatus. */
+  updateDelivery: (chatId: string, id: string, status: DeliveryStatus) => Promise<void>;
   /** Replace a message's media reference in place (e.g. local URI → persistent blob ref after upload). */
   setMediaUri: (chatId: string, id: string, mediaUri: string) => Promise<void>;
   /** Replace a message's attachments array in place (local URIs → blob refs after upload). */
@@ -352,14 +354,21 @@ export const useMessages = create<MessagesState>((set, get) => ({
 
   async updateDelivery(chatId, id, status) {
     if (!isDuress()) {
-      const { updateMessageDelivery } = require('../db/local');
-      await updateMessageDelivery(id, status);
+      const { advanceMessageDelivery } = require('../db/local');
+      // advance, not overwrite: a `delivered` receipt can beat our own relay
+      // ack, and a late outbox resolution must not knock two ticks back to one.
+      await advanceMessageDelivery(id, status);
     }
+    const { nextDeliveryStatus } = require('../db/local');
     const list = get().byChat[chatId] ?? [];
     set((s) => ({
       byChat: {
         ...s.byChat,
-        [chatId]: list.map((m) => (m.id === id ? { ...m, deliveryStatus: status } : m)),
+        [chatId]: list.map((m) =>
+          m.id === id
+            ? { ...m, deliveryStatus: nextDeliveryStatus(m.deliveryStatus ?? 'sent', status) }
+            : m,
+        ),
       },
     }));
   },

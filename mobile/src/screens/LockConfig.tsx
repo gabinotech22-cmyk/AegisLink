@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { logger } from '../utils/logger';
 import { View, Text, ScrollView, Pressable, Modal, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -199,7 +200,21 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
                 return;
               }
             }
-          } catch {}
+          } catch (e) {
+            // FAIL CLOSED (golden rule #6). This block is the ONLY thing
+            // stopping the real PIN from being set to the decoy PIN. Swallowing
+            // the error and falling through to setPIN() below would silently
+            // collapse duress mode: the PIN the user hands over under coercion
+            // would unlock the real account instead of the decoy, and nobody
+            // would ever be told. If we cannot PROVE the two differ, refuse.
+            if (__DEV__) logger.warn('[lock] decoy-PIN check failed — refusing to set PIN', e);
+            setPinError(i18nT('lockConfig.decoyCheckFailed', 'Could not verify this PIN against the decoy PIN. Try again.'));
+            shake();
+            setPinEntry('');
+            setPinStep('enter');
+            setFirstPin('');
+            return;
+          }
         }
         await setPIN(pin);
         setPinStored(true);

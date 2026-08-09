@@ -153,6 +153,10 @@
     "verifyNudgeAction": "Verifica",
     "verifyNudgeDismiss": "Più tardi",
     "queued": "IN CODA · VERRÀ INVIATO ALLA RICONNESSIONE",
+    "sendingNow": "INVIO IN CORSO…",
+    "sendFailed": "NON INVIATO · TOCCA PER RIPROVARE",
+    "retrySend": "Riprova l'invio",
+    "retrySendDesc": "Questo messaggio non è mai arrivato al relay. Provare a inviarlo di nuovo?",
     "deleteMessage": "Elimina messaggio",
     "deleteMessageDesc": "Questo messaggio verrà eliminato localmente.",
     "deleteForAll": "Elimina per tutti",
@@ -1200,7 +1204,8 @@
     "sameAsDecoy": "Il PIN non può essere uguale al PIN esca.",
     "screenPrivacy": "PRIVACY SCHERMO",
     "setPin": "Imposta PIN",
-    "titleBar": "Blocco app"
+    "titleBar": "Blocco app",
+    "decoyCheckFailed": "Impossibile verificare questo PIN rispetto al PIN esca. Riprova."
   },
   "appIcon": {
     "title": "Icona app",
