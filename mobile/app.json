@@ -58,7 +58,7 @@
     },
     "android": {
       "package": "com.aegislink.app",
-      "versionCode": 2,
+      "versionCode": 10006,
       "intentFilters": [
         {
           "action": "VIEW",
