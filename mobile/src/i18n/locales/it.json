@@ -1204,7 +1204,8 @@
     "sameAsDecoy": "Il PIN non può essere uguale al PIN esca.",
     "screenPrivacy": "PRIVACY SCHERMO",
     "setPin": "Imposta PIN",
-    "titleBar": "Blocco app"
+    "titleBar": "Blocco app",
+    "decoyCheckFailed": "Impossibile verificare questo PIN rispetto al PIN esca. Riprova."
   },
   "appIcon": {
     "title": "Icona app",

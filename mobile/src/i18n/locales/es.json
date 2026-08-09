@@ -1222,7 +1222,8 @@
     "sameAsDecoy": "El PIN no puede ser igual al PIN señuelo.",
     "screenPrivacy": "PRIVACIDAD DE PANTALLA",
     "setPin": "Configurar PIN",
-    "titleBar": "Bloqueo de la app"
+    "titleBar": "Bloqueo de la app",
+    "decoyCheckFailed": "No se pudo comprobar este PIN contra el PIN señuelo. Inténtalo de nuevo."
   },
   "appIcon": {
     "title": "Icono de la app",

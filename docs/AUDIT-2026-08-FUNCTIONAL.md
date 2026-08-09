@@ -17,8 +17,8 @@ Los fallos que el dueño veía no venían de la arquitectura, sino de **dos huec
 concretos en el cliente**, ambos ya corregidos en esta tanda: el outbox no tenía
 quién lo condujera y la UI no podía representar un fallo de envío.
 
-Salieron **9 hallazgos**: **5 cerrados** en esta tanda (SEC-1, I18N-1, TEST-2,
-TEST-3, DOC-1) y **4 abiertos** (REL-1, PAR-1, ARCH-1, TEST-1).
+Salieron **9 hallazgos**: **7 cerrados** en esta tanda (SEC-1, I18N-1, REL-1,
+TEST-1, TEST-2, TEST-3, DOC-1) y **2 abiertos** (PAR-1, ARCH-1).
 
 El más revelador no era un bug de la app. La única prueba end-to-end de la app
 real llevaba tiempo en rojo sin bloquear nada (TEST-2) y, al diagnosticarla,
@@ -94,8 +94,8 @@ avanzando en tres mensajes seguidos.
 
 ## 4. Hallazgos
 
-Cinco cerrados en esta tanda (SEC-1, I18N-1, TEST-2, TEST-3, DOC-1) y cuatro
-abiertos (REL-1, PAR-1, ARCH-1, TEST-1). Cada uno lleva su estado en el título.
+Siete cerrados en esta tanda (SEC-1, I18N-1, REL-1, TEST-1, TEST-2, TEST-3,
+DOC-1) y dos abiertos (PAR-1, ARCH-1). Cada uno lleva su estado en el título.
 
 ### SEC-1 · `POST /work/workspace` no verificaba quién decía ser el admin — **alto**, **cerrado**
 
@@ -157,7 +157,7 @@ Ahora hay dos guards en `screensUseI18n.test.ts`: toda pantalla importa el hook
 como primer argumento**. Verificado que no pasa en vacío: contra la revisión
 anterior marca exactamente las 9 líneas que el arreglo tocó.
 
-### REL-1 · Los mensajes de grupo no pueden tener estado de envío — medio
+### REL-1 · Los mensajes de grupo no podían tener estado de envío — medio, **cerrado**
 
 Un envío de grupo se abre en un job **por miembro**, cada uno con su `msgId`
 aleatorio (`mobile/src/socket/client.ts:4786`), y la burbuja del emisor se añade
@@ -165,8 +165,13 @@ con un tercer id sin relación (`:4896`). No hay forma de ir del job a la burbuj
 Por eso A-2 se limitó deliberadamente a 1:1: marcar esos jobs pondría un mensaje
 de grupo entero en `failed` porque la entrega a uno de veinte miembros expiró.
 
-**Arreglo:** que el fan-out lleve un id de mensaje compartido; entonces el estado
-de grupo se resuelve por "todos los jobs de este msgId resueltos".
+**Cerrado en PR #435:** los jobs llevan `bubble_id` (esquema v14), generado una
+sola vez antes del fan-out y compartido por todos los miembros. El estado se
+agrega: `sent` solo cuando NO queda ningún job de esa burbuja, `failed` en cuanto
+caduca el de cualquier miembro. Eso obligó a que `failed` sea **pegajoso** — los
+hermanos siguen resolviendo tras el primer fallo, y un `sent` tardío no puede
+decirte que sí llegó después de haberte dicho que no. Solo un reintento explícito
+lo levanta, y en grupos ese reintento re-hace el fan-out contra el roster ACTUAL.
 
 ### PAR-1 · El desktop es ciudadano de segunda — medio (viola la regla de oro #5)
 
@@ -189,7 +194,40 @@ Concentra transporte, sesiones, glare/recovery, grupos, self-copy, perfiles y
 mailbox. Es la razón mecánica de que cada arreglo genere el siguiente. Costuras
 naturales: transporte / sesiones / grupos / mailbox.
 
-### TEST-1 · 196 `catch` en `screens/` sin triar — medio
+### TEST-1 · Los `catch` de UI, triados — medio, **cerrado**
+
+**Primero, una cifra mía que estaba mal.** Dije 196; salían de un
+`grep -c "catch"` que contaba también comentarios y cadenas `.catch(`. Contando
+bloques `catch` de verdad en `screens/` son **144**, y el reparto desmonta la
+premisa de que fueran un mar de errores tragados:
+
+| Qué hace el `catch` | Nº |
+|---|---|
+| **Avisa al usuario** (`themedAlert` / `setError`) | **69** |
+| Hace algo con el error (fallback, estado) | 37 |
+| Solo comentario `/* ignore */` — best-effort declarado | 27 |
+| Loguea | 7 |
+| **Vacío del todo** | **3** |
+| Re-lanza | 1 |
+
+Casi la mitad ya avisa. De los 3 vacíos, dos son best-effort correctos: parsear
+unos "recientes" corruptos en `Search.tsx:78` (sin recientes y ya), y liberar la
+protección de captura al desmontar en `ViewOnce.tsx:85` (fallar ahí deja la
+protección PUESTA, o sea falla hacia el lado seguro).
+
+**El tercero era un fail-open de seguridad**, y justifica el triaje entero:
+
+`LockConfig.tsx:188-203` — el `catch {}` envolvía la comprobación de que el PIN
+real **no fuera igual al PIN señuelo**. Si algo dentro lanzaba (blob
+`aegis.panic.v1` corrupto, `require` fallido, error de Argon2 en
+`verifyPinWithSalt`), se tragaba y la ejecución caía directa a `setPIN(pin)`.
+Consecuencia silenciosa y grave: **el PIN que entregas bajo coacción abriría la
+cuenta real en vez del señuelo**, y nadie te avisa de que el guard no llegó a
+correr. Viola la regla de oro #6.
+
+Arreglado para **fallar cerrado**: si no se puede *demostrar* que los dos PIN
+difieren, no se guarda ninguno y se muestra el error. Dos tests de regresión
+(verify que lanza, y blob corrupto) que comprueban que `setPIN` no se llama.
 
 La mayor concentración de tragado de errores está en la capa de UI. Hay que
 clasificar cada uno en: legítimo best-effort, **debe avisar al usuario**, o
@@ -305,8 +343,10 @@ cubiertos de forma indirecta por §2 y §4.
    para que vuelva a ser una señal que bloquea.
 3. **I18N-1** — ✅ cerrado en PR #436: llamadas, las 5 pantallas sin i18n, y 9
    alertas más en stores/socket/componentes que el primer barrido no vio.
-4. **REL-1** — cierra el estado de envío que A-2 dejó a medias.
-5. **TEST-1** y **ARCH-1** — reducen la tasa de bugs futuros.
+4. **REL-1** — ✅ cerrado en PR #435.
+5. **TEST-1** — ✅ cerrado: 144 `catch` (no 196), 69 ya avisaban, y el único
+   problema real era un fail-open del guard de PIN señuelo. **ARCH-1** sigue
+   abierto y es el que más reduciría la tasa de bugs futuros.
 6. **PAR-1** — el desktop necesita decisión de producto antes que código
    (¿paridad completa, o desktop declarado como cliente reducido?).
 7. **DOC-1** — ✅ cerrado en esta pasada.

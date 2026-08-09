@@ -1222,7 +1222,8 @@
     "sameAsDecoy": "PIN cannot be the same as decoy PIN.",
     "screenPrivacy": "SCREEN PRIVACY",
     "setPin": "Set PIN",
-    "titleBar": "App Lock"
+    "titleBar": "App Lock",
+    "decoyCheckFailed": "Could not verify this PIN against the decoy PIN. Try again."
   },
   "appIcon": {
     "title": "App icon",

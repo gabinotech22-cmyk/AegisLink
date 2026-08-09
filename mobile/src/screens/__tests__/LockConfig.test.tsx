@@ -240,3 +240,74 @@ describe('LockConfigScreen', () => {
     expect(props.onBack).toHaveBeenCalledTimes(1);
   });
 });
+
+// ─── Fail-closed on the decoy-PIN guard (audit 2026-08, TEST-1) ──────────────
+//
+// The check that stops the real PIN being set to the DECOY PIN used to sit
+// inside `catch {}`. Any throw in there — a corrupted aegis.panic.v1 blob, a
+// require failure, an Argon2 error in verifyPinWithSalt — was swallowed and
+// execution fell straight through to setPIN(). The result would be silent and
+// severe: the PIN handed over under coercion unlocks the REAL account instead
+// of the decoy, and the user is never told the guard did not run.
+//
+// Golden rule #6: production fails closed. If we cannot PROVE the two PINs
+// differ, we refuse to store one.
+
+describe('LockConfigScreen — decoy-PIN guard fails closed', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockHasStoredPIN.mockResolvedValue(false);
+    // mockPrefs is a shared mutable object and an earlier suite leaves
+    // appLockEnabled true — pressing "App lock" would then toggle it OFF
+    // instead of opening the PIN modal.
+    mockPrefs.appLockEnabled = false;
+    mockPrefs.biometricsEnabled = false;
+  });
+
+  it('does NOT store a PIN when the decoy comparison throws', async () => {
+    jest.useFakeTimers();
+    try {
+      // Panic state present, so the guard runs — but the verify blows up.
+      mockSsGet.mockResolvedValue(JSON.stringify({ duressPin: true, pinHash: 'fake-hash' }));
+      const { verifyPinWithSalt } = require('../../lock/pin');
+      (verifyPinWithSalt as jest.Mock).mockRejectedValue(new Error('argon2 exploded'));
+
+      const { getByText } = render(<LockConfigScreen {...makeProps()} />);
+      await act(async () => {});
+      fireEvent.press(getByText('App lock'));
+
+      enterPin(getByText, '654321');
+      await act(async () => { jest.advanceTimersByTime(200); });
+      enterPin(getByText, '654321');
+      await act(async () => { jest.advanceTimersByTime(200); });
+      await act(async () => {});
+
+      // The whole point: nothing stored, app-lock not silently enabled.
+      expect(mockSetPIN).not.toHaveBeenCalled();
+      expect(mockSetPref).not.toHaveBeenCalledWith('appLockEnabled', true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('does NOT store a PIN when the panic blob is corrupt and cannot be parsed', async () => {
+    jest.useFakeTimers();
+    try {
+      mockSsGet.mockResolvedValue('{ this is not json');
+
+      const { getByText } = render(<LockConfigScreen {...makeProps()} />);
+      await act(async () => {});
+      fireEvent.press(getByText('App lock'));
+
+      enterPin(getByText, '654321');
+      await act(async () => { jest.advanceTimersByTime(200); });
+      enterPin(getByText, '654321');
+      await act(async () => { jest.advanceTimersByTime(200); });
+      await act(async () => {});
+
+      expect(mockSetPIN).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
