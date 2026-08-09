@@ -347,12 +347,28 @@ jobs:
             adb logcat > maestro-logcat.txt 2>&1 &
             LOGCAT_PID=$!
             set +e
-            maestro test .maestro/ --format junit --output maestro-report.xml
+            # --debug-output writes Maestro's OWN logs (driver, hierarchy dumps,
+            # per-command timings) to a path we control. Without it the run
+            # relied on copying $HOME/.maestro/tests/*, which came back empty:
+            # the 2026-08-09 failure uploaded neither a screenshot nor a UI tree
+            # nor a driver log, so the only evidence for a 664 s hang was the
+            # JUnit "Unknown error". Diagnosing a driver hang needs the driver's
+            # side of the story (audit 2026-08, TEST-2).
+            maestro test .maestro/ --format junit --output maestro-report.xml \
+              --debug-output maestro-debug
             CODE=$?
             # Snapshot the final on-screen state + rendered UI tree so we can see
             # whether it's a splash spinner, a redbox crash, or raw i18n keys.
+            # `uiautomator dump` writes to a file on the device and is then
+            # pulled: the old `dump /dev/tty` form interleaves the tool's own
+            # status line into the XML and silently produced nothing here.
             adb exec-out screencap -p > maestro-screen.png 2>/dev/null || true
-            adb exec-out uiautomator dump /dev/tty > maestro-uihierarchy.xml 2>/dev/null || true
+            adb shell uiautomator dump /sdcard/maestro-uihierarchy.xml >/dev/null 2>&1 \
+              && adb pull /sdcard/maestro-uihierarchy.xml maestro-uihierarchy.xml >/dev/null 2>&1 || true
+            # Say out loud what we captured, so an empty artifact is visible in
+            # the log instead of being silently swallowed by `if-no-files-found`.
+            ls -l maestro-screen.png maestro-uihierarchy.xml 2>&1 || true
+            du -sh maestro-debug 2>&1 || true
             kill "$LOGCAT_PID" 2>/dev/null || true
             mkdir -p maestro-out
             cp -r "$HOME/.maestro/tests/"* maestro-out/ 2>/dev/null || true
@@ -366,6 +382,7 @@ jobs:
           path: |
             mobile/maestro-report.xml
             mobile/maestro-out/**
+            mobile/maestro-debug/**
             mobile/maestro-logcat.txt
             mobile/maestro-screen.png
             mobile/maestro-uihierarchy.xml
