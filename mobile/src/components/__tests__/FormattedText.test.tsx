@@ -126,6 +126,39 @@ describe('FormattedText', () => {
     expect(linkTexts[0].props.children).toContain('aegislink://group/v1/');
   });
 
+  it('linkifies channel invite deep links (audit 2026-08-08: they rendered as dead text)', () => {
+    // Channel invites carry no `v1` segment, so the old allow-list skipped them
+    // and they showed up as plain text right next to a tappable group invite.
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText
+        body="Únete: aegislink://channel/8ZP1QRSTVWXY0123456789ABCD/0123456789ABCDEFGHJKMNPQRSTVWXYZ0123456789ABCDEFGHJK?k=ZYXWVUTSRQPNMKJHGFEDCBA9876543210ZYXWVUTSRQPN"
+        t={t}
+      />,
+    );
+    const { Text } = require('react-native');
+    const linkTexts = UNSAFE_getAllByType(Text).filter(
+      (node: any) =>
+        node.props.style?.textDecorationLine === 'underline' &&
+        typeof node.props.onPress === 'function',
+    );
+    expect(linkTexts.length).toBe(1);
+    expect(linkTexts[0].props.children).toContain('aegislink://channel/');
+  });
+
+  it('keeps the allow-list closed — an unknown aegislink:// path stays plain text', () => {
+    // The pattern must never drift into "any aegislink:// URL": each new link
+    // type has to be added deliberately here AND handled behind a confirmation
+    // in handleDeepLink.
+    const { UNSAFE_getAllByType } = render(
+      <FormattedText body="mira aegislink://wipe/everything y aegislink://settings/reset" t={t} />,
+    );
+    const { Text } = require('react-native');
+    const linkTexts = UNSAFE_getAllByType(Text).filter(
+      (node: any) => typeof node.props.onPress === 'function',
+    );
+    expect(linkTexts.length).toBe(0);
+  });
+
   it('NEVER linkifies aegislink://panic (remote wipe must not be tappable from chat)', () => {
     const { UNSAFE_getAllByType } = render(
       <FormattedText

@@ -1126,6 +1126,47 @@ function Shell() {
       return;
     }
 
+    // Channel invite: aegislink://channel/<b32 id>/<b32 pub>[?k=…][&p=1].
+    // Confirm before joining — the link arrives in a message someone else wrote,
+    // so a single tap must never subscribe the user to a channel on its own
+    // (same rule as the contact link below). Approval-gated invites only file an
+    // application; the owner still has to approve it.
+    if (url.startsWith('aegislink://channel/')) {
+      const { parseInviteLink } = require('./src/channels/inviteLink') as typeof import('./src/channels/inviteLink');
+      if (!parseInviteLink(url)) return;
+      const { themedAlert: _themedAlert } = require('./src/components/AlertHost') as typeof import('./src/components/AlertHost');
+      _themedAlert(
+        i18nT('channels.joinConfirmTitle', 'Unirse al canal'),
+        i18nT('channels.joinConfirmDesc', '¿Quieres unirte a este canal?'),
+        [
+          { text: i18nT('common.cancel', 'Cancelar'), style: 'cancel' },
+          {
+            text: i18nT('channels.joinConfirmJoin', 'Unirse'),
+            onPress: () => {
+              void (async () => {
+                const { useIdentity: _useIdentity } = require('./src/store/identity') as typeof import('./src/store/identity');
+                const id = _useIdentity.getState().identity;
+                if (!id) return;
+                const { useChannels: _useChannels } = require('./src/store/channels') as typeof import('./src/store/channels');
+                const res = await _useChannels.getState().joinViaInvite(url, id);
+                if (res.ok && res.applied) {
+                  _themedAlert(
+                    i18nT('channels.applySentTitle', 'Request sent'),
+                    i18nT('channels.applySentDesc', 'This channel requires approval. You will join automatically when the owner approves your request.'),
+                  );
+                } else if (res.ok && res.channelId) {
+                  push({ name: 'channelFeed', channelId: res.channelId });
+                } else {
+                  _themedAlert(i18nT('channels.joinFailed'), res.error ?? i18nT('channels.invalidInvite'));
+                }
+              })();
+            },
+          },
+        ],
+      );
+      return;
+    }
+
     // Contact link: aegislink://v1/<AEGIS_ID>/<pubkeyB64> — same payload as the
     // identity QR. Confirm before adding (TOFU via addFromQR, which detects a
     // key change for an existing contact and refuses to overwrite silently).
