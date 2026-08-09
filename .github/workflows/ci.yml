@@ -354,8 +354,11 @@ jobs:
             # nor a driver log, so the only evidence for a 664 s hang was the
             # JUnit "Unknown error". Diagnosing a driver hang needs the driver's
             # side of the story (audit 2026-08, TEST-2).
-            maestro test .maestro/ --format junit --output maestro-report.xml \
-              --debug-output maestro-debug
+            # ONE LINE on purpose. A `\` continuation does not survive the way
+            # android-emulator-runner passes this script through: the previous
+            # attempt reached Maestro as a second flow path and died with
+            # "Flow path does not exist: .../mobile/\".
+            maestro test .maestro/ --format junit --output maestro-report.xml --debug-output maestro-debug
             CODE=$?
             # Snapshot the final on-screen state + rendered UI tree so we can see
             # whether it's a splash spinner, a redbox crash, or raw i18n keys.
@@ -363,8 +366,7 @@ jobs:
             # pulled: the old `dump /dev/tty` form interleaves the tool's own
             # status line into the XML and silently produced nothing here.
             adb exec-out screencap -p > maestro-screen.png 2>/dev/null || true
-            adb shell uiautomator dump /sdcard/maestro-uihierarchy.xml >/dev/null 2>&1 \
-              && adb pull /sdcard/maestro-uihierarchy.xml maestro-uihierarchy.xml >/dev/null 2>&1 || true
+            adb shell uiautomator dump /sdcard/maestro-uihierarchy.xml >/dev/null 2>&1 && adb pull /sdcard/maestro-uihierarchy.xml maestro-uihierarchy.xml >/dev/null 2>&1 || true
             # Say out loud what we captured, so an empty artifact is visible in
             # the log instead of being silently swallowed by `if-no-files-found`.
             ls -l maestro-screen.png maestro-uihierarchy.xml 2>&1 || true
