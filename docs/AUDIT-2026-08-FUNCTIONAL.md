@@ -106,19 +106,31 @@ solo cubre la lectura.
 **Arreglo:** exigir `sig`+`ts` como el resto, con test de regresión que pruebe
 que una firma ajena es rechazada.
 
-### I18N-1 · 15 strings de cara al usuario hardcodeados, **en idiomas mezclados** — medio
+### I18N-1 · Strings de cara al usuario hardcodeados, **en idiomas mezclados** — medio, **parcialmente cerrado**
 
-| Archivo | Strings | Idioma |
-|---|---|---|
-| `mobile/src/socket/calls.ts:526,552,565,673,697` | 8 | **inglés** |
-| `mobile/src/screens/ProfileSwitcher.tsx:52,53,85` | 3 | **español** |
-| `mobile/src/utils/overlayPermission.ts:45,46` | 2 | **español** |
-| `mobile/src/screens/Scheduled.tsx:66` | 1 | español |
-| `mobile/src/screens/DistributionLists.tsx:55` | 1 | inglés |
+Primero lo medí por llamadas a `themedAlert` y salieron 15. Al comprobar pantalla
+por pantalla el hueco es mayor: **5 pantallas no tienen i18n cableado en
+absoluto** (cero `useTranslation`), con ~41 literales entre ellas.
 
-Un usuario en español ve **todos** los errores de llamada en inglés; uno en
-inglés ve el cambio de perfil y el permiso de superposición en español. Es la
-misma clase de bug reportada en la build 15, viva todavía en otras pantallas.
+| Sitio | Literales | Idioma | Estado |
+|---|---|---|---|
+| `mobile/src/socket/calls.ts` (8: fallo de llamada + notificación en curso) | 8 | inglés + español | ✅ **arreglado, PR #436** |
+| `mobile/src/screens/ProfileSwitcher.tsx` | ~13 | **español** | abierto |
+| `mobile/src/screens/DistributionLists.tsx` | ~11 | inglés | abierto |
+| `mobile/src/screens/Scheduled.tsx` | ~8 | español | abierto |
+| `mobile/src/screens/BroadcastCompose.tsx` | ~6 | mixto | abierto |
+| `mobile/src/screens/CreateProfile.tsx` | ~3 | español | abierto |
+| `mobile/src/utils/overlayPermission.ts` | 2 | **español** | abierto |
+
+Cortaba en las dos direcciones: un usuario en español recibía **todos** los
+errores de llamada en inglés, y uno en inglés ve el cambio de perfil, los
+programados y el permiso de superposición en español. Es la misma clase de bug
+reportada contra la build 15, viva todavía en las pantallas más nuevas.
+
+Las cinco pantallas sin i18n son trabajo mecánico pero pantalla a pantalla, y los
+tests de paridad de locales (`i18nKeyParity`, `localeParity`, 9/9) **no lo
+detectan**: solo comprueban que en/es/it tengan las mismas claves, no que las
+pantallas usen claves en vez de literales.
 
 ### REL-1 · Los mensajes de grupo no pueden tener estado de envío — medio
 
