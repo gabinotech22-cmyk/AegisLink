@@ -291,8 +291,19 @@ jobs:
         # EXPO_PUBLIC_E2E is inlined into the bundle (Expo exposes EXPO_PUBLIC_*
         # to the app). It disables FLAG_SECURE so Maestro can capture the screen;
         # release builds never set it, so production keeps screenshots blocked.
+        #
+        # EXPO_PUBLIC_SERVER_URL pins the relay to the emulator loopback, where
+        # nothing is listening. This is NOT cosmetic: the bundle is built with
+        # `--dev false`, so `__DEV__` is false and config.ts would otherwise
+        # resolve SERVER_URL to SERVER_URL_PROD — meaning every CI run mined a
+        # PoW and registered a REAL identity against the live relay, and burned
+        # its 5-per-15-min registration budget from a shared runner IP.
+        # The 02-onboarding flow already documents "no server in CI"; this makes
+        # that true. Registration fails fast, Onboarding falls through to Home
+        # exactly as the flow expects, and CI never writes to production.
         env:
           EXPO_PUBLIC_E2E: '1'
+          EXPO_PUBLIC_SERVER_URL: 'http://10.0.2.2:3001'
         run: |
           mkdir -p android/app/src/main/assets
           npx expo export:embed \
