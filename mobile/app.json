@@ -2,7 +2,7 @@
   "expo": {
     "name": "AegisLink",
     "slug": "aegislink",
-    "version": "1.0.6",
+    "version": "1.0.5",
     "orientation": "portrait",
     "scheme": "aegislink",
     "userInterfaceStyle": "automatic",
@@ -58,7 +58,7 @@
     },
     "android": {
       "package": "com.aegislink.app",
-      "versionCode": 10006,
+      "versionCode": 10005,
       "intentFilters": [
         {
           "action": "VIEW",
