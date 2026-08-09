@@ -40,12 +40,21 @@ type Segment =
   | { kind: 'mention'; text: string };
 
 // Combined regex: order matters — code first (avoids greedy overlap), then url, mention, bold, italic, strike.
-// aegislink:// is linkified ONLY for group invites (group/v1/) and contact
-// links (v1/): other scheme URLs — notably aegislink://panic, which
-// remote-wipes the device — must never become tappable from a message body
-// an attacker controls.
+//
+// aegislink:// is linkified against an ALLOW-LIST, never a deny-list: group
+// invites (group/v1/), contact links (v1/) and channel invites (channel/).
+// Everything else stays plain text — notably aegislink://panic, which
+// remote-wipes the device and must never become tappable from a message body an
+// attacker controls. Adding a new link type here means adding it to
+// handleDeepLink in App.tsx too, behind a confirmation step; a link someone
+// else sent must never act on a single tap.
+//
+// Channel invites were missing (audit 2026-08-08) and rendered as dead text
+// while group invites right next to them were tappable. Format:
+// aegislink://channel/<b32 id>/<b32 pub>[?k=…][&p=1] — no `v1` segment, which
+// is why the old pattern skipped it.
 const TOKEN_RE =
-  /(`[^`]+`)|(\bhttps?:\/\/[^\s<>"')\]]+|\baegislink:\/\/(?:group\/)?v1\/[^\s<>"')\]]+)|((?:^|\s)@[A-Za-z0-9_-]{3,})|(\*[^*\n]+\*)|(_[^_\n]+_)|(~[^~\n]+~)/g;
+  /(`[^`]+`)|(\bhttps?:\/\/[^\s<>"')\]]+|\baegislink:\/\/(?:(?:group\/)?v1|channel)\/[^\s<>"')\]]+)|((?:^|\s)@[A-Za-z0-9_-]{3,})|(\*[^*\n]+\*)|(_[^_\n]+_)|(~[^~\n]+~)/g;
 
 function parse(body: string): Segment[] {
   const segments: Segment[] = [];
