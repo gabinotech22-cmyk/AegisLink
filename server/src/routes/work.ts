@@ -656,9 +656,15 @@ router.get('/org/:orgId/channels/:channelId/files/:attachmentId/download', async
 
 const AEGIS_ID_WS_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
+// Creation proves possession too. This used to take adminAegisId from the body
+// and trust it, which let anyone mint a workspace administered by someone else's
+// identity — the one route of the 32 in this file that skipped the check the
+// comment below spells out (audit 2026-08, SEC-1).
 const CreateWorkspaceSchema = z.object({
   nameEnc: z.string().min(1).max(512),   // base64 ciphertext of workspace name
   adminAegisId: z.string().regex(AEGIS_ID_WS_RE),
+  sig: z.string().min(1),
+  ts: z.coerce.number().int().positive(),
 });
 
 const InviteWorkspaceMemberSchema = z.object({
@@ -679,7 +685,16 @@ router.post('/workspace', async (req, res) => {
   const parsed = CreateWorkspaceSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: 'INVALID_PAYLOAD' }); return; }
 
-  const { nameEnc, adminAegisId } = parsed.data;
+  const { nameEnc, adminAegisId, sig, ts } = parsed.data;
+
+  // Prove the caller owns the identity it is naming as admin. Signed over the
+  // aegisId itself rather than a workspace id, because the workspace does not
+  // exist yet — same scheme, same 30 s time buckets as every other route here.
+  if (!(await verifyAdminSig(adminAegisId, adminAegisId, 'create_workspace', sig, ts))) {
+    res.status(403).json({ error: 'FORBIDDEN' });
+    return;
+  }
+
   const id = randomUUID();
   const now = Date.now();
 

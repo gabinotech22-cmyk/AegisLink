@@ -94,3 +94,65 @@ describe('GET /work/workspace/:id/members — signature auth', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ─── POST /work/workspace — creation must prove possession too (SEC-1) ────────
+//
+// Audit 2026-08 found this was the ONE route of the 32 in work.ts that took an
+// identity from the request body and trusted it: `adminAegisId` went straight
+// into workspaceRepo.create with no signature. Anyone could mint a workspace
+// administered by someone else's identity — the exact thing the comment above
+// WorkspaceReadQuerySchema says must not happen (golden rule #3: knowing an
+// aegisId ≠ owning it, and #7: trust is derived server-side, never supplied).
+//
+// The signature is over the aegisId itself rather than a workspace id, because
+// the workspace does not exist yet at creation time.
+
+describe('POST /work/workspace — signature auth (SEC-1 regression)', () => {
+  it('creates the workspace when the admin signs with their own key', async () => {
+    const ts = Date.now();
+    const sig = sign(MEMBER_ID, 'create_workspace', ts, signKeys.secretKey);
+    const res = await request(app)
+      .post('/work/workspace')
+      .send({ nameEnc: 'opaque', adminAegisId: MEMBER_ID, sig, ts });
+    expect(res.status).toBe(201);
+    expect(typeof res.body.id).toBe('string');
+  });
+
+  it('REJECTS a workspace claiming an admin the caller does not own', async () => {
+    // The attack: I know your aegisId, so I create a workspace with you as admin.
+    const attacker = nacl.sign.keyPair();
+    const ts = Date.now();
+    const sig = sign(MEMBER_ID, 'create_workspace', ts, attacker.secretKey);
+    const res = await request(app)
+      .post('/work/workspace')
+      .send({ nameEnc: 'opaque', adminAegisId: MEMBER_ID, sig, ts });
+    expect(res.status).toBe(403);
+  });
+
+  it('REJECTS a request with no signature at all', async () => {
+    // The pre-fix request shape. It must now fail validation, not succeed.
+    const res = await request(app)
+      .post('/work/workspace')
+      .send({ nameEnc: 'opaque', adminAegisId: MEMBER_ID });
+    expect(res.status).toBe(400);
+  });
+
+  it('REJECTS a stale signature outside the replay window', async () => {
+    const ts = Date.now() - 5 * 60_000;
+    const sig = sign(MEMBER_ID, 'create_workspace', ts, signKeys.secretKey);
+    const res = await request(app)
+      .post('/work/workspace')
+      .send({ nameEnc: 'opaque', adminAegisId: MEMBER_ID, sig, ts });
+    expect(res.status).toBe(403);
+  });
+
+  it('REJECTS a signature bound to a different action', async () => {
+    // A read signature must not be replayable as a creation.
+    const ts = Date.now();
+    const sig = sign(MEMBER_ID, 'read_workspace', ts, signKeys.secretKey);
+    const res = await request(app)
+      .post('/work/workspace')
+      .send({ nameEnc: 'opaque', adminAegisId: MEMBER_ID, sig, ts });
+    expect(res.status).toBe(403);
+  });
+});
