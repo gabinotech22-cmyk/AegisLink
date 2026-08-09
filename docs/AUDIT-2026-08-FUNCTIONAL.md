@@ -172,7 +172,7 @@ La mayor concentración de tragado de errores está en la capa de UI. Hay que
 clasificar cada uno en: legítimo best-effort, **debe avisar al usuario**, o
 **debe fallar cerrado**.
 
-### TEST-2 · La única prueba end-to-end de la app real lleva tiempo en rojo y no bloquea nada — medio
+### TEST-2 · La única prueba end-to-end de la app real llevaba tiempo en rojo — medio, **cerrado**
 
 El job `mobile-e2e` (Maestro sobre emulador Android) está marcado
 `continue-on-error: true` en `.github/workflows/ci.yml`, así que su resultado
@@ -186,20 +186,34 @@ que solo añade un markdown — no toca código de app):
 Que falle en un PR de solo-documentación descarta que lo rompa el cambio: está
 roto de base.
 
-**Diagnóstico, ya medido sobre el artefacto de la ejecución** (descartando mi
-primera sospecha, que era el PoW):
+**RESUELTO — y mi diagnóstico intermedio era falso.** Vale la pena dejar las dos
+versiones porque el error es instructivo:
 
-- El fallo llega a los **664 s**, cuando los timeouts del propio flow suman
-  **150 s**, y Maestro lo reporta como `Unknown error`, no como aserción fallida.
-  Una aserción reventada habría fallado a los ~150 s.
-- El logcat no muestra crash, ANR ni excepción de la app.
-- ⇒ Es el **driver de Maestro/uiautomator colgándose sobre la jerarquía de vistas
-  de React Native**, no la app fallando al hacer onboarding. Es la misma desincronía
-  de uiautomator con RN que ya se había topado este repo antes.
+1. Primera sospecha: el minado PoW en hardware débil.
+2. La descarté sobre los tiempos: el fallo llegaba a los **664 s** cuando los
+   timeouts del flow suman **150 s**, y Maestro reportaba `Unknown error` en vez
+   de aserción fallida. Concluí "cuelgue del driver, no la app". Escribí eso aquí
+   como si fuera la conclusión.
+3. **La causa real era la 1, y el cuelgue del driver era su consecuencia.** Al
+   arreglar TEST-3 (dejar de apuntar a producción) el E2E pasó a verde. La
+   jerarquía UI capturada lo dice literalmente:
+   `[fetchPowChallenge] TypeError: Network request failed`. La app se bloqueaba
+   pidiendo el challenge al relay de producción y minando PoW a dificultad 18 en
+   JS puro sobre un emulador lento; eso desbordaba la ventana y arrastraba al
+   driver.
 
-Lo relevante para esta auditoría: **el único test que ejercita la app compilada
-de principio a fin lleva tiempo rojo y nadie está obligado a mirarlo.** Mientras
-siga `continue-on-error`, el proyecto no tiene señal end-to-end.
+Resultado tras el arreglo (ejecución 31328814361):
+
+| Flow | Antes | Ahora |
+|---|---|---|
+| `01-launch-smoke` | ✅ 16,8 s | ✅ 19,3 s |
+| `02-onboarding` | ❌ 664 s, `Unknown error` | ✅ **14,9 s** |
+| Suite | 1 de 2 fallando | **2/2, 0 fallos, 34 s** |
+
+Lección que sí se sostiene: **el único test que ejercita la app compilada de
+principio a fin llevaba tiempo rojo y nadie estaba obligado a mirarlo** — por eso
+sobrevivió tanto. Siguiente paso natural, ahora que pasa: quitarle el
+`continue-on-error` para que vuelva a ser señal de verdad.
 
 ### TEST-3 · El E2E de CI registraba identidades reales en el relay de producción — **alto**, **cerrado**
 
@@ -263,11 +277,11 @@ cubiertos de forma indirecta por §2 y §4.
 ## 7. Orden recomendado
 
 1. **SEC-1** — es seguridad y el arreglo es pequeño. **→ hecho, PR #436.**
-2. **TEST-2** — diagnosticar por qué falla `02-onboarding`. Si es el PoW, arregla
-   de paso el registro en hardware viejo; sea lo que sea, hasta que no esté verde
-   el proyecto no tiene señal end-to-end. Ponerlo a bloquear después.
-3. **I18N-1** — visible para todo usuario no anglófono, arreglo mecánico.
-   **→ parcial, PR #436** (llamadas); quedan 5 pantallas sin i18n.
+2. **TEST-2** — ✅ cerrado: era el PoW contra producción, y se fue con TEST-3.
+   Pendiente el remate: quitarle el `continue-on-error` ahora que pasa en 34 s,
+   para que vuelva a ser una señal que bloquea.
+3. **I18N-1** — ✅ cerrado en PR #436: llamadas, las 5 pantallas sin i18n, y 9
+   alertas más en stores/socket/componentes que el primer barrido no vio.
 4. **REL-1** — cierra el estado de envío que A-2 dejó a medias.
 5. **TEST-1** y **ARCH-1** — reducen la tasa de bugs futuros.
 6. **PAR-1** — el desktop necesita decisión de producto antes que código
