@@ -17,9 +17,11 @@ Los fallos que el dueño veía no venían de la arquitectura, sino de **dos huec
 concretos en el cliente**, ambos ya corregidos en esta tanda: el outbox no tenía
 quién lo condujera y la UI no podía representar un fallo de envío.
 
-Quedan **8 hallazgos abiertos**, uno de ellos de seguridad — y uno de ellos es
-que la única prueba end-to-end de la app real lleva tiempo en rojo sin bloquear
-nada (TEST-2), que es probablemente la razón de que estos huecos duraran.
+Salieron **9 hallazgos** (2 de seguridad, ambos ya cerrados). El más revelador
+no es un bug de la app: la única prueba end-to-end de la app real lleva tiempo en
+rojo sin bloquear nada (TEST-2), y al diagnosticarla apareció que además estaba
+**registrando identidades reales contra el relay de producción** (TEST-3). Esa
+falta de señal end-to-end es probablemente la razón de que el resto durara.
 
 ## 1. Superficie medida
 
@@ -182,15 +184,39 @@ que solo añade un markdown — no toca código de app):
   se llega a la UI principal.
 
 Que falle en un PR de solo-documentación descarta que lo rompa el cambio: está
-roto de base. **Causa raíz no determinada** — puede ser el minado PoW en hardware
-débil (la misma sospecha que la investigación de registro en iPhone 8 del
-`ROADMAP-2026-07.md` §2), un timeout de red contra el relay real desde CI, o
-inestabilidad del emulador. No lo afirmo sin medirlo.
+roto de base.
+
+**Diagnóstico, ya medido sobre el artefacto de la ejecución** (descartando mi
+primera sospecha, que era el PoW):
+
+- El fallo llega a los **664 s**, cuando los timeouts del propio flow suman
+  **150 s**, y Maestro lo reporta como `Unknown error`, no como aserción fallida.
+  Una aserción reventada habría fallado a los ~150 s.
+- El logcat no muestra crash, ANR ni excepción de la app.
+- ⇒ Es el **driver de Maestro/uiautomator colgándose sobre la jerarquía de vistas
+  de React Native**, no la app fallando al hacer onboarding. Es la misma desincronía
+  de uiautomator con RN que ya se había topado este repo antes.
 
 Lo relevante para esta auditoría: **el único test que ejercita la app compilada
-de principio a fin lleva tiempo rojo y nadie está obligado a mirarlo**. Si el
-fallo es el PoW, entonces CI llevaba meses reproduciendo el bug de registro que
-se estaba investigando a mano sobre TestFlight.
+de principio a fin lleva tiempo rojo y nadie está obligado a mirarlo.** Mientras
+siga `continue-on-error`, el proyecto no tiene señal end-to-end.
+
+### TEST-3 · El E2E de CI registraba identidades reales en el relay de producción — **alto**, **cerrado**
+
+Encontrado al diagnosticar TEST-2. El bundle de CI se compila con `--dev false`,
+así que `__DEV__` es falso y `config.ts:34-37` resolvía `SERVER_URL` a
+`SERVER_URL_PROD` = `https://aegislink.duckdns.org`. Es decir: **cada ejecución
+del E2E minaba un PoW y registraba una identidad real contra el relay vivo**,
+desde una IP compartida de runner de GitHub que además compite por el mismo
+límite de 5 registros / 15 min que tienen los usuarios reales.
+
+Confirmado en el logcat de la ejecución 31301655118: el emulador resolviendo y
+verificando app-links de `aegislink.duckdns.org`.
+
+El flow `02-onboarding` llevaba desde siempre justificándose con *"no server in
+CI"*. Era una suposición, y era falsa. **Cerrado en PR #437**: se fija
+`EXPO_PUBLIC_SERVER_URL` al loopback del emulador, con lo que la suposición pasa
+a ser cierta y CI deja de escribir en producción.
 
 ### DOC-1 · `SESSION_HANDOFF.md` describía infraestructura muerta — bajo, **cerrado**
 
