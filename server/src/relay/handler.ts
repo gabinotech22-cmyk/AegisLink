@@ -75,6 +75,46 @@ export function attachRelay(io: SocketServer) {
   // desktopPubKey -> { socket, timer }
   const linkingSockets = new Map<string, { socket: Socket; timer: ReturnType<typeof setTimeout> }>();
 
+  /**
+   * How long a "live" delivery has to be confirmed before we treat it as having
+   * gone nowhere and wake the device for real.
+   *
+   * A real client acks as soon as it has persisted the envelope, which is well
+   * under a second, so this only fires when the socket was not backed by a
+   * running app. 8s leaves generous room for a busy JS thread (a cold start
+   * grinding through a backlog) without making the notification feel late.
+   */
+  const PUSH_FALLBACK_MS = 8_000;
+
+  /**
+   * Ghost guard (audit 2026-08-08). `notifyRecipient` used to fire only when the
+   * relay already believed the recipient was offline. But iOS tears an app down
+   * without closing its TCP connection, so for up to ~35s (pingInterval 15s +
+   * pingTimeout 20s) a killed or backgrounded phone still looks connected: the
+   * message was emitted into nothing, no push was sent, and it arrived silently
+   * — "las notificaciones de grupo con la app minimizada o muerta no llegan".
+   * Group messages fan out as ordinary 1:1 envelopes, so they hit this too.
+   *
+   * The ack is the only honest signal that a device is really there: a queued
+   * row is deleted when the recipient confirms it. So if the row is STILL queued
+   * a few seconds after a supposedly live delivery, nobody received it — wake
+   * them properly.
+   *
+   * Zero-metadata: this fires only when a delivery went unconfirmed, never on a
+   * healthy one, so the push provider learns nothing about normal conversation
+   * frequency that it did not already see from the offline path.
+   */
+  function pushIfUnconfirmed(id: string, to: string): void {
+    const timer = setTimeout(() => {
+      void messageRepo
+        .isStillQueued(id)
+        .then((unconfirmed) => { if (unconfirmed) void notifyRecipient(to); })
+        .catch(() => { /* best-effort wake-up */ });
+    }, PUSH_FALLBACK_MS);
+    // Never let a pending wake-up keep the process alive on shutdown.
+    timer.unref?.();
+  }
+
   function deliver(env: SealedEnvelope, recipientSockets: Set<Socket>): boolean {
     const live = liveSockets(recipientSockets);
     if (live.length === 0) return false;
@@ -712,6 +752,8 @@ export function attachRelay(io: SocketServer) {
             ack?.({ ok: true, queued: true });
             return;
           }
+          // "Delivered" only means we emitted. If nobody acks it, wake them.
+          pushIfUnconfirmed(env.id, env.to);
           ack?.({ ok: true, queued: false });
 
           // Echo sent-confirmation to other devices of the sender so they can
@@ -845,6 +887,8 @@ export function attachRelay(io: SocketServer) {
             // Confirm delivery to the sender's own (authenticated) socket — this
             // is the sender's own device, not a social-graph leak.
             socket.emit('msg:delivered', { msgId: env.id, to: env.to });
+            // "Delivered" only means we emitted. If nobody acks it, wake them.
+            pushIfUnconfirmed(env.id, env.to);
             ack?.({ ok: true, queued: false });
             return;
           }
