@@ -204,6 +204,47 @@ y decirlo donde el usuario lo vea, en vez de dejar que lo descubra buscando una
 pestaña que no está. Lo que no se sostiene es el estado actual: paridad
 implícita que no existe.
 
+#### PAR-1b · El desktop no *puede* aislar perfiles, y su código aparenta que sí — **alto**
+
+Al ir a portar las dos pantallas apareció algo que contar por separado, porque no
+es "falta UI": **es una trampa puesta**.
+
+El renderer expone una API con forma de multi-perfil —`setActiveDbSlot()`,
+`getSecretKeySlot()`, `deleteIdentitySlot()`, y una allow-list de keystore que ya
+contempla `activeProfile`, `activeSlotId` y `slotsList`
+(`desktop/src/main/ipc/secureStorage.ts:27`). Yo leí esos nombres y di la
+fontanería por hecha. **El proceso main no la honra:**
+
+| Evidencia | `desktop/src/main/ipc/database.ts` |
+|---|---|
+| Un solo fichero de DB, abierto una vez con la clave del slot `'self'` | `:448-454`, `:473` |
+| `db:save-message` recibe el slot y lo usa **solo para cifrar el cuerpo** | `:692-697` |
+| `db:load-messages-by-chat` recibe el slot y el SQL **lo ignora** — `WHERE chat_id = ?` | `:724-729` |
+| `db:save-group` / `db:load-groups` ni siquiera lo reciben | `:929`, `:952` |
+| `contacts` no tiene columna de slot: su `profile` es la etiqueta personal/trabajo, otra cosa | `:290`, `:613-625` |
+
+Consecuencia si alguien cablea `ProfileSwitcher` contra esto: cambiar de perfil
+escribe los mensajes cifrados con la clave del perfil B **en la misma tabla**, y
+al abrir un chat salen mezclados los del perfil A como `[DECRYPTION_ERROR]`
+(`:242-249` devuelve marcador visible — eso sí está bien, regla de oro #1), con
+los contactos y grupos de A a la vista. **Aislamiento aparente, cero aislamiento
+real.** Para la sección 11, cuyo nombre literal es "múltiples perfiles
+*aislados*", eso es peor que no tener la pantalla.
+
+**Diseño recomendado — un fichero de DB por slot, no una columna de slot.**
+`getDbKey(slot)` ya deriva clave distinta por slot (`:119-149`), así que basta
+con que `mainDbPath` dependa del slot: `aegislink.db` sigue siendo `'self'` y los
+demás van a `aegislink-<slot>.db`. Con eso el aislamiento es del sistema de
+ficheros, no de un `WHERE` que alguien puede olvidar; no hay migración de esquema
+ni riesgo para los datos que ya existen en disco; y los handlers que hoy ignoran
+el slot pasan a ser correctos sin tocarlos, porque apuntan al handle activo.
+Falta añadir `db:switch-slot`, hacer `setActiveDbSlot` asíncrono contra ese IPC,
+y tests de IPC — que la regla de oro #11 ya exigía al desktop y aún no tiene.
+
+**Hasta que eso exista, portar `CreateProfile`/`ProfileSwitcher` está
+bloqueado.** No por esfuerzo: porque entregaría una función de privacidad que no
+cumple lo que promete.
+
 ### ARCH-1 · `socket/client.ts` — medio, **abierto** (plan medido, sin ejecutar)
 
 5188 líneas y 59 funciones. Pero al medirlo por función el diagnóstico cambia:
@@ -398,5 +439,9 @@ cubiertos de forma indirecta por §2 y §4.
    problema real era un fail-open del guard de PIN señuelo. **ARCH-1** sigue
    abierto y es el que más reduciría la tasa de bugs futuros.
 6. **PAR-1** — el desktop necesita decisión de producto antes que código
-   (¿paridad completa, o desktop declarado como cliente reducido?).
+   (¿paridad completa, o desktop declarado como cliente reducido?). Pero
+   **PAR-1b no espera a esa decisión**: aunque se elija cliente reducido, hoy hay
+   una API con forma de multi-perfil que el proceso main no honra, y eso se
+   arregla o se retira. Dejar nombres que prometen aislamiento sobre una DB
+   compartida es una trampa para el próximo que pase por ahí.
 7. **DOC-1** — ✅ cerrado en esta pasada.
