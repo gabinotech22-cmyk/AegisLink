@@ -17,11 +17,15 @@ Los fallos que el dueño veía no venían de la arquitectura, sino de **dos huec
 concretos en el cliente**, ambos ya corregidos en esta tanda: el outbox no tenía
 quién lo condujera y la UI no podía representar un fallo de envío.
 
-Salieron **9 hallazgos** (2 de seguridad, ambos ya cerrados). El más revelador
-no es un bug de la app: la única prueba end-to-end de la app real lleva tiempo en
-rojo sin bloquear nada (TEST-2), y al diagnosticarla apareció que además estaba
-**registrando identidades reales contra el relay de producción** (TEST-3). Esa
-falta de señal end-to-end es probablemente la razón de que el resto durara.
+Salieron **9 hallazgos**: **5 cerrados** en esta tanda (SEC-1, I18N-1, TEST-2,
+TEST-3, DOC-1) y **4 abiertos** (REL-1, PAR-1, ARCH-1, TEST-1).
+
+El más revelador no era un bug de la app. La única prueba end-to-end de la app
+real llevaba tiempo en rojo sin bloquear nada (TEST-2) y, al diagnosticarla,
+apareció que además estaba **registrando identidades reales contra el relay de
+producción** (TEST-3) — lo que resultó ser también la causa del rojo. Arreglado
+eso, el E2E pasa en 34 s por primera vez. Esa ausencia de señal end-to-end es
+probablemente la razón de que el resto de huecos durara tanto.
 
 ## 1. Superficie medida
 
@@ -88,9 +92,12 @@ real del móvil. Tres escenarios: envío offline → reconexión → descifrado;
 at-least-once (un drenaje sin ack sobrevive, uno con ack no); y el ratchet
 avanzando en tres mensajes seguidos.
 
-## 4. Hallazgos ABIERTOS
+## 4. Hallazgos
 
-### SEC-1 · `POST /work/workspace` no verifica quién dice ser el admin — **alto**
+Cinco cerrados en esta tanda (SEC-1, I18N-1, TEST-2, TEST-3, DOC-1) y cuatro
+abiertos (REL-1, PAR-1, ARCH-1, TEST-1). Cada uno lleva su estado en el título.
+
+### SEC-1 · `POST /work/workspace` no verificaba quién decía ser el admin — **alto**, **cerrado**
 
 `server/src/routes/work.ts:678-693` toma `adminAegisId` **del cuerpo de la
 petición** y crea el workspace sin pedir firma. Es la única de las 32 rutas de
@@ -105,34 +112,50 @@ workspaces atribuyendo la administración a un aegisId ajeno (spam de tabla y un
 víctima que ve un workspace que nunca creó). El test `workspace.auth.test.ts`
 solo cubre la lectura.
 
-**Arreglo:** exigir `sig`+`ts` como el resto, con test de regresión que pruebe
-que una firma ajena es rechazada.
+**Cerrado en PR #436:** la creación exige `sig`+`ts` como el resto, firmando
+sobre el propio aegisId (el workspace aún no tiene id). Cinco tests de regresión:
+camino honesto, atacante firmando con su clave para un aegisId ajeno, la petición
+sin firma de antes, timestamp caducado, y una firma de lectura reusada como
+creación.
 
-### I18N-1 · Strings de cara al usuario hardcodeados, **en idiomas mezclados** — medio, **parcialmente cerrado**
+### I18N-1 · Strings de cara al usuario hardcodeados, **en idiomas mezclados** — medio, **cerrado**
 
-Primero lo medí por llamadas a `themedAlert` y salieron 15. Al comprobar pantalla
-por pantalla el hueco es mayor: **5 pantallas no tienen i18n cableado en
-absoluto** (cero `useTranslation`), con ~41 literales entre ellas.
+El hallazgo creció tres veces al medirlo mejor, y esa progresión es la parte
+interesante:
 
-| Sitio | Literales | Idioma | Estado |
-|---|---|---|---|
-| `mobile/src/socket/calls.ts` (8: fallo de llamada + notificación en curso) | 8 | inglés + español | ✅ **arreglado, PR #436** |
-| `mobile/src/screens/ProfileSwitcher.tsx` | ~13 | **español** | abierto |
-| `mobile/src/screens/DistributionLists.tsx` | ~11 | inglés | abierto |
-| `mobile/src/screens/Scheduled.tsx` | ~8 | español | abierto |
-| `mobile/src/screens/BroadcastCompose.tsx` | ~6 | mixto | abierto |
-| `mobile/src/screens/CreateProfile.tsx` | ~3 | español | abierto |
-| `mobile/src/utils/overlayPermission.ts` | 2 | **español** | abierto |
+1. Barrido por llamadas a `themedAlert`: **15 literales**.
+2. Comprobación pantalla por pantalla: **5 pantallas sin `useTranslation` en
+   absoluto**, ~41 literales más.
+3. Una captura del E2E mostró el banner **"Registro fallido" en un emulador
+   en_US** — y ese string vive en un *store*, no en una pantalla. Barriendo todo
+   `src/` aparecieron **9 alertas más** en stores, `socket/` y componentes.
+
+| Sitio | Idioma | Estado |
+|---|---|---|
+| `socket/calls.ts` — errores de llamada + notificación en curso | inglés + español | ✅ PR #436 |
+| 5 pantallas: ProfileSwitcher, CreateProfile, Scheduled, DistributionLists, BroadcastCompose | mixto | ✅ PR #436 |
+| `socket/groupCalls.ts` — 6 alertas (sin conexión, sin micro, llamada llena…) | español | ✅ PR #436 |
+| `components/SchedulePicker.tsx` — 2 alertas | español | ✅ PR #436 |
+| `store/identity.ts` — título de registro fallido | español | ✅ PR #436 |
+| `socket/client.ts` — "Contact offline" | inglés | ✅ PR #436 |
+| `screens/Chat.tsx` — error al programar | español | ✅ PR #436 |
+| `utils/overlayPermission.ts` | español | ✅ PR #436 |
 
 Cortaba en las dos direcciones: un usuario en español recibía **todos** los
-errores de llamada en inglés, y uno en inglés ve el cambio de perfil, los
-programados y el permiso de superposición en español. Es la misma clase de bug
-reportada contra la build 15, viva todavía en las pantallas más nuevas.
+errores de llamada y de grupo en inglés o en un español que nadie tradujo, y uno
+en inglés veía el cambio de perfil, los programados y el permiso de superposición
+en español. Misma clase de bug que la reportada contra la build 15.
 
-Las cinco pantallas sin i18n son trabajo mecánico pero pantalla a pantalla, y los
-tests de paridad de locales (`i18nKeyParity`, `localeParity`, 9/9) **no lo
-detectan**: solo comprueban que en/es/it tengan las mismas claves, no que las
-pantallas usen claves en vez de literales.
+**Por qué duró tanto:** los tests de paridad de locales (`i18nKeyParity`,
+`localeParity`) comprueban que en/es/it tengan las **mismas claves** — son ciegos
+a un módulo que escribe el string en vez de pedir una clave. Tres archivos de
+locale en verde junto a cinco pantallas sin traducir es exactamente el tipo de
+falsa tranquilidad que esta auditoría venía a quitar.
+
+Ahora hay dos guards en `screensUseI18n.test.ts`: toda pantalla importa el hook
+(cero excepciones hoy), y **ningún `themedAlert` en todo `src/` recibe un literal
+como primer argumento**. Verificado que no pasa en vacío: contra la revisión
+anterior marca exactamente las 9 líneas que el arreglo tocó.
 
 ### REL-1 · Los mensajes de grupo no pueden tener estado de envío — medio
 
