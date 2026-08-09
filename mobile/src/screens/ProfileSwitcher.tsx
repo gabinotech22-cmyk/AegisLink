@@ -10,6 +10,7 @@
  *   - Long-press → delete confirmation (cannot delete last or primary).
  */
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { View, Text, FlatList, Pressable, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
@@ -27,6 +28,7 @@ interface Props {
 
 export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const profiles = useProfiles((s) => s.profiles);
   const activeSlotId = useProfiles((s) => s.activeSlotId);
@@ -49,19 +51,19 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
   function handleSwitch(profile: Profile) {
     if (profile.slotId === activeSlotId) return;
     themedAlert(
-      'Cambiar de perfil',
-      'Cambiar de perfil cerrará todos los chats activos y cargará la base de datos del nuevo perfil.',
+      i18nT('profileSwitch.title'),
+      i18nT('profileSwitch.switchConfirmDesc'),
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: i18nT('common.cancel'), style: 'cancel' },
         {
-          text: 'Cambiar',
+          text: i18nT('profileSwitch.switchAction'),
           onPress: async () => {
             setSwitching(profile.slotId);
             try {
               await switchProfile(profile.slotId);
               onBack();
             } catch (e) {
-              themedAlert('Error', (e as Error).message);
+              themedAlert(i18nT('common.error'), (e as Error).message);
             } finally {
               setSwitching(null);
             }
@@ -73,26 +75,26 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
 
   function handleDelete(profile: Profile) {
     if (profiles.length <= 1) {
-      themedAlert('No se puede eliminar', 'Debes tener al menos un perfil.');
+      themedAlert(i18nT('profileSwitch.cannotDeleteTitle'), i18nT('profileSwitch.cannotDeleteLast'));
       return;
     }
     if (profile.slotId === 'self') {
-      themedAlert('No se puede eliminar', 'El perfil primario no se puede eliminar. Usa "Eliminar identidad" en Perfil → Ajustes.');
+      themedAlert(i18nT('profileSwitch.cannotDeleteTitle'), i18nT('profileSwitch.cannotDeletePrimary'));
       return;
     }
     themedAlert(
-      `Eliminar "${profile.displayName}"`,
-      'Se borrarán permanentemente todas las claves, mensajes y contactos de este perfil. Esta acción es irreversible.',
+      i18nT('profileSwitch.deleteConfirmTitle', { name: profile.displayName }),
+      i18nT('profileSwitch.deleteConfirmDesc'),
       [
-        { text: 'Cancelar', style: 'cancel' },
+        { text: i18nT('common.cancel'), style: 'cancel' },
         {
-          text: 'Eliminar',
+          text: i18nT('common.delete'),
           style: 'destructive',
           onPress: async () => {
             try {
               await removeProfile(profile.slotId);
             } catch (e) {
-              themedAlert('Error', (e as Error).message);
+              themedAlert(i18nT('common.error'), (e as Error).message);
             }
           },
         },
@@ -104,7 +106,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <TopBar
         t={t}
-        title="Perfiles"
+        title={i18nT('profileSwitch.screenTitle')}
         left={
           <Pressable onPress={onBack} hitSlop={8} style={{ padding: 4 }}>
             <I.ChevronL size={22} color={t.textDim} />
@@ -115,7 +117,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
             onPress={onCreateProfile}
             hitSlop={8}
             style={{ padding: 8 }}
-            accessibilityLabel="Crear nuevo perfil"
+            accessibilityLabel={i18nT('profileSwitch.createNewA11y')}
           >
             <I.Plus size={22} color={t.accent} />
           </Pressable>
@@ -125,7 +127,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
       {profiles.length === 0 ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
           <Text style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, textAlign: 'center' }}>
-            No se encontraron perfiles. Reinicia la app para que se inicialicen.
+            {i18nT('profileSwitch.emptyState')}
           </Text>
         </View>
       ) : (
@@ -150,7 +152,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
           ListFooterComponent={
             <Pressable
               onPress={onCreateProfile}
-              accessibilityLabel="Crear nuevo perfil"
+              accessibilityLabel={i18nT('profileSwitch.createNewA11y')}
               style={({ pressed }) => ({
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -174,7 +176,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
                 <I.Plus size={22} color={t.accent} />
               </View>
               <Text style={{ fontFamily: t.font, fontSize: 15, fontWeight: '600', color: t.accent }}>
-                Nuevo perfil
+                {i18nT('profileSwitch.newProfile')}
               </Text>
             </Pressable>
           }
@@ -189,7 +191,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
         borderTopColor: t.divider,
       }}>
         <Text style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.8, textAlign: 'center' }}>
-          CADA PERFIL TIENE SUS PROPIAS CLAVES E2EE Y BASE DE DATOS
+          {i18nT('profileSwitch.footer')}
         </Text>
       </View>
     </View>
@@ -218,13 +220,17 @@ function ProfileRow({
   // Seed the identicon by publicKeyB64 when this is the active profile (so it
   // matches Profile/Privacy/Home), otherwise by the only stable id we have for
   // an inactive profile: its aegisId. Avatar shows the photo when present.
+  const { t: i18nT } = useTranslation();
   const seed = activeSeed ?? profile.aegisId;
 
   return (
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
-      accessibilityLabel={`Perfil ${profile.displayName}${profile.isActive ? ', activo' : ''}`}
+      accessibilityLabel={i18nT(
+        profile.isActive ? 'profileSwitch.rowA11yActive' : 'profileSwitch.rowA11y',
+        { name: profile.displayName },
+      )}
       android_ripple={{ color: t.surface2 }}
       style={({ pressed }) => ({
         flexDirection: 'row',
@@ -266,7 +272,7 @@ function ProfileRow({
         </Text>
         {profile.isActive && (
           <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.8, marginTop: 3 }}>
-            ACTIVO
+            {i18nT('profileSwitch.activeBadge')}
           </Text>
         )}
       </View>
