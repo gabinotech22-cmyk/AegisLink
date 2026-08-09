@@ -25,6 +25,25 @@ export interface Attachment {
   caption?: string;     // per-attachment caption (optional)
 }
 
+/**
+ * Lifecycle of an OUTGOING message, as the local device knows it.
+ *
+ *   pending   — sitting in the outbox; the relay has not acked it yet
+ *   sent      — the relay acked receipt (one tick)
+ *   delivered — the recipient's device persisted it (two ticks)
+ *   read      — the recipient opened it (two accented ticks)
+ *   failed    — the outbox gave up after the retry window; user can retry
+ *
+ * `pending` and `failed` exist because the previous three-state model could not
+ * represent a message that never left the device: a stuck job rendered exactly
+ * like a delivered one. This is LOCAL state — it is never sent to the relay and
+ * adds no metadata to the wire.
+ */
+export type DeliveryStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+
+/** Values the DB is allowed to hold, for validating what we read back. */
+const DELIVERY_STATUSES: readonly string[] = ['pending', 'sent', 'delivered', 'read', 'failed'];
+
 export interface StoredMessage {
   id: string;
   chatId: string;
@@ -38,7 +57,7 @@ export interface StoredMessage {
   starred?: boolean;
   deleted?: boolean;
   pinned?: boolean;
-  deliveryStatus?: 'sent' | 'delivered' | 'read';
+  deliveryStatus?: DeliveryStatus;
   expiresAt?: number | null;
   attachments?: Attachment[] | null;
   /** Authenticated sender aegisId from the E2EE envelope (group messages). */
@@ -88,7 +107,12 @@ async function rowToMessage(r: MessageRow, body: string): Promise<StoredMessage>
     starred: r.starred === 1,
     deleted: r.deleted === 1,
     pinned: r.pinned === 1,
-    deliveryStatus: (r.delivery_status as 'sent' | 'delivered' | 'read' | null) ?? 'sent',
+    // Validate rather than blind-cast: a row written by a newer build (or a
+    // corrupted value) must not become an unrenderable status. Unknown → 'sent',
+    // which is what every pre-v13 row means anyway.
+    deliveryStatus: DELIVERY_STATUSES.includes(r.delivery_status ?? '')
+      ? (r.delivery_status as DeliveryStatus)
+      : 'sent',
     expiresAt: r.expires_at ?? null,
     attachments,
     senderId: r.sender_id ?? null,
@@ -123,9 +147,51 @@ export async function saveMessage(m: StoredMessage): Promise<void> {
   });
 }
 
-export async function updateMessageDelivery(id: string, status: 'sent' | 'delivered' | 'read'): Promise<void> {
+export async function updateMessageDelivery(id: string, status: DeliveryStatus): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync('UPDATE messages SET delivery_status = ? WHERE id = ?', status, id);
+  });
+}
+
+/**
+ * Advance a message's delivery state without ever moving it BACKWARDS.
+ *
+ * Delivery signals race: a `delivered` receipt from the recipient can land
+ * before our own relay ack resolves, and the outbox drain can resolve a job
+ * after the peer already read the message. Applying those out of order would
+ * flip two ticks back to one. Rank order is pending < sent < delivered < read;
+ * `failed` is terminal-until-retried and only settable from pending/sent.
+ */
+const DELIVERY_RANK: Record<DeliveryStatus, number> = {
+  pending: 0, sent: 1, delivered: 2, read: 3, failed: 0,
+};
+
+/**
+ * Resolve which status wins. Pure so the in-memory store and the DB can apply
+ * the exact same rule and never disagree about what a bubble should show.
+ */
+export function nextDeliveryStatus(current: DeliveryStatus, incoming: DeliveryStatus): DeliveryStatus {
+  if (current === incoming) return current;
+  // A retry lifts a failed message back into flight; anything may follow.
+  if (current === 'failed') return incoming;
+  // Giving up is only meaningful while the message is still in flight.
+  if (incoming === 'failed') return current === 'pending' || current === 'sent' ? 'failed' : current;
+  return DELIVERY_RANK[incoming] > DELIVERY_RANK[current] ? incoming : current;
+}
+
+export async function advanceMessageDelivery(id: string, status: DeliveryStatus): Promise<void> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ delivery_status: string | null }>(
+      'SELECT delivery_status FROM messages WHERE id = ?',
+      id,
+    );
+    if (!row) return;
+    const current: DeliveryStatus = DELIVERY_STATUSES.includes(row.delivery_status ?? '')
+      ? (row.delivery_status as DeliveryStatus)
+      : 'sent';
+    const next = nextDeliveryStatus(current, status);
+    if (next === current) return;
+    await d.runAsync('UPDATE messages SET delivery_status = ? WHERE id = ?', next, id);
   });
 }
 

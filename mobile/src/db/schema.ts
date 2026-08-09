@@ -189,9 +189,13 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       kind                 TEXT NOT NULL,
       group_id             TEXT,
       created_at           INTEGER NOT NULL,
-      attempts             INTEGER NOT NULL DEFAULT 0
+      attempts             INTEGER NOT NULL DEFAULT 0,
+      -- Epoch ms before which the job must not be retried (0 = due now). Durable
+      -- so the exponential backoff survives an app restart; see db/outboxBackoff.
+      next_attempt_at      INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_outbox_created ON outbox(created_at);
+    CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(next_attempt_at);
 
     -- X3DH prekey SECRETS (durable, encrypted-at-rest primary store).
     -- ROOT-CAUSE FIX: previously SPK/OPK private keys lived ONLY in SecureStore
@@ -213,7 +217,7 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 12;
+  const USER_DB_VERSION = 13;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -322,6 +326,19 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     // GroupBubble falls back to legacy body parsing for backwards compat.
     await addColumn(d, 'messages', 'sender_id TEXT;');
     await d.execAsync('PRAGMA user_version = 12');
+  }
+
+  if (currentVersion < 13) {
+    // v12 → v13: give the outbox a durable retry schedule.
+    // Until now `attempts` was incremented and never read: no backoff, no cap,
+    // no terminal state, and flushOutbox only ran on reconnect — so a job that
+    // failed while the socket stayed up sat there indefinitely while the chat
+    // bubble rendered as sent. next_attempt_at parks a failed job until its
+    // backoff elapses; 0 means "due now", which is the right default for the
+    // rows that already exist (drain them on the next pass).
+    await addColumn(d, 'outbox', 'next_attempt_at INTEGER NOT NULL DEFAULT 0;');
+    await d.execAsync('CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(next_attempt_at);');
+    await d.execAsync('PRAGMA user_version = 13');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.

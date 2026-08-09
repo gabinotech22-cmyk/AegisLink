@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import type { Video as VideoRef } from 'expo-av';
@@ -12,13 +13,28 @@ interface VideoBubbleProps {
   t: Theme;
   m: StoredMessage;
   me: boolean;
-  queued?: boolean;
+  /** Outbox state of an own message; null once settled. See chat/bubbles SendState. */
+  sendState?: null | 'sending' | 'queued' | 'failed';
   time: string;
   onLongPress?: () => void;
   caption?: string;
 }
 
-export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: VideoBubbleProps) {
+export function VideoBubble({ t, m, me, sendState, time, onLongPress, caption }: VideoBubbleProps) {
+  const { t: i18nT } = useTranslation();
+  const queued = sendState != null;
+  // This bubble renders its own footer instead of the shared TimestampRow, so it
+  // has to surface the send state itself — otherwise a video stuck in the outbox
+  // would show a plain timestamp exactly like a delivered one.
+  const stamp =
+    sendState === 'failed' ? i18nT('chat.sendFailed')
+    : sendState === 'sending' ? i18nT('chat.sendingNow')
+    : sendState === 'queued' ? i18nT('chat.queued')
+    : time;
+  const stampColor =
+    sendState === 'failed' ? t.danger
+    : sendState ? t.warn
+    : (me ? `${t.bubbleOutText}99` : t.textFaint);
   const [loadError, setLoadError] = useState(false);
   const [expired, setExpired] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -163,8 +179,8 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: Vi
           <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 10, color: textColor, letterSpacing: 0.3 }}>
             Video · E2EE
           </Text>
-          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: me ? `${t.bubbleOutText}99` : t.textFaint }}>
-            {time}
+          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: stampColor }}>
+            {stamp}
           </Text>
         </View>
       </Pressable>
@@ -224,8 +240,8 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: Vi
           <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 10, color: textColor, letterSpacing: 0.3 }}>
             Video · E2EE
           </Text>
-          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: me ? `${t.bubbleOutText}99` : t.textFaint }}>
-            {time}
+          <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: stampColor }}>
+            {stamp}
           </Text>
         </View>
       </Pressable>
@@ -321,8 +337,8 @@ export function VideoBubble({ t, m, me, queued, time, onLongPress, caption }: Vi
         <Text style={{ flex: 1, fontFamily: t.fontMono, fontSize: 10, color: textColor, letterSpacing: 0.3 }}>
           Video · E2EE
         </Text>
-        <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: me ? `${t.bubbleOutText}99` : t.textFaint }}>
-          {time}
+        <Text style={{ fontFamily: t.fontMono, fontSize: 9, color: stampColor }}>
+          {stamp}
         </Text>
       </View>
     </Pressable>

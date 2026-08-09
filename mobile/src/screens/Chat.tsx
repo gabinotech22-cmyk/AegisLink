@@ -25,7 +25,7 @@ import { useTyping } from '../store/typing';
 import { useConnection } from '../store/connection';
 import { usePreferences } from '../store/preferences';
 import { useContacts } from '../store/contacts';
-import { sendMessage, emitTyping, sendReadReceipts, sendDeleteForEveryone } from '../socket/client';
+import { sendMessage, emitTyping, sendReadReceipts, sendDeleteForEveryone, retryFailedMessage } from '../socket/client';
 import { startCall } from '../socket/calls';
 import { WEBRTC_AVAILABLE } from '../runtime';
 import { SoundFX } from '../hooks/useSoundFX';
@@ -365,7 +365,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       const id = Crypto.randomUUID();
       await appendMsg({
         id, chatId: contact.aegisId, direction: 'out', body: caption.trim(),
-        createdAt: Date.now(), type: 'image', mediaUri: uri,
+        createdAt: Date.now(), type: 'image', mediaUri: uri, deliveryStatus: 'pending',
       });
       const { encryptAndUploadMedia } = require('../crypto/media');
       const blobUri = await encryptAndUploadMedia(uri, 'image/jpeg');
@@ -392,7 +392,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       const bodyText = caption.trim() ? `[viewonce]\n${caption.trim()}` : '[viewonce]';
       await appendMsg({
         id, chatId: contact.aegisId, direction: 'out', body: bodyText,
-        createdAt: Date.now(), type: 'image', mediaUri: uri,
+        createdAt: Date.now(), type: 'image', mediaUri: uri, deliveryStatus: 'pending',
       });
 
       const FileSystem = require('expo-file-system/legacy') as typeof import('expo-file-system/legacy');
@@ -421,7 +421,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       const id = Crypto.randomUUID();
       await appendMsg({
         id, chatId: contact.aegisId, direction: 'out', body: '',
-        createdAt: Date.now(), type: 'video', mediaUri: uri,
+        createdAt: Date.now(), type: 'video', mediaUri: uri, deliveryStatus: 'pending',
       });
       const { encryptAndUploadMedia } = require('../crypto/media');
       const blobUri = await encryptAndUploadMedia(uri, 'video/mp4');
@@ -451,7 +451,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       await appendMsg({
         id, chatId: contact.aegisId, direction: 'out',
         body: `[audio:${durSec}s]`,
-        createdAt: Date.now(), type: 'audio', mediaUri: uri,
+        createdAt: Date.now(), type: 'audio', mediaUri: uri, deliveryStatus: 'pending',
       });
       const { encryptAndUploadMedia } = require('../crypto/media');
       const blobUri = await encryptAndUploadMedia(uri, 'audio/m4a');
@@ -500,6 +500,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           createdAt: Date.now(),
           type: 'image',
           mediaUri: imageUri,
+          deliveryStatus: 'pending',
         });
         const { encryptAndUploadMedia } = require('../crypto/media');
         const blobUri = await encryptAndUploadMedia(imageUri, 'image/jpeg');
@@ -547,6 +548,21 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   function handleReply() {
     if (!actionsMsg) return;
     setReplyTo(actionsMsg);
+  }
+
+  /** Re-queue a message the outbox gave up on after its 24 h retry window. */
+  function handleRetrySend() {
+    const msg = actionsMsg;
+    if (!msg || !identity) return;
+    setActionsMsg(null);
+    void (async () => {
+      try {
+        const ok = await retryFailedMessage(identity, contact.aegisId, msg.id);
+        if (!ok) themedAlert(i18nT('chat.sendError'), i18nT('chat.retrySendDesc'));
+      } catch (e) {
+        themedAlert(i18nT('chat.sendError'), (e as Error).message);
+      }
+    })();
   }
 
   function handleStar() {
@@ -634,7 +650,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       const id = Crypto.randomUUID();
       await appendMsg({
         id, chatId: contact.aegisId, direction: 'out', body: '',
-        createdAt: Date.now(), type: 'image', mediaUri: localPath,
+        createdAt: Date.now(), type: 'image', mediaUri: localPath, deliveryStatus: 'pending',
       });
 
       const { encryptAndUploadMedia } = require('../crypto/media');
@@ -1449,6 +1465,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         onDelete={handleDelete}
         onDeleteForAll={actionsMsg?.direction === 'out' ? handleDeleteForAll : undefined}
         onReact={handleReact}
+        onRetrySend={
+          actionsMsg?.direction === 'out' && actionsMsg.deliveryStatus === 'failed'
+            ? handleRetrySend
+            : undefined
+        }
       />
 
       <ForwardModal

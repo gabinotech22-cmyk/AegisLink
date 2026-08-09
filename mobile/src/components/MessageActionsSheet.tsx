@@ -24,6 +24,8 @@ export interface MessageActionsSheetProps {
   onDelete: () => void;
   onDeleteForAll?: () => void;
   onReact: (emoji: string) => void;
+  /** Present only for an own message the outbox gave up on — offers a re-send. */
+  onRetrySend?: () => void;
 }
 
 export function MessageActionsSheet({
@@ -41,6 +43,7 @@ export function MessageActionsSheet({
   onDeleteForAll,
   onReact,
   onCopy,
+  onRetrySend,
 }: MessageActionsSheetProps) {
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
@@ -57,10 +60,23 @@ export function MessageActionsSheet({
     onReact(emoji);
   }
 
-  const items: FloatingMenuItem[] = [
+  const items: FloatingMenuItem[] = [];
+
+  // First entry when it applies: the message never left the device, so re-sending
+  // it is the only action the user actually wants here.
+  if (onRetrySend) {
+    items.push({
+      key: 'retrySend',
+      icon: <I.RotateCW size={20} color={t.accent} />,
+      label: i18nT('chat.retrySend'),
+      onPress: onRetrySend,
+    });
+  }
+
+  items.push(
     { key: 'reply', icon: <I.Reply size={20} color={t.textDim} />, label: i18nT('messageActions.reply'), onPress: onReply },
     { key: 'forward', icon: <I.Forward size={20} color={t.textDim} />, label: i18nT('messageActions.forward'), onPress: onForward },
-  ];
+  );
 
   if (body) {
     items.push({ key: 'copy', icon: <I.Copy size={20} color={t.textDim} />, label: i18nT('messageActions.copy'), onPress: () => void handleCopy() });

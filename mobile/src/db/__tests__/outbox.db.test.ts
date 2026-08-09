@@ -269,3 +269,98 @@ describe('outbox DB — countOutboxJobs', () => {
     expect(count).toBe(0);
   });
 });
+
+// ─── Retry scheduling (regression: the outbox had no backoff at all) ──────────
+//
+// `attempts` used to be incremented and never read: no backoff, no cap, no
+// terminal state, and the only drain trigger was a socket reconnect. A job that
+// failed while the connection stayed up was retried on no schedule whatsoever.
+// These cover the durable half of the fix — the columns and queries the
+// scheduler in socket/client.ts depends on.
+
+describe('outbox DB — loadDueOutboxJobs', () => {
+  it('asks only for jobs whose backoff has elapsed, in FIFO order', async () => {
+    const mockGetAllAsync = jest.fn().mockResolvedValue([]);
+    const mockDb = makeMockDb(undefined, mockGetAllAsync);
+    const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+    openMock.mockResolvedValue(mockDb);
+
+    const { loadDueOutboxJobs } = requireLocal();
+    await loadDueOutboxJobs(1_700_000_000_000);
+
+    const [sql, arg] = mockGetAllAsync.mock.calls[0] as [string, number];
+    // Backed-off jobs must be filtered OUT by the query, not loaded and skipped
+    // in JS — otherwise a large parked queue is decrypted on every drain tick.
+    expect(sql).toContain('next_attempt_at <= ?');
+    expect(sql).toContain('ORDER BY created_at ASC');
+    expect(arg).toBe(1_700_000_000_000);
+  });
+
+  it('defaults a NULL next_attempt_at to due-now', async () => {
+    // Rows written before the v13 migration have no scheduling column value.
+    // They must drain immediately, not be parked forever by a NULL comparison.
+    const mockGetAllAsync = jest.fn().mockResolvedValue([{
+      job_id: 'j1', msg_id: 'm1', recipient_aegis_id: 'peer', recipient_pubkey_b64: 'cHVi',
+      payload: 'plain:{"text":"hi"}', kind: 'direct', group_id: null,
+      created_at: 100, attempts: 0, next_attempt_at: null,
+    }]);
+    const mockDb = makeMockDb(undefined, mockGetAllAsync);
+    const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+    openMock.mockResolvedValue(mockDb);
+
+    const { loadDueOutboxJobs } = requireLocal();
+    const jobs = await loadDueOutboxJobs(Date.now());
+    expect(jobs[0].nextAttemptAt).toBe(0);
+  });
+});
+
+describe('outbox DB — markOutboxAttemptFailed', () => {
+  it('increments attempts AND parks the job in one statement', async () => {
+    const mockRunAsync = jest.fn().mockResolvedValue({ lastInsertRowId: 0, changes: 1 });
+    const mockDb = makeMockDb(mockRunAsync);
+    const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+    openMock.mockResolvedValue(mockDb);
+
+    const { markOutboxAttemptFailed } = requireLocal();
+    await markOutboxAttemptFailed('job-7', 1_700_000_005_000);
+
+    // One statement, not two: a crash between an attempts bump and a backoff
+    // write would leave the job retrying immediately, forever.
+    const call = mockRunAsync.mock.calls.find((c: unknown[]) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('UPDATE outbox'));
+    expect(call).toBeDefined();
+    const [sql, nextAt, jobId] = call as [string, number, string];
+    expect(sql).toContain('attempts = attempts + 1');
+    expect(sql).toContain('next_attempt_at = ?');
+    expect(nextAt).toBe(1_700_000_005_000);
+    expect(jobId).toBe('job-7');
+  });
+});
+
+describe('outbox DB — nextOutboxDueAt', () => {
+  it('returns the earliest due timestamp so the scheduler can sleep exactly', async () => {
+    const mockGetFirstAsync = jest.fn()
+      .mockResolvedValueOnce({ user_version: 5 })
+      .mockResolvedValueOnce({ due: 1_700_000_009_000 });
+    const mockDb = makeMockDb(undefined, undefined, mockGetFirstAsync);
+    const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+    openMock.mockResolvedValue(mockDb);
+
+    const { nextOutboxDueAt } = requireLocal();
+    expect(await nextOutboxDueAt()).toBe(1_700_000_009_000);
+  });
+
+  it('returns null on an empty outbox so the scheduler stands down', async () => {
+    // MIN() over zero rows yields NULL — the scheduler must read that as
+    // "nothing queued" and not arm a timer that wakes up to do nothing.
+    const mockGetFirstAsync = jest.fn()
+      .mockResolvedValueOnce({ user_version: 5 })
+      .mockResolvedValueOnce({ due: null });
+    const mockDb = makeMockDb(undefined, undefined, mockGetFirstAsync);
+    const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+    openMock.mockResolvedValue(mockDb);
+
+    const { nextOutboxDueAt } = requireLocal();
+    expect(await nextOutboxDueAt()).toBeNull();
+  });
+});
