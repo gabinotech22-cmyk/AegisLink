@@ -32,6 +32,7 @@ import {
   enqueueOutboxJob,
   loadDueOutboxJobs,
   nextOutboxDueAt,
+  countOutboxJobsForBubble,
   deleteOutboxJob,
   markOutboxAttemptFailed,
   saveSpkSecret,
@@ -291,21 +292,37 @@ export async function buildOutgoingEnvelope(
  * Mark the message behind an outbox job with a delivery state, in DB and in the
  * live store. Best-effort: a bookkeeping failure must never abort a real send.
  *
- * DIRECT MESSAGES ONLY, on purpose. A group send fans out into one job PER
- * MEMBER, each with its own random msgId (sendGroupMessage), and the sender's
- * own bubble is appended under a third, unrelated id. There is currently no link
- * from a group job back to the bubble it belongs to, so a per-job status update
- * would either target nothing or, worse, flip a whole group message to `failed`
- * because delivery to one member of twenty timed out. Group send-state needs the
- * fan-out to carry a shared message id first — tracked as a follow-up in the
- * audit; until then group bubbles keep their previous behaviour.
+ * GROUPS AGGREGATE. A group send fans out into one job per member, each with its
+ * own wire msgId, and they all carry the same `bubbleId` — the single row the
+ * sender actually sees. So:
+ *
+ *   success  → only settle to `sent` once NO jobs remain for that bubble.
+ *              Otherwise the first of twenty members would flip the whole
+ *              message to sent while nineteen were still queued.
+ *   expiry   → mark `failed` immediately. One member who never received it
+ *              after 24 h means this message did not fully deliver, and saying
+ *              so is the honest answer; a later sibling success must not
+ *              silently un-fail it (see nextDeliveryStatus — `failed` is sticky
+ *              until an explicit retry sets `pending`).
+ *
+ * 1:1 has one job whose bubbleId IS its msgId, so both rules collapse to the
+ * obvious behaviour.
  */
 async function setJobMessageStatus(job: OutboxJob, status: DeliveryStatus): Promise<void> {
-  if (job.kind !== 'direct') return;
+  const bubbleId = job.bubbleId ?? (job.kind === 'direct' ? job.msgId : null);
+  // Pre-v14 group jobs have no bubble link; there is nothing to update.
+  if (!bubbleId) return;
+  const chatId = job.kind === 'group' && job.groupId ? job.groupId : job.recipientAegisId;
   try {
-    await useMessages.getState().updateDelivery(job.recipientAegisId, job.msgId, status);
+    if (status === 'sent') {
+      // The caller deletes the row before calling us, so a remaining count of
+      // zero means this was the last one.
+      const remaining = await countOutboxJobsForBubble(bubbleId);
+      if (remaining > 0) return;
+    }
+    await useMessages.getState().updateDelivery(chatId, bubbleId, status);
   } catch (e) {
-    if (__DEV__) logger.warn('[socket] could not update delivery status', job.msgId, e);
+    if (__DEV__) logger.warn('[socket] could not update delivery status', bubbleId, e);
   }
 }
 
@@ -482,6 +499,25 @@ export async function retryFailedMessage(
 ): Promise<boolean> {
   const msg = (useMessages.getState().byChat[chatId] ?? []).find((m) => m.id === msgId);
   if (!msg || msg.direction !== 'out' || msg.deliveryStatus !== 'failed') return false;
+
+  // Group retry: re-run the fan-out against the CURRENT roster, reusing the
+  // bubble so the row the user tapped is the one that updates. Membership may
+  // have changed in the 24 h since the original attempt, which is exactly why
+  // this re-fans out rather than replaying the old per-member jobs.
+  const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+  if (useGroups.getState().groups.some((g) => g.id === chatId)) {
+    await useMessages.getState().updateDelivery(chatId, msgId, 'pending');
+    await sendGroupMessage({
+      identity,
+      groupId: chatId,
+      plaintext: msg.body,
+      msgType: msg.type,
+      mediaUri: msg.mediaUri ?? undefined,
+      skipLocalAppend: true,
+      bubbleId: msgId,
+    });
+    return true;
+  }
 
   const contact = useContacts.getState().contacts.find((c) => c.aegisId === chatId);
   if (!contact) return false;
@@ -4744,6 +4780,14 @@ export async function sendGroupMessage(opts: {
    */
   skipLocalAppend?: boolean;
   /**
+   * Reuse an existing local message row instead of creating one. Set by the
+   * retry path so a re-send updates the bubble the user tapped rather than
+   * spawning a second one. Callers that pre-append their own bubble (media)
+   * should pass its id here together with skipLocalAppend, otherwise the
+   * fan-out jobs cannot report back to it.
+   */
+  bubbleId?: string;
+  /**
    * Admin-only, signed group-dissolution marker (see groupSig.ts,
    * canonicalGroupDissolveBytes). When present the payload carries
    * `dissolved: true` + `dissolveSig` so every member's receive path can
@@ -4818,6 +4862,12 @@ export async function sendGroupMessage(opts: {
   if (groupAvatarImage) profiledGroupImages.add(group.id);
 
   const nowMs = Date.now();
+
+  // One id for the single bubble the sender sees, shared by every member's job.
+  // Generated BEFORE the fan-out because the jobs need it; the local append
+  // below reuses it. Without this the jobs, the wire envelopes and the bubble
+  // all had different ids and a group message could carry no send state at all.
+  const bubbleId = opts.bubbleId ?? Crypto.randomUUID();
 
   // ── Per-member outbox fan-out ────────────────────────────────────────────────
   // Fan-out is sequential so that ratchet state advances monotonically and
@@ -4914,6 +4964,7 @@ export async function sendGroupMessage(opts: {
         kind: 'group',
         groupId: opts.groupId,
         createdAt: nowMs,
+        bubbleId,
       });
     } catch (e) {
       // Outbox write failed — still attempt the send (best-effort path)
@@ -4961,9 +5012,9 @@ export async function sendGroupMessage(opts: {
 
   // Optimistic local append — skip when caller already pre-appended (e.g. media messages)
   if (!opts.skipLocalAppend) {
-    const localId = Crypto.randomUUID();
     await useMessages.getState().append({
-      id: localId,
+      // Same id the fan-out jobs carry, so they can settle this row.
+      id: bubbleId,
       chatId: opts.groupId,
       direction: 'out',
       // Store the RAW body (no "name: " prefix). The sender's own bubble never
@@ -4975,6 +5026,9 @@ export async function sendGroupMessage(opts: {
       createdAt: nowMs,
       type: (opts.msgType as 'text' | 'image' | 'audio' | 'file' | 'poll' | 'location' | 'view_once' | undefined) ?? 'text',
       mediaUri: opts.mediaUri ?? undefined,
+      // Born pending like 1:1; settles to sent when the LAST member's job
+      // resolves, or failed if any of them expires (see setJobMessageStatus).
+      deliveryStatus: 'pending',
     });
   }
 }

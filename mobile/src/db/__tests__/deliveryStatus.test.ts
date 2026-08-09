@@ -83,9 +83,24 @@ describe('nextDeliveryStatus — failure is bounded', () => {
     expect(nextDeliveryStatus('read', 'failed')).toBe('read');
   });
 
-  it('lets a manual retry lift a failed message back into flight', () => {
+  it('lets a manual retry — and ONLY a retry — lift a failed message', () => {
+    // The retry path sets `pending` explicitly, so that is the one door in.
     expect(nextDeliveryStatus('failed', 'pending')).toBe('pending');
-    expect(nextDeliveryStatus('failed', 'sent')).toBe('sent');
-    expect(nextDeliveryStatus('failed', 'delivered')).toBe('delivered');
+  });
+
+  it('keeps a failed message failed when a late sibling succeeds', () => {
+    // Groups make this concrete: a message is failed as soon as ONE member's
+    // job expires, while other members' jobs may still be resolving. A late
+    // `sent` must not quietly tell the user it went through after we already
+    // told them it did not.
+    expect(nextDeliveryStatus('failed', 'sent')).toBe('failed');
+    expect(nextDeliveryStatus('failed', 'delivered')).toBe('failed');
+    expect(nextDeliveryStatus('failed', 'read')).toBe('failed');
+  });
+
+  it('resumes normally once a retry has put it back in flight', () => {
+    const afterRetry = nextDeliveryStatus('failed', 'pending');
+    expect(nextDeliveryStatus(afterRetry, 'sent')).toBe('sent');
+    expect(nextDeliveryStatus('sent', 'delivered')).toBe('delivered');
   });
 });

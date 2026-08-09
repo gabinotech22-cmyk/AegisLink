@@ -30,6 +30,13 @@ export interface OutboxJob {
   attempts: number;
   /** Epoch ms before which this job must not be retried (0 = due now). */
   nextAttemptAt: number;
+  /**
+   * The LOCAL message row this job belongs to, so a resolved job can update the
+   * bubble the user is looking at. For 1:1 that is just msgId; for a group the
+   * fan-out creates one job per member with its own wire msgId, and they all
+   * share this. null on rows written before the v14 migration.
+   */
+  bubbleId: string | null;
 }
 
 type OutboxRow = {
@@ -43,11 +50,12 @@ type OutboxRow = {
   created_at: number;
   attempts: number;
   next_attempt_at: number | null;
+  bubble_id: string | null;
 };
 
 /** Column list shared by every SELECT so a schema change touches one place. */
 const OUTBOX_COLUMNS =
-  'job_id, msg_id, recipient_aegis_id, recipient_pubkey_b64, payload, kind, group_id, created_at, attempts, next_attempt_at';
+  'job_id, msg_id, recipient_aegis_id, recipient_pubkey_b64, payload, kind, group_id, created_at, attempts, next_attempt_at, bubble_id';
 
 async function rowToOutboxJob(r: OutboxRow): Promise<OutboxJob> {
   return {
@@ -61,16 +69,17 @@ async function rowToOutboxJob(r: OutboxRow): Promise<OutboxJob> {
     createdAt: r.created_at,
     attempts: r.attempts,
     nextAttemptAt: r.next_attempt_at ?? 0,
+    bubbleId: r.bubble_id ?? null,
   };
 }
 
-export async function enqueueOutboxJob(job: Omit<OutboxJob, 'attempts' | 'nextAttemptAt'>): Promise<void> {
+export async function enqueueOutboxJob(job: Omit<OutboxJob, 'attempts' | 'nextAttemptAt' | 'bubbleId'> & { bubbleId?: string | null }): Promise<void> {
   return withDb(async (d) => {
     const encryptedPayload = await encryptBody(job.payload);
     await d.runAsync(
       `INSERT OR REPLACE INTO outbox
-         (job_id, msg_id, recipient_aegis_id, recipient_pubkey_b64, payload, kind, group_id, created_at, attempts, next_attempt_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+         (job_id, msg_id, recipient_aegis_id, recipient_pubkey_b64, payload, kind, group_id, created_at, attempts, next_attempt_at, bubble_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
       job.jobId,
       job.msgId,
       job.recipientAegisId,
@@ -79,6 +88,8 @@ export async function enqueueOutboxJob(job: Omit<OutboxJob, 'attempts' | 'nextAt
       job.kind,
       job.groupId ?? null,
       job.createdAt,
+      // Default to msgId: for a 1:1 send the job IS the bubble.
+      job.bubbleId ?? job.msgId,
     );
   });
 }
@@ -152,6 +163,23 @@ export async function markOutboxAttemptFailed(jobId: string, nextAttemptAt: numb
 export async function countOutboxJobs(): Promise<number> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM outbox');
+    return row?.n ?? 0;
+  });
+}
+
+/**
+ * How many jobs are still queued for a given local message.
+ *
+ * A group send is only settled when the LAST member's job resolves; until then
+ * the bubble must stay `pending`. Without this the first successful member
+ * would flip a twenty-member message to `sent`.
+ */
+export async function countOutboxJobsForBubble(bubbleId: string): Promise<number> {
+  return withDb(async (d) => {
+    const row = await d.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM outbox WHERE bubble_id = ?',
+      bubbleId,
+    );
     return row?.n ?? 0;
   });
 }

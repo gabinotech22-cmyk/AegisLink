@@ -364,3 +364,78 @@ describe('outbox DB — nextOutboxDueAt', () => {
     expect(await nextOutboxDueAt()).toBeNull();
   });
 });
+
+// ─── Bubble linkage (REL-1: group messages could not carry a send state) ──────
+//
+// A group send fans out into one job per member, each with its own wire msg_id,
+// and the sender's own bubble used a third unrelated id. There was no path from
+// a resolved job back to the row the user is looking at, so A-2's pending/failed
+// model could only ever apply to 1:1. bubble_id is that path.
+
+describe('outbox DB — bubble linkage', () => {
+  it('defaults bubble_id to msgId, so a 1:1 job IS its own bubble', async () => {
+    const mockRunAsync = jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
+    const mockDb = makeMockDb(mockRunAsync);
+    const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+    openMock.mockResolvedValue(mockDb);
+
+    const { enqueueOutboxJob } = requireLocal();
+    await enqueueOutboxJob({
+      jobId: 'j1', msgId: 'm1', recipientAegisId: 'peer', recipientPubkeyB64: 'cHVi',
+      payload: '{}', kind: 'direct', groupId: null, createdAt: 1,
+    });
+
+    const call = mockRunAsync.mock.calls.find((c: unknown[]) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('INSERT OR REPLACE INTO outbox'));
+    expect(call).toBeDefined();
+    // Last positional arg is bubble_id.
+    expect((call as unknown[])[(call as unknown[]).length - 1]).toBe('m1');
+  });
+
+  it('keeps an explicit bubbleId, so every member of a fan-out shares one', async () => {
+    const mockRunAsync = jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
+    const mockDb = makeMockDb(mockRunAsync);
+    const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+    openMock.mockResolvedValue(mockDb);
+
+    const { enqueueOutboxJob } = requireLocal();
+    await enqueueOutboxJob({
+      jobId: 'j2', msgId: 'wire-per-member', recipientAegisId: 'member-a',
+      recipientPubkeyB64: 'cHVi', payload: '{}', kind: 'group', groupId: 'g1',
+      createdAt: 1, bubbleId: 'the-one-bubble',
+    });
+
+    const call = mockRunAsync.mock.calls.find((c: unknown[]) =>
+      typeof c[0] === 'string' && (c[0] as string).includes('INSERT OR REPLACE INTO outbox'));
+    const args = call as unknown[];
+    expect(args[args.length - 1]).toBe('the-one-bubble');
+    // The wire id stays per-member — recipients dedup on it independently.
+    expect(args[2]).toBe('wire-per-member');
+  });
+
+  it('counts the jobs still queued for a bubble', async () => {
+    // This is what stops the first of twenty members flipping the whole
+    // message to `sent` while nineteen are still waiting.
+    const mockGetFirstAsync = jest.fn()
+      .mockResolvedValueOnce({ user_version: 5 })
+      .mockResolvedValueOnce({ n: 19 });
+    const mockDb = makeMockDb(undefined, undefined, mockGetFirstAsync);
+    const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+    openMock.mockResolvedValue(mockDb);
+
+    const { countOutboxJobsForBubble } = requireLocal();
+    expect(await countOutboxJobsForBubble('the-one-bubble')).toBe(19);
+  });
+
+  it('reports zero for a bubble whose fan-out has fully drained', async () => {
+    const mockGetFirstAsync = jest.fn()
+      .mockResolvedValueOnce({ user_version: 5 })
+      .mockResolvedValueOnce({ n: 0 });
+    const mockDb = makeMockDb(undefined, undefined, mockGetFirstAsync);
+    const openMock = require('expo-sqlite').openDatabaseAsync as jest.Mock;
+    openMock.mockResolvedValue(mockDb);
+
+    const { countOutboxJobsForBubble } = requireLocal();
+    expect(await countOutboxJobsForBubble('done')).toBe(0);
+  });
+});

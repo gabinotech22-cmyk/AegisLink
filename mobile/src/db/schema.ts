@@ -192,10 +192,17 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       attempts             INTEGER NOT NULL DEFAULT 0,
       -- Epoch ms before which the job must not be retried (0 = due now). Durable
       -- so the exponential backoff survives an app restart; see db/outboxBackoff.
-      next_attempt_at      INTEGER NOT NULL DEFAULT 0
+      next_attempt_at      INTEGER NOT NULL DEFAULT 0,
+      -- The LOCAL message row this job belongs to. A group send fans out into
+      -- one job per member, each with its own wire msg_id; without this there
+      -- is no way back from a job to the single bubble the user sees, so group
+      -- messages could not carry a send state at all. NULL for 1:1, where
+      -- msg_id already IS the bubble id.
+      bubble_id            TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_outbox_created ON outbox(created_at);
     CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(next_attempt_at);
+    CREATE INDEX IF NOT EXISTS idx_outbox_bubble ON outbox(bubble_id);
 
     -- X3DH prekey SECRETS (durable, encrypted-at-rest primary store).
     -- ROOT-CAUSE FIX: previously SPK/OPK private keys lived ONLY in SecureStore
@@ -217,7 +224,7 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
 
   // ─── Schema versioning via PRAGMA user_version ──────────────────────────
   // Bump USER_DB_VERSION whenever a migration must run on existing installs.
-  const USER_DB_VERSION = 13;
+  const USER_DB_VERSION = 14;
   const versionRow = await d.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = versionRow?.user_version ?? 0;
 
@@ -339,6 +346,18 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
     await addColumn(d, 'outbox', 'next_attempt_at INTEGER NOT NULL DEFAULT 0;');
     await d.execAsync('CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(next_attempt_at);');
     await d.execAsync('PRAGMA user_version = 13');
+  }
+
+  if (currentVersion < 14) {
+    // v13 → v14: link an outbox job back to the local message row it belongs to.
+    // A group send fans out into one job per member, each with its own wire
+    // msg_id, and the sender's bubble had a third unrelated id — so a group
+    // message structurally could not show pending/sent/failed. NULL on existing
+    // rows is correct: 1:1 jobs use msg_id as the bubble id, and any in-flight
+    // group job from before this migration simply keeps the old behaviour.
+    await addColumn(d, 'outbox', 'bubble_id TEXT;');
+    await d.execAsync('CREATE INDEX IF NOT EXISTS idx_outbox_bubble ON outbox(bubble_id);');
+    await d.execAsync('PRAGMA user_version = 14');
   }
 
   // Suppress USER_DB_VERSION "unused" warning — the constant documents intent.

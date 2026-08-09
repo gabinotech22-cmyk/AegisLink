@@ -172,8 +172,12 @@ const DELIVERY_RANK: Record<DeliveryStatus, number> = {
  */
 export function nextDeliveryStatus(current: DeliveryStatus, incoming: DeliveryStatus): DeliveryStatus {
   if (current === incoming) return current;
-  // A retry lifts a failed message back into flight; anything may follow.
-  if (current === 'failed') return incoming;
+  // `failed` is STICKY: only an explicit retry (which sets `pending`) lifts it.
+  // This matters for groups, where a message is failed as soon as one member's
+  // job expires while siblings may still be succeeding — a late sibling `sent`
+  // must not silently tell the user it went through after we told them it did
+  // not. For 1:1 the retry path sets `pending` first, so nothing changes.
+  if (current === 'failed') return incoming === 'pending' ? 'pending' : 'failed';
   // Giving up is only meaningful while the message is still in flight.
   if (incoming === 'failed') return current === 'pending' || current === 'sent' ? 'failed' : current;
   return DELIVERY_RANK[incoming] > DELIVERY_RANK[current] ? incoming : current;
