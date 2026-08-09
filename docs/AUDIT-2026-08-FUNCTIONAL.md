@@ -188,11 +188,45 @@ pantallas**: los 5 de canales públicos, los 3 de llamadas de grupo, y
 `CreateProfile` + `ProfileSwitcher` — **la sección 11 (múltiples perfiles) no
 existe en desktop**.
 
-### ARCH-1 · `socket/client.ts` tiene 4953 líneas — medio
+### ARCH-1 · `socket/client.ts` — medio, **abierto** (plan medido, sin ejecutar)
 
-Concentra transporte, sesiones, glare/recovery, grupos, self-copy, perfiles y
-mailbox. Es la razón mecánica de que cada arreglo genere el siguiente. Costuras
-naturales: transporte / sesiones / grupos / mailbox.
+5188 líneas y 59 funciones. Pero al medirlo por función el diagnóstico cambia:
+**el problema no es tanto el archivo como una función.**
+
+| Costura | Líneas | Funciones |
+|---|---|---|
+| **`decryptAndAppendLocked` (una sola función)** | **1332** | 1 |
+| `connect` (una sola función) | 569 | 1 |
+| Sesiones / ratchet / glare-recovery | 617 | 11 |
+| Grupos | 579 | 9 |
+| Outbox y envío | 536 | 6 |
+| Self-copy multi-dispositivo | 274 | 2 |
+| Prekeys / X3DH | 266 | 2 |
+| Perfil y contactos | 197 | 5 |
+| Mailbox / Tor | 86 | 3 |
+| Canales | 60 | 3 |
+
+`decryptAndAppendLocked` es **el 26 % del archivo en una función**: es ahí donde
+conviven descifrado, dedup, adopción de sesión, glare, grupos, perfiles y
+control-plane, y por eso cada arreglo de entrega toca el mismo sitio y genera el
+siguiente. Trocear el archivo sin trocear esa función mueve el problema de sitio.
+
+**Orden propuesto** (ninguno ejecutado; cada paso es mecánico y verificable con
+las suites que ya existen):
+
+1. Extraer de `decryptAndAppendLocked` los manejadores por tipo de payload
+   (`group_msg`, `profile_update`, control-plane, self-copy) a un módulo
+   `socket/incoming/` con una función por tipo y un dispatcher. Es partir por
+   `if (type === …)`, no reescribir lógica.
+2. Sacar sesiones/glare/recovery a `socket/sessions.ts` — ya tiene frontera
+   limpia (`withSessionLock`, `getOrCreateSession`, `tryRecoverDesync`).
+3. Sacar el fan-out de grupos a `socket/groupSend.ts`.
+4. Dejar en `client.ts` solo transporte y ciclo de vida del socket.
+
+**Precondición, y es la razón de no hacerlo ahora:** el harness E2E cubre hoy
+tres escenarios de entrega. Antes de mover 1332 líneas conviene que cubra también
+grupos y el camino de mailbox, o el refactor se hace a ciegas sobre justo el
+código donde han vivido los últimos seis bugs.
 
 ### TEST-1 · Los `catch` de UI, triados — medio, **cerrado**
 
