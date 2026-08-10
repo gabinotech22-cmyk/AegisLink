@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import i18n from '../i18n';
 import { logger } from '../utils/logger';
 import * as SecureStore from 'expo-secure-store';
 import { ss } from '../utils/secureStore';
@@ -213,7 +214,7 @@ async function runPublish(identity: Identity, slotId: string, silent = false): P
   // already-published identity intentionally do NOT alert — see the `silent`
   // doc comment on runPublish.
   if (!silent) {
-    themedAlert('Registro fallido', errorMsg);
+    themedAlert(i18n.t('onboarding.registrationFailedTitle'), errorMsg);
   }
 }
 

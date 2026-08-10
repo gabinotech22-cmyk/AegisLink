@@ -128,6 +128,6 @@ describe('ScheduledScreen', () => {
 
   it('renders title', () => {
     const { getByText } = render(<ScheduledScreen onBack={jest.fn()} />);
-    expect(getByText('Mensajes Programados')).toBeTruthy();
+    expect(getByText('scheduled.listTitle')).toBeTruthy();
   });
 });

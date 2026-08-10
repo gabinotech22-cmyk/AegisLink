@@ -133,18 +133,33 @@ interesante:
 | Sitio | Idioma | Estado |
 |---|---|---|
 | `socket/calls.ts` — errores de llamada + notificación en curso | inglés + español | ✅ PR #436 |
-| 5 pantallas: ProfileSwitcher, CreateProfile, Scheduled, DistributionLists, BroadcastCompose | mixto | ✅ PR #436 |
-| `socket/groupCalls.ts` — 6 alertas (sin conexión, sin micro, llamada llena…) | español | ✅ PR #436 |
-| `components/SchedulePicker.tsx` — 2 alertas | español | ✅ PR #436 |
-| `store/identity.ts` — título de registro fallido | español | ✅ PR #436 |
-| `socket/client.ts` — "Contact offline" | inglés | ✅ PR #436 |
-| `screens/Chat.tsx` — error al programar | español | ✅ PR #436 |
+| 5 pantallas: ProfileSwitcher, CreateProfile, Scheduled, DistributionLists, BroadcastCompose | mixto | ✅ PR #440 |
+| `socket/groupCalls.ts` — 6 alertas (sin conexión, sin micro, llamada llena…) | español | ✅ PR #440 |
+| `components/SchedulePicker.tsx` — 2 alertas | español | ✅ PR #440 |
+| `store/identity.ts` — título de registro fallido | español | ✅ PR #440 |
+| `socket/client.ts` — "Contact offline" | inglés | ✅ PR #440 |
+| `screens/Chat.tsx` — error al programar | español | ✅ PR #440 |
 | `utils/overlayPermission.ts` | español | ✅ PR #436 |
 
 Cortaba en las dos direcciones: un usuario en español recibía **todos** los
 errores de llamada y de grupo en inglés o en un español que nadie tradujo, y uno
 en inglés veía el cambio de perfil, los programados y el permiso de superposición
 en español. Misma clase de bug que la reportada contra la build 15.
+
+**Corrección de este documento — estuvo mintiendo tres días.** Arriba ponía
+"✅ PR #436" en las ocho filas. Solo era cierto en dos. Los otros seis arreglos
+vivían en dos commits (`4d585ee`, `677939d`) que se escribieron en
+`fix/audit-2026-08-findings` **después** de que #436 se mergeara en squash, y
+ahí se quedaron: `git log` los muestra en la rama, pero su contenido nunca entró
+en `main`. Medido sobre `main` antes de la PR #440: **5 pantallas seguían con
+cero i18n** y el test guardián **no existía**.
+
+Es el mismo fallo dos veces (le pasó igual a `fix/outbox-delivery-reliability`),
+y tiene una causa concreta: **tras un squash-merge, la rama sigue viva y aceptando
+commits que ya nadie va a mergear**. La comprobación que lo detecta no es
+`git log origin/main..rama` — que con squash miente — sino
+`git diff origin/main rama --stat`, que compara árboles. Va al inventario de
+cierre de tanda.
 
 **Por qué duró tanto:** los tests de paridad de locales (`i18nKeyParity`,
 `localeParity`) comprueban que en/es/it tengan las **mismas claves** — son ciegos
@@ -173,20 +188,77 @@ hermanos siguen resolviendo tras el primer fallo, y un `sent` tardío no puede
 decirte que sí llegó después de haberte dicho que no. Solo un reintento explícito
 lo levanta, y en grupos ese reintento re-hace el fan-out contra el roster ACTUAL.
 
-### PAR-1 · El desktop es ciudadano de segunda — medio (viola la regla de oro #5)
+### PAR-1 · Alcance del desktop — bajo/medio, **abierto** (decisión de producto)
 
-La cripto está **duplicada, no compartida**, y ya divergió:
+**Corrijo mi propio hallazgo: la mitad grave era falsa.** Lo medí por líneas
+(`x3dh.ts` 755 vs 438, −42 %) y escribí que "no es formato, es lógica ausente".
+Al comprobarlo contra el código no se sostiene:
 
-| Módulo | mobile | desktop | Δ |
-|---|---|---|---|
-| `signal/x3dh.ts` | 755 | 438 | **−42 %** |
-| `messaging.ts` | 304 | 248 | −18 % |
-| `sealedSender.ts` | 169 | 136 | −20 % |
+| Comprobación | mobile | desktop |
+|---|---|---|
+| Funciones exportadas en `messaging.ts` / `sealedSender.ts` | 7 / 4 | **7 / 4 — idénticas** |
+| ML-KEM (post-cuántico), PQXDH, `shouldUsePqReceiver` | sí | **sí** |
+| `encryptMessageV2` / `openEnvelopeV2` (sealed-sender v2) | sí | **sí** |
+| `ratchetDecrypt` transaccional (descifra sobre clon) | sí | **sí** (`ratchet.ts:502`) |
 
-317 líneas menos en X3DH no es formato: es lógica ausente. Además faltan **12
-pantallas**: los 5 de canales públicos, los 3 de llamadas de grupo, y
-`CreateProfile` + `ProfileSwitcher` — **la sección 11 (múltiples perfiles) no
-existe en desktop**.
+La diferencia de líneas es densidad de comentarios y código defensivo, no
+capacidad. `cloneState` "faltaba" solo porque en desktop no está exportado — se
+usa igual. La única función realmente ausente es `ensureDevicePreKeys`
+(aprovisionamiento de prekeys por slot de DB), y es plausible que sea correcto:
+el desktop es un dispositivo vinculado, no una identidad primaria.
+
+**Lo que sí queda, y es una decisión de producto, no un bug:** faltan 12
+pantallas — los 5 de canales públicos, los 3 de llamadas de grupo, y
+`CreateProfile` + `ProfileSwitcher`, es decir **la sección 11 (múltiples
+perfiles) no existe en desktop**.
+
+Eso no es deuda técnica que se arregle sola: es *qué quieres que sea el
+desktop*. Las dos salidas honestas son (a) paridad completa, con el coste de
+portar canales + llamadas de grupo + perfiles, o (b) declararlo cliente reducido
+y decirlo donde el usuario lo vea, en vez de dejar que lo descubra buscando una
+pestaña que no está. Lo que no se sostiene es el estado actual: paridad
+implícita que no existe.
+
+#### PAR-1b · El desktop no *puede* aislar perfiles, y su código aparenta que sí — **alto**
+
+Al ir a portar las dos pantallas apareció algo que contar por separado, porque no
+es "falta UI": **es una trampa puesta**.
+
+El renderer expone una API con forma de multi-perfil —`setActiveDbSlot()`,
+`getSecretKeySlot()`, `deleteIdentitySlot()`, y una allow-list de keystore que ya
+contempla `activeProfile`, `activeSlotId` y `slotsList`
+(`desktop/src/main/ipc/secureStorage.ts:27`). Yo leí esos nombres y di la
+fontanería por hecha. **El proceso main no la honra:**
+
+| Evidencia | `desktop/src/main/ipc/database.ts` |
+|---|---|
+| Un solo fichero de DB, abierto una vez con la clave del slot `'self'` | `:448-454`, `:473` |
+| `db:save-message` recibe el slot y lo usa **solo para cifrar el cuerpo** | `:692-697` |
+| `db:load-messages-by-chat` recibe el slot y el SQL **lo ignora** — `WHERE chat_id = ?` | `:724-729` |
+| `db:save-group` / `db:load-groups` ni siquiera lo reciben | `:929`, `:952` |
+| `contacts` no tiene columna de slot: su `profile` es la etiqueta personal/trabajo, otra cosa | `:290`, `:613-625` |
+
+Consecuencia si alguien cablea `ProfileSwitcher` contra esto: cambiar de perfil
+escribe los mensajes cifrados con la clave del perfil B **en la misma tabla**, y
+al abrir un chat salen mezclados los del perfil A como `[DECRYPTION_ERROR]`
+(`:242-249` devuelve marcador visible — eso sí está bien, regla de oro #1), con
+los contactos y grupos de A a la vista. **Aislamiento aparente, cero aislamiento
+real.** Para la sección 11, cuyo nombre literal es "múltiples perfiles
+*aislados*", eso es peor que no tener la pantalla.
+
+**Diseño recomendado — un fichero de DB por slot, no una columna de slot.**
+`getDbKey(slot)` ya deriva clave distinta por slot (`:119-149`), así que basta
+con que `mainDbPath` dependa del slot: `aegislink.db` sigue siendo `'self'` y los
+demás van a `aegislink-<slot>.db`. Con eso el aislamiento es del sistema de
+ficheros, no de un `WHERE` que alguien puede olvidar; no hay migración de esquema
+ni riesgo para los datos que ya existen en disco; y los handlers que hoy ignoran
+el slot pasan a ser correctos sin tocarlos, porque apuntan al handle activo.
+Falta añadir `db:switch-slot`, hacer `setActiveDbSlot` asíncrono contra ese IPC,
+y tests de IPC — que la regla de oro #11 ya exigía al desktop y aún no tiene.
+
+**Hasta que eso exista, portar `CreateProfile`/`ProfileSwitcher` está
+bloqueado.** No por esfuerzo: porque entregaría una función de privacidad que no
+cumple lo que promete.
 
 ### ARCH-1 · `socket/client.ts` — medio, **abierto** (plan medido, sin ejecutar)
 
@@ -375,12 +447,18 @@ cubiertos de forma indirecta por §2 y §4.
 2. **TEST-2** — ✅ cerrado: era el PoW contra producción, y se fue con TEST-3.
    Pendiente el remate: quitarle el `continue-on-error` ahora que pasa en 34 s,
    para que vuelva a ser una señal que bloquea.
-3. **I18N-1** — ✅ cerrado en PR #436: llamadas, las 5 pantallas sin i18n, y 9
-   alertas más en stores/socket/componentes que el primer barrido no vio.
+3. **I18N-1** — ✅ cerrado, pero en **dos** PRs, no en una: los errores de
+   llamada en #436, y las 5 pantallas sin i18n + las 9 alertas de
+   stores/socket/componentes en **#440**, que rescata dos commits que se
+   quedaron varados en una rama ya squash-mergeada.
 4. **REL-1** — ✅ cerrado en PR #435.
 5. **TEST-1** — ✅ cerrado: 144 `catch` (no 196), 69 ya avisaban, y el único
    problema real era un fail-open del guard de PIN señuelo. **ARCH-1** sigue
    abierto y es el que más reduciría la tasa de bugs futuros.
 6. **PAR-1** — el desktop necesita decisión de producto antes que código
-   (¿paridad completa, o desktop declarado como cliente reducido?).
+   (¿paridad completa, o desktop declarado como cliente reducido?). Pero
+   **PAR-1b no espera a esa decisión**: aunque se elija cliente reducido, hoy hay
+   una API con forma de multi-perfil que el proceso main no honra, y eso se
+   arregla o se retira. Dejar nombres que prometen aislamiento sobre una DB
+   compartida es una trampa para el próximo que pase por ahí.
 7. **DOC-1** — ✅ cerrado en esta pasada.

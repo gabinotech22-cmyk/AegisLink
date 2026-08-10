@@ -25,6 +25,7 @@ import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
 import { themedAlert } from '../components/AlertHost';
 import { nextOutboxDelayMs, isOutboxJobExpired } from '../db/outboxBackoff';
+import i18n from '../i18n';
 import {
   loadRatchetSession,
   saveRatchetSession,
@@ -1114,7 +1115,7 @@ export function connect(identity: Identity): Socket {
       // callee never responds after waking up.
       const { endCall } = require('./calls') as typeof import('./calls');
       endCall('peer_offline');
-      themedAlert('Contact offline', 'The contact is not currently connected to the server. Try again later.');
+      themedAlert(i18n.t('contacts.offlineTitle'), i18n.t('contacts.offlineDesc'));
     }
     if (e?.code === 'unknown_identity') {
       // Server doesn't know us — re-register via the SINGLE de-duplicated path
