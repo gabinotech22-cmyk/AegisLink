@@ -24,6 +24,16 @@ function assertKeyAllowed(key: string): void {
   // (grep for `aegis.` literals under src/renderer). Keep in sync when adding
   // new keys — a miss here fails silently at the feature level.
   //
+  // Public channels are matched separately: their keys are suffixed with a
+  // channel id, so they do not fit the "aegis.<slot>.<name>" shape the main
+  // pattern below assumes.
+  if (
+    /^aegis\.pubchannel\.(cek|cap|sign|head|meta|applyesk|banned)\.v1\.[A-Za-z0-9_-]{1,128}$/.test(key) || // base64url channel id, unpadded
+    /^aegis\.pubchannel\.(index|applyindex)\.v1$/.test(key) ||
+    /^aegis\.channelKey(Index)?\.v1$/.test(key)
+  ) {
+    return
+  }
   // Sealed-sender v2 + mailbox mode (Fase 4) keys were MISSING here until the
   // desktop Tor cutover: every `aegis.deliveryToken.*` / `aegis.mailboxRoot.*`
   // write threw "Access denied" → v2 silently degraded to v1 per contact and
