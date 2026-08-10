@@ -36,35 +36,35 @@ function assertTrustedSender(e: IpcMainInvokeEvent): void {
 
 // IPC payload size guard (defence-in-depth): a compromised or buggy renderer
 // must not be able to push an unbounded string into the main process / SQLite
-// (memory-exhaustion / disk-fill). Bounds are generous â€” far above any legitimate
-// value â€” so they never reject real data, only pathological payloads.
-const MAX_RATCHET_STATE_BYTES = 1024 * 1024;   // 1 MB â€” a session state is a few KB
-const MAX_MESSAGE_BODY_BYTES = 8 * 1024 * 1024; // 8 MB â€” covers large base64 media refs
-const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB â€” inline base64 avatar
-const MAX_METADATA_FIELD_BYTES = 256 * 1024;    // 256 KB â€” names, status, member JSON, etc.
+// (memory-exhaustion / disk-fill). Bounds are generous — far above any legitimate
+// value — so they never reject real data, only pathological payloads.
+const MAX_RATCHET_STATE_BYTES = 1024 * 1024;   // 1 MB — a session state is a few KB
+const MAX_MESSAGE_BODY_BYTES = 8 * 1024 * 1024; // 8 MB — covers large base64 media refs
+const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB — inline base64 avatar
+const MAX_METADATA_FIELD_BYTES = 256 * 1024;    // 256 KB — names, status, member JSON, etc.
 function assertMaxLen(value: unknown, maxBytes: number, label: string): void {
   if (typeof value === 'string' && value.length > maxBytes) {
     throw new Error(`IPC payload too large: ${label} (${value.length} > ${maxBytes})`)
   }
 }
 
-// â”€â”€â”€ DB encryption at-rest â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── DB encryption at-rest ───────────────────────────────────────────────────
 
 function getDbEncKeySlot(slot = 'self'): string {
   return slot === 'self' ? 'aegis.dbEncKey.b64' : `aegis.${slot}.dbEncKey.b64`
 }
 
-// â”€â”€â”€ C-2 Fase 2: PIN-wrapped DB key (second factor at-rest) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── C-2 Fase 2: PIN-wrapped DB key (second factor at-rest) ──────────────────
 //
 // When the user enables the app lock, the 32-byte DB key is wrapped under a KEK
 // derived from the PIN (Argon2id, derived in the renderer) *inside* the DPAPI
 // layer. Opening the DB then requires BOTH the OS session (DPAPI) AND the PIN.
-// Format of the keystore value (slot 'self' â†’ `aegis.dbEncKey.b64`):
-//   `pinv1:<nonceB64>.<dpapiB64>`   â€” secretbox(dbKey,nonce,KEK) then DPAPI
-//   `pinv1plain:<nonceB64>.<ctB64>` â€” dev-only fallback when safeStorage absent
+// Format of the keystore value (slot 'self' → `aegis.dbEncKey.b64`):
+//   `pinv1:<nonceB64>.<dpapiB64>`   — secretbox(dbKey,nonce,KEK) then DPAPI
+//   `pinv1plain:<nonceB64>.<ctB64>` — dev-only fallback when safeStorage absent
 // (base64 alphabet has no '.', so it is an unambiguous separator). The KEK salt
 // lives separately in `aegis.dbkek.salt.v1` (renderer-owned); only the 32-byte
-// KEK crosses IPC â€” the raw DB key never leaves main.
+// KEK crosses IPC — the raw DB key never leaves main.
 const PIN_WRAP_PREFIX = 'pinv1:'
 const PIN_WRAP_PLAIN_PREFIX = 'pinv1plain:'
 const DBKEK_SALT_KEY = 'aegis.dbkek.salt.v1'
@@ -96,7 +96,7 @@ export function wrapDbKeyUnderPin(dbKey: Uint8Array, kek: Uint8Array): string {
   }
   // No try/catch fallback to plaintext in production (golden rule #1/#6).
   if (app.isPackaged) {
-    throw new Error('AegisLink: OS secure storage unavailable â€” cannot PIN-wrap DB key.')
+    throw new Error('AegisLink: OS secure storage unavailable — cannot PIN-wrap DB key.')
   }
   return `${PIN_WRAP_PLAIN_PREFIX}${nonceB64}.${ctB64}`
 }
@@ -119,8 +119,8 @@ export function unwrapDbKeyUnderPin(encoded: string, kek: Uint8Array): Uint8Arra
   const opened = nacl.secretbox.open(decodeBase64(ctB64), decodeBase64(nonceB64), kek)
   if (!opened) {
     // Wrong PIN (or tampered blob): the unwrap is itself the PIN check. Never
-    // fall through to a fresh key â€” that would orphan all encrypted rows.
-    throw new Error('AegisLink: incorrect PIN â€” DB key unwrap failed.')
+    // fall through to a fresh key — that would orphan all encrypted rows.
+    throw new Error('AegisLink: incorrect PIN — DB key unwrap failed.')
   }
   if (opened.length !== 32) throw new Error('decrypted DB key has invalid length')
   return opened
@@ -182,7 +182,7 @@ function getDbKey(slot = 'self'): Uint8Array {
       // encryption. (Golden rule #1/#6: encryption never degrades silently;
       // production fails closed.)
       throw new Error(
-        'AegisLink: OS secure storage unavailable â€” cannot create DB key securely.'
+        'AegisLink: OS secure storage unavailable — cannot create DB key securely.'
       )
     }
     const keyBytes = nacl.randomBytes(32)
@@ -206,7 +206,7 @@ function getDbKey(slot = 'self'): Uint8Array {
     cachedDbKeys.set(slot, keyBytes)
     return keyBytes
   }
-  // A plaintext DB key must never exist in a packaged build â€” its presence means
+  // A plaintext DB key must never exist in a packaged build — its presence means
   // at-rest encryption silently downgraded. Refuse to serve it rather than
   // operating on cleartext-keyed data (golden rule #1/#6; parity with
   // secureStorage:get, which applies the same refusal on read).
@@ -216,7 +216,7 @@ function getDbKey(slot = 'self'): Uint8Array {
     )
   }
   // Existing key: decrypt it. If this fails we MUST NOT silently mint a new
-  // key â€” that would orphan every previously-encrypted row (silent total
+  // key — that would orphan every previously-encrypted row (silent total
   // history loss). Surface the error so the caller can offer recovery.
   try {
     let decrypted = ''
@@ -232,7 +232,7 @@ function getDbKey(slot = 'self'): Uint8Array {
     return key
   } catch (e) {
     throw new Error(
-      'AegisLink: failed to decrypt the local DB key â€” refusing to regenerate ' +
+      'AegisLink: failed to decrypt the local DB key — refusing to regenerate ' +
         '(would orphan existing encrypted data). ' +
         (e instanceof Error ? e.message : String(e))
     )
@@ -293,7 +293,7 @@ function decryptBodyStrict(encryptedBody: string, slot = 'self'): string {
 
 /**
  * Display-path decryption. On failure returns a VISIBLE marker (never silent,
- * never fabricated plaintext). NOT for key material â€” use
+ * never fabricated plaintext). NOT for key material — use
  * {@link decryptSecretOrNull} for ratchet state / prekey secrets.
  */
 export function decryptBody(encryptedBody: string, slot = 'self'): string {
@@ -318,7 +318,7 @@ export function decryptSecretOrNull(encryptedBody: string, slot = 'self'): strin
   }
 }
 
-// â”€â”€â”€ Schema Setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Schema Setup ─────────────────────────────────────────────────────────────
 
 function ensureSchema(db: Database.Database): void {
   const statements = [
@@ -444,9 +444,9 @@ function ensureSchema(db: Database.Database): void {
   safeAddColumn('call_history', 'duration_s', 'INTEGER NOT NULL DEFAULT 0')
 }
 
-// â”€â”€â”€ SQLCipher at-rest encryption (Ola 10) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── SQLCipher at-rest encryption (Ola 10) ────────────────────────────────────
 
-/** Lowercase hex of the 32-byte DB key for `PRAGMA key = "x'â€¦'"`. */
+/** Lowercase hex of the 32-byte DB key for `PRAGMA key = "x'…'"`. */
 function dbKeyHex(slot = 'self'): string {
   return Buffer.from(getDbKey(slot)).toString('hex')
 }
@@ -454,24 +454,24 @@ function dbKeyHex(slot = 'self'): string {
 /**
  * Open `dbPath` encrypted at-rest, migrating a legacy plaintext file in place.
  *
- * Detection probes whether the file is readable with NO key (â‡’ plaintext); if so
+ * Detection probes whether the file is readable with NO key (⇒ plaintext); if so
  * it is encrypted in place via `PRAGMA rekey` (SQLite3MultipleCiphers supports
- * plaintextâ†’encrypted rekey, preserving all rows). The key PRAGMA is applied as
+ * plaintext→encrypted rekey, preserving all rows). The key PRAGMA is applied as
  * the first statement on the returned handle. Fails closed: getDbKey() throws
  * when OS secure storage is unavailable in a packaged build.
  */
 export function openEncrypted(dbPath: string, slot = 'self'): Database.Database {
   const keyHex = dbKeyHex(slot)
 
-  // â”€â”€ Migrate a pre-existing PLAINTEXT database (readable without a key) â”€â”€â”€â”€â”€â”€
+  // ── Migrate a pre-existing PLAINTEXT database (readable without a key) ──────
   if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
     let plaintext = false
     const probe = new Database(dbPath)
     try {
-      probe.exec('SELECT count(*) FROM sqlite_master') // no key â†’ succeeds iff plaintext
+      probe.exec('SELECT count(*) FROM sqlite_master') // no key → succeeds iff plaintext
       plaintext = true
     } catch {
-      plaintext = false // unreadable without a key â†’ already encrypted
+      plaintext = false // unreadable without a key → already encrypted
     } finally {
       probe.close()
     }
@@ -490,7 +490,7 @@ export function openEncrypted(dbPath: string, slot = 'self'): Database.Database 
   return handle
 }
 
-// â”€â”€â”€ Handlers Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Handlers Registration ────────────────────────────────────────────────────
 
 let mainDbPath = ''
 
@@ -554,7 +554,7 @@ function openMainDb(): void {
 /**
  * Eagerly open the main DB for legacy / no-PIN installs. MUST be called AFTER
  * app.whenReady(): openMainDb() -> getDbKey() uses Electron safeStorage, which
- * THROWS when used before the app is ready (enforced since Electron 42 â€” before
+ * THROWS when used before the app is ready (enforced since Electron 42 — before
  * that it silently worked, so the eager open could live inside the pre-ready
  * registerDatabaseHandlers()). PIN-wrapped installs stay closed until db:unlock
  * supplies the PIN-derived KEK. No-op if already open or path not yet set.
@@ -582,10 +582,10 @@ export function registerDatabaseHandlers(): void {
 
   // C-2 Fase 2: if the DB key is PIN-wrapped, DEFER opening until db:unlock
   // supplies the PIN-derived KEK. Legacy / no-PIN installs are opened eagerly
-  // too â€” but from app.whenReady() (see openMainDbIfUnwrapped), NOT here:
+  // too — but from app.whenReady() (see openMainDbIfUnwrapped), NOT here:
   // getDbKey() touches safeStorage, illegal before the app is ready on Electron 42+.
 
-  // â”€â”€â”€ Lock / unlock (C-2 Fase 2) â”€â”€â”€
+  // ─── Lock / unlock (C-2 Fase 2) ───
   ipcMain.handle('db:lock-state', (event): { pinWrapped: boolean; opened: boolean } => {
     assertTrustedSender(event)
     const enc = readKeystore()[getDbEncKeySlot(currentSlot)]
@@ -688,7 +688,7 @@ export function registerDatabaseHandlers(): void {
     cachedKek = null // no PIN any more: nothing left to unwrap with
   })
 
-  // â”€â”€â”€ Identity â”€â”€â”€
+  // ─── Identity ───
   ipcMain.handle('db:save-identity', (event, activeSlot: string, identity: IdentityInput): void => {
     assertTrustedSender(event)
     assertSlot(activeSlot)
@@ -736,7 +736,7 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // â”€â”€â”€ Contacts â”€â”€â”€
+  // ─── Contacts ───
   ipcMain.handle('db:save-contact', (event, c: ContactInput): void => {
     assertTrustedSender(event)
     // Defence-in-depth: bound the unbounded string fields a renderer can write
@@ -846,7 +846,7 @@ export function registerDatabaseHandlers(): void {
     db.prepare('DELETE FROM contacts WHERE aegis_id = ?').run(aegisId)
   })
 
-  // â”€â”€â”€ Messages â”€â”€â”€
+  // ─── Messages ───
   ipcMain.handle('db:save-message', (event, activeSlot: string, m: MessageInput): void => {
     assertTrustedSender(event)
     assertSlot(activeSlot)
@@ -1061,7 +1061,7 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // â”€â”€â”€ Double Ratchet sessions â”€â”€â”€
+  // ─── Double Ratchet sessions ───
   ipcMain.handle(
     'db:save-ratchet-session',
     (event, activeSlot: string, aegisId: string, stateJson: string): void => {
@@ -1089,7 +1089,7 @@ export function registerDatabaseHandlers(): void {
     }
   )
 
-  // â”€â”€â”€ Groups â”€â”€â”€
+  // ─── Groups ───
   ipcMain.handle('db:save-group', (event, g: GroupInput): void => {
     assertTrustedSender(event)
     assertMaxLen(g?.name, MAX_METADATA_FIELD_BYTES, 'group.name')
@@ -1161,12 +1161,12 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // â”€â”€â”€ Panic wipe â”€â”€â”€
+  // ─── Panic wipe ───
   ipcMain.handle('db:wipe-database', (event, activeSlot: string): void => {
     assertTrustedSender(event)
     assertSlot(activeSlot)
     // Tolerate a LOCKED DB (Fase 2 cold-start panic, before db:unlock): the SQL
-    // deletes are skipped, but the keystore wipe below removes the DB key blob â€”
+    // deletes are skipped, but the keystore wipe below removes the DB key blob —
     // the encrypted DB file is then unrecoverable, so panic still leaves nothing.
     if (db) {
       db.prepare('DELETE FROM messages').run()
@@ -1224,7 +1224,7 @@ export function registerDatabaseHandlers(): void {
     writeKeystore(keystore)
   })
 
-  // â”€â”€â”€ Chat state â”€â”€â”€
+  // ─── Chat state ───
   ipcMain.handle('db:get-chat-state', (event, activeSlot: string, chatId: string) => {
     assertTrustedSender(event)
     assertSlot(activeSlot)
@@ -1276,7 +1276,7 @@ export function registerDatabaseHandlers(): void {
     return result
   })
 
-  // â”€â”€â”€ Ephemeral cleanup â”€â”€â”€
+  // ─── Ephemeral cleanup ───
   ipcMain.handle('db:delete-expired-messages', (event, timerSeconds: number): void => {
     assertTrustedSender(event)
     const now = Date.now()
@@ -1289,7 +1289,7 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // â”€â”€â”€ Call history â”€â”€â”€
+  // ─── Call history ───
   ipcMain.handle('db:save-call', (event, c: CallInput): void => {
     assertTrustedSender(event)
     assertMaxLen(c?.id, MAX_METADATA_FIELD_BYTES, 'call.id')
