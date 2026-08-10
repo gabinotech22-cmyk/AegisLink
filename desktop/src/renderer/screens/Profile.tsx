@@ -22,6 +22,8 @@ interface Props {
   onPanic: () => void;
   onAppIcon: () => void;
   onKeys: () => void;
+  /** Section 11. Optional so the screen still renders where it is not wired. */
+  onProfileSwitcher?: () => void;
 }
 
 const PROFILE_COLORS = ['#05b875', '#8b5cf6', '#3b82f6', '#ec4899', '#f97316', '#eab308', '#6366f1'];
@@ -38,7 +40,7 @@ const PROFILE_EMOJIS = [
   { get label() { return i18n.t('groups.robot'); }, val: '🤖' },
 ];
 
-export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys }: Props) {
+export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys, onProfileSwitcher }: Props) {
   useTranslation(); // re-render on language change
   const { t } = useTheme();
 
@@ -58,6 +60,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys }:
 
   const photoVis = usePreferences((s) => s.photoVis);
   const setPref = usePreferences((s) => s.set);
+  const duressActive = usePreferences((s) => s.duressActive);
   // Changing "who sees my photo" re-announces the profile: contacts that lose
   // access get an explicit clear, contacts that gain it get the photo.
   function setPhotoVis(v: 'all' | 'contacts' | 'none') {
@@ -186,6 +189,18 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys }:
         </Section>
 
         <Section t={t} label={i18n.t('profile.accountSection')}>
+          {/* Hidden while the decoy account is showing. The row itself is the
+              leak: offering to switch profiles proves a real, hidden identity
+              exists, which is exactly what duress mode has to deny. */}
+          {onProfileSwitcher && !duressActive && (
+            <Row
+              t={t}
+              icon={<I.Person size={18} color={t.textDim} />}
+              label={i18n.t('profile.isolatedProfiles')}
+              sub={i18n.t('profile.isolatedProfilesSub')}
+              onPress={onProfileSwitcher}
+            />
+          )}
           <Row t={t} icon={<I.Key size={18} color={t.textDim} />} label={i18n.t('profile.identitiesAndKeys')} sub={i18n.t('profile.viewYourPublicKeys')} onPress={onKeys} />
           <Row t={t} icon={<I.Phone size={18} color={t.textDim} />} label={i18n.t('profile.linkedDevices')} onPress={onDevices} />
           <Row t={t} icon={<I.Shield size={18} color={t.accent} />} label={i18n.t('profile.panicMode')} sub={i18n.t('profile.instantlyWipeAllData')} onPress={onPanic} />

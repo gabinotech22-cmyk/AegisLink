@@ -34,7 +34,7 @@ function assertKeyAllowed(key: string): void {
   const pattern = new RegExp(
     r`^aegis\.(?:[a-zA-Z0-9_\-]+\.)?(` +
       [
-        r`secretKey\.b64`, r`signSecretKey\.b64`, 'activeProfile', 'activeSlotId', 'slotsList',
+        r`secretKey\.b64`, r`signSecretKey\.b64`, 'activeProfile', 'activeSlotId', 'slotsList', r`profiles\.v1`,
         'displayName', 'avatarColor', 'avatarImage', 'profileStatus',
         'workDisplayName', 'workAvatarColor', 'workAvatarImage', 'workProfileStatus',
         r`panic\.v1`, r`preferences\.v1`, r`polls\.v1`, r`identity\.v1`, r`prekeys\.v1`,
