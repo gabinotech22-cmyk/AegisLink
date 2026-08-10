@@ -489,6 +489,36 @@ export async function withDb<T>(fn: (d: SQLite.SQLiteDatabase) => Promise<T>): P
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 export async function saveIdentity(v: StoredIdentity): Promise<void> {
+  // ORDER MATTERS: SQLite (the public identity row) is written FIRST, and
+  // SecureStore/Keychain (the private keys) only AFTER that succeeds.
+  //
+  // Root-cause fix: these two stores used to be written in the opposite
+  // order. If the SecureStore write succeeded but the SQLite write then threw
+  // (e.g. a schema-init crash on that DB handle), SecureStore was left
+  // holding a NEW keypair while SQLite kept the OLD identity row — a silent,
+  // permanent split. loadIdentity() would happily recombine the OLD aegisId/
+  // publicKey (from SQLite) with the NEW, unrelated secretKey (from
+  // SecureStore), producing a keypair-that-never-was: signatures made with it
+  // never verify against what the relay or contacts have on file. That is
+  // exactly what caused real devices to get a permanent 403 invalid_signature
+  // on every prekey upload after a botched identity-generation retry.
+  //
+  // SQLite first means a failure there touches NOTHING — the old identity
+  // (if any) stays fully intact in both stores, and the next attempt starts
+  // from a clean slate. See crypto/identity.ts's identityFromStored for the
+  // matching defence-in-depth check on load.
+  await withDb(async (d) => {
+    await d.runAsync(
+      `INSERT OR REPLACE INTO identity (slot, aegis_id, public_key_b64, signing_public_key_b64, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      activeSlot,
+      v.aegisId,
+      v.publicKeyB64,
+      v.signingPublicKeyB64,
+      v.createdAt
+    );
+  });
+
   // expo-secure-store can fail with NullPointerException on Android if the
   // Keystore has stale entries from a previous installation (classic "update
   // over old APK" corruption).  Attempt once; on failure, clear the stale
@@ -519,17 +549,6 @@ export async function saveIdentity(v: StoredIdentity): Promise<void> {
     await SecureStore.deleteItemAsync(getSignSecretKeySlot()).catch(() => {});
     await persistKeys(); // if this throws again, surface the real error
   }
-  return withDb(async (d) => {
-    await d.runAsync(
-      `INSERT OR REPLACE INTO identity (slot, aegis_id, public_key_b64, signing_public_key_b64, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      activeSlot,
-      v.aegisId,
-      v.publicKeyB64,
-      v.signingPublicKeyB64,
-      v.createdAt
-    );
-  });
 }
 
 export async function loadIdentity(): Promise<StoredIdentity | null> {

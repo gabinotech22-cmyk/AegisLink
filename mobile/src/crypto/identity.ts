@@ -105,6 +105,15 @@ export async function signWithProfileKey(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** XOR-accumulated constant-time comparison for secret/derived key material
+ * (golden rule #8) — never early-return on the first mismatching byte. */
+function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
 export function identityFromStored(opts: {
   publicKeyB64: string;
   secretKeyB64: string;
@@ -114,6 +123,20 @@ export function identityFromStored(opts: {
 }): Identity {
   const publicKey = decodeBase64(opts.publicKeyB64);
   const secretKey = decodeBase64(opts.secretKeyB64);
+
+  // Integrity check: publicKeyB64 and secretKeyB64 are written to two
+  // different stores (SQLite vs SecureStore) by two separate operations in
+  // saveIdentity — if one write lands and the other fails/retries with a
+  // DIFFERENT keypair, the two halves silently stop matching. Every future
+  // encrypt/sign then fails against whatever the relay and contacts actually
+  // have on file (e.g. permanent 403 invalid_signature on prekey upload).
+  // Failing loudly here converts that into a clear, debuggable error instead
+  // of a perpetual silent failure (golden rule #1).
+  const derivedPublicKey = nacl.box.keyPair.fromSecretKey(secretKey).publicKey;
+  if (!constantTimeEqualBytes(derivedPublicKey, publicKey)) {
+    throw new Error('identity corrupted: secretKey does not match publicKeyB64');
+  }
+
   // Missing signing material (pre-multi-key DBs): DERIVE it deterministically
   // from the box secret key, exactly as createIdentity does
   // (nacl.sign.keyPair.fromSeed). A throwaway RANDOM pair would produce
@@ -126,6 +149,18 @@ export function identityFromStored(opts: {
         secretKey: decodeBase64(opts.signingSecretKeyB64)
       }
     : nacl.sign.keyPair.fromSeed(secretKey);
+
+  // Same integrity check for the signing keypair: a nacl sign secret key is
+  // 64 bytes (32-byte seed || 32-byte embedded public key), so the public
+  // half is verifiable without any extra derivation. Only applies when both
+  // were loaded explicitly — the derived branch above is correct by
+  // construction (fromSeed always returns a matching pair).
+  if (opts.signingPublicKeyB64 && opts.signingSecretKeyB64) {
+    const embeddedPublicKey = signKeys.secretKey.slice(32, 64);
+    if (!constantTimeEqualBytes(embeddedPublicKey, signKeys.publicKey)) {
+      throw new Error('identity corrupted: signingSecretKey does not match signingPublicKeyB64');
+    }
+  }
 
   return {
     aegisId: deriveAegisId(publicKey),
