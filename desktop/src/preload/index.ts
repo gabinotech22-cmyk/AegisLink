@@ -26,6 +26,11 @@ contextBridge.exposeInMainWorld('aegis', {
       ipcRenderer.invoke('db:enable-pin-wrap', kekB64),
     disablePinWrap: (): Promise<void> =>
       ipcRenderer.invoke('db:disable-pin-wrap'),
+    // ── Section 11: isolated profiles ──
+    // Closes the current profile's database and opens the next one's. A different
+    // FILE with a different key, so nothing can bleed across.
+    switchSlot: (slot: string): Promise<void> =>
+      ipcRenderer.invoke('db:switch-slot', slot),
     saveIdentity: (activeSlot: string, identity: any): Promise<void> =>
       ipcRenderer.invoke('db:save-identity', activeSlot, identity),
     loadIdentity: (activeSlot: string): Promise<any> =>
