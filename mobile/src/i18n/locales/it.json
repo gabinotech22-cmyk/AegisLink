@@ -79,7 +79,8 @@
     "skipNickname": "Salta per ora",
     "dbInitializing": "Inizializzazione archiviazione sicura…",
     "switchDark": "Passa alla modalità scura",
-    "switchLight": "Passa alla modalità chiara"
+    "switchLight": "Passa alla modalità chiara",
+    "registrationFailedTitle": "Registrazione non riuscita"
   },
   "home": {
     "identityCreated": "Identità creata",
@@ -211,7 +212,8 @@
     "sendAccessibilityLabel": "Invia messaggio",
     "videoCallMade": "Videochiamata",
     "voiceCallMade": "Chiamata vocale",
-    "voiceNote": "Registra nota vocale"
+    "voiceNote": "Registra nota vocale",
+    "scheduleError": "Impossibile programmare"
   },
   "contacts": {
     "title": "Contatti",
@@ -222,7 +224,9 @@
     "noResultsDesc": "Prova con un altro termine o cancella la ricerca.",
     "emptyTitle": "Nessun contatto ancora",
     "emptyDesc": "Scansiona il QR di un peer o incolla il suo Aegis ID per iniziare.",
-    "addContact": "Aggiungi contatto"
+    "addContact": "Aggiungi contatto",
+    "offlineTitle": "Contatto offline",
+    "offlineDesc": "Il contatto non è attualmente connesso al server. Riprova più tardi."
   },
   "profile": {
     "title": "Profilo",
@@ -472,7 +476,21 @@
     "newProfile": "Nuovo profilo",
     "activeLabel": "Profilo attivo",
     "switchTo": "Passa al profilo {{name}}",
-    "openHint": "Apri selettore profili"
+    "openHint": "Apri selettore profili",
+    "screenTitle": "Profili",
+    "switchConfirmDesc": "Cambiare profilo chiude tutte le chat attive e carica il database del nuovo profilo.",
+    "switchAction": "Cambia",
+    "cannotDeleteTitle": "Impossibile eliminare",
+    "cannotDeleteLast": "Devi mantenere almeno un profilo.",
+    "cannotDeletePrimary": "Il profilo principale non può essere eliminato. Usa “Elimina identità” in Profilo → Impostazioni.",
+    "deleteConfirmTitle": "Elimina “{{name}}”",
+    "deleteConfirmDesc": "Tutte le chiavi, i messaggi e i contatti di questo profilo verranno eliminati definitivamente. L’azione è irreversibile.",
+    "createNewA11y": "Crea nuovo profilo",
+    "emptyState": "Nessun profilo trovato. Riavvia l’app per inizializzarli.",
+    "footer": "OGNI PROFILO HA LE PROPRIE CHIAVI E2EE E IL PROPRIO DATABASE",
+    "rowA11y": "Profilo {{name}}",
+    "rowA11yActive": "Profilo {{name}}, attivo",
+    "activeBadge": "ATTIVO"
   },
   "settings": {
     "language": "Language / Lingua"
@@ -745,7 +763,18 @@
     "scheduledAlert": "Messaggio programmato",
     "scheduledAlertDesc": "Il tuo messaggio a {{name}} verrà inviato tra {{delay}} secondi.",
     "inSeconds": "TRA {{secs}}S",
-    "e2eeQueue": "PROGRAMMATO (CODA E2EE RATCHET)"
+    "e2eeQueue": "PROGRAMMATO (CODA E2EE RATCHET)",
+    "statusSent": "INVIATO",
+    "statusFailed": "NON RIUSCITO",
+    "statusPending": "IN ATTESA",
+    "cancelTitle": "Annulla messaggio",
+    "cancelDesc": "Annullare questo messaggio programmato? L’azione è irreversibile.",
+    "listTitle": "Messaggi programmati",
+    "backA11y": "Indietro",
+    "groupFallback": "Gruppo",
+    "badgeGroupPost": "POST DI GRUPPO · E2EE ALL’INVIO",
+    "badgeDirect": "E2EE · CIFRATO ALL’ORIGINE",
+    "rowA11y": "Messaggio programmato per {{name}} il {{when}}, stato: {{status}}"
   },
   "ephemeral": {
     "title": "Messaggi a scomparsa",
@@ -1773,7 +1802,16 @@
     "tapToExpand": "Torna alla chiamata di gruppo",
     "tooMany": "Troppi partecipanti",
     "tooManyDetail": "Max. 8 partecipanti nelle chiamate di gruppo.",
-    "waitingForParticipants": "In attesa di partecipanti…"
+    "waitingForParticipants": "In attesa di partecipanti…",
+    "noConnTitle": "Nessuna connessione",
+    "noConnStart": "Devi essere connesso per avviare una chiamata di gruppo.",
+    "noConnJoin": "Devi essere connesso per unirti alla chiamata.",
+    "noMicTitle": "Nessun microfono",
+    "noMicDesc": "Impossibile accedere al microfono. Controlla i permessi.",
+    "endedTitle": "Chiamata terminata",
+    "endedDesc": "Questa chiamata non è più attiva.",
+    "fullTitle": "Chiamata piena",
+    "fullDesc": "Questa chiamata ha raggiunto il massimo di 8 partecipanti."
   },
   "multiPreview": {
     "captionPlaceholder": "Aggiungi un messaggio… (opzionale)",
@@ -1786,5 +1824,64 @@
     "copy": "Copia link",
     "shareVia": "Condividi tramite app…",
     "title": "Link di condivisione"
+  },
+  "createProfile": {
+    "title": "Nuovo profilo",
+    "generatingTitle": "Generazione identità",
+    "generatingDesc": "Le tue chiavi crittografiche X25519 ed Ed25519 vengono create su questo dispositivo.",
+    "nameTitle": "Scegli un nome",
+    "nameDesc": "Visibile solo a te. Usalo per riconoscere questo profilo nel selettore.",
+    "aegisIdLabel": "AEGIS ID",
+    "nameLabel": "Nome del profilo",
+    "namePlaceholder": "es. Personale, Lavoro, Anonimo…",
+    "continueA11y": "Continua al passaggio colore",
+    "continue": "Continua",
+    "colorTitle": "Colore avatar",
+    "colorDesc": "Riconosci subito questo profilo dal colore nel selettore.",
+    "colorA11y": "Colore {{color}}",
+    "confirmA11y": "Conferma e crea profilo",
+    "creating": "Creazione…",
+    "create": "Crea profilo"
+  },
+  "distLists": {
+    "title": "Liste di distribuzione",
+    "backA11y": "Indietro",
+    "createA11y": "Crea nuova lista di distribuzione",
+    "createFirstA11y": "Crea la prima lista di distribuzione",
+    "nameRequiredTitle": "Nome richiesto",
+    "nameRequiredDesc": "Inserisci un nome per questa lista.",
+    "noMembersTitle": "Nessun membro",
+    "noMembersDesc": "Seleziona almeno un contatto.",
+    "deleteDesc": "Questa lista di distribuzione verrà eliminata definitivamente.",
+    "cancelA11y": "Annulla",
+    "saveA11y": "Salva lista di distribuzione",
+    "save": "Salva",
+    "namePlaceholder": "Nome della lista…",
+    "nameA11y": "Nome della lista di distribuzione",
+    "member": "MEMBRO",
+    "members": "MEMBRI",
+    "selectA11y": "Seleziona {{name}}",
+    "deselectA11y": "Deseleziona {{name}}",
+    "deleteTitle": "Eliminare “{{name}}”?"
+  },
+  "broadcast": {
+    "backA11y": "Indietro",
+    "emptyTitle": "Messaggio vuoto",
+    "emptyDesc": "Scrivi un messaggio prima di inviarlo.",
+    "notReadyTitle": "Non pronto",
+    "notReadyDesc": "Identità non caricata. Attendi.",
+    "recipient": "DESTINATARIO",
+    "recipients": "DESTINATARI",
+    "individualMessages": "MESSAGGI INDIVIDUALI",
+    "placeholder": "Scrivi il tuo messaggio broadcast…",
+    "messageA11y": "Messaggio broadcast",
+    "doneA11y": "Fatto, torna indietro",
+    "done": "Fatto"
+  },
+  "schedulePicker": {
+    "invalidDateTitle": "Data non valida",
+    "invalidDateDesc": "Usa il formato YYYY-MM-DD e HH:MM.",
+    "tooSoonTitle": "Data troppo vicina",
+    "tooSoonDesc": "Il messaggio deve essere programmato almeno 1 minuto nel futuro."
   }
 }

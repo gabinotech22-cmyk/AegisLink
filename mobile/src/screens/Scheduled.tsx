@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { View, Text, Pressable, FlatList, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
@@ -32,10 +33,12 @@ function formatSendAt(ts: number): string {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function statusLabel(status: ScheduledMessage['status']): string {
-  if (status === 'sent') return 'ENVIADO';
-  if (status === 'failed') return 'FALLIDO';
-  return 'PENDIENTE';
+/** i18n key for a status badge. Returns the KEY, not the text: this is a
+ *  module-level helper with no hook access, so the caller translates. */
+function statusLabelKey(status: ScheduledMessage['status']): string {
+  if (status === 'sent') return 'scheduled.statusSent';
+  if (status === 'failed') return 'scheduled.statusFailed';
+  return 'scheduled.statusPending';
 }
 
 function statusColor(status: ScheduledMessage['status'], accent: string, warn: string, textFaint: string): string {
@@ -46,6 +49,7 @@ function statusColor(status: ScheduledMessage['status'], accent: string, warn: s
 
 export function ScheduledScreen({ onBack }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { scheduled, loadPending, cancelScheduled } = useScheduledMessages();
   const contacts = useContacts((s) => s.contacts);
@@ -63,12 +67,12 @@ export function ScheduledScreen({ onBack }: Props) {
 
   function handleCancel(msg: ScheduledMessage) {
     themedAlert(
-      'Cancelar mensaje',
-      '¿Cancelar este mensaje programado? No se podrá deshacer.',
+      i18nT('scheduled.cancelTitle'),
+      i18nT('scheduled.cancelDesc'),
       [
-        { text: 'No', style: 'cancel' },
+        { text: i18nT('common.no'), style: 'cancel' },
         {
-          text: 'Cancelar mensaje',
+          text: i18nT('scheduled.cancelTitle'),
           style: 'destructive',
           onPress: () => void cancelScheduled(msg.id),
         },
@@ -84,14 +88,14 @@ export function ScheduledScreen({ onBack }: Props) {
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
       <TopBar
         t={t}
-        title="Mensajes Programados"
+        title={i18nT('scheduled.listTitle')}
         big
         left={
           <Pressable
             onPress={onBack}
             hitSlop={8}
             style={{ padding: 4 }}
-            accessibilityLabel="Volver"
+            accessibilityLabel={i18nT('scheduled.backA11y')}
           >
             <I.ChevronL size={22} color={t.textDim} />
           </Pressable>
@@ -146,7 +150,7 @@ export function ScheduledScreen({ onBack }: Props) {
             : undefined;
           const contact = isGroupPost ? undefined : contactFor(item.recipientAegisId);
           const displayName = isGroupPost
-            ? (groupName ?? 'Grupo')
+            ? (groupName ?? i18nT('scheduled.groupFallback'))
             : (contact?.name ?? item.recipientAegisId.slice(0, 12) + '…');
           const isPending = item.status === 'pending';
 
@@ -156,7 +160,11 @@ export function ScheduledScreen({ onBack }: Props) {
                 styles.row,
                 { borderBottomColor: t.divider },
               ]}
-              accessibilityLabel={`Mensaje programado para ${displayName} el ${formatSendAt(item.sendAt)}, estado: ${statusLabel(item.status)}`}
+              accessibilityLabel={i18nT('scheduled.rowA11y', {
+                name: displayName,
+                when: formatSendAt(item.sendAt),
+                status: i18nT(statusLabelKey(item.status)),
+              })}
             >
               <View
                 style={[styles.iconBox, { backgroundColor: t.surface2 }]}
@@ -185,7 +193,7 @@ export function ScheduledScreen({ onBack }: Props) {
                       },
                     ]}
                   >
-                    {statusLabel(item.status)}
+                    {i18nT(statusLabelKey(item.status))}
                   </Text>
                 </View>
 
@@ -200,7 +208,7 @@ export function ScheduledScreen({ onBack }: Props) {
                 )}
 
                 <Text style={[styles.e2eeTag, { color: t.textFaint, fontFamily: t.fontMono }]}>
-                  {isGroupPost ? 'POST DE GRUPO · E2EE AL ENVIAR' : 'E2EE · CIFRADO EN ORIGEN'}
+                  {i18nT(isGroupPost ? 'scheduled.badgeGroupPost' : 'scheduled.badgeDirect')}
                 </Text>
               </View>
 

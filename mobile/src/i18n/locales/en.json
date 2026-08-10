@@ -79,7 +79,8 @@
     "skipNickname": "Skip for now",
     "dbInitializing": "Initializing secure storage…",
     "switchDark": "Switch to dark mode",
-    "switchLight": "Switch to light mode"
+    "switchLight": "Switch to light mode",
+    "registrationFailedTitle": "Registration failed"
   },
   "home": {
     "identityCreated": "Identity created",
@@ -211,7 +212,8 @@
     "sendAccessibilityLabel": "Send message",
     "videoCallMade": "Video call",
     "voiceCallMade": "Voice call",
-    "voiceNote": "Record voice note"
+    "voiceNote": "Record voice note",
+    "scheduleError": "Could not schedule"
   },
   "contacts": {
     "title": "Contacts",
@@ -222,7 +224,9 @@
     "noResultsDesc": "Try another term or clear the search.",
     "emptyTitle": "No contacts yet",
     "emptyDesc": "Scan a peer's QR or paste their Aegis ID to start.",
-    "addContact": "Add contact"
+    "addContact": "Add contact",
+    "offlineTitle": "Contact offline",
+    "offlineDesc": "The contact is not currently connected to the server. Try again later."
   },
   "profile": {
     "title": "Profile",
@@ -472,7 +476,21 @@
     "newProfile": "New profile",
     "activeLabel": "Active profile",
     "switchTo": "Switch to {{name}}",
-    "openHint": "Open profile switcher"
+    "openHint": "Open profile switcher",
+    "screenTitle": "Profiles",
+    "switchConfirmDesc": "Switching profile closes every active chat and loads the new profile’s database.",
+    "switchAction": "Switch",
+    "cannotDeleteTitle": "Cannot delete",
+    "cannotDeleteLast": "You must keep at least one profile.",
+    "cannotDeletePrimary": "The primary profile cannot be deleted. Use “Delete identity” in Profile → Settings.",
+    "deleteConfirmTitle": "Delete “{{name}}”",
+    "deleteConfirmDesc": "Every key, message and contact in this profile will be permanently erased. This cannot be undone.",
+    "createNewA11y": "Create new profile",
+    "emptyState": "No profiles found. Restart the app to initialise them.",
+    "footer": "EACH PROFILE HAS ITS OWN E2EE KEYS AND DATABASE",
+    "rowA11y": "Profile {{name}}",
+    "rowA11yActive": "Profile {{name}}, active",
+    "activeBadge": "ACTIVE"
   },
   "settings": {
     "language": "Language / Lingua"
@@ -763,7 +781,18 @@
     "scheduledAlert": "Message scheduled",
     "scheduledAlertDesc": "Your message to {{name}} will be sent in {{delay}} seconds.",
     "inSeconds": "IN {{secs}}S",
-    "e2eeQueue": "SCHEDULED (E2EE RATCHET QUEUE)"
+    "e2eeQueue": "SCHEDULED (E2EE RATCHET QUEUE)",
+    "statusSent": "SENT",
+    "statusFailed": "FAILED",
+    "statusPending": "PENDING",
+    "cancelTitle": "Cancel message",
+    "cancelDesc": "Cancel this scheduled message? This cannot be undone.",
+    "listTitle": "Scheduled messages",
+    "backA11y": "Back",
+    "groupFallback": "Group",
+    "badgeGroupPost": "GROUP POST · E2EE ON SEND",
+    "badgeDirect": "E2EE · ENCRYPTED AT SOURCE",
+    "rowA11y": "Scheduled message to {{name}} on {{when}}, status: {{status}}"
   },
   "ephemeral": {
     "title": "Disappearing messages",
@@ -1773,7 +1802,16 @@
     "tapToExpand": "Return to group call",
     "tooMany": "Too many participants",
     "tooManyDetail": "Max. 8 participants in group calls.",
-    "waitingForParticipants": "Waiting for participants…"
+    "waitingForParticipants": "Waiting for participants…",
+    "noConnTitle": "No connection",
+    "noConnStart": "You need to be connected to start a group call.",
+    "noConnJoin": "You need to be connected to join the call.",
+    "noMicTitle": "No microphone",
+    "noMicDesc": "Could not access the microphone. Check permissions.",
+    "endedTitle": "Call ended",
+    "endedDesc": "This call is no longer active.",
+    "fullTitle": "Call full",
+    "fullDesc": "This call has reached its maximum of 8 participants."
   },
   "multiPreview": {
     "captionPlaceholder": "Add a message… (optional)",
@@ -1786,5 +1824,64 @@
     "copy": "Copy link",
     "shareVia": "Share via app…",
     "title": "Sharing link"
+  },
+  "createProfile": {
+    "title": "New profile",
+    "generatingTitle": "Generating identity",
+    "generatingDesc": "Your X25519 and Ed25519 cryptographic keys are being created on this device.",
+    "nameTitle": "Choose a name",
+    "nameDesc": "Only visible to you. Use it to identify this profile in the switcher.",
+    "aegisIdLabel": "AEGIS ID",
+    "nameLabel": "Profile name",
+    "namePlaceholder": "e.g. Personal, Work, Anonymous…",
+    "continueA11y": "Continue to the colour step",
+    "continue": "Continue",
+    "colorTitle": "Avatar colour",
+    "colorDesc": "Spot this profile quickly by its colour in the switcher.",
+    "colorA11y": "Colour {{color}}",
+    "confirmA11y": "Confirm and create profile",
+    "creating": "Creating…",
+    "create": "Create profile"
+  },
+  "distLists": {
+    "title": "Distribution Lists",
+    "backA11y": "Go back",
+    "createA11y": "Create new distribution list",
+    "createFirstA11y": "Create first distribution list",
+    "nameRequiredTitle": "Name required",
+    "nameRequiredDesc": "Please enter a name for this list.",
+    "noMembersTitle": "No members",
+    "noMembersDesc": "Select at least one contact.",
+    "deleteDesc": "This will permanently remove this distribution list.",
+    "cancelA11y": "Cancel",
+    "saveA11y": "Save distribution list",
+    "save": "Save",
+    "namePlaceholder": "List name…",
+    "nameA11y": "Distribution list name",
+    "member": "MEMBER",
+    "members": "MEMBERS",
+    "selectA11y": "Select {{name}}",
+    "deselectA11y": "Deselect {{name}}",
+    "deleteTitle": "Delete “{{name}}”?"
+  },
+  "broadcast": {
+    "backA11y": "Go back",
+    "emptyTitle": "Empty message",
+    "emptyDesc": "Type a message before sending.",
+    "notReadyTitle": "Not ready",
+    "notReadyDesc": "Identity not loaded. Please wait.",
+    "recipient": "RECIPIENT",
+    "recipients": "RECIPIENTS",
+    "individualMessages": "INDIVIDUAL MESSAGES",
+    "placeholder": "Write your broadcast message…",
+    "messageA11y": "Broadcast message",
+    "doneA11y": "Done, go back",
+    "done": "Done"
+  },
+  "schedulePicker": {
+    "invalidDateTitle": "Invalid date",
+    "invalidDateDesc": "Use the format YYYY-MM-DD and HH:MM.",
+    "tooSoonTitle": "Too soon",
+    "tooSoonDesc": "The message must be scheduled at least 1 minute in the future."
   }
 }

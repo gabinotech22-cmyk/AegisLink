@@ -133,18 +133,33 @@ interesante:
 | Sitio | Idioma | Estado |
 |---|---|---|
 | `socket/calls.ts` — errores de llamada + notificación en curso | inglés + español | ✅ PR #436 |
-| 5 pantallas: ProfileSwitcher, CreateProfile, Scheduled, DistributionLists, BroadcastCompose | mixto | ✅ PR #436 |
-| `socket/groupCalls.ts` — 6 alertas (sin conexión, sin micro, llamada llena…) | español | ✅ PR #436 |
-| `components/SchedulePicker.tsx` — 2 alertas | español | ✅ PR #436 |
-| `store/identity.ts` — título de registro fallido | español | ✅ PR #436 |
-| `socket/client.ts` — "Contact offline" | inglés | ✅ PR #436 |
-| `screens/Chat.tsx` — error al programar | español | ✅ PR #436 |
+| 5 pantallas: ProfileSwitcher, CreateProfile, Scheduled, DistributionLists, BroadcastCompose | mixto | ✅ PR #440 |
+| `socket/groupCalls.ts` — 6 alertas (sin conexión, sin micro, llamada llena…) | español | ✅ PR #440 |
+| `components/SchedulePicker.tsx` — 2 alertas | español | ✅ PR #440 |
+| `store/identity.ts` — título de registro fallido | español | ✅ PR #440 |
+| `socket/client.ts` — "Contact offline" | inglés | ✅ PR #440 |
+| `screens/Chat.tsx` — error al programar | español | ✅ PR #440 |
 | `utils/overlayPermission.ts` | español | ✅ PR #436 |
 
 Cortaba en las dos direcciones: un usuario en español recibía **todos** los
 errores de llamada y de grupo en inglés o en un español que nadie tradujo, y uno
 en inglés veía el cambio de perfil, los programados y el permiso de superposición
 en español. Misma clase de bug que la reportada contra la build 15.
+
+**Corrección de este documento — estuvo mintiendo tres días.** Arriba ponía
+"✅ PR #436" en las ocho filas. Solo era cierto en dos. Los otros seis arreglos
+vivían en dos commits (`4d585ee`, `677939d`) que se escribieron en
+`fix/audit-2026-08-findings` **después** de que #436 se mergeara en squash, y
+ahí se quedaron: `git log` los muestra en la rama, pero su contenido nunca entró
+en `main`. Medido sobre `main` antes de la PR #440: **5 pantallas seguían con
+cero i18n** y el test guardián **no existía**.
+
+Es el mismo fallo dos veces (le pasó igual a `fix/outbox-delivery-reliability`),
+y tiene una causa concreta: **tras un squash-merge, la rama sigue viva y aceptando
+commits que ya nadie va a mergear**. La comprobación que lo detecta no es
+`git log origin/main..rama` — que con squash miente — sino
+`git diff origin/main rama --stat`, que compara árboles. Va al inventario de
+cierre de tanda.
 
 **Por qué duró tanto:** los tests de paridad de locales (`i18nKeyParity`,
 `localeParity`) comprueban que en/es/it tengan las **mismas claves** — son ciegos
@@ -432,8 +447,10 @@ cubiertos de forma indirecta por §2 y §4.
 2. **TEST-2** — ✅ cerrado: era el PoW contra producción, y se fue con TEST-3.
    Pendiente el remate: quitarle el `continue-on-error` ahora que pasa en 34 s,
    para que vuelva a ser una señal que bloquea.
-3. **I18N-1** — ✅ cerrado en PR #436: llamadas, las 5 pantallas sin i18n, y 9
-   alertas más en stores/socket/componentes que el primer barrido no vio.
+3. **I18N-1** — ✅ cerrado, pero en **dos** PRs, no en una: los errores de
+   llamada en #436, y las 5 pantallas sin i18n + las 9 alertas de
+   stores/socket/componentes en **#440**, que rescata dos commits que se
+   quedaron varados en una rama ya squash-mergeada.
 4. **REL-1** — ✅ cerrado en PR #435.
 5. **TEST-1** — ✅ cerrado: 144 `catch` (no 196), 69 ya avisaban, y el único
    problema real era un fail-open del guard de PIN señuelo. **ARCH-1** sigue
