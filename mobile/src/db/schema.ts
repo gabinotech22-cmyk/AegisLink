@@ -201,8 +201,14 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       bubble_id            TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_outbox_created ON outbox(created_at);
-    CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(next_attempt_at);
-    CREATE INDEX IF NOT EXISTS idx_outbox_bubble ON outbox(bubble_id);
+    -- idx_outbox_due (next_attempt_at) and idx_outbox_bubble (bubble_id) are
+    -- deliberately NOT created here. CREATE TABLE IF NOT EXISTS is a no-op on
+    -- an existing pre-v13/v14 outbox table, but CREATE INDEX is NOT gated on
+    -- the table being newly created — it would still run and fail with
+    -- "no such column: next_attempt_at"/"bubble_id" on upgrade, before the
+    -- migrations below ever get a chance to ALTER TABLE and add them. They
+    -- are created instead inside the v13/v14 migration steps, which cover
+    -- both fresh installs (migrations run 0→14 in order) and upgrades.
 
     -- X3DH prekey SECRETS (durable, encrypted-at-rest primary store).
     -- ROOT-CAUSE FIX: previously SPK/OPK private keys lived ONLY in SecureStore
