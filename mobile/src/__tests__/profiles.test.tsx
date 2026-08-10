@@ -185,7 +185,7 @@ describe('ProfileSwitcherScreen', () => {
     const { getByText } = render(
       <ProfileSwitcherScreen onBack={jest.fn()} onCreateProfile={jest.fn()} />
     );
-    expect(getByText('ACTIVO')).toBeTruthy();
+    expect(getByText('ACTIVE')).toBeTruthy();
   });
 
   it('muestra estado vacío cuando no hay perfiles', () => {
@@ -193,7 +193,7 @@ describe('ProfileSwitcherScreen', () => {
     const { getByText } = render(
       <ProfileSwitcherScreen onBack={jest.fn()} onCreateProfile={jest.fn()} />
     );
-    expect(getByText(/No se encontraron perfiles/i)).toBeTruthy();
+    expect(getByText(/No profiles found/i)).toBeTruthy();
   });
 
   it('navega a CreateProfile al pulsar el botón "+"', () => {
@@ -201,7 +201,7 @@ describe('ProfileSwitcherScreen', () => {
     const { getByText } = render(
       <ProfileSwitcherScreen onBack={jest.fn()} onCreateProfile={onCreateProfile} />
     );
-    fireEvent.press(getByText('Nuevo perfil'));
+    fireEvent.press(getByText('New profile'));
     expect(onCreateProfile).toHaveBeenCalled();
   });
 
@@ -213,7 +213,7 @@ describe('ProfileSwitcherScreen', () => {
     );
     fireEvent.press(getByText('Trabajo'));
     expect(alertSpy).toHaveBeenCalledWith(
-      'Cambiar de perfil',
+      'Change profile',
       expect.any(String),
       expect.any(Array)
     );
@@ -242,7 +242,7 @@ describe('ProfileSwitcherScreen', () => {
     fireEvent(getByText('Personal'), 'longPress');
     // For the primary profile, should alert about primary profile protection
     expect(alertSpy).toHaveBeenCalledWith(
-      'No se puede eliminar',
+      'Cannot delete',
       expect.any(String)
     );
   });
@@ -263,7 +263,7 @@ describe('CreateProfileScreen', () => {
     const { getByText } = render(
       <CreateProfileScreen onBack={jest.fn()} onCreated={jest.fn()} />
     );
-    expect(getByText('Generando identidad')).toBeTruthy();
+    expect(getByText('Generating identity')).toBeTruthy();
   });
 
   it('avanza al paso de nombre tras la generación', async () => {
@@ -271,7 +271,7 @@ describe('CreateProfileScreen', () => {
       <CreateProfileScreen onBack={jest.fn()} onCreated={jest.fn()} />
     );
     act(() => { jest.advanceTimersByTime(2000); });
-    await waitFor(() => expect(getByText('Elige un nombre')).toBeTruthy());
+    await waitFor(() => expect(getByText('Choose a name')).toBeTruthy());
   });
 
   it('muestra el AegisID generado en el paso de nombre', async () => {
