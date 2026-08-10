@@ -29,6 +29,11 @@ export interface AegisIPC {
      * further db.* call: main refuses operations whose slot is not the open one.
      */
     switchSlot(slot: string): Promise<void>;
+    /** Public channels: persist a channel's projected feed, encrypted at rest. */
+    saveChannelFeed(activeSlot: string, channelId: string, postsJson: string): Promise<void>;
+    /** Returns the stored JSON, or "[]" when absent or undecryptable. */
+    loadChannelFeed(activeSlot: string, channelId: string): Promise<string>;
+    deleteChannelFeed(channelId: string): Promise<void>;
     saveIdentity(activeSlot: string, identity: unknown): Promise<void>;
     loadIdentity(activeSlot: string): Promise<any>;
     clearIdentity(): Promise<void>;

@@ -102,7 +102,15 @@ contextBridge.exposeInMainWorld('aegis', {
     saveCall: (c: any): Promise<void> =>
       ipcRenderer.invoke('db:save-call', c),
     getCallHistory: (contactId: string, limit: number): Promise<any[]> =>
-      ipcRenderer.invoke('db:get-call-history', contactId, limit)
+      ipcRenderer.invoke('db:get-call-history', contactId, limit),
+
+    // Public channels: local at-rest feed cache.
+    saveChannelFeed: (activeSlot: string, channelId: string, postsJson: string): Promise<void> =>
+      ipcRenderer.invoke('db:save-channel-feed', activeSlot, channelId, postsJson),
+    loadChannelFeed: (activeSlot: string, channelId: string): Promise<string> =>
+      ipcRenderer.invoke('db:load-channel-feed', activeSlot, channelId),
+    deleteChannelFeed: (channelId: string): Promise<void> =>
+      ipcRenderer.invoke('db:delete-channel-feed', channelId)
   },
   notifications: {
     show: (title: string, body: string): Promise<void> =>

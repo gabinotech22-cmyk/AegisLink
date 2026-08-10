@@ -7,6 +7,10 @@
 
 import '../crypto/ipc-types';
 
+// Public-channel feed cache, re-exported here so callers import it from the same
+// place as everything else (mobile/src/db/local.ts does the same).
+export * from './channelFeed';
+
 const db = () => window.aegis.db;
 const secureStorage = () => window.aegis.secureStorage;
 

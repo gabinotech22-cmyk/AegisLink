@@ -394,6 +394,16 @@ function ensureSchema(db: Database.Database): void {
       duration_s  INTEGER NOT NULL DEFAULT 0
     )`,
     `CREATE INDEX IF NOT EXISTS idx_calls_contact ON call_history(contact_id, started_at)`,
+    // Public channels: local at-rest cache of a sealed channel's projected feed.
+    // The relay does not keep broadcast history forever and the verified chain
+    // head IS persisted, so without this a cold start resumes from the head into
+    // an empty feed and shows nothing. Posts are stored as one encrypted blob,
+    // so only opaque ciphertext reaches disk (zero metadata holds).
+    `CREATE TABLE IF NOT EXISTS channel_feed (
+      channel_id  TEXT PRIMARY KEY,
+      posts_enc   TEXT NOT NULL,
+      updated_at  INTEGER NOT NULL
+    )`,
   ]
   for (const sql of statements) {
     db.prepare(sql).run()
@@ -1318,6 +1328,63 @@ export function registerDatabaseHandlers(): void {
       startedAt: r.started_at,
       durationS: r.duration_s
     }))
+  })
+
+  // ─── Public channels: local feed cache ───
+  //
+  // The whole post list travels as ONE already-encrypted string. Encryption
+  // happens in this process (encryptBody), same as message bodies, so what
+  // lands on disk is opaque even before SQLCipher — the belt-and-braces the
+  // zero-metadata rule asks for.
+  //
+  // Bounded to the most recent posts so an active channel cannot grow the row
+  // without limit. Trimming only shortens local history; the verified chain
+  // head is stored separately, so delta pulls stay correct.
+  const MAX_CACHED_POSTS = 500
+
+  ipcMain.handle(
+    'db:save-channel-feed',
+    (event, activeSlot: string, channelId: string, postsJson: string): void => {
+      assertTrustedSender(event)
+      assertSlot(activeSlot)
+      assertMaxLen(postsJson, MAX_MESSAGE_BODY_BYTES, 'channelFeed.posts')
+      let trimmed = postsJson
+      try {
+        const parsed = JSON.parse(postsJson) as unknown[]
+        if (Array.isArray(parsed) && parsed.length > MAX_CACHED_POSTS) {
+          trimmed = JSON.stringify(parsed.slice(-MAX_CACHED_POSTS))
+        }
+      } catch {
+        // Not an array we can trim. Store it as given rather than lose the feed;
+        // the length guard above already bounds the damage.
+      }
+      db.prepare(
+        'INSERT OR REPLACE INTO channel_feed (channel_id, posts_enc, updated_at) VALUES (?, ?, ?)'
+      ).run(channelId, encryptBody(trimmed, activeSlot), Date.now())
+    }
+  )
+
+  ipcMain.handle(
+    'db:load-channel-feed',
+    (event, activeSlot: string, channelId: string): string => {
+      assertTrustedSender(event)
+      assertSlot(activeSlot)
+      const row = db
+        .prepare<unknown[], { posts_enc: string }>(
+          'SELECT posts_enc FROM channel_feed WHERE channel_id = ?'
+        )
+        .get(channelId)
+      if (!row?.posts_enc) return '[]'
+      const json = decryptBody(row.posts_enc, activeSlot)
+      // decryptBody returns the visible marker rather than throwing. A feed we
+      // cannot read is an empty feed, never a crash and never a partial render.
+      return json && json !== '[DECRYPTION_ERROR]' ? json : '[]'
+    }
+  )
+
+  ipcMain.handle('db:delete-channel-feed', (event, channelId: string): void => {
+    assertTrustedSender(event)
+    db.prepare('DELETE FROM channel_feed WHERE channel_id = ?').run(channelId)
   })
 }
 

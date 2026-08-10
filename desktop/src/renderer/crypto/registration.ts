@@ -68,6 +68,27 @@ export async function fetchPowChallenge(
   return { challenge: json.challenge, difficulty: json.difficulty };
 }
 
+/**
+ * Fetch a PoW challenge from an EXACT url, rather than deriving
+ * `<relay>/identity/challenge`. Endpoints other than registration issue their
+ * own challenges — the blob upload used by channel avatars is the first.
+ * Parity with mobile/src/crypto/registration.ts fetchPowChallengeAt.
+ */
+export async function fetchPowChallengeAt(challengeUrl: string): Promise<PowChallenge> {
+  const res = await fetch(trimSlash(challengeUrl), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`PoW challenge fetch failed: HTTP ${res.status}`);
+  }
+  const json: unknown = await res.json();
+  if (!isPowChallenge(json)) {
+    throw new Error('PoW challenge: malformed response');
+  }
+  return { challenge: json.challenge, difficulty: json.difficulty };
+}
+
 export async function solvePoW(
   challenge: string,
   difficulty: number,
