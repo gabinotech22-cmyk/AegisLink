@@ -23,6 +23,17 @@ export interface AegisIPC {
     enablePinWrap(kekB64: string): Promise<void>;
     /** Rewrap the DB key as DPAPI-only (disable the PIN second factor). */
     disablePinWrap(): Promise<void>;
+    /**
+     * Section 11: close the active profile's database and open `slot`'s.
+     * One file per profile, each with its own key. Must be awaited before any
+     * further db.* call: main refuses operations whose slot is not the open one.
+     */
+    switchSlot(slot: string): Promise<void>;
+    /** Public channels: persist a channel's projected feed, encrypted at rest. */
+    saveChannelFeed(activeSlot: string, channelId: string, postsJson: string): Promise<void>;
+    /** Returns the stored JSON, or "[]" when absent or undecryptable. */
+    loadChannelFeed(activeSlot: string, channelId: string): Promise<string>;
+    deleteChannelFeed(channelId: string): Promise<void>;
     saveIdentity(activeSlot: string, identity: unknown): Promise<void>;
     loadIdentity(activeSlot: string): Promise<any>;
     clearIdentity(): Promise<void>;
