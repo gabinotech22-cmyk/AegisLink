@@ -17,6 +17,8 @@ import { AddContactScreen } from './screens/AddContact';
 import { ContactsScreen } from './screens/Contacts';
 import { ContactDetailScreen } from './screens/ContactDetail';
 import { ProfileScreen } from './screens/Profile';
+import { ProfileSwitcherScreen } from './screens/ProfileSwitcher';
+import { CreateProfileScreen } from './screens/CreateProfile';
 import { KeysScreen } from './screens/Keys';
 import { NotificationsScreen } from './screens/Notifications';
 import { SearchScreen } from './screens/Search';
@@ -93,6 +95,8 @@ type PushRoute =
   | { name: 'subscription' }
   | { name: 'keys' }
   | { name: 'lockSettings' }
+  | { name: 'profileSwitcher' }
+  | { name: 'createProfile' }
   | { name: 'distributionLists' }
   | { name: 'broadcastCompose'; list: DistributionList };
 
@@ -485,6 +489,7 @@ function Shell() {
               onAppIcon={() => push({ name: 'appIcon' })}
               onSubscription={() => push({ name: 'subscription' })}
               onKeys={() => push({ name: 'keys' })}
+              onProfileSwitcher={() => push({ name: 'profileSwitcher' })}
             />
           );
         case 'notifs':
@@ -495,6 +500,18 @@ function Shell() {
           return <DevicesScreen onBack={pop} />;
         case 'lockConfig':
           return <LockConfigScreen onBack={pop} onLockTest={() => push({ name: 'lock' })} />;
+        case 'profileSwitcher':
+          return (
+            <ProfileSwitcherScreen
+              onBack={pop}
+              onCreateProfile={() => push({ name: 'createProfile' })}
+            />
+          );
+        case 'createProfile':
+          // onCreated pops TWICE: the wizard already switched into the new
+          // profile, so leaving the switcher open would show a list built
+          // from the profile the user just left.
+          return <CreateProfileScreen onBack={pop} onCreated={() => { pop(); pop(); }} />;
         case 'lockSettings':
           return <LockSettingsScreen onBack={pop} />;
         case 'lock':
