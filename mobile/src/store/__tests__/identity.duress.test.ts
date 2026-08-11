@@ -34,31 +34,48 @@ jest.mock('../../utils/secureStore', () => {
   };
 });
 
-// Real (valid-base64, 32-byte) dummy key material — identityFromStored
-// decodes these and does NOT re-derive them, so they must round-trip exactly.
-// Built directly inside the jest.mock factory (Babel hoists jest.mock calls
-// above top-level const declarations, so a module-scope constant referenced
-// here would still be undefined at factory-invocation time).
-jest.mock('../../db/local', () => ({
-  loadIdentity: jest.fn().mockResolvedValue({
-    aegisId: 'REAL-AAAA-BBBB',
-    publicKeyB64: Buffer.alloc(32, 1).toString('base64'),
-    secretKeyB64: Buffer.alloc(32, 2).toString('base64'),
-    signingPublicKeyB64: Buffer.alloc(32, 3).toString('base64'),
-    signingSecretKeyB64: Buffer.alloc(64, 4).toString('base64'),
-    createdAt: 1000,
-  }),
-  saveIdentity: jest.fn().mockResolvedValue(undefined),
-  setActiveDbSlot: jest.fn(),
-  deleteIdentitySlot: jest.fn().mockResolvedValue(undefined),
-}));
+// A genuinely CONSISTENT keypair — identityFromStored now verifies that
+// secretKeyB64 actually derives publicKeyB64 (and signingSecretKeyB64
+// derives signingPublicKeyB64) and throws otherwise (see
+// crypto/__tests__/identityFromStored.corruption.test.ts), so arbitrary
+// mismatched dummy bytes are no longer valid fixtures here. The jest.mock
+// factory below and the outer `mockRealStoredIdentity` const each derive
+// their own keypair from the SAME fixed 32-byte seed via
+// nacl.box.keyPair.fromSecretKey — deterministic, so both sides land on the
+// identical keypair without needing to share a variable across the
+// Babel-hoisted jest.mock boundary (a module-scope constant referenced
+// inside the factory would still be undefined at factory-invocation time).
+const FIXED_SEED = Buffer.alloc(32, 7);
 
+jest.mock('../../db/local', () => {
+  const nacl = jest.requireActual<typeof import('tweetnacl')>('tweetnacl');
+  const { encodeBase64 } = jest.requireActual<typeof import('tweetnacl-util')>('tweetnacl-util');
+  const seed = Buffer.alloc(32, 7);
+  const box = nacl.box.keyPair.fromSecretKey(seed);
+  const sign = nacl.sign.keyPair.fromSeed(seed);
+  return {
+    loadIdentity: jest.fn().mockResolvedValue({
+      aegisId: 'REAL-AAAA-BBBB',
+      publicKeyB64: encodeBase64(box.publicKey),
+      secretKeyB64: encodeBase64(seed),
+      signingPublicKeyB64: encodeBase64(sign.publicKey),
+      signingSecretKeyB64: encodeBase64(sign.secretKey),
+      createdAt: 1000,
+    }),
+    saveIdentity: jest.fn().mockResolvedValue(undefined),
+    setActiveDbSlot: jest.fn(),
+    deleteIdentitySlot: jest.fn().mockResolvedValue(undefined),
+  };
+});
+
+const _realBox = nacl.box.keyPair.fromSecretKey(FIXED_SEED);
+const _realSign = nacl.sign.keyPair.fromSeed(FIXED_SEED);
 const mockRealStoredIdentity = {
   aegisId: 'REAL-AAAA-BBBB',
-  publicKeyB64: Buffer.alloc(32, 1).toString('base64'),
-  secretKeyB64: Buffer.alloc(32, 2).toString('base64'),
-  signingPublicKeyB64: Buffer.alloc(32, 3).toString('base64'),
-  signingSecretKeyB64: Buffer.alloc(64, 4).toString('base64'),
+  publicKeyB64: encodeBase64(_realBox.publicKey),
+  secretKeyB64: encodeBase64(FIXED_SEED),
+  signingPublicKeyB64: encodeBase64(_realSign.publicKey),
+  signingSecretKeyB64: encodeBase64(_realSign.secretKey),
   createdAt: 1000,
 };
 
@@ -70,6 +87,8 @@ jest.mock('../../crypto/media', () => ({
   purgeCachedDecryptedMedia: jest.fn().mockResolvedValue(undefined),
 }));
 
+import nacl from 'tweetnacl';
+import { encodeBase64 } from 'tweetnacl-util';
 import { useIdentity } from '../identity';
 import { usePreferences } from '../preferences';
 
