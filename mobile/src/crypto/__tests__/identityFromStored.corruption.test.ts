@@ -51,6 +51,31 @@ describe('identityFromStored — corrupted (mismatched) key material', () => {
     ).toThrow(/identity corrupted/);
   });
 
+  it('throws when only the signing SEED is corrupted but the embedded public-key bytes still match', () => {
+    // nacl.sign.detached() only ever reads the seed (first 32 bytes) to
+    // compute a signature — the embedded public-key bytes (last 32) are a
+    // convenience copy never read back for signing. A bytes-only comparison
+    // against those embedded bytes would miss this: patch the seed while
+    // keeping the embedded public-key bytes intact and matching
+    // signingPublicKeyB64, so the ONLY way to catch it is deriving from the
+    // seed itself (nacl.sign.keyPair.fromSeed) and comparing that.
+    const id = createIdentity();
+    const tamperedSecret = new Uint8Array(id.signingSecretKey);
+    tamperedSecret[0] ^= 0xff; // corrupt one byte of the seed half only
+    // Embedded public-key bytes (32..64) are left untouched — they still
+    // equal signingPublicKeyB64 — but the seed no longer derives it.
+
+    expect(() =>
+      identityFromStored({
+        publicKeyB64: id.publicKeyB64,
+        secretKeyB64: id.secretKeyB64,
+        signingPublicKeyB64: id.signingPublicKeyB64,
+        signingSecretKeyB64: encodeBase64(tamperedSecret),
+        createdAt: id.createdAt,
+      }),
+    ).toThrow(/identity corrupted/);
+  });
+
   it('does not throw for a genuinely consistent identity', () => {
     const id = createIdentity();
     expect(() =>

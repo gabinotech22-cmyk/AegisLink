@@ -150,14 +150,21 @@ export function identityFromStored(opts: {
       }
     : nacl.sign.keyPair.fromSeed(secretKey);
 
-  // Same integrity check for the signing keypair: a nacl sign secret key is
-  // 64 bytes (32-byte seed || 32-byte embedded public key), so the public
-  // half is verifiable without any extra derivation. Only applies when both
-  // were loaded explicitly — the derived branch above is correct by
-  // construction (fromSeed always returns a matching pair).
+  // Same integrity check for the signing keypair, but derived from the SEED
+  // (first 32 bytes), not just compared against the embedded public-key
+  // bytes (last 32). nacl.sign.detached() only ever uses the seed to compute
+  // the signature — the embedded public-key bytes are a convenience copy it
+  // never reads back. A secretKey whose embedded bytes were patched to match
+  // signingPublicKeyB64 while its seed stayed unrelated would have passed a
+  // bytes-only comparison yet still produce signatures that fail to verify —
+  // reintroducing exactly the silent-failure bug this check exists to catch.
+  // Deriving from the seed and comparing THAT public key closes the gap.
+  // Only applies when both were loaded explicitly — the derived branch above
+  // is correct by construction (fromSeed always returns a matching pair).
   if (opts.signingPublicKeyB64 && opts.signingSecretKeyB64) {
-    const embeddedPublicKey = signKeys.secretKey.slice(32, 64);
-    if (!constantTimeEqualBytes(embeddedPublicKey, signKeys.publicKey)) {
+    const seed = signKeys.secretKey.slice(0, 32);
+    const derivedSigningPublicKey = nacl.sign.keyPair.fromSeed(seed).publicKey;
+    if (!constantTimeEqualBytes(derivedSigningPublicKey, signKeys.publicKey)) {
       throw new Error('identity corrupted: signingSecretKey does not match signingPublicKeyB64');
     }
   }

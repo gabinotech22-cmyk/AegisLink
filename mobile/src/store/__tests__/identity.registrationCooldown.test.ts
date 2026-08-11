@@ -54,10 +54,8 @@ jest.mock('../../utils/secureStore', () => ({
 const FIXED_SEED = Buffer.alloc(32, 7);
 
 jest.mock('../../db/local', () => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const nacl = require('tweetnacl');
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { encodeBase64 } = require('tweetnacl-util');
+  const nacl = jest.requireActual<typeof import('tweetnacl')>('tweetnacl');
+  const { encodeBase64 } = jest.requireActual<typeof import('tweetnacl-util')>('tweetnacl-util');
   const seed = Buffer.alloc(32, 7);
   const box = nacl.box.keyPair.fromSecretKey(seed);
   const sign = nacl.sign.keyPair.fromSeed(seed);
