@@ -15,18 +15,18 @@
     "package": "electron-builder"
   },
   "dependencies": {
-    "@noble/hashes": "^2.2.0",
-    "@noble/post-quantum": "^0.6.1",
+    "@noble/hashes": "^2.3.0",
+    "@noble/post-quantum": "^0.7.0",
     "better-sqlite3-multiple-ciphers": "^12.11.1",
-    "i18next": "^26.3.6",
+    "i18next": "^26.4.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-i18next": "^17.0.11",
+    "react-i18next": "^17.0.12",
     "socket.io-client": "^4.7.5",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.15"
   },
   "build": {
     "appId": "com.aegislink.desktop",
@@ -81,15 +81,15 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/qrcode": "^1.5.6",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^5.2.0",
-    "electron": "^42.7.1",
+    "electron": "^42.9.3",
     "electron-builder": "^26.0.16",
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "esbuild": "^0.28.1"
