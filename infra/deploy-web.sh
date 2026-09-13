@@ -34,7 +34,16 @@ echo "[deploy-web] Uploading landing page and nginx config..."
 "${SCP[@]}" "$ROOT/web/privacy.html" "$USER@$HOST:/tmp/aegislink-web-privacy.html"
 "${SCP[@]}" "$ROOT/web/terms.html" "$USER@$HOST:/tmp/aegislink-web-terms.html"
 "${SCP[@]}" "$ROOT/web/legal.html" "$USER@$HOST:/tmp/aegislink-web-legal.html"
+"${SCP[@]}" "$ROOT/web/donate.html" "$USER@$HOST:/tmp/aegislink-web-donate.html"
 "${SCP[@]}" "$SCRIPT_DIR/nginx/aegislink-web.conf" "$USER@$HOST:/tmp/aegislink-web.conf"
+
+# Optional donation QR images — uploaded only if present locally (the page
+# hides the <img> when the file is missing, so absence is fine).
+for qr in qr-xmr.png qr-lightning.png; do
+  if [ -f "$ROOT/web/$qr" ]; then
+    "${SCP[@]}" "$ROOT/web/$qr" "$USER@$HOST:/tmp/aegislink-web-$qr"
+  fi
+done
 
 "${SSH[@]}" 'bash -s' <<'ENDSSH'
 set -euo pipefail
@@ -44,6 +53,11 @@ sudo mv /tmp/aegislink-web-index.html /var/www/aegislink-web/index.html
 sudo mv /tmp/aegislink-web-privacy.html /var/www/aegislink-web/privacy.html
 sudo mv /tmp/aegislink-web-terms.html /var/www/aegislink-web/terms.html
 sudo mv /tmp/aegislink-web-legal.html /var/www/aegislink-web/legal.html
+sudo mv /tmp/aegislink-web-donate.html /var/www/aegislink-web/donate.html
+# Move any donation QR images that were uploaded this run.
+for qr in qr-xmr.png qr-lightning.png; do
+  [ -f "/tmp/aegislink-web-$qr" ] && sudo mv "/tmp/aegislink-web-$qr" "/var/www/aegislink-web/$qr"
+done
 sudo chown -R www-data:www-data /var/www/aegislink-web /var/www/certbot
 
 if sudo test -f /etc/letsencrypt/live/aegis-link.it/fullchain.pem; then
