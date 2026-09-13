@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support AegisLink</title>
+<meta name="description" content="Support AegisLink with an anonymous cryptocurrency donation. No account, no name, no tracking — Monero and Bitcoin Lightning.">
+<style>
+  :root {
+    --bg: #07090a; --bg-2: #0d1112; --text: #e8f5ef; --dim: #9fb8ac;
+    --accent: #5bf2b9; --border: rgba(91,242,185,0.18);
+    --sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono: 'Cascadia Code', 'JetBrains Mono', monospace;
+  }
+  * { margin: 0; box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { font-family: var(--sans); color: var(--text); line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 48px 22px 80px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; }
+  header a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 20px; display: flex; align-items: center; gap: 12px; }
+  h1 { font-size: 34px; line-height: 1.15; margin-bottom: 10px; }
+  .meta { font-family: var(--mono); font-size: 13px; color: var(--accent); margin-bottom: 32px; }
+  h2 { font-size: 21px; margin: 40px 0 12px; padding-top: 22px; border-top: 1px solid var(--border); }
+  p, li { color: var(--dim); font-size: 16px; }
+  p { margin: 12px 0; }
+  strong { color: var(--text); }
+  ul { padding-left: 22px; margin: 12px 0; }
+  li { margin: 6px 0; }
+  a { color: var(--accent); }
+  .coin { background: var(--bg-2); border: 1px solid var(--border); border-radius: 14px; padding: 22px; margin: 20px 0; }
+  .coin h3 { font-size: 18px; display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .coin .tag { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  .coin p { font-size: 14.5px; margin: 8px 0 16px; }
+  .addr-row { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; }
+  .addr {
+    flex: 1; min-width: 220px; font-family: var(--mono); font-size: 13px; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; word-break: break-all; user-select: all;
+  }
+  .copy {
+    font-family: var(--sans); font-size: 14px; font-weight: 600; color: #04120c;
+    background: var(--accent); border: none; border-radius: 10px; padding: 0 18px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .copy:active { transform: translatey(1px); }
+  .qr { margin-top: 16px; }
+  .qr img { width: 168px; height: 168px; border-radius: 10px; background: #fff; padding: 8px; display: block; }
+  .placeholder { color: #e0b34a !important; }
+  .note { font-style: italic; margin-top: 42px; color: var(--dim); font-size: 14.5px; }
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a href="/">
+      <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/><rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/><rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/></svg>
+      AegisLink
+    </a>
+  </header>
+
+  <h1>Support the project</h1>
+  <p class="meta">100% donation-funded · no ads · no trackers · no investors</p>
+
+  <p>AegisLink has no ads, no analytics, and no venture money. It is funded entirely by people who value private communication. Your donation pays for the self-hosted relay and call servers that keep the network running — nothing else.</p>
+
+  <h2>Donations are anonymous by design</h2>
+  <p>You do not need an account, a name, or an email to donate — and you should not send us any. We use privacy-preserving cryptocurrencies precisely so that a donation can never be linked back to your identity or your AegisID. We keep no record of who donated.</p>
+  <ul>
+    <li><strong>We never link a payment to an AegisID.</strong> The app and the payment are completely separate systems.</li>
+    <li><strong>We collect no personal data.</strong> No name, no email, no billing address — the same as the rest of AegisLink.</li>
+    <li><strong>For maximum privacy</strong>, use a non-custodial wallet over Tor.</li>
+  </ul>
+
+  <h2>Monero (XMR)</h2>
+  <div class="coin">
+    <h3>Monero <span class="tag">XMR · recommended</span></h3>
+    <p>The most private option: Monero transactions hide sender, receiver, and amount by default. This is the choice most aligned with what AegisLink stands for.</p>
+    <div class="addr-row">
+      <!-- REPLACE the placeholder below with your real Monero primary address. -->
+      <code class="addr placeholder" id="xmr-addr">«paste your Monero address here»</code>
+      <button class="copy" data-target="xmr-addr">Copy</button>
+    </div>
+    <!-- Optional QR: drop a file named qr-xmr.png next to this page and it appears automatically. -->
+    <div class="qr"><img src="qr-xmr.png" alt="Monero donation QR" onerror="this.parentNode.remove()"></div>
+  </div>
+
+  <h2>Bitcoin — Lightning Network</h2>
+  <div class="coin">
+    <h3>Lightning <span class="tag">BTC · fast &amp; low-fee</span></h3>
+    <p>Bitcoin over the Lightning Network is fast, low-fee, and pseudonymous. Note that Lightning is pseudonymous, not fully private: your node or wallet may leak routing information. Use a non-custodial wallet over Tor for the strongest privacy.</p>
+    <div class="addr-row">
+      <!-- REPLACE with your Lightning address (e.g. you@walletofsatoshi.com) or a BOLT11/LNURL. -->
+      <code class="addr placeholder" id="ln-addr">«paste your Lightning address here»</code>
+      <button class="copy" data-target="ln-addr">Copy</button>
+    </div>
+    <!-- Optional QR: drop a file named qr-lightning.png next to this page and it appears automatically. -->
+    <div class="qr"><img src="qr-lightning.png" alt="Lightning donation QR" onerror="this.parentNode.remove()"></div>
+  </div>
+
+  <p class="note">Thank you. Every donation keeps the servers running and the project independent. If you cannot donate, telling a friend about AegisLink helps just as much.</p>
+
+  <footer>© AegisLink · <a href="/">aegis-link.it</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></footer>
+</div>
+
+<script>
+  // Tap-to-copy for each address. No network, no tracking — purely local.
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var el = document.getElementById(btn.getAttribute('data-target'));
+      if (!el) return;
+      var text = el.textContent.trim();
+      var done = function () {
+        var original = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(function () { btn.textContent = original; }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () {});
+      } else {
+        var r = document.createRange();
+        r.selectNode(el);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        sel.removeAllRanges();
+      }
+    });
+  });
+</script>
+</body>
+</html>

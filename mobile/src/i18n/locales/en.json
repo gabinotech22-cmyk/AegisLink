@@ -347,6 +347,8 @@
     "jurisdictionSub": "Italy",
     "privacyPolicy": "Privacy policy",
     "termsOfService": "Terms of service",
+    "support": "Support the project",
+    "supportSub": "Anonymous crypto donation (Monero · Lightning)",
     "auditAlert": "Open source",
     "auditAlertDesc": "AegisLink is fully open source. All cryptographic code can be independently reviewed and verified.",
     "pqStatus": "Post-quantum status",
