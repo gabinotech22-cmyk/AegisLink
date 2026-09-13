@@ -27,6 +27,13 @@ const LEGAL_URLS = {
   terms: 'https://aegis-link.it/terms.html',
 } as const;
 
+// Donations are collected OUTSIDE the app, on the product site, and opened in
+// the external browser — never as an in-app purchase or an embedded wallet.
+// This keeps us clear of App Store §3.2.1(vi)/§3.1.5(b) and Play's payments
+// policy, which restrict in-app donations and crypto. The page itself holds the
+// Monero/Lightning addresses; the relay never sees a payment or a payer.
+const DONATE_URL = 'https://aegis-link.it/donate.html';
+
 interface Props {
   onTab: (tab: Tab) => void;
   onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices') => void;
@@ -346,6 +353,13 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
             icon={<I.Link size={20} color={t.textDim} />}
             label={i18nT('privacy.termsOfService')}
             onPress={() => { void Linking.openURL(LEGAL_URLS.terms).catch(() => {}); }}
+          />
+          <Row
+            t={t}
+            icon={<I.Zap size={20} color={t.accent} />}
+            label={i18nT('privacy.support')}
+            sub={i18nT('privacy.supportSub')}
+            onPress={() => { void Linking.openURL(DONATE_URL).catch(() => {}); }}
             noBorder
           />
         </Section>
