@@ -201,8 +201,13 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       bubble_id            TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_outbox_created ON outbox(created_at);
-    CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(next_attempt_at);
-    CREATE INDEX IF NOT EXISTS idx_outbox_bubble ON outbox(bubble_id);
+    -- NOTE: indexes on next_attempt_at (v13) and bubble_id (v14) are NOT created
+    -- here. On a DB whose outbox table predates those columns (any install from
+    -- schema v5–v12), CREATE TABLE IF NOT EXISTS above is a no-op, so the columns
+    -- do not exist yet at this point — a CREATE INDEX on them would throw
+    -- "no such column: next_attempt_at" and fail this ENTIRE execAsync batch,
+    -- bricking identity generation and every other DB op. They are created after
+    -- the migrations run instead (see end of initSchema).
 
     -- X3DH prekey SECRETS (durable, encrypted-at-rest primary store).
     -- ROOT-CAUSE FIX: previously SPK/OPK private keys lived ONLY in SecureStore
@@ -401,4 +406,16 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   await addColumn(d, 'messages', 'attachments TEXT;');
   await addColumn(d, 'messages', 'sender_id TEXT;');
   await addColumn(d, 'chat_state', 'ephemeral_timer INTEGER NOT NULL DEFAULT 0;');
+
+  // Outbox indexes on migration-added columns — created LAST, after every
+  // CREATE TABLE and every column-adding migration above, so both columns are
+  // guaranteed to exist regardless of the path here:
+  //   • fresh install  → columns come from CREATE TABLE outbox
+  //   • upgrade (v5–v14) → columns come from the addColumn migrations above
+  // Creating these inside the base CREATE block instead threw
+  // "no such column: next_attempt_at" on any DB whose outbox table predated the
+  // columns (CREATE TABLE IF NOT EXISTS was a no-op there), failing the whole
+  // execAsync batch and blocking identity generation. Idempotent (IF NOT EXISTS).
+  await d.execAsync('CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(next_attempt_at);');
+  await d.execAsync('CREATE INDEX IF NOT EXISTS idx_outbox_bubble ON outbox(bubble_id);');
 }
