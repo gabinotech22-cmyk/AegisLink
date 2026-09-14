@@ -137,9 +137,18 @@ function withIconAliases(config) {
 // NOTE: certbot rotated the intermediate YE1 -> YE2 around 2026-08-17. The previous
 // pins (YE1 leaf + YE1 intermediate) no longer match ANY cert in the live chain, which
 // broke pinned TLS on every shipped build (iOS ATS rejected the connection outright:
-// "Network request failed" at fetchPowChallenge). These values are the current chain.
-// Pinning the *intermediate* re-breaks when LE next rotates it; if this recurs, pin the
-// long-lived ISRG Root YE (sCkq5UWXjg+7mKu9lMhhYF5bGLsy7VI/UNW3tccdR7w=) instead.
+// "Network request failed" at fetchPowChallenge).
+//
+// That was the SECOND intermediate rotation to brick shipped builds (E8 -> YE1 on the
+// AWS->Hetzner move, then YE1 -> YE2). Because pins are baked into the binary, each one
+// costs an emergency build plus a full store review — there is no server-side hotfix.
+// So we now also pin the long-lived ISRG Root YE (SPKI_ANCHOR): roots live for years,
+// so the next intermediate rotation degrades to "still works" instead of a total outage.
+// The leaf and intermediate pins stay as the tighter, normally-matched pins — a pin-set
+// passes if ANY pin matches, so this is added reach, not a relaxation of the others.
+// Exposure delta is small: pinning YE2 already meant "any Let's Encrypt cert for this
+// domain"; the root pin widens that to the same CA's other intermediates, and still
+// rejects every non-ISRG CA and every user-installed root.
 //
 // To refresh the primary pin after cert renewal:
 //   echo Q | openssl s_client -connect aegislink.duckdns.org:443 2>/dev/null \
@@ -159,6 +168,11 @@ const SPKI_BACKUP  = 'ikzWA3NEA1YVdzZPkMmfU1/noMRdEdVGyxCkuSNpihA='; // current 
 // primary key must be abandoned, issue a cert with this key and installed
 // clients still validate. This is the true "key we control" backup pin.
 const SPKI_BACKUP2 = 'LvglXAxgB9K5SCOZrLvdX0VVc8UuEU+Bj6r58LSA7r8=';
+// ANCHOR: ISRG Root YE — the root of the live chain (verified at depth 2 on
+// 2026-09-14). Roots rotate on a multi-year cadence, so this pin keeps shipped
+// builds alive across LE intermediate rotations that would otherwise kill both
+// the leaf and intermediate pins at once. Last-resort reach, not the primary.
+const SPKI_ANCHOR  = 'sCkq5UWXjg+7mKu9lMhhYF5bGLsy7VI/UNW3tccdR7w=';
 
 const NETWORK_SECURITY_XML = `<?xml version="1.0" encoding="utf-8"?>
 <!--
@@ -199,6 +213,11 @@ const NETWORK_SECURITY_XML = `<?xml version="1.0" encoding="utf-8"?>
       <!-- BACKUP2: independently-held offline P-256 key (cold-stored). Disaster
            recovery if the LE chain / primary key must be abandoned. -->
       <pin digest="SHA-256">${SPKI_BACKUP2}</pin>
+      <!-- ANCHOR: ISRG Root YE. Long-lived root of the live chain, so an LE
+           intermediate rotation (which invalidates BOTH pins above at once)
+           degrades to "still connects" instead of bricking every shipped build.
+           Two such rotations already caused exactly that outage. -->
+      <pin digest="SHA-256">${SPKI_ANCHOR}</pin>
     </pin-set>
   </domain-config>
   <!-- Dev loopback only: cleartext to the emulator host + Metro bundler.
