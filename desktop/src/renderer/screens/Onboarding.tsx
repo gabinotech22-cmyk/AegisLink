@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocale } from '../i18n/useLocale';
@@ -24,6 +25,7 @@ type Step = 'welcome' | 'generating' | 'show' | 'nickname';
 const AVATAR_COLOR_SWATCHES = ['#05b875', '#3b82f6', '#8b5cf6', '#ec4899', '#f97316', '#eab308'];
 
 export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const { t: i18nT } = useTranslation();
   const { locale, setLocale } = useLocale();
@@ -179,7 +181,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             }}
           >
             <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.8 }}>
-              {locale === 'en' ? 'EN | IT | ES' : locale === 'it' ? 'IT | ES | EN' : 'ES | EN | IT'}
+              {locale === 'en' ? 'EN | IT | ES' : locale === 'it' ? i18n.t('onboarding.itEsEn') : i18n.t('onboarding.esEnIt')}
             </span>
           </button>
         </div>
@@ -289,7 +291,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
             border: 'none',
             cursor: 'pointer',
           }}
-          aria-label="Skip animation"
+          aria-label={i18n.t('onboarding.skipAnimation2')}
         >
           <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 1.0 }}>
             {i18nT('onboarding.skipAnimation')}
@@ -416,7 +418,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
                 } catch { /* clipboard unavailable */ }
               }}
               style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer' }}
-              aria-label="Copy AegisID"
+              aria-label={i18n.t('onboarding.copyAegisid')}
             >
               <I.Copy size={16} color={t.textDim} />
             </button>
@@ -544,6 +546,7 @@ export function OnboardingScreen({ onDone, onRestore, initialStep = 'welcome' }:
 }
 
 function Label({ t, children }: { t: Theme; children: React.ReactNode }) {
+  useTranslation(); // re-render on language change
   return (
     <span
       style={{

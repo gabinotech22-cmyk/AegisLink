@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -10,6 +12,7 @@ interface Props {
 }
 
 export function ViewOnceScreen({ mediaUri, contactName, onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [opened, setOpened] = useState(false);
   const [progress, setProgress] = useState(1); // 1 = full, 0 = empty (counts down)
@@ -39,10 +42,10 @@ export function ViewOnceScreen({ mediaUri, contactName, onBack }: Props) {
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 22px 16px' }}>
           <button
             onClick={onBack}
-            aria-label="Close"
+            aria-label={i18n.t('common.close')}
             style={{ backgroundColor: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.15)', padding: '6px 12px', borderRadius: 99, cursor: 'pointer' }}
           >
-            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: '#fff', letterSpacing: 0.5 }}>CLOSE</span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: '#fff', letterSpacing: 0.5 }}>{i18n.t('viewOnce.closeCaps')}</span>
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', backgroundColor: 'rgba(230,57,70,0.25)', border: '1px solid rgba(230,57,70,0.5)', borderRadius: 99 }}>
             <I.Timer size={11} color="#ff8b95" />
@@ -55,16 +58,12 @@ export function ViewOnceScreen({ mediaUri, contactName, onBack }: Props) {
         {/* Content */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {mediaUri ? (
-            <img src={mediaUri} alt="View once" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            <img src={mediaUri} alt={i18n.t('viewOnce.title')} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
           ) : (
             <div style={{ textAlign: 'center' }}>
-              <span style={{ fontFamily: t.fontMono, fontSize: 11, color: 'rgba(255,255,255,0.4)', letterSpacing: 1.1 }}>
-                [ VIEW ONCE ]
-              </span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 11, color: 'rgba(255,255,255,0.4)', letterSpacing: 1.1 }}>{i18n.t('viewOnce.viewOnce')}</span>
               <br />
-              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: 'rgba(255,255,255,0.25)', letterSpacing: 0.5 }}>
-                No capture · No saving
-              </span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: 'rgba(255,255,255,0.25)', letterSpacing: 0.5 }}>{i18n.t('viewOnce.noCaptureNoSaving2')}</span>
             </div>
           )}
         </div>
@@ -74,9 +73,7 @@ export function ViewOnceScreen({ mediaUri, contactName, onBack }: Props) {
           <div style={{ height: 3, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 99, overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${progress * 100}%`, backgroundColor: '#e63946', borderRadius: 99, transition: 'width 0.05s linear' }} />
           </div>
-          <span style={{ fontFamily: t.fontMono, fontSize: 9, color: 'rgba(255,255,255,0.35)', letterSpacing: 0.8, marginTop: 8, textAlign: 'center', display: 'block' }}>
-            Cannot forward · Not saved · Deletes automatically
-          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 9, color: 'rgba(255,255,255,0.35)', letterSpacing: 0.8, marginTop: 8, textAlign: 'center', display: 'block' }}>{i18n.t('viewOnce.cannotForwardNotSaved2')}</span>
         </div>
       </div>
     );
@@ -84,8 +81,8 @@ export function ViewOnceScreen({ mediaUri, contactName, onBack }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="View once" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('viewOnce.title')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
@@ -97,19 +94,15 @@ export function ViewOnceScreen({ mediaUri, contactName, onBack }: Props) {
           <span style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.4, color: t.text, marginBottom: 8, textAlign: 'center', display: 'block' }}>
             {contactName ? `${contactName} sent a view-once` : 'View-once media'}
           </span>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px', textAlign: 'center', display: 'block' }}>
-            This media can only be viewed once. It will be deleted 5 seconds after opening and cannot be saved or forwarded.
-          </span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px', textAlign: 'center', display: 'block' }}>{i18n.t('viewOnce.thisMediaCanOnly')}</span>
         </div>
       </div>
       <div style={{ padding: '0 22px 24px' }}>
         <button
           onClick={() => setOpened(true)}
-          aria-label="View now"
+          aria-label={i18n.t('viewOnce.viewNow')}
           style={{ width: '100%', padding: '13px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radius, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.accentInk }}
-        >
-          View now
-        </button>
+        >{i18n.t('viewOnce.viewNow')}</button>
       </div>
     </div>
   );

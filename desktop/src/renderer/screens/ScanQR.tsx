@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -13,6 +15,7 @@ interface Props {
 }
 
 export function ScanQRScreen({ onCancel, onAdded }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [manualInput, setManualInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -24,26 +27,26 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
   async function handleFileQR(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setError('QR scanning from file is not supported in this build. Please use the text field below to paste the Aegis ID or JSON payload.');
+    setError(i18n.t('scanQR.qrScanningFromFile'));
     e.target.value = '';
   }
 
   async function handleManualSubmit() {
     const raw = manualInput.trim();
-    if (!raw) { setError('Enter an Aegis ID or JSON payload.'); return; }
+    if (!raw) { setError(i18n.t('scanQR.enterAnAegisId')); return; }
     setBusy(true);
     setError('');
     try {
       const parsed = parseIdentityQR(raw);
       if (!parsed) {
-        setError('Not a valid AegisLink ID. Try the full JSON from a QR code.');
+        setError(i18n.t('scanQR.notAValidAegislink'));
         setBusy(false);
         return;
       }
       const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64);
       if (outcome.kind === 'mitm_detected') {
         const accept = window.confirm(
-          `Key changed for this contact.\n\nOld key: …${outcome.oldKey.slice(-8)}\nNew key: …${outcome.newKey.slice(-8)}\n\nAccept new key?`
+          i18n.t('scanQR.keyChangedForThis', { v0: outcome.oldKey.slice(-8), v1: outcome.newKey.slice(-8) })
         );
         if (accept) {
           const updated = await confirmKeyChange(outcome.contact.aegisId, outcome.newKey);
@@ -59,7 +62,7 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
       }
       onAdded(outcome.contact);
     } catch (e) {
-      setError(`Could not add contact: ${(e as Error).message}`);
+      setError(i18n.t('scanQR.couldNotAddContact', { v0: (e as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -73,8 +76,8 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Scan QR / Add contact" left={
-        <button onClick={onCancel} aria-label="Cancel" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('scanQR.scanQrAddContact')} left={
+        <button onClick={onCancel} aria-label={i18n.t('common.cancel')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.X size={22} color={t.textDim} />
         </button>
       } />
@@ -83,31 +86,25 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
         {/* Desktop note */}
         <div style={{ padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius, marginBottom: 20, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
           <I.Monitor size={16} color={t.accent} style={{ marginTop: 2, flexShrink: 0 }} />
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>
-            Camera QR scanning is not available on desktop. Use the mobile app to scan in-person, or paste the Aegis ID / JSON payload below.
-          </span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>{i18n.t('scanQR.cameraQrScanningIs')}</span>
         </div>
 
         {/* File upload stub */}
         <div style={{ marginBottom: 20 }}>
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>
-            QR FROM IMAGE FILE (stub)
-          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>{i18n.t('scanQR.qrFromImageFile')}</span>
           <label style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius, cursor: 'pointer' }}>
             <I.Attach size={20} color={t.textDim} />
-            <span style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>Upload QR image</span>
+            <span style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>{i18n.t('scanQR.uploadQrImage')}</span>
             <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileQR} />
           </label>
         </div>
 
         {/* Manual input */}
-        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>
-          PASTE AEGIS ID OR JSON
-        </span>
+        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>{i18n.t('scanQR.pasteAegisIdOr')}</span>
         <textarea
           value={manualInput}
           onChange={(e) => { setManualInput(e.target.value); setError(''); }}
-          placeholder={'ABC-1234-5678 or { "aegisId": "...", "publicKeyB64": "..." }'}
+          placeholder={i18n.t('scanQR.abc12345678Or')}
           rows={4}
           style={{ ...inputStyle, resize: 'vertical' }}
         />
@@ -121,7 +118,7 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
         <button
           onClick={() => void handleManualSubmit()}
           disabled={busy || !manualInput.trim()}
-          aria-label="Add contact"
+          aria-label={i18n.t('contacts.addContact')}
           style={{
             width: '100%', padding: '13px 0', backgroundColor: t.accent, border: 'none',
             borderRadius: t.radius, cursor: busy || !manualInput.trim() ? 'not-allowed' : 'pointer',
@@ -129,7 +126,7 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
             opacity: busy || !manualInput.trim() ? 0.6 : 1,
           }}
         >
-          {busy ? 'Adding…' : 'Add contact'}
+          {busy ? i18n.t('scanQR.adding') : i18n.t('contacts.addContact')}
         </button>
       </div>
     </div>

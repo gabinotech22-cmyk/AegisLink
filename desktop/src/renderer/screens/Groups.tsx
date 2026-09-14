@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -15,16 +17,16 @@ import { fileToDownscaledDataUrl } from '../utils/image';
 
 const GROUP_COLORS = ['#05b875', '#8b5cf6', '#3b82f6', '#ec4899', '#f97316', '#eab308', '#06b6d4'];
 const GROUP_EMOJIS = [
-  { label: 'Initial', val: undefined },
-  { label: 'Group', val: '👥' },
-  { label: 'Chat', val: '💬' },
-  { label: 'Lightning', val: '⚡' },
-  { label: 'Shield', val: '🛡️' },
-  { label: 'Lock', val: '🔒' },
-  { label: 'Robot', val: '🤖' },
-  { label: 'Fire', val: '🔥' },
-  { label: 'Crown', val: '👑' },
-  { label: 'Ice', val: '🧊' },
+  { get label() { return i18n.t('groups.initial'); }, val: undefined },
+  { get label() { return i18n.t('scheduled.groupFallback'); }, val: '👥' },
+  { get label() { return i18n.t('groups.chat'); }, val: '💬' },
+  { get label() { return i18n.t('groups.lightning'); }, val: '⚡' },
+  { get label() { return i18n.t('groups.shield'); }, val: '🛡️' },
+  { get label() { return i18n.t('groups.lock'); }, val: '🔒' },
+  { get label() { return i18n.t('groups.robot'); }, val: '🤖' },
+  { get label() { return i18n.t('groups.fire'); }, val: '🔥' },
+  { get label() { return i18n.t('groups.crown'); }, val: '👑' },
+  { get label() { return i18n.t('groups.ice'); }, val: '🧊' },
 ];
 
 interface Props {
@@ -33,6 +35,7 @@ interface Props {
 }
 
 export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const groups = useGroups((s) => s.groups);
   const contacts = useContacts((s) => s.contacts) as StoredContact[];
@@ -60,18 +63,18 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
       // and the group image would vanish after restart (same fix as Profile).
       fileToDownscaledDataUrl(file)
         .then((dataUrl) => setGroupImage(dataUrl))
-        .catch(() => setErrorMsg('Could not load that image.'));
+        .catch(() => setErrorMsg(i18n.t('groups.couldNotLoadThat')));
     };
     input.click();
   }
 
   async function handleConfirmCreate() {
-    if (!groupName.trim()) { setErrorMsg('Enter a group name.'); return; }
-    if (selectedContacts.length === 0) { setErrorMsg('Select at least one contact.'); return; }
+    if (!groupName.trim()) { setErrorMsg(i18n.t('groups.enterAGroupName')); return; }
+    if (selectedContacts.length === 0) { setErrorMsg(i18n.t('distLists.noMembersDesc')); return; }
     setErrorMsg(null);
     try {
       const identity = useIdentity.getState().identity;
-      if (!identity) { setErrorMsg('No identity found.'); return; }
+      if (!identity) { setErrorMsg(i18n.t('groups.noIdentityFound')); return; }
       const members = [identity.aegisId, ...selectedContacts];
       await useGroups.getState().createGroup(groupName.trim(), members, groupColor, groupImage);
       setIsCreating(false);
@@ -90,15 +93,15 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
         <TopBar
           t={t}
-          title="New Group"
+          title={i18n.t('groups.newGroup2')}
           left={
-            <button onClick={() => { setIsCreating(false); setGroupName(''); setSelectedContacts([]); }} aria-label="Cancel" style={iconBtn}>
+            <button onClick={() => { setIsCreating(false); setGroupName(''); setSelectedContacts([]); }} aria-label={i18n.t('common.cancel')} style={iconBtn}>
               <I.ChevronL size={22} color={t.textDim} />
             </button>
           }
         />
         <div style={{ flex: 1, overflowY: 'auto', paddingLeft: 18, paddingRight: 18, paddingTop: 12, paddingBottom: 32, display: 'flex', flexDirection: 'column', gap: 0 }}>
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8, display: 'block' }}>GROUP NAME</span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8, display: 'block' }}>{i18n.t('groups.nameLabel')}</span>
           <input
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
@@ -106,34 +109,34 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
             style={{ fontFamily: t.font, fontSize: 16, color: t.text, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius, paddingLeft: 16, paddingRight: 16, paddingTop: 12, paddingBottom: 12, marginBottom: 16, outline: 'none', width: '100%', boxSizing: 'border-box' }}
           />
 
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8, display: 'block' }}>PREVIEW</span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8, display: 'block' }}>{i18n.t('groups.preview')}</span>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius, marginBottom: 10 }}>
             <Avatar t={t} name={groupImage ?? (groupName.trim() || 'G')} color={groupColor} size={64} />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'row', gap: 10, justifyContent: 'center', marginBottom: 20 }}>
-            <button onClick={handlePickImage} aria-label="Pick image" style={outlineBtn(t)}>
+            <button onClick={handlePickImage} aria-label={i18n.t('groups.pickImage')} style={outlineBtn(t)}>
               <I.Plus size={14} color={t.text} />
-              <span style={{ fontFamily: t.font, fontSize: 12, color: t.text }}>Gallery</span>
+              <span style={{ fontFamily: t.font, fontSize: 12, color: t.text }}>{i18n.t('common.gallery')}</span>
             </button>
             {groupImage && (
-              <button onClick={() => setGroupImage(undefined)} aria-label="Remove image" style={{ ...outlineBtn(t), backgroundColor: `${t.danger}15`, borderColor: t.danger }}>
+              <button onClick={() => setGroupImage(undefined)} aria-label={i18n.t('groupPosts.removeImage')} style={{ ...outlineBtn(t), backgroundColor: `${t.danger}15`, borderColor: t.danger }}>
                 <I.Trash size={14} color={t.danger} />
-                <span style={{ fontFamily: t.font, fontSize: 12, color: t.danger }}>Remove</span>
+                <span style={{ fontFamily: t.font, fontSize: 12, color: t.danger }}>{i18n.t('common.remove')}</span>
               </button>
             )}
           </div>
 
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8, display: 'block' }}>COLOR</span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8, display: 'block' }}>{i18n.t('groups.color')}</span>
           <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
             {GROUP_COLORS.map((c) => (
-              <button key={c} onClick={() => setGroupColor(c)} aria-label={`Color ${c}`} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: c, border: `2px solid ${groupColor === c ? t.text : 'transparent'}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <button key={c} onClick={() => setGroupColor(c)} aria-label={i18n.t('groups.colorV0', { v0: c })} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: c, border: `2px solid ${groupColor === c ? t.text : 'transparent'}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {groupColor === c && <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' }} />}
               </button>
             ))}
           </div>
 
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8, display: 'block' }}>ICON</span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, marginBottom: 8, display: 'block' }}>{i18n.t('groups.iconLabelShort')}</span>
           <div style={{ display: 'flex', flexDirection: 'row', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 6 }}>
             {GROUP_EMOJIS.map((e) => {
               const isSel = groupImage === e.val;
@@ -151,14 +154,14 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
           {contacts.length === 0 ? (
             <div style={{ padding: 24, backgroundColor: t.surface, borderRadius: t.radius, display: 'flex', flexDirection: 'column', alignItems: 'center', border: `1px solid ${t.border}`, marginBottom: 24 }}>
               <I.Users size={24} color={t.textDim} />
-              <span style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, textAlign: 'center', marginTop: 8 }}>No contacts yet. Add contacts first.</span>
+              <span style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, textAlign: 'center', marginTop: 8 }}>{i18n.t('groups.noContactsYetAdd')}</span>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 24 }}>
               {contacts.map((c) => {
                 const isSel = selectedContacts.includes(c.aegisId);
                 return (
-                  <button key={c.aegisId} onClick={() => toggleContact(c.aegisId)} aria-label={`Toggle ${c.name}`} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, backgroundColor: isSel ? `${t.accent}11` : t.surface, border: `1px solid ${isSel ? t.accent : t.border}`, borderRadius: t.radius, cursor: 'pointer', textAlign: 'left' }}>
+                  <button key={c.aegisId} onClick={() => toggleContact(c.aegisId)} aria-label={i18n.t('groups.toggleV0', { v0: c.name })} style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, backgroundColor: isSel ? `${t.accent}11` : t.surface, border: `1px solid ${isSel ? t.accent : t.border}`, borderRadius: t.radius, cursor: 'pointer', textAlign: 'left' }}>
                     <Avatar t={t} name={c.avatarImage ?? c.name} color={c.color ?? t.surface2} size={32} photoUri={c.avatarImage ?? undefined} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block' }}>{c.name}</span>
@@ -177,8 +180,8 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
             <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger, display: 'block', marginBottom: 12 }}>{errorMsg}</span>
           )}
 
-          <button onClick={() => void handleConfirmCreate()} aria-label="Create group" style={{ backgroundColor: t.accent, paddingTop: 14, paddingBottom: 14, borderRadius: t.radius, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 15 }}>Create Group</span>
+          <button onClick={() => void handleConfirmCreate()} aria-label={i18n.t('groups.createGroup')} style={{ backgroundColor: t.accent, paddingTop: 14, paddingBottom: 14, borderRadius: t.radius, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 15 }}>{i18n.t('groups.createGroup2')}</span>
           </button>
         </div>
       </div>
@@ -190,10 +193,10 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       <TopBar
         t={t}
-        title="Groups"
+        title={i18n.t('groups.title')}
         big
         right={
-          <button onClick={() => setIsCreating(true)} aria-label="Create group" style={iconBtn}>
+          <button onClick={() => setIsCreating(true)} aria-label={i18n.t('groups.createGroup')} style={iconBtn}>
             <I.Plus size={22} color={t.accent} />
           </button>
         }
@@ -202,27 +205,21 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
       {groups.length === 0 ? (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingLeft: 32, paddingRight: 32 }}>
           <ConstellationVisual t={t} />
-          <h2 style={{ fontFamily: t.fontDisplay, fontSize: 24, fontWeight: '600', letterSpacing: -0.4, color: t.text, marginTop: 28, marginBottom: 10, textAlign: 'center' }}>
-            No groups yet
-          </h2>
-          <p style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: '21px', textAlign: 'center', maxWidth: 280, marginBottom: 26, marginTop: 0 }}>
-            Create a group to chat with multiple people at once.
-          </p>
-          <button onClick={() => setIsCreating(true)} aria-label="Create group" style={{ backgroundColor: t.accent, paddingLeft: 24, paddingRight: 24, paddingTop: 13, paddingBottom: 13, borderRadius: t.radius, border: 'none', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 10 }}>
+          <h2 style={{ fontFamily: t.fontDisplay, fontSize: 24, fontWeight: '600', letterSpacing: -0.4, color: t.text, marginTop: 28, marginBottom: 10, textAlign: 'center' }}>{i18n.t('groups.emptyTitle')}</h2>
+          <p style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: '21px', textAlign: 'center', maxWidth: 280, marginBottom: 26, marginTop: 0 }}>{i18n.t('groups.createAGroupTo')}</p>
+          <button onClick={() => setIsCreating(true)} aria-label={i18n.t('groups.createGroup')} style={{ backgroundColor: t.accent, paddingLeft: 24, paddingRight: 24, paddingTop: 13, paddingBottom: 13, borderRadius: t.radius, border: 'none', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 10 }}>
             <I.Plus size={18} color={t.accentInk} />
-            <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
-              Create Group
-            </span>
+            <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>{i18n.t('groups.createGroup2')}</span>
           </button>
-          <button aria-label="Join by link" style={{ backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, paddingLeft: 24, paddingRight: 24, paddingTop: 12, paddingBottom: 12, borderRadius: t.radius, cursor: 'pointer' }}>
-            <span style={{ color: t.text, fontFamily: t.font, fontWeight: '500', fontSize: 14 }}>Join by link</span>
+          <button aria-label={i18n.t('groups.joinByLink')} style={{ backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, paddingLeft: 24, paddingRight: 24, paddingTop: 12, paddingBottom: 12, borderRadius: t.radius, cursor: 'pointer' }}>
+            <span style={{ color: t.text, fontFamily: t.font, fontWeight: '500', fontSize: 14 }}>{i18n.t('groups.joinByLink')}</span>
           </button>
         </div>
       ) : (
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {groups.map((item) => {
             const previewMsg = previews[item.id];
-            let lastText = 'No messages';
+            let lastText = i18n.t('groups.noMessages');
             if (previewMsg) {
               if (previewMsg.body.includes(': ')) {
                 const colonIdx = previewMsg.body.indexOf(': ');
@@ -237,7 +234,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
               <button
                 key={item.id}
                 onClick={() => onOpenGroupChat(item)}
-                aria-label={`Open ${item.name}`}
+                aria-label={i18n.t('groups.openV0', { v0: item.name })}
                 style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 18, paddingRight: 18, paddingTop: 14, paddingBottom: 14, borderBottom: `1px solid ${t.divider}`, backgroundColor: 'transparent', border: 'none', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: t.divider, cursor: 'pointer', width: '100%', textAlign: 'left', boxSizing: 'border-box' }}
               >
                 <Avatar t={t} name={item.avatarImage ?? item.name} color={item.avatarColor ?? t.accent} size={44} />
@@ -249,7 +246,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
                   <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, display: 'block', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lastText}</span>
                   <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
                     <I.Lock size={10} color={t.accent} />
-                    <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.5 }}>E2EE · {item.members.length} MEMBERS</span>
+                    <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.5 }}>{i18n.t('groups.e2eeMembers', { v0: item.members.length })}</span>
                   </div>
                 </div>
               </button>
@@ -263,6 +260,7 @@ export function GroupsScreen({ onTab, onOpenGroupChat }: Props) {
 }
 
 function ConstellationVisual({ t }: { t: Theme }) {
+  useTranslation(); // re-render on language change
   return (
     <svg viewBox="0 0 180 140" width={180} height={140}>
       <line x1={50} y1={40} x2={90} y2={70} stroke={t.borderStrong} strokeWidth={1} strokeDasharray="2 4" />

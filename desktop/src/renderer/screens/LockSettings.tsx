@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -11,6 +13,7 @@ interface Props {
 }
 
 export function LockSettingsScreen({ onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [biometrics, setBiometrics] = useState(false);
   const [autoLockMinutes, setAutoLockMinutes] = useState(5);
@@ -19,57 +22,57 @@ export function LockSettingsScreen({ onBack }: Props) {
   function handleBiometrics(v: boolean) {
     setBiometrics(v);
     if (v) {
-      window.alert('Face ID / fingerprint will be used to unlock the app. Make sure you have biometrics configured in your system settings.');
+      window.alert(i18n.t('lockSettings.faceIdFingerprintWill'));
     }
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Lock Settings" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('lockConfig.lockSettings')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
 
       <div style={{ flex: 1, overflowY: 'auto', paddingTop: 8, paddingBottom: 32 }}>
-        <Section t={t} label="SECURITY">
+        <Section t={t} label={i18n.t('lockSettings.security')}>
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', paddingLeft: 16, paddingRight: 16, paddingTop: 12, paddingBottom: 12, borderBottom: `1px solid ${t.divider}` }}>
             <div style={{ flex: 1 }}>
-              <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, display: 'block' }}>Require biometrics</span>
-              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2, display: 'block' }}>Face ID / fingerprint unlock</span>
+              <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, display: 'block' }}>{i18n.t('lockSettings.requireBiometrics')}</span>
+              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2, display: 'block' }}>{i18n.t('lockSettings.bioUnlockDesc')}</span>
             </div>
             <input
               type="checkbox"
               checked={biometrics}
               onChange={(e) => handleBiometrics(e.target.checked)}
-              aria-label="Require biometrics"
+              aria-label={i18n.t('lockSettings.requireBiometrics')}
               style={{ width: 40, height: 24, cursor: 'pointer', accentColor: t.accent }}
             />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', paddingLeft: 16, paddingRight: 16, paddingTop: 12, paddingBottom: 12 }}>
             <div style={{ flex: 1 }}>
-              <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, display: 'block' }}>Lock on background</span>
-              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2, display: 'block' }}>Lock when app goes to background</span>
+              <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, display: 'block' }}>{i18n.t('lockSettings.lockOnBackground')}</span>
+              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 2, display: 'block' }}>{i18n.t('lockSettings.lockWhenAppGoes')}</span>
             </div>
             <input
               type="checkbox"
               checked={lockOnBackground}
               onChange={(e) => setLockOnBackground(e.target.checked)}
-              aria-label="Lock on background"
+              aria-label={i18n.t('lockSettings.lockOnBackground')}
               style={{ width: 40, height: 24, cursor: 'pointer', accentColor: t.accent }}
             />
           </div>
         </Section>
 
-        <Section t={t} label="AUTO-LOCK TIMER">
+        <Section t={t} label={i18n.t('lockSettings.autoLockTimer')}>
           {AUTO_LOCK_OPTIONS.map((opt, i) => {
             const selected = autoLockMinutes === opt;
             return (
               <button
                 key={opt}
                 onClick={() => setAutoLockMinutes(opt)}
-                aria-label={`Auto-lock after ${opt} minutes`}
+                aria-label={i18n.t('lockSettings.autoLockAfterV0', { v0: opt })}
                 style={{
                   display: 'flex', flexDirection: 'row', alignItems: 'center',
                   paddingLeft: 16, paddingRight: 16, paddingTop: 12, paddingBottom: 12,

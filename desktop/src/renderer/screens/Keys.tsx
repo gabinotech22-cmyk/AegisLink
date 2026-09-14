@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -19,6 +21,7 @@ function formatFingerprint(b64: string): string {
 }
 
 export function KeysScreen({ onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const identity = useIdentity((s) => s.identity);
   // Which row was just copied — drives the transient checkmark (desktop has no
@@ -33,7 +36,7 @@ export function KeysScreen({ onBack }: Props) {
   };
 
   const backButton = (
-    <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+    <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
       <I.ChevronL size={22} color={t.textDim} />
     </button>
   );
@@ -41,9 +44,9 @@ export function KeysScreen({ onBack }: Props) {
   if (!identity) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-        <TopBar t={t} title="Your Keys" left={backButton} />
+        <TopBar t={t} title={i18n.t('keys.yourKeys')} left={backButton} />
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span style={{ fontFamily: t.font, color: t.textDim }}>No identity</span>
+          <span style={{ fontFamily: t.font, color: t.textDim }}>{i18n.t('backup.noIdentity')}</span>
         </div>
       </div>
     );
@@ -60,14 +63,14 @@ export function KeysScreen({ onBack }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Your Keys" left={backButton} />
+      <TopBar t={t} title={i18n.t('keys.yourKeys')} left={backButton} />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '14px 0 40px' }}>
-        <Section t={t} label="IDENTITY">
+        <Section t={t} label={i18n.t('keys.identitySection')}>
           <Row
             t={t}
             icon={<I.Person size={20} color={t.textDim} />}
-            label="Aegis ID"
+            label={i18n.t('keys.aegisId')}
             sub={identity.aegisId}
             onPress={() => copy('aegisId', identity.aegisId)}
             trailing={copyTrailing('aegisId')}
@@ -75,7 +78,7 @@ export function KeysScreen({ onBack }: Props) {
           <Row
             t={t}
             icon={<I.Fingerprint size={20} color={t.textDim} />}
-            label="Fingerprint"
+            label={i18n.t('keys.fingerprint2')}
             sub={fingerprint}
             onPress={() => copy('fingerprint', fingerprint)}
             trailing={copyTrailing('fingerprint')}
@@ -83,29 +86,29 @@ export function KeysScreen({ onBack }: Props) {
           />
         </Section>
 
-        <Section t={t} label="CRYPTOGRAPHY">
+        <Section t={t} label={i18n.t('keys.cryptoSection')}>
           <Row
             t={t}
             icon={<I.Key size={20} color={t.textDim} />}
-            label="Key type"
-            sub="X25519 · Ed25519 (TweetNaCl)"
+            label={i18n.t('keys.keyType')}
+            sub={i18n.t('keys.x25519Ed25519Tweetnacl')}
           />
           <Row
             t={t}
             icon={<I.Timer size={20} color={t.textDim} />}
-            label="Created"
+            label={i18n.t('keys.createdAt')}
             sub={creationDate}
           />
           <Row
             t={t}
             icon={<I.Shield size={20} color={t.textDim} />}
-            label="Status"
-            sub="Active"
+            label={i18n.t('keys.keyStatus')}
+            sub={i18n.t('keys.active')}
             noBorder
           />
         </Section>
 
-        <Section t={t} label="DECENTRALIZED ID">
+        <Section t={t} label={i18n.t('keys.didSection')}>
           <Row
             t={t}
             icon={<I.Globe size={20} color={t.textDim} />}
@@ -117,12 +120,10 @@ export function KeysScreen({ onBack }: Props) {
           />
         </Section>
 
-        <Section t={t} label="SAFETY">
+        <Section t={t} label={i18n.t('keys.safety')}>
           <div style={{ padding: 16, backgroundColor: t.surface2, borderRadius: t.radius, display: 'flex', flexDirection: 'row', gap: 12 }}>
             <I.Lock size={24} color={t.text} style={{ marginTop: 2, flexShrink: 0 }} />
-            <span style={{ flex: 1, fontFamily: t.font, fontSize: 13, lineHeight: '18px', color: t.textDim }}>
-              Your private keys never leave this device. Share your Aegis ID or fingerprint to let others verify they are talking to you — never share anything else.
-            </span>
+            <span style={{ flex: 1, fontFamily: t.font, fontSize: 13, lineHeight: '18px', color: t.textDim }}>{i18n.t('keys.yourPrivateKeysNever')}</span>
           </div>
         </Section>
       </div>

@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { useTor } from '../net/tor';
+import i18n from '../i18n';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Thin status strip shown while the embedded Tor is not yet bootstrapped (or has
@@ -8,6 +10,7 @@ import { useTor } from '../net/tor';
  * honest explanation of "why am I not connected yet". Hidden once Tor is ON.
  */
 export function TorBanner() {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const status = useTor((s) => s.status);
   const init = useTor((s) => s.init);
@@ -17,8 +20,8 @@ export function TorBanner() {
 
   const isError = status.state === 'error';
   const label = isError
-    ? `Tor failed: ${status.summary || 'unknown error'} — retrying is automatic; check your network`
-    : `Connecting through Tor… ${status.progress}%${status.summary ? ` · ${status.summary}` : ''}`;
+    ? i18n.t('tor.failed', { v0: status.summary || i18n.t('tor.unknownError') })
+    : i18n.t('tor.connecting', { v0: status.progress }) + (status.summary ? ` · ${status.summary}` : '');
 
   return (
     <div

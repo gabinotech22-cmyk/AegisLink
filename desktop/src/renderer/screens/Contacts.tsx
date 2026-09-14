@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -28,6 +30,7 @@ interface Props {
 }
 
 export function ContactsScreen({ onBack, onAddContact, onOpenContact, onChat }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const contacts: StoredContact[] = []; // stub
   const [query, setQuery] = useState('');
@@ -54,15 +57,15 @@ export function ContactsScreen({ onBack, onAddContact, onOpenContact, onChat }: 
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       <TopBar
         t={t}
-        title="Contacts"
+        title={i18n.t('contacts.title')}
         big
         left={
-          <button onClick={onBack} aria-label="Back" style={iconBtn}>
+          <button onClick={onBack} aria-label={i18n.t('common.back')} style={iconBtn}>
             <I.ChevronL size={22} color={t.textDim} />
           </button>
         }
         right={
-          <button onClick={onAddContact} aria-label="Add contact" style={iconBtn}>
+          <button onClick={onAddContact} aria-label={i18n.t('contacts.addContact')} style={iconBtn}>
             <I.Plus size={22} color={t.accent} />
           </button>
         }
@@ -74,11 +77,11 @@ export function ContactsScreen({ onBack, onAddContact, onOpenContact, onChat }: 
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search contacts…"
+          placeholder={i18n.t('contacts.searchContacts')}
           style={{ flex: 1, fontFamily: t.font, fontSize: 14, color: t.text, background: 'none', border: 'none', outline: 'none', padding: 0 }}
         />
         {query.length > 0 && (
-          <button onClick={() => setQuery('')} aria-label="Clear search" style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 0 }}>
+          <button onClick={() => setQuery('')} aria-label={i18n.t('contacts.clearSearch')} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 0 }}>
             <I.X size={14} color={t.textDim} />
           </button>
         )}
@@ -128,7 +131,7 @@ function ContactRow({ t, contact, onPress, onChat, noBorder }: { t: Theme; conta
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onPress()}
-      aria-label={`View contact ${contact.name}`}
+      aria-label={i18n.t('chat.viewContactV0', { v0: contact.name })}
       style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', paddingLeft: 18, paddingRight: 18, paddingTop: 11, paddingBottom: 11, gap: 12, backgroundColor: hovered ? t.surface : 'transparent', borderBottom: noBorder ? 'none' : `1px solid ${t.divider}`, cursor: 'pointer', transition: 'background-color 0.1s' }}
     >
       <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={42} photoUri={contact.avatarImage ?? undefined} seed={contact.publicKeyB64 ?? contact.aegisId} />
@@ -149,7 +152,7 @@ function ContactRow({ t, contact, onPress, onChat, noBorder }: { t: Theme; conta
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); onChat(); }}
-        aria-label={`Chat with ${contact.name}`}
+        aria-label={i18n.t('contacts.chatWithV0', { v0: contact.name })}
         style={{ padding: 8, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
       >
         <I.Chat size={18} color={t.accent} />
@@ -165,15 +168,15 @@ function EmptyState({ t, hasContacts, onAdd }: { t: Theme; hasContacts: boolean;
         <I.Users size={32} color={t.textDim} />
       </div>
       <span style={{ fontFamily: t.fontDisplay, fontSize: 20, fontWeight: '600', letterSpacing: -0.3, color: t.text, marginBottom: 8, textAlign: 'center', display: 'block' }}>
-        {hasContacts ? 'No results' : 'No contacts yet'}
+        {hasContacts ? i18n.t('contacts.noResultsTitle') : i18n.t('contacts.emptyTitle')}
       </span>
       <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, textAlign: 'center', lineHeight: '19px', maxWidth: 280, marginBottom: 18, display: 'block' }}>
-        {hasContacts ? 'Try a different name or AegisLink ID.' : 'Add contacts by their AegisLink ID or scan their QR code.'}
+        {hasContacts ? i18n.t('contacts.tryADifferentName') : i18n.t('contacts.addContactsByTheir')}
       </span>
       {!hasContacts && (
-        <button onClick={onAdd} aria-label="Add contact" style={{ backgroundColor: t.accent, paddingLeft: 22, paddingRight: 22, paddingTop: 12, paddingBottom: 12, borderRadius: t.radius, border: 'none', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+        <button onClick={onAdd} aria-label={i18n.t('contacts.addContact')} style={{ backgroundColor: t.accent, paddingLeft: 22, paddingRight: 22, paddingTop: 12, paddingBottom: 12, borderRadius: t.radius, border: 'none', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
           <I.Plus size={18} color={t.accentInk} />
-          <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>Add Contact</span>
+          <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>{i18n.t('addContact.addContact')}</span>
         </button>
       )}
     </div>

@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -12,6 +14,7 @@ interface Props {
 }
 
 export function DataExportScreen({ onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [pick, setPick] = useState({ messages: true, media: true, contacts: true, settings: false });
   const set = (k: keyof typeof pick, v: boolean) => setPick((p) => ({ ...p, [k]: v }));
@@ -47,7 +50,7 @@ export function DataExportScreen({ onBack }: Props) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      window.alert(`Export error: ${(e as Error).message}`);
+      window.alert(i18n.t('dataExport.exportErrorV0', { v0: (e as Error).message }));
     } finally {
       setExporting(false);
     }
@@ -55,7 +58,7 @@ export function DataExportScreen({ onBack }: Props) {
 
   async function handleDeleteAccount() {
     const first = window.confirm(
-      'DELETE ACCOUNT\n\nThis will delete all your local keys and messages from this device permanently. It cannot be undone. Continue?'
+      i18n.t('dataExport.deleteAccountThisWill')
     );
     if (!first) return;
     await reset();
@@ -63,28 +66,26 @@ export function DataExportScreen({ onBack }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Your data" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('dataExport.title')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
 
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 32 }}>
         <div style={{ margin: '12px 18px 16px', padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius }}>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>
-            AegisLink does not save anything on the server beyond opaque encrypted blobs. Here you control what leaves the device — and how to wipe everything if you leave.
-          </span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>{i18n.t('dataExport.infoDesc')}</span>
         </div>
 
-        <Section t={t} label="EXPORT · ENCRYPTED FILE">
-          <Toggle t={t} label="Messages" sub="Export chat history" value={pick.messages} onChange={(v) => set('messages', v)} />
-          <Toggle t={t} label="Media" sub="Export photos/videos" value={pick.media} onChange={(v) => set('media', v)} />
-          <Toggle t={t} label="Contacts" sub="Export address book" value={pick.contacts} onChange={(v) => set('contacts', v)} />
-          <Toggle t={t} label="Settings" sub="Preferences" value={pick.settings} onChange={(v) => set('settings', v)} noBorder />
+        <Section t={t} label={i18n.t('dataExport.exportEncryptedFile')}>
+          <Toggle t={t} label={i18n.t('common.messages')} sub={i18n.t('dataExport.messagesSub')} value={pick.messages} onChange={(v) => set('messages', v)} />
+          <Toggle t={t} label={i18n.t('dataExport.media')} sub={i18n.t('dataExport.exportPhotosVideos')} value={pick.media} onChange={(v) => set('media', v)} />
+          <Toggle t={t} label={i18n.t('common.contacts')} sub={i18n.t('dataExport.contactsSub')} value={pick.contacts} onChange={(v) => set('contacts', v)} />
+          <Toggle t={t} label={i18n.t('common.settings')} sub={i18n.t('dataExport.settingsSub')} value={pick.settings} onChange={(v) => set('settings', v)} noBorder />
         </Section>
 
         <div style={{ margin: '0 18px 18px', padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>FORMAT</span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>{i18n.t('dataExport.format')}</span>
           <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 0.5 }}>JSON</span>
         </div>
 
@@ -92,7 +93,7 @@ export function DataExportScreen({ onBack }: Props) {
           <button
             onClick={() => void handleExport()}
             disabled={exporting}
-            aria-label="Generate export file"
+            aria-label={i18n.t('dataExport.generateExportFile')}
             style={{
               width: '100%', padding: '13px 0', backgroundColor: t.accent, border: 'none',
               borderRadius: t.radius, cursor: exporting ? 'not-allowed' : 'pointer',
@@ -100,32 +101,28 @@ export function DataExportScreen({ onBack }: Props) {
               opacity: exporting ? 0.7 : 1,
             }}
           >
-            {exporting ? 'Generating…' : 'Generate file'}
+            {exporting ? i18n.t('dataExport.generating') : i18n.t('dataExport.generateBtn')}
           </button>
         </div>
 
         <div style={{ margin: '0 18px 14px', height: 1, backgroundColor: t.divider }} />
 
-        <Section t={t} label="DELETE ACCOUNT" hint="IRREVERSIBLE">
+        <Section t={t} label={i18n.t('dataExport.deleteAccountCaps')} hint={i18n.t('dataExport.irreversible')}>
           <div style={{ padding: 14 }}>
-            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>
-              Deleting your account wipes your local keys and sends a revocation signal to all relays. Messages already received by your contacts remain on their devices — but no one will ever be able to decrypt messages to you again.
-            </span>
+            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>{i18n.t('dataExport.deletingYourAccountWipes')}</span>
           </div>
         </Section>
 
         <div style={{ padding: '0 18px' }}>
           <button
             onClick={() => void handleDeleteAccount()}
-            aria-label="Delete my account forever"
+            aria-label={i18n.t('dataExport.deleteBtn')}
             style={{
               width: '100%', padding: '14px 0', backgroundColor: 'transparent',
               border: `1px solid ${t.danger}66`, borderRadius: t.radius,
               cursor: 'pointer', fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.danger,
             }}
-          >
-            Delete my account forever
-          </button>
+          >{i18n.t('dataExport.deleteBtn')}</button>
         </div>
       </div>
     </div>

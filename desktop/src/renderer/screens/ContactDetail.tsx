@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -38,6 +40,7 @@ interface Props {
 }
 
 export function ContactDetailScreen({ contact: contactProp, keyChanged = false, onBack, onChat, onCall, onVerify, onEphemeral }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [fp, setFp] = useState<string[]>([]);
   const [removing, setRemoving] = useState(false);
@@ -79,7 +82,7 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
   }
 
   function handleRemove() {
-    if (!window.confirm(`Remove ${contact.name}? This cannot be undone.`)) return;
+    if (!window.confirm(i18n.t('contactDetail.removeV0ThisCannot', { v0: contact.name }))) return;
     setRemoving(true);
     useContacts.getState().removeContact(contact.aegisId).then(() => {
       setRemoving(false);
@@ -96,7 +99,7 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
   if (removing) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <span style={{ fontFamily: t.fontMono, fontSize: 13, color: t.textDim }}>Removing…</span>
+        <span style={{ fontFamily: t.fontMono, fontSize: 13, color: t.textDim }}>{i18n.t('contactDetail.removing')}</span>
       </div>
     );
   }
@@ -105,9 +108,9 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       <TopBar
         t={t}
-        title="Contact"
+        title={i18n.t('attachSheet.contact')}
         left={
-          <button onClick={onBack} aria-label="Back" style={iconBtn}>
+          <button onClick={onBack} aria-label={i18n.t('common.back')} style={iconBtn}>
             <I.ChevronL size={22} color={t.textDim} />
           </button>
         }
@@ -132,10 +135,10 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
 
           {/* Action buttons */}
           <div style={{ display: 'flex', flexDirection: 'row', gap: 8, marginTop: 18 }}>
-            <ContactAction t={t} icon={<I.Chat size={20} color={t.accent} />} label="Message" onPress={onChat} />
-            <ContactAction t={t} icon={<I.Phone size={20} color={t.accent} />} label="Call" onPress={() => onCall('audio')} />
-            <ContactAction t={t} icon={<I.Video size={20} color={t.accent} />} label="Video" onPress={() => onCall('video')} />
-            <ContactAction t={t} icon={<I.Mute size={20} color={effectiveMuted ? t.warn : t.accent} />} label={effectiveMuted ? 'Unmute' : 'Mute'} active={effectiveMuted} onPress={handleMute} />
+            <ContactAction t={t} icon={<I.Chat size={20} color={t.accent} />} label={i18n.t('contactDetail.message')} onPress={onChat} />
+            <ContactAction t={t} icon={<I.Phone size={20} color={t.accent} />} label={i18n.t('contactDetail.call')} onPress={() => onCall('audio')} />
+            <ContactAction t={t} icon={<I.Video size={20} color={t.accent} />} label={i18n.t('call.video')} onPress={() => onCall('video')} />
+            <ContactAction t={t} icon={<I.Mute size={20} color={effectiveMuted ? t.warn : t.accent} />} label={effectiveMuted ? i18n.t('contactDetail.unmute') : i18n.t('contactDetail.mute')} active={effectiveMuted} onPress={handleMute} />
           </div>
         </div>
 
@@ -146,23 +149,21 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
               <span style={{ color: '#fff', fontFamily: t.font, fontWeight: '700', fontSize: 16 }}>!</span>
             </div>
             <div style={{ flex: 1 }}>
-              <span style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.danger, display: 'block', marginBottom: 4 }}>Key changed</span>
-              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '17px', display: 'block', marginBottom: 10 }}>
-                This contact's encryption key has changed. Verify their identity before messaging.
-              </span>
+              <span style={{ fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.danger, display: 'block', marginBottom: 4 }}>{i18n.t('contactDetail.keyChanged2')}</span>
+              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '17px', display: 'block', marginBottom: 10 }}>{i18n.t('contactDetail.thisContactSEncryption')}</span>
               <div style={{ display: 'flex', flexDirection: 'row', gap: 8 }}>
-                <button onClick={onVerify} aria-label="Re-verify" style={{ backgroundColor: t.danger, paddingLeft: 14, paddingRight: 14, paddingTop: 7, paddingBottom: 7, borderRadius: t.radiusS, border: 'none', cursor: 'pointer' }}>
-                  <span style={{ color: '#fff', fontFamily: t.font, fontSize: 12, fontWeight: '600' }}>Re-verify</span>
+                <button onClick={onVerify} aria-label={i18n.t('contactDetail.reVerify')} style={{ backgroundColor: t.danger, paddingLeft: 14, paddingRight: 14, paddingTop: 7, paddingBottom: 7, borderRadius: t.radiusS, border: 'none', cursor: 'pointer' }}>
+                  <span style={{ color: '#fff', fontFamily: t.font, fontSize: 12, fontWeight: '600' }}>{i18n.t('contactDetail.reVerify')}</span>
                 </button>
                 <button
                   onClick={async () => {
                     await useContacts.getState().confirmKeyChange(contact.aegisId, contact.publicKeyB64);
                     onBack();
                   }}
-                  aria-label="Trust anyway"
+                  aria-label={i18n.t('contactDetail.trustAnyway')}
                   style={{ border: `1px solid ${t.borderStrong}`, paddingLeft: 14, paddingRight: 14, paddingTop: 7, paddingBottom: 7, borderRadius: t.radiusS, background: 'none', cursor: 'pointer' }}
                 >
-                  <span style={{ color: t.text, fontFamily: t.font, fontSize: 12 }}>Trust anyway</span>
+                  <span style={{ color: t.text, fontFamily: t.font, fontSize: 12 }}>{i18n.t('contactDetail.trustAnyway')}</span>
                 </button>
               </div>
             </div>
@@ -170,7 +171,7 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
         )}
 
         {/* Fingerprint */}
-        <Section t={t} label="PUBLIC KEY">
+        <Section t={t} label={i18n.t('contactDetail.publicKeySection')}>
           <div style={{ padding: 14 }}>
             <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
               {fp.map((f, i) => (
@@ -181,10 +182,10 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
             </div>
             <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
               <span style={{ fontFamily: t.fontMono, fontSize: 10, color: keyChanged ? t.danger : contact.verified ? t.accent : t.warn, letterSpacing: 0.5 }}>
-                {keyChanged ? 'KEY CHANGED' : contact.verified ? 'VERIFIED' : 'NOT VERIFIED'}
+                {keyChanged ? 'KEY CHANGED' : contact.verified ? i18n.t('contactDetail.verified') : i18n.t('contactDetail.notVerified')}
               </span>
-              <button onClick={onVerify} aria-label="Verify identity" style={{ border: `1px solid ${t.borderStrong}`, paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: t.radiusS, background: 'none', cursor: 'pointer' }}>
-                <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.text, letterSpacing: 0.5 }}>VERIFY IDENTITY</span>
+              <button onClick={onVerify} aria-label={i18n.t('contactDetail.verifyIdentity')} style={{ border: `1px solid ${t.borderStrong}`, paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: t.radiusS, background: 'none', cursor: 'pointer' }}>
+                <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.text, letterSpacing: 0.5 }}>{i18n.t('contactDetail.verifyIdentity2')}</span>
               </button>
             </div>
             {!contact.verified && !keyChanged && (
@@ -192,22 +193,22 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
                 onClick={async () => {
                   await useContacts.getState().markVerified(contact.aegisId, true);
                 }}
-                aria-label="Mark as verified"
+                aria-label={i18n.t('contactDetail.markVerifiedTitle')}
                 aria-pressed={false}
                 style={{ marginTop: 10, backgroundColor: t.accent, paddingTop: 10, paddingBottom: 10, borderRadius: t.radiusS, border: 'none', cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                <span style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: '#000', letterSpacing: 0.3 }}>Safety words match — mark verified</span>
+                <span style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: '#000', letterSpacing: 0.3 }}>{i18n.t('contactDetail.safetyWordsMatchMark')}</span>
               </button>
             )}
           </div>
         </Section>
 
-        <Section t={t} label="THIS CONVERSATION">
-          <Row t={t} icon={<I.Timer size={18} color={t.textDim} />} label="Disappearing messages" sub="Set a timer for messages" onPress={onEphemeral} />
-          <Toggle t={t} label="Zero Trust" sub={zeroTrust ? 'Blocks sending if key changes' : 'Trust on first use'} value={zeroTrust} onChange={handleZeroTrust} />
-          <Row t={t} icon={<I.Bell size={18} color={t.textDim} />} label="Notifications" sub="Manage alerts for this contact" onPress={() => {}} />
-          <Row t={t} icon={<I.X size={18} color={t.danger} />} label={blocked ? 'Unblock' : 'Block'} sub={blocked ? 'Unblock this contact' : 'Block messages from this contact'} danger onPress={handleBlock} />
-          <Row t={t} icon={<I.Trash size={18} color={t.danger} />} label="Remove contact" danger noBorder onPress={handleRemove} />
+        <Section t={t} label={i18n.t('contactDetail.thisConversationSection')}>
+          <Row t={t} icon={<I.Timer size={18} color={t.textDim} />} label={i18n.t('contactDetail.burnMessages')} sub={i18n.t('contactDetail.setATimerFor')} onPress={onEphemeral} />
+          <Toggle t={t} label={i18n.t('contactDetail.zeroTrust')} sub={zeroTrust ? i18n.t('contactDetail.blocksSendingIfKey') : i18n.t('contactDetail.trustOnFirstUse')} value={zeroTrust} onChange={handleZeroTrust} />
+          <Row t={t} icon={<I.Bell size={18} color={t.textDim} />} label={i18n.t('contactDetail.notificationsLabel')} sub={i18n.t('contactDetail.manageAlertsForThis')} onPress={() => {}} />
+          <Row t={t} icon={<I.X size={18} color={t.danger} />} label={blocked ? i18n.t('contactDetail.unblock') : i18n.t('contactDetail.block')} sub={blocked ? i18n.t('contactDetail.unblockThisContact') : i18n.t('contactDetail.blockMessagesFromThis')} danger onPress={handleBlock} />
+          <Row t={t} icon={<I.Trash size={18} color={t.danger} />} label={i18n.t('contactDetail.removeContact')} danger noBorder onPress={handleRemove} />
         </Section>
 
         {errorMsg && (

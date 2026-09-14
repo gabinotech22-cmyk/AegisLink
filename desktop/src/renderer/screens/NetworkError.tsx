@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { SERVER_URL } from '../config';
@@ -13,6 +15,7 @@ interface RelayStatus { label: string; state: RelayState; detail: string }
 const RELAY_LABELS = ['zurich-1', 'berlin-1', 'ny-1', 'sg-1'];
 
 export function NetworkErrorScreen({ onRetry }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
 
   const [relays, setRelays] = useState<RelayStatus[]>(
@@ -72,9 +75,7 @@ export function NetworkErrorScreen({ onRetry }: Props) {
         }}
       >
         <div style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: t.warn }} />
-        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.warn, letterSpacing: 1.1 }}>
-          RELAY UNREACHABLE
-        </span>
+        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.warn, letterSpacing: 1.1 }}>{i18n.t('networkError.relayUnreachable')}</span>
       </div>
 
       {/* Hexagon SVG graphic */}
@@ -97,9 +98,7 @@ export function NetworkErrorScreen({ onRetry }: Props) {
           marginBottom: 12,
           display: 'block',
         }}
-      >
-        Connection lost
-      </span>
+      >{i18n.t('networkError.connectionLost')}</span>
       <span
         style={{
           fontFamily: t.font,
@@ -111,9 +110,7 @@ export function NetworkErrorScreen({ onRetry }: Props) {
           marginBottom: 20,
           display: 'block',
         }}
-      >
-        AegisLink could not reach the relay. Your messages are queued and will be delivered automatically when the connection is restored.
-      </span>
+      >{i18n.t('networkError.aegislinkCouldNotReach')}</span>
 
       {/* Relay status list */}
       <div
@@ -135,7 +132,7 @@ export function NetworkErrorScreen({ onRetry }: Props) {
 
       <button
         onClick={onRetry}
-        aria-label="Retry connection"
+        aria-label={i18n.t('common.retryConnection')}
         style={{
           width: '100%',
           maxWidth: 380,
@@ -150,17 +147,15 @@ export function NetworkErrorScreen({ onRetry }: Props) {
           color: t.accentInk,
           marginBottom: 4,
         }}
-      >
-        Retry connection
-      </button>
+      >{i18n.t('common.retryConnection')}</button>
 
       <button
         onClick={() =>
           window.alert(
-            'Emergency relay\n\nAn emergency relay can be activated by the AegisLink team during outages. Check the official status page or Nostr feed for updates.'
+            i18n.t('networkError.emergencyRelayAnEmergency')
           )
         }
-        aria-label="Emergency relay info"
+        aria-label={i18n.t('networkError.emergencyRelayInfo')}
         style={{
           padding: '12px 12px',
           background: 'none',
@@ -168,9 +163,7 @@ export function NetworkErrorScreen({ onRetry }: Props) {
           cursor: 'pointer',
         }}
       >
-        <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5 }}>
-          USE EMERGENCY RELAY
-        </span>
+        <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5 }}>{i18n.t('networkError.useEmergencyRelay')}</span>
       </button>
     </div>
   );
@@ -189,6 +182,7 @@ function RelayRow({
   detail: string;
   last: boolean;
 }) {
+  useTranslation(); // re-render on language change
   const c = state === 'down' ? t.danger : state === 'up' ? t.accent : t.warn;
   return (
     <div

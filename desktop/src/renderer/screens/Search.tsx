@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -67,14 +69,15 @@ function isFileMessage(body: string): boolean {
 }
 
 const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'messages', label: 'Messages' },
-  { id: 'files', label: 'Files' },
-  { id: 'people', label: 'People' },
-  { id: 'groups', label: 'Groups' },
+  { id: 'all', get label() { return i18n.t('profile.all'); } },
+  { id: 'messages', get label() { return i18n.t('common.messages'); } },
+  { id: 'files', get label() { return i18n.t('search.files'); } },
+  { id: 'people', get label() { return i18n.t('search.people'); } },
+  { id: 'groups', get label() { return i18n.t('groups.title'); } },
 ];
 
 export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupChat }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -140,7 +143,7 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       {/* Search bar */}
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 18, paddingRight: 18, paddingTop: 12, paddingBottom: 12 }}>
-        <button onClick={onBack} aria-label="Back" style={iconBtn}>
+        <button onClick={onBack} aria-label={i18n.t('common.back')} style={iconBtn}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8, backgroundColor: t.surface2, borderRadius: 99 }}>
@@ -148,12 +151,12 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search messages, people, files…"
+            placeholder={i18n.t('search.searchMessagesPeopleFiles')}
             autoFocus
             style={{ flex: 1, color: t.text, fontFamily: t.font, fontSize: 14, background: 'none', border: 'none', outline: 'none', padding: 0 }}
           />
           {q.length > 0 && (
-            <button onClick={() => setQ('')} aria-label="Clear search" style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 0 }}>
+            <button onClick={() => setQ('')} aria-label={i18n.t('contacts.clearSearch')} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 0 }}>
               <I.X size={14} color={t.textDim} />
             </button>
           )}
@@ -168,7 +171,7 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
             <button
               key={id}
               onClick={() => setFilter(id)}
-              aria-label={`Filter by ${label}`}
+              aria-label={i18n.t('search.filterByV0', { v0: label })}
               aria-pressed={active}
               style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 6, paddingBottom: 6, borderRadius: 99, backgroundColor: active ? t.accent : t.surface2, border: 'none', cursor: 'pointer', flexShrink: 0 }}
             >
@@ -246,7 +249,7 @@ function PersonRow({ t, contact, onPress, onChat }: { t: Theme; contact: StoredC
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onPress()}
-      aria-label={`View ${contact.name}`}
+      aria-label={i18n.t('search.viewV0', { v0: contact.name })}
       style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 18, paddingRight: 18, paddingTop: 11, paddingBottom: 11, backgroundColor: hovered ? t.surface : 'transparent', borderBottom: `1px solid ${t.divider}`, cursor: 'pointer' }}
     >
       <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={40} photoUri={contact.avatarImage ?? undefined} seed={contact.publicKeyB64 ?? contact.aegisId} />
@@ -254,7 +257,7 @@ function PersonRow({ t, contact, onPress, onChat }: { t: Theme; contact: StoredC
         <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contact.name}</span>
         <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, display: 'block', marginTop: 2, letterSpacing: 0.4 }}>{contact.aegisId}</span>
       </div>
-      <button onClick={(e) => { e.stopPropagation(); onChat(); }} aria-label={`Chat with ${contact.name}`} style={iconBtn}>
+      <button onClick={(e) => { e.stopPropagation(); onChat(); }} aria-label={i18n.t('contacts.chatWithV0', { v0: contact.name })} style={iconBtn}>
         <I.Chat size={18} color={t.accent} />
       </button>
     </div>
@@ -271,7 +274,7 @@ function GroupRow({ t, group, onPress }: { t: Theme; group: StoredGroup; onPress
       role="button"
       tabIndex={0}
       onKeyDown={(e) => e.key === 'Enter' && onPress()}
-      aria-label={`Open group ${group.name}`}
+      aria-label={i18n.t('search.openGroupV0', { v0: group.name })}
       style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 18, paddingRight: 18, paddingTop: 11, paddingBottom: 11, backgroundColor: hovered ? t.surface : 'transparent', borderBottom: `1px solid ${t.divider}`, cursor: 'pointer' }}
     >
       <Avatar t={t} name={group.avatarImage ?? group.name} color={group.avatarColor ?? t.accent} size={40} />
@@ -279,7 +282,7 @@ function GroupRow({ t, group, onPress }: { t: Theme; group: StoredGroup; onPress
         <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.name}</span>
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
           <I.Users size={10} color={t.accent} />
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.4 }}>{group.members.length} members</span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.4 }}>{i18n.t('search.membersCount', { v0: group.members.length })}</span>
         </div>
       </div>
       <I.Chevron size={14} color={t.textFaint} />
@@ -289,6 +292,7 @@ function GroupRow({ t, group, onPress }: { t: Theme; group: StoredGroup; onPress
 
 
 function FileRow({ t, result }: { t: Theme; result: { type: 'file'; chatId: string; chatName: string; name: string; size: string; from: string; time: string; ts: number } }) {
+  useTranslation(); // re-render on language change
   const [hovered, setHovered] = useState(false);
   return (
     <div
@@ -296,7 +300,7 @@ function FileRow({ t, result }: { t: Theme; result: { type: 'file'; chatId: stri
       onMouseLeave={() => setHovered(false)}
       role="button"
       tabIndex={0}
-      aria-label={`File ${result.name} from ${result.chatName}`}
+      aria-label={i18n.t('search.fileV0FromV1', { v0: result.name, v1: result.chatName })}
       style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 18, paddingRight: 18, paddingTop: 12, paddingBottom: 12, backgroundColor: hovered ? t.surface : 'transparent', borderBottom: `1px solid ${t.divider}`, cursor: 'pointer' }}
     >
       <div style={{ width: 40, height: 40, borderRadius: t.radiusS, backgroundColor: t.surface2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -313,22 +317,22 @@ function FileRow({ t, result }: { t: Theme; result: { type: 'file'; chatId: stri
 }
 
 function EmptySearch({ t }: { t: Theme }) {
+  useTranslation(); // re-render on language change
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 60 }}>
       <I.Search size={48} color={t.surface3} />
-      <span style={{ fontFamily: t.fontDisplay, fontSize: 20, fontWeight: '600', color: t.text, marginTop: 18, display: 'block', textAlign: 'center' }}>Search AegisLink</span>
-      <span style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, marginTop: 8, display: 'block', textAlign: 'center', maxWidth: 260 }}>
-        Search messages, contacts, groups, and files.
-      </span>
+      <span style={{ fontFamily: t.fontDisplay, fontSize: 20, fontWeight: '600', color: t.text, marginTop: 18, display: 'block', textAlign: 'center' }}>{i18n.t('search.emptyTitle')}</span>
+      <span style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, marginTop: 8, display: 'block', textAlign: 'center', maxWidth: 260 }}>{i18n.t('search.searchMessagesContactsGroups')}</span>
     </div>
   );
 }
 
 function NoResults({ t, query }: { t: Theme; query: string }) {
+  useTranslation(); // re-render on language change
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 60 }}>
       <I.Search size={40} color={t.surface3} />
-      <span style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '600', color: t.text, marginTop: 18, display: 'block', textAlign: 'center' }}>No results</span>
+      <span style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '600', color: t.text, marginTop: 18, display: 'block', textAlign: 'center' }}>{i18n.t('search.noResultsTitle')}</span>
       <span style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, marginTop: 6, display: 'block', textAlign: 'center', maxWidth: 260 }}>
         Nothing matches "{query}"
       </span>
@@ -346,6 +350,7 @@ function highlightQuery(text: string, query: string): { text: string; match: boo
 type MessageResult = { type: 'message'; chatId: string; chatName: string; chatColor?: string; chatAvatar?: string | null; text: string; time: string; ts: number };
 
 function MessageRowFixed({ t, result, query }: { t: Theme; result: MessageResult; query: string }) {
+  useTranslation(); // re-render on language change
   const [hovered, setHovered] = useState(false);
   const highlighted = highlightQuery(result.text, query);
   return (
@@ -354,7 +359,7 @@ function MessageRowFixed({ t, result, query }: { t: Theme; result: MessageResult
       onMouseLeave={() => setHovered(false)}
       role="button"
       tabIndex={0}
-      aria-label={`Message from ${result.chatName}`}
+      aria-label={i18n.t('search.messageFromV0', { v0: result.chatName })}
       style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingLeft: 18, paddingRight: 18, paddingTop: 12, paddingBottom: 12, backgroundColor: hovered ? t.surface : 'transparent', borderBottom: `1px solid ${t.divider}`, cursor: 'pointer' }}
     >
       <div style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: result.chatColor ?? t.surface2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>

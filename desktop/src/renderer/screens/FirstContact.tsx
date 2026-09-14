@@ -1,4 +1,6 @@
 import { useTheme } from '../theme/ThemeContext';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { I } from '../components/icons';
 import type { StoredContact } from '../db/local';
 
@@ -9,6 +11,7 @@ interface Props {
 }
 
 export function FirstContactScreen({ contact, onOpenChat, onAddAnother }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
 
   const initials = contact.name.trim()[0]?.toUpperCase() ?? '?';
@@ -52,9 +55,7 @@ export function FirstContactScreen({ contact, onOpenChat, onAddAnother }: Props)
           maxWidth: 280,
           display: 'block',
         }}
-      >
-        First contact verified
-      </span>
+      >{i18n.t('firstContact.verifiedTitle')}</span>
 
       {/* Contact card */}
       <div
@@ -111,7 +112,7 @@ export function FirstContactScreen({ contact, onOpenChat, onAddAnother }: Props)
               display: 'block',
             }}
           >
-            {`◆ KEY ${keyPart1}-${keyPart2} · VERIFIED`}
+            {i18n.t('firstContact.keyV0V1Verified', { v0: keyPart1, v1: keyPart2 })}
           </span>
         </div>
       </div>
@@ -127,14 +128,12 @@ export function FirstContactScreen({ contact, onOpenChat, onAddAnother }: Props)
           marginBottom: 'auto',
           display: 'block',
         }}
-      >
-        Their key fingerprints match. What is sent in this chat will only be decrypted by the owner of that key — neither AegisLink nor anyone else.
-      </span>
+      >{i18n.t('firstContact.verifiedDesc')}</span>
 
       <div style={{ width: '100%', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 10, marginTop: 24 }}>
         <button
           onClick={onOpenChat}
-          aria-label="Open chat"
+          aria-label={i18n.t('firstContact.openChat')}
           style={{
             width: '100%',
             padding: '14px 0',
@@ -147,12 +146,10 @@ export function FirstContactScreen({ contact, onOpenChat, onAddAnother }: Props)
             fontSize: 14,
             color: t.accentInk,
           }}
-        >
-          Open chat
-        </button>
+        >{i18n.t('firstContact.openChat')}</button>
         <button
           onClick={onAddAnother}
-          aria-label="Add another contact"
+          aria-label={i18n.t('firstContact.addAnother')}
           style={{
             width: '100%',
             padding: '13px 0',
@@ -165,9 +162,7 @@ export function FirstContactScreen({ contact, onOpenChat, onAddAnother }: Props)
             fontSize: 14,
             color: t.text,
           }}
-        >
-          Add another contact
-        </button>
+        >{i18n.t('firstContact.addAnother')}</button>
       </div>
     </div>
   );

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -12,15 +14,16 @@ interface Props {
 }
 
 const DELAYS = [
-  { label: '5 sec (test)', sec: 5 },
-  { label: '15 sec', sec: 15 },
-  { label: '1 minute', sec: 60 },
-  { label: '5 minutes', sec: 300 },
-  { label: '1 hour', sec: 3600 },
-  { label: '1 day', sec: 86400 },
+  { get label() { return i18n.t('scheduled.5SecTest'); }, sec: 5 },
+  { get label() { return i18n.t('scheduled.15Sec'); }, sec: 15 },
+  { get label() { return i18n.t('scheduled.delay1m'); }, sec: 60 },
+  { get label() { return i18n.t('scheduled.delay5m'); }, sec: 300 },
+  { get label() { return i18n.t('scheduled.delay1h'); }, sec: 3600 },
+  { get label() { return i18n.t('scheduled.delay1d'); }, sec: 86400 },
 ];
 
 export function ScheduledScreen({ onBack, contactId }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const { contacts } = useContacts();
   const [items, setItems] = useState<ScheduledItem[]>([]);
@@ -47,9 +50,9 @@ export function ScheduledScreen({ onBack, contactId }: Props) {
   }, []);
 
   function handleAddScheduled() {
-    if (!bodyText.trim()) { window.alert('Message cannot be empty.'); return; }
+    if (!bodyText.trim()) { window.alert(i18n.t('scheduled.messageCannotBeEmpty')); return; }
     const dest = contacts.find((c) => c.aegisId === targetId);
-    if (!dest) { window.alert('Select a recipient.'); return; }
+    if (!dest) { window.alert(i18n.t('scheduled.selectARecipient')); return; }
     const newItem: ScheduledItem = {
       id: Math.random().toString(36).substr(2, 9),
       toContactId: dest.aegisId,
@@ -62,7 +65,7 @@ export function ScheduledScreen({ onBack, contactId }: Props) {
     persist(next);
     setBodyText('');
     setIsScheduling(false);
-    window.alert(`Scheduled to ${dest.name} in ${delay}s.`);
+    window.alert(i18n.t('scheduled.scheduledToV0In', { v0: dest.name, v1: delay }));
   }
 
   const overlayStyle: CSSProperties = {
@@ -85,26 +88,24 @@ export function ScheduledScreen({ onBack, contactId }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Scheduled messages" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('scheduled.title')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } right={
-        <button onClick={() => setIsScheduling(true)} aria-label="Schedule message" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+        <button onClick={() => setIsScheduling(true)} aria-label={i18n.t('scheduled.schedule')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.Plus size={22} color={t.accent} />
         </button>
       } />
 
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 22 }}>
         <div style={{ margin: '12px 18px 14px', padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius }}>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>
-            Scheduled messages are encrypted before leaving the device and sent at the chosen time.
-          </span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>{i18n.t('scheduled.scheduledMessagesAreEncrypted')}</span>
         </div>
 
         {items.length === 0 ? (
           <div style={{ padding: 36, textAlign: 'center' }}>
-            <span style={{ fontFamily: t.font, fontSize: 14, color: t.textFaint }}>No scheduled messages</span>
+            <span style={{ fontFamily: t.font, fontSize: 14, color: t.textFaint }}>{i18n.t('scheduled.empty')}</span>
           </div>
         ) : items.map((it) => {
           const secsLeft = Math.max(0, Math.ceil((it.sendAt - now) / 1000));
@@ -123,9 +124,7 @@ export function ScheduledScreen({ onBack, contactId }: Props) {
                   </span>
                 </div>
                 <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '18px', display: 'block' }}>{it.text}</span>
-                <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, marginTop: 4, letterSpacing: 0.5, display: 'block' }}>
-                  E2EE · QUEUED
-                </span>
+                <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, marginTop: 4, letterSpacing: 0.5, display: 'block' }}>{i18n.t('scheduled.e2eeQueued')}</span>
               </div>
             </div>
           );
@@ -135,20 +134,16 @@ export function ScheduledScreen({ onBack, contactId }: Props) {
           <button
             onClick={() => setIsScheduling(true)}
             style={{ width: '100%', padding: '13px 0', backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, borderRadius: t.radius, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}
-          >
-            + Schedule message
-          </button>
+          >{i18n.t('scheduled.scheduleMessage')}</button>
         </div>
       </div>
 
       {isScheduling && (
         <div style={overlayStyle}>
           <div style={modalStyle}>
-            <span style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '700', color: t.text, display: 'block', marginBottom: 16 }}>
-              Schedule message
-            </span>
+            <span style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '700', color: t.text, display: 'block', marginBottom: 16 }}>{i18n.t('scheduled.schedule')}</span>
 
-            <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block', marginBottom: 6 }}>Recipient</span>
+            <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block', marginBottom: 6 }}>{i18n.t('scheduled.recipient')}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
               {contacts.map((c) => {
                 const sel = targetId === c.aegisId;
@@ -162,19 +157,19 @@ export function ScheduledScreen({ onBack, contactId }: Props) {
                   </button>
                 );
               })}
-              {contacts.length === 0 && <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>No contacts yet</span>}
+              {contacts.length === 0 && <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>{i18n.t('contacts.emptyTitle')}</span>}
             </div>
 
-            <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block', marginBottom: 6 }}>Message</span>
+            <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block', marginBottom: 6 }}>{i18n.t('contactDetail.message')}</span>
             <textarea
               value={bodyText}
               onChange={(e) => setBodyText(e.target.value)}
-              placeholder="Type your message…"
+              placeholder={i18n.t('scheduled.typeYourMessage')}
               rows={3}
               style={{ ...inputStyle, resize: 'vertical', marginBottom: 16 }}
             />
 
-            <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block', marginBottom: 6 }}>Send in</span>
+            <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block', marginBottom: 6 }}>{i18n.t('scheduled.sendIn')}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 22 }}>
               {DELAYS.map((d) => {
                 const sel = delay === d.sec;
@@ -194,15 +189,11 @@ export function ScheduledScreen({ onBack, contactId }: Props) {
               <button
                 onClick={handleAddScheduled}
                 style={{ flex: 1, padding: '12px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', color: t.accentInk }}
-              >
-                Schedule
-              </button>
+              >{i18n.t('scheduled.schedule2')}</button>
               <button
                 onClick={() => { setIsScheduling(false); setBodyText(''); }}
                 style={{ flex: 1, padding: '12px 0', backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '500', color: t.text }}
-              >
-                Cancel
-              </button>
+              >{i18n.t('common.cancel')}</button>
             </div>
           </div>
         </div>

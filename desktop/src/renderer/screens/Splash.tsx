@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { AegisMark } from '../components/AegisMark';
@@ -11,6 +13,7 @@ interface Props {
 export function SplashScreen({ onDone }: Props) {
   const { t } = useTheme();
   const doneRef = useRef(false);
+  useTranslation(); // re-render on language change
   const tor = useTor((s) => s.status);
   const initTor = useTor((s) => s.init);
   useEffect(() => { initTor(); }, [initTor]);
@@ -99,9 +102,7 @@ export function SplashScreen({ onDone }: Props) {
             letterSpacing: -0.8,
             color: t.text,
           }}
-        >
-          AegisLink
-        </span>
+        >{i18n.t('onboarding.aegislink')}</span>
       </div>
 
       {/* Tagline */}
@@ -113,19 +114,17 @@ export function SplashScreen({ onDone }: Props) {
             color: t.textDim,
             letterSpacing: 2,
           }}
-        >
-          SECURE · ANONYMOUS · ON-DEVICE
-        </span>
+        >{i18n.t('onboarding.secureAnonymousOnDevice')}</span>
       </div>
 
       {/* Tor bootstrap — always-on, so the user sees why the first seconds take longer */}
       <div className="splash-tagline" style={{ marginTop: 28, minHeight: 16 }}>
         <span style={{ fontFamily: t.fontMono, fontSize: 11, color: tor.state === 'error' ? t.danger : t.textDim }}>
           {tor.state === 'on'
-            ? 'TOR CIRCUIT READY'
+            ? i18n.t('tor.splashReady')
             : tor.state === 'error'
-              ? `TOR ERROR · ${tor.summary}`
-              : `CONNECTING THROUGH TOR · ${tor.progress}%`}
+              ? i18n.t('tor.splashError', { v0: tor.summary })
+              : i18n.t('tor.splashConnecting', { v0: tor.progress })}
         </span>
       </div>
     </div>

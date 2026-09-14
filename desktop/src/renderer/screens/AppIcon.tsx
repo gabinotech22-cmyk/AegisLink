@@ -1,4 +1,6 @@
 import { useTheme } from '../theme/ThemeContext';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 
@@ -7,17 +9,18 @@ interface Props {
 }
 
 export function AppIconScreen({ onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       <TopBar
         t={t}
-        title="App icon"
+        title={i18n.t('appIcon.title')}
         left={
           <button
             onClick={onBack}
-            aria-label="Go back"
+            aria-label={i18n.t('distLists.backA11y')}
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
           >
             <I.ChevronL size={22} color={t.textDim} />
@@ -60,9 +63,7 @@ export function AppIconScreen({ onBack }: Props) {
             color: t.text,
             textAlign: 'center',
           }}
-        >
-          App icon customization
-        </span>
+        >{i18n.t('appIcon.appIconCustomization')}</span>
 
         <div
           style={{
@@ -84,9 +85,7 @@ export function AppIconScreen({ onBack }: Props) {
               display: 'block',
               marginBottom: 8,
             }}
-          >
-            MOBILE ONLY
-          </span>
+          >{i18n.t('appIcon.mobileOnly')}</span>
           <span
             style={{
               fontFamily: t.font,
@@ -95,9 +94,7 @@ export function AppIconScreen({ onBack }: Props) {
               lineHeight: '20px',
               display: 'block',
             }}
-          >
-            App icon customization is only available on mobile. Open AegisLink on your iOS or Android device to change the app icon.
-          </span>
+          >{i18n.t('appIcon.appIconCustomizationIs')}</span>
         </div>
       </div>
     </div>

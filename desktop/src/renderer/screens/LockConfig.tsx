@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
@@ -17,6 +19,7 @@ interface Props {
 const TIMEOUT_OPTIONS = [0, 1, 5, 15, 60];
 
 function PinDots({ count, t }: { count: number; t: Theme }) {
+  useTranslation(); // re-render on language change
   return (
     <div style={{ display: 'flex', flexDirection: 'row', gap: 16, justifyContent: 'center', marginTop: 28, marginBottom: 28 }}>
       {[0, 1, 2, 3].map((i) => (
@@ -66,6 +69,7 @@ function Numpad({ onDigit, onDelete, t }: { onDigit: (d: string) => void; onDele
 }
 
 export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   // Persisted lock prefs live in the preferences store (App.tsx reads them to
   // drive cold-lock + inactivity timeout). The PIN hash itself lives in the
@@ -126,7 +130,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
       setPinEntry('');
     } else {
       if (pin !== firstPin) {
-        setPinError('PINs do not match. Try again.');
+        setPinError(i18n.t('lockConfig.pinMismatch'));
         shake();
         setPinEntry('');
         setPinStep('enter');
@@ -150,7 +154,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
             }
             setShowPinModal(false);
           } catch {
-            setPinError('Could not save PIN. Try again.');
+            setPinError(i18n.t('lockConfig.couldNotSavePin'));
             shake();
             setPinEntry('');
             setPinStep('enter');
@@ -182,7 +186,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   }
 
   function handleClearPin() {
-    if (window.confirm('Delete PIN? App lock will be disabled.')) {
+    if (window.confirm(i18n.t('lockConfig.deletePinAppLock'))) {
       void (async () => {
         // Unwrap the DB key first (revert to DPAPI-only) so no cold lock remains.
         await window.aegis.db.disablePinWrap().catch(() => {});
@@ -211,23 +215,23 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
         }
       `}</style>
 
-      <TopBar t={t} title="App Lock" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('lockConfig.titleBar')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
 
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 32 }}>
-        <Section t={t} label="ACCESS PROTECTION">
-          <Toggle t={t} label="App lock" sub={appLockEnabled ? 'Active · Authentication required to open' : 'Disabled'} value={appLockEnabled} onChange={handleToggleAppLock} />
+        <Section t={t} label={i18n.t('lockConfig.accessProtection')}>
+          <Toggle t={t} label={i18n.t('lockConfig.appLock')} sub={appLockEnabled ? i18n.t('lockConfig.appLockActive') : i18n.t('lockConfig.appLockDisabled')} value={appLockEnabled} onChange={handleToggleAppLock} />
 
           {appLockEnabled && (
             <>
-              <Toggle t={t} label="Face ID / Fingerprint" sub="Use biometrics as primary method" value={biometricsEnabled} onChange={(v) => void setPref('biometricsEnabled', v)} />
+              <Toggle t={t} label={i18n.t('lockSetup.faceIdHuella')} sub={i18n.t('lockConfig.useBiometricsAsPrimary')} value={biometricsEnabled} onChange={(v) => void setPref('biometricsEnabled', v)} />
 
               <button
                 onClick={() => setShowTimeout((v) => !v)}
-                aria-label="Inactivity timeout"
+                aria-label={i18n.t('lockConfig.inactivityTime')}
                 style={{
                   display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                   paddingLeft: 16, paddingRight: 16, paddingTop: 13, paddingBottom: 13,
@@ -235,7 +239,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
                   width: '100%', cursor: 'pointer', border: 'none', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: t.divider, boxSizing: 'border-box',
                 }}
               >
-                <span style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>Inactivity timeout</span>
+                <span style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>{i18n.t('lockConfig.inactivityTime')}</span>
                 <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent }}>{getTimeoutLabel(lockTimeoutMin)}</span>
                   <I.ChevronD size={14} color={t.textFaint} />
@@ -266,7 +270,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
 
               <button
                 onClick={() => openPinModal(false)}
-                aria-label={pinStored ? 'Change PIN' : 'Set PIN'}
+                aria-label={pinStored ? i18n.t('lockConfig.changePin') : i18n.t('lockConfig.setPin')}
                 style={{
                   display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                   paddingLeft: 16, paddingRight: 16, paddingTop: 13, paddingBottom: 13,
@@ -274,43 +278,43 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
                   width: '100%', cursor: 'pointer', border: 'none', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: t.divider, boxSizing: 'border-box',
                 }}
               >
-                <span style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>{pinStored ? 'Change PIN' : 'Set PIN'}</span>
+                <span style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>{pinStored ? i18n.t('lockConfig.changePin') : i18n.t('lockConfig.setPin')}</span>
                 <I.Chevron size={16} color={t.textFaint} />
               </button>
 
               {pinStored && (
                 <button
                   onClick={handleClearPin}
-                  aria-label="Delete PIN"
+                  aria-label={i18n.t('lockConfig.deletePin')}
                   style={{
                     display: 'block', textAlign: 'left', paddingLeft: 16, paddingRight: 16, paddingTop: 13, paddingBottom: 13,
                     backgroundColor: 'transparent', borderBottom: `1px solid ${t.divider}`,
                     width: '100%', cursor: 'pointer', border: 'none', borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: t.divider, boxSizing: 'border-box',
                   }}
                 >
-                  <span style={{ fontFamily: t.font, fontSize: 14, color: '#ef4444' }}>Delete PIN</span>
+                  <span style={{ fontFamily: t.font, fontSize: 14, color: '#ef4444' }}>{i18n.t('lockConfig.deletePin')}</span>
                 </button>
               )}
 
               <button
                 onClick={onLockTest}
-                aria-label="Lock now test"
+                aria-label={i18n.t('lockConfig.lockNowTest2')}
                 style={{
                   display: 'block', textAlign: 'left', paddingLeft: 16, paddingRight: 16, paddingTop: 13, paddingBottom: 13,
                   backgroundColor: 'transparent', width: '100%', cursor: 'pointer', border: 'none', boxSizing: 'border-box',
                 }}
               >
-                <span style={{ fontFamily: t.font, fontSize: 14, color: t.accent }}>Lock now (Test) ▸</span>
+                <span style={{ fontFamily: t.font, fontSize: 14, color: t.accent }}>{i18n.t('lockConfig.lockNowTest')}</span>
               </button>
             </>
           )}
         </Section>
 
         {onLockSettings && (
-          <Section t={t} label="ADVANCED">
+          <Section t={t} label={i18n.t('lockConfig.advanced')}>
             <button
               onClick={onLockSettings}
-              aria-label="Lock Settings"
+              aria-label={i18n.t('lockConfig.lockSettings')}
               style={{
                 display: 'flex', flexDirection: 'row', alignItems: 'center',
                 paddingLeft: 16, paddingRight: 16, paddingTop: 13, paddingBottom: 13,
@@ -318,20 +322,18 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
               }}
             >
               <I.Settings size={16} color={t.textDim} />
-              <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, marginLeft: 10, flex: 1, textAlign: 'left' }}>Lock Settings</span>
+              <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, marginLeft: 10, flex: 1, textAlign: 'left' }}>{i18n.t('lockConfig.lockSettings')}</span>
               <I.Chevron size={14} color={t.textFaint} />
             </button>
           </Section>
         )}
 
-        <Section t={t} label="SCREEN PRIVACY">
-          <Toggle t={t} label="Hide in recents" sub="Screen goes black when switching apps" value={hideRecents} onChange={(v) => void setPref('hideRecents', v)} noBorder />
+        <Section t={t} label={i18n.t('lockConfig.screenPrivacy')}>
+          <Toggle t={t} label={i18n.t('lockConfig.hideRecents')} sub={i18n.t('lockConfig.screenGoesBlackWhen')} value={hideRecents} onChange={(v) => void setPref('hideRecents', v)} noBorder />
         </Section>
 
         <div style={{ paddingLeft: 18, paddingRight: 18, marginTop: 10 }}>
-          <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '18px', display: 'block' }}>
-            AegisLink has no access to your biometric data. They are processed locally. The PIN never leaves the device.
-          </span>
+          <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '18px', display: 'block' }}>{i18n.t('lockConfig.aegislinkHasNoAccess')}</span>
         </div>
       </div>
 
@@ -346,18 +348,18 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
             boxSizing: 'border-box',
           }}>
             <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <button onClick={() => { setShowPinModal(false); pendingEnable.current = false; }} aria-label="Cancel" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
-                <span style={{ fontFamily: t.font, fontSize: 15, color: t.accent }}>Cancel</span>
+              <button onClick={() => { setShowPinModal(false); pendingEnable.current = false; }} aria-label={i18n.t('common.cancel')} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <span style={{ fontFamily: t.font, fontSize: 15, color: t.accent }}>{i18n.t('common.cancel')}</span>
               </button>
               <span style={{ fontFamily: t.font, fontSize: 16, fontWeight: '600', color: t.text }}>
-                {pinStored ? 'Change PIN' : 'Set PIN'}
+                {pinStored ? i18n.t('lockConfig.changePin') : i18n.t('lockConfig.setPin')}
               </span>
               <div style={{ width: 60 }} />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <span style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, marginBottom: 4 }}>
-                {pinStep === 'enter' ? 'Enter a 4-digit PIN' : 'Confirm your PIN'}
+                {pinStep === 'enter' ? i18n.t('lockConfig.enterA4Digit') : i18n.t('lockConfig.confirmPinPrompt')}
               </span>
 
               <div style={{ animation: shakeModal ? 'aegis-shake-modal 0.4s ease' : 'none', width: '100%', display: 'flex', justifyContent: 'center' }}>

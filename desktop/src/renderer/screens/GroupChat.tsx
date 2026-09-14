@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -77,6 +79,7 @@ interface Props {
 }
 
 export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onGroupPosts }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const identity = useIdentity((s) => s.identity);
   const myAegisId = identity?.aegisId;
@@ -173,12 +176,12 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onGroupP
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       {/* Header */}
       <div style={{ height: 56, display: 'flex', flexDirection: 'row', alignItems: 'center', paddingLeft: 12, paddingRight: 12, borderBottom: `1px solid ${t.divider}`, gap: 8, flexShrink: 0 }}>
-        <button onClick={onBack} aria-label="Back" style={iconBtn}>
+        <button onClick={onBack} aria-label={i18n.t('common.back')} style={iconBtn}>
           <I.ChevronL size={22} color={t.text} />
         </button>
         <button
           onClick={onGroupDetail}
-          aria-label={`View group ${group.name}`}
+          aria-label={i18n.t('groupChat.viewGroupV0', { v0: group.name })}
           style={{ flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0, background: 'none', border: 'none', cursor: onGroupDetail ? 'pointer' : 'default', padding: 0, textAlign: 'left' }}
         >
           <Avatar t={t} name={group.avatarImage ?? group.name} color={group.avatarColor ?? t.accent} size={36} />
@@ -195,18 +198,18 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onGroupP
           </div>
         </button>
         {onPoll && (
-          <button onClick={onPoll} aria-label="Create poll" style={iconBtn}>
+          <button onClick={onPoll} aria-label={i18n.t('poll.title')} style={iconBtn}>
             <I.Poll size={20} color={t.textDim} />
           </button>
         )}
         {/* Announcements — visible only to owner and moderators */}
         {onGroupPosts && (group.adminId === myAegisId || group.moderators?.includes(myAegisId ?? '')) && (
-          <button onClick={onGroupPosts} aria-label="Schedule group announcement" style={iconBtn}>
+          <button onClick={onGroupPosts} aria-label={i18n.t('groupChat.scheduleGroupAnnouncement')} style={iconBtn}>
             <I.Broadcast size={20} color={t.textDim} />
           </button>
         )}
         {onGroupDetail && (
-          <button onClick={onGroupDetail} aria-label="Group info" style={iconBtn}>
+          <button onClick={onGroupDetail} aria-label={i18n.t('groupChat.groupInfo')} style={iconBtn}>
             <I.More size={20} color={t.textDim} />
           </button>
         )}
@@ -216,7 +219,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onGroupP
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', paddingLeft: 14, paddingRight: 14, paddingTop: 12, paddingBottom: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {list.length === 0 && (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontFamily: t.font, fontSize: 14, color: t.textFaint }}>No messages yet</span>
+            <span style={{ fontFamily: t.font, fontSize: 14, color: t.textFaint }}>{i18n.t('home.noMessages')}</span>
           </div>
         )}
         {list.map((item) => (
@@ -242,7 +245,7 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onGroupP
             <button
               key={id}
               onClick={() => insertMention(name)}
-              aria-label={`Mention ${name}`}
+              aria-label={i18n.t('groupChat.mentionV0', { v0: name })}
               style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 16, paddingRight: 16, paddingTop: 10, paddingBottom: 10, backgroundColor: 'transparent', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left' }}
             >
               <Avatar t={t} name={name} color={colorFromId(id)} size={28} />
@@ -264,13 +267,13 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onGroupP
           value={draft}
           onChange={handleDraftChange}
           onKeyDown={handleKeyDown}
-          placeholder="Group message…"
+          placeholder={i18n.t('groupChat.messagePlaceholder')}
           style={{ flex: 1, border: `1px solid ${t.border}`, borderRadius: 22, paddingLeft: 16, paddingRight: 16, paddingTop: 8, paddingBottom: 8, fontSize: 15, color: t.text, backgroundColor: t.surface2, fontFamily: t.font, outline: 'none', maxHeight: 100 }}
         />
         <button
           onClick={() => void handleSend()}
           disabled={!draft.trim() || sending}
-          aria-label="Send group message"
+          aria-label={i18n.t('groupChat.sendGroupMessage')}
           style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: draft.trim() && online ? t.accent : t.surface2, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: !draft.trim() || sending ? 'not-allowed' : 'pointer', flexShrink: 0 }}
         >
           <I.Send size={18} color={draft.trim() && online ? t.accentInk : t.textDim} />
@@ -297,6 +300,7 @@ interface GroupBubbleProps {
 }
 
 function GroupBubble({ t, m, myAegisId, memberNames, adminId, moderators, onContextMenu, pollResult, onVote }: GroupBubbleProps) {
+  useTranslation(); // re-render on language change
   const me = m.direction === 'out';
   const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const reactions = m.reactions ? Object.entries(m.reactions).filter(([, ids]) => ids.length > 0) : [];
@@ -319,8 +323,8 @@ function GroupBubble({ t, m, myAegisId, memberNames, adminId, moderators, onCont
     return (
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
         <span style={{ fontFamily: t.fontMono, fontSize: 10, color: senderColor }}>{sender}</span>
-        {senderIsAdmin && <div style={{ backgroundColor: `${t.accent}22`, paddingLeft: 4, paddingRight: 4, paddingTop: 1, paddingBottom: 1, borderRadius: 3 }}><span style={{ fontFamily: t.fontMono, fontSize: 8, color: t.accent }}>ADMIN</span></div>}
-        {senderIsMod && <div style={{ backgroundColor: `${t.warn}22`, paddingLeft: 4, paddingRight: 4, paddingTop: 1, paddingBottom: 1, borderRadius: 3 }}><span style={{ fontFamily: t.fontMono, fontSize: 8, color: t.warn }}>MOD</span></div>}
+        {senderIsAdmin && <div style={{ backgroundColor: `${t.accent}22`, paddingLeft: 4, paddingRight: 4, paddingTop: 1, paddingBottom: 1, borderRadius: 3 }}><span style={{ fontFamily: t.fontMono, fontSize: 8, color: t.accent }}>{i18n.t('groupAdmin.roleAdmin')}</span></div>}
+        {senderIsMod && <div style={{ backgroundColor: `${t.warn}22`, paddingLeft: 4, paddingRight: 4, paddingTop: 1, paddingBottom: 1, borderRadius: 3 }}><span style={{ fontFamily: t.fontMono, fontSize: 8, color: t.warn }}>{i18n.t('groupChat.modBadge')}</span></div>}
       </div>
     );
   }
@@ -331,7 +335,7 @@ function GroupBubble({ t, m, myAegisId, memberNames, adminId, moderators, onCont
         <SenderLabel />
         <div style={{ backgroundColor: t.surface2, paddingLeft: 13, paddingRight: 13, paddingTop: 8, paddingBottom: 8, borderRadius: t.radius, display: 'flex', alignItems: 'center', gap: 6 }}>
           <I.Trash size={13} color={t.textFaint} />
-          <span style={{ color: t.textFaint, fontFamily: t.font, fontSize: 13, fontStyle: 'italic' }}>Deleted message</span>
+          <span style={{ color: t.textFaint, fontFamily: t.font, fontSize: 13, fontStyle: 'italic' }}>{i18n.t('groupChat.deletedMessage')}</span>
         </div>
         <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, marginTop: 3, paddingLeft: 4, paddingRight: 4 }}>{time}</span>
       </div>
@@ -361,18 +365,12 @@ function GroupBubble({ t, m, myAegisId, memberNames, adminId, moderators, onCont
         >
           <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <I.Broadcast size={12} color={t.accent} />
-            <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.6 }}>
-              ANNOUNCEMENT
-            </span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 0.6 }}>{i18n.t('groupPosts.announceChip')}</span>
             {post.pinned && (
-              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.warn, letterSpacing: 0.4 }}>
-                · PINNED
-              </span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.warn, letterSpacing: 0.4 }}>{i18n.t('groupChat.pinned')}</span>
             )}
             {post.repliesOff && (
-              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, letterSpacing: 0.4 }}>
-                · READ-ONLY
-              </span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, letterSpacing: 0.4 }}>{i18n.t('groupChat.readOnly')}</span>
             )}
           </div>
           {m.mediaUri && m.type === 'image' && (
@@ -412,7 +410,7 @@ function GroupBubble({ t, m, myAegisId, memberNames, adminId, moderators, onCont
                 <button
                   key={idx}
                   onClick={() => onVote(idx)}
-                  aria-label={`Vote for ${opt}`}
+                  aria-label={i18n.t('groupChat.voteForV0', { v0: opt })}
                   style={{ position: 'relative', height: 38, borderRadius: 6, border: `1px solid ${selected ? t.accent : t.border}`, display: 'flex', alignItems: 'center', paddingLeft: 12, paddingRight: 12, overflow: 'hidden', cursor: 'pointer', backgroundColor: 'transparent' }}
                 >
                   <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: `${pct * 100}%`, backgroundColor: selected ? `${t.accent}28` : `${t.text}0d`, borderRadius: 6 }} />
@@ -423,7 +421,7 @@ function GroupBubble({ t, m, myAegisId, memberNames, adminId, moderators, onCont
             })}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, paddingTop: 8, borderTop: `1px solid ${me ? 'rgba(255,255,255,0.15)' : t.divider}` }}>
-            <span style={{ fontFamily: t.fontMono, fontSize: 9.5, color: me ? t.bubbleOutText : t.textDim }}>Anonymous Poll · {totalVotes} votes</span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 9.5, color: me ? t.bubbleOutText : t.textDim }}>{i18n.t('groupChat.anonymousPollVotes', { v0: totalVotes })}</span>
             <span style={{ fontFamily: t.fontMono, fontSize: 9.5, color: me ? t.bubbleOutText : t.textDim }}>{time}</span>
           </div>
         </div>
@@ -438,7 +436,7 @@ function GroupBubble({ t, m, myAegisId, memberNames, adminId, moderators, onCont
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: me ? 'flex-end' : 'flex-start' }}>
         <SenderLabel />
         <div onContextMenu={(e) => { e.preventDefault(); onContextMenu(); }} style={{ borderRadius: t.radius, overflow: 'hidden', cursor: 'context-menu' }}>
-          <img src={m.mediaUri} alt="group image" style={{ width: 200, height: 150, objectFit: 'cover', display: 'block', backgroundColor: t.surface2 }} />
+          <img src={m.mediaUri} alt={i18n.t('groupChat.groupImage')} style={{ width: 200, height: 150, objectFit: 'cover', display: 'block', backgroundColor: t.surface2 }} />
         </div>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, alignSelf: me ? 'flex-end' : 'flex-start', marginTop: 3, paddingLeft: 4, paddingRight: 4 }}>{time}</span>
@@ -479,6 +477,7 @@ function GroupBubble({ t, m, myAegisId, memberNames, adminId, moderators, onCont
 }
 
 function GroupAudioBubble({ t, m, me, time }: { t: Theme; m: StoredMessage; me: boolean; time: string }) {
+  useTranslation(); // re-render on language change
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -514,7 +513,7 @@ function GroupAudioBubble({ t, m, me, time }: { t: Theme; m: StoredMessage; me: 
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, width: 230, backgroundColor: me ? t.bubbleOut : t.bubbleIn, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderRadius: t.radius }}>
         <button
           onClick={togglePlay}
-          aria-label={playing ? 'Pause' : 'Play'}
+          aria-label={playing ? i18n.t('groupChat.pause') : i18n.t('groupChat.play')}
           style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: me ? 'rgba(255,255,255,0.2)' : t.surface3, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', flexShrink: 0 }}
         >
           {playing
@@ -538,6 +537,7 @@ function GroupAudioBubble({ t, m, me, time }: { t: Theme; m: StoredMessage; me: 
 }
 
 function ReactionPills({ t, reactions, me }: { t: Theme; reactions: [string, string[]][]; me: boolean }) {
+  useTranslation(); // re-render on language change
   if (reactions.length === 0) return null;
   return (
     <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4, justifyContent: me ? 'flex-end' : 'flex-start' }}>

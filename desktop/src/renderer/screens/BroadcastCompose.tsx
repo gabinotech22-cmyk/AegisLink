@@ -8,6 +8,8 @@
  */
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
@@ -26,6 +28,7 @@ interface Props {
 type SendState = 'idle' | 'sending' | 'done';
 
 export function BroadcastComposeScreen({ list, onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const { identity } = useIdentity();
   const contacts = useContacts((s) => s.contacts);
@@ -42,11 +45,11 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
   async function handleSend() {
     const body = text.trim();
     if (!body) {
-      setErrorMsg('Type a message before sending.');
+      setErrorMsg(i18n.t('broadcast.emptyDesc'));
       return;
     }
     if (!identity) {
-      setErrorMsg('Identity not loaded. Please wait.');
+      setErrorMsg(i18n.t('broadcast.notReadyDesc'));
       return;
     }
     setErrorMsg(null);
@@ -97,7 +100,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
         t={t}
         title={list.name}
         left={
-          <button onClick={onBack} aria-label="Go back" style={iconBtn}>
+          <button onClick={onBack} aria-label={i18n.t('broadcast.backA11y')} style={iconBtn}>
             <I.ChevronL size={22} color={t.textDim} />
           </button>
         }
@@ -123,7 +126,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
               {list.name}
             </span>
             <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, marginTop: 2, display: 'block' }}>
-              {total} {total === 1 ? 'RECIPIENT' : 'RECIPIENTS'} · INDIVIDUAL MESSAGES
+              {total} {total === 1 ? i18n.t('broadcast.recipient') : i18n.t('broadcast.recipients')} · INDIVIDUAL MESSAGES
             </span>
           </div>
         </div>
@@ -137,9 +140,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
             borderRadius: t.radiusS,
           }}
         >
-          <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '18px' }}>
-            Each recipient receives a separate encrypted message. Recipients cannot see each other.
-          </span>
+          <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '18px' }}>{i18n.t('broadcast.eachRecipientReceivesA')}</span>
         </div>
 
         {/* Message input */}
@@ -155,9 +156,9 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Write your broadcast message…"
+            placeholder={i18n.t('broadcast.placeholder')}
             disabled={sendState !== 'idle'}
-            aria-label="Broadcast message"
+            aria-label={i18n.t('broadcast.messageA11y')}
             style={{
               fontFamily: t.font,
               fontSize: 15,
@@ -242,9 +243,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
                 : `Sent to ${sentCount}/${total} (${failCount} failed)`}
             </span>
             {failCount > 0 && (
-              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '18px' }}>
-                Failed recipients may be offline. Try again later.
-              </span>
+              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '18px' }}>{i18n.t('broadcast.failedRecipientsMayBe')}</span>
             )}
           </div>
         )}
@@ -254,7 +253,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
           <button
             onClick={() => void handleSend()}
             disabled={sendState === 'sending' || !text.trim()}
-            aria-label={`Send to ${total} members`}
+            aria-label={i18n.t('broadcast.sendToV0Members', { v0: total })}
             style={{
               padding: '14px 0',
               backgroundColor:
@@ -275,7 +274,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
         ) : (
           <button
             onClick={onBack}
-            aria-label="Done, go back"
+            aria-label={i18n.t('broadcast.doneA11y')}
             style={{
               padding: '14px 0',
               backgroundColor: t.surface,
@@ -287,9 +286,7 @@ export function BroadcastComposeScreen({ list, onBack }: Props) {
               fontWeight: '600',
               color: t.text,
             }}
-          >
-            Done
-          </button>
+          >{i18n.t('broadcast.done')}</button>
         )}
       </div>
     </div>

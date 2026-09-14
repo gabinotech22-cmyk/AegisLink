@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { decodeBase64 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
@@ -15,13 +17,7 @@ interface Props {
   onReject: () => void;
 }
 
-const QUICK_REPLIES = [
-  'Cannot talk now',
-  'Call you in 5 minutes',
-  'What do you need?',
-  'I am in a meeting',
-  'Write to me instead',
-];
+const QUICK_REPLY_KEYS = ['incomingCall.quickReply1', 'incomingCall.quickReply2', 'incomingCall.quickReply3', 'incomingCall.quickReply4', 'incomingCall.quickReply5'];
 
 function ActionBtn({ t, color, icon, label, onPress, small, rotate }: {
   t: Theme; color: string; icon: React.ReactNode; label: string;
@@ -50,6 +46,7 @@ function ActionBtn({ t, color, icon, label, onPress, small, rotate }: {
 }
 
 export function IncomingCallScreen({ onAccept, onReject }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const peerId = useCall((s) => s.peer);
   const media = useCall((s) => s.media);
@@ -81,9 +78,7 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
         {/* E2EE badge */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', backgroundColor: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 99 }}>
           <div style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: t.accent }} />
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.1 }}>
-            E2EE CALL · ENCRYPTED
-          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.1 }}>{i18n.t('incomingCall.e2eeCall')}</span>
         </div>
 
         {/* Avatar with CSS pulse animation */}
@@ -104,26 +99,26 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
           {name}
         </span>
         <span style={{ fontFamily: t.fontMono, fontSize: 12, color: 'rgba(255,255,255,0.6)', letterSpacing: 0.5, marginTop: 6 }}>
-          {(media === 'video' ? 'VIDEO' : 'AUDIO')} · CURVE25519 · SRTP
+          {(media === 'video' ? i18n.t('incomingCall.video') : i18n.t('call.audio'))} · CURVE25519 · SRTP
         </span>
 
         {peer?.verified && (
           <div style={{ marginTop: 18, padding: '8px 14px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: t.radius, display: 'flex', alignItems: 'center', gap: 6 }}>
             <I.Check size={11} color={t.accent} />
-            <span style={{ fontFamily: t.fontMono, fontSize: 11, color: 'rgba(255,255,255,0.7)', letterSpacing: 0.4 }}>Verified identity</span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 11, color: 'rgba(255,255,255,0.7)', letterSpacing: 0.4 }}>{i18n.t('incomingCall.verified')}</span>
           </div>
         )}
       </div>
 
       {/* Action buttons */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 40px 48px', maxWidth: 360, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-        <ActionBtn t={t} color="#e63946" label="DECLINE" onPress={onReject} rotate
+        <ActionBtn t={t} color="#e63946" label={i18n.t('incomingCall.decline2')} onPress={onReject} rotate
           icon={<I.Phone size={28} color="#fff" />}
         />
-        <ActionBtn t={t} color="rgba(255,255,255,0.08)" label="REPLY" small onPress={() => setShowReplies(true)}
+        <ActionBtn t={t} color="rgba(255,255,255,0.08)" label={i18n.t('incomingCall.reply')} small onPress={() => setShowReplies(true)}
           icon={<I.Chat size={20} color="#fff" />}
         />
-        <ActionBtn t={t} color={t.accent} label="ACCEPT" onPress={onAccept}
+        <ActionBtn t={t} color={t.accent} label={i18n.t('incomingCall.accept2')} onPress={onAccept}
           icon={<I.Phone size={28} color={t.accentInk} />}
         />
       </div>
@@ -141,12 +136,10 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
             <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 12 }}>
               <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)' }} />
             </div>
-            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 0.8, padding: '0 22px 8px', display: 'block' }}>
-              REPLY AND REJECT
-            </span>
-            {QUICK_REPLIES.map((reply) => (
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: 'rgba(255,255,255,0.4)', letterSpacing: 0.8, padding: '0 22px 8px', display: 'block' }}>{i18n.t('incomingCall.replyAndReject')}</span>
+            {QUICK_REPLY_KEYS.map((key) => { const reply = i18n.t(key); return (
               <button
-                key={reply}
+                key={key}
                 onClick={() => void handleQuickReply(reply)}
                 style={{
                   display: 'block', width: '100%', textAlign: 'left',
@@ -157,7 +150,7 @@ export function IncomingCallScreen({ onAccept, onReject }: Props) {
               >
                 {reply}
               </button>
-            ))}
+            ); })}
           </div>
         </div>
       )}

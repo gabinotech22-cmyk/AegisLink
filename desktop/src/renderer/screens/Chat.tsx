@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -41,6 +43,7 @@ interface Props {
 }
 
 export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphemeral }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const { identity } = useIdentity();
   const online = useConnection((s) => s.online);
@@ -285,12 +288,12 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       {/* Top bar */}
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', paddingLeft: 14, paddingRight: 14, paddingTop: 10, paddingBottom: 10, gap: 6, borderBottom: `1px solid ${t.divider}`, flexShrink: 0 }}>
-        <button onClick={onBack} aria-label="Back" style={iconBtn}>
+        <button onClick={onBack} aria-label={i18n.t('common.back')} style={iconBtn}>
           <I.ChevronL size={22} color={t.text} />
         </button>
         <button
           onClick={onContactDetail}
-          aria-label={`View contact ${contact.name}`}
+          aria-label={i18n.t('chat.viewContactV0', { v0: contact.name })}
           style={{ flex: 1, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
         >
           <Avatar t={t} name={contact.avatarImage ?? contact.name} color={contact.color ?? t.surface2} size={36} photoUri={contact.avatarImage ?? undefined} seed={contact.publicKeyB64 ?? contact.aegisId} />
@@ -300,22 +303,22 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
             </span>
             <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
               {isContactTyping ? (
-                <span style={{ fontFamily: t.font, fontSize: 10, color: t.accent, fontStyle: 'italic' }}>typing…</span>
+                <span style={{ fontFamily: t.font, fontSize: 10, color: t.accent, fontStyle: 'italic' }}>{i18n.t('chat.typingIndicatorShort')}</span>
               ) : (
                 <>
                   <I.Lock size={10} color={contact.verified ? t.accent : t.warn} />
                   <span style={{ fontFamily: t.fontMono, fontSize: 10, color: contact.verified ? t.accent : t.warn, letterSpacing: 0.5 }}>
-                    {contact.verified ? 'E2E Verified' : 'E2E Not Verified'}
+                    {contact.verified ? i18n.t('chat.e2eVerified2') : i18n.t('chat.e2eNotVerified2')}
                   </span>
                 </>
               )}
             </div>
           </div>
         </button>
-        <button onClick={() => void handleCall('audio')} aria-label="Audio call" style={iconBtn}>
+        <button onClick={() => void handleCall('audio')} aria-label={i18n.t('chat.audioCall')} style={iconBtn}>
           <I.Phone size={20} color={t.text} />
         </button>
-        <button onClick={() => void handleCall('video')} aria-label="Video call" style={iconBtn}>
+        <button onClick={() => void handleCall('video')} aria-label={i18n.t('chat.videoCall')} style={iconBtn}>
           <I.Video size={20} color={t.text} />
         </button>
       </div>
@@ -323,23 +326,17 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
       {/* Offline banner */}
       {!online && (
         <div data-testid="offline-banner" style={{ padding: '8px 16px', backgroundColor: '#f59e0b', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <span style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: '#000', fontWeight: '700', letterSpacing: 0.5 }}>
-            OFFLINE — messages will queue
-          </span>
+          <span style={{ flex: 1, fontFamily: t.fontMono, fontSize: 11, color: '#000', fontWeight: '700', letterSpacing: 0.5 }}>{i18n.t('chat.offlineMessagesWillQueue')}</span>
         </div>
       )}
 
       {/* Key mismatch banner */}
       {mismatchKey && (
         <div style={{ margin: '10px 12px 4px', padding: 14, backgroundColor: t.dark ? 'rgba(255,107,107,0.12)' : 'rgba(184,68,42,0.08)', border: `1px solid ${t.danger}66`, borderRadius: t.radius, flexShrink: 0 }}>
-          <span style={{ fontFamily: t.font, fontWeight: '700', fontSize: 13, color: t.danger, display: 'block', marginBottom: 4 }}>
-            ⚠️ Key changed — possible MITM
-          </span>
-          <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block' }}>
-            Verify identity out-of-band before continuing.
-          </span>
+          <span style={{ fontFamily: t.font, fontWeight: '700', fontSize: 13, color: t.danger, display: 'block', marginBottom: 4 }}>{i18n.t('chat.keyChangedPossibleMitm')}</span>
+          <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block' }}>{i18n.t('chat.verifyIdentityOutOf')}</span>
           <button onClick={onContactDetail} style={{ marginTop: 8, backgroundColor: t.danger, border: 'none', borderRadius: t.radiusS, padding: '7px 14px', cursor: 'pointer' }}>
-            <span style={{ color: '#fff', fontFamily: t.font, fontSize: 12, fontWeight: '600' }}>Re-verify</span>
+            <span style={{ color: '#fff', fontFamily: t.font, fontSize: 12, fontWeight: '600' }}>{i18n.t('chat.reverify')}</span>
           </button>
         </div>
       )}
@@ -348,7 +345,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
       <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0', flexShrink: 0 }}>
         <div style={{ backgroundColor: t.surface2, paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 99, display: 'flex', alignItems: 'center', gap: 6 }}>
           <I.Lock size={9} color={t.textDim} />
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.5 }}>End-to-end encrypted</span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.5 }}>{i18n.t('search.mlsEncrypted')}</span>
         </div>
       </div>
 
@@ -363,7 +360,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
           </span>
           <button
             onClick={(e) => { e.stopPropagation(); void handleTogglePin(pinnedMsg); }}
-            aria-label="Unpin message"
+            aria-label={i18n.t('chat.unpinMessage')}
             style={iconBtn}
           >
             <I.X size={14} color={t.textDim} />
@@ -378,7 +375,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
       >
         {list.length === 0 && (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontFamily: t.font, fontSize: 14, color: t.textFaint }}>No messages yet</span>
+            <span style={{ fontFamily: t.font, fontSize: 14, color: t.textFaint }}>{i18n.t('home.noMessages')}</span>
           </div>
         )}
         {list.map((m) => (
@@ -404,7 +401,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
           <span style={{ flex: 1, fontFamily: t.font, fontSize: 12, color: t.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {replyTo.deleted ? 'Deleted message' : replyTo.body || (replyTo.type === 'image' ? '📷 Image' : '…')}
           </span>
-          <button onClick={() => setReplyTo(null)} aria-label="Cancel reply" style={iconBtn}>
+          <button onClick={() => setReplyTo(null)} aria-label={i18n.t('chat.cancelReply')} style={iconBtn}>
             <I.X size={16} color={t.textDim} />
           </button>
         </div>
@@ -433,7 +430,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
                 )}
                 <button
                   onClick={() => removeStagedItem(i)}
-                  aria-label={`Remove ${item.name}`}
+                  aria-label={i18n.t('chat.removeV0', { v0: item.name })}
                   style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: 9, backgroundColor: t.danger, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, zIndex: 1 }}
                 >
                   <I.X size={11} color="#fff" />
@@ -443,7 +440,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
             {/* Add more files button */}
             <label
               style={{ flexShrink: 0, width: 64, height: 64, borderRadius: t.radiusS, border: `1px dashed ${t.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backgroundColor: 'transparent' }}
-              aria-label="Add more files"
+              aria-label={i18n.t('chat.addMoreFiles')}
             >
               <I.Plus size={22} color={t.textDim} />
               <input ref={fileInputRef} type="file" accept="image/*,application/pdf,text/plain,application/zip,application/octet-stream" multiple style={{ display: 'none' }} onChange={handleFileChange} />
@@ -464,22 +461,20 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
 
       {/* Unverified contact banner */}
       {!contact.verified && (
-        <div style={{ padding: '8px 16px', backgroundColor: '#1a1200', borderTop: `1px solid #ff9500`, color: '#ff9500', fontSize: 12, fontFamily: t.fontMono, flexShrink: 0 }}>
-          Unverified contact. Sending is enabled — verify their identity for maximum security.
-        </div>
+        <div style={{ padding: '8px 16px', backgroundColor: '#1a1200', borderTop: `1px solid #ff9500`, color: '#ff9500', fontSize: 12, fontFamily: t.fontMono, flexShrink: 0 }}>{i18n.t('chat.unverifiedContactSendingIs')}</div>
       )}
 
       {/* Composer */}
       {contact.blocked ? (
         <div style={{ padding: '14px 12px', backgroundColor: t.surface, borderTop: `1px solid ${t.divider}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.danger, fontWeight: '500' }}>You have blocked this contact</span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.danger, fontWeight: '500' }}>{i18n.t('chat.youHaveBlockedThis')}</span>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 14, borderTop: `1px solid ${t.divider}`, backgroundColor: t.surface, flexShrink: 0 }}>
           {/* Attach — opens file picker directly when no tray is visible;
               the staged tray has its own Add button once files are staged */}
           {stagedItems.length === 0 && (
-            <label style={{ ...iconBtn, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} aria-label="Attach file">
+            <label style={{ ...iconBtn, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} aria-label={i18n.t('chat.attach')}>
               <I.Attach size={22} color={t.textDim} />
               <input type="file" accept="image/*,application/pdf,text/plain,application/zip,application/octet-stream" multiple style={{ display: 'none' }} onChange={handleFileChange} />
             </label>
@@ -489,7 +484,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
             value={draft}
             onChange={handleDraftChange}
             onKeyDown={handleKeyDown}
-            placeholder={online ? 'Message…' : 'Offline — message will queue'}
+            placeholder={online ? i18n.t('chat.message') : i18n.t('chat.offlineMessageWillQueue')}
             style={{
               flex: 1,
               backgroundColor: t.surface2,
@@ -506,14 +501,14 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
             }}
           />
           {/* Ephemeral timer */}
-          <button onClick={onEphemeral} aria-label="Set ephemeral timer" style={iconBtn}>
+          <button onClick={onEphemeral} aria-label={i18n.t('chat.setEphemeralTimer')} style={iconBtn}>
             <I.Timer size={22} color={t.textDim} />
           </button>
           {/* Send */}
           <button
             onClick={() => void handleSend()}
             disabled={(!draft.trim() && stagedItems.length === 0) || sending}
-            aria-label="Send message"
+            aria-label={i18n.t('chat.sendAccessibilityLabel')}
             style={{
               width: 40,
               height: 40,
@@ -565,6 +560,7 @@ interface ActionsOverlayProps {
 }
 
 function MessageActionsOverlay({ t, m, myAegisId, onReply, onStar, onPin, onDelete, onClose }: ActionsOverlayProps) {
+  useTranslation(); // re-render on language change
   return (
     <div
       onClick={onClose}
@@ -576,17 +572,17 @@ function MessageActionsOverlay({ t, m, myAegisId, onReply, onStar, onPin, onDele
       >
         {/* Header */}
         <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 10, paddingRight: 4, paddingTop: 6, paddingBottom: 8, borderBottom: `1px solid ${t.divider}`, marginBottom: 4 }}>
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.8 }}>MESSAGE</span>
-          <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.8 }}>{i18n.t('scheduled.messageLabel')}</span>
+          <button onClick={onClose} aria-label={i18n.t('common.close')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <I.X size={16} color={t.textDim} />
           </button>
         </div>
 
-        <ActionRow t={t} icon={<I.Reply size={16} color={t.text} />} label="Reply" onClick={onReply} />
-        <ActionRow t={t} icon={<I.Star size={16} color={m.starred ? t.accent : t.text} />} label={m.starred ? 'Unstar' : 'Star'} onClick={onStar} />
-        <ActionRow t={t} icon={<I.Pin size={16} color={m.pinned ? t.accent : t.text} />} label={m.pinned ? 'Unpin' : 'Pin'} onClick={onPin} />
+        <ActionRow t={t} icon={<I.Reply size={16} color={t.text} />} label={i18n.t('messageActions.reply')} onClick={onReply} />
+        <ActionRow t={t} icon={<I.Star size={16} color={m.starred ? t.accent : t.text} />} label={m.starred ? i18n.t('messageActions.unstar') : i18n.t('messageActions.star')} onClick={onStar} />
+        <ActionRow t={t} icon={<I.Pin size={16} color={m.pinned ? t.accent : t.text} />} label={m.pinned ? i18n.t('home.unpin') : i18n.t('home.pin')} onClick={onPin} />
         {m.direction === 'out' && (
-          <ActionRow t={t} icon={<I.Trash size={16} color={t.danger} />} label="Delete" danger onClick={onDelete} />
+          <ActionRow t={t} icon={<I.Trash size={16} color={t.danger} />} label={i18n.t('chat.requestDelete')} danger onClick={onDelete} />
         )}
       </div>
     </div>
@@ -622,6 +618,7 @@ interface BubbleProps {
 }
 
 function Bubble({ t, m, online, quotedMsg, onContextMenu }: BubbleProps) {
+  useTranslation(); // re-render on language change
   const me = m.direction === 'out';
   const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const queued = me && !online;
@@ -632,7 +629,7 @@ function Bubble({ t, m, online, quotedMsg, onContextMenu }: BubbleProps) {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: me ? 'flex-end' : 'flex-start' }}>
         <div style={{ backgroundColor: t.surface2, paddingLeft: 13, paddingRight: 13, paddingTop: 8, paddingBottom: 8, borderRadius: t.radius, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <I.Trash size={13} color={t.textFaint} />
-          <span style={{ color: t.textFaint, fontFamily: t.font, fontSize: 13, fontStyle: 'italic' }}>Deleted message</span>
+          <span style={{ color: t.textFaint, fontFamily: t.font, fontSize: 13, fontStyle: 'italic' }}>{i18n.t('chat.deletedMessage')}</span>
         </div>
         <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, marginTop: 3, paddingLeft: 4, paddingRight: 4 }}>{time}</span>
       </div>
@@ -649,8 +646,8 @@ function Bubble({ t, m, online, quotedMsg, onContextMenu }: BubbleProps) {
         >
           <I.Lock size={16} color={me ? t.bubbleOutText : t.bubbleInText} />
           <div>
-            <span style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: me ? t.bubbleOutText : t.bubbleInText, display: 'block' }}>View Once</span>
-            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? `${t.bubbleOutText}aa` : t.textDim }}>Opens once, then disappears</span>
+            <span style={{ fontFamily: t.font, fontSize: 13, fontWeight: '600', color: me ? t.bubbleOutText : t.bubbleInText, display: 'block' }}>{i18n.t('chat.viewOnce')}</span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: me ? `${t.bubbleOutText}aa` : t.textDim }}>{i18n.t('chat.opensOnceThenDisappears')}</span>
           </div>
         </div>
         <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
@@ -748,7 +745,7 @@ function Bubble({ t, m, online, quotedMsg, onContextMenu }: BubbleProps) {
           onContextMenu={(e) => { e.preventDefault(); onContextMenu(); }}
           style={{ borderRadius: t.radius, borderTopRightRadius: me ? t.radiusS : t.radius, borderTopLeftRadius: me ? t.radius : t.radiusS, overflow: 'hidden', opacity: queued ? 0.55 : 1, cursor: 'context-menu' }}
         >
-          <img src={m.mediaUri} alt="image message" style={{ width: 220, height: 180, objectFit: 'cover', display: 'block', backgroundColor: t.surface2 }} />
+          <img src={m.mediaUri} alt={i18n.t('chat.imageMessage')} style={{ width: 220, height: 180, objectFit: 'cover', display: 'block', backgroundColor: t.surface2 }} />
         </div>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
@@ -817,6 +814,7 @@ interface AudioBubbleProps {
 }
 
 function AudioBubble({ t, m, me, queued, time, reactions, onContextMenu }: AudioBubbleProps) {
+  useTranslation(); // re-render on language change
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -871,7 +869,7 @@ function AudioBubble({ t, m, me, queued, time, reactions, onContextMenu }: Audio
       >
         <button
           onClick={togglePlay}
-          aria-label={playing ? 'Pause audio' : 'Play audio'}
+          aria-label={playing ? i18n.t('chat.pauseAudio') : i18n.t('chat.playAudio')}
           style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: me ? 'rgba(255,255,255,0.2)' : t.surface3, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer', flexShrink: 0 }}
         >
           {playing
@@ -901,6 +899,7 @@ function AudioBubble({ t, m, me, queued, time, reactions, onContextMenu }: Audio
 }
 
 function ReactionPills({ t, reactions, me }: { t: Theme; reactions: [string, string[]][]; me: boolean }) {
+  useTranslation(); // re-render on language change
   if (reactions.length === 0) return null;
   return (
     <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4, justifyContent: me ? 'flex-end' : 'flex-start' }}>
@@ -915,13 +914,14 @@ function ReactionPills({ t, reactions, me }: { t: Theme; reactions: [string, str
 }
 
 function TimestampRow({ t, queued, time, starred, deliveryStatus }: { t: Theme; queued: boolean; time: string; starred?: boolean; deliveryStatus?: 'sent' | 'delivered' | 'read' }) {
+  useTranslation(); // re-render on language change
   return (
     <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 4, paddingRight: 4, marginTop: 3 }}>
       {starred && <I.Star size={9} color={t.accent} />}
       {queued ? (
         <>
           <I.Timer size={10} color={t.warn} />
-          <span style={{ fontFamily: t.fontMono, fontSize: 9.5, color: t.warn, letterSpacing: 0.4 }}>queued</span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 9.5, color: t.warn, letterSpacing: 0.4 }}>{i18n.t('chat.queuedStatus')}</span>
         </>
       ) : (
         <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint }}>{time}</span>

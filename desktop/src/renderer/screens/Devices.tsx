@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -29,6 +31,7 @@ function truncatePubKey(b64: string): string {
 }
 
 export function DevicesScreen({ onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const identity = useIdentity((s) => s.identity);
 
@@ -55,16 +58,16 @@ export function DevicesScreen({ onBack }: Props) {
 
   function handleManualLink() {
     const trimmed = manualId.trim();
-    if (!trimmed) { setLinkError('Enter a device ID or JSON payload.'); return; }
+    if (!trimmed) { setLinkError(i18n.t('devices.enterADeviceId')); return; }
     let payload: { pubKey?: string; relay?: string };
     try {
       payload = JSON.parse(trimmed) as { pubKey?: string; relay?: string };
     } catch {
-      setLinkError('Could not parse input. Paste the full JSON from AegisLink Desktop QR.');
+      setLinkError(i18n.t('devices.couldNotParseInput'));
       return;
     }
     if (typeof payload.pubKey !== 'string' || typeof payload.relay !== 'string') {
-      setLinkError('Invalid format — missing pubKey or relay.');
+      setLinkError(i18n.t('devices.invalidFormatMissingPubkey'));
       return;
     }
     setConfirmDevice({ pubKey: payload.pubKey, relay: payload.relay });
@@ -95,7 +98,7 @@ export function DevicesScreen({ onBack }: Props) {
   }
 
   async function handleRevoke(device: LinkedDevice) {
-    if (!window.confirm(`Revoke "${device.name}"? New messages will immediately become unreadable.`)) return;
+    if (!window.confirm(i18n.t('devices.revokeV0NewMessages', { v0: device.name }))) return;
     setRevoking(device.id);
     try {
       const socket = getSocket();
@@ -108,7 +111,7 @@ export function DevicesScreen({ onBack }: Props) {
       }
       setLinkedDevices((prev) => prev.filter((d) => d.id !== device.id));
     } catch (e) {
-      window.alert(`Revoke failed: ${(e as Error).message}`);
+      window.alert(i18n.t('devices.revokeFailedV0', { v0: (e as Error).message }));
     } finally {
       setRevoking(null);
     }
@@ -123,12 +126,12 @@ export function DevicesScreen({ onBack }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Devices" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('workDashboard.navDevices')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } right={
-        <button onClick={() => setShowLinkPanel((v) => !v)} aria-label="Link new device" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+        <button onClick={() => setShowLinkPanel((v) => !v)} aria-label={i18n.t('devices.linkDevice')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.Plus size={22} color={t.accent} />
         </button>
       } />
@@ -136,9 +139,7 @@ export function DevicesScreen({ onBack }: Props) {
       <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 24 }}>
         {/* Info banner */}
         <div style={{ margin: '12px 18px', padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius }}>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>
-            Each device has its own key. If you lose one, revoke it here — new messages will immediately become unreadable.
-          </span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>{i18n.t('devices.infoDesc')}</span>
         </div>
 
         {linkError && (
@@ -150,16 +151,12 @@ export function DevicesScreen({ onBack }: Props) {
         {/* Link panel */}
         {showLinkPanel && (
           <div style={{ margin: '0 18px 16px', padding: 16, backgroundColor: t.surface, border: `1px solid ${t.accent}44`, borderRadius: t.radius }}>
-            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.1, display: 'block', marginBottom: 12 }}>
-              LINK A NEW DEVICE
-            </span>
-            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '18px', display: 'block', marginBottom: 10 }}>
-              On the mobile app, open Add Device and scan the QR. Then paste the full JSON payload from the desktop QR below.
-            </span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.1, display: 'block', marginBottom: 12 }}>{i18n.t('devices.linkANewDevice')}</span>
+            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '18px', display: 'block', marginBottom: 10 }}>{i18n.t('devices.onTheMobileApp')}</span>
             <textarea
               value={manualId}
               onChange={(e) => setManualId(e.target.value)}
-              placeholder={'{ "v": 1, "pubKey": "...", "relay": "..." }'}
+              placeholder={i18n.t('devices.v1PubkeyRelay')}
               rows={3}
               style={inputStyle}
             />
@@ -173,9 +170,7 @@ export function DevicesScreen({ onBack }: Props) {
               <button
                 onClick={() => { setShowLinkPanel(false); setManualId(''); setLinkError(null); }}
                 style={{ flex: 1, padding: '10px 0', backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, color: t.text, fontSize: 13 }}
-              >
-                Cancel
-              </button>
+              >{i18n.t('common.cancel')}</button>
             </div>
           </div>
         )}
@@ -187,19 +182,17 @@ export function DevicesScreen({ onBack }: Props) {
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text }}>This Device (Desktop)</span>
-              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, border: `1px solid ${t.accent}`, borderRadius: 99, padding: '1px 5px', letterSpacing: 0.5 }}>
-                THIS DEVICE
-              </span>
+              <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text }}>{i18n.t('devices.thisDeviceDesktop')}</span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, border: `1px solid ${t.accent}`, borderRadius: 99, padding: '1px 5px', letterSpacing: 0.5 }}>{i18n.t('devices.thisDevice')}</span>
             </div>
-            <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim }}>Desktop · Active now</span>
+            <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim }}>{i18n.t('devices.desktopActiveNow')}</span>
           </div>
           <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: t.accent }} />
         </div>
 
         {loadingList && linkedDevices.length === 0 && (
           <div style={{ padding: 24, textAlign: 'center' }}>
-            <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.8 }}>LOADING…</span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.8 }}>{i18n.t('devices.loading')}</span>
           </div>
         )}
 
@@ -210,25 +203,23 @@ export function DevicesScreen({ onBack }: Props) {
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{device.name}</span>
-              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim }}>Linked {formatLinkedAt(device.linkedAt)}</span>
+              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim }}>{i18n.t('devices.linkedAtLine', { v0: formatLinkedAt(device.linkedAt) })}</span>
             </div>
             {revoking === device.id ? (
-              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.danger }}>REVOKING…</span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.danger }}>{i18n.t('devices.revoking')}</span>
             ) : (
               <button
                 onClick={() => void handleRevoke(device)}
-                aria-label={`Revoke ${device.name}`}
+                aria-label={i18n.t('devices.revokeV0', { v0: device.name })}
                 style={{ padding: '6px 10px', fontFamily: t.font, fontSize: 12, fontWeight: '600', color: t.danger, backgroundColor: `${t.danger}11`, border: `1px solid ${t.danger}88`, borderRadius: t.radiusS, cursor: 'pointer' }}
-              >
-                Revoke
-              </button>
+              >{i18n.t('devices.revoke')}</button>
             )}
           </div>
         ))}
 
         {!loadingList && linkedDevices.length === 0 && !showLinkPanel && (
           <div style={{ padding: '32px 18px', textAlign: 'center' }}>
-            <span style={{ fontFamily: t.font, fontSize: 14, color: t.textFaint }}>No other linked devices</span>
+            <span style={{ fontFamily: t.font, fontSize: 14, color: t.textFaint }}>{i18n.t('devices.noOtherLinkedDevices')}</span>
           </div>
         )}
       </div>
@@ -240,35 +231,27 @@ export function DevicesScreen({ onBack }: Props) {
             <div style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: `${t.accent}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
               <I.Monitor size={24} color={t.accent} />
             </div>
-            <span style={{ fontFamily: t.fontDisplay, fontWeight: '600', fontSize: 18, color: t.text, display: 'block', textAlign: 'center', marginBottom: 8 }}>
-              Link AegisLink Desktop?
-            </span>
+            <span style={{ fontFamily: t.fontDisplay, fontWeight: '600', fontSize: 18, color: t.text, display: 'block', textAlign: 'center', marginBottom: 8 }}>{i18n.t('devices.linkDesktopConfirmTitle')}</span>
             <div style={{ backgroundColor: t.surface2, borderRadius: t.radiusS, padding: 10, marginBottom: 16 }}>
-              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.5, display: 'block' }}>DEVICE KEY</span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.5, display: 'block' }}>{i18n.t('devices.deviceKeyLabel')}</span>
               <span style={{ fontFamily: t.fontMono, fontSize: 13, color: t.text, display: 'block', marginTop: 4 }}>{truncatePubKey(confirmDevice.pubKey)}</span>
-              <span style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, display: 'block', marginTop: 4 }}>Relay: {confirmDevice.relay}</span>
+              <span style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, display: 'block', marginTop: 4 }}>{i18n.t('devices.relayLine', { v0: confirmDevice.relay })}</span>
             </div>
-            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, textAlign: 'center', lineHeight: '19px', display: 'block', marginBottom: 20 }}>
-              This desktop will be able to send and receive messages using your AegisLink identity. Keys never leave your devices.
-            </span>
+            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, textAlign: 'center', lineHeight: '19px', display: 'block', marginBottom: 20 }}>{i18n.t('devices.linkDesktopConfirmDesc')}</span>
             {linking ? (
               <div style={{ textAlign: 'center', padding: 8 }}>
-                <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent }}>LINKING…</span>
+                <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent }}>{i18n.t('devices.linking')}</span>
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 10 }}>
                 <button
                   onClick={() => setConfirmDevice(null)}
                   style={{ flex: 1, padding: '12px 0', backgroundColor: 'transparent', border: `1px solid ${t.border}`, borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', color: t.text, fontSize: 14 }}
-                >
-                  Cancel
-                </button>
+                >{i18n.t('common.cancel')}</button>
                 <button
                   onClick={() => void handleConfirmLink()}
                   style={{ flex: 1, padding: '12px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', color: t.accentInk, fontSize: 14 }}
-                >
-                  Link
-                </button>
+                >{i18n.t('devices.link')}</button>
               </div>
             )}
           </div>
