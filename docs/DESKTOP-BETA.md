@@ -1,8 +1,7 @@
 # AegisLink Desktop — Beta 1 (Windows)
 
 Estado canónico del cliente desktop. Si este doc y el código discrepan, gana el
-código (regla de oro doc↔código). Última verificación: 2026-09-15, rama
-`feat/desktop-i18n`.
+código (regla de oro doc↔código). Última verificación: 2026-09-15 (`main`, tras #474/#475/#477).
 
 ## Qué es
 
@@ -125,9 +124,13 @@ con Tor arrancado.
   Smart App Control (Windows 11) bloquea el `.exe` sin firmar** — ni siquiera es
   "instalable con aviso", directamente no arranca en máquinas con SAC activo.
   Vía gratuita: **SignPath Foundation** (firma OSS gratuita para proyectos
-  open source con licencia OSI — AegisLink es GPL-3.0). Requiere solicitud,
-  build desde CI (GitHub Actions) y que el firmante sea el pipeline, no una
-  máquina personal. Alternativa de pago: Azure Trusted Signing (~10 €/mes).
+  open source con licencia OSI — AegisLink es GPL-3.0). Requisitos verificados
+  (signpath.org/terms): binarios construidos desde el repo de forma
+  verificable (CI), roles Author/Reviewer/Approver con 2FA, aprobación manual
+  por release y una "Code signing policy" pública → borrador listo en
+  `docs/CODE-SIGNING-POLICY.md`. Falta: crear cuenta en signpath.io, solicitar
+  en signpath.org/apply y el workflow de GitHub Actions que construya y envíe
+  el artefacto. Alternativa de pago: Azure Trusted Signing (~10 €/mes).
 - **D-4 · Canal de distribución.** GitHub Releases con `SHA256SUMS` firmado con
   la clave del proyecto es lo mínimo; auto-update (`electron-updater`) solo
   cuando exista firma.
