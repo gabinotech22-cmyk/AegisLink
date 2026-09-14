@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -13,6 +15,7 @@ type Stage = 'idle' | 'recording' | 'recorded' | 'playing';
 const BARS = Array.from({ length: 32 }, () => 0.15 + Math.random() * 0.85);
 
 export function VoiceRecorderScreen({ onBack, onSend }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [stage, setStage] = useState<Stage>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -60,7 +63,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
       const start = Date.now();
       intervalRef.current = setInterval(() => setElapsedMs(Date.now() - start), 100);
     } catch (e) {
-      setError(`Microphone error: ${(e as Error).message}`);
+      setError(i18n.t('voiceRecorder.microphoneErrorV0', { v0: (e as Error).message }));
     }
   }
 
@@ -103,8 +106,8 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Voice note" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('attachSheet.audio')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
@@ -144,7 +147,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
         {!hasRecording ? (
           <button
             onClick={isRecording ? stopRecording : startRecording}
-            aria-label={isRecording ? 'Stop recording' : 'Start recording'}
+            aria-label={isRecording ? i18n.t('voiceRecorder.stop') : i18n.t('viewOnce.startRecording')}
             style={{
               width: 80, height: 80, borderRadius: 40,
               backgroundColor: isRecording ? t.danger : t.accent,
@@ -161,14 +164,14 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             <button
               onClick={discard}
-              aria-label="Discard recording"
+              aria-label={i18n.t('voiceRecorder.discardRecording')}
               style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: t.surface2, border: `1px solid ${t.borderStrong}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <I.Trash size={20} color={t.danger} />
             </button>
             <button
               onClick={isPlaying ? stopPlayback : playback}
-              aria-label={isPlaying ? 'Stop playback' : 'Play recording'}
+              aria-label={isPlaying ? i18n.t('voiceRecorder.stopPlayback') : i18n.t('voiceRecorder.playRecording')}
               style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: t.accent, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               {isPlaying
@@ -178,7 +181,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
             </button>
             <button
               onClick={() => url && onSend(url, durationMs)}
-              aria-label="Send voice note"
+              aria-label={i18n.t('voiceRecorder.sendVoiceNote')}
               style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: t.accent, border: `1px solid ${t.accent}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               <I.Send size={20} color={t.accentInk} />
@@ -187,7 +190,7 @@ export function VoiceRecorderScreen({ onBack, onSend }: Props) {
         )}
 
         <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, textAlign: 'center' }}>
-          {stage === 'idle' ? 'Tap to record' : isRecording ? 'Recording…' : isPlaying ? 'Playing…' : 'Review and send'}
+          {stage === 'idle' ? 'Tap to record' : isRecording ? 'Recording…' : isPlaying ? i18n.t('voiceRecorder.playing') : i18n.t('voiceRecorder.reviewAndSend')}
         </span>
       </div>
     </div>

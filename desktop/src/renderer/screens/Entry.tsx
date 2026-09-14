@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { AegisMark } from '../components/AegisMark';
@@ -49,6 +51,7 @@ function CardButton({
   accentInk,
   radius,
 }: CardButtonProps) {
+  useTranslation(); // re-render on language change
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
 
@@ -135,6 +138,7 @@ function CardButton({
 }
 
 export function EntryScreen({ onNewIdentity, onRestore, onLinkMobile }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
 
   const root: CSSProperties = {
@@ -172,9 +176,7 @@ export function EntryScreen({ onNewIdentity, onRestore, onLinkMobile }: Props) {
             color: t.text,
             margin: '16px 0 6px',
           }}
-        >
-          AegisLink
-        </h1>
+        >{i18n.t('onboarding.aegislink')}</h1>
 
         {/* Tagline */}
         <span
@@ -185,16 +187,14 @@ export function EntryScreen({ onNewIdentity, onRestore, onLinkMobile }: Props) {
             letterSpacing: 2,
             marginBottom: 36,
           }}
-        >
-          SECURE · ANONYMOUS · ON-DEVICE
-        </span>
+        >{i18n.t('onboarding.secureAnonymousOnDevice')}</span>
 
         {/* Options */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
           <CardButton
             icon={<I.QR size={20} stroke={1.8} />}
-            label="Vincular con móvil"
-            description="GENERAR IDENTIDAD Y MOSTRAR QR"
+            label={i18n.t('onboarding.vincularConMVil')}
+            description={i18n.t('onboarding.generarIdentidadYMostrar')}
             primary
             onClick={onLinkMobile}
             accent={t.accent}
@@ -212,8 +212,8 @@ export function EntryScreen({ onNewIdentity, onRestore, onLinkMobile }: Props) {
           />
           <CardButton
             icon={<I.Key size={20} stroke={1.8} />}
-            label="Restaurar identidad"
-            description="IMPORTAR DESDE COPIA DE SEGURIDAD"
+            label={i18n.t('onboarding.restaurarIdentidad')}
+            description={i18n.t('onboarding.importarDesdeCopiaDe')}
             onClick={onRestore}
             accent={t.accent}
             bg={t.bg}
@@ -230,8 +230,8 @@ export function EntryScreen({ onNewIdentity, onRestore, onLinkMobile }: Props) {
           />
           <CardButton
             icon={<I.Shield size={20} stroke={1.8} />}
-            label="Nueva identidad"
-            description="GENERAR CLAVES EN ESTE DISPOSITIVO"
+            label={i18n.t('onboarding.nuevaIdentidad')}
+            description={i18n.t('onboarding.generarClavesEnEste')}
             onClick={onNewIdentity}
             accent={t.accent}
             bg={t.bg}
@@ -258,9 +258,7 @@ export function EntryScreen({ onNewIdentity, onRestore, onLinkMobile }: Props) {
             marginTop: 32,
             textAlign: 'center',
           }}
-        >
-          ZERO METADATA · E2EE · OPEN SOURCE
-        </span>
+        >{i18n.t('onboarding.zeroMetadataE2eeOpen')}</span>
       </div>
     </div>
   );

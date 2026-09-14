@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -15,10 +17,10 @@ import type { Tab } from './TabBar';
 // ---------------------------------------------------------------------------
 
 const PERSONAL_NAV: { id: Tab; icon: keyof typeof I; label: string }[] = [
-  { id: 'home',     icon: 'Chat',     label: 'Chats'    },
-  { id: 'groups',   icon: 'Users',    label: 'Groups'   },
-  { id: 'verify',   icon: 'Shield',   label: 'Verify'   },
-  { id: 'settings', icon: 'Settings', label: 'Settings' },
+  { id: 'home',     icon: 'Chat',     get label() { return i18n.t('home.chats'); }    },
+  { id: 'groups',   icon: 'Users',    get label() { return i18n.t('groups.title'); }   },
+  { id: 'verify',   icon: 'Shield',   get label() { return i18n.t('chat.verifyNudgeAction'); }   },
+  { id: 'settings', icon: 'Settings', get label() { return i18n.t('common.settings'); } },
 ];
 
 // ---------------------------------------------------------------------------
@@ -38,6 +40,7 @@ interface Props {
 // ---------------------------------------------------------------------------
 
 export function Sidebar({ activeSection, activeChatId, onNavigate, onSelectChat, onNewChat }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -132,7 +135,7 @@ function SidebarHeader({ t, onNewChat }: { t: Theme; onNewChat: () => void }) {
       <div style={{ flex: 1 }} />
       <button
         onClick={onNewChat}
-        aria-label="New chat"
+        aria-label={i18n.t('home.newChat')}
         style={iconBtnStyle}
       >
         <EditIcon size={18} color={t.textDim} />
@@ -174,8 +177,8 @@ function SearchBar({ t, value, onChange }: { t: Theme; value: string; onChange: 
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Search"
-          aria-label="Search chats"
+          placeholder={i18n.t('common.search')}
+          aria-label={i18n.t('home.searchChats')}
           style={{
             flex: 1,
             background: 'none',
@@ -189,7 +192,7 @@ function SearchBar({ t, value, onChange }: { t: Theme; value: string; onChange: 
         {value.length > 0 && (
           <button
             onClick={() => onChange('')}
-            aria-label="Clear search"
+            aria-label={i18n.t('contacts.clearSearch')}
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}
           >
             <I.X size={13} color={t.textFaint} />
@@ -229,7 +232,7 @@ function ChatItem({
       previewText = preview.body || (preview.type === 'image' ? 'Image' : preview.type === 'audio' ? 'Audio' : '...');
     }
   } else {
-    previewText = 'No messages yet';
+    previewText = i18n.t('home.noMessages');
   }
 
   const time = preview
@@ -245,7 +248,7 @@ function ChatItem({
       onClick={onPress}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      aria-label={`Open chat with ${contact.name}`}
+      aria-label={i18n.t('home.openChatWithV0', { v0: contact.name })}
       style={{
         display: 'flex',
         flexDirection: 'row',
@@ -338,6 +341,7 @@ function ChatItem({
 // ---------------------------------------------------------------------------
 
 function EmptyList({ t, hasQuery }: { t: Theme; hasQuery: boolean }) {
+  useTranslation(); // re-render on language change
   return (
     <div
       style={{
@@ -359,7 +363,7 @@ function EmptyList({ t, hasQuery }: { t: Theme; hasQuery: boolean }) {
           lineHeight: '18px',
         }}
       >
-        {hasQuery ? 'No chats match your search' : 'No conversations yet'}
+        {hasQuery ? i18n.t('home.noChatsMatchYour') : i18n.t('home.noConversationsYet')}
       </span>
     </div>
   );
@@ -379,6 +383,7 @@ interface NavItemProps {
 }
 
 function NavItem({ t, id, icon, label, active, onNavigate }: NavItemProps) {
+  useTranslation(); // re-render on language change
   const [hovered, setHovered] = useState(false);
   const Icon = I[icon];
   const color = active ? t.accent : hovered ? t.textDim : t.textFaint;
@@ -471,6 +476,7 @@ function BottomNav({ t, active, onNavigate }: { t: Theme; active: Tab; onNavigat
 // ---------------------------------------------------------------------------
 
 function EditIcon({ size = 18, color }: { size?: number; color: string }) {
+  useTranslation(); // re-render on language change
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />

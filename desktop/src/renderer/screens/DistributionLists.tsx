@@ -13,6 +13,8 @@
  */
 
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -26,6 +28,7 @@ interface Props {
 }
 
 export function DistributionListsScreen({ onBack, onOpenList }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const lists = useDistribution((s) => s.lists);
   const hydrate = useDistribution((s) => s.hydrate);
@@ -71,14 +74,14 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       <TopBar
         t={t}
-        title="Distribution Lists"
+        title={i18n.t('distLists.title')}
         left={
-          <button onClick={onBack} aria-label="Go back" style={iconBtn}>
+          <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={iconBtn}>
             <I.ChevronL size={22} color={t.textDim} />
           </button>
         }
         right={
-          <button onClick={() => setCreating(true)} aria-label="Create new distribution list" style={iconBtn}>
+          <button onClick={() => setCreating(true)} aria-label={i18n.t('distLists.createA11y')} style={iconBtn}>
             <I.Plus size={22} color={t.accent} />
           </button>
         }
@@ -87,15 +90,11 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
       {lists.length === 0 ? (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 14, paddingLeft: 40, paddingRight: 40 }}>
           <I.Users size={36} color={t.textFaint} />
-          <span style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, textAlign: 'center' }}>
-            No distribution lists
-          </span>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, textAlign: 'center', lineHeight: '19px' }}>
-            Click + to create a list and broadcast messages to multiple contacts at once.
-          </span>
+          <span style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text, textAlign: 'center' }}>{i18n.t('distLists.noDistributionLists')}</span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, textAlign: 'center', lineHeight: '19px' }}>{i18n.t('distLists.clickToCreateA')}</span>
           <button
             onClick={() => setCreating(true)}
-            aria-label="Create first distribution list"
+            aria-label={i18n.t('distLists.createFirstA11y')}
             style={{
               padding: '11px 22px',
               backgroundColor: t.accent,
@@ -108,9 +107,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
               fontWeight: '600',
               color: t.accentInk,
             }}
-          >
-            Create List
-          </button>
+          >{i18n.t('distLists.createList')}</button>
         </div>
       ) : (
         <div style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -120,7 +117,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
               onClick={() => onOpenList(item)}
               role="button"
               tabIndex={0}
-              aria-label={`${item.name}, ${item.members.length} members`}
+              aria-label={i18n.t('distLists.v0V1Members', { v0: item.name, v1: item.members.length })}
               style={{
                 backgroundColor: t.surface,
                 border: `1px solid ${t.border}`,
@@ -153,12 +150,12 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                   {item.name}
                 </span>
                 <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, marginTop: 3, display: 'block' }}>
-                  {item.members.length} {item.members.length === 1 ? 'MEMBER' : 'MEMBERS'}
+                  {item.members.length} {item.members.length === 1 ? i18n.t('distLists.member') : i18n.t('distLists.members')}
                 </span>
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); handleDeleteRequest(item); }}
-                aria-label={`Delete ${item.name}`}
+                aria-label={i18n.t('distLists.deleteV0', { v0: item.name })}
                 style={iconBtn}
               >
                 <I.Trash size={16} color={t.textFaint} />
@@ -186,16 +183,14 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                 gap: 12,
               }}
             >
-              <button onClick={() => { setCreating(false); setNewName(''); setSelectedMembers([]); }} aria-label="Cancel" style={iconBtn}>
+              <button onClick={() => { setCreating(false); setNewName(''); setSelectedMembers([]); }} aria-label={i18n.t('distLists.cancelA11y')} style={iconBtn}>
                 <I.X size={22} color={t.textDim} />
               </button>
-              <span style={{ flex: 1, fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>
-                New Distribution List
-              </span>
+              <span style={{ flex: 1, fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>{i18n.t('distLists.newDistributionList')}</span>
               <button
                 onClick={() => void handleCreate()}
                 disabled={!newName.trim() || selectedMembers.length === 0}
-                aria-label="Save distribution list"
+                aria-label={i18n.t('distLists.saveA11y')}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -206,9 +201,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                   fontWeight: '600',
                   color: (!newName.trim() || selectedMembers.length === 0) ? t.textFaint : t.accent,
                 }}
-              >
-                Save
-              </button>
+              >{i18n.t('distLists.save')}</button>
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -226,9 +219,9 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                 <input
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="List name…"
+                  placeholder={i18n.t('distLists.namePlaceholder')}
                   autoFocus
-                  aria-label="Distribution list name"
+                  aria-label={i18n.t('distLists.nameA11y')}
                   style={{
                     width: '100%',
                     fontFamily: t.font,
@@ -242,15 +235,11 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                 />
               </div>
 
-              <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.6, marginTop: 6 }}>
-                SELECT MEMBERS
-              </span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.6, marginTop: 6 }}>{i18n.t('distLists.selectMembers')}</span>
 
               {contacts.length === 0 ? (
                 <div style={{ paddingTop: 22, paddingBottom: 22, display: 'flex', justifyContent: 'center' }}>
-                  <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>
-                    No contacts available.
-                  </span>
+                  <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>{i18n.t('distLists.noContactsAvailable')}</span>
                 </div>
               ) : (
                 contacts.map((contact) => {
@@ -261,7 +250,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                       onClick={() => toggleMember(contact.aegisId)}
                       role="button"
                       tabIndex={0}
-                      aria-label={`${isSelected ? 'Deselect' : 'Select'} ${contact.name}`}
+                      aria-label={i18n.t('distLists.v0V1', { v0: isSelected ? i18n.t('distLists.deselect') : i18n.t('distLists.select'), v1: contact.name })}
                       style={{
                         display: 'flex',
                         flexDirection: 'row',
@@ -323,9 +312,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
             <span style={{ fontFamily: t.fontDisplay, fontSize: 16, fontWeight: '600', color: t.text }}>
               Delete &ldquo;{confirmDelete.name}&rdquo;?
             </span>
-            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>
-              This will permanently remove this distribution list. The contacts themselves are not affected.
-            </span>
+            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>{i18n.t('distLists.thisWillPermanentlyRemove')}</span>
             <div style={{ display: 'flex', flexDirection: 'row', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
               <button
                 onClick={() => setConfirmDelete(null)}
@@ -339,9 +326,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                   color: t.text,
                   cursor: 'pointer',
                 }}
-              >
-                Cancel
-              </button>
+              >{i18n.t('distLists.cancelA11y')}</button>
               <button
                 onClick={() => void handleDeleteConfirm()}
                 style={{
@@ -355,9 +340,7 @@ export function DistributionListsScreen({ onBack, onOpenList }: Props) {
                   color: '#fff',
                   cursor: 'pointer',
                 }}
-              >
-                Delete
-              </button>
+              >{i18n.t('common.delete')}</button>
             </div>
           </div>
         </div>

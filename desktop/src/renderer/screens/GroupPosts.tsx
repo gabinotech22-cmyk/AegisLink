@@ -13,6 +13,8 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -96,6 +98,7 @@ async function stripExifAndShrink(file: File): Promise<string> {
 }
 
 export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const identity = useIdentity((s) => s.identity);
   const group = useGroups((s) => s.groups.find((g) => g.id === groupProp.id)) ?? groupProp;
@@ -139,12 +142,12 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
 
   function handleSchedule() {
     if (!canPost) {
-      setErrorMsg('Only the group owner and moderators can publish announcements.');
+      setErrorMsg(i18n.t('groupPosts.onlyTheGroupOwner2'));
       return;
     }
     const body = text.trim();
     if (!body && !imageDataUrl) {
-      setErrorMsg('Write something or attach an image.');
+      setErrorMsg(i18n.t('groupPosts.writeSomethingOrAttach'));
       return;
     }
     setErrorMsg(null);
@@ -191,9 +194,9 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       <TopBar
         t={t}
-        title={`${group.name ?? 'Group'} · Announcements`}
+        title={i18n.t('groupPosts.v0Announcements', { v0: group.name ?? 'Group' })}
         left={
-          <button onClick={onBack} aria-label="Go back" style={iconBtn}>
+          <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={iconBtn}>
             <I.ChevronL size={22} color={t.textDim} />
           </button>
         }
@@ -205,7 +208,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
           <button
             key={id}
             onClick={() => setTab(id)}
-            aria-label={id === 'compose' ? 'Compose tab' : 'Queue tab'}
+            aria-label={id === 'compose' ? i18n.t('groupPosts.composeTab') : i18n.t('groupPosts.queueTab')}
             style={{
               padding: '8px 16px',
               backgroundColor: tab === id ? t.surface2 : 'transparent',
@@ -234,9 +237,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
               marginBottom: 14,
             }}
           >
-            <span style={{ fontFamily: t.font, fontSize: 13, color: t.warn, lineHeight: '18px' }}>
-              Only the group owner and moderators can publish announcements. You can view the queue but cannot schedule new posts.
-            </span>
+            <span style={{ fontFamily: t.font, fontSize: 13, color: t.warn, lineHeight: '18px' }}>{i18n.t('groupPosts.onlyTheGroupOwner')}</span>
           </div>
         )}
 
@@ -246,18 +247,14 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
             <div style={{ display: 'flex', flexDirection: 'row', gap: 8 }}>
               <button
                 onClick={() => setAsGroup(true)}
-                aria-label="Publish as group"
+                aria-label={i18n.t('groupPosts.publishAsGroup')}
                 style={publishAsBtn(t, asGroup)}
-              >
-                AS GROUP
-              </button>
+              >{i18n.t('groupPosts.asGroup2')}</button>
               <button
                 onClick={() => setAsGroup(false)}
-                aria-label="Publish as you"
+                aria-label={i18n.t('groupPosts.publishAsYou')}
                 style={publishAsBtn(t, !asGroup)}
-              >
-                AS YOU
-              </button>
+              >{i18n.t('groupPosts.asYou2')}</button>
             </div>
 
             {/* Text area */}
@@ -265,9 +262,9 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Write your announcement…"
+                placeholder={i18n.t('groupPosts.writeYourAnnouncement')}
                 disabled={!canPost}
-                aria-label="Announcement text"
+                aria-label={i18n.t('groupPosts.announcementText')}
                 style={{
                   fontFamily: t.font,
                   fontSize: 15,
@@ -301,7 +298,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
                 />
                 <button
                   onClick={() => setImageDataUrl(null)}
-                  aria-label="Remove image"
+                  aria-label={i18n.t('groupPosts.removeImage')}
                   style={{
                     position: 'absolute',
                     top: 6,
@@ -332,9 +329,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
                     color: t.accentInk,
                     letterSpacing: 0.5,
                   }}
-                >
-                  EXIF STRIPPED
-                </span>
+                >{i18n.t('groupPosts.exifStripped')}</span>
               </div>
             ) : (
               <label
@@ -351,7 +346,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
               >
                 <I.Image size={18} color={t.textDim} />
                 <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>
-                  {processing ? 'Processing image…' : 'Attach image (optional)'}
+                  {processing ? i18n.t('groupPosts.processingImage') : i18n.t('groupPosts.attachImageOptional')}
                 </span>
                 <input
                   type="file"
@@ -373,10 +368,10 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
                   <button
                     key={id}
                     onClick={() => setWhen(id)}
-                    aria-label={`Send ${id}`}
+                    aria-label={i18n.t('groupPosts.sendV0', { v0: id })}
                     style={chipStyle(t, when === id)}
                   >
-                    {id === 'now' ? 'NOW' : id === '1h' ? 'IN 1H' : id === 'today' ? 'TODAY 18:00' : id === 'tomorrow' ? 'TOMORROW 09:00' : 'CUSTOM'}
+                    {id === 'now' ? 'NOW' : id === '1h' ? 'IN 1H' : id === 'today' ? 'TODAY 18:00' : id === 'tomorrow' ? i18n.t('groupPosts.tomorrow0900') : i18n.t('groupPosts.custom2')}
                   </button>
                 ))}
               </div>
@@ -388,7 +383,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
                     const ms = new Date(e.target.value).getTime();
                     setCustomTs(Number.isFinite(ms) ? ms : null);
                   }}
-                  aria-label="Custom date and time"
+                  aria-label={i18n.t('groupPosts.customDateAndTime')}
                   style={{
                     padding: '10px 12px',
                     backgroundColor: t.surface,
@@ -409,12 +404,10 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
 
             {/* Options toggles */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.6 }}>
-                OPTIONS
-              </span>
-              <OptionRow t={t} label="Pin announcement" sub="Highlights the post at the top of the chat." on={pinned} onChange={setPinned} />
-              <OptionRow t={t} label="Silent" sub="Receivers see the post but no notification banner." on={silent} onChange={setSilent} />
-              <OptionRow t={t} label="Replies disabled" sub="Read-only announcement (display hint only)." on={repliesOff} onChange={setRepliesOff} />
+              <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.6 }}>{i18n.t('groupPosts.options')}</span>
+              <OptionRow t={t} label={i18n.t('groupPosts.pinAnnouncement')} sub={i18n.t('groupPosts.highlightsThePostAt')} on={pinned} onChange={setPinned} />
+              <OptionRow t={t} label={i18n.t('groupPosts.silent')} sub={i18n.t('groupPosts.receiversSeeThePost')} on={silent} onChange={setSilent} />
+              <OptionRow t={t} label={i18n.t('groupPosts.repliesDisabled')} sub={i18n.t('groupPosts.readOnlyAnnouncementDisplay')} on={repliesOff} onChange={setRepliesOff} />
             </div>
 
             {errorMsg && (
@@ -426,7 +419,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
             <button
               onClick={handleSchedule}
               disabled={!canPost}
-              aria-label="Schedule announcement"
+              aria-label={i18n.t('groupPosts.scheduleAnnouncement')}
               style={{
                 padding: '14px 0',
                 backgroundColor: canPost ? t.accent : t.surface2,
@@ -439,7 +432,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
                 color: canPost ? t.accentInk : t.textFaint,
               }}
             >
-              {when === 'now' ? 'Publish now' : 'Schedule announcement'}
+              {when === 'now' ? i18n.t('groupPosts.publishNow') : i18n.t('groupPosts.scheduleAnnouncement')}
             </button>
           </div>
         ) : (
@@ -447,9 +440,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {queue.length === 0 ? (
               <div style={{ padding: 22, textAlign: 'center' }}>
-                <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>
-                  No scheduled posts for this group.
-                </span>
+                <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim }}>{i18n.t('groupPosts.queueEmpty')}</span>
               </div>
             ) : (
               queue.map((post) => (
@@ -470,21 +461,15 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
                       {formatQueueWhen(post.sendAt).toUpperCase()}
                     </span>
                     {post.options.pinned && (
-                      <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.warn, letterSpacing: 0.4 }}>
-                        PINNED
-                      </span>
+                      <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.warn, letterSpacing: 0.4 }}>{i18n.t('groupPosts.pinnedChip')}</span>
                     )}
                     {post.options.silent && (
-                      <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, letterSpacing: 0.4 }}>
-                        SILENT
-                      </span>
+                      <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, letterSpacing: 0.4 }}>{i18n.t('groupPosts.silent2')}</span>
                     )}
                     {post.options.repliesOff && (
-                      <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, letterSpacing: 0.4 }}>
-                        READ-ONLY
-                      </span>
+                      <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, letterSpacing: 0.4 }}>{i18n.t('groupPosts.readOnly')}</span>
                     )}
-                    <button onClick={() => handleCancel(post.id)} aria-label="Cancel post" style={iconBtn}>
+                    <button onClick={() => handleCancel(post.id)} aria-label={i18n.t('groupPosts.cancelPost')} style={iconBtn}>
                       <I.Trash size={14} color={t.textFaint} />
                     </button>
                   </div>
@@ -501,7 +486,7 @@ export function GroupPostsScreen({ group: groupProp, onBack }: Props) {
                     </span>
                   )}
                   <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.4 }}>
-                    {post.options.asGroup ? 'AS GROUP' : 'AS YOU'}
+                    {post.options.asGroup ? i18n.t('groupPosts.asGroup2') : i18n.t('groupPosts.asYou2')}
                   </span>
                 </div>
               ))
@@ -522,7 +507,7 @@ function OptionRow({
   return (
     <button
       onClick={() => onChange(!on)}
-      aria-label={`${label}: ${on ? 'enabled' : 'disabled'}`}
+      aria-label={i18n.t('groupPosts.v0V1', { v0: label, v1: on ? 'enabled' : 'disabled' })}
       style={{
         display: 'flex',
         flexDirection: 'row',

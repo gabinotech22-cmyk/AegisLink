@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -10,6 +12,7 @@ interface Props {
 }
 
 export function NotificationsScreen({ onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
 
   // Stub preferences
@@ -40,27 +43,27 @@ export function NotificationsScreen({ onBack }: Props) {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
       <TopBar
         t={t}
-        title="Notifications"
+        title={i18n.t('notifications.title')}
         big
         left={
-          <button onClick={onBack} aria-label="Back" style={iconBtn}>
+          <button onClick={onBack} aria-label={i18n.t('common.back')} style={iconBtn}>
             <I.ChevronL size={22} color={t.textDim} />
           </button>
         }
       />
 
       <div style={{ flex: 1, overflowY: 'auto', paddingTop: 4, paddingBottom: 22 }}>
-        <Section t={t} label="GENERAL">
-          <Toggle t={t} label="Notifications" sub="Master switch — turns off all notifications" value={master} onChange={setMaster} />
+        <Section t={t} label={i18n.t('notifications.generalSection')}>
+          <Toggle t={t} label={i18n.t('notifications.title')} sub={i18n.t('notifications.masterSwitchTurnsOff')} value={master} onChange={setMaster} />
           <div style={{ opacity: master ? 1 : 0.4, pointerEvents: master ? 'auto' : 'none' }}>
-            <Toggle t={t} label="Show content" sub='If off, only displays "new encrypted message"' value={preview} onChange={setPreview} />
-            <Toggle t={t} label="Sound" value={sound} onChange={setSound} />
-            <Toggle t={t} label="Badge counter" sub="Red dot counter on app icon" value={badge} onChange={setBadge} noBorder />
+            <Toggle t={t} label={i18n.t('notifications.showContent')} sub='If off, only displays "new encrypted message"' value={preview} onChange={setPreview} />
+            <Toggle t={t} label={i18n.t('notifications.sound')} value={sound} onChange={setSound} />
+            <Toggle t={t} label={i18n.t('notifications.badge')} sub={i18n.t('notifications.badgeSub')} value={badge} onChange={setBadge} noBorder />
           </div>
         </Section>
 
         <div style={{ opacity: master ? 1 : 0.4, pointerEvents: master ? 'auto' : 'none' }}>
-          <Section t={t} label="PRIORITY KEYWORDS">
+          <Section t={t} label={i18n.t('notifications.keywordsLabel')}>
             <div style={{ padding: 14 }}>
               <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
                 {keywords.map((k) => (
@@ -68,7 +71,7 @@ export function NotificationsScreen({ onBack }: Props) {
                     <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.text }}>{k}</span>
                     <button
                       onClick={() => removeKeyword(k)}
-                      aria-label={`Remove keyword ${k}`}
+                      aria-label={i18n.t('notifications.removeKeywordV0', { v0: k })}
                       style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: t.surface3, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     >
                       <span style={{ color: t.textDim, fontSize: 11 }}>×</span>
@@ -88,27 +91,25 @@ export function NotificationsScreen({ onBack }: Props) {
                 ) : (
                   <button
                     onClick={() => setShowKwInput(true)}
-                    aria-label="Add keyword"
+                    aria-label={i18n.t('notifications.addKeyword')}
                     style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, border: `1px dashed ${t.borderStrong}`, borderRadius: 99, background: 'none', cursor: 'pointer' }}
                   >
-                    <span style={{ color: t.accent, fontFamily: t.fontMono, fontSize: 11 }}>+ add</span>
+                    <span style={{ color: t.accent, fontFamily: t.fontMono, fontSize: 11 }}>{i18n.t('notifications.addBtn')}</span>
                   </button>
                 )}
               </div>
-              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '17px', display: 'block' }}>
-                Messages containing these keywords will always notify you, even if the chat is muted.
-              </span>
+              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '17px', display: 'block' }}>{i18n.t('notifications.keywordsDesc')}</span>
             </div>
           </Section>
 
-          <Section t={t} label="DAILY SUMMARY">
-            <Toggle t={t} label="Generate local summary" sub="Processed on-device · 19:30" value={summary} onChange={setSummary} noBorder />
+          <Section t={t} label={i18n.t('notifications.dailySummary')}>
+            <Toggle t={t} label={i18n.t('notifications.localSummary')} sub={i18n.t('notifications.localSummarySub')} value={summary} onChange={setSummary} noBorder />
           </Section>
 
-          <Section t={t} label={`MUTED · ${muted.length}`}>
+          <Section t={t} label={i18n.t('notifications.mutedV0', { v0: muted.length })}>
             {muted.length === 0 ? (
               <div style={{ padding: 14 }}>
-                <span style={{ fontFamily: t.font, fontSize: 13, color: t.textFaint }}>No muted conversations</span>
+                <span style={{ fontFamily: t.font, fontSize: 13, color: t.textFaint }}>{i18n.t('notifications.noMutedConversations')}</span>
               </div>
             ) : (
               muted.map((m, i) => (
@@ -125,10 +126,10 @@ export function NotificationsScreen({ onBack }: Props) {
                   </div>
                   <button
                     onClick={() => {}}
-                    aria-label={`Unmute ${m.name}`}
+                    aria-label={i18n.t('notifications.unmuteV0', { v0: m.name })}
                     style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, background: 'none', cursor: 'pointer' }}
                   >
-                    <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.text, letterSpacing: 0.4 }}>UNMUTE</span>
+                    <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.text, letterSpacing: 0.4 }}>{i18n.t('notifications.unmuteBtn')}</span>
                   </button>
                 </div>
               ))

@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -9,16 +11,17 @@ interface Props {
 }
 
 const OPTS = [
-  { id: 'off',  label: 'Off',       sub: 'Messages are kept indefinitely',  sec: 0 },
-  { id: '30s',  label: '30 seconds', sub: 'Deletes 30 seconds after reading', sec: 30 },
-  { id: '5m',   label: '5 minutes',  sub: 'Deletes 5 minutes after reading',  sec: 300 },
-  { id: '1h',   label: '1 hour',     sub: 'Deletes 1 hour after reading',     sec: 3600 },
-  { id: '1d',   label: '1 day',      sub: 'Deletes 24 hours after reading',   sec: 86400 },
-  { id: '7d',   label: '7 days',     sub: 'Deletes 7 days after reading',     sec: 604800 },
-  { id: '30d',  label: '30 days',    sub: 'Deletes 30 days after reading',    sec: 2592000 },
+  { id: 'off',  get label() { return i18n.t('ephemeral.offLabel'); },       get sub() { return i18n.t('ephemeral.messagesAreKeptIndefinitely'); },  sec: 0 },
+  { id: '30s',  get label() { return i18n.t('ephemeral.30sLabel'); }, get sub() { return i18n.t('ephemeral.deletes30SecondsAfter'); }, sec: 30 },
+  { id: '5m',   get label() { return i18n.t('ephemeral.5mLabel'); },  get sub() { return i18n.t('ephemeral.deletes5MinutesAfter'); },  sec: 300 },
+  { id: '1h',   get label() { return i18n.t('ephemeral.1hLabel'); },     get sub() { return i18n.t('ephemeral.deletes1HourAfter'); },     sec: 3600 },
+  { id: '1d',   get label() { return i18n.t('scheduled.delay1d'); },      get sub() { return i18n.t('ephemeral.deletes24HoursAfter'); },   sec: 86400 },
+  { id: '7d',   get label() { return i18n.t('ephemeral.7dLabel'); },     get sub() { return i18n.t('ephemeral.deletes7DaysAfter'); },     sec: 604800 },
+  { id: '30d',  get label() { return i18n.t('ephemeral.30dLabel'); },    get sub() { return i18n.t('ephemeral.deletes30DaysAfter'); },    sec: 2592000 },
 ] as const;
 
 export function EphemeralScreen({ onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const ephemeralTimer = useMessages((s) => s.ephemeralTimer);
   const setEphemeralTimer = useMessages((s) => s.setEphemeralTimer);
@@ -29,16 +32,16 @@ export function EphemeralScreen({ onBack }: Props) {
     setPick(id);
     setEphemeralTimer(sec);
     if (sec > 0) {
-      window.alert(`Disappearing messages enabled: ${label}`);
+      window.alert(i18n.t('ephemeral.disappearingMessagesEnabledV0', { v0: label }));
     } else {
-      window.alert('Disappearing messages disabled.');
+      window.alert(i18n.t('ephemeral.disappearingMessagesDisabled'));
     }
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Disappearing messages" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('ephemeral.title')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
@@ -49,12 +52,8 @@ export function EphemeralScreen({ onBack }: Props) {
           <div style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: t.surface, border: `1px solid ${t.borderStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
             <I.Timer size={32} color={t.accent} />
           </div>
-          <span style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.4, color: t.text, textAlign: 'center', display: 'block' }}>
-            Disappearing messages
-          </span>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px', textAlign: 'center', maxWidth: 280, marginTop: 8, display: 'block' }}>
-            Messages will be automatically deleted after the selected time, from both devices.
-          </span>
+          <span style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.4, color: t.text, textAlign: 'center', display: 'block' }}>{i18n.t('ephemeral.title')}</span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px', textAlign: 'center', maxWidth: 280, marginTop: 8, display: 'block' }}>{i18n.t('ephemeral.messagesWillBeAutomatically')}</span>
         </div>
 
         <div style={{ backgroundColor: t.surface, borderRadius: t.radius, border: `1px solid ${t.border}`, overflow: 'hidden' }}>

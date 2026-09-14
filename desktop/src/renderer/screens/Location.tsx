@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -20,13 +22,14 @@ interface Props {
 }
 
 const DURATIONS = [
-  { id: '15m', label: '15 minutes', sub: 'Expires automatically' },
-  { id: '1h',  label: '1 hour',     sub: 'Standard duration' },
-  { id: '8h',  label: '8 hours',    sub: 'Extended sharing' },
-  { id: 'eod', label: 'End of day', sub: 'Until midnight' },
+  { id: '15m', get label() { return i18n.t('location.duration15m'); }, get sub() { return i18n.t('location.expiresAutomatically'); } },
+  { id: '1h',  get label() { return i18n.t('location.duration1h'); },     get sub() { return i18n.t('location.standardDuration'); } },
+  { id: '8h',  get label() { return i18n.t('location.duration8h'); },    get sub() { return i18n.t('location.extendedSharing'); } },
+  { id: 'eod', get label() { return i18n.t('location.endOfDay'); }, get sub() { return i18n.t('location.durationEod'); } },
 ] as const;
 
 export function LocationScreen({ contact, onBack, onShare }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const { identity } = useIdentity();
   const [dur, setDur] = useState<string>('1h');
@@ -52,7 +55,7 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
         setLoading(false);
       },
       (err) => {
-        setPermError(`Location unavailable: ${err.message}`);
+        setPermError(i18n.t('location.locationUnavailableV0', { v0: err.message }));
         setLocationName('47.37690, 8.54170');
         setCoords({ latitude: 47.3769, longitude: 8.5417 });
         setLoading(false);
@@ -74,7 +77,7 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
         locStr = `Area of ${locStr}`;
       }
       const durObj = DURATIONS.find((d) => d.id === dur);
-      const msgText = `[Location] ${precise ? 'Exact' : 'Approximate'} · ${durObj?.label ?? dur} · ${locStr} (Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)})`;
+      const msgText = `[Location] ${precise ? i18n.t('location.exact2') : i18n.t('location.approximate2')} · ${durObj?.label ?? dur} · ${locStr} (Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)})`;
       const now = Date.now();
       const expiresMap: Record<string, number> = {
         '15m': now + 15 * 60 * 1000,
@@ -90,10 +93,10 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
         type: 'location',
         expiresAt,
       });
-      window.alert('Location shared successfully.');
+      window.alert(i18n.t('location.locationSharedSuccessfully'));
       onShare();
     } catch (e) {
-      window.alert(`Failed to share location: ${(e as Error).message}`);
+      window.alert(i18n.t('location.failedToShareLocation', { v0: (e as Error).message }));
     } finally {
       setSharing(false);
     }
@@ -105,8 +108,8 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Share location" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('location.title')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
@@ -119,7 +122,7 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
           <path d="M0 150 L280 140" stroke={t.borderStrong} strokeWidth={3} fill="none" opacity={0.4} />
         </svg>
         {loading ? (
-          <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 1 }}>LOCATING…</span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 1 }}>{i18n.t('location.locating')}</span>
         ) : (
           <div style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: t.accent, border: `3px solid ${t.bg}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <I.Shield size={18} color={t.accentInk} />
@@ -141,13 +144,11 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
             </span>
           )}
           {mapsUrl && (
-            <a href={mapsUrl} target="_blank" rel="noopener noreferrer" style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5, display: 'block', marginTop: 6 }}>
-              Open in Google Maps →
-            </a>
+            <a href={mapsUrl} target="_blank" rel="noopener noreferrer" style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5, display: 'block', marginTop: 6 }}>{i18n.t('location.openInGoogleMaps')}</a>
           )}
         </div>
 
-        <Section t={t} label="DURATION">
+        <Section t={t} label={i18n.t('location.duration2')}>
           {DURATIONS.map((o, i) => {
             const sel = dur === o.id;
             return (
@@ -176,11 +177,11 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
           })}
         </Section>
 
-        <Section t={t} label="PRECISION">
+        <Section t={t} label={i18n.t('location.precision2')}>
           <Toggle
             t={t}
-            label="Precise location"
-            sub="Share exact coordinates vs approximate area"
+            label={i18n.t('location.preciseLocation')}
+            sub={i18n.t('location.shareExactCoordinatesVs')}
             value={precise}
             onChange={setPrecise}
             noBorder
@@ -191,7 +192,7 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
           <button
             onClick={() => void handleShare()}
             disabled={sharing || loading}
-            aria-label="Share location"
+            aria-label={i18n.t('location.title')}
             style={{
               width: '100%', padding: '13px 0', backgroundColor: t.accent, border: 'none',
               borderRadius: t.radius, cursor: sharing || loading ? 'not-allowed' : 'pointer',
@@ -199,7 +200,7 @@ export function LocationScreen({ contact, onBack, onShare }: Props) {
               opacity: sharing || loading ? 0.7 : 1,
             }}
           >
-            {sharing ? 'Sharing…' : 'Share location'}
+            {sharing ? i18n.t('location.sharing') : i18n.t('location.title')}
           </button>
         </div>
       </div>

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
@@ -20,6 +22,7 @@ interface Props {
 }
 
 function PinDots({ count, error, t }: { count: number; error: boolean; t: Theme }) {
+  useTranslation(); // re-render on language change
   return (
     <div style={{ display: 'flex', flexDirection: 'row', gap: 18, justifyContent: 'center', marginTop: 32, marginBottom: 32 }}>
       {[0, 1, 2, 3].map((i) => (
@@ -85,6 +88,7 @@ function Numpad({ onDigit, onDelete, t }: { onDigit: (d: string) => void; onDele
 }
 
 export function LockScreen({ onUnlock, onPanic, variant = 'overlay' }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [mode, setMode] = useState<'biometric' | 'pin'>('pin');
   const [pinCode, setPinCode] = useState('');
@@ -154,11 +158,11 @@ export function LockScreen({ onUnlock, onPanic, variant = 'overlay' }: Props) {
     shake();
     setPinCode('');
     if (newAttempts >= MAX_ATTEMPTS) {
-      setPinError(`Max attempts reached. Triggering panic mode.`);
+      setPinError(i18n.t('lock.maxAttemptsReachedTriggering'));
       setTimeout(onPanic, 1800);
     } else {
       const left = MAX_ATTEMPTS - newAttempts;
-      setPinError(`Incorrect PIN. ${left} attempt${left === 1 ? '' : 's'} remaining.`);
+      setPinError(i18n.t('lock.incorrectPinV0Attempt', { v0: left, v1: left === 1 ? '' : 's' }));
     }
   }
 
@@ -186,13 +190,11 @@ export function LockScreen({ onUnlock, onPanic, variant = 'overlay' }: Props) {
 
       <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <I.Lock size={12} color={t.textDim} />
-        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>LOCKED</span>
+        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>{i18n.t('lock.locked2')}</span>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-        <span style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.3, color: t.text }}>
-          Enter PIN
-        </span>
+        <span style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.3, color: t.text }}>{i18n.t('lock.enterPin2')}</span>
 
         <div style={{
           animation: shakeClass ? 'aegis-shake 0.4s ease' : 'none',
@@ -218,30 +220,26 @@ export function LockScreen({ onUnlock, onPanic, variant = 'overlay' }: Props) {
             onClick={async () => {
               try {
                 const electronAny = (window as unknown as Record<string, unknown>)['electronAPI'] as { authenticate?: () => Promise<boolean> } | undefined;
-                const ok = electronAny?.authenticate ? await electronAny.authenticate() : window.confirm('Authenticate with system credentials?');
+                const ok = electronAny?.authenticate ? await electronAny.authenticate() : window.confirm(i18n.t('lock.authenticateWithSystemCredentials'));
                 if (ok) onUnlock();
               } catch {
                 // ignore
               }
             }}
             style={{ marginTop: 24, background: 'none', border: 'none', cursor: 'pointer' }}
-            aria-label="Use biometrics"
+            aria-label={i18n.t('lock.useBiometrics')}
           >
-            <span style={{ fontFamily: t.font, fontSize: 13, color: t.accent }}>
-              Use biometrics / system authentication
-            </span>
+            <span style={{ fontFamily: t.font, fontSize: 13, color: t.accent }}>{i18n.t('lock.useBiometricsSystemAuthentication')}</span>
           </button>
         )}
       </div>
 
       <button
         onClick={onPanic}
-        aria-label="Emergency"
+        aria-label={i18n.t('lock.emergency2')}
         style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8 }}
       >
-        <span style={{ fontFamily: t.fontMono, fontSize: 11, color: '#ef4444', letterSpacing: 0.8 }}>
-          EMERGENCY
-        </span>
+        <span style={{ fontFamily: t.fontMono, fontSize: 11, color: '#ef4444', letterSpacing: 0.8 }}>{i18n.t('lock.emergency3')}</span>
       </button>
     </div>
   );

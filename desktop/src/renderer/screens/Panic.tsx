@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -12,6 +14,7 @@ interface Props {
 }
 
 export function PanicScreen({ onBack, onWipe }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [duressPin, setDuressPin] = useState(true);
   const [autoWipe, setAutoWipe] = useState(false);
@@ -22,29 +25,29 @@ export function PanicScreen({ onBack, onWipe }: Props) {
 
   function handleSavePin() {
     if (tempPin.length < 4 || tempPin.length > 6) {
-      setPinError('PIN must be 4–6 digits.');
+      setPinError(i18n.t('panic.pinMustBe4'));
       return;
     }
     setPinSaved(true);
     setIsEditingPin(false);
     setTempPin('');
     setPinError('');
-    window.alert('Decoy PIN saved. Entering this PIN will trigger the panic wipe.');
+    window.alert(i18n.t('panic.decoyPinSavedEntering'));
   }
 
   function handleActivatePanic() {
     const first = window.confirm(
-      'ACTIVATE PANIC MODE?\n\nThis will wipe all keys, messages and contacts from this device permanently. This cannot be undone.'
+      i18n.t('panic.activatePanicModeThis')
     );
     if (!first) return;
-    const second = window.confirm('Are you absolutely sure? THIS CANNOT BE UNDONE.');
+    const second = window.confirm(i18n.t('panic.areYouAbsolutelySure'));
     if (!second) return;
     // If App.tsx supplied a real wipe callback, use it (clears stack before
     // setting identity = null to avoid the green-screen race).
     if (onWipe) {
       void onWipe();
     } else {
-      window.alert('Panic activated. All data has been wiped.');
+      window.alert(i18n.t('panic.panicActivatedAllData'));
       onBack();
     }
   }
@@ -73,8 +76,8 @@ export function PanicScreen({ onBack, onWipe }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Panic mode" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('panic.title')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
@@ -91,29 +94,21 @@ export function PanicScreen({ onBack, onWipe }: Props) {
           }}>
             <I.Shield size={32} color={t.danger} />
           </div>
-          <span style={{ fontFamily: t.fontDisplay, fontSize: 24, fontWeight: '600', letterSpacing: -0.4, color: t.text, textAlign: 'center', display: 'block' }}>
-            Panic Mode
-          </span>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px', textAlign: 'center', maxWidth: 290, marginTop: 10, display: 'block' }}>
-            Instantly wipe all keys, messages and contacts from this device. Nothing stays — not even in memory.
-          </span>
+          <span style={{ fontFamily: t.fontDisplay, fontSize: 24, fontWeight: '600', letterSpacing: -0.4, color: t.text, textAlign: 'center', display: 'block' }}>{i18n.t('panic.pinSaved')}</span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px', textAlign: 'center', maxWidth: 290, marginTop: 10, display: 'block' }}>{i18n.t('panic.instantlyWipeAllKeys')}</span>
         </div>
 
         {/* Trigger method — desktop note */}
         <div style={{ margin: '0 18px 18px', padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius }}>
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>
-            TRIGGER METHOD
-          </span>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '18px', display: 'block' }}>
-            On desktop, use the red PANIC button below. Shake and volume gestures are only available on mobile.
-          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>{i18n.t('panic.triggerMethod')}</span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '18px', display: 'block' }}>{i18n.t('panic.onDesktopUseThe')}</span>
         </div>
 
-        <Section t={t} label="DECOY PIN">
+        <Section t={t} label={i18n.t('panic.decoyPin')}>
           <Toggle
             t={t}
-            label="Enable decoy PIN"
-            sub="Entering this PIN instead of your real PIN triggers a wipe"
+            label={i18n.t('panic.enableDecoyPin')}
+            sub={i18n.t('panic.enteringThisPinInstead')}
             value={duressPin}
             onChange={setDuressPin}
           />
@@ -127,14 +122,14 @@ export function PanicScreen({ onBack, onWipe }: Props) {
                 display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                 padding: '12px 16px', cursor: 'pointer', boxSizing: 'border-box',
               }}
-              aria-label="Change decoy PIN"
+              aria-label={i18n.t('panic.changeDecoyPin')}
             >
               <div>
                 <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, display: 'block' }}>
-                  {pinSaved ? 'Change decoy PIN' : 'Set decoy PIN'}
+                  {pinSaved ? i18n.t('panic.changeDecoyPin') : i18n.t('panic.setDecoyPin')}
                 </span>
                 <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block', marginTop: 2 }}>
-                  {pinSaved ? 'Decoy PIN is set' : '4–6 digit PIN that wipes on entry'}
+                  {pinSaved ? i18n.t('panic.decoyPinIsSet') : i18n.t('panic.46DigitPin')}
                 </span>
               </div>
               <I.Chevron size={14} color={t.textFaint} />
@@ -142,11 +137,11 @@ export function PanicScreen({ onBack, onWipe }: Props) {
           )}
         </Section>
 
-        <Section t={t} label="AUTO-WIPE">
+        <Section t={t} label={i18n.t('panic.autoWipeSection')}>
           <Toggle
             t={t}
-            label="Auto-wipe after 5 failed attempts"
-            sub="If the main PIN is wrong 5 times consecutively, wipe everything"
+            label={i18n.t('panic.autoWipeAfter5')}
+            sub={i18n.t('panic.ifTheMainPin')}
             value={autoWipe}
             onChange={setAutoWipe}
             noBorder
@@ -157,19 +152,15 @@ export function PanicScreen({ onBack, onWipe }: Props) {
         <div style={{ padding: '8px 18px 24px' }}>
           <button
             onClick={handleActivatePanic}
-            aria-label="Activate panic mode"
+            aria-label={i18n.t('panic.activatePanic')}
             style={{
               width: '100%', padding: '18px 0', borderRadius: t.radius,
               backgroundColor: t.danger, border: 'none', cursor: 'pointer',
               fontFamily: t.font, fontWeight: '700', fontSize: 16, color: '#fff',
               letterSpacing: 0.5,
             }}
-          >
-            PANIC — WIPE EVERYTHING
-          </button>
-          <span style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, display: 'block', textAlign: 'center', marginTop: 8, lineHeight: '16px' }}>
-            This action is irreversible. All data will be permanently deleted.
-          </span>
+          >{i18n.t('panic.panicWipeEverything')}</button>
+          <span style={{ fontFamily: t.font, fontSize: 11, color: t.textDim, display: 'block', textAlign: 'center', marginTop: 8, lineHeight: '16px' }}>{i18n.t('panic.thisActionIsIrreversible')}</span>
         </div>
       </div>
 
@@ -177,19 +168,15 @@ export function PanicScreen({ onBack, onWipe }: Props) {
       {isEditingPin && (
         <div style={overlayStyle}>
           <div style={modalStyle}>
-            <span style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '700', color: t.text, display: 'block', marginBottom: 8 }}>
-              Set decoy PIN
-            </span>
-            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, display: 'block', marginBottom: 16, lineHeight: '18px' }}>
-              Enter 4–6 digits. Never tell anyone this PIN — it triggers an immediate wipe.
-            </span>
+            <span style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '700', color: t.text, display: 'block', marginBottom: 8 }}>{i18n.t('panic.setDecoyPin')}</span>
+            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, display: 'block', marginBottom: 16, lineHeight: '18px' }}>{i18n.t('panic.enter46Digits')}</span>
             <input
               type="password"
               inputMode="numeric"
               maxLength={6}
               value={tempPin}
               onChange={(e) => { setTempPin(e.target.value.replace(/[^0-9]/g, '')); setPinError(''); }}
-              placeholder="Enter 4–6 digit PIN"
+              placeholder={i18n.t('panic.enter46Digit')}
               style={{
                 width: '100%', padding: 12, fontSize: 20, textAlign: 'center', letterSpacing: 8,
                 fontFamily: t.fontMono, color: t.text, backgroundColor: t.bg,
@@ -207,9 +194,7 @@ export function PanicScreen({ onBack, onWipe }: Props) {
                   flex: 1, padding: '12px 0', backgroundColor: t.danger, border: 'none',
                   borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', color: '#fff',
                 }}
-              >
-                Save PIN
-              </button>
+              >{i18n.t('panic.savePinBtn')}</button>
               <button
                 onClick={() => { setIsEditingPin(false); setTempPin(''); setPinError(''); }}
                 style={{
@@ -217,9 +202,7 @@ export function PanicScreen({ onBack, onWipe }: Props) {
                   border: `1px solid ${t.borderStrong}`,
                   borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '500', color: t.text,
                 }}
-              >
-                Cancel
-              </button>
+              >{i18n.t('common.cancel')}</button>
             </div>
           </div>
         </div>

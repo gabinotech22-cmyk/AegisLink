@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -12,6 +14,7 @@ interface Props {
 type Mode = 'select' | 'preview' | 'audio';
 
 export function ViewOnceSendScreen({ onBack, onSend }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [mode, setMode] = useState<Mode>('select');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -49,7 +52,7 @@ export function ViewOnceSendScreen({ onBack, onSend }: Props) {
       mediaRecorderRef.current = mr;
       setRecording(true);
     } catch (e) {
-      setAudioError(`Microphone error: ${(e as Error).message}`);
+      setAudioError(i18n.t('voiceRecorder.microphoneErrorV0', { v0: (e as Error).message }));
     }
   }
 
@@ -78,19 +81,17 @@ export function ViewOnceSendScreen({ onBack, onSend }: Props) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: '#000' }}>
         <div style={{ position: 'absolute', top: 16, left: 0, right: 0, zIndex: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 16px' }}>
-          <button onClick={() => { setMode('select'); setImageUrl(null); }} aria-label="Go back" style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 99, padding: '6px 12px', cursor: 'pointer' }}>
-            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: '#fff', letterSpacing: 0.5 }}>BACK</span>
+          <button onClick={() => { setMode('select'); setImageUrl(null); }} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 99, padding: '6px 12px', cursor: 'pointer' }}>
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: '#fff', letterSpacing: 0.5 }}>{i18n.t('common.back')}</span>
           </button>
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1, backgroundColor: `${t.accent}22`, border: `1px solid ${t.accent}44`, borderRadius: 99, padding: '4px 10px' }}>
-            VIEW ONCE
-          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1, backgroundColor: `${t.accent}22`, border: `1px solid ${t.accent}44`, borderRadius: 99, padding: '4px 10px' }}>{i18n.t('viewOnce.previewBadge')}</span>
         </div>
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <img src={imageUrl} alt="Preview" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+          <img src={imageUrl} alt={i18n.t('viewOnce.preview')} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
         </div>
         <div style={{ padding: '16px 22px 32px', display: 'flex', gap: 10 }}>
-          <button onClick={() => { setMode('select'); setImageUrl(null); }} style={btnStyle()}>Discard</button>
-          <button onClick={handleSendImage} style={btnStyle(true)}>Send view-once</button>
+          <button onClick={() => { setMode('select'); setImageUrl(null); }} style={btnStyle()}>{i18n.t('viewOnce.discard')}</button>
+          <button onClick={handleSendImage} style={btnStyle(true)}>{i18n.t('viewOnce.sendViewOnce')}</button>
         </div>
       </div>
     );
@@ -99,8 +100,8 @@ export function ViewOnceSendScreen({ onBack, onSend }: Props) {
   if (mode === 'audio') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-        <TopBar t={t} title="Voice view-once" left={
-          <button onClick={() => { setMode('select'); setAudioUrl(null); setRecording(false); mediaRecorderRef.current?.stop(); }} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+        <TopBar t={t} title={i18n.t('viewOnce.voiceViewOnce')} left={
+          <button onClick={() => { setMode('select'); setAudioUrl(null); setRecording(false); mediaRecorderRef.current?.stop(); }} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
             <I.ChevronL size={22} color={t.textDim} />
           </button>
         } />
@@ -114,7 +115,7 @@ export function ViewOnceSendScreen({ onBack, onSend }: Props) {
           {!audioUrl && (
             <button
               onClick={recording ? stopRecording : startRecording}
-              aria-label={recording ? 'Stop recording' : 'Start recording'}
+              aria-label={recording ? i18n.t('voiceRecorder.stop') : i18n.t('viewOnce.startRecording')}
               style={{
                 width: 80, height: 80, borderRadius: 40, border: 'none', cursor: 'pointer',
                 backgroundColor: recording ? t.danger : t.accent,
@@ -128,13 +129,13 @@ export function ViewOnceSendScreen({ onBack, onSend }: Props) {
             </button>
           )}
           <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, textAlign: 'center' }}>
-            {recording ? 'Recording… tap to stop' : audioUrl ? 'Review your voice note' : 'Tap to record'}
+            {recording ? 'Recording… tap to stop' : audioUrl ? i18n.t('viewOnce.reviewYourVoiceNote') : i18n.t('voiceRecorder.tap')}
           </span>
         </div>
         {audioUrl && !recording && (
           <div style={{ padding: '0 22px 32px', display: 'flex', gap: 10 }}>
-            <button onClick={() => setAudioUrl(null)} style={btnStyle()}>Re-record</button>
-            <button onClick={handleSendAudio} style={btnStyle(true)}>Send view-once</button>
+            <button onClick={() => setAudioUrl(null)} style={btnStyle()}>{i18n.t('viewOnce.reRecord')}</button>
+            <button onClick={handleSendAudio} style={btnStyle(true)}>{i18n.t('viewOnce.sendViewOnce')}</button>
           </div>
         )}
       </div>
@@ -144,16 +145,14 @@ export function ViewOnceSendScreen({ onBack, onSend }: Props) {
   // Select mode
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Send view-once" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('viewOnce.sendViewOnce')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
       <div style={{ flex: 1, padding: '24px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius }}>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>
-            View-once media cannot be saved, forwarded or replayed. It auto-deletes 5 seconds after opening.
-          </span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>{i18n.t('viewOnce.viewOnceMediaCannot')}</span>
         </div>
 
         <label style={{ display: 'block', cursor: 'pointer' }}>
@@ -162,8 +161,8 @@ export function ViewOnceSendScreen({ onBack, onSend }: Props) {
               <I.Eye size={22} color={t.accent} />
             </div>
             <div>
-              <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block' }}>Photo / Image</span>
-              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, display: 'block', marginTop: 3 }}>SELECT FROM FILES</span>
+              <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block' }}>{i18n.t('viewOnce.photoImage')}</span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, display: 'block', marginTop: 3 }}>{i18n.t('viewOnce.selectFromFiles')}</span>
             </div>
           </div>
           <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileSelect} />
@@ -172,14 +171,14 @@ export function ViewOnceSendScreen({ onBack, onSend }: Props) {
         <button
           onClick={() => setMode('audio')}
           style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 16, backgroundColor: t.surface, border: `1px solid ${t.accent}44`, borderRadius: t.radius, cursor: 'pointer', textAlign: 'left', width: '100%', boxSizing: 'border-box' }}
-          aria-label="Voice view-once"
+          aria-label={i18n.t('viewOnce.voiceViewOnce')}
         >
           <div style={{ width: 44, height: 44, borderRadius: t.radius, backgroundColor: `${t.accent}22`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <I.Mic size={22} color={t.accent} />
           </div>
           <div>
-            <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block' }}>Voice note</span>
-            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, display: 'block', marginTop: 3 }}>RECORD AUDIO</span>
+            <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block' }}>{i18n.t('attachSheet.audio')}</span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, display: 'block', marginTop: 3 }}>{i18n.t('viewOnce.recordAudio')}</span>
           </div>
         </button>
       </div>

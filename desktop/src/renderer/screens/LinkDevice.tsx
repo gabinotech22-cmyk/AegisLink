@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import QRCode from 'qrcode';
@@ -18,6 +20,7 @@ interface Props {
 }
 
 function QRCanvas({ payload, t }: { payload: string; t: { radius: number; borderStrong: string } }) {
+  useTranslation(); // re-render on language change
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -37,6 +40,7 @@ function QRCanvas({ payload, t }: { payload: string; t: { radius: number; border
 }
 
 export function LinkDeviceScreen({ onBack, onLinked }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [aegisId, setAegisId] = useState('');
   const [step, setStep] = useState<'input' | 'qr'>('input');
@@ -69,7 +73,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
   async function handleNext() {
     const trimmed = aegisId.trim();
     if (!trimmed) {
-      setError('Please enter a valid Aegis ID.');
+      setError(i18n.t('devices.pleaseEnterAValid'));
       return;
     }
     setError('');
@@ -86,7 +90,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
       socketRef.current = socket;
 
       socket.on('connect_error', (err: Error) => {
-        setError('Connection error: ' + err.message);
+        setError(i18n.t('devices.connectionError') + err.message);
         setStep('input');
         setLoading(false);
         socket.disconnect();
@@ -115,7 +119,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
             ephemeralKeyRef.current.secretKey
           );
           if (!dec) {
-            setError('Error decrypting identity');
+            setError(i18n.t('devices.errorDecryptingIdentity'));
             return;
           }
 
@@ -128,7 +132,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
             typeof parsed.signingSecretKeyB64 !== 'string' ||
             typeof parsed.aegisId !== 'string'
           ) {
-            setError('Received malformed identity data');
+            setError(i18n.t('devices.receivedMalformedIdentityData'));
             return;
           }
           
@@ -153,7 +157,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
           // supplied alongside it. A mismatch means a corrupt/tampered transfer —
           // reject it instead of silently overwriting the derived value.
           if (json.aegisId && json.aegisId !== newIdentity.aegisId) {
-            setError('Identity mismatch — transfer rejected');
+            setError(i18n.t('devices.identityMismatchTransferRejected'));
             return;
           }
 
@@ -167,7 +171,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
 
           onLinked();
         } catch (err) {
-          setError('Error processing approval: ' + (err as Error).message);
+          setError(i18n.t('devices.errorProcessingApproval') + (err as Error).message);
         } finally {
           dec?.fill(0);
           wipeEphemeralKey();
@@ -175,7 +179,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
       });
 
       socket.on('error_msg', (e: { code?: string }) => {
-        setError('Server error: ' + (e?.code || 'Unknown'));
+        setError(i18n.t('devices.serverError') + (e?.code || 'Unknown'));
         setStep('input');
         setLoading(false);
         socket.disconnect();
@@ -186,7 +190,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
       // Synchronous failure (e.g. io() throwing) after the ephemeral keypair was
       // assigned to ephemeralKeyRef but before any socket handler could wipe it:
       // zeroize here too so the secret never lingers until unmount.
-      setError('Connection error: ' + (err as Error).message);
+      setError(i18n.t('devices.connectionError') + (err as Error).message);
       setLoading(false);
       wipeEphemeralKey();
     }
@@ -200,8 +204,8 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Link Device" left={
-        <button onClick={onBack} aria-label="Back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('devices.linkDevice2')} left={
+        <button onClick={onBack} aria-label={i18n.t('common.back')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.text} />
         </button>
       } />
@@ -209,17 +213,13 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         {step === 'input' && (
           <div style={{ width: '100%', maxWidth: 400 }}>
-            <p style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, marginBottom: 24, lineHeight: 1.5 }}>
-              To link this desktop, you must first enter your Aegis ID. You can find it in your profile within the mobile app.
-            </p>
-            <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>
-              YOUR AEGIS ID
-            </span>
+            <p style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, marginBottom: 24, lineHeight: 1.5 }}>{i18n.t('devices.toLinkThisDesktop')}</p>
+            <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>{i18n.t('addContact.yourAegisId')}</span>
             <input
               type="text"
               value={aegisId}
               onChange={(e) => { setAegisId(e.target.value); setError(''); }}
-              placeholder="ABC-1234-5678"
+              placeholder={i18n.t('devices.abc12345678')}
               style={inputStyle}
             />
             {error && (
@@ -227,21 +227,18 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
                 <span style={{ fontFamily: t.font, fontSize: 13, color: t.danger }}>{error}</span>
               </div>
             )}
-            <PrimaryButton t={t} label={loading ? 'Connecting...' : 'Next'} onPress={handleNext} disabled={loading} />
+            <PrimaryButton t={t} label={loading ? i18n.t('devices.connecting') : i18n.t('devices.next')} onPress={handleNext} disabled={loading} />
           </div>
         )}
 
         {step === 'qr' && (
           <div style={{ width: '100%', maxWidth: 400, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <p style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, marginBottom: 32, lineHeight: 1.5, textAlign: 'center' }}>
-              Open AegisLink on your mobile, go to <strong>Settings &gt; Linked Devices</strong> and scan this QR code.
+            <p style={{ fontFamily: t.font, fontSize: 15, color: t.textDim, marginBottom: 32, lineHeight: 1.5, textAlign: 'center' }}>{i18n.t('devices.openAegislinkOnYour')}<strong>{i18n.t('devices.settingsPath')}</strong> and scan this QR code.
             </p>
             
             <QRCanvas payload={qrPayload} t={t} />
             
-            <p style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 32, textAlign: 'center' }}>
-              Waiting for mobile approval...
-            </p>
+            <p style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 32, textAlign: 'center' }}>{i18n.t('devices.waitingForMobileApproval')}</p>
 
             {error && (
               <div style={{ padding: 12, backgroundColor: `${t.danger}22`, border: `1px solid ${t.danger}66`, borderRadius: t.radiusS, marginTop: 16, width: '100%' }}>

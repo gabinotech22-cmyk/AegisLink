@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
@@ -14,6 +16,7 @@ interface Props {
 }
 
 export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const { renameGroup, addMember, removeMember, updateGroupPermissions, leaveGroup, dissolveGroup } = useGroups();
   const contacts = useContacts((s) => s.contacts);
@@ -45,12 +48,12 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
 
   function handleAddMember() {
     const eligible = contacts.filter((c) => !group.members.includes(c.aegisId));
-    if (eligible.length === 0) { window.alert('All contacts are already in this group.'); return; }
+    if (eligible.length === 0) { window.alert(i18n.t('groupAdmin.allContactsAreAlready')); return; }
     const options = eligible.slice(0, 10).map((c) => c.name).join('\n');
     const name = window.prompt(`Enter contact name to add:\n\n${options}`);
     if (!name) return;
     const match = eligible.find((c) => c.name.toLowerCase() === name.trim().toLowerCase());
-    if (!match) { window.alert('Contact not found.'); return; }
+    if (!match) { window.alert(i18n.t('verify.contactNotFound')); return; }
     void addMember(group.id, match.aegisId);
   }
 
@@ -62,8 +65,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
       // other member in a group whose creator vanished. Non-admins keep the
       // original leave-only flow (they lack the signing key to dissolve).
       const message = isAdmin
-        ? 'You are the admin. Leaving will delete this group for every member, not just you. Continue?'
-        : 'Leave group and delete locally?';
+        ? i18n.t('groupAdmin.youAreTheAdmin') : i18n.t('groupAdmin.leaveGroupAndDelete');
       if (window.confirm(message)) {
         if (isAdmin) void dissolveGroup(group.id);
         else void leaveGroup(group.id);
@@ -72,15 +74,15 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
       return;
     }
     const name = getMemberName(id);
-    if (window.confirm(`Remove ${name} from the group?`)) {
+    if (window.confirm(i18n.t('groupAdmin.removeV0FromThe', { v0: name }))) {
       void removeMember(group.id, id);
     }
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Group settings" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('groupAdmin.groupSettings')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
@@ -101,7 +103,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
                 autoFocus
                 style={{ fontFamily: t.fontDisplay, fontSize: 20, fontWeight: '600', color: t.text, backgroundColor: 'transparent', border: 'none', borderBottom: `2px solid ${t.accent}`, outline: 'none', minWidth: 120, padding: '2px 0' }}
               />
-              <button onClick={() => void handleRename()} aria-label="Confirm name" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+              <button onClick={() => void handleRename()} aria-label={i18n.t('groupAdmin.confirmName')} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                 <I.Check size={22} color={t.accent} />
               </button>
             </div>
@@ -109,7 +111,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
             <button
               onClick={() => { setNameInput(group.name); setEditingName(true); }}
               style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, background: 'none', border: 'none', cursor: 'pointer' }}
-              aria-label="Edit group name"
+              aria-label={i18n.t('groupAdmin.editGroupName')}
             >
               <span style={{ fontFamily: t.fontDisplay, fontSize: 22, fontWeight: '600', letterSpacing: -0.4, color: t.text }}>{group.name}</span>
               <I.Key size={14} color={t.textDim} />
@@ -122,7 +124,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
         </div>
 
         {/* Members */}
-        <Section t={t} label={`MEMBERS · ${group.members.length}`}>
+        <Section t={t} label={i18n.t('groupAdmin.membersV0', { v0: group.members.length })}>
           {group.members.map((id, i) => {
             const name = getMemberName(id);
             const color = getMemberColor(id);
@@ -146,7 +148,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
                   </span>
                 </div>
                 {!me && (
-                  <button onClick={() => handleRemoveMember(id)} aria-label={`Remove ${name}`} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6 }}>
+                  <button onClick={() => handleRemoveMember(id)} aria-label={i18n.t('chat.removeV0', { v0: name })} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6 }}>
                     <I.X size={16} color={t.textDim} />
                   </button>
                 )}
@@ -156,30 +158,30 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
 
           <button
             onClick={handleAddMember}
-            aria-label="Add member"
+            aria-label={i18n.t('groupAdmin.addMember')}
             style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', boxSizing: 'border-box' }}
           >
             <div style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, border: `1px dashed ${t.accent}66`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <I.Plus size={20} color={t.accent} />
             </div>
-            <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '500', color: t.accent, flex: 1, textAlign: 'left' }}>Add member</span>
-            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.5 }}>FROM CONTACTS</span>
+            <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '500', color: t.accent, flex: 1, textAlign: 'left' }}>{i18n.t('groupAdmin.addMember')}</span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.5 }}>{i18n.t('groupAdmin.fromContacts2')}</span>
           </button>
         </Section>
 
         {/* Permissions */}
-        <Section t={t} label="PERMISSIONS">
+        <Section t={t} label={i18n.t('groupAdmin.permissionsSection')}>
           <Toggle
             t={t}
-            label="Only admins can send"
-            sub="Members can only read messages"
+            label={i18n.t('groupAdmin.onlyAdminsCanSend')}
+            sub={i18n.t('groupAdmin.membersCanOnlyRead')}
             value={group.permissions?.onlyAdminsSend ?? false}
             onChange={(v) => void updateGroupPermissions(group.id, { permissions: { ...(group.permissions ?? {}), onlyAdminsSend: v } })}
           />
           <Toggle
             t={t}
-            label="Disable reactions"
-            sub="No emoji reactions in this group"
+            label={i18n.t('groupAdmin.disableReactions')}
+            sub={i18n.t('groupAdmin.noEmojiReactionsIn')}
             value={group.permissions?.disableReactions ?? false}
             onChange={(v) => void updateGroupPermissions(group.id, { permissions: { ...(group.permissions ?? {}), disableReactions: v } })}
             noBorder
@@ -187,16 +189,14 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
         </Section>
 
         {/* Danger zone */}
-        <Section t={t} label="DANGER ZONE">
+        <Section t={t} label={i18n.t('groupAdmin.dangerZone')}>
           <button
             onClick={() => {
-              if (window.confirm('Leave group permanently?')) { void leaveGroup(group.id); onBack(); }
+              if (window.confirm(i18n.t('groupAdmin.leaveGroupPermanently'))) { void leaveGroup(group.id); onBack(); }
             }}
             style={{ display: 'block', width: '100%', padding: '13px 16px', textAlign: 'left', background: 'none', border: 'none', borderBottom: `1px solid ${t.divider}`, cursor: 'pointer', fontFamily: t.font, fontSize: 14, color: t.danger }}
-            aria-label="Leave group"
-          >
-            Leave group
-          </button>
+            aria-label={i18n.t('groupAdmin.leaveGroupTitle')}
+          >{i18n.t('groupAdmin.leaveGroupTitle')}</button>
           {/* Only the group admin holds the signing key that can dissolve the
               group for every member (see socket/client.ts broadcastGroupDissolve
               / signGroupDissolve) — a non-admin clicking this could previously
@@ -205,16 +205,14 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
           {amIAdmin && (
             <button
               onClick={() => {
-                if (window.confirm('Delete group for everyone? This cannot be undone.')) {
+                if (window.confirm(i18n.t('groupAdmin.deleteGroupForEveryone'))) {
                   void dissolveGroup(group.id);
                   onBack();
                 }
               }}
               style={{ display: 'block', width: '100%', padding: '13px 16px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', fontFamily: t.font, fontSize: 14, color: t.danger, fontWeight: '600' }}
-              aria-label="Delete group"
-            >
-              Delete group for everyone
-            </button>
+              aria-label={i18n.t('groupAdmin.deleteGroup')}
+            >{i18n.t('groupAdmin.dissolveGroupTitle')}</button>
           )}
         </Section>
       </div>

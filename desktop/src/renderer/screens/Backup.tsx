@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -29,6 +31,7 @@ interface Props {
 type PassphraseMode = 'backup' | 'restore';
 
 export function BackupScreen({ onBack, onRestored }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const {
     identity,
@@ -61,7 +64,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
 
   const lastBackupLabel = lastBackupAt
     ? `${Math.max(1, Math.floor((Date.now() - lastBackupAt) / 60000))} min ago`
-    : 'No backup yet';
+    : i18n.t('backup.noBackupYetLabel');
 
   const mnemonic = useMemo<string>(() => {
     if (!identity?.secretKey) return '';
@@ -129,11 +132,11 @@ export function BackupScreen({ onBack, onRestored }: Props) {
 
   async function confirmBackup() {
     if (passphrase.length < BACKUP_MIN_PASSPHRASE_LEN) {
-      setError(`Passphrase must be at least ${BACKUP_MIN_PASSPHRASE_LEN} characters.`);
+      setError(i18n.t('backup.passphraseMustBeAt', { v0: BACKUP_MIN_PASSPHRASE_LEN }));
       return;
     }
     if (passphrase !== passphraseConfirm) {
-      setError('Passphrases do not match.');
+      setError(i18n.t('backup.passphrasesDoNotMatch'));
       return;
     }
     setBusy(true);
@@ -151,7 +154,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       const now = Date.now();
       setLastBackupAt(now);
       resetPassphrase();
-      window.alert('Backup exported. Store the file and passphrase somewhere safe — we cannot recover them.');
+      window.alert(i18n.t('backup.backupExportedStoreThe'));
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -163,24 +166,24 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       const text = await file.text();
       let parsed: unknown;
       try { parsed = JSON.parse(text); } catch {
-        window.alert('Invalid file — not valid JSON.');
+        window.alert(i18n.t('backup.invalidFileNotValid'));
         return;
       }
       if (!isBackupEnvelope(parsed)) {
-        window.alert('Invalid backup envelope.');
+        window.alert(i18n.t('backup.invalidBackupEnvelope'));
         return;
       }
       setPendingEnvelope(text);
       setPassphraseMode('restore');
     } catch (e) {
-      window.alert(`Restore failed: ${(e as Error).message}`);
+      window.alert(i18n.t('backup.restoreFailedV0', { v0: (e as Error).message }));
     }
   }
 
   async function confirmRestore() {
     if (!pendingEnvelope) return;
     if (passphrase.length < BACKUP_MIN_PASSPHRASE_LEN) {
-      setError(`Passphrase must be at least ${BACKUP_MIN_PASSPHRASE_LEN} characters.`);
+      setError(i18n.t('backup.passphraseMustBeAt', { v0: BACKUP_MIN_PASSPHRASE_LEN }));
       return;
     }
     setBusy(true);
@@ -227,8 +230,8 @@ export function BackupScreen({ onBack, onRestored }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Backup & Restore" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('backup.backupRestore')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
@@ -238,27 +241,23 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         <div style={{ padding: 22, border: `1px solid ${t.borderStrong}`, borderRadius: t.radius, backgroundColor: t.surface, marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <span style={{ fontFamily: t.fontMono, fontSize: 10, color: lastBackupAt ? t.accent : t.warn, letterSpacing: 1.1 }}>{lastBackupLabel}</span>
-            <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim }}>REALTIME STATS</span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim }}>{i18n.t('backup.realtimeStats')}</span>
           </div>
           <span style={{ fontFamily: t.fontDisplay, fontSize: 32, fontWeight: '600', letterSpacing: -0.6, color: t.text, display: 'block' }}>
             {totalMessages.toLocaleString()} messages
           </span>
-          <span style={{ fontFamily: t.fontMono, fontSize: 12, color: t.textDim, marginTop: 2, display: 'block' }}>
-            Database encrypted at rest
-          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 12, color: t.textDim, marginTop: 2, display: 'block' }}>{i18n.t('backup.databaseEncryptedAtRest')}</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 18, gap: 10 }}>
-            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label="CONVERSATIONS" val={String(totalConversations)} /></div>
-            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label="GROUPS" val={String(totalGroups)} /></div>
-            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label="MEDIA" val={String(totalMedia)} /></div>
-            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label="DEVICES" val="1" /></div>
+            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.conversations')} val={String(totalConversations)} /></div>
+            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.groups')} val={String(totalGroups)} /></div>
+            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.media')} val={String(totalMedia)} /></div>
+            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.devices')} val="1" /></div>
           </div>
         </div>
 
         {/* Recovery phrase card */}
         <div style={{ padding: 16, backgroundColor: t.surface, borderRadius: t.radius, border: `1px solid ${t.border}`, marginBottom: 16 }}>
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>
-            RECOVERY PHRASE
-          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>{i18n.t('backup.recoveryPhrase2')}</span>
           <span style={{ fontFamily: t.fontMono, fontSize: 12, color: t.text, lineHeight: '20px', letterSpacing: 0.2, display: 'block', marginBottom: 10, wordBreak: 'break-all' }}>
             {revealed ? mnemonic : '●●●● '.repeat(16)}
           </span>
@@ -277,13 +276,11 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         {/* Mnemonic restore */}
         {restoring && (
           <div style={{ padding: 16, backgroundColor: t.surface, borderRadius: t.radius, border: `1px solid ${t.border}`, marginBottom: 16 }}>
-            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>
-              PASTE RECOVERY PHRASE
-            </span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1, display: 'block', marginBottom: 8 }}>{i18n.t('backup.pasteRecovery')}</span>
             <textarea
               value={mnemonicInput}
               onChange={(e) => setMnemonicInput(e.target.value)}
-              placeholder="word1 word2 word3…"
+              placeholder={i18n.t('backup.word1Word2Word3')}
               rows={3}
               style={{ ...inputStyle, resize: 'vertical', marginBottom: 12 }}
             />
@@ -292,7 +289,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                 onClick={async () => {
                   const words = mnemonicInput.trim().toLowerCase().split(/\s+/);
                   if (words.length !== 32) {
-                    window.alert('Frase de recuperación inválida. Debe contener exactamente 32 palabras.');
+                    window.alert(i18n.t('backup.fraseDeRecuperaciN'));
                     return;
                   }
                   // Duress containment (parity with mobile Backup.tsx):
@@ -302,7 +299,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                   {
                     const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
                     if (usePreferences.getState().duressActive) {
-                      window.alert('Error al recuperar identidad: frase de recuperación inválida.');
+                      window.alert(i18n.t('backup.errorAlRecuperarIdentidad'));
                       return;
                     }
                   }
@@ -332,10 +329,10 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                     await useIdentity.getState().hydrate();
                     setRestoring(false);
                     setMnemonicInput('');
-                    window.alert(`Identidad recuperada exitosamente:\n${restored.aegisId}`);
+                    window.alert(i18n.t('backup.identidadRecuperadaExitosamenteV0', { v0: restored.aegisId }));
                     onRestored?.();
                   } catch (e) {
-                    window.alert(`Error al recuperar identidad: ${(e as Error).message}`);
+                    window.alert(i18n.t('backup.errorAlRecuperarIdentidad2', { v0: (e as Error).message }));
                   } finally {
                     secretKeyBytes?.fill(0);
                     keypair?.secretKey.fill(0);
@@ -343,15 +340,11 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                   }
                 }}
                 style={{ flex: 1, padding: '10px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', color: t.accentInk, fontSize: 13 }}
-              >
-                Import phrase
-              </button>
+              >{i18n.t('backup.importPhrase')}</button>
               <button
                 onClick={() => setRestoring(false)}
                 style={{ flex: 1, padding: '10px 0', backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '500', color: t.text, fontSize: 13 }}
-              >
-                Cancel
-              </button>
+              >{i18n.t('common.cancel')}</button>
             </div>
           </div>
         )}
@@ -359,20 +352,16 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         {/* Action buttons */}
         <button
           onClick={() => {
-            if (!identity) { window.alert('Generate an identity first.'); return; }
+            if (!identity) { window.alert(i18n.t('backup.generateAnIdentityFirst')); return; }
             setPassphraseMode('backup');
           }}
           style={{ width: '100%', padding: '13px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radius, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.accentInk, marginBottom: 10 }}
-        >
-          Create encrypted backup
-        </button>
+        >{i18n.t('backup.createBtn')}</button>
 
         <label style={{ display: 'block', marginBottom: 10 }}>
           <span
             style={{ display: 'block', width: '100%', padding: '13px 0', textAlign: 'center', fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text, backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, borderRadius: t.radius, cursor: 'pointer', boxSizing: 'border-box' }}
-          >
-            Restore from file
-          </span>
+          >{i18n.t('backup.restoreFromFile')}</span>
           <input
             type="file"
             accept=".aegisbak"
@@ -385,9 +374,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
           <button
             onClick={() => setRestoring(true)}
             style={{ width: '100%', padding: '13px 0', backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, borderRadius: t.radius, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', fontSize: 14, color: t.text }}
-          >
-            Restore from recovery phrase
-          </button>
+          >{i18n.t('backup.restoreFromRecoveryPhrase')}</button>
         )}
       </div>
 
@@ -396,18 +383,17 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         <div style={overlayStyle}>
           <div style={modalStyle}>
             <span style={{ fontFamily: t.fontDisplay, fontSize: 18, fontWeight: '600', color: t.text }}>
-              {passphraseMode === 'backup' ? 'Set backup passphrase' : 'Enter backup passphrase'}
+              {passphraseMode === 'backup' ? i18n.t('backup.setPassTitle') : i18n.t('backup.enterPassTitle')}
             </span>
             <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '18px' }}>
               {passphraseMode === 'backup'
-                ? 'This passphrase is the only key to your backup. We cannot recover it — store it somewhere safe.'
-                : 'Enter the passphrase you set when you created this backup.'}
+                ? i18n.t('backup.setPassDesc') : i18n.t('backup.enterPassDesc')}
             </span>
 
             <input
               type="password"
               autoComplete="new-password"
-              placeholder="Passphrase"
+              placeholder={i18n.t('backup.passphraseLabel')}
               value={passphrase}
               onChange={(e) => { setPassphrase(e.target.value); setError(''); }}
               style={inputStyle}
@@ -418,13 +404,13 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                 <input
                   type="password"
                   autoComplete="new-password"
-                  placeholder="Confirm passphrase"
+                  placeholder={i18n.t('backup.confirmPass')}
                   value={passphraseConfirm}
                   onChange={(e) => { setPassphraseConfirm(e.target.value); setError(''); }}
                   style={inputStyle}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>STRENGTH</span>
+                  <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.1 }}>{i18n.t('backup.strength')}</span>
                   <span style={{ fontFamily: t.fontMono, fontSize: 11, color: strengthColor[strength] }}>
                     {strengthLabel[strength]}
                   </span>
@@ -441,9 +427,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                 disabled={busy}
                 onClick={() => { if (!busy) resetPassphrase(); }}
                 style={{ flex: 1, padding: '12px 0', backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, cursor: busy ? 'not-allowed' : 'pointer', fontFamily: t.font, fontWeight: '500', color: t.text, fontSize: 13, opacity: busy ? 0.5 : 1 }}
-              >
-                Cancel
-              </button>
+              >{i18n.t('common.cancel')}</button>
               <button
                 disabled={busy}
                 onClick={() => {
@@ -452,7 +436,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                 }}
                 style={{ flex: 1, padding: '12px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radiusS, cursor: busy ? 'not-allowed' : 'pointer', fontFamily: t.font, fontWeight: '600', color: t.accentInk, fontSize: 13, opacity: busy ? 0.6 : 1 }}
               >
-                {busy ? 'Working…' : passphraseMode === 'backup' ? 'Encrypt & export' : 'Decrypt & restore'}
+                {busy ? 'Working…' : passphraseMode === 'backup' ? i18n.t('backup.encryptExport') : i18n.t('backup.decryptRestore')}
               </button>
             </div>
           </div>

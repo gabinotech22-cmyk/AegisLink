@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -22,6 +24,7 @@ interface Props {
 }
 
 export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onContacts, onDistribution, onTab }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
 
   const identity = useIdentity((s) => s.identity);
@@ -67,7 +70,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
       >
         <button
           onClick={onProfile}
-          aria-label="Open profile"
+          aria-label={i18n.t('home.openProfile')}
           style={{
             display: 'flex',
             flexDirection: 'row',
@@ -84,16 +87,16 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         </button>
 
         <div style={{ display: 'flex', flexDirection: 'row', gap: 4 }}>
-          <button onClick={onSearch} aria-label="Search" style={iconBtnStyle}>
+          <button onClick={onSearch} aria-label={i18n.t('common.search')} style={iconBtnStyle}>
             <I.Search size={20} color={t.textDim} />
           </button>
-          <button onClick={onContacts} aria-label="Contacts" style={iconBtnStyle}>
+          <button onClick={onContacts} aria-label={i18n.t('common.contacts')} style={iconBtnStyle}>
             <I.Person size={20} color={t.textDim} />
           </button>
-          <button onClick={onDistribution} aria-label="Distribution lists" style={iconBtnStyle}>
+          <button onClick={onDistribution} aria-label={i18n.t('home.distributionLists')} style={iconBtnStyle}>
             <I.Broadcast size={20} color={t.textDim} />
           </button>
-          <button onClick={onAddContact} aria-label="Add contact" style={iconBtnStyle}>
+          <button onClick={onAddContact} aria-label={i18n.t('contacts.addContact')} style={iconBtnStyle}>
             <I.Plus size={22} color={t.accent} />
           </button>
         </div>
@@ -111,7 +114,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         <button
           onClick={() => setShowArchived(false)}
           style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 18, paddingRight: 18, paddingTop: 10, paddingBottom: 10, background: 'none', border: 'none', cursor: 'pointer' }}
-          aria-label="Back to chats"
+          aria-label={i18n.t('home.backToChats')}
         >
           <I.ChevronL size={16} color={t.accent} />
           <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 0.5 }}>
@@ -163,13 +166,13 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
                 cursor: 'pointer',
                 boxSizing: 'border-box',
               }}
-              aria-label="Show archived"
+              aria-label={i18n.t('home.showArchived')}
             >
               <div style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: t.surface2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <I.Archive size={20} color={t.textDim} />
               </div>
               <div style={{ flex: 1, textAlign: 'left' }}>
-                <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '500', color: t.text, display: 'block' }}>Archived</span>
+                <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '500', color: t.text, display: 'block' }}>{i18n.t('home.archived2')}</span>
                 <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, marginTop: 2, display: 'block' }}>
                   {archived.length} {archived.length === 1 ? 'conversation' : 'conversations'}
                 </span>
@@ -206,7 +209,7 @@ function IdentityBanner({ t, identity, displayName: _displayName, onPress }: { t
       onClick={onPress}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      aria-label="View profile"
+      aria-label={i18n.t('home.viewProfile')}
       style={{
         margin: '4px 18px 14px',
         padding: 14,
@@ -241,9 +244,7 @@ function IdentityBanner({ t, identity, displayName: _displayName, onPress }: { t
         <I.Check size={16} color={t.accent} />
       </div>
       <div style={{ flex: 1, textAlign: 'left', minWidth: 0 }}>
-        <span style={{ fontFamily: t.font, fontWeight: '600', fontSize: 13, color: t.text, display: 'block' }}>
-          Identity created
-        </span>
+        <span style={{ fontFamily: t.font, fontWeight: '600', fontSize: 13, color: t.text, display: 'block' }}>{i18n.t('home.identityCreated')}</span>
         <span
           style={{
             fontFamily: t.fontMono,
@@ -265,6 +266,7 @@ function IdentityBanner({ t, identity, displayName: _displayName, onPress }: { t
 }
 
 function StatusBar({ t, identity, displayName: _displayName }: { t: Theme; identity: { aegisId: string }; displayName: string }) {
+  useTranslation(); // re-render on language change
   return (
     <div
       style={{
@@ -295,7 +297,7 @@ function StatusBar({ t, identity, displayName: _displayName }: { t: Theme; ident
           whiteSpace: 'nowrap',
         }}
       >
-        {`${identity.aegisId} · End-to-end encrypted`}
+        {i18n.t('home.v0EndToEnd', { v0: identity.aegisId })}
       </span>
     </div>
   );
@@ -355,17 +357,13 @@ function EmptyHero({ t, onAdd }: { t: Theme; onAdd: () => void }) {
           marginBottom: 12,
           maxWidth: 280,
         }}
-      >
-        No conversations yet
-      </h2>
+      >{i18n.t('home.noConversationsYet')}</h2>
 
-      <p style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: '21px', textAlign: 'center', maxWidth: 300, marginBottom: 24, marginTop: 0 }}>
-        Add your first contact via QR code, link, or AegisLink ID to start chatting privately.
-      </p>
+      <p style={{ fontFamily: t.font, fontSize: 14, color: t.textDim, lineHeight: '21px', textAlign: 'center', maxWidth: 300, marginBottom: 24, marginTop: 0 }}>{i18n.t('home.addYourFirstContact')}</p>
 
       <button
         onClick={onAdd}
-        aria-label="Add first contact"
+        aria-label={i18n.t('home.addFirstContact2')}
         style={{
           backgroundColor: t.accent,
           paddingLeft: 24,
@@ -382,14 +380,10 @@ function EmptyHero({ t, onAdd }: { t: Theme; onAdd: () => void }) {
         }}
       >
         <I.Plus size={18} color={t.accentInk} />
-        <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>
-          Add first contact
-        </span>
+        <span style={{ color: t.accentInk, fontFamily: t.font, fontWeight: '600', fontSize: 14 }}>{i18n.t('home.addFirstContact2')}</span>
       </button>
 
-      <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.8, marginTop: 22 }}>
-        QR · LINK · ID
-      </span>
+      <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.8, marginTop: 22 }}>{i18n.t('home.qrLinkId')}</span>
     </div>
   );
 }
@@ -417,7 +411,7 @@ function ContactRow({
       previewText = preview.body || (preview.type === 'image' ? '📷 Image' : preview.type === 'audio' ? '🎙 Audio' : preview.type === 'file' ? '📎 File' : '...');
     }
   } else {
-    previewText = 'No messages yet';
+    previewText = i18n.t('home.noMessages');
   }
 
   const time = preview ? new Date(preview.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
@@ -432,7 +426,7 @@ function ContactRow({
       onClick={onPress}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      aria-label={`Open chat with ${contact.name}`}
+      aria-label={i18n.t('home.openChatWithV0', { v0: contact.name })}
       style={{
         display: 'flex',
         flexDirection: 'row',
@@ -488,7 +482,7 @@ function ContactRow({
           </span>
           {hasEphemeral && (
             <div style={{ backgroundColor: `${t.accent}22`, borderRadius: 4, paddingLeft: 4, paddingRight: 4, paddingTop: 2, paddingBottom: 2 }}>
-              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent }}>⏱ ephemeral</span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent }}>{i18n.t('home.ephemeral')}</span>
             </div>
           )}
         </div>

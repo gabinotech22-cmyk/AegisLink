@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { useTheme } from '../theme/ThemeContext';
@@ -57,6 +59,7 @@ function CircleBtn({ t, color, onPress, label, outlined = false, children }: {
 }
 
 export function CallScreen({ onClose }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const status = useCall((s) => s.status);
   const peerId = useCall((s) => s.peer);
@@ -149,17 +152,15 @@ export function CallScreen({ onClose }: Props) {
           {peerName}
         </span>
         <button
-          onClick={() => window.alert('This call uses DTLS-SRTP with ephemeral CURVE25519 key exchange. No server can decrypt or intercept the audio/video stream.')}
-          aria-label="E2EE call info"
+          onClick={() => window.alert(i18n.t('call.alertDesc'))}
+          aria-label={i18n.t('call.e2eeCallInfo')}
           style={{
             display: 'flex', alignItems: 'center', gap: 4, marginTop: 8,
             padding: '4px 10px', backgroundColor: `${t.accent}22`,
             border: `1px solid ${t.accent}44`, borderRadius: 99, cursor: 'pointer',
           }}
         >
-          <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 1 }}>
-            E2EE · CURVE25519 · SRTP
-          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, letterSpacing: 1 }}>{i18n.t('call.e2eeCurve25519Srtp')}</span>
         </button>
         <span style={{ fontFamily: t.fontMono, fontSize: 12, color: isVideo ? 'rgba(255,255,255,0.7)' : t.textDim, marginTop: 8, letterSpacing: 0.5 }}>
           {labelFor(status, startedAt)}
@@ -168,17 +169,13 @@ export function CallScreen({ onClose }: Props) {
         {/* Fingerprint card */}
         {status === 'in-call' && fingerprintWords.length === 8 && (
           <div style={{ marginTop: 16, marginLeft: 24, marginRight: 24, padding: 12, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius, textAlign: 'center', maxWidth: 360, width: '100%', boxSizing: 'border-box' }}>
-            <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1, display: 'block', marginBottom: 8 }}>
-              CALL FINGERPRINT
-            </span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textDim, letterSpacing: 1, display: 'block', marginBottom: 8 }}>{i18n.t('call.callFingerprint')}</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
               {fingerprintWords.map((w, i) => (
                 <span key={i} style={{ fontFamily: t.fontMono, fontSize: 12, color: t.text }}>{w}</span>
               ))}
             </div>
-            <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, marginTop: 8, display: 'block', textAlign: 'center' }}>
-              Compare with your contact to verify
-            </span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.textFaint, marginTop: 8, display: 'block', textAlign: 'center' }}>{i18n.t('call.fingerprintDesc')}</span>
           </div>
         )}
       </div>
@@ -187,24 +184,24 @@ export function CallScreen({ onClose }: Props) {
       <div style={{ position: 'absolute', bottom: 32, left: 0, right: 0, display: 'flex', justifyContent: 'center', zIndex: 4 }}>
         {status === 'incoming-ringing' ? (
           <div style={{ display: 'flex', gap: 60 }}>
-            <CircleBtn t={t} color={t.danger} onPress={() => endCall?.('declined')} label="Decline">
+            <CircleBtn t={t} color={t.danger} onPress={() => endCall?.('declined')} label={i18n.t('groups.declineInvite')}>
               <I.X size={26} color="#fff" />
             </CircleBtn>
-            <CircleBtn t={t} color={t.accent} onPress={() => void acceptCall()} label="Accept">
+            <CircleBtn t={t} color={t.accent} onPress={() => void acceptCall()} label={i18n.t('chat.requestAccept')}>
               <I.Check size={26} color={t.accentInk} />
             </CircleBtn>
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 28 }}>
-            <CircleBtn t={t} color={muted ? t.warn : t.surface2} onPress={() => setMuted?.(!muted)} label={muted ? 'Unmute' : 'Mute'} outlined>
+            <CircleBtn t={t} color={muted ? t.warn : t.surface2} onPress={() => setMuted?.(!muted)} label={muted ? i18n.t('call.unmute') : i18n.t('call.mute')} outlined>
               <span style={{ fontSize: 22, color: muted ? t.warn : t.text }}>🎙</span>
             </CircleBtn>
             {isVideo && (
-              <CircleBtn t={t} color={cameraOff ? t.warn : t.surface2} onPress={() => setCameraOff?.(!cameraOff)} label={cameraOff ? 'Cam on' : 'Cam off'} outlined>
+              <CircleBtn t={t} color={cameraOff ? t.warn : t.surface2} onPress={() => setCameraOff?.(!cameraOff)} label={cameraOff ? i18n.t('call.cameraOn') : i18n.t('call.cameraOff')} outlined>
                 <span style={{ fontSize: 22, color: cameraOff ? t.warn : t.text }}>📷</span>
               </CircleBtn>
             )}
-            <CircleBtn t={t} color={t.danger} onPress={() => endCall?.('hangup')} label="End">
+            <CircleBtn t={t} color={t.danger} onPress={() => endCall?.('hangup')} label={i18n.t('call.end2')}>
               <span style={{ fontSize: 22, color: '#fff', display: 'inline-block', transform: 'rotate(135deg)' }}>☎</span>
             </CircleBtn>
           </div>

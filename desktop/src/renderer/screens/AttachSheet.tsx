@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -13,6 +15,7 @@ interface Props {
 }
 
 export function AttachSheetScreen({ onBack, onPick }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const setPendingMedia = useMessages((s) => s.setPendingMedia);
   const [picking, setPicking] = useState(false);
@@ -69,19 +72,19 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
   if (picking) {
     return (
       <div style={{ display: 'flex', flex: 1, height: '100%', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, backgroundColor: t.bg }}>
-        <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.8 }}>PROCESSING…</span>
+        <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.8 }}>{i18n.t('attachSheet.processing')}</span>
       </div>
     );
   }
 
   const opts: { id: AttachKind; icon: React.ReactNode; label: string; sub: string; accent?: boolean }[] = [
-    { id: 'photo', icon: <I.Eye size={22} color={t.textDim} />, label: 'Photo', sub: 'From files' },
-    { id: 'camera', icon: <I.Video size={22} color={t.textDim} />, label: 'File', sub: 'Any type' },
-    { id: 'voice', icon: <I.Mic size={22} color={t.accent} />, label: 'Voice note', sub: 'Ephemeral', accent: true },
-    { id: 'viewoncesend', icon: <I.EyeOff size={22} color={t.accent} />, label: 'View once', sub: 'Non-savable', accent: true },
-    { id: 'scheduled', icon: <I.Timer size={22} color={t.textDim} />, label: 'Scheduled', sub: 'Delayed send' },
-    { id: 'location', icon: <I.Globe size={22} color={t.textDim} />, label: 'Location', sub: 'Temporary' },
-    { id: 'contact', icon: <I.Users size={22} color={t.textDim} />, label: 'Contact', sub: 'Share ID' },
+    { id: 'photo', icon: <I.Eye size={22} color={t.textDim} />, label: i18n.t('attachSheet.photo'), sub: i18n.t('attachSheet.fromFiles') },
+    { id: 'camera', icon: <I.Video size={22} color={t.textDim} />, label: i18n.t('attachSheet.file'), sub: i18n.t('attachSheet.anyType') },
+    { id: 'voice', icon: <I.Mic size={22} color={t.accent} />, label: i18n.t('attachSheet.audio'), sub: i18n.t('attachSheet.ephemeral'), accent: true },
+    { id: 'viewoncesend', icon: <I.EyeOff size={22} color={t.accent} />, label: i18n.t('attachSheet.viewOnce'), sub: i18n.t('attachSheet.viewOnceSub'), accent: true },
+    { id: 'scheduled', icon: <I.Timer size={22} color={t.textDim} />, label: i18n.t('attachSheet.scheduled'), sub: i18n.t('attachSheet.delayedSend') },
+    { id: 'location', icon: <I.Globe size={22} color={t.textDim} />, label: i18n.t('attachSheet.location'), sub: i18n.t('attachSheet.temporary') },
+    { id: 'contact', icon: <I.Users size={22} color={t.textDim} />, label: i18n.t('attachSheet.contact'), sub: i18n.t('attachSheet.shareId') },
   ];
 
   const cardStyle = (accent?: boolean): CSSProperties => ({
@@ -92,24 +95,22 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Attach" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('attachSheet.title')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
       <div style={{ flex: 1, overflowY: 'auto', padding: '18px 18px 22px', boxSizing: 'border-box' }}>
         <div style={{ padding: 14, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius, marginBottom: 18 }}>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>
-            Everything is encrypted before leaving the device. File EXIF and metadata are automatically removed.
-          </span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px' }}>{i18n.t('attachSheet.cryptoWarning')}</span>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
           {/* Photo — file input */}
           <label style={{ ...cardStyle(false), cursor: 'pointer' }}>
             <I.Eye size={22} color={t.textDim} />
             <div>
-              <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block' }}>Photo</span>
-              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, display: 'block', marginTop: 3 }}>FROM FILES</span>
+              <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block' }}>{i18n.t('attachSheet.photo')}</span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, display: 'block', marginTop: 3 }}>{i18n.t('attachSheet.fromFiles2')}</span>
             </div>
             <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoFile} />
           </label>
@@ -118,8 +119,8 @@ export function AttachSheetScreen({ onBack, onPick }: Props) {
           <label style={{ ...cardStyle(false), cursor: 'pointer' }}>
             <I.Attach size={22} color={t.textDim} />
             <div>
-              <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block' }}>File</span>
-              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, display: 'block', marginTop: 3 }}>ANY TYPE</span>
+              <span style={{ fontFamily: t.font, fontSize: 14, fontWeight: '600', color: t.text, display: 'block' }}>{i18n.t('attachSheet.file')}</span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 0.4, display: 'block', marginTop: 3 }}>{i18n.t('attachSheet.anyType2')}</span>
             </div>
             <input type="file" style={{ display: 'none' }} onChange={handleGenericFile} />
           </label>

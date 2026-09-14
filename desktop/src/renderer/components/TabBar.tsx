@@ -1,4 +1,6 @@
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { Theme } from '../theme/vault';
 import { I } from './icons';
 
@@ -11,13 +13,14 @@ interface Props {
 }
 
 const ITEMS: { id: Tab; icon: keyof typeof I; label: string }[] = [
-  { id: 'home',     icon: 'Chat',    label: 'CHATS'   },
-  { id: 'groups',   icon: 'Users',   label: 'GROUPS'  },
-  { id: 'verify',   icon: 'QR',      label: 'VERIFY'  },
-  { id: 'settings', icon: 'Shield',  label: 'PRIVACY' },
+  { id: 'home',     icon: 'Chat',    get label() { return i18n.t('tabBar.chats'); }   },
+  { id: 'groups',   icon: 'Users',   get label() { return i18n.t('tabBar.groups'); }  },
+  { id: 'verify',   icon: 'QR',      get label() { return i18n.t('tabBar.verify'); }  },
+  { id: 'settings', icon: 'Shield',  get label() { return i18n.t('tabBar.privacy'); } },
 ];
 
 export function TabBar({ t, current, onChange }: Props) {
+  useTranslation(); // re-render on language change
   const containerStyle: CSSProperties = {
     display: 'flex',
     flexDirection: 'row',

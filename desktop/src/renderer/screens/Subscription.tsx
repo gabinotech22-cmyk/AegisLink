@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -27,12 +29,13 @@ interface Props {
 }
 
 const PLANS: Plan[] = [
-  { id: 30,  label: '1 month',  duration: '30 days',  sats: 5_000,  highlight: false },
-  { id: 90,  label: '3 months', duration: '90 days',  sats: 12_000, highlight: true  },
-  { id: 365, label: '1 year',   duration: '365 days', sats: 40_000, highlight: false },
+  { id: 30,  get label() { return i18n.t('subscription.plan1m'); },  duration: '30 days',  sats: 5_000,  highlight: false },
+  { id: 90,  get label() { return i18n.t('subscription.plan3m'); }, duration: '90 days',  sats: 12_000, highlight: true  },
+  { id: 365, get label() { return i18n.t('subscription.plan1y'); },   duration: '365 days', sats: 40_000, highlight: false },
 ];
 
 export function SubscriptionScreen({ onBack }: Props) {
+  useTranslation(); // re-render on language change
   const { t } = useTheme();
   const [selectedPlan, setSelectedPlan] = useState<PlanId>(90);
   const [loading, setLoading] = useState(false);
@@ -64,7 +67,7 @@ export function SubscriptionScreen({ onBack }: Props) {
     if (!invoice) return;
     const hex = preimageInput.trim().toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(hex)) {
-      window.alert('Invalid preimage — must be 64 hex characters.');
+      window.alert(i18n.t('subscription.invalidPreimageMustBe'));
       return;
     }
     setActivating(true);
@@ -93,7 +96,7 @@ export function SubscriptionScreen({ onBack }: Props) {
   function copyBolt11() {
     if (!invoice) return;
     navigator.clipboard.writeText(invoice.bolt11).catch(() => {});
-    window.alert('BOLT11 invoice copied to clipboard.');
+    window.alert(i18n.t('subscription.bolt11InvoiceCopiedTo'));
   }
 
   const overlayStyle: CSSProperties = {
@@ -115,8 +118,8 @@ export function SubscriptionScreen({ onBack }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', backgroundColor: t.bg }}>
-      <TopBar t={t} title="Subscription" left={
-        <button onClick={onBack} aria-label="Go back" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+      <TopBar t={t} title={i18n.t('subscription.subscription')} left={
+        <button onClick={onBack} aria-label={i18n.t('distLists.backA11y')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
           <I.ChevronL size={22} color={t.textDim} />
         </button>
       } />
@@ -128,7 +131,7 @@ export function SubscriptionScreen({ onBack }: Props) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, borderRadius: t.radius, backgroundColor: `${t.accent}14`, border: `1px solid ${t.accent}` }}>
             <I.Shield size={18} color={t.accent} />
             <div>
-              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.2, display: 'block' }}>ACTIVE</span>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.2, display: 'block' }}>{i18n.t('workDashboard.keysActiveBadge')}</span>
               <span style={{ fontFamily: t.font, fontSize: 12, color: t.text, marginTop: 2, display: 'block' }}>
                 Expires {new Date(activeUntil).toLocaleDateString()}
               </span>
@@ -138,14 +141,12 @@ export function SubscriptionScreen({ onBack }: Props) {
 
         {/* Privacy notice */}
         <div style={{ padding: 16, borderRadius: t.radius, backgroundColor: t.surface, border: `1px solid ${t.border}` }}>
-          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.2, display: 'block', marginBottom: 8 }}>ZERO IDENTITY</span>
-          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '20px', display: 'block' }}>
-            Payments are made over Lightning Network. No email, no account, no personal data — just a payment and a preimage.
-          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 1.2, display: 'block', marginBottom: 8 }}>{i18n.t('subscription.zeroIdentity')}</span>
+          <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '20px', display: 'block' }}>{i18n.t('subscription.paymentsAreMadeOver')}</span>
         </div>
 
         {/* Plan selector */}
-        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.2 }}>SELECT PLAN</span>
+        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.2 }}>{i18n.t('subscription.selectPlan')}</span>
         {PLANS.map((p) => {
           const active = p.id === selectedPlan;
           return (
@@ -163,7 +164,7 @@ export function SubscriptionScreen({ onBack }: Props) {
             >
               <div>
                 <span style={{ fontFamily: t.fontDisplay, fontSize: 16, fontWeight: '600', color: active ? t.accent : t.text, display: 'block' }}>
-                  {p.label}{p.highlight ? <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, marginLeft: 6, letterSpacing: 0.5 }}>BEST VALUE</span> : null}
+                  {p.label}{p.highlight ? <span style={{ fontFamily: t.fontMono, fontSize: 9, color: t.accent, marginLeft: 6, letterSpacing: 0.5 }}>{i18n.t('workDashboard.bestValue')}</span> : null}
                 </span>
                 <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, marginTop: 2, display: 'block' }}>{p.duration}</span>
               </div>
@@ -171,7 +172,7 @@ export function SubscriptionScreen({ onBack }: Props) {
                 <span style={{ fontFamily: t.fontMono, fontSize: 16, fontWeight: '700', color: active ? t.accent : t.text, display: 'block' }}>
                   {p.sats.toLocaleString()} sats
                 </span>
-                <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, display: 'block' }}>LIGHTNING BTC</span>
+                <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, display: 'block' }}>{i18n.t('subscription.lightningBtc2')}</span>
               </div>
             </button>
           );
@@ -180,7 +181,7 @@ export function SubscriptionScreen({ onBack }: Props) {
         {/* Invoice section */}
         {invoice ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.2 }}>LIGHTNING INVOICE</span>
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textDim, letterSpacing: 1.2 }}>{i18n.t('subscription.invoiceSection')}</span>
             <div style={{ padding: 12, backgroundColor: t.bg, border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, wordBreak: 'break-all' }}>
               <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, lineHeight: '16px' }}>{invoice.bolt11}</span>
             </div>
@@ -188,15 +189,11 @@ export function SubscriptionScreen({ onBack }: Props) {
               <button
                 onClick={copyBolt11}
                 style={{ flex: 1, padding: '12px 0', backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontSize: 13, color: t.text }}
-              >
-                Copy invoice
-              </button>
+              >{i18n.t('subscription.copyInvoice')}</button>
               <button
                 onClick={() => setShowPreimageModal(true)}
                 style={{ flex: 1, padding: '12px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', fontSize: 13, color: t.accentInk }}
-              >
-                I paid — enter preimage
-              </button>
+              >{i18n.t('subscription.iPaidEnterPreimage')}</button>
             </div>
           </div>
         ) : (
@@ -210,7 +207,7 @@ export function SubscriptionScreen({ onBack }: Props) {
               opacity: loading ? 0.7 : 1,
             }}
           >
-            {loading ? 'Generating invoice…' : 'Pay with Lightning'}
+            {loading ? i18n.t('subscription.generatingInvoice') : i18n.t('subscription.payWithLightning')}
           </button>
         )}
       </div>
@@ -219,29 +216,25 @@ export function SubscriptionScreen({ onBack }: Props) {
       {showPreimageModal && (
         <div style={overlayStyle}>
           <div style={modalStyle}>
-            <span style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>Enter payment preimage</span>
-            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '18px' }}>
-              After paying the Lightning invoice, copy the 64-character payment preimage from your wallet and paste it here.
-            </span>
+            <span style={{ fontFamily: t.fontDisplay, fontSize: 17, fontWeight: '600', color: t.text }}>{i18n.t('subscription.preimageTitle')}</span>
+            <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '18px' }}>{i18n.t('subscription.afterPayingTheLightning')}</span>
             <input
               value={preimageInput}
               onChange={(e) => setPreimageInput(e.target.value)}
-              placeholder="64-character hex preimage"
+              placeholder={i18n.t('subscription.64CharacterHexPreimage')}
               style={inputStyle}
             />
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 onClick={() => { setShowPreimageModal(false); setPreimageInput(''); }}
                 style={{ flex: 1, padding: '11px 0', border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, cursor: 'pointer', background: 'none', fontFamily: t.font, color: t.text }}
-              >
-                Cancel
-              </button>
+              >{i18n.t('subscription.cancelInvoice')}</button>
               <button
                 disabled={activating}
                 onClick={() => void activateWithPreimage()}
                 style={{ flex: 1, padding: '11px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radiusS, cursor: activating ? 'not-allowed' : 'pointer', fontFamily: t.font, fontWeight: '700', color: t.accentInk, opacity: activating ? 0.7 : 1 }}
               >
-                {activating ? 'Verifying…' : 'Activate'}
+                {activating ? i18n.t('subscription.verifying') : i18n.t('subscription.preimageActivate')}
               </button>
             </div>
           </div>

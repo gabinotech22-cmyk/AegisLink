@@ -1,8 +1,8 @@
 # AegisLink Desktop — Beta 1 (Windows)
 
 Estado canónico del cliente desktop. Si este doc y el código discrepan, gana el
-código (regla de oro doc↔código). Última verificación: 2026-09-14, rama
-`feat/desktop-tor`.
+código (regla de oro doc↔código). Última verificación: 2026-09-15, rama
+`feat/desktop-i18n`.
 
 ## Qué es
 
@@ -23,7 +23,7 @@ con `assertTrustedSender` + allow-list de claves del keystore, fail-closed si
 | Comprobación | Resultado | Evidencia |
 |---|---|---|
 | `npm run typecheck` | ✅ limpio | main + web tsconfigs |
-| `npm test` (vitest) | ✅ 23 ficheros / 179 tests | CI `desktop-test` en `.github/workflows/ci.yml` |
+| `npm test` (vitest) | ✅ 26 ficheros / 199 tests | CI `desktop-test` en `.github/workflows/ci.yml` |
 | `npm run build` | ✅ | `out/` |
 | `npm run package` (NSIS + portable x64) | ✅ arranca, abre DB cifrada, sin errores en log | ver "Bug de empaquetado" abajo |
 | Firma de código | ❌ **NotSigned** | SmartScreen avisará al instalar |
@@ -100,9 +100,12 @@ con Tor arrancado.
 
 1. ~~Sin Tor~~ → ✅ resuelto (sección Tor). Queda: sin bridges/PT para redes que
    bloquean Tor; latencia de llamadas mayor (TURN-TCP por Tor).
-2. **UI solo en inglés.** Existen `en/es/it.json` pero solo 3 pantallas
-   (`Onboarding`, `Privacy`, `DeleteAccountSection`) usan `react-i18next`; las
-   otras 41 tienen literales en inglés. Ver D-2.
+2. ~~UI solo en inglés~~ → ✅ resuelto (rama `feat/desktop-i18n`): las 44
+   pantallas + componentes usan `i18n.t()`; EN/ES/IT completos (1.8k claves, los
+   locales de mobile son el superset). Idioma inicial = elección guardada o el
+   del SO. Test de integridad `i18n/__tests__/locales.test.ts` (todas las claves
+   usadas existen en los 3 idiomas, placeholders iguales). Queda solo en inglés
+   el cuerpo genérico de la notificación del SO ("New message", proceso main).
 3. **Sin lectura de QR.** `ScanQR.tsx` acepta pegar el Aegis ID / JSON; no
    decodifica imágenes ni usa cámara.
 4. **Sin canales públicos, sin llamadas de grupo, sin múltiples perfiles**
@@ -117,8 +120,7 @@ con Tor arrancado.
 ## Decisiones de producto pendientes
 
 - **D-1 · Tor en desktop.** ✅ Decidido (a) y hecho en `feat/desktop-tor`.
-- **D-2 · i18n.** Beta 1 en inglés; portar las 41 pantallas a `t()` antes de
-  la 1.0 desktop (las claves ya existen en los JSON).
+- **D-2 · i18n.** ✅ Hecho en `feat/desktop-i18n` (ver limitación 2).
 - **D-3 · Firma de código.** Sin presupuesto. **Confirmado en vivo 2026-09-14:
   Smart App Control (Windows 11) bloquea el `.exe` sin firmar** — ni siquiera es
   "instalable con aviso", directamente no arranca en máquinas con SAC activo.
