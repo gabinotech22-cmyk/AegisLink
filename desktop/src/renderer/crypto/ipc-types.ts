@@ -74,6 +74,14 @@ export interface AegisIPC {
   notifications: {
     show(title: string, body: string): Promise<void>;
   };
+  tor: {
+    status(): Promise<unknown>;
+    onStatus(cb: (status: unknown) => void): () => void;
+    sioConnect(id: string, url: string, authJson: string, eventsJson: string): Promise<boolean>;
+    sioEmit(id: string, event: string, payloadJson: string, ackId: string | null): Promise<boolean>;
+    sioDisconnect(id: string): Promise<boolean>;
+    onSioEvent(cb: (msg: unknown) => void): () => void;
+  };
 }
 
 declare global {

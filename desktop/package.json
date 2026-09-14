@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package": "electron-builder"
+    "fetch-tor": "node scripts/fetch-tor.mjs",
+    "package": "npm run fetch-tor && node scripts/native-abi.mjs electron && electron-builder && node scripts/native-abi.mjs node"
   },
   "dependencies": {
     "@noble/hashes": "^2.2.0",
@@ -24,6 +25,7 @@
     "react-dom": "^19.2.8",
     "react-i18next": "^17.0.11",
     "socket.io-client": "^4.7.5",
+    "socks-proxy-agent": "^8.0.5",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
     "zustand": "^5.0.14"
@@ -39,6 +41,13 @@
       "out/renderer/**",
       "assets/**",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/tor/${platform}-${arch}",
+        "to": "tor",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "icon": "assets/icon.ico",

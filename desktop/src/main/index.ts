@@ -5,6 +5,24 @@ import { is } from '@electron-toolkit/utils'
 import { registerSecureStorageHandlers } from './ipc/secureStorage'
 import { registerDatabaseHandlers, openMainDbIfUnwrapped, closeDatabase } from './ipc/database'
 import { registerNotificationHandlers } from './ipc/notifications'
+import { startTor, stopTor, getTorStatus } from './tor/torProcess'
+import { registerTorSioHandlers, disconnectAllTorSockets } from './tor/sioBridge'
+
+// Relay hosts the renderer is allowed to reach. VITE_ vars are shared with the
+// main build by electron-vite (envPrefix ['MAIN_VITE_', 'VITE_']).
+const RELAY_URL = (import.meta.env.VITE_RELAY_URL as string | undefined) ?? 'http://localhost:3001'
+const ONION_URL = (import.meta.env.VITE_ONION_URL as string | undefined) ?? null
+const RELAY_ORIGINS = [RELAY_URL, ONION_URL]
+  .filter((u): u is string => !!u)
+  .map((u) => { try { return new URL(u).origin } catch { return '' } })
+  .filter(Boolean)
+function isRelayUrl(url: string): boolean {
+  return RELAY_ORIGINS.some((o) => url === o || url.startsWith(o + '/'))
+}
+/** `connect-src` entries for every relay origin (http(s) + matching ws(s)). */
+function relayConnectSrc(): string {
+  return RELAY_ORIGINS.flatMap((o) => [o, o.replace(/^http/, 'ws')]).join(' ')
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -27,6 +45,11 @@ function createWindow(): void {
   win.on('ready-to-show', () => {
     win.show()
   })
+
+  // Tor: WebRTC must not open UDP sockets outside the proxy — that would leak
+  // the real IP to the TURN server / peer around Tor. With this policy Chromium
+  // only uses proxied TCP candidates (TURN over TCP through the SOCKS proxy).
+  win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp')
 
   // Open external links in the OS browser, not inside Electron.
   // Only http(s) is handed to the OS — never file://, ms-msdt:, smb:, etc.,
@@ -77,14 +100,23 @@ function createWindow(): void {
 registerSecureStorageHandlers()
 registerDatabaseHandlers()
 registerNotificationHandlers()
+registerTorSioHandlers()
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // ── Tor always-on (fail-closed) ─────────────────────────────────────────────
+  // Pick the SOCKS ports and point the WHOLE session at Tor BEFORE any window
+  // exists. Until Tor bootstraps the proxy simply refuses connections — the
+  // relay is never reached over clearnet. Loopback (dev Vite server / local
+  // relay) is implicitly bypassed by Chromium.
+  const { controlSocksPort } = await startTor()
+  await session.defaultSession.setProxy({ proxyRules: `socks5://127.0.0.1:${controlSocksPort}` })
+
   // Strip the Origin header on requests to the relay so the server treats the
   // desktop app like a native client (same as React Native, which sends none).
   // The renderer origin is http://localhost:517x in dev and file:// (-> "null")
   // when packaged — neither belongs in the relay's production CORS allowlist.
   session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ['https://aegislink.duckdns.org/*', 'wss://aegislink.duckdns.org/*'] },
+    { urls: RELAY_ORIGINS.flatMap((o) => [`${o}/*`, `${o.replace(/^http/, 'ws')}/*`]) },
     (details, callback) => {
       delete details.requestHeaders['Origin']
       callback({ requestHeaders: details.requestHeaders })
@@ -109,7 +141,7 @@ app.whenReady().then(() => {
       ...details.responseHeaders,
       'Content-Security-Policy': [
         `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline'; ` +
-        "connect-src 'self' ws://localhost:* wss://localhost:* https://aegislink.duckdns.org wss://aegislink.duckdns.org; " +
+        `connect-src 'self' ws://localhost:* wss://localhost:* ${relayConnectSrc()}; ` +
         "img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; object-src 'none'; frame-src 'none';"
       ]
     }
@@ -117,7 +149,7 @@ app.whenReady().then(() => {
     // so it sends no CORS headers back — inject them here so the renderer's
     // fetch() can read the response. Chromium still enforces the CSP above,
     // which limits connect targets to the relay itself.
-    if (details.url.startsWith('https://aegislink.duckdns.org/') || details.url === 'https://aegislink.duckdns.org') {
+    if (isRelayUrl(details.url)) {
       responseHeaders['Access-Control-Allow-Origin'] = [rendererOrigin]
       responseHeaders['Access-Control-Allow-Methods'] = ['GET, POST, PUT, PATCH, DELETE, OPTIONS']
       responseHeaders['Access-Control-Allow-Headers'] = ['Content-Type, Accept']
@@ -142,6 +174,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   closeDatabase()
+  disconnectAllTorSockets()
+  stopTor()
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -149,4 +183,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   closeDatabase()
+  disconnectAllTorSockets()
+  stopTor()
 })
+
+// Keep the linter honest about the status accessor being part of the main API
+// surface (used by sioBridge's `tor:status` handler).
+void getTorStatus

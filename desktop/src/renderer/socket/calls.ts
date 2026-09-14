@@ -21,7 +21,7 @@ import { saveCall } from '../db/local';
 import { useMessages } from '../store/messages';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
-import { RELAY_URL } from '../config';
+import { RELAY_URL, TOR_RELAY } from '../config';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import {
@@ -69,7 +69,18 @@ function defaultRtcConfig(): RTCConfigShape {
   if (TURN_URL) {
     iceServers.push({ urls: TURN_URL, username: TURN_USERNAME, credential: TURN_PASSWORD });
   }
-  return { iceServers };
+  return torRtcPolicy({ iceServers });
+}
+
+/**
+ * Tor always-on: main sets Chromium's WebRTC IP handling to
+ * `disable_non_proxied_udp`, so only TURN-over-TCP/TLS via the SOCKS proxy can
+ * carry media. Force relay-only so no host/srflx candidate (our LAN/public IP)
+ * is ever written into the SDP handed to the peer — the peer must not learn
+ * our IP either. Media latency is higher over Tor; privacy is the product.
+ */
+function torRtcPolicy(cfg: RTCConfigShape): RTCConfigShape {
+  return TOR_RELAY ? { ...cfg, iceTransportPolicy: 'relay' } : cfg;
 }
 
 async function fetchTurnConfig(_aegisId: string): Promise<RTCConfigShape> {
@@ -122,7 +133,7 @@ async function fetchTurnConfig(_aegisId: string): Promise<RTCConfigShape> {
       const stunUrl = TURN_URL ? deriveStunUrl(TURN_URL) : null;
       if (stunUrl) iceServers.unshift({ urls: [stunUrl] });
     }
-    return { iceServers };
+    return torRtcPolicy({ iceServers });
   } catch {
     return defaultRtcConfig();
   }

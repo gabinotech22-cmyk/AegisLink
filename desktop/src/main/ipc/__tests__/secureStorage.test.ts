@@ -121,6 +121,25 @@ describe('assertKeyAllowed — keystore allowlist', () => {
     ];
     for (const k of ok) expect(() => set(TRUSTED, k, 'v')).not.toThrow();
   });
+
+  it('accepts the sealed-sender v2 / mailbox keys (regression: were rejected → v2 degraded, mailbox dead)', () => {
+    const ok = [
+      'aegis.deliveryToken.self',
+      'aegis.deliveryToken.peer.ABCD-EFGH-JKMN',
+      'aegis.mailboxRoot.self',
+      'aegis.mailboxRoot.peer.ABCD-EFGH-JKMN',
+      'aegis.mailboxRoot.lastEpoch',
+      'aegis.pbh.ABCD-EFGH-JKMN',
+      'aegis.spk.createdAt',
+      'aegis.work.spk.createdAt',
+      'aegis.prekeysPublished.self',
+      'aegis.scheduled.grouposts.v1',
+    ];
+    for (const k of ok) expect(() => set(TRUSTED, k, 'v')).not.toThrow();
+    // still exact-shape: a non-Crockford id or a stray suffix is refused
+    expect(() => set(TRUSTED, 'aegis.mailboxRoot.peer.lower-case', 'v')).toThrow(/not whitelisted/);
+    expect(() => set(TRUSTED, 'aegis.deliveryToken.self.evil', 'v')).toThrow(/not whitelisted/);
+  });
 });
 
 describe('assertValidKey / assertValidValue — shape bounds', () => {

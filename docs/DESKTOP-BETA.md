@@ -2,7 +2,7 @@
 
 Estado canónico del cliente desktop. Si este doc y el código discrepan, gana el
 código (regla de oro doc↔código). Última verificación: 2026-09-14, rama
-`fix/desktop-beta-packaging`.
+`feat/desktop-tor`.
 
 ## Qué es
 
@@ -37,15 +37,41 @@ de **Electron 42** (146). El `.exe` arrancaba pero el proceso main fallaba con
 Con `false`, `@electron/rebuild` descarga el prebuilt oficial
 `electron-v146-win32-x64` y el paquete funciona.
 
-**Consecuencia local**: tras `npm run package`, `node_modules` queda con el
-binario de Electron y `npm test` en local fallará al cargar SQLCipher. Restaurar
-con:
+Y el paso `@electron/rebuild` de electron-builder **tampoco es fiable** (reportó éxito
+dejando el binario de Node): por eso `npm run package` fuerza el ABI explícitamente con
+`scripts/native-abi.mjs` (prebuild-install oficial, sin compilador).
 
-```bash
-cd desktop && npm rebuild better-sqlite3-multiple-ciphers
-```
+## Tor — siempre activo, sin toggle (✅ HECHO, rama `feat/desktop-tor`)
 
-(CI no lo sufre: `npm ci` instala el prebuilt de Node y nunca empaqueta.)
+Paridad con el Tor embebido de mobile (`docs/FASE4-TOR-EMBEDDED-IMPL.md`), pero
+más completo: en desktop **todo** el tráfico va por Tor, no solo el buzón.
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| Binario | `scripts/fetch-tor.mjs` → `resources/tor/<os>-<arch>/tor.exe` (gitignored), `extraResources` en `package.json` | Descarga el Tor Expert Bundle con **sha256 pineado** (del `sha256sums-signed-build.txt` firmado por Tor Project); rechaza y no extrae si no coincide |
+| Proceso | `src/main/tor/torProcess.ts` | Spawn con `--SocksPort` ×2, `--ClientOnly`, `--__OwningControllerProcess <pid>` (muere con la app); parsea `Bootstrapped N%`; **reinicio automático** con backoff si Tor cae |
+| Proxy de sesión | `src/main/index.ts` | `session.setProxy('socks5://127.0.0.1:<control>')` **antes** de crear la ventana → fail-closed: sin Tor no hay red. Resolución DNS dentro de Tor (SOCKS5 remoto), `.onion` incluido |
+| Buzón aislado | `src/main/tor/sioBridge.ts` + `src/renderer/net/tor.ts` (`TorSioSocket`) | El socket de mailbox vive en main sobre el **segundo** listener SOCKS (grupo de sesión distinto = circuitos distintos) para que el relay no pueda relacionar mailbox-id y aegisId por circuito. Tubo tonto: la firma de posesión y el sellado siguen en el renderer. Solo acepta destinos `.onion` |
+| Destino | `src/renderer/config.ts` | `RELAY_URL = ONION_URL` cuando está configurado: control, HTTP (PoW, prekeys, TURN creds) y mailbox atacan el hidden service. Sin exit nodes, sin pin TLS que rotar |
+| CSP | `electron.vite.config.ts` (`relay-csp`) + cabecera en main | `connect-src` solo relay clearnet + onion (http/ws), calculado del `.env` en build |
+| Llamadas | `main/index.ts` (`disable_non_proxied_udp`) + `calls.ts` (`iceTransportPolicy: 'relay'`) | WebRTC no abre UDP fuera del proxy; solo TURN-TCP/TLS vía Tor y sin candidatos host/srflx en el SDP → ni el TURN ni el peer ven la IP real |
+| UI | `components/TorBanner.tsx`, `screens/Splash.tsx` | Progreso de bootstrap y errores; desaparece al 100 % |
+| Tests | `src/main/tor/__tests__/pure.test.ts`, `src/renderer/net/__tests__/torSioSocket.test.ts`, `calls.sealedSenderPolicy.test.ts` (relay-only), `secureStorage.test.ts` (claves v2/mailbox) | 15 + 1 + 1 nuevos |
+
+**Verificado 2026-09-14** (`electron-vite preview` con `--enable-logging`): `tor.exe`
+arranca, dos listeners, Electron establece conexiones **solo** a 127.0.0.1:<control> y
+127.0.0.1:<mailbox> (cero conexiones a IPs externas desde Electron), identidad creada y
+publicada contra el `.onion`, Tor muere al cerrar la app.
+
+**Bug atrapado de paso (alto):** la allow-list del keystore (`main/ipc/secureStorage.ts`)
+no incluía `aegis.deliveryToken.*` ni `aegis.mailboxRoot.*` → cada escritura lanzaba
+`Access denied`, sealed-sender v2 degradaba a v1 por contacto y el buzón nunca podía
+derivar raíz. Corregido + test de regresión. Tampoco estaban `pbh.*`, `spk.createdAt`,
+`prekeysPublished.<slot>`, `scheduled.grouposts.v1`.
+
+**Residuo honesto:** el relay ve "un circuito Tor conectó el mailbox X" y "alguien pidió
+el bundle de Y por Tor" (mismo residuo que Session, `FASE4-CONTROL-PLANE-DESIGN.md` §5).
+Bridges/pluggable transports (redes que bloquean Tor) no van en Beta 1.
 
 ## Cómo construir la beta
 
@@ -54,19 +80,26 @@ cd desktop
 npm ci
 npm run typecheck && npm test
 npm run build
-npm run package        # → dist/AegisLink Setup <ver>.exe (NSIS) + dist/AegisLink <ver>.exe (portable)
+npm run package        # fetch-tor (sha256 pineado) → ABI Electron → electron-builder → ABI Node
+                       # → dist/AegisLink Setup <ver>.exe (NSIS) + dist/AegisLink <ver>.exe (portable)
 ```
 
+`npm run package` deja `node_modules` con el binario de **Node** al terminar
+(`scripts/native-abi.mjs node`), así que `npm test` sigue funcionando. Para probar
+la app sin empaquetar: `node scripts/native-abi.mjs electron && npx electron-vite preview`
+(y `node scripts/native-abi.mjs node` al acabar).
+
 `desktop/.env` (gitignored) debe apuntar al relay de producción:
-`VITE_RELAY_URL=https://aegislink.duckdns.org` y `VITE_TURN_URL=turn:aegislink.duckdns.org:3478`.
-Sin `.env` el build apunta a `localhost:3001` (`desktop/src/renderer/config.ts`).
+`VITE_RELAY_URL=https://aegislink.duckdns.org`, `VITE_TURN_URL=turn:aegislink.duckdns.org:3478`,
+`VITE_ONION_URL=http://<onion>.onion`, `VITE_MAILBOX_MODE=on` (ver `.env.example`).
+Sin `.env` el build apunta a `localhost:3001` (`desktop/src/renderer/config.ts`) —
+que Chromium no pasa por el proxy (loopback), así que el relay local de dev funciona
+con Tor arrancado.
 
 ## Limitaciones conocidas de Beta 1 (declaradas, no ocultas)
 
-1. **Sin Tor.** El desktop no embebe Tor ni configura proxy SOCKS; por tanto
-   `MAILBOX_ENABLED` es `false` (fail-closed en `config.ts`) y la entrega usa el
-   transporte por `aegisId`. El relay ve la IP del desktop. Mobile sí tiene Tor
-   embebido. Ver decisión pendiente D-1.
+1. ~~Sin Tor~~ → ✅ resuelto (sección Tor). Queda: sin bridges/PT para redes que
+   bloquean Tor; latencia de llamadas mayor (TURN-TCP por Tor).
 2. **UI solo en inglés.** Existen `en/es/it.json` pero solo 3 pantallas
    (`Onboarding`, `Privacy`, `DeleteAccountSection`) usan `react-i18next`; las
    otras 41 tienen literales en inglés. Ver D-2.
@@ -83,16 +116,16 @@ Sin `.env` el build apunta a `localhost:3001` (`desktop/src/renderer/config.ts`)
 
 ## Decisiones de producto pendientes
 
-- **D-1 · Tor en desktop.** Opciones: (a) bundlear `tor` expert bundle y
-  `session.setProxy({ proxyRules: 'socks5://127.0.0.1:<port>' })` como hacen
-  Cwtch/Ricochet — coherente con "Tor siempre, sin toggle"; (b) declarar la
-  beta como "sin Tor" en la pantalla de onboarding del desktop. Recomendación:
-  (b) para Beta 1 con aviso visible, (a) como requisito para salir de beta.
+- **D-1 · Tor en desktop.** ✅ Decidido (a) y hecho en `feat/desktop-tor`.
 - **D-2 · i18n.** Beta 1 en inglés; portar las 41 pantallas a `t()` antes de
   la 1.0 desktop (las claves ya existen en los JSON).
-- **D-3 · Firma de código.** Certificado OV/EV (~200-400 €/año) o Azure Trusted
-  Signing; sin ella la beta es "instalable con aviso" y muchos usuarios de
-  privacidad no pasarán del SmartScreen.
+- **D-3 · Firma de código.** Sin presupuesto. **Confirmado en vivo 2026-09-14:
+  Smart App Control (Windows 11) bloquea el `.exe` sin firmar** — ni siquiera es
+  "instalable con aviso", directamente no arranca en máquinas con SAC activo.
+  Vía gratuita: **SignPath Foundation** (firma OSS gratuita para proyectos
+  open source con licencia OSI — AegisLink es GPL-3.0). Requiere solicitud,
+  build desde CI (GitHub Actions) y que el firmante sea el pipeline, no una
+  máquina personal. Alternativa de pago: Azure Trusted Signing (~10 €/mes).
 - **D-4 · Canal de distribución.** GitHub Releases con `SHA256SUMS` firmado con
   la clave del proyecto es lo mínimo; auto-update (`electron-updater`) solo
   cuando exista firma.

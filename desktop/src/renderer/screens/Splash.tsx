@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { AegisMark } from '../components/AegisMark';
+import { useTor } from '../net/tor';
 
 interface Props {
   onDone: () => void;
@@ -10,6 +11,9 @@ interface Props {
 export function SplashScreen({ onDone }: Props) {
   const { t } = useTheme();
   const doneRef = useRef(false);
+  const tor = useTor((s) => s.status);
+  const initTor = useTor((s) => s.init);
+  useEffect(() => { initTor(); }, [initTor]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -111,6 +115,17 @@ export function SplashScreen({ onDone }: Props) {
           }}
         >
           SECURE · ANONYMOUS · ON-DEVICE
+        </span>
+      </div>
+
+      {/* Tor bootstrap — always-on, so the user sees why the first seconds take longer */}
+      <div className="splash-tagline" style={{ marginTop: 28, minHeight: 16 }}>
+        <span style={{ fontFamily: t.fontMono, fontSize: 11, color: tor.state === 'error' ? t.danger : t.textDim }}>
+          {tor.state === 'on'
+            ? 'TOR CIRCUIT READY'
+            : tor.state === 'error'
+              ? `TOR ERROR · ${tor.summary}`
+              : `CONNECTING THROUGH TOR · ${tor.progress}%`}
         </span>
       </div>
     </div>
