@@ -35,6 +35,7 @@ import { attachMessagingEphemeral } from './handlers/messaging.js';
 import { attachChannels } from './handlers/channels.js';
 import { attachPublicChannelEvents } from './handlers/publicChannels.js';
 import { attachDevices } from './handlers/devices.js';
+import { appVersionInfo } from './appVersion';
 
 // Fixed sha256-length (32-byte) dummy hash. The sealed-sender v2 submission gate
 // runs its constant-time delivery-token check against this when `to` has no
@@ -210,7 +211,7 @@ export function attachRelay(io: SocketServer) {
         clearTimeout(authTimer);
         onAuthenticated(socket, me, deviceId, challenge).then(async () => {
           const opkCount = await prekeysRepo.countOneTime(me, deviceId); // M-2: per-device count
-          socket.emit('auth:ok', { opkCount });
+          socket.emit('auth:ok', { opkCount, app: appVersionInfo() });
         }).catch(() => {
           socket.emit('error_msg', { code: 'internal_error' });
           socket.disconnect(true);
@@ -537,7 +538,7 @@ export function attachRelay(io: SocketServer) {
             if (!ackCapable) await messageRepo.delete(row.id);
           }
         }
-        socket.emit('auth:ok', {});
+        socket.emit('auth:ok', { app: appVersionInfo() });
       })();
     });
 

@@ -34,6 +34,8 @@ import { NotificationsScreen } from './src/screens/Notifications';
 import { BackupScreen } from './src/screens/Backup';
 import { DevicesScreen } from './src/screens/Devices';
 import { LockScreen } from './src/screens/Lock';
+import { UpdateRequiredScreen } from './src/screens/UpdateRequired';
+import { useAppVersion, isUpdateRequired } from './src/store/appVersion';
 import { LockConfigScreen } from './src/screens/LockConfig';
 import { PanicScreen } from './src/screens/Panic';
 import { EphemeralScreen } from './src/screens/Ephemeral';
@@ -245,6 +247,9 @@ function Shell() {
 
   // ── App lock state ──────────────────────────────────────────────────────────
   const [appLocked, setAppLocked] = useState(false);
+  // Relay-advertised minimum version vs installed build (compared locally).
+  const minVersion = useAppVersion((s) => s.minVersion);
+  const updateRequired = isUpdateRequired({ minVersion });
   const [showWipeOverlay, setShowWipeOverlay] = useState(false);
   const lastBgTimeRef = useRef<number | null>(null);
   const didColdLockRef = useRef(false);
@@ -1290,6 +1295,13 @@ function Shell() {
         onPanic={() => void triggerPanic()}
       />
     );
+  }
+
+  // Retired build — the relay's minVersion says this binary must not keep
+  // running. Below the lock on purpose: unlocking still guards everything, and
+  // this screen shows no user data, only the way to the store.
+  if (updateRequired && minVersion) {
+    return <UpdateRequiredScreen minVersion={minVersion} />;
   }
 
   if (netError) {

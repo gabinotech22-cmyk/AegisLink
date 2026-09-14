@@ -1886,5 +1886,14 @@
     "invalidDateDesc": "Usa il formato YYYY-MM-DD e HH:MM.",
     "tooSoonTitle": "Data troppo vicina",
     "tooSoonDesc": "Il messaggio deve essere programmato almeno 1 minuto nel futuro."
+  },
+  "appVersion": {
+    "bannerTitle": "Nuova versione disponibile: {{version}}",
+    "bannerCta": "Aggiorna dallo store",
+    "dismiss": "Chiudi avviso",
+    "requiredTitle": "Aggiornamento necessario",
+    "requiredBody": "Questa versione ({{installed}}) non è più supportata dal server. Aggiorna alla {{min}} o successiva per continuare a usare AegisLink.",
+    "requiredCta": "Aggiorna ora",
+    "notifBody": "È disponibile una nuova versione ({{version}}). Aggiorna dallo store."
   }
 }
