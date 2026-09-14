@@ -32,6 +32,7 @@ vi.mock('../client', () => ({
 }));
 vi.mock('../../config', () => ({
   RELAY_URL: 'https://relay.test',
+  TOR_RELAY: true,
 }));
 vi.mock('../../db/local', () => ({ saveCall: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../store/messages', () => ({ useMessages: { getState: () => ({ append: vi.fn() }) } }));
@@ -64,11 +65,14 @@ vi.mock('../../crypto/callSession', () => ({
 import { useCall } from '../../store/call';
 import { startCall, attachCallHandlers } from '../calls';
 
+/** RTCConfiguration passed to the last `new RTCPeerConnection(cfg)` (ICE policy assertions). */
+let lastPcConfig: Record<string, unknown> | undefined;
+
 /** Minimal browser-WebRTC stubs so the inline createPeer() runs under Node. */
 function installWebRtcStubs(): void {
   class FakePC {
     connectionState = 'new';
-    constructor(_cfg?: unknown) {}
+    constructor(cfg?: unknown) { lastPcConfig = cfg as Record<string, unknown> | undefined; }
     addTrack(): void {}
     addEventListener(): void {}
     async createOffer(): Promise<object> { return { type: 'offer', sdp: 'o' }; }
@@ -118,6 +122,12 @@ describe('desktop calls.ts — sealed-sender (v2) policy', () => {
     const invite = h.emit.mock.calls.find((c) => c[0] === 'call:invite:v2')?.[1] as Record<string, unknown>;
     expect(invite).toMatchObject({ to: 'peer-A', media: 'audio' });
     expect(invite).not.toHaveProperty('from');
+  });
+
+  it('under Tor (TOR_RELAY) the peer connection is relay-only — no host/srflx candidate can leak our IP', async () => {
+    await startCall('peer-A', 'audio');
+    expect(lastPcConfig).toBeDefined();
+    expect(lastPcConfig?.iceTransportPolicy).toBe('relay');
   });
 
   it('startCall FAILS CLOSED when the peer box key is unavailable — no v1 fallback', async () => {

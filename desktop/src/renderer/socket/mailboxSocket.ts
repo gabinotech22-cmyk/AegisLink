@@ -27,7 +27,7 @@
  */
 
 import { logger } from '../utils/logger';
-import { io, type Socket } from 'socket.io-client';
+import { TorSioSocket } from '../net/tor';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { ONION_URL, MAILBOX_ENABLED } from '../config';
 import {
@@ -84,6 +84,9 @@ export function mailboxAckConfirmsDelivery(ack: EnvelopeAck | null | undefined):
   return ack?.delivered === true;
 }
 
+/** Structural subset shared with socket.io-client's Socket; transport lives in main over Tor. */
+type Socket = TorSioSocket;
+
 let mboxSocket: Socket | null = null;
 let currentEpochMailbox: Mailbox | null = null;
 let extraEpochMailboxes: Mailbox[] = []; // catch-up epochs bound alongside the current one
@@ -125,9 +128,9 @@ export async function connectMailboxSocket(
   extraEpochMailboxes = extraEpochs.length ? await getOwnMailboxesForEpochs(extraEpochs) : [];
   authed = false;
 
-  const sock = io(ONION_URL, {
-    transports: ['websocket', 'polling'],
-    tryAllTransports: true,
+  // Bridged to main over the ISOLATED mailbox SOCKS listener (net/tor.ts):
+  // separate circuits from the aegisId control socket, .onion resolved inside Tor.
+  const sock = new TorSioSocket(ONION_URL, {
     auth: {
       mailboxId: mb.mailboxIdB64,
       mailboxSignPubKey: encodeBase64(mb.signPublicKey),
@@ -139,11 +142,6 @@ export async function connectMailboxSocket(
         ? { binds: extraEpochMailboxes.map((m) => ({ mailboxId: m.mailboxIdB64, mailboxSignPubKey: encodeBase64(m.signPublicKey) })) }
         : {}),
     },
-    reconnection: true,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 8000,
-    reconnectionAttempts: Infinity,
-    timeout: 20000,
   });
   mboxSocket = sock;
 
@@ -207,6 +205,8 @@ export async function connectMailboxSocket(
       .catch((e) => { if (DEV) logger.warn('[mailbox] onEnvelope handler threw:', e); });
   });
 
+  // Listeners are declared above; dial now (main waits for Tor bootstrap).
+  sock.connect();
   return sock;
 }
 

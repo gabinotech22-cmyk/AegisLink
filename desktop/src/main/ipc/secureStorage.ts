@@ -23,8 +23,36 @@ function assertKeyAllowed(key: string): void {
   // Audited against every secureStorage key the renderer actually writes
   // (grep for `aegis.` literals under src/renderer). Keep in sync when adding
   // new keys — a miss here fails silently at the feature level.
-  const pattern =
-    /^aegis\.(?:[a-zA-Z0-9_\-]+\.)?(secretKey\.b64|signSecretKey\.b64|activeProfile|activeSlotId|slotsList|displayName|avatarColor|avatarImage|profileStatus|workDisplayName|workAvatarColor|workAvatarImage|workProfileStatus|panic\.v1|preferences\.v1|polls\.v1|identity\.v1|prekeys\.v1|prekeysPublished|pin\.v1|pin\.salt\.v2|dbkek\.salt\.v1|group\.v1|deviceId|scheduled\.desktop\.v1|distribution\.v1|spkSecret\.b64|spkSecret\.\d+|spk\.keyId|pqSpkSecret\.\d+|pqSpk\.keyId|secdiag\.v1|opkIds\.json|opkSecret\.\d+|self\.ratchet\.[0-9A-HJKMNP-TV-Z\-]+)$/
+  //
+  // Sealed-sender v2 + mailbox mode (Fase 4) keys were MISSING here until the
+  // desktop Tor cutover: every `aegis.deliveryToken.*` / `aegis.mailboxRoot.*`
+  // write threw "Access denied" → v2 silently degraded to v1 per contact and
+  // the mailbox socket could never derive a root. Regression-tested in
+  // __tests__/secureStorage.test.ts ("sealed-sender v2 / mailbox keys").
+  const r = String.raw
+  const AEGIS_ID = r`[0-9A-HJKMNP-TV-Z\-]+` // Crockford base32 id (no I/L/O/U)
+  const pattern = new RegExp(
+    r`^aegis\.(?:[a-zA-Z0-9_\-]+\.)?(` +
+      [
+        r`secretKey\.b64`, r`signSecretKey\.b64`, 'activeProfile', 'activeSlotId', 'slotsList',
+        'displayName', 'avatarColor', 'avatarImage', 'profileStatus',
+        'workDisplayName', 'workAvatarColor', 'workAvatarImage', 'workProfileStatus',
+        r`panic\.v1`, r`preferences\.v1`, r`polls\.v1`, r`identity\.v1`, r`prekeys\.v1`,
+        'prekeysPublished', r`prekeysPublished\.[a-zA-Z0-9_\-]+`,
+        r`pin\.v1`, r`pin\.salt\.v2`, r`dbkek\.salt\.v1`, r`group\.v1`, 'deviceId',
+        r`scheduled\.desktop\.v1`, r`scheduled\.grouposts\.v1`, r`distribution\.v1`,
+        r`spkSecret\.b64`, r`spkSecret\.\d+`, r`spk\.keyId`, r`spk\.createdAt`,
+        r`pqSpkSecret\.\d+`, r`pqSpk\.keyId`, r`secdiag\.v1`, r`opkIds\.json`, r`opkSecret\.\d+`,
+        r`self\.ratchet\.` + AEGIS_ID,
+        // sealed-sender v2 delivery tokens (crypto/deliveryToken.ts)
+        r`deliveryToken\.self`, r`deliveryToken\.peer\.` + AEGIS_ID,
+        // mailbox roots + last-connect epoch (crypto/mailboxStore.ts)
+        r`mailboxRoot\.self`, r`mailboxRoot\.peer\.` + AEGIS_ID, r`mailboxRoot\.lastEpoch`,
+        // last-broadcast profile hash (socket/profileBroadcast.ts)
+        r`pbh\.` + AEGIS_ID,
+      ].join('|') +
+      ')$',
+  )
   if (!pattern.test(key)) {
     throw new Error('Access denied: key is not whitelisted for renderer access')
   }

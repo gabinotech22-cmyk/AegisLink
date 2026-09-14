@@ -47,6 +47,7 @@ import { SubscriptionScreen } from './screens/Subscription';
 import { CallScreen } from './screens/Call';
 import { IncomingCallScreen } from './screens/IncomingCall';
 import { NetworkErrorScreen } from './screens/NetworkError';
+import { TorBanner } from './components/TorBanner';
 import { useIdentity } from './store/identity';
 import { usePreferences } from './store/preferences';
 import { useCall } from './store/call';
@@ -654,6 +655,7 @@ function Shell() {
           onNewChat={() => push({ name: 'invite' })}
         />
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <TorBanner />
           {renderContent() ?? <NoChatPlaceholder t={t} />}
         </div>
       </div>

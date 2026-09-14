@@ -102,5 +102,24 @@ contextBridge.exposeInMainWorld('aegis', {
   notifications: {
     show: (title: string, body: string): Promise<void> =>
       ipcRenderer.invoke('notifications:show', title, body)
+  },
+  // ── Embedded Tor (main/tor/*) — status + the socket.io-over-Tor dumb pipe ──
+  tor: {
+    status: (): Promise<unknown> => ipcRenderer.invoke('tor:status'),
+    onStatus: (cb: (status: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, status: unknown): void => cb(status)
+      ipcRenderer.on('tor:status', listener)
+      return () => ipcRenderer.removeListener('tor:status', listener)
+    },
+    sioConnect: (id: string, url: string, authJson: string, eventsJson: string): Promise<boolean> =>
+      ipcRenderer.invoke('tor:sio-connect', id, url, authJson, eventsJson),
+    sioEmit: (id: string, event: string, payloadJson: string, ackId: string | null): Promise<boolean> =>
+      ipcRenderer.invoke('tor:sio-emit', id, event, payloadJson, ackId),
+    sioDisconnect: (id: string): Promise<boolean> => ipcRenderer.invoke('tor:sio-disconnect', id),
+    onSioEvent: (cb: (msg: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, msg: unknown): void => cb(msg)
+      ipcRenderer.on('tor:sio-event', listener)
+      return () => ipcRenderer.removeListener('tor:sio-event', listener)
+    }
   }
 })

@@ -123,6 +123,8 @@ assembleRelease (módulo nativo → nunca Expo Go). Ojo APK size: +libtor.so por
   `connectionProxyDictionary` SOCKS. Necesita Mac. Fast-follow (`[[project_launch_ios_decision]]`).
   **Diseño detallado en `docs/FASE4-TOR-IOS-DESIGN.md`** — paridad del *transporte*
   mailbox (el *wake* con app cerrada sigue por APNs, muro de Apple, irreducible).
-- **desktop**: puede usar Tor del sistema / `torsocks`; sin módulo embebido por ahora.
+- **desktop**: ✅ HECHO — Tor embebido (`tor.exe` del Expert Bundle) en el proceso main,
+  sesión Chromium entera por SOCKS + socket de mailbox por listener aislado. Ver
+  `docs/DESKTOP-BETA.md` §Tor y `desktop/src/main/tor/`.
 - **Slice 2b push**: el push por mailbox (`FASE4-SLICE2B-PUSH-DESIGN.md`) sigue su
   propio track (UnifiedPush/ntfy); ortogonal a este transporte.
