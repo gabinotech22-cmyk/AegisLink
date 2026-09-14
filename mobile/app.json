@@ -36,13 +36,16 @@
               "NSIncludesSubdomains": true,
               "NSPinnedCAIdentities": [
                 {
-                  "SPKI-SHA256-BASE64": "FHU7MjGd0nNUIZbayXMzSxHlMSay5Mfj2fBRzY6OFYc="
+                  "SPKI-SHA256-BASE64": "s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y="
                 },
                 {
-                  "SPKI-SHA256-BASE64": "brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4="
+                  "SPKI-SHA256-BASE64": "ikzWA3NEA1YVdzZPkMmfU1/noMRdEdVGyxCkuSNpihA="
                 },
                 {
                   "SPKI-SHA256-BASE64": "LvglXAxgB9K5SCOZrLvdX0VVc8UuEU+Bj6r58LSA7r8="
+                },
+                {
+                  "SPKI-SHA256-BASE64": "sCkq5UWXjg+7mKu9lMhhYF5bGLsy7VI/UNW3tccdR7w="
                 }
               ]
             }

@@ -130,13 +130,25 @@ function withIconAliases(config) {
 
 // ─── Step 3: Android network_security_config.xml with SPKI cert pinning ──────
 //
-// SHA-256 SPKI pins extracted from the live relay on 2026-06-18 (Hetzner Helsinki):
-//   Primary: leaf cert  CN=aegislink.duckdns.org (Let's Encrypt YE1, expires 2026-09-15)
-//   Backup:  Let's Encrypt YE1 intermediate (issuer=ISRG Root YE) — survives leaf rotation
+// SHA-256 SPKI pins re-extracted from the live relay on 2026-09-13 (Hetzner Helsinki):
+//   Primary: Let's Encrypt YE2 intermediate (issuer=ISRG Root YE) — survives leaf rotation
+//   Backup:  current leaf cert CN=aegislink.duckdns.org (renewed 2026-08-17)
 //
-// NOTE: the relay migrated AWS->Hetzner on 2026-06-17; certbot issued a fresh cert
-// on the new ECDSA chain (YE1 / Root YE), so BOTH the old leaf pin and the old E8
-// intermediate pin no longer match. These values are the new chain.
+// NOTE: certbot rotated the intermediate YE1 -> YE2 around 2026-08-17. The previous
+// pins (YE1 leaf + YE1 intermediate) no longer match ANY cert in the live chain, which
+// broke pinned TLS on every shipped build (iOS ATS rejected the connection outright:
+// "Network request failed" at fetchPowChallenge).
+//
+// That was the SECOND intermediate rotation to brick shipped builds (E8 -> YE1 on the
+// AWS->Hetzner move, then YE1 -> YE2). Because pins are baked into the binary, each one
+// costs an emergency build plus a full store review — there is no server-side hotfix.
+// So we now also pin the long-lived ISRG Root YE (SPKI_ANCHOR): roots live for years,
+// so the next intermediate rotation degrades to "still works" instead of a total outage.
+// The leaf and intermediate pins stay as the tighter, normally-matched pins — a pin-set
+// passes if ANY pin matches, so this is added reach, not a relaxation of the others.
+// Exposure delta is small: pinning YE2 already meant "any Let's Encrypt cert for this
+// domain"; the root pin widens that to the same CA's other intermediates, and still
+// rejects every non-ISRG CA and every user-installed root.
 //
 // To refresh the primary pin after cert renewal:
 //   echo Q | openssl s_client -connect aegislink.duckdns.org:443 2>/dev/null \
@@ -149,13 +161,18 @@ function withIconAliases(config) {
 // stale iOS pin makes ATS reject the connection at the OS level (no app-code
 // override possible), while Android silently keeps working. This exact drift
 // caused a "registration failed" bug on the first iOS TestFlight build.
-const SPKI_PRIMARY = 'FHU7MjGd0nNUIZbayXMzSxHlMSay5Mfj2fBRzY6OFYc=';
-const SPKI_BACKUP  = 'brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4='; // LE YE1 intermediate
+const SPKI_PRIMARY = 's/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y='; // LE YE2 intermediate
+const SPKI_BACKUP  = 'ikzWA3NEA1YVdzZPkMmfU1/noMRdEdVGyxCkuSNpihA='; // current leaf (renewed 2026-08-17)
 // Independently-held offline backup key (P-256). Private key is COLD-STORED
 // outside the repo (_keystore_backup/aegis-pin-backup.key). If the LE chain or
 // primary key must be abandoned, issue a cert with this key and installed
 // clients still validate. This is the true "key we control" backup pin.
 const SPKI_BACKUP2 = 'LvglXAxgB9K5SCOZrLvdX0VVc8UuEU+Bj6r58LSA7r8=';
+// ANCHOR: ISRG Root YE — the root of the live chain (verified at depth 2 on
+// 2026-09-14). Roots rotate on a multi-year cadence, so this pin keeps shipped
+// builds alive across LE intermediate rotations that would otherwise kill both
+// the leaf and intermediate pins at once. Last-resort reach, not the primary.
+const SPKI_ANCHOR  = 'sCkq5UWXjg+7mKu9lMhhYF5bGLsy7VI/UNW3tccdR7w=';
 
 const NETWORK_SECURITY_XML = `<?xml version="1.0" encoding="utf-8"?>
 <!--
@@ -186,15 +203,21 @@ const NETWORK_SECURITY_XML = `<?xml version="1.0" encoding="utf-8"?>
   <domain-config>
     <domain includeSubdomains="true">aegislink.duckdns.org</domain>
     <pin-set expiration="2027-12-31">
-      <!-- PRIMARY: SHA-256 SPKI of leaf cert (CN=aegislink.duckdns.org, Let's Encrypt E8)
-           Valid until: 2026-08-24 — renew cert + update SPKI_PRIMARY in app.plugin.js before expiry -->
+      <!-- PRIMARY: SHA-256 SPKI of Let's Encrypt YE2 intermediate (issuer=ISRG Root YE).
+           Survives leaf-cert rotation as long as LE YE2 signs the new leaf. Re-check
+           after any LE intermediate rotation (last seen 2026-09-13). -->
       <pin digest="SHA-256">${SPKI_PRIMARY}</pin>
-      <!-- BACKUP: SHA-256 SPKI of Let's Encrypt E8 intermediate (issuer=ISRG Root X1)
-           Survives leaf-cert rotation as long as LE E8 signs the new cert. -->
+      <!-- BACKUP: SHA-256 SPKI of the current leaf (CN=aegislink.duckdns.org).
+           Second live pin; rotates on renewal (~60d) — the intermediate pin above is durable. -->
       <pin digest="SHA-256">${SPKI_BACKUP}</pin>
       <!-- BACKUP2: independently-held offline P-256 key (cold-stored). Disaster
            recovery if the LE chain / primary key must be abandoned. -->
       <pin digest="SHA-256">${SPKI_BACKUP2}</pin>
+      <!-- ANCHOR: ISRG Root YE. Long-lived root of the live chain, so an LE
+           intermediate rotation (which invalidates BOTH pins above at once)
+           degrades to "still connects" instead of bricking every shipped build.
+           Two such rotations already caused exactly that outage. -->
+      <pin digest="SHA-256">${SPKI_ANCHOR}</pin>
     </pin-set>
   </domain-config>
   <!-- Dev loopback only: cleartext to the emulator host + Metro bundler.

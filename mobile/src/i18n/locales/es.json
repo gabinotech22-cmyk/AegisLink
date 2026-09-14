@@ -351,6 +351,7 @@
     "supportSub": "Donación anónima en cripto (Monero · Lightning)",
     "auditAlert": "Código abierto",
     "auditAlertDesc": "AegisLink es completamente de código abierto. Todo el código criptográfico puede ser revisado y verificado de forma independiente.",
+    "auditViewSource": "Ver en GitHub",
     "pqStatus": "Estado post-cuántico",
     "pqStatusSubOk": "Todas las sesiones son híbridas post-cuánticas",
     "pqStatusSubFallback": "{{count}} sesión(es) volvieron a cifrado clásico",

@@ -245,4 +245,37 @@ describe('M-2 — certificate pinning manifest entries exist', () => {
     expect(src).toMatch(/NSPinnedDomains/);
     expect(src).toMatch(/aegislink\.duckdns\.org/);
   });
+
+  // Both platforms must pin the SAME keys, in the same order. iOS enforces ATS
+  // at the OS level with no app-code override, so a pin present on Android but
+  // missing on iOS shows up only as "Network request failed" on a shipped
+  // build — exactly the drift that broke the first iOS TestFlight build.
+  it('iOS (app.json) and Android (app.plugin.js) pin the identical key set', () => {
+    const appJson = JSON.parse(fs.readFileSync(path.resolve(SRC, '..', 'app.json'), 'utf8'));
+    const iosPins: string[] = appJson.expo.ios.infoPlist.NSAppTransportSecurity
+      .NSPinnedDomains['aegislink.duckdns.org'].NSPinnedCAIdentities
+      .map((e: Record<string, string>) => e['SPKI-SHA256-BASE64']);
+
+    const plugin = fs.readFileSync(path.resolve(SRC, '..', 'app.plugin.js'), 'utf8');
+    const consts = new Map(
+      [...plugin.matchAll(/const (SPKI_\w+)\s*=\s*'([^']+)'/g)].map((m) => [m[1], m[2]]),
+    );
+    const pinSet = plugin.match(/<pin-set[\s\S]*?<\/pin-set>/)?.[0] ?? '';
+    const androidPins = [...pinSet.matchAll(/\$\{(SPKI_\w+)\}/g)].map((m) => consts.get(m[1]));
+
+    expect(androidPins.length).toBeGreaterThanOrEqual(3);
+    expect(iosPins).toEqual(androidPins);
+  });
+
+  // Two Let's Encrypt intermediate rotations (E8→YE1, YE1→YE2) each invalidated
+  // the leaf AND intermediate pins at once, bricking every shipped build with no
+  // server-side fix available. The long-lived ISRG Root YE anchor is what turns
+  // the next rotation into a non-event; removing it re-arms that outage.
+  it('keeps the long-lived ISRG Root YE anchor pin on both platforms', () => {
+    const ISRG_ROOT_YE = 'sCkq5UWXjg+7mKu9lMhhYF5bGLsy7VI/UNW3tccdR7w=';
+    const appJson = fs.readFileSync(path.resolve(SRC, '..', 'app.json'), 'utf8');
+    const plugin = fs.readFileSync(path.resolve(SRC, '..', 'app.plugin.js'), 'utf8');
+    expect(appJson).toContain(ISRG_ROOT_YE);
+    expect(plugin).toContain(ISRG_ROOT_YE);
+  });
 });

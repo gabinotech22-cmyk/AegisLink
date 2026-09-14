@@ -34,6 +34,11 @@ const LEGAL_URLS = {
 // Monero/Lightning addresses; the relay never sees a payment or a payer.
 const DONATE_URL = 'https://aegis-link.it/donate.html';
 
+// "Open source · auditable" is a core product promise, so the audit row has to
+// hand the user the source, not just assert it exists. Opens the repo in the
+// external browser — read-only, no account needed, nothing leaves the device.
+const SOURCE_URL = 'https://github.com/gabinotech22-cmyk/AegisLink';
+
 interface Props {
   onTab: (tab: Tab) => void;
   onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices') => void;
@@ -312,7 +317,15 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
             icon={<I.Shield size={20} color={t.textDim} />}
             label={i18nT('privacy.securityAudit')}
             sub={i18nT('privacy.securityAuditSub')}
-            onPress={() => { themedAlert(i18nT('privacy.auditAlert'), i18nT('privacy.auditAlertDesc')); }}
+            onPress={() => {
+              themedAlert(i18nT('privacy.auditAlert'), i18nT('privacy.auditAlertDesc'), [
+                { text: i18nT('common.close'), style: 'cancel' },
+                {
+                  text: i18nT('privacy.auditViewSource'),
+                  onPress: () => { void Linking.openURL(SOURCE_URL).catch(() => {}); },
+                },
+              ]);
+            }}
           />
           <Row
             t={t}

@@ -407,4 +407,20 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   await addColumn(d, 'messages', 'attachments TEXT;');
   await addColumn(d, 'messages', 'sender_id TEXT;');
   await addColumn(d, 'chat_state', 'ephemeral_timer INTEGER NOT NULL DEFAULT 0;');
+
+  // Outbox columns and their indexes, unconditionally — the same belt-and-
+  // suspenders treatment every other table above already gets. The v13/v14
+  // steps add these on a normal upgrade, but those are gated on user_version,
+  // so a DB whose version bookkeeping ever ran ahead of its real columns would
+  // hit "no such column: next_attempt_at". That throw kills the WHOLE batch,
+  // which is why the symptom was not a broken outbox but a dead app: identity
+  // generation itself failed with
+  //   Calling the 'execAsync' function has failed -> no such column: next_attempt_at
+  // Re-running here is free: addColumn swallows "duplicate column name" and
+  // CREATE INDEX IF NOT EXISTS is a no-op, so this self-heals any DB state
+  // instead of trusting the version counter to tell the truth.
+  await addColumn(d, 'outbox', 'next_attempt_at INTEGER NOT NULL DEFAULT 0;');
+  await addColumn(d, 'outbox', 'bubble_id TEXT;');
+  await d.execAsync('CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(next_attempt_at);');
+  await d.execAsync('CREATE INDEX IF NOT EXISTS idx_outbox_bubble ON outbox(bubble_id);');
 }

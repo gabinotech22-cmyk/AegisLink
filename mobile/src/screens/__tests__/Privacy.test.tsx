@@ -218,9 +218,32 @@ describe('PrivacyScreen', () => {
     const alertSpy = themedAlert as jest.Mock;
     const { getByText } = render(<PrivacyScreen {...makeProps()} />);
     fireEvent.press(getByText('privacy.securityAudit'));
-    expect(alertSpy).toHaveBeenCalledWith('privacy.auditAlert', 'privacy.auditAlertDesc');
+    expect(alertSpy).toHaveBeenCalledWith(
+      'privacy.auditAlert',
+      'privacy.auditAlertDesc',
+      expect.any(Array),
+    );
     fireEvent.press(getByText('privacy.pqStatus'));
     expect(alertSpy).toHaveBeenCalledWith('privacy.pqStatusAlert', 'privacy.pqStatusAlertOk');
+  });
+
+  it('offers a source-code link from the audit alert, not just the claim', () => {
+    // "Open source · auditable" is a core product promise: the audit row used to
+    // only assert it in prose, leaving the user no way to actually go verify.
+    const alertSpy = themedAlert as jest.Mock;
+    const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as never);
+    const { getByText } = render(<PrivacyScreen {...makeProps()} />);
+    fireEvent.press(getByText('privacy.securityAudit'));
+
+    const buttons = alertSpy.mock.calls.at(-1)?.[2] as
+      | { text: string; onPress?: () => void }[]
+      | undefined;
+    const source = buttons?.find((b) => b.text === 'privacy.auditViewSource');
+    expect(source).toBeDefined();
+
+    source?.onPress?.();
+    expect(openSpy).toHaveBeenCalledWith('https://github.com/gabinotech22-cmyk/AegisLink');
+    openSpy.mockRestore();
   });
 
   it('opens the legal pages on the product site, not raw GitHub blobs', () => {
