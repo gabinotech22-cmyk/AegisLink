@@ -1,3 +1,6 @@
+// `jest` is not injected as a global in this suite's config — import it, as
+// every other server test that spies does (see blob.test.ts).
+import { jest } from '@jest/globals';
 import { appVersionInfo } from '../relay/appVersion';
 
 describe('appVersionInfo — relay-side version advertisement', () => {
