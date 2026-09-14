@@ -14,7 +14,17 @@ import nacl from 'tweetnacl'
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util'
 
 let db: Database.Database
-let cachedDbKey: Uint8Array | null = null
+// Per-slot DB key cache. This MUST be keyed by slot: a single cachedDbKey would
+// hand profile B the key it minted for profile A, so B's rows would be written
+// under A's key and read back as [DECRYPTION_ERROR]. Isolation that looks real
+// and is not (golden rule #1: encryption never degrades silently).
+const cachedDbKeys = new Map<string, Uint8Array>()
+
+// KEK from the last successful db:unlock, kept so a slot whose key is PIN-wrapped
+// can be unwrapped on demand when the user switches to it. Without this, enabling
+// the app lock would protect slot 'self' and silently leave every other profile
+// openable. The lock has to cover all of them or it covers none.
+let cachedKek: Uint8Array | null = null
 
 function assertTrustedSender(e: IpcMainInvokeEvent): void {
   const url = e.senderFrame?.url ?? ''
@@ -26,35 +36,35 @@ function assertTrustedSender(e: IpcMainInvokeEvent): void {
 
 // IPC payload size guard (defence-in-depth): a compromised or buggy renderer
 // must not be able to push an unbounded string into the main process / SQLite
-// (memory-exhaustion / disk-fill). Bounds are generous â€” far above any legitimate
-// value â€” so they never reject real data, only pathological payloads.
-const MAX_RATCHET_STATE_BYTES = 1024 * 1024;   // 1 MB â€” a session state is a few KB
-const MAX_MESSAGE_BODY_BYTES = 8 * 1024 * 1024; // 8 MB â€” covers large base64 media refs
-const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB â€” inline base64 avatar
-const MAX_METADATA_FIELD_BYTES = 256 * 1024;    // 256 KB â€” names, status, member JSON, etc.
+// (memory-exhaustion / disk-fill). Bounds are generous — far above any legitimate
+// value — so they never reject real data, only pathological payloads.
+const MAX_RATCHET_STATE_BYTES = 1024 * 1024;   // 1 MB — a session state is a few KB
+const MAX_MESSAGE_BODY_BYTES = 8 * 1024 * 1024; // 8 MB — covers large base64 media refs
+const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB — inline base64 avatar
+const MAX_METADATA_FIELD_BYTES = 256 * 1024;    // 256 KB — names, status, member JSON, etc.
 function assertMaxLen(value: unknown, maxBytes: number, label: string): void {
   if (typeof value === 'string' && value.length > maxBytes) {
     throw new Error(`IPC payload too large: ${label} (${value.length} > ${maxBytes})`)
   }
 }
 
-// â”€â”€â”€ DB encryption at-rest â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── DB encryption at-rest ───────────────────────────────────────────────────
 
 function getDbEncKeySlot(slot = 'self'): string {
   return slot === 'self' ? 'aegis.dbEncKey.b64' : `aegis.${slot}.dbEncKey.b64`
 }
 
-// â”€â”€â”€ C-2 Fase 2: PIN-wrapped DB key (second factor at-rest) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── C-2 Fase 2: PIN-wrapped DB key (second factor at-rest) ──────────────────
 //
 // When the user enables the app lock, the 32-byte DB key is wrapped under a KEK
 // derived from the PIN (Argon2id, derived in the renderer) *inside* the DPAPI
 // layer. Opening the DB then requires BOTH the OS session (DPAPI) AND the PIN.
-// Format of the keystore value (slot 'self' â†’ `aegis.dbEncKey.b64`):
-//   `pinv1:<nonceB64>.<dpapiB64>`   â€” secretbox(dbKey,nonce,KEK) then DPAPI
-//   `pinv1plain:<nonceB64>.<ctB64>` â€” dev-only fallback when safeStorage absent
+// Format of the keystore value (slot 'self' → `aegis.dbEncKey.b64`):
+//   `pinv1:<nonceB64>.<dpapiB64>`   — secretbox(dbKey,nonce,KEK) then DPAPI
+//   `pinv1plain:<nonceB64>.<ctB64>` — dev-only fallback when safeStorage absent
 // (base64 alphabet has no '.', so it is an unambiguous separator). The KEK salt
 // lives separately in `aegis.dbkek.salt.v1` (renderer-owned); only the 32-byte
-// KEK crosses IPC â€” the raw DB key never leaves main.
+// KEK crosses IPC — the raw DB key never leaves main.
 const PIN_WRAP_PREFIX = 'pinv1:'
 const PIN_WRAP_PLAIN_PREFIX = 'pinv1plain:'
 const DBKEK_SALT_KEY = 'aegis.dbkek.salt.v1'
@@ -86,7 +96,7 @@ export function wrapDbKeyUnderPin(dbKey: Uint8Array, kek: Uint8Array): string {
   }
   // No try/catch fallback to plaintext in production (golden rule #1/#6).
   if (app.isPackaged) {
-    throw new Error('AegisLink: OS secure storage unavailable â€” cannot PIN-wrap DB key.')
+    throw new Error('AegisLink: OS secure storage unavailable — cannot PIN-wrap DB key.')
   }
   return `${PIN_WRAP_PLAIN_PREFIX}${nonceB64}.${ctB64}`
 }
@@ -109,37 +119,81 @@ export function unwrapDbKeyUnderPin(encoded: string, kek: Uint8Array): Uint8Arra
   const opened = nacl.secretbox.open(decodeBase64(ctB64), decodeBase64(nonceB64), kek)
   if (!opened) {
     // Wrong PIN (or tampered blob): the unwrap is itself the PIN check. Never
-    // fall through to a fresh key â€” that would orphan all encrypted rows.
-    throw new Error('AegisLink: incorrect PIN â€” DB key unwrap failed.')
+    // fall through to a fresh key — that would orphan all encrypted rows.
+    throw new Error('AegisLink: incorrect PIN — DB key unwrap failed.')
   }
   if (opened.length !== 32) throw new Error('decrypted DB key has invalid length')
   return opened
 }
 
+/**
+ * Every slot id the keystore knows about, recovered from its own key names.
+ * Used wherever an operation has to cover ALL profiles rather than the open one
+ * (enable/disable the lock, panic).
+ */
+function knownSlots(keystore: Record<string, string>): Set<string> {
+  const slots = new Set<string>()
+  for (const k of Object.keys(keystore)) {
+    if (k === 'aegis.dbEncKey.b64') slots.add('self')
+    const m = /^aegis\.([A-Za-z0-9_-]{1,64})\.dbEncKey\.b64$/.exec(k)
+    if (m) slots.add(m[1])
+  }
+  return slots
+}
+
+/** True when ANY profile's key is PIN-wrapped, i.e. the app lock is enabled. */
+function appLockIsOn(keystore: Record<string, string>): boolean {
+  for (const slot of knownSlots(keystore)) {
+    if (isPinWrapped(keystore[getDbEncKeySlot(slot)])) return true
+  }
+  return false
+}
+
 function getDbKey(slot = 'self'): Uint8Array {
-  if (cachedDbKey) return cachedDbKey
+  const cached = cachedDbKeys.get(slot)
+  if (cached) return cached
   const slotKey = getDbEncKeySlot(slot)
   const keystore = readKeystore()
   const encoded = keystore[slotKey]
   if (isPinWrapped(encoded)) {
-    // PIN-wrapped (Fase 2): recoverable only via db:unlock(kek), which populates
-    // cachedDbKey above. Reaching here means the DB is locked â€” fail closed.
-    throw new Error('AegisLink: database is PIN-locked â€” unlock required before access.')
+    // PIN-wrapped (Fase 2): recoverable only with the KEK. db:unlock caches it,
+    // so switching to another profile after unlocking does not ask for the PIN
+    // again. No cached KEK means the DB is locked: fail closed.
+    if (!cachedKek) {
+      throw new Error('AegisLink: database is PIN-locked. Unlock required before access.')
+    }
+    const unwrapped = unwrapDbKeyUnderPin(encoded as string, cachedKek) // throws on wrong PIN
+    cachedDbKeys.set(slot, unwrapped)
+    return unwrapped
   }
   if (!encoded) {
     // First run for this slot: generate and persist a fresh DB key.
+    //
+    // Unless the app lock is on and we are still locked. Minting here would
+    // create a profile the PIN does not cover — reachable by anyone who opens
+    // the app, sitting next to profiles that ARE protected. Fail closed: a
+    // profile can only be created once the user has proven the PIN.
+    if (appLockIsOn(keystore) && !cachedKek) {
+      throw new Error('AegisLink: database is PIN-locked. Unlock required before access.')
+    }
     if (!safeStorage.isEncryptionAvailable() && app.isPackaged) {
       // Production: never store the DB key in plaintext. Fail closed so the
       // caller surfaces a real error instead of silently downgrading at-rest
       // encryption. (Golden rule #1/#6: encryption never degrades silently;
       // production fails closed.)
       throw new Error(
-        'AegisLink: OS secure storage unavailable â€” cannot create DB key securely.'
+        'AegisLink: OS secure storage unavailable — cannot create DB key securely.'
       )
     }
     const keyBytes = nacl.randomBytes(32)
     const rawVal = encodeBase64(keyBytes)
-    if (safeStorage.isEncryptionAvailable()) {
+    if (cachedKek) {
+      // The app lock is ON and this is a brand-new profile. Wrap its key under
+      // the same KEK right now. Storing it unwrapped would mean the PIN guards
+      // the profiles that existed when it was set and quietly skips every one
+      // created afterwards.
+      keystore[slotKey] = wrapDbKeyUnderPin(keyBytes, cachedKek)
+    } else if (safeStorage.isEncryptionAvailable()) {
       keystore[slotKey] = 'enc:' + safeStorage.encryptString(rawVal).toString('base64')
     } else {
       // Dev-only fallback (NOT encrypted) for local development. Unreachable
@@ -149,10 +203,10 @@ function getDbKey(slot = 'self'): Uint8Array {
       keystore[slotKey] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
     }
     writeKeystore(keystore)
-    cachedDbKey = keyBytes
-    return cachedDbKey
+    cachedDbKeys.set(slot, keyBytes)
+    return keyBytes
   }
-  // A plaintext DB key must never exist in a packaged build â€” its presence means
+  // A plaintext DB key must never exist in a packaged build — its presence means
   // at-rest encryption silently downgraded. Refuse to serve it rather than
   // operating on cleartext-keyed data (golden rule #1/#6; parity with
   // secureStorage:get, which applies the same refusal on read).
@@ -162,7 +216,7 @@ function getDbKey(slot = 'self'): Uint8Array {
     )
   }
   // Existing key: decrypt it. If this fails we MUST NOT silently mint a new
-  // key â€” that would orphan every previously-encrypted row (silent total
+  // key — that would orphan every previously-encrypted row (silent total
   // history loss). Surface the error so the caller can offer recovery.
   try {
     let decrypted = ''
@@ -174,20 +228,23 @@ function getDbKey(slot = 'self'): Uint8Array {
     }
     const key = decodeBase64(decrypted)
     if (key.length !== 32) throw new Error('decrypted DB key has invalid length')
-    cachedDbKey = key
-    return cachedDbKey
+    cachedDbKeys.set(slot, key)
+    return key
   } catch (e) {
     throw new Error(
-      'AegisLink: failed to decrypt the local DB key â€” refusing to regenerate ' +
+      'AegisLink: failed to decrypt the local DB key — refusing to regenerate ' +
         '(would orphan existing encrypted data). ' +
         (e instanceof Error ? e.message : String(e))
     )
   }
 }
 
-/** Drop the cached DB key (test helper / slot switch). */
+/** Drop every cached DB key and the cached KEK (test helper / lock / panic). */
 export function resetDbKeyCache(): void {
-  cachedDbKey = null
+  for (const k of cachedDbKeys.values()) k.fill(0)
+  cachedDbKeys.clear()
+  cachedKek?.fill(0)
+  cachedKek = null
 }
 
 export function encryptBody(body: string, slot = 'self'): string {
@@ -236,7 +293,7 @@ function decryptBodyStrict(encryptedBody: string, slot = 'self'): string {
 
 /**
  * Display-path decryption. On failure returns a VISIBLE marker (never silent,
- * never fabricated plaintext). NOT for key material â€” use
+ * never fabricated plaintext). NOT for key material — use
  * {@link decryptSecretOrNull} for ratchet state / prekey secrets.
  */
 export function decryptBody(encryptedBody: string, slot = 'self'): string {
@@ -261,7 +318,7 @@ export function decryptSecretOrNull(encryptedBody: string, slot = 'self'): strin
   }
 }
 
-// â”€â”€â”€ Schema Setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Schema Setup ─────────────────────────────────────────────────────────────
 
 function ensureSchema(db: Database.Database): void {
   const statements = [
@@ -337,6 +394,16 @@ function ensureSchema(db: Database.Database): void {
       duration_s  INTEGER NOT NULL DEFAULT 0
     )`,
     `CREATE INDEX IF NOT EXISTS idx_calls_contact ON call_history(contact_id, started_at)`,
+    // Public channels: local at-rest cache of a sealed channel's projected feed.
+    // The relay does not keep broadcast history forever and the verified chain
+    // head IS persisted, so without this a cold start resumes from the head into
+    // an empty feed and shows nothing. Posts are stored as one encrypted blob,
+    // so only opaque ciphertext reaches disk (zero metadata holds).
+    `CREATE TABLE IF NOT EXISTS channel_feed (
+      channel_id  TEXT PRIMARY KEY,
+      posts_enc   TEXT NOT NULL,
+      updated_at  INTEGER NOT NULL
+    )`,
   ]
   for (const sql of statements) {
     db.prepare(sql).run()
@@ -387,9 +454,9 @@ function ensureSchema(db: Database.Database): void {
   safeAddColumn('call_history', 'duration_s', 'INTEGER NOT NULL DEFAULT 0')
 }
 
-// â”€â”€â”€ SQLCipher at-rest encryption (Ola 10) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── SQLCipher at-rest encryption (Ola 10) ────────────────────────────────────
 
-/** Lowercase hex of the 32-byte DB key for `PRAGMA key = "x'â€¦'"`. */
+/** Lowercase hex of the 32-byte DB key for `PRAGMA key = "x'…'"`. */
 function dbKeyHex(slot = 'self'): string {
   return Buffer.from(getDbKey(slot)).toString('hex')
 }
@@ -397,24 +464,24 @@ function dbKeyHex(slot = 'self'): string {
 /**
  * Open `dbPath` encrypted at-rest, migrating a legacy plaintext file in place.
  *
- * Detection probes whether the file is readable with NO key (â‡’ plaintext); if so
+ * Detection probes whether the file is readable with NO key (⇒ plaintext); if so
  * it is encrypted in place via `PRAGMA rekey` (SQLite3MultipleCiphers supports
- * plaintextâ†’encrypted rekey, preserving all rows). The key PRAGMA is applied as
+ * plaintext→encrypted rekey, preserving all rows). The key PRAGMA is applied as
  * the first statement on the returned handle. Fails closed: getDbKey() throws
  * when OS secure storage is unavailable in a packaged build.
  */
 export function openEncrypted(dbPath: string, slot = 'self'): Database.Database {
   const keyHex = dbKeyHex(slot)
 
-  // â”€â”€ Migrate a pre-existing PLAINTEXT database (readable without a key) â”€â”€â”€â”€â”€â”€
+  // ── Migrate a pre-existing PLAINTEXT database (readable without a key) ──────
   if (fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0) {
     let plaintext = false
     const probe = new Database(dbPath)
     try {
-      probe.exec('SELECT count(*) FROM sqlite_master') // no key â†’ succeeds iff plaintext
+      probe.exec('SELECT count(*) FROM sqlite_master') // no key → succeeds iff plaintext
       plaintext = true
     } catch {
-      plaintext = false // unreadable without a key â†’ already encrypted
+      plaintext = false // unreadable without a key → already encrypted
     } finally {
       probe.close()
     }
@@ -433,9 +500,50 @@ export function openEncrypted(dbPath: string, slot = 'self'): Database.Database 
   return handle
 }
 
-// â”€â”€â”€ Handlers Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Handlers Registration ────────────────────────────────────────────────────
 
 let mainDbPath = ''
+
+// Section 11 (isolated profiles): the ACTIVE slot, and the only one whose data
+// this process will touch. Named currentSlot, not activeSlot, on purpose: ten
+// IPC handlers already take a parameter called activeSlot, and a module-level
+// name would be shadowed inside exactly the functions that must compare the two.
+let currentSlot = 'self'
+let userDataDir = ''
+
+/**
+ * Where a slot's database lives. Isolation is the FILESYSTEM, not a WHERE
+ * clause: one file per profile means a forgotten filter cannot leak profile A's
+ * messages into profile B's chat list, and dropping a profile is unlink() rather
+ * than a cascade of DELETEs someone has to remember to keep in sync.
+ *
+ * Slot 'self' keeps the historic filename so every existing install stays put
+ * and needs no migration.
+ */
+function dbPathForSlot(slot: string): string {
+  if (slot === 'self') return path.join(userDataDir, 'aegislink.db')
+  // Slot ids are app-generated (an aegisId), but this string becomes a path:
+  // constrain it rather than trust it.
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(slot)) {
+    throw new Error(`AegisLink: refusing to open a database for an invalid slot id: ${slot}`)
+  }
+  return path.join(userDataDir, `aegislink-${slot}.db`)
+}
+
+/**
+ * Every handler that receives a slot from the renderer must call this. The open
+ * handle belongs to ONE slot; if the renderer believes it is on another, the
+ * honest outcome is a loud error, not a write into the wrong profile's file
+ * encrypted under the wrong key.
+ */
+function assertSlot(slot: string): void {
+  if (slot !== currentSlot) {
+    throw new Error(
+      `AegisLink: profile mismatch. The renderer asked for slot "${slot}" while ` +
+        `"${currentSlot}" is open. Refusing to touch the wrong profile's data.`
+    )
+  }
+}
 
 /**
  * Open the main DB handle (idempotent). Ola 10: whole-DB SQLCipher encryption
@@ -447,7 +555,7 @@ let mainDbPath = ''
  */
 function openMainDb(): void {
   if (db) return
-  db = openEncrypted(mainDbPath)
+  db = openEncrypted(mainDbPath, currentSlot)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   ensureSchema(db)
@@ -456,60 +564,107 @@ function openMainDb(): void {
 /**
  * Eagerly open the main DB for legacy / no-PIN installs. MUST be called AFTER
  * app.whenReady(): openMainDb() -> getDbKey() uses Electron safeStorage, which
- * THROWS when used before the app is ready (enforced since Electron 42 â€” before
+ * THROWS when used before the app is ready (enforced since Electron 42 — before
  * that it silently worked, so the eager open could live inside the pre-ready
  * registerDatabaseHandlers()). PIN-wrapped installs stay closed until db:unlock
  * supplies the PIN-derived KEK. No-op if already open or path not yet set.
  */
 export function openMainDbIfUnwrapped(): void {
   if (db || !mainDbPath) return
-  const encoded = readKeystore()[getDbEncKeySlot('self')]
+  const encoded = readKeystore()[getDbEncKeySlot(currentSlot)]
   if (!isPinWrapped(encoded)) {
     openMainDb()
   }
 }
 
 export function registerDatabaseHandlers(): void {
-  mainDbPath = path.join(app.getPath('userData'), 'aegislink.db')
+  // Start from a known profile. In production this runs once, at boot, when the
+  // active profile IS 'self' (the renderer switches later, after it hydrates its
+  // roster). Making it explicit also keeps the function idempotent, so tests can
+  // re-register without inheriting the slot the previous one left behind.
+  if (db) {
+    db.close()
+    db = undefined as unknown as Database.Database
+  }
+  currentSlot = 'self'
+  userDataDir = app.getPath('userData')
+  mainDbPath = dbPathForSlot(currentSlot)
 
   // C-2 Fase 2: if the DB key is PIN-wrapped, DEFER opening until db:unlock
   // supplies the PIN-derived KEK. Legacy / no-PIN installs are opened eagerly
-  // too â€” but from app.whenReady() (see openMainDbIfUnwrapped), NOT here:
+  // too — but from app.whenReady() (see openMainDbIfUnwrapped), NOT here:
   // getDbKey() touches safeStorage, illegal before the app is ready on Electron 42+.
 
-  // â”€â”€â”€ Lock / unlock (C-2 Fase 2) â”€â”€â”€
+  // ─── Lock / unlock (C-2 Fase 2) ───
   ipcMain.handle('db:lock-state', (event): { pinWrapped: boolean; opened: boolean } => {
     assertTrustedSender(event)
-    const enc = readKeystore()[getDbEncKeySlot('self')]
+    const enc = readKeystore()[getDbEncKeySlot(currentSlot)]
     return { pinWrapped: isPinWrapped(enc), opened: !!db }
+  })
+
+  /**
+   * Section 11: switch the active profile. Closes the current database and opens
+   * the one belonging to `slot`, which is a different FILE with a different key.
+   *
+   * Deliberately does NOT clear cachedDbKeys: with the app lock on, the KEK from
+   * db:unlock is what lets the new slot's key be unwrapped without asking for the
+   * PIN again, and a wrong slot can no longer read the wrong data anyway because
+   * each key only opens its own file.
+   */
+  ipcMain.handle('db:switch-slot', (event, slot: string): void => {
+    assertTrustedSender(event)
+    if (typeof slot !== 'string' || !slot) throw new Error('db:switch-slot needs a slot id')
+    const nextPath = dbPathForSlot(slot) // validates the id before anything closes
+    if (slot === currentSlot) return
+    if (db) {
+      db.close() // flushes WAL; the next open re-reads from disk
+      db = undefined as unknown as Database.Database
+    }
+    currentSlot = slot
+    mainDbPath = nextPath
+    openMainDb()
   })
 
   ipcMain.handle('db:unlock', (event, kekB64: string): void => {
     assertTrustedSender(event)
     if (db) return // already unlocked/open
-    const enc = readKeystore()[getDbEncKeySlot('self')]
+    const enc = readKeystore()[getDbEncKeySlot(currentSlot)]
     if (isPinWrapped(enc)) {
       assertValidB64Key(kekB64)
       const kek = decodeBase64(kekB64)
-      try {
-        cachedDbKey = unwrapDbKeyUnderPin(enc as string, kek) // throws on wrong PIN
-      } finally {
-        kek.fill(0)
-      }
+      // Unwrap FIRST: it doubles as the PIN check and throws on a wrong one.
+      // Only a proven-correct KEK gets cached, so a failed attempt cannot leave
+      // one behind that would later unlock another profile's key.
+      const unwrapped = unwrapDbKeyUnderPin(enc as string, kek) // throws on wrong PIN
+      cachedDbKeys.set(currentSlot, unwrapped)
+      cachedKek?.fill(0)
+      cachedKek = kek // kept so switching profile does not re-ask for the PIN
     }
-    // Legacy/no-PIN: open without a KEK. PIN-wrapped: cachedDbKey now set.
+    // Legacy/no-PIN: open without a KEK. PIN-wrapped: the slot key is now cached.
     openMainDb()
   })
 
   ipcMain.handle('db:enable-pin-wrap', (event, kekB64: string): void => {
     assertTrustedSender(event)
     assertValidB64Key(kekB64)
-    const dbKey = getDbKey('self') // DB must be open/unlocked
     const kek = decodeBase64(kekB64)
     try {
       const keystore = readKeystore()
-      keystore[getDbEncKeySlot('self')] = wrapDbKeyUnderPin(dbKey, kek)
+      // Wrap EVERY profile's key, not just the active one. The app lock is a
+      // property of the app, so a PIN that guards your main profile and leaves
+      // the second one openable is worse than no lock: it reads as protected.
+      // Slot ids are recovered from the keystore's own key names.
+      const slots = knownSlots(keystore)
+      slots.add(currentSlot)
+      for (const slot of slots) {
+        const existing = keystore[getDbEncKeySlot(slot)]
+        if (isPinWrapped(existing)) continue // already wrapped under this PIN
+        const dbKey = getDbKey(slot) // must be readable: DB open / not locked
+        keystore[getDbEncKeySlot(slot)] = wrapDbKeyUnderPin(dbKey, kek)
+      }
       writeKeystore(keystore)
+      cachedKek?.fill(0)
+      cachedKek = new Uint8Array(kek) // copy: the finally below zeroes `kek`
     } finally {
       kek.fill(0)
     }
@@ -517,24 +672,36 @@ export function registerDatabaseHandlers(): void {
 
   ipcMain.handle('db:disable-pin-wrap', (event): void => {
     assertTrustedSender(event)
-    const dbKey = getDbKey('self') // DB must be open/unlocked
     const keystore = readKeystore()
-    const rawVal = encodeBase64(dbKey)
-    if (safeStorage.isEncryptionAvailable()) {
-      keystore[getDbEncKeySlot('self')] = 'enc:' + safeStorage.encryptString(rawVal).toString('base64')
-    } else if (app.isPackaged) {
-      throw new Error('AegisLink: OS secure storage unavailable â€” cannot rewrap DB key.')
-    } else {
-      // Dev-only (the isPackaged branch above fails closed in production).
-      // nosemgrep: aegislink-no-plain-prefix-persist
-      keystore[getDbEncKeySlot('self')] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
+    // Unwrap EVERY profile, mirroring enable. Unwrapping only the active one
+    // would leave the others sealed under a PIN that is about to stop existing,
+    // and with no KEK to recover it those databases become unreadable for good.
+    const slots = knownSlots(keystore)
+    slots.add(currentSlot)
+    for (const slot of slots) {
+      const dbKey = getDbKey(slot) // unwraps via cachedKek; throws if still locked
+      const rawVal = encodeBase64(dbKey)
+      if (safeStorage.isEncryptionAvailable()) {
+        keystore[getDbEncKeySlot(slot)] =
+          'enc:' + safeStorage.encryptString(rawVal).toString('base64')
+      } else if (app.isPackaged) {
+        throw new Error('AegisLink: OS secure storage unavailable. Cannot rewrap DB key.')
+      } else {
+        // Dev-only (the isPackaged branch above fails closed in production).
+        // nosemgrep: aegislink-no-plain-prefix-persist
+        keystore[getDbEncKeySlot(slot)] =
+          'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
+      }
     }
     writeKeystore(keystore)
+    cachedKek?.fill(0)
+    cachedKek = null // no PIN any more: nothing left to unwrap with
   })
 
-  // â”€â”€â”€ Identity â”€â”€â”€
+  // ─── Identity ───
   ipcMain.handle('db:save-identity', (event, activeSlot: string, identity: IdentityInput): void => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     const sql = `INSERT OR REPLACE INTO identity (slot, aegis_id, public_key_b64, signing_public_key_b64, created_at)
                  VALUES (?, ?, ?, ?, ?)`
     db.prepare(sql).run(
@@ -548,6 +715,7 @@ export function registerDatabaseHandlers(): void {
 
   ipcMain.handle('db:load-identity', (event, activeSlot: string) => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     const row = db
       .prepare<unknown[], IdentityRow>(
         `SELECT aegis_id, public_key_b64, signing_public_key_b64, created_at FROM identity WHERE slot = ?`
@@ -578,7 +746,7 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // â”€â”€â”€ Contacts â”€â”€â”€
+  // ─── Contacts ───
   ipcMain.handle('db:save-contact', (event, c: ContactInput): void => {
     assertTrustedSender(event)
     // Defence-in-depth: bound the unbounded string fields a renderer can write
@@ -688,9 +856,10 @@ export function registerDatabaseHandlers(): void {
     db.prepare('DELETE FROM contacts WHERE aegis_id = ?').run(aegisId)
   })
 
-  // â”€â”€â”€ Messages â”€â”€â”€
+  // ─── Messages ───
   ipcMain.handle('db:save-message', (event, activeSlot: string, m: MessageInput): void => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     assertMaxLen(m?.body, MAX_MESSAGE_BODY_BYTES, 'message.body')
     assertMaxLen(m?.mediaUri, MAX_MESSAGE_BODY_BYTES, 'message.mediaUri')
     const encrypted = encryptBody(m.body, activeSlot)
@@ -723,6 +892,7 @@ export function registerDatabaseHandlers(): void {
 
   ipcMain.handle('db:load-messages-by-chat', (event, activeSlot: string, chatId: string) => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     const rows = db
       .prepare<unknown[], MessageRow>(
         `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
@@ -762,6 +932,7 @@ export function registerDatabaseHandlers(): void {
 
   ipcMain.handle('db:get-message', (event, activeSlot: string, id: string) => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     const r = db
       .prepare<unknown[], MessageRow>(
         `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
@@ -804,6 +975,7 @@ export function registerDatabaseHandlers(): void {
 
   ipcMain.handle('db:get-pinned-message', (event, activeSlot: string, chatId: string) => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     const r = db
       .prepare<unknown[], MessageRow>(
         `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
@@ -846,6 +1018,7 @@ export function registerDatabaseHandlers(): void {
 
   ipcMain.handle('db:set-message-deleted', (event, activeSlot: string, id: string): void => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     const empty = encryptBody('', activeSlot)
     db.prepare('UPDATE messages SET deleted = 1, body = ?, media_uri = NULL WHERE id = ?').run(
       empty,
@@ -881,6 +1054,7 @@ export function registerDatabaseHandlers(): void {
 
   ipcMain.handle('db:last-message-by-chat', (event, activeSlot: string, chatId: string) => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     const r = db
       .prepare<unknown[], LastMessageRow>(
         `SELECT id, chat_id, direction, body, created_at FROM messages
@@ -897,7 +1071,7 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // â”€â”€â”€ Double Ratchet sessions â”€â”€â”€
+  // ─── Double Ratchet sessions ───
   ipcMain.handle(
     'db:save-ratchet-session',
     (event, activeSlot: string, aegisId: string, stateJson: string): void => {
@@ -925,7 +1099,7 @@ export function registerDatabaseHandlers(): void {
     }
   )
 
-  // â”€â”€â”€ Groups â”€â”€â”€
+  // ─── Groups ───
   ipcMain.handle('db:save-group', (event, g: GroupInput): void => {
     assertTrustedSender(event)
     assertMaxLen(g?.name, MAX_METADATA_FIELD_BYTES, 'group.name')
@@ -997,11 +1171,12 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // â”€â”€â”€ Panic wipe â”€â”€â”€
+  // ─── Panic wipe ───
   ipcMain.handle('db:wipe-database', (event, activeSlot: string): void => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     // Tolerate a LOCKED DB (Fase 2 cold-start panic, before db:unlock): the SQL
-    // deletes are skipped, but the keystore wipe below removes the DB key blob â€”
+    // deletes are skipped, but the keystore wipe below removes the DB key blob —
     // the encrypted DB file is then unrecoverable, so panic still leaves nothing.
     if (db) {
       db.prepare('DELETE FROM messages').run()
@@ -1021,10 +1196,37 @@ export function registerDatabaseHandlers(): void {
         } catch { /* best-effort */ }
       }
     }
-    if (cachedDbKey) cachedDbKey.fill(0) // zeroize the in-memory DB key (rule #9)
-    cachedDbKey = null
     const keystore = readKeystore()
+
+    // Section 11: panic wipes EVERY profile, not just the open one. A second
+    // profile surviving a panic wipe would break the promise outright, and its
+    // mere presence on disk is the evidence the wipe exists to destroy. The
+    // active slot is emptied row-by-row above so the running app keeps a usable
+    // handle; the others have no handle, so their files go.
+    const otherSlots = knownSlots(keystore)
+    otherSlots.delete(currentSlot)
+    for (const slot of otherSlots) {
+      let victimPath = ''
+      try {
+        victimPath = dbPathForSlot(slot)
+      } catch {
+        continue // unparseable slot id: no file of ours to remove
+      }
+      for (const suffix of ['', '-wal', '-shm']) {
+        try {
+          if (fs.existsSync(victimPath + suffix)) fs.rmSync(victimPath + suffix)
+        } catch { /* best-effort */ }
+      }
+      delete keystore[getDbEncKeySlot(slot)]
+    }
+
+    // Zeroize every in-memory DB key and the cached KEK (rule #9).
+    resetDbKeyCache()
+
     delete keystore[getDbEncKeySlot(activeSlot)]
+    delete keystore['aegis.slotsList']  // the roster itself is metadata: who existed
+    delete keystore['aegis.activeSlotId']
+    delete keystore['aegis.activeProfile']
     delete keystore[DBKEK_SALT_KEY] // Fase 2: drop the PIN-KEK salt too (hygiene)
     delete keystore['aegis.panic.v1']
     delete keystore['aegis.preferences.v1']
@@ -1032,9 +1234,10 @@ export function registerDatabaseHandlers(): void {
     writeKeystore(keystore)
   })
 
-  // â”€â”€â”€ Chat state â”€â”€â”€
+  // ─── Chat state ───
   ipcMain.handle('db:get-chat-state', (event, activeSlot: string, chatId: string) => {
     assertTrustedSender(event)
+    assertSlot(activeSlot)
     const r = db
       .prepare<unknown[], ChatStateRow>('SELECT draft, unread_count FROM chat_state WHERE chat_id = ?')
       .get(chatId)
@@ -1083,7 +1286,7 @@ export function registerDatabaseHandlers(): void {
     return result
   })
 
-  // â”€â”€â”€ Ephemeral cleanup â”€â”€â”€
+  // ─── Ephemeral cleanup ───
   ipcMain.handle('db:delete-expired-messages', (event, timerSeconds: number): void => {
     assertTrustedSender(event)
     const now = Date.now()
@@ -1096,7 +1299,7 @@ export function registerDatabaseHandlers(): void {
     }
   })
 
-  // â”€â”€â”€ Call history â”€â”€â”€
+  // ─── Call history ───
   ipcMain.handle('db:save-call', (event, c: CallInput): void => {
     assertTrustedSender(event)
     assertMaxLen(c?.id, MAX_METADATA_FIELD_BYTES, 'call.id')
@@ -1125,6 +1328,63 @@ export function registerDatabaseHandlers(): void {
       startedAt: r.started_at,
       durationS: r.duration_s
     }))
+  })
+
+  // ─── Public channels: local feed cache ───
+  //
+  // The whole post list travels as ONE already-encrypted string. Encryption
+  // happens in this process (encryptBody), same as message bodies, so what
+  // lands on disk is opaque even before SQLCipher — the belt-and-braces the
+  // zero-metadata rule asks for.
+  //
+  // Bounded to the most recent posts so an active channel cannot grow the row
+  // without limit. Trimming only shortens local history; the verified chain
+  // head is stored separately, so delta pulls stay correct.
+  const MAX_CACHED_POSTS = 500
+
+  ipcMain.handle(
+    'db:save-channel-feed',
+    (event, activeSlot: string, channelId: string, postsJson: string): void => {
+      assertTrustedSender(event)
+      assertSlot(activeSlot)
+      assertMaxLen(postsJson, MAX_MESSAGE_BODY_BYTES, 'channelFeed.posts')
+      let trimmed = postsJson
+      try {
+        const parsed = JSON.parse(postsJson) as unknown[]
+        if (Array.isArray(parsed) && parsed.length > MAX_CACHED_POSTS) {
+          trimmed = JSON.stringify(parsed.slice(-MAX_CACHED_POSTS))
+        }
+      } catch {
+        // Not an array we can trim. Store it as given rather than lose the feed;
+        // the length guard above already bounds the damage.
+      }
+      db.prepare(
+        'INSERT OR REPLACE INTO channel_feed (channel_id, posts_enc, updated_at) VALUES (?, ?, ?)'
+      ).run(channelId, encryptBody(trimmed, activeSlot), Date.now())
+    }
+  )
+
+  ipcMain.handle(
+    'db:load-channel-feed',
+    (event, activeSlot: string, channelId: string): string => {
+      assertTrustedSender(event)
+      assertSlot(activeSlot)
+      const row = db
+        .prepare<unknown[], { posts_enc: string }>(
+          'SELECT posts_enc FROM channel_feed WHERE channel_id = ?'
+        )
+        .get(channelId)
+      if (!row?.posts_enc) return '[]'
+      const json = decryptBody(row.posts_enc, activeSlot)
+      // decryptBody returns the visible marker rather than throwing. A feed we
+      // cannot read is an empty feed, never a crash and never a partial render.
+      return json && json !== '[DECRYPTION_ERROR]' ? json : '[]'
+    }
+  )
+
+  ipcMain.handle('db:delete-channel-feed', (event, channelId: string): void => {
+    assertTrustedSender(event)
+    db.prepare('DELETE FROM channel_feed WHERE channel_id = ?').run(channelId)
   })
 }
 

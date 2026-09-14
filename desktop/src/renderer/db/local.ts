@@ -7,6 +7,10 @@
 
 import '../crypto/ipc-types';
 
+// Public-channel feed cache, re-exported here so callers import it from the same
+// place as everything else (mobile/src/db/local.ts does the same).
+export * from './channelFeed';
+
 const db = () => window.aegis.db;
 const secureStorage = () => window.aegis.secureStorage;
 
@@ -24,12 +28,34 @@ export function getSignSecretKeySlot(slot = activeSlot): string {
   return slot === 'self' ? 'aegis.signSecretKey.b64' : `aegis.${slot}.signSecretKey.b64`;
 }
 
+/**
+ * Point the renderer at a profile. Local bookkeeping ONLY — it does not move the
+ * database. To actually change profile use switchDbSlot(), which is async
+ * because the real work (closing one encrypted file, opening another) happens in
+ * the main process.
+ *
+ * Kept separate and side-effect-free because most call sites use it to label a
+ * keystore lookup, not to change profile.
+ */
 export function setActiveDbSlot(slot: string): void {
   activeSlot = slot;
 }
 
+/**
+ * Section 11: actually switch profile. Closes the current database in main and
+ * opens the one belonging to `slot` — a different file under a different key.
+ *
+ * Awaited on purpose: main rejects any db.* call whose slot is not the open one,
+ * so racing a read against the switch surfaces as a loud error instead of a
+ * silent read of the wrong profile.
+ */
+export async function switchDbSlot(slot: string): Promise<void> {
+  await window.aegis.db.switchSlot(slot);
+  activeSlot = slot;
+}
+
 export async function closeActiveDatabase(): Promise<void> {
-  // Owned by the main process
+  // Owned by the main process; switchDbSlot() closes and reopens it.
 }
 
 export async function deleteIdentitySlot(slot: string): Promise<void> {

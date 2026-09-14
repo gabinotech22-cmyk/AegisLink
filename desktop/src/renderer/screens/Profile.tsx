@@ -21,6 +21,8 @@ interface Props {
   onAppIcon: () => void;
   onSubscription?: () => void;
   onKeys: () => void;
+  /** Section 11. Optional so the screen still renders where it is not wired. */
+  onProfileSwitcher?: () => void;
 }
 
 const PROFILE_COLORS = ['#05b875', '#8b5cf6', '#3b82f6', '#ec4899', '#f97316', '#eab308', '#6366f1'];
@@ -37,7 +39,7 @@ const PROFILE_EMOJIS = [
   { label: 'Robot', val: '🤖' },
 ];
 
-export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscription, onKeys }: Props) {
+export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscription, onKeys, onProfileSwitcher }: Props) {
   const { t } = useTheme();
 
   const identity = useIdentity((s) => s.identity);
@@ -58,6 +60,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
   const lastSeen = usePreferences((s) => s.lastSeenVisible);
   const typing = usePreferences((s) => s.typingVisible);
   const setPref = usePreferences((s) => s.set);
+  const duressActive = usePreferences((s) => s.duressActive);
   function setPhotoVis(v: 'all' | 'contacts' | 'none') { void setPref('photoVis', v); }
   function setLastSeen(v: boolean) { void setPref('lastSeenVisible', v); }
   function setTyping(v: boolean) { void setPref('typingVisible', v); }
@@ -177,6 +180,18 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
         </Section>
 
         <Section t={t} label="ACCOUNT">
+          {/* Hidden while the decoy account is showing. The row itself is the
+              leak: offering to switch profiles proves a real, hidden identity
+              exists, which is exactly what duress mode has to deny. */}
+          {onProfileSwitcher && !duressActive && (
+            <Row
+              t={t}
+              icon={<I.Person size={18} color={t.textDim} />}
+              label="Isolated profiles"
+              sub="Separate identities, each with its own keys and database"
+              onPress={onProfileSwitcher}
+            />
+          )}
           <Row t={t} icon={<I.Key size={18} color={t.textDim} />} label="Identities & keys" sub="View your public keys & fingerprint" onPress={onKeys} />
           <Row t={t} icon={<I.Phone size={18} color={t.textDim} />} label="Linked devices" onPress={onDevices} />
           <Row t={t} icon={<I.Shield size={18} color={t.accent} />} label="Panic mode" sub="Instantly wipe all data" onPress={onPanic} />

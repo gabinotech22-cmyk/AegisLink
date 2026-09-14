@@ -207,17 +207,27 @@ usa igual. La única función realmente ausente es `ensureDevicePreKeys`
 (aprovisionamiento de prekeys por slot de DB), y es plausible que sea correcto:
 el desktop es un dispositivo vinculado, no una identidad primaria.
 
-**Lo que sí queda, y es una decisión de producto, no un bug:** faltan 12
-pantallas — los 5 de canales públicos, los 3 de llamadas de grupo, y
-`CreateProfile` + `ProfileSwitcher`, es decir **la sección 11 (múltiples
-perfiles) no existe en desktop**.
+**Lo que sí queda, y es una decisión de producto, no un bug:** faltaban 12
+pantallas. Medidas por bloque, con la fontanería que cada una necesita debajo:
 
-Eso no es deuda técnica que se arregle sola: es *qué quieres que sea el
-desktop*. Las dos salidas honestas son (a) paridad completa, con el coste de
-portar canales + llamadas de grupo + perfiles, o (b) declararlo cliente reducido
-y decirlo donde el usuario lo vea, en vez de dejar que lo descubra buscando una
-pestaña que no está. Lo que no se sostiene es el estado actual: paridad
-implícita que no existe.
+| Bloque | Fontanería en desktop | A portar | Estado |
+|---|---|---|---|
+| **Perfiles múltiples** (sección 11) | existía a medias, y mentía — ver PAR-1b | ~570 líneas (2 pantallas) | ✅ **hecho** |
+| `MultiPreview` | parcial | ~270 | pendiente |
+| `GroupJoin` | grupos sí existen | ~300 | pendiente |
+| **Canales públicos** (5 pantallas) | **cero** — 17 apariciones de "channel" y todas de otra cosa | ~5.100, de ellas **~1.500 de cripto** | pendiente |
+| **Llamadas de grupo** (3 pantallas) | **cero** — `socket/calls.ts` es solo 1:1 | ~630 + WebRTC multi-peer | pendiente |
+| `LockSetup` | — | — | **no se porta**: está huérfana también en mobile |
+
+La decisión se tomó por el bloque más caro en valor/coste: **la sección 11 se
+portó entera** (es la única sección del producto que faltaba por completo, y su
+fontanería ya estaba a medio poner). Los canales son 5.000 líneas con cripto que
+debe ir carácter a carácter por la regla de oro #5, y las llamadas de grupo
+necesitan WebRTC multi-peer que desktop no tiene: esos dos siguen siendo decisión
+abierta, ahora con el precio medido en vez de estimado.
+
+Lo que ya no se sostiene en ningún caso es la paridad implícita: o se portan, o
+se dice en la app que el desktop no los tiene.
 
 #### PAR-1b · El desktop no *puede* aislar perfiles, y su código aparenta que sí — **alto**
 
@@ -259,6 +269,36 @@ y tests de IPC — que la regla de oro #11 ya exigía al desktop y aún no tiene
 **Hasta que eso exista, portar `CreateProfile`/`ProfileSwitcher` está
 bloqueado.** No por esfuerzo: porque entregaría una función de privacidad que no
 cumple lo que promete.
+
+##### PAR-1b — ✅ **cerrado**. Y al construirlo aparecieron cuatro agujeros más
+
+El diseño recomendado arriba se implementó tal cual (un fichero por slot,
+`db:switch-slot`, `switchDbSlot()` asíncrono, guard fail-closed en los 10
+handlers que reciben slot). Pero **hacerlo real destapó cuatro cosas que el
+diseño sobre el papel no había visto**, todas de la misma familia: la seguridad
+que ya existía asumía **un** perfil.
+
+| Agujero | Qué pasaba | Por qué importa |
+|---|---|---|
+| Caché de clave global | `cachedDbKey` era una sola variable: el slot B recibía la clave que se minteó para A | Las filas de B se escriben con la clave de A y vuelven como `[DECRYPTION_ERROR]` |
+| El bloqueo solo cubría `self` | `db:enable-pin-wrap` envolvía una clave, la del slot activo | Un PIN que protege tu perfil principal y deja el segundo abierto **es peor que no tener PIN**: se lee como protegido |
+| Desactivar el bloqueo = pérdida de datos | `db:disable-pin-wrap` desenvolvía solo `self` | Los demás quedaban sellados bajo un PIN que ya no existe, sin KEK con que recuperarlos: **ilegibles para siempre** |
+| Pánico dejaba supervivientes | `db:wipe-database` borraba las filas del slot activo | Un segundo perfil sobreviviendo al pánico rompe la promesa, y su presencia en disco **es la prueba** que el borrado existe para destruir |
+
+Un quinto, encontrado por su propio test: con el bloqueo puesto pero sin
+desbloquear, crear un perfil lo minteaba **sin envolver** — un perfil fuera del
+PIN, junto a otros que sí lo respetan. Ahora falla cerrado.
+
+Evidencia: `desktop/src/main/ipc/__tests__/database.profileIsolation.test.ts`
+(12 tests, cifrado real), `store/__tests__/profiles.test.ts` (9), suite desktop
+200/200.
+
+De paso: `database.ts` estaba guardado con mojibake (UTF-8 leído como cp1252).
+13 comentarios y 301 caracteres de separadores, cosmético — pero **cuatro
+mensajes de error que el usuario ve**, y de los que saltan en el peor momento
+(PIN incorrecto, keystore que no abre, clave de DB que no descifra). 327
+secuencias arregladas; barridos los otros 604 `.ts`/`.tsx`: ningún otro fichero
+afectado.
 
 ### ARCH-1 · `socket/client.ts` — medio, **abierto** (plan medido, sin ejecutar)
 
@@ -455,10 +495,12 @@ cubiertos de forma indirecta por §2 y §4.
 5. **TEST-1** — ✅ cerrado: 144 `catch` (no 196), 69 ya avisaban, y el único
    problema real era un fail-open del guard de PIN señuelo. **ARCH-1** sigue
    abierto y es el que más reduciría la tasa de bugs futuros.
-6. **PAR-1** — el desktop necesita decisión de producto antes que código
-   (¿paridad completa, o desktop declarado como cliente reducido?). Pero
-   **PAR-1b no espera a esa decisión**: aunque se elija cliente reducido, hoy hay
-   una API con forma de multi-perfil que el proceso main no honra, y eso se
-   arregla o se retira. Dejar nombres que prometen aislamiento sobre una DB
-   compartida es una trampa para el próximo que pase por ahí.
+6. **PAR-1b** — ✅ cerrado. El aislamiento por fichero está puesto, con los
+   cuatro agujeros que destapó (caché de clave global, bloqueo que solo cubría
+   un perfil, desactivarlo perdía datos, pánico dejaba supervivientes) y la
+   sección 11 completa en desktop. 21 tests nuevos.
+   **PAR-1** sigue abierto para lo que queda: canales públicos (~5.100 líneas,
+   ~1.500 de cripto) y llamadas de grupo (~630 + WebRTC multi-peer). Con el
+   precio ya medido, la decisión es portarlos o decir en la app que el desktop
+   no los tiene — lo que no vale es dejarlo implícito.
 7. **DOC-1** — ✅ cerrado en esta pasada.

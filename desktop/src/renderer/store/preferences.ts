@@ -26,6 +26,8 @@ export interface Preferences {
   notifSummary: boolean;
   notifKeywords: string[];
   mutedChats: string[];
+  /** Public channels the user muted locally. Never leaves the device. */
+  mutedChannels: string[];
   appLockEnabled: boolean;
   biometricsEnabled: boolean;
   lockTimeoutMin: number;
@@ -48,6 +50,7 @@ const DEFAULTS: Preferences = {
   notifSummary: true,
   notifKeywords: ['urgente', 'multisig', 'audit'],
   mutedChats: [],
+  mutedChannels: [],
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
@@ -80,6 +83,7 @@ function snapshot(get: () => PrefsState): Preferences {
     notifSummary: s.notifSummary,
     notifKeywords: s.notifKeywords,
     mutedChats: s.mutedChats,
+    mutedChannels: s.mutedChannels,
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,
