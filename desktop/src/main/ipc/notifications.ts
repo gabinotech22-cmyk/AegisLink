@@ -18,7 +18,7 @@ export function registerNotificationHandlers(): void {
     if (!Notification.isSupported()) return
     const notification = new Notification({
       title: 'AegisLink',
-      body: 'Nuevo mensaje',
+      body: 'New message',
       silent: false
     })
     notification.show()

@@ -68,7 +68,7 @@ short version:
   watch network flows in and out of the relay (timing/volume correlation).
 - **Post-quantum protection is gated.** The hybrid PQXDH handshake (X25519 +
   ML-KEM-768) protects sessions where *both* ends are upgraded; sessions with a
-  not-yet-upgraded peer (including the still-v1 desktop client) fall back to
+  not-yet-upgraded peer fall back to
   classical X25519.
 - **The crypto core runs in JavaScript.** It uses constant-time libraries
   (TweetNaCl / `@noble`), but the constant-time guarantee is source-level, not
@@ -89,7 +89,7 @@ short version:
 |-------------|---------------------------------------------------------|-----------|
 | `mobile/`   | The app — Expo SDK 54 + React Native + TypeScript       | GPL-3.0   |
 | `server/`   | Relay — Node.js, Socket.IO, SQLite, push wake-ups, TURN credentials | AGPL-3.0  |
-| `desktop/`  | Desktop client (work in progress)                       | GPL-3.0   |
+| `desktop/`  | Desktop client (Electron, Windows beta — see `docs/DESKTOP-BETA.md`) | GPL-3.0   |
 
 ## Quick start — run a relay locally
 
