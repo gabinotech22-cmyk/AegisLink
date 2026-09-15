@@ -1,0 +1,125 @@
+# Build Desktop (Windows) — NSIS installer + portable exe, built in CI from a
+# known commit so the artifact is reproducible and never comes from a laptop.
+#
+# Why this exists: SignPath Foundation (free OSS code signing, see
+# docs/CODE-SIGNING-POLICY.md) only signs binaries "built from source code in a
+# verifiable way" — i.e. here, not on a developer machine. Until the SignPath
+# application is approved the output is UNSIGNED (Windows Smart App Control
+# will block it; SmartScreen warns). The signing step is a single extra job to
+# add once approved (signpath/github-action-submit-signing-request).
+#
+# What it does, mirroring `npm run package` locally:
+#   npm ci → typecheck → vitest → electron-vite build → fetch-tor (sha256
+#   pinned Tor Expert Bundle) → swap SQLCipher prebuilt to the Electron ABI →
+#   electron-builder --win → sha256 → artifact (+ optional GitHub Release upload).
+#
+# Trigger: Actions tab → "Build Desktop" → Run workflow, or
+#   gh workflow run build-desktop.yml -f tag=desktop-v1.0.0-beta.1 -f attach=true
+# or push a tag matching desktop-v* (builds, does not attach).
+name: Build Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. desktop-v1.0.0-beta.1). Empty builds the default branch.'
+        required: false
+        type: string
+      attach:
+        description: 'Upload the installers + SHA256SUMS to that tag''s GitHub Release'
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'desktop-v*'
+
+# contents: write is needed only for the optional `attach` step.
+permissions:
+  contents: write
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-desktop:
+    name: Package Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: desktop
+        shell: bash
+    env:
+      # Same values as desktop/.env in production (none of these are secrets:
+      # the onion address is public, see mobile/eas.json). Tor is always-on in
+      # the desktop client; with the onion configured every request targets the
+      # hidden service (desktop/src/renderer/config.ts).
+      VITE_RELAY_URL: https://aegislink.duckdns.org
+      VITE_TURN_URL: turn:aegislink.duckdns.org:3478
+      VITE_ONION_URL: http://fhxnal5jmuuqsbtzz7avos4drhqmuy4c7ffd35gi3hw2uwbe5iqshfyd.onion
+      VITE_MAILBOX_MODE: 'on'
+      # electron-builder: never try to code-sign here (no certificate in CI;
+      # signing is SignPath's job) and never publish on its own.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci
+
+      - name: TypeScript strict check
+        run: npm run typecheck
+
+      - name: Unit tests (Node ABI, real SQLCipher prebuilt)
+        run: npm test
+
+      - name: Build renderer/main/preload
+        run: npm run build
+
+      - name: Fetch pinned Tor Expert Bundle
+        run: node scripts/fetch-tor.mjs
+
+      - name: Swap SQLCipher prebuilt to the Electron ABI
+        run: node scripts/native-abi.mjs electron
+
+      - name: Package (NSIS + portable)
+        run: npx electron-builder --win --publish never
+
+      - name: Checksums
+        id: sums
+        run: |
+          cd dist
+          ls -la *.exe
+          sha256sum *.exe | tee SHA256SUMS
+          # Expose the version for the artifact name (from package.json).
+          echo "version=$(node -p "require('../package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aegislink-desktop-${{ steps.sums.outputs.version }}-win-x64
+          if-no-files-found: error
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/SHA256SUMS
+
+      # Publishing to a release is opt-in and requires an explicit tag.
+      - name: Attach to GitHub Release
+        if: ${{ inputs.attach && inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          cd dist
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" \
+            --title "AegisLink Desktop $RELEASE_TAG" --notes "Unsigned Windows beta — verify SHA256SUMS before installing. See docs/DESKTOP-BETA.md." --prerelease
+          gh release upload "$RELEASE_TAG" *.exe SHA256SUMS --clobber

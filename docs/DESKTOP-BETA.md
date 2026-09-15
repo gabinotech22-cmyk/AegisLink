@@ -128,9 +128,13 @@ con Tor arrancado.
   (signpath.org/terms): binarios construidos desde el repo de forma
   verificable (CI), roles Author/Reviewer/Approver con 2FA, aprobación manual
   por release y una "Code signing policy" pública → borrador listo en
-  `docs/CODE-SIGNING-POLICY.md`. Falta: crear cuenta en signpath.io, solicitar
-  en signpath.org/apply y el workflow de GitHub Actions que construya y envíe
-  el artefacto. Alternativa de pago: Azure Trusted Signing (~10 €/mes).
-- **D-4 · Canal de distribución.** GitHub Releases con `SHA256SUMS` firmado con
-  la clave del proyecto es lo mínimo; auto-update (`electron-updater`) solo
-  cuando exista firma.
+  `docs/CODE-SIGNING-POLICY.md`. El build en CI ya existe:
+  `.github/workflows/build-desktop.yml` (windows-latest: typecheck → tests →
+  fetch-tor pineado → ABI Electron → electron-builder → `SHA256SUMS`, artefacto
+  y subida opcional a un GitHub Release `desktop-v*`). Falta: crear cuenta en
+  signpath.io, solicitar en signpath.org/apply y, al aprobarse, añadir el job
+  `signpath/github-action-submit-signing-request` tras el empaquetado.
+  Alternativa de pago: Azure Trusted Signing (~10 €/mes).
+- **D-4 · Canal de distribución.** ✅ GitHub Releases vía `build-desktop.yml`
+  (`gh workflow run build-desktop.yml -f tag=desktop-v1.0.0-beta.1 -f attach=true`)
+  con `SHA256SUMS`; auto-update (`electron-updater`) solo cuando exista firma.
