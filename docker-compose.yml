@@ -76,6 +76,14 @@ services:
       # Same gotcha as TURN_HOST/KLIPY_KEY: it MUST be listed here or the
       # container never sees the value from .env and the flag stays off forever.
       PUBLIC_CHANNELS: ${PUBLIC_CHANNELS:-off}
+      # APP_LATEST_VERSION / APP_MIN_VERSION: the version advertisement the relay
+      # publishes to every client in auth:ok (relay/appVersion.ts). Same value for
+      # everyone; the client compares locally. Empty = no banner / no gate.
+      # Bumping APP_MIN_VERSION retires a broken build without a store review.
+      # Same gotcha as everything above: MUST be listed here or the container
+      # never sees the value from .env.
+      APP_LATEST_VERSION: ${APP_LATEST_VERSION:-}
+      APP_MIN_VERSION: ${APP_MIN_VERSION:-}
       # PUSH_MAILBOX_ENABLED gates the Slice 2b ntfy wake-up publish on the
       # mailbox offline-enqueue path (relay/handler.ts -> push/ntfy.ts).
       # Default OFF. NTFY_URL must point at the co-hosted ntfy service below

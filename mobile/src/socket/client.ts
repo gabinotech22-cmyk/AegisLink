@@ -66,6 +66,7 @@ import {
   verifyGroupDissolve,
   type GroupPermissions,
 } from '../crypto/groupSig';
+import type { RelayAppVersion } from '../store/appVersion';
 
 /**
  * Ratchet/X3DH recovery diagnostics — DEV BUILDS ONLY. These trace who talks
@@ -1180,10 +1181,18 @@ export function connect(identity: Identity): Socket {
     }
   });
 
-  socket.on('auth:ok', async (res?: { opkCount?: number }) => {
+  socket.on('auth:ok', async (res?: { opkCount?: number; app?: RelayAppVersion }) => {
     authenticated = true;
     clearAuthWatchdog();
     if (__DEV__) logger.debug('[socket] authenticated');
+
+    // Relay-advertised latest/min app version (same value for every client;
+    // the comparison against the installed version happens locally in the
+    // store, nothing about our version goes back on the wire).
+    try {
+      (require('../store/appVersion') as typeof import('../store/appVersion'))
+        .useAppVersion.getState().applyAdvertisement(res?.app);
+    } catch { /* store unavailable in some test harnesses */ }
 
     // Warm the TURN credential cache (50-min TTL) so the first call doesn't pay
     // the up-to-3s credential fetch during setup. Fire-and-forget; on failure

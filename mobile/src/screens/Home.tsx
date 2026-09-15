@@ -18,6 +18,7 @@ import { usePreferences } from '../store/preferences';
 import type { StoredContact, StoredMessage } from '../db/local';
 import { previewLabel } from '../utils/messagePreview';
 import { themedAlert } from '../components/AlertHost';
+import { UpdateBanner } from '../components/UpdateBanner';
 
 interface Props {
   onOpenChat: (contact: StoredContact) => void;
@@ -270,6 +271,8 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
           </Pressable>
         </View>
       </View>
+
+      <UpdateBanner />
 
       {/* Welcome / identity banner */}
       {empty ? (
