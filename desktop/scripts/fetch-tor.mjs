@@ -15,7 +15,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
-const TOR_VERSION = '15.0.22'
+const TOR_VERSION = '15.0.23'
 const PINNED = {
   'win32-x64': {
     file: `tor-expert-bundle-windows-x86_64-${TOR_VERSION}.tar.gz`,
@@ -40,11 +40,21 @@ if (existsSync(outBin) && process.argv[2] !== '--force') {
   process.exit(0)
 }
 
-const url = `https://dist.torproject.org/torbrowser/${TOR_VERSION}/${pin.file}`
-console.log(`fetch-tor: downloading ${url}`)
-const res = await fetch(url)
-if (!res.ok) { console.error(`fetch-tor: HTTP ${res.status}`); process.exit(1) }
-const bytes = Buffer.from(await res.arrayBuffer())
+// dist.torproject.org only keeps the CURRENT release; older versions move to
+// archive.torproject.org within days (bit us in CI the day 15.0.23 shipped).
+// The pinned sha256 makes either mirror equally trustworthy.
+const MIRRORS = [
+  `https://dist.torproject.org/torbrowser/${TOR_VERSION}/${pin.file}`,
+  `https://archive.torproject.org/tor-package-archive/torbrowser/${TOR_VERSION}/${pin.file}`,
+]
+let bytes = null
+for (const url of MIRRORS) {
+  console.log(`fetch-tor: downloading ${url}`)
+  const res = await fetch(url)
+  if (res.ok) { bytes = Buffer.from(await res.arrayBuffer()); break }
+  console.warn(`fetch-tor: HTTP ${res.status}, trying next mirror`)
+}
+if (!bytes) { console.error('fetch-tor: all mirrors failed'); process.exit(1) }
 const sha = createHash('sha256').update(bytes).digest('hex')
 if (sha !== pin.sha256) {
   console.error(`fetch-tor: sha256 MISMATCH\n  expected ${pin.sha256}\n  got      ${sha}\nRefusing to extract.`)
