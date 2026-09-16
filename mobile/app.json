@@ -177,6 +177,23 @@
           "microphonePermission": "Allow AegisLink to access the microphone for end-to-end encrypted calls."
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "AegisLink uses your location only when you choose to share it inside an encrypted message. It is never read in the background.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": false
+        }
+      ],
       "expo-background-fetch",
       "expo-task-manager",
       "expo-localization",
