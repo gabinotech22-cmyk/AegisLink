@@ -27,7 +27,7 @@ decía Node 22+, el server exige Node 24 → sus 55 suites fallaron con
 `ENOENT sqlite`). La regla "La doc no miente" existía en `CLAUDE.md` pero sin
 enforcement; esta tanda añade el gate `docs-sync` en CI y la plantilla de PR.
 
-**Estado:** 11 abiertos → se cierran en tres PRs encadenadas (§4).
+**Estado:** 8 cerrados (PR #482: AL-01/03/04/05/06/08/10/11) · 3 abiertos → PR-C (AL-02/07/09, extracción de Work).
 
 ## 1. Superficie medida
 
@@ -55,8 +55,10 @@ Lo que el auditor no vio:
 - `device:list` devuelve `{count, platforms}` (`devices.ts:67-70`); mobile (`Devices.tsx:108`) y desktop
   (`Devices.tsx:51`) esperan `{ok, devices[]}` → la lista siempre está vacía.
 
-Estado: **abierto → PR-B**. Limitación estructural que queda documentada (§3.1): el desktop recibe
-las claves secretas de identidad, así que revocar en el relay no revoca de verdad.
+Estado: **cerrado (PR #482)** — `deviceLink.relay.test.ts` (6 casos). Hallazgo extra al arreglar: el socket de
+link del desktop no llevaba `aegisId` y el relay lo expulsaba con `bad_handshake` antes de registrar
+`device:link`; ahora hay un handshake `linkRequest`. Limitación estructural documentada en
+`PROTOCOL.md §9.2` (§3.1 abajo): el desktop recibe las claves de identidad, revocar en el relay no revoca de verdad.
 
 ### AL-02 · Borrado cross-org en canales Work — **alto**, **CONFIRMADO**
 
@@ -71,7 +73,7 @@ Estado: **abierto → PR-C** (extracción de Work).
 - `:288` — `await upstream.arrayBuffer()` carga toda la respuesta antes de `slice(0, 8192)`.
 - `proxyLinkPreview.ssrf.test.ts` cubre el caso textual y los redirects; no cubre rebinding ni el límite.
 
-Estado: **abierto → PR-B**.
+Estado: **cerrado (PR #482)** — `proxyLinkPreview.rebinding.test.ts` (7 casos, sin red).
 
 ### AL-04 · Memoria antes del PoW en uploads + carrera en la quota — **alto**, **CONFIRMADO**
 
@@ -79,7 +81,7 @@ Estado: **abierto → PR-B**.
 - `:155` comprueba `currentTotalBytes + uploadLength`; `:168` incrementa en el callback de `writeFile` →
   varias peticiones pasan el check antes de que ninguna sume.
 
-Estado: **abierto → PR-B**.
+Estado: **cerrado (PR #482)** — `blobUploadPow.test.ts` (3 casos; fallan contra el código viejo).
 
 ### AL-05 · Las previews remotas revelan IP y hora de lectura — **alto (privacidad)**, **CONFIRMADO**
 
@@ -88,7 +90,7 @@ Estado: **abierto → PR-B**.
 - `mobile/src/components/GifPicker.tsx:340` — las previews de GIF se cargan del proveedor.
 - El relay solo proxya el HTML (`proxyLinkPreview.ts:292-294`), no los bytes de imagen.
 
-Estado: **abierto → PR-B** (decisión de producto en §3.2).
+Estado: **cerrado (PR #482)** — `og:image` solo bajo gesto explícito (`LinkPreview.test.tsx`); aviso en el picker de GIF. Decisión §3.2: sin proxy de bytes de GIF por ahora.
 
 ### AL-06 · Los ACK no están atados a la cola autenticada — **medio**, **CONFIRMADO**
 
@@ -98,7 +100,7 @@ Estado: **abierto → PR-B** (decisión de producto en §3.2).
 - `channels.ts:464-473` — `group:rekey_drain_ack` → `senderKeyDistRepo.delete(distId, deviceId)`, mismo patrón.
 - `handler.ts:171-174` — `deviceId` viene del handshake sin validar.
 
-Estado: **abierto → PR-B**.
+Estado: **cerrado (PR #482)** — `ackScoping.relay.test.ts` (4 casos).
 
 ### AL-07 · La cronología Work E2EE pierde el `nonce` — **medio**, **PARCIALMENTE CORRECTO**
 
@@ -112,7 +114,7 @@ Superficie sin clientes. Estado: **abierto → PR-C** (extracción de Work).
 ### AL-08 · Backups declarados de 5 MB pero bloqueados a 64 KB — **medio**, **CONFIRMADO**
 
 `server/src/index.ts:131` — `express.json({ limit: '64kb' })` global; `routes/backup.ts` no monta parser
-propio; `MAX_BACKUP_BYTES` (`:42`) es inalcanzable. Estado: **abierto → PR-B**.
+propio; `MAX_BACKUP_BYTES` (`:42`) es inalcanzable. Estado: **cerrado (PR #482)** — `http/jsonBody.ts`; `backup.routes.test.ts` replica el montaje de producción (+2 casos).
 
 ### AL-09 · `POST /work/org` no puede producir una firma válida — **medio**, **CONFIRMADO**
 
@@ -122,14 +124,14 @@ Ningún cliente llama al endpoint. Estado: **abierto → PR-C** (extracción de 
 ### AL-10 · Dependencias con advisories — **medio/alto**, **CONFIRMADO**
 
 `server/package-lock.json`: `socket.io-parser 4.2.6` (l.5975), `qs 6.15.2` (l.5587),
-`ip-address 10.2.0` (l.4001), `undici 7.28.0` (l.6608). Estado: **abierto → PR-B**.
+`ip-address 10.2.0` (l.4001), `undici 7.28.0` (l.6608). Estado: **cerrado (PR #482)** — server y desktop 0 vulnerabilidades; mobile solo conserva toolchain (metro/postcss/image-size) que exige Expo 57.
 Restricción: el lockfile de `mobile/` se regenera **siempre con npm@10** (npm 11 rompe el CI).
 
 ### AL-11 · El job `permissions-audit` siempre se salta — **bajo/proceso**, **CONFIRMADO**
 
 `.github/workflows/ci.yml:449-462` comprueba `mobile/android/…/AndroidManifest.xml`; ese directorio no
 está trackeado (`git ls-files mobile/android` vacío) → `has_android=false` → todo "skipped".
-Estado: **abierto → PR-B**.
+Estado: **cerrado (PR #482)** — `mobile/scripts/audit-permissions.mjs` sobre `expo config --type introspect`. Al ejecutarse de verdad **descubrió** que el build llevaba `NSLocationAlways*` y `NSMotionUsageDescription` con el texto genérico de Expo; corregido en `app.json` (expo-location solo when-in-use, expo-sensors sin permiso de movimiento).
 
 ### DOC-1 · Drift de documentación que hizo tropezar al auditor — **bajo**, **cerrado en esta PR**
 
@@ -158,7 +160,7 @@ Estado: **abierto → PR-B**.
 | PR | Rama | Cierra |
 |---|---|---|
 | A | `docs/audit-2026-09-16-verification-and-doc-sync-rule` | DOC-1, regla + gate `docs-sync`, este informe |
-| B | `fix/security-audit-2026-09-16-server` | AL-01, AL-03, AL-04, AL-05, AL-06, AL-08, AL-10, AL-11 |
+| B | `fix/security-audit-2026-09-16-server` (#482) | AL-01, AL-03, AL-04, AL-05, AL-06, AL-08, AL-10, AL-11 — **cerrados** |
 | C | `chore/extract-work` (Hito 1 del ROADMAP) | AL-02, AL-07, AL-09 |
 
 Cada PR se mergea antes de abrir la siguiente (regla de oro de ramas). Este documento es la fuente

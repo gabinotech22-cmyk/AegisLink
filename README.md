@@ -93,9 +93,15 @@ short version:
 
 ## Quick start — run a relay locally
 
-Spin up your own relay and point a client at it. Two ways:
+The relay is fully self-hostable (AGPL-3.0). **Today the published clients are fixed to the
+official relay** (URL, `.onion` and TLS pins are compiled into the binary), so pointing a
+client at your own relay means building the client yourself with
+`EXPO_PUBLIC_SERVER_URL` (mobile) or `VITE_RELAY_URL` (desktop), and there is **no federation
+yet**: every contact must be on the same relay. Choosing your own relay from the app, with
+contacts on different relays, is designed in `docs/FEDERATION-DESIGN.md` and tracked in
+`docs/ROADMAP.md`.
 
-**A. Node directly** (Node.js 22+, fastest):
+**A. Node directly** (Node.js 24+ — `node:sqlite`; fastest):
 
 ```bash
 cd server
