@@ -271,6 +271,17 @@ npm run start
 
 ---
 
+## Gate CI `permissions-audit` (auditoría externa 2026-09-16 AL-11)
+
+`mobile/android` y `mobile/ios` no están en git, así que el job antiguo (que buscaba el
+`AndroidManifest.xml` trackeado) se saltaba siempre. Ahora `mobile/scripts/audit-permissions.mjs`
+pide a Expo la configuración **resuelta** (`expo config --type introspect`, lo que producirían
+todos los plugins y módulos autolinkeados) y la contrasta con una allowlist explícita: cada
+`uses-permission` de Android debe estar listado **con su motivo**, hay una lista prohibida
+(ubicación en background, contactos, SMS, AD_ID…), las claves de privacidad de iOS deben estar
+listadas, un texto genérico de plugin (`$(PRODUCT_NAME)`) falla, y `UIBackgroundModes` debe
+coincidir. En local: `cd mobile && node scripts/audit-permissions.mjs`. Para añadir un permiso,
+se añade a la allowlist del script con su justificación en la misma PR.
 ## Gate CI `docs-sync` (regla de oro "La doc no miente" #7)
 
 Job `docs-sync` en `.github/workflows/ci.yml`, solo en `pull_request`. Falla si el diff contra la
