@@ -65,6 +65,24 @@ const MAX_TOTAL_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 
 let currentTotalBytes = 0;
 
+/**
+ * Reserve `len` bytes of the global quota. Check-and-increment in ONE synchronous
+ * step so concurrent uploads cannot all pass the check before any of them counts
+ * (audit 2026-09-16 AL-04: the increment used to happen in the writeFile callback,
+ * after an await, so N in-flight uploads could jointly overshoot the 5 GB cap).
+ * Release on write failure with `releaseQuota`.
+ */
+function reserveQuota(len: number): boolean {
+  if (currentTotalBytes + len > MAX_TOTAL_UPLOAD_BYTES) return false;
+  currentTotalBytes += len;
+  return true;
+}
+function releaseQuota(len: number): void {
+  currentTotalBytes = Math.max(0, currentTotalBytes - len);
+}
+/** Test-only view of the counter (never exposed over HTTP). */
+export function __currentTotalBytes(): number { return currentTotalBytes; }
+
 // Initialise the counter once at startup by summing existing files.
 (function initStorageCounter() {
   try {
@@ -118,27 +136,32 @@ router.get('/challenge', challengeLimiter, (_req, res) => {
   res.json(issueChallenge());
 });
 
-// ── POST /blob/upload ─────────────────────────────────────────────────────────
-// Requires a valid PoW solution passed as query params alongside the binary body.
-router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
-  // PoW fields come from query string so we can still accept raw binary body.
+// ── PoW gate — runs BEFORE the body parser ────────────────────────────────────
+// Audit 2026-09-16 AL-04: `express.raw({ limit: '50mb' })` used to buffer the
+// whole body before the handler looked at the PoW, so a client with no valid
+// challenge could park many 50 MB uploads in relay memory for free. The PoW is
+// in the query string precisely so it can be checked from the headers alone;
+// a request that fails it is answered without its body ever being read.
+function requireUploadPoW(req: express.Request, res: express.Response, next: express.NextFunction): void {
   const powChallenge = typeof req.query.powChallenge === 'string' ? req.query.powChallenge : '';
   const powNonce = typeof req.query.powNonce === 'string' ? req.query.powNonce : '';
-  const parsed = UploadPoWSchema.safeParse({
-    powChallenge,
-    powNonce,
-  });
+  const parsed = UploadPoWSchema.safeParse({ powChallenge, powNonce });
   if (!parsed.success) {
     res.status(400).json({ error: 'pow_required', issues: parsed.error.issues });
     return;
   }
-
   const powError = verifyPoW(parsed.data.powChallenge, parsed.data.powNonce);
   if (powError !== null) {
     res.status(403).json({ error: 'pow_failed', reason: powError });
     return;
   }
+  next();
+}
 
+// ── POST /blob/upload ─────────────────────────────────────────────────────────
+// Requires a valid PoW solution passed as query params alongside the binary body.
+// Order matters: rate limit → PoW → body parser → handler.
+router.post('/upload', uploadLimiter, requireUploadPoW, express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
   if (!req.body || !Buffer.isBuffer(req.body)) {
     res.status(400).json({ error: 'body_must_be_binary' });
     return;
@@ -151,8 +174,8 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
     return;
   }
 
-  // ── Global quota check (FIX A) ────────────────────────────────────────────
-  if (currentTotalBytes + uploadLength > MAX_TOTAL_UPLOAD_BYTES) {
+  // ── Global quota (FIX A) — reserved atomically before the write ───────────
+  if (!reserveQuota(uploadLength)) {
     res.status(507).json({ error: 'storage_full' });
     return;
   }
@@ -162,10 +185,10 @@ router.post('/upload', uploadLimiter, express.raw({ type: '*/*', limit: '50mb' }
 
   fs.writeFile(filePath, uploadBuffer, (err) => {
     if (err) {
+      releaseQuota(uploadLength);
       res.status(500).json({ error: 'SERVER_ERROR' });
       return;
     }
-    currentTotalBytes += uploadLength;
     // Return the download token bound to this id. It travels inside the E2EE
     // envelope; the relay never needs to persist it (it is recomputed on GET).
     res.json({ id, token: mintDownloadToken(id) });

@@ -1,9 +1,13 @@
 /**
  * GET /proxy/gif
  *
- * Blind proxy for KLIPY GIF search and trending feeds. The relay fetches on
- * behalf of the client so no user IP ever reaches the GIF provider. The API
- * key stays server-side and is never exposed to the client.
+ * Blind proxy for KLIPY GIF search and trending feeds. The relay fetches the
+ * SEARCH/TRENDING metadata on behalf of the client, so the query and the API key
+ * never leave the relay. The GIF media bytes (preview tiles in the picker and
+ * the GIF the sender downloads before encrypting it) are still fetched by the
+ * browsing client straight from the provider's CDN, which therefore sees that
+ * client's IP — the picker says so in its UI (audit 2026-09-16 AL-05). The
+ * RECIPIENT never contacts the provider: a sent GIF travels as an E2EE blob.
  *
  * Provider note: Google shut down the Tenor public API (full shutdown
  * 2026-06-30). KLIPY is the drop-in successor (same content, lifetime-free
@@ -12,7 +16,8 @@
  * mobile client already consumes, so GifPicker.tsx needs no change.
  *
  * Privacy guarantees:
- *   - Client IP is never forwarded upstream (only the relay's egress IP is seen).
+ *   - Client IP is never forwarded upstream for search/trending (only the relay's
+ *     egress IP is seen). Media bytes are NOT proxied — see above.
  *   - The query string and all upstream URLs are NEVER logged.
  *   - Error counters are logged without any query data.
  *   - Rate limiting uses express-rate-limit's in-memory store (ephemeral, no DB).

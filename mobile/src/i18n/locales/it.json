@@ -120,6 +120,9 @@
     "unpin": "Rimuovi fissaggio"
   },
   "chat": {
+    "previewShowImage": "Mostra immagine",
+    "previewImageHint": "Viene caricata dal sito del mittente e gli rivela il tuo IP",
+    "gifProviderNotice": "Ricerca e anteprime GIF vengono caricate dal provider (vede il tuo IP). Le GIF inviate sono cifrate end-to-end.",
     "encryptedToday": "CIFRATO END-TO-END · OGGI",
     "dateToday": "Oggi",
     "dateYesterday": "Ieri",

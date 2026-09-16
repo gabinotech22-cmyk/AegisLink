@@ -7,7 +7,14 @@ import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
 import { SERVER_URL } from '../config';
 import { identityFromStored } from '../crypto/identity';
-import { saveSpkSecret } from '../socket/client';
+import { saveSpkSecret, getOrCreateDeviceId } from '../socket/client';
+
+/** Label the relay stores for this desktop and the phone shows in its device list. */
+function desktopDeviceName(): string {
+  const ua = navigator.userAgent;
+  const os = /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : null;
+  return os ? `AegisLink Desktop (${os})` : 'AegisLink Desktop';
+}
 import { useIdentity } from '../store/identity';
 import { useTheme } from '../theme/ThemeContext';
 import { TopBar } from '../components/TopBar';
@@ -85,8 +92,14 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
       ephemeralKeyRef.current = keypair;
       const ephemeralPubKeyB64 = encodeBase64(keypair.publicKey);
 
+      // The relay persists the link under this id and later admits our
+      // authenticated session only if the handshake carries the same value.
+      const deviceId = await getOrCreateDeviceId();
+
       // 2. Connect temp socket to relay
-      const socket = io(SERVER_URL, { transports: ['websocket'] });
+      // Link-only handshake: no identity yet, the relay only lets this socket
+      // register a `device:link` request and wait for the phone's approval.
+      const socket = io(SERVER_URL, { transports: ['websocket'], auth: { linkRequest: true } });
       socketRef.current = socket;
 
       socket.on('connect_error', (err: Error) => {
@@ -99,7 +112,12 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
 
       socket.on('connect', () => {
         // 3. Emit device:link
-        socket.emit('device:link', { targetAegisId: trimmed, desktopPubKey: ephemeralPubKeyB64 });
+        socket.emit('device:link', {
+          targetAegisId: trimmed,
+          desktopPubKey: ephemeralPubKeyB64,
+          deviceId,
+          deviceName: desktopDeviceName(),
+        });
         
         // 4. Generate QR payload
         const payloadJson = JSON.stringify({ v: 1, pubKey: ephemeralPubKeyB64, relay: SERVER_URL });

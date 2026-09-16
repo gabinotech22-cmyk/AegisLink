@@ -1,14 +1,21 @@
 /**
  * LinkPreview — Open Graph card shown beneath a message that contains a URL.
  *
- * PRIVACY: All fetches are proxied through the AegisLink relay via
- * /proxy/linkpreview — the user's IP is never disclosed to external sites.
+ * PRIVACY: The page's HTML (title/description) is fetched through the relay via
+ * /proxy/linkpreview — the user's IP never reaches the site for that. The
+ * `og:image` is NOT loaded automatically: its URL is chosen by whoever sent the
+ * link, so auto-loading it would hand that party the reader's IP, the exact
+ * moment the message was read and the device's user agent — a tracking pixel
+ * (audit 2026-09-16 AL-05). The card shows a tap-to-load tile instead; the
+ * image is fetched only on an explicit gesture, after telling the user what
+ * that reveals.
  *
  * Usage: <LinkPreview url="https://example.com" t={t} />
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Image, Pressable, Linking } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import type { Theme } from '../theme/vault';
 import { SERVER_URL, isSecureUrl } from '../config';
 
@@ -27,7 +34,10 @@ interface OGData {
 const cache = new Map<string, OGData | 'error'>();
 
 export function LinkPreview({ url, t }: Props) {
+  const { t: i18nT } = useTranslation();
   const [data, setData] = useState<OGData | null>(null);
+  // Explicit opt-in per card; never persisted, never inferred.
+  const [showImage, setShowImage] = useState(false);
   const cancelledRef = useRef(false);
 
   useEffect(() => {
@@ -125,14 +135,38 @@ export function LinkPreview({ url, t }: Props) {
         </Text>
       </View>
 
-      {/* Thumbnail */}
+      {/* Thumbnail — remote bytes only after an explicit tap (AL-05). */}
       {data.image ? (
-        <Image
-          source={{ uri: data.image }}
-          style={{ width: 80, height: 80, backgroundColor: t.surface3 }}
-          resizeMode="cover"
-          accessibilityLabel={data.title ?? 'Preview image'}
-        />
+        showImage ? (
+          <Image
+            source={{ uri: data.image }}
+            style={{ width: 80, height: 80, backgroundColor: t.surface3 }}
+            resizeMode="cover"
+            accessibilityLabel={data.title ?? 'Preview image'}
+          />
+        ) : (
+          <Pressable
+            onPress={() => setShowImage(true)}
+            accessibilityRole="button"
+            accessibilityLabel={i18nT('chat.previewShowImage', 'Show image')}
+            accessibilityHint={i18nT('chat.previewImageHint', 'Loads from the sender’s site and reveals your IP to it')}
+            testID="link-preview-show-image"
+            style={{
+              width: 80,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: t.surface3,
+              paddingHorizontal: 6,
+            }}
+          >
+            <Text
+              numberOfLines={2}
+              style={{ fontFamily: t.font, fontSize: 10, color: t.textDim, textAlign: 'center' }}
+            >
+              {i18nT('chat.previewShowImage', 'Show image')}
+            </Text>
+          </Pressable>
+        )
       ) : null}
     </Pressable>
   );

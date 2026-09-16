@@ -34,8 +34,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import { backupRepo } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
+import { backupJsonParser } from '../http/jsonBody.js';
 
 const router = Router();
+
+// Own body parser: the app-wide one skips /backup so a full 5 MB envelope can
+// reach the size check below instead of dying at 64 KB (audit 2026-09-16 AL-08).
+router.use(backupJsonParser);
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

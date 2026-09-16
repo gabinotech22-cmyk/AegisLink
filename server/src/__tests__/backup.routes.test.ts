@@ -40,8 +40,12 @@ const signingKeys = nacl.sign.keyPair();
 beforeAll(async () => {
   ({ identityRepo } = await import('../db/client.js'));
   const { default: backupRoutes } = await import('../routes/backup.js');
+  const { globalJsonParser } = await import('../http/jsonBody.js');
+  // Mirror the PRODUCTION mount exactly (index.ts): the app-wide 64 KB parser
+  // first, then the backup router with its own 5 MB parser. A permissive
+  // test-only parser here is what hid AL-08 (any backup > 64 KB was 413 in prod).
   app = express();
-  app.use(express.json({ limit: '10mb' }));
+  app.use(globalJsonParser);
   app.use('/backup', backupRoutes);
 
   await identityRepo.insert({
@@ -148,6 +152,26 @@ describe('PUT /backup — with valid auth', () => {
       .send({ aegisId: AEGIS_ID, token, plain, envelope: VALID_ENVELOPE });
     expect(res.status).toBe(200);
     expect((res.body as { ok: boolean }).ok).toBe(true);
+  });
+
+  it('accepts a realistic 300 KB backup under the production body policy (audit AL-08)', async () => {
+    const { token, plain } = await authenticate(AEGIS_ID);
+    // ~300 KB — a normal contacts+groups+profile backup; well above the 64 KB
+    // API-wide cap that used to reject it before the 5 MB check could run.
+    const ciphertext = 'B'.repeat(300 * 1024);
+    const res = await request(app)
+      .put('/backup')
+      .send({ aegisId: AEGIS_ID, token, plain, envelope: { v: 1, salt: 'abc', nonce: 'abc', ciphertext } });
+    expect(res.status).toBe(200);
+  });
+
+  it('the 64 KB API-wide cap still applies to every other JSON path', async () => {
+    const other = express();
+    const { globalJsonParser } = await import('../http/jsonBody.js');
+    other.use(globalJsonParser);
+    other.post('/anything', (_req, res) => { res.json({ ok: true }); });
+    const res = await request(other).post('/anything').send({ pad: 'C'.repeat(100 * 1024) });
+    expect(res.status).toBe(413);
   });
 
   it('returns 413 when envelope ciphertext exceeds 5 MB', async () => {

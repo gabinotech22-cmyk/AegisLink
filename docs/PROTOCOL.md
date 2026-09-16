@@ -583,6 +583,41 @@ with a key derived from a user passphrase the relay never sees:
 > only), WebRTC signaling relay and rate limiting is maintained separately; this
 > section summarizes only the parts that bear on the cryptographic threat model.
 
+### 9.1 Delivery acknowledgements are scoped to the authenticated queue
+
+`envelope:ack` and `group:rekey_drain_ack` delete a queued row only if it
+belongs to the identity (Aegis-ID sockets) or to one of the mailboxes (mailbox
+sockets, all bound epochs) the acking socket proved possession of.
+Knowing a message id is never enough to remove someone else's queued message
+(`messageRepo.ack` / `senderKeyDistRepo.ack`, `server/src/db/client.ts`;
+regression `ackScoping.relay.test.ts`; external audit 2026-09-16 AL-06).
+
+### 9.2 Desktop linking
+
+Linking a desktop transfers a **copy of the identity keys** (X25519 + Ed25519 +
+current signed-prekey secret) from the phone to the desktop, boxed with a fresh
+ephemeral X25519 pair on each side. Wire (`server/src/relay/schemas.ts`,
+`handlers/devices.ts`; regression `deviceLink.relay.test.ts`):
+
+| Step | Direction | Payload |
+|---|---|---|
+| link request | desktop → relay, **link-only handshake** (`auth.linkRequest = true`, no identity) | `{ targetAegisId, desktopPubKey (ephemeral), deviceId (stable per install), deviceName? }` |
+| notify | relay → phone (authenticated) | `{ desktopPubKey, tempSocketId }` |
+| approve | phone → relay (authenticated, acked) | `{ desktopPubKey, encryptedPayload, nonceB64, mobilePubKey (ephemeral) }` |
+| deliver | relay → desktop | `{ encryptedPayload, nonceB64, mobilePubKey }` — the relay forwards the phone's ephemeral key verbatim, never the identity key |
+
+On approval the relay persists `(deviceId, aegisId, desktopPubKey, name)` in
+`linked_devices` **before** delivering. A desktop session is then admitted only
+while that row is active: the handshake `auth.deviceId` must match an
+un-revoked row for the claimed Aegis ID (fail-closed, `device_not_linked`).
+`device:revoke` flips the row and disconnects exactly that device.
+
+**Limitation (product decision pending, see `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` §3.1):**
+because the desktop holds the identity secrets, relay-side revocation blocks a
+*cooperating* client, not an adversary who already extracted the keys. True
+revocation requires rotating the identity (new key pair + re-X3DH with every
+contact). Per-device identities (Signal/SimpleX model) are the long-term fix.
+
 ---
 
 ## 10. Known limitations and roadmap
@@ -607,6 +642,9 @@ current protocol:
    enforced in native code rather than source-level JS on Hermes/V8 (§2.1). This
    is implementation substitution behind a stable TypeScript interface, not a
    protocol change.
+6. **Per-device identity keys for linked desktops** (§9.2) so that revoking a
+   device revokes cryptographic access instead of relying on the relay's
+   `linked_devices` gate.
 
 ---
 
