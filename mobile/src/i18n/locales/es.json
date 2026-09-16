@@ -120,6 +120,9 @@
     "unpin": "Desfijar"
   },
   "chat": {
+    "previewShowImage": "Mostrar imagen",
+    "previewImageHint": "Se carga desde el sitio del remitente y le revela tu IP",
+    "gifProviderNotice": "La búsqueda y las vistas previas de GIF se cargan del proveedor (ve tu IP). Los GIF enviados van cifrados de extremo a extremo.",
     "encryptedToday": "CIFRADO EXTREMO A EXTREMO · HOY",
     "dateToday": "Hoy",
     "dateYesterday": "Ayer",

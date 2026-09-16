@@ -10,6 +10,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from './icons';
 import { SERVER_URL, isSecureUrl } from '../config';
@@ -46,6 +47,7 @@ const TILE_SIZE = (SCREEN_W - GRID_PAD * 2 - GRID_GAP * 2) / 3; // 3 columns
 
 export function GifPicker({ visible, onSelectGif, onSelectSticker }: Props) {
   const { t } = useTheme();
+  const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<GifTab>('gifs');
   const [query, setQuery] = useState('');
@@ -240,6 +242,20 @@ export function GifPicker({ visible, onSelectGif, onSelectSticker }: Props) {
                 </View>
               )}
             </View>
+
+            {/* Privacy notice (audit 2026-09-16 AL-05): search results go through
+                the relay, but the preview tiles are fetched straight from the
+                GIF provider, which therefore sees the BROWSING user's IP. The
+                GIF that gets sent is downloaded, encrypted and delivered as an
+                E2EE attachment, so the recipient never touches the provider. */}
+            {activeTab === 'gifs' && (
+              <Text
+                testID="gif-provider-notice"
+                style={{ fontFamily: t.font, fontSize: 10, color: t.textDim, paddingHorizontal: 14, paddingBottom: 6 }}
+              >
+                {i18nT('chat.gifProviderNotice', 'GIF search and previews load from the GIF provider (it sees your IP). Sent GIFs are encrypted end-to-end.')}
+              </Text>
+            )}
 
             {/* Content — wrapped so a render failure (e.g. remote GIF media)
                 degrades to a local fallback instead of white-screening the whole
