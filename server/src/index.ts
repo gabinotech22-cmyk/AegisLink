@@ -12,6 +12,7 @@ import web3Routes from './routes/web3.js';
 import prekeysRoutes from './routes/prekeys.js';
 import blobRoutes from './routes/blob.js';
 import backupRoutes from './routes/backup.js';
+import { globalJsonParser } from './http/jsonBody.js';
 import mailboxRoutes from './routes/mailbox.js';
 import linksRoutes from './routes/links.js';
 import turnRoutes from './routes/turn.js';
@@ -128,7 +129,8 @@ app.use((_req, res, next) => {
 });
 app.disable('x-powered-by');
 
-app.use(express.json({ limit: '64kb' }));
+// 64 KB API-wide; /backup parses its own 5 MB body (see http/jsonBody.ts, AL-08).
+app.use(globalJsonParser);
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, ts: Date.now() });
