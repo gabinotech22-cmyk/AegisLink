@@ -271,6 +271,15 @@ npm run start
 
 ---
 
+## Gate CI `docs-sync` (regla de oro "La doc no miente" #7)
+
+Job `docs-sync` en `.github/workflows/ci.yml`, solo en `pull_request`. Falla si el diff contra la
+rama base toca código de producto (`server/src/`, `mobile/src/`, `desktop/src/`, `.github/workflows/`;
+se excluyen `__tests__/` y `*.test.*`/`*.spec.*`) **sin** tocar `docs/`, `README.md`, `CLAUDE.md`
+o `SECURITY.md`, salvo que el cuerpo de la PR contenga una línea
+`Docs: none — <por qué no aplica>` (campo de `.github/PULL_REQUEST_TEMPLATE.md`). Con guion
+también vale; sin motivo no vale. El mapa código → doc canónico está en `CLAUDE.md`.
+
 ## Troubleshooting general
 
 | Síntoma | Causa probable | Acción |

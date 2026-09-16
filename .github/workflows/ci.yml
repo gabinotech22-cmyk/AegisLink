@@ -82,6 +82,57 @@ jobs:
             echo "mobile=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # ─── Docs ↔ code sync gate ────────────────────────────────────────────────
+  # Golden rule "La doc no miente" #7 (CLAUDE.md). A PR that touches product
+  # code without touching any doc must say so explicitly in its body with
+  # `Docs: none — <reason>` (field in the PR template). Born from the external
+  # audit 2026-09-16: DEVELOPMENT.md said Node 22 while the server required 24,
+  # and the auditor lost every server suite to it. Tests are excluded — a
+  # test-only PR changes no behaviour a doc could describe.
+  docs-sync:
+    name: Docs sync gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require a doc change or an explicit Docs-none declaration
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -e
+          BASE="origin/${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "$BASE"...HEAD)
+          echo "Changed files:"; echo "$CHANGED"
+
+          CODE=$(echo "$CHANGED" \
+            | grep -E '^(server/src/|mobile/src/|desktop/src/|\.github/workflows/)' \
+            | grep -vE '(^|/)__tests__/|\.test\.[cm]?[jt]sx?$|\.spec\.[cm]?[jt]sx?$' || true)
+          if [ -z "$CODE" ]; then
+            echo "No product code changed - nothing to sync."
+            exit 0
+          fi
+
+          DOCS=$(echo "$CHANGED" | grep -E '^(docs/|README\.md$|CLAUDE\.md$|SECURITY\.md$)' || true)
+          if [ -n "$DOCS" ]; then
+            echo "Docs touched alongside code:"; echo "$DOCS"
+            exit 0
+          fi
+
+          # 'Docs: none — reason' (em dash or hyphen), reason non-empty.
+          if printf '%s\n' "$PR_BODY" | grep -qE '^Docs:[[:space:]]*none[[:space:]]*(—|-)[[:space:]]*[^[:space:]]'; then
+            echo "PR body declares 'Docs: none' with a reason - accepted."
+            exit 0
+          fi
+
+          echo "::error::Product code changed but no doc was updated and the PR body has no 'Docs: none — <reason>' line."
+          echo "Code changed:"; echo "$CODE"
+          echo "Either update the canonical doc (map: CLAUDE.md, 'La doc no miente' #7) or add to the PR body:"
+          echo "  Docs: none — <why no doc applies>"
+          exit 1
+
   # ─── Server — lint + typecheck ────────────────────────────────────────────
   server-typecheck:
     name: Server TypeScript check
