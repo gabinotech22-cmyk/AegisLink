@@ -13,7 +13,11 @@
  * Security (SSRF prevention):
  *   - Only http: and https: schemes are allowed.
  *   - Private / loopback / link-local / cloud-metadata ranges are blocked.
- *   - Only the first 8 KB of the response body are read (Range: bytes=0-8191).
+ *   - DNS is resolved ONCE per hop and the connection is pinned to the validated
+ *     address (undici Agent with a fixed `lookup`), so a rebinding name cannot
+ *     answer public to the check and private to the connect (audit 2026-09-16 AL-03).
+ *   - At most 8 KB of the response body are ever read into memory: the stream is
+ *     cancelled at 8192 bytes regardless of what the server sends (Range is only a hint).
  *   - 5-second AbortController timeout prevents slow-drip attacks.
  *   - Relative og:image URLs are resolved against the final (post-redirect) URL.
  */
@@ -22,6 +26,42 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { lookup } from 'node:dns/promises';
+import { fetch as undiciFetch, Agent, type Dispatcher } from 'undici';
+import type { LookupOptions } from 'node:dns';
+
+/** Hard cap on bytes read from an upstream body. */
+export const MAX_PREVIEW_BYTES = 8192;
+
+export interface ResolvedAddr { address: string; family: number }
+
+/**
+ * A `net.connect`-compatible lookup that never touches DNS: it answers with the
+ * addresses `assertPublicHost` already validated. Handles both call shapes Node
+ * uses (`options.all` → array of {address, family}; otherwise a single address).
+ */
+export function pinnedLookup(addrs: readonly ResolvedAddr[]) {
+  return (
+    _hostname: string,
+    options: LookupOptions,
+    cb: (err: NodeJS.ErrnoException | null, address: string | ResolvedAddr[], family?: number) => void,
+  ): void => {
+    const first = addrs[0];
+    if (!first) { cb(Object.assign(new Error('no_address'), { code: 'ENOTFOUND' }), ''); return; }
+    if (options.all) cb(null, addrs.map((a) => ({ address: a.address, family: a.family })));
+    else cb(null, first.address, first.family);
+  };
+}
+
+/**
+ * Seams for tests (no network in CI): DNS resolution, the dispatcher factory
+ * that pins the connection to validated addresses, and fetch itself.
+ */
+export const __deps = {
+  lookup: (host: string) => lookup(host, { all: true }),
+  makeDispatcher: (addrs: readonly ResolvedAddr[]): Dispatcher =>
+    new Agent({ connect: { lookup: pinnedLookup(addrs) } }),
+  fetch: undiciFetch,
+};
 
 const router = Router();
 
@@ -109,22 +149,55 @@ function isBlockedHostname(hostname: string): boolean {
  * B-8 (DNS rebinding): textual hostname checks are not enough — an attacker can
  * point a public-looking name at a private IP. Resolve the hostname to ALL of
  * its A/AAAA records and reject if ANY resolves into a blocked range. Throws on
- * any blocked/failed resolution. NOTE: a narrow TOCTOU window remains between
- * this lookup and fetch()'s own resolution; the complete mitigation is an egress
- * firewall on the relay host (documented in ops). This closes the trivial case.
+ * any blocked/failed resolution.
+ *
+ * Returns the validated addresses so the caller can PIN the connection to them
+ * (audit 2026-09-16 AL-03): the old code validated here and then let fetch()
+ * resolve the name a second time, leaving a TOCTOU window a rebinding DNS server
+ * could exploit. Now the fetch never resolves DNS at all.
  */
-async function assertPublicHost(hostname: string): Promise<void> {
+async function assertPublicHost(hostname: string): Promise<ResolvedAddr[]> {
   const h = hostname.replace(/^\[|\]$/g, '');
   // A literal IP needs no DNS — validate directly.
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')) {
     if (isBlockedIp(h)) throw new Error('blocked_ip');
-    return;
+    return [{ address: h, family: h.includes(':') ? 6 : 4 }];
   }
-  const addrs = await lookup(h, { all: true });
+  const addrs = await __deps.lookup(h);
   if (addrs.length === 0) throw new Error('no_address');
   for (const { address } of addrs) {
     if (isBlockedIp(address)) throw new Error('blocked_ip');
   }
+  return addrs.map((a) => ({ address: a.address, family: a.family }));
+}
+
+/**
+ * Read at most `limit` bytes from a body and cancel the stream — never buffer
+ * the whole response (AL-03: `arrayBuffer()` let a hostile server push an
+ * unbounded body into relay memory before the 8 KB slice).
+ */
+export async function readBounded(body: ReadableStream<Uint8Array> | null, limit: number): Promise<Uint8Array> {
+  if (!body) return new Uint8Array(0);
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < limit) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      const room = limit - total;
+      const piece = value.byteLength > room ? value.subarray(0, room) : value;
+      chunks.push(piece);
+      total += piece.byteLength;
+    }
+  } finally {
+    // Stop the upstream transfer as soon as we have what we need.
+    reader.cancel().catch(() => { /* already closed */ });
+  }
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.byteLength; }
+  return out;
 }
 
 // ── OG tag extractor (regex-based, no cheerio dependency) ────────────────────
@@ -198,17 +271,13 @@ router.get('/', previewLimiter, async (req, res) => {
     return;
   }
 
-  // SSRF guard — resolve DNS and reject if the host points at a private IP
-  // (DNS-rebinding defence). Failure to resolve is also rejected.
-  try {
-    await assertPublicHost(parsedUrl.hostname);
-  } catch {
-    res.status(400).json({ error: 'INVALID_PAYLOAD' });
-    return;
-  }
+  // DNS validation happens per hop inside the loop below (hop 0 included), so
+  // the first hop is resolved exactly once and that answer pins its connection.
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
+  // The per-hop dispatcher pinned to validated addresses; closed in `finally`.
+  let dispatcher: Dispatcher | null = null;
 
   try {
     // Manual redirect handling: validate EVERY hop's host (textual + DNS) BEFORE
@@ -218,7 +287,7 @@ router.get('/', previewLimiter, async (req, res) => {
     // target and never followed blindly. See security audit 2026-07 (M6).
     const MAX_REDIRECTS = 5;
     let currentUrl = url;
-    let upstream: Response | null = null;
+    let upstream: Awaited<ReturnType<typeof undiciFetch>> | null = null;
     for (let hop = 0; ; hop++) {
       const hopParsed = new URL(currentUrl);
       if (
@@ -228,11 +297,24 @@ router.get('/', previewLimiter, async (req, res) => {
         res.status(400).json({ error: 'INVALID_PAYLOAD' });
         return;
       }
-      // Throws on a blocked/unresolvable host; the outer catch turns it into a
-      // generic error response WITHOUT the request ever being issued.
-      await assertPublicHost(hopParsed.hostname);
+      // Blocked/unresolvable host → 400 like the textual block, and the
+      // request to it is never issued.
+      let addrs: ResolvedAddr[];
+      try {
+        addrs = await assertPublicHost(hopParsed.hostname);
+      } catch {
+        clearTimeout(timeout);
+        res.status(400).json({ error: 'INVALID_PAYLOAD' });
+        return;
+      }
 
-      const resp = await fetch(currentUrl, {
+      // Pin THIS hop's connection to the addresses just validated. Host header
+      // and TLS SNI still carry the hostname; only the socket target is fixed.
+      if (dispatcher) void dispatcher.close();
+      dispatcher = __deps.makeDispatcher(addrs);
+
+      const resp = await __deps.fetch(currentUrl, {
+        dispatcher,
         signal: controller.signal,
         headers: {
           // Request only the first 8 KB; many servers honour this.
@@ -260,9 +342,8 @@ router.get('/', previewLimiter, async (req, res) => {
       break;
     }
 
-    clearTimeout(timeout);
-
     if (!upstream) {
+      clearTimeout(timeout);
       res.status(504).json({ error: 'preview_unavailable' });
       return;
     }
@@ -271,22 +352,27 @@ router.get('/', previewLimiter, async (req, res) => {
     const finalUrl = upstream.url || currentUrl;
 
     if (!upstream.ok) {
+      clearTimeout(timeout);
+      void upstream.body?.cancel().catch(() => { /* ignore */ });
       // Only log aggregated status codes — never the URL.
       console.error(`[proxy/linkpreview] upstream HTTP ${upstream.status}`);
       res.status(504).json({ error: 'preview_unavailable' });
       return;
     }
 
-    // Read at most 8 KB regardless of what the server sends.
     const contentType = upstream.headers.get('content-type') ?? '';
     if (!contentType.includes('text/html') && !contentType.includes('text/plain')) {
+      clearTimeout(timeout);
+      void upstream.body?.cancel().catch(() => { /* ignore */ });
       // Non-HTML (e.g. binary, video) — no OG data to extract.
       res.json({ title: null, description: null, image: null, url: finalUrl });
       return;
     }
 
-    const rawBuffer = await upstream.arrayBuffer();
-    const sliced = rawBuffer.slice(0, 8192);
+    // Read at most 8 KB regardless of what the server sends — the timeout still
+    // covers the body read so a slow-drip server cannot hold the request open.
+    const sliced = await readBounded(upstream.body, MAX_PREVIEW_BYTES);
+    clearTimeout(timeout);
     const html = new TextDecoder('utf-8', { fatal: false }).decode(sliced);
 
     const og = extractOg(html, finalUrl);
@@ -300,6 +386,8 @@ router.get('/', previewLimiter, async (req, res) => {
       `[proxy/linkpreview] error type=${isTimeout ? 'timeout' : 'network'}`,
     );
     res.status(504).json({ error: 'preview_unavailable' });
+  } finally {
+    if (dispatcher) void dispatcher.close();
   }
 });
 
