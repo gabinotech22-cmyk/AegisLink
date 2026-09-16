@@ -130,6 +130,17 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
       es local, está gitignored (`.gitignore:50`) — el drift nunca llegó al repo.
       Auditoría 2026-08, DOC-1.
 
+## Hito 6 — Federación de relays: "elige tu servidor" 🟡 (decidido 2026-09-16)
+
+Hoy el relay es autoalojable pero los clientes de tienda van fijados al oficial y **no hay
+federación** (todos los contactos deben estar en el mismo relay). Decisión del dueño: modelo
+**SimpleX** — cada usuario elige el relay de su buzón (solo `.onion`), la dirección de contacto
+lleva el relay, el cliente habla con varios relays, sin relay-a-relay. Pantalla en
+`Privacy → Red → Mi relay`. Diseño, slices F0–F7 y su **estado canónico** en
+[`FEDERATION-DESIGN.md`](./FEDERATION-DESIGN.md) (aquí no se duplica).
+
+Orden: se arranca F1 cuando #482 (auditoría) y el Hito 1 (extraer Work) estén en `main`.
+
 ---
 
 ## Trade-offs aceptados (no son deuda abierta)
