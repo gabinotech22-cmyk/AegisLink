@@ -561,7 +561,9 @@ export function attachRelay(io: SocketServer) {
         const id = typeof (raw as { id?: unknown } | null)?.id === 'string'
           ? (raw as { id: string }).id
           : null;
-        if (id) void messageRepo.delete(id);
+        // Scoped to the mailboxes THIS socket proved (AL-06): an id belonging to
+        // another mailbox is a no-op, never a deletion.
+        if (id) void messageRepo.ack(id, boundIds);
       });
 
       // Drain every bound id (current epoch + catch-up epochs), THEN signal ready —
@@ -642,7 +644,8 @@ export function attachRelay(io: SocketServer) {
       const id = typeof (raw as { id?: unknown } | null)?.id === 'string'
         ? (raw as { id: string }).id
         : null;
-      if (id) void messageRepo.delete(id, deviceId);
+      // Scoped to `me` (AL-06): a guessed id of another recipient's row is a no-op.
+      if (id) void messageRepo.ack(id, [me], deviceId);
     });
 
     // Backward-compat (audit 2026-07-25): old clients don't advertise 'ackDelivery'

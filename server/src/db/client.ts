@@ -324,9 +324,37 @@ export const messageRepo = {
   },
 
   /**
+   * CLIENT-DRIVEN ack (audit 2026-09-16 AL-06). The socket handlers must call this,
+   * never `delete`: the row is touched only if it belongs to one of `recipients`
+   * — the identities/mailboxes the acking socket actually authenticated as. Any
+   * authenticated socket used to be able to delete any queued row by id.
+   */
+  async ack(id: string, recipients: readonly string[], deviceId?: string): Promise<void> {
+    if (recipients.length === 0) return;
+    const marks = recipients.map(() => '?').join(',');
+    const row = await dbGet<Pick<MessageRow, 'recipient' | 'drained_by'>>(
+      `SELECT recipient, drained_by FROM messages WHERE id = ? AND recipient IN (${marks})`,
+      [id, ...recipients]
+    );
+    if (!row) return;
+    if (!deviceId) {
+      await dbRun(`DELETE FROM messages WHERE id = ? AND recipient = ?`, [id, row.recipient]);
+      return;
+    }
+    const drained = parseDrainedBy(row.drained_by);
+    if (!drained.includes(deviceId)) drained.push(deviceId);
+    if (drained.length >= await drainCapFor(row.recipient)) {
+      await dbRun(`DELETE FROM messages WHERE id = ? AND recipient = ?`, [id, row.recipient]);
+    } else {
+      await dbRun(`UPDATE messages SET drained_by = ? WHERE id = ? AND recipient = ?`, [JSON.stringify(drained), id, row.recipient]);
+    }
+  },
+
+  /**
    * Mark a message as drained by `deviceId`. Deletes the row when the recipient's
    * full set of devices has drained it (see drainCapFor) or the caller provides
-   * no deviceId (legacy path).
+   * no deviceId (legacy path). SERVER-DRIVEN only (drain-on-emit for legacy
+   * clients, purge, tests) — a client ack goes through `ack()` above.
    */
   async delete(id: string, deviceId?: string): Promise<void> {
     if (!deviceId) {
@@ -448,10 +476,32 @@ export const senderKeyDistRepo = {
     return rows.filter((row) => !parseDrainedBy(row.drained_by).includes(deviceId));
   },
 
+  /** CLIENT-DRIVEN ack scoped to the authenticated recipient — see messageRepo.ack (AL-06). */
+  async ack(id: string, recipients: readonly string[], deviceId?: string): Promise<void> {
+    if (recipients.length === 0) return;
+    const marks = recipients.map(() => '?').join(',');
+    const row = await dbGet<Pick<SenderKeyDistRow, 'recipient' | 'drained_by'>>(
+      `SELECT recipient, drained_by FROM sender_key_dist_queue WHERE id = ? AND recipient IN (${marks})`,
+      [id, ...recipients]
+    );
+    if (!row) return;
+    if (!deviceId) {
+      await dbRun(`DELETE FROM sender_key_dist_queue WHERE id = ? AND recipient = ?`, [id, row.recipient]);
+      return;
+    }
+    const drained = parseDrainedBy(row.drained_by);
+    if (!drained.includes(deviceId)) drained.push(deviceId);
+    if (drained.length >= await drainCapFor(row.recipient)) {
+      await dbRun(`DELETE FROM sender_key_dist_queue WHERE id = ? AND recipient = ?`, [id, row.recipient]);
+    } else {
+      await dbRun(`UPDATE sender_key_dist_queue SET drained_by = ? WHERE id = ? AND recipient = ?`, [JSON.stringify(drained), id, row.recipient]);
+    }
+  },
+
   /**
    * Mark a distribution as drained by `deviceId`. Deletes the row when the
    * recipient's full set of devices has drained it — mirrors messageRepo.delete
-   * exactly (shared drainCapFor / parseDrainedBy).
+   * exactly (shared drainCapFor / parseDrainedBy). SERVER-DRIVEN only.
    */
   async delete(id: string, deviceId?: string): Promise<void> {
     if (!deviceId) {

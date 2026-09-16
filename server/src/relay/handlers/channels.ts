@@ -469,6 +469,7 @@ export function attachChannels(socket: Socket, deps: ChannelsDeps): void {
     }
     // Fire-and-forget: delete is idempotent and non-fatal if the row is gone.
     // Do not log distId or aegisId — zero-metadata principle.
-    void senderKeyDistRepo.delete(parsed.data.distId, deviceId);
+    // Scoped to `me` (AL-06): only a distribution queued FOR this identity is touched.
+    void senderKeyDistRepo.ack(parsed.data.distId, [me], deviceId);
   });
 }
