@@ -1,7 +1,11 @@
 # AegisLink — Desarrollo Local
 
 ## Requisitos
-- Node.js 22+
+- Node.js **24+ para `server/`** (usa `node:sqlite`, estable solo desde Node 24; en Node 22
+  el runtime necesita `--experimental-sqlite` y **Jest no arranca**: las 55 suites fallan con
+  `ENOENT ... open 'sqlite'`). El CI fija Node 24 para el server (`.github/workflows/ci.yml`).
+- Node.js 22+ para `mobile/` y `desktop/`.
+- npm **10** para regenerar `mobile/package-lock.json` (npm 11 borra una entrada anidada y rompe el CI).
 - Android Studio / Xcode (para mobile)
 - Electron (para desktop, ya incluido en dependencias)
 

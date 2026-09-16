@@ -71,7 +71,7 @@ Esf **S-M**. Cierra C-6 (crítico) + A-7 (alto) + device:link spam.
 |----|-----|----------|-----|
 | C-6 | 🔴 | `DELETE /:aegisId/:deviceId` sin auth (`deviceLink.ts:152`) | Exigir firma Ed25519 sobre `aegisId\|deviceId\|timestamp`, verificar contra identity pubkey. |
 | A-7 | 🟠 | `link-confirm` confía solo en posesión del token (`deviceLink.ts:105`) | Segundo factor: prompt en el device ya autenticado mostrando **fingerprint** de la nueva clave; persistir solo tras aprobación explícita. |
-| MED | 🟡 | `device:link` socket sin auth ni rate-limit por target (`handler.ts:425`) | Rate-limit por `targetAegisId` (p.ej. 3/15min), descarte silencioso. |
+| MED | ✅ HECHO | `device:link` socket sin auth ni rate-limit por target (`handler.ts:425`) | Rate-limit por `targetAegisId` 3/15 min con descarte silencioso — `server/src/relay/rateLimits.ts` (`checkDeviceLinkRateLimit`), test `socketRateLimits.unit.test.ts`. El resto del flujo de link (mismatch de claves, persistencia, revocación) sigue roto: ver `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` AL-01. |
 | B-6 | 🔵 | Sin cap server-side de linked devices | Cap duro (p.ej. 5) en `devicesRepo.upsert`. |
 
 **Ref.** Signal/SimpleX: el flujo de "link new device" siempre requiere confirmación interactiva en el device existente con verificación de fingerprint. **Mirar el linking flow de SimpleX (QR + confirmación).**

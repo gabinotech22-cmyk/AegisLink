@@ -4,6 +4,10 @@
 > Fuente de verdad forward-looking. Complementa (no reemplaza) el histórico ya cerrado
 > en `SECURITY-ROADMAP-2026-06.md` (12 olas) y `AUDIT-2026-06-30-FULL.md`. El backlog
 > `backlog_fases3_4.md` queda como registro de Fase 3/4; su estado de features sigue vigente.
+>
+> **Auditoría externa 2026-09-16:** 11 hallazgos verificados (10 correctos, 0 falsos positivos) en
+> `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` — es la fuente canónica de su estado. Tres de ellos
+> (AL-02/07/09) se cierran ejecutando el Hito 1 de este roadmap.
 
 ## Alcance y exclusiones (decisión 2026-07-05)
 
@@ -56,7 +60,7 @@ CI de los dos PRs abiertos estaba en rojo. Reglas de oro de ramas/estructura rot
       aislados (sin debilitar ninguna validación de seguridad al reconciliar `blob.ts`/`publicChannels.ts`)
       y mergeados como PR #241–#245. Cero ramas remotas huérfanas al cierre, salvo #246 en curso.
 
-## Hito 1 — Extraer Work + pagos de este repo 🟠
+## Hito 1 — Extraer Work + pagos de este repo 🟠 EN CURSO (PR-C de la auditoría 2026-09-16)
 
 Objetivo: dejar este repo como **AegisLink normal puro**. El código Work es un bloque coherente
 y separable (NO enredado con los canales públicos sellados, que son normales y viven en

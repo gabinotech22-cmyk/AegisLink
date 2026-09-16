@@ -212,3 +212,22 @@ doc desactualizada no es un detalle cosmético: es deuda que **duplica trabajo**
 6. **Ante la duda sobre qué está hecho, `grep` y tests, no memoria ni `.md` viejo.**
    La pregunta "¿esto ya existe?" se responde leyendo código y corriendo la suite,
    nunca asumiendo desde un documento que pudo quedar atrás.
+7. **Mapa código → doc canónico (con gate en CI).** Tocar un área obliga a tocar su
+   doc en la misma PR. El job `docs-sync` de CI falla si el diff toca código de
+   producto (`server/src`, `mobile/src`, `desktop/src`, `.github/workflows`; tests
+   excluidos) sin tocar `docs/`/`README.md`/`CLAUDE.md`/`SECURITY.md`, salvo que el
+   cuerpo de la PR lleve `Docs: none — <por qué no aplica>` (campo de la plantilla).
+   Nació de la auditoría externa 2026-09-16: el auditor perdió sus 55 suites del
+   server porque `DEVELOPMENT.md` decía Node 22 y el código exigía 24.
+
+   | Área de código | Doc canónico |
+   |---|---|
+   | `server/src/relay/**`, `relay/schemas.ts` (wire) | `docs/PROTOCOL.md` |
+   | `mobile/src/crypto/**`, `desktop/src/**/crypto/**` | `docs/PROTOCOL.md` |
+   | Estado de features / hitos | `docs/ROADMAP.md` |
+   | Requisitos de entorno (Node, npm, Expo, SO) | `docs/DEVELOPMENT.md` |
+   | CI / workflows / cómo se testea | `docs/TESTING.md` |
+   | Sealed sender / mailbox / Tor | `docs/SEALED-SENDER-ARCHITECTURE.md`, `docs/FASE4-*.md` |
+   | Desktop: empaquetado y firma | `docs/DESKTOP-BETA.md` |
+   | Hallazgos de auditoría | el `docs/AUDIT-*.md` que los trackea |
+   | Estructura de carpetas | `docs/PROJECT-STRUCTURE.md` |
