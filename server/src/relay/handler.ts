@@ -3,7 +3,7 @@ import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 
 const { decodeBase64, encodeBase64 } = naclUtil;
-import { messageRepo, senderKeyDistRepo, prekeysRepo, identityRepo, deliveryTokenRepo, pushEndpointRepo, pushMailboxTokenRepo } from '../db/client.js';
+import { messageRepo, senderKeyDistRepo, prekeysRepo, identityRepo, deliveryTokenRepo, pushEndpointRepo, pushMailboxTokenRepo, devicesRepo } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';
@@ -74,7 +74,7 @@ export function attachRelay(io: SocketServer) {
 
   // Temporary map for sockets in device-linking flow (unauthenticated desktop sockets)
   // desktopPubKey -> { socket, timer }
-  const linkingSockets = new Map<string, { socket: Socket; timer: ReturnType<typeof setTimeout> }>();
+  const linkingSockets = new Map<string, { socket: Socket; timer: ReturnType<typeof setTimeout>; deviceId: string; deviceName: string }>();
 
   /**
    * How long a "live" delivery has to be confirmed before we treat it as having
@@ -128,10 +128,68 @@ export function attachRelay(io: SocketServer) {
     return true;
   }
 
+  /**
+   * `device:link` — an UNAUTHENTICATED desktop registers itself as link-pending
+   * for `targetAegisId`. Accepted from two kinds of socket: a link-only handshake
+   * (`auth.linkRequest === true`, no aegisId — what LinkDevice.tsx opens) and, for
+   * the edge case of a socket that later authenticates, the normal aegisId path.
+   * Audit 2026-09-16 AL-01: a socket without aegisId used to be dropped with
+   * `bad_handshake` before this listener was even registered, so the desktop's
+   * link request never reached the relay.
+   */
+  function attachDeviceLinkRequest(socket: Socket): void {
+    socket.on('device:link', async (raw: unknown) => {
+      const parsed = DeviceLink.safeParse(raw);
+      if (!parsed.success) {
+        socket.emit('error_msg', { code: 'invalid_device_link' });
+        return;
+      }
+      const { targetAegisId, desktopPubKey, deviceId: linkDeviceId, deviceName: linkDeviceName } = parsed.data;
+
+      // Throttle per target identity so an unauthenticated socket can't spam
+      // link requests at a victim. Silent drop — no oracle signal on excess.
+      if (!(await checkDeviceLinkRateLimit(targetAegisId))) {
+        return;
+      }
+      // Bound the pending-link map independently of the rate-limit maps: refuse
+      // new entries past the cap rather than evicting a live pending link.
+      if (!linkingSockets.has(desktopPubKey) && linkingSockets.size >= RATE_LIMIT_MAP_MAX) {
+        return;
+      }
+
+      if (linkingSockets.has(desktopPubKey)) {
+        clearTimeout(linkingSockets.get(desktopPubKey)!.timer);
+      }
+      const timer = setTimeout(() => {
+        linkingSockets.delete(desktopPubKey);
+        socket.emit('error_msg', { code: 'device_link_expired' });
+        socket.disconnect(true);
+      }, DEVICE_LINK_TTL_MS);
+      // Never let a pending device-link request keep the process alive.
+      timer.unref?.();
+      linkingSockets.set(desktopPubKey, { socket, timer, deviceId: linkDeviceId, deviceName: linkDeviceName ?? 'AegisLink Desktop' });
+
+      // Neutral response regardless of whether target is online — prevents
+      // binary online/offline oracle for unauthenticated sockets (FND-06).
+      // If the target is online we forward immediately; if not, the pending
+      // entry stays in linkingSockets until the TTL expires or the target
+      // authenticates and picks up the link request via its own flow.
+      const targetSockets = sockets.get(targetAegisId);
+      if (targetSockets && targetSockets.size > 0) {
+        for (const s of targetSockets) {
+          s.emit('device:link', { desktopPubKey, tempSocketId: socket.id });
+        }
+      }
+      // Always emit 'pending' — same response online or offline
+      socket.emit('device:link', { status: 'pending' });
+    });
+  }
+
   io.on('connection', (socket) => {
     const auth = socket.handshake.auth as {
       aegisId?: unknown; platform?: unknown; deviceId?: unknown;
       mailboxId?: unknown; mailboxSignPubKey?: unknown; binds?: unknown;
+      linkRequest?: unknown;
     };
 
     // ── Fase 4: mailbox-mode handshake ────────────────────────────────────────
@@ -150,6 +208,28 @@ export function attachRelay(io: SocketServer) {
         try { binds = JSON.parse(binds); } catch { binds = undefined; }
       }
       handleMailboxConnection(socket, auth.mailboxId, auth.mailboxSignPubKey, binds);
+      return;
+    }
+
+    // ── Link-only handshake (desktop QR flow) ─────────────────────────────────
+    // No identity yet: the socket may only register a `device:link` request and
+    // then wait for the phone's approval. It lives at most DEVICE_LINK_TTL_MS
+    // (the pending-link timer disconnects it) and gets nothing else.
+    if (auth?.linkRequest === true && auth?.aegisId === undefined) {
+      attachDeviceLinkRequest(socket);
+      const idle = setTimeout(() => {
+        // Never registered a link — don't let an idle unauthenticated socket linger.
+        let pending = false;
+        for (const entry of linkingSockets.values()) { if (entry.socket === socket) { pending = true; break; } }
+        if (!pending) socket.disconnect(true);
+      }, AUTH_TIMEOUT_MS);
+      idle.unref?.();
+      socket.on('disconnect', () => {
+        clearTimeout(idle);
+        for (const [key, entry] of linkingSockets) {
+          if (entry.socket === socket) { clearTimeout(entry.timer); linkingSockets.delete(key); break; }
+        }
+      });
       return;
     }
 
@@ -209,9 +289,25 @@ export function attachRelay(io: SocketServer) {
         }
         authenticated = true;
         clearTimeout(authTimer);
-        onAuthenticated(socket, me, deviceId, challenge).then(async () => {
-          const opkCount = await prekeysRepo.countOneTime(me, deviceId); // M-2: per-device count
-          socket.emit('auth:ok', { opkCount, app: appVersionInfo() });
+        // Audit 2026-09-16 AL-01: a desktop holds a COPY of the identity keys, so
+        // key possession alone cannot tell a linked desktop from a revoked one.
+        // A desktop session is admitted only while its deviceId has an ACTIVE row
+        // in linked_devices for this identity (written on `device:link:approve`,
+        // flipped by `device:revoke`). Fail-closed: no deviceId, no row, or a
+        // revoked row all reject. Mobile is the primary and is never gated here.
+        const gate: Promise<boolean> = platform === 'desktop'
+          ? (deviceId ? devicesRepo.isActiveLink(deviceId, me) : Promise.resolve(false))
+          : Promise.resolve(true);
+        gate.then((admitted) => {
+          if (!admitted) {
+            socket.emit('error_msg', { code: 'device_not_linked' });
+            socket.disconnect(true);
+            return;
+          }
+          return onAuthenticated(socket, me, deviceId, challenge).then(async () => {
+            const opkCount = await prekeysRepo.countOneTime(me, deviceId); // M-2: per-device count
+            socket.emit('auth:ok', { opkCount, app: appVersionInfo() });
+          });
         }).catch(() => {
           socket.emit('error_msg', { code: 'internal_error' });
           socket.disconnect(true);
@@ -223,52 +319,7 @@ export function attachRelay(io: SocketServer) {
       socket.disconnect(true);
     });
 
-    // Allow unauthenticated sockets to register as a linking-pending desktop.
-    socket.on('device:link', async (raw: unknown) => {
-      const parsed = DeviceLink.safeParse(raw);
-      if (!parsed.success) {
-        socket.emit('error_msg', { code: 'invalid_device_link' });
-        return;
-      }
-      const { targetAegisId, desktopPubKey } = parsed.data;
-
-      // Throttle per target identity so an unauthenticated socket can't spam
-      // link requests at a victim. Silent drop — no oracle signal on excess.
-      if (!(await checkDeviceLinkRateLimit(targetAegisId))) {
-        return;
-      }
-      // Bound the pending-link map independently of the rate-limit maps: refuse
-      // new entries past the cap rather than evicting a live pending link.
-      if (!linkingSockets.has(desktopPubKey) && linkingSockets.size >= RATE_LIMIT_MAP_MAX) {
-        return;
-      }
-
-      if (linkingSockets.has(desktopPubKey)) {
-        clearTimeout(linkingSockets.get(desktopPubKey)!.timer);
-      }
-      const timer = setTimeout(() => {
-        linkingSockets.delete(desktopPubKey);
-        socket.emit('error_msg', { code: 'device_link_expired' });
-        socket.disconnect(true);
-      }, DEVICE_LINK_TTL_MS);
-      // Never let a pending device-link request keep the process alive.
-      timer.unref?.();
-      linkingSockets.set(desktopPubKey, { socket, timer });
-
-      // Neutral response regardless of whether target is online — prevents
-      // binary online/offline oracle for unauthenticated sockets (FND-06).
-      // If the target is online we forward immediately; if not, the pending
-      // entry stays in linkingSockets until the TTL expires or the target
-      // authenticates and picks up the link request via its own flow.
-      const targetSockets = sockets.get(targetAegisId);
-      if (targetSockets && targetSockets.size > 0) {
-        for (const s of targetSockets) {
-          s.emit('device:link', { desktopPubKey, tempSocketId: socket.id });
-        }
-      }
-      // Always emit 'pending' — same response online or offline
-      socket.emit('device:link', { status: 'pending' });
-    });
+    attachDeviceLinkRequest(socket);
 
     socket.on('disconnect', () => {
       clearTimeout(authTimer);

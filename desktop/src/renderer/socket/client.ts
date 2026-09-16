@@ -618,6 +618,19 @@ async function uploadPreKeys(identity: Identity) {
   });
 }
 
+/**
+ * The desktop's stable per-install id. Generated once, kept in secure storage,
+ * and sent both in `device:link` (so the relay persists the link row under it)
+ * and as `auth.deviceId` at every handshake (so the relay can match that row).
+ */
+export async function getOrCreateDeviceId(): Promise<string> {
+  const stored = await window.aegis.secureStorage.get('aegis.deviceId');
+  if (stored) return stored;
+  const id = crypto.randomUUID();
+  await window.aegis.secureStorage.set('aegis.deviceId', id);
+  return id;
+}
+
 export function connect(identity: Identity): Socket {
   if (
     socket &&
@@ -630,34 +643,28 @@ export function connect(identity: Identity): Socket {
 
   authenticated = false;
 
-  // Resolve (or generate) a stable deviceId before connecting.
-  // We use an IIFE that runs asynchronously in the background and patches
-  // socket.auth once the value is ready.  The socket is created immediately
-  // so callers can attach event listeners straight away.
-  void (async () => {
-    try {
-      const stored = await window.aegis.secureStorage.get('aegis.deviceId');
-      const deviceId: string = stored ?? await (async () => {
-        const id = crypto.randomUUID();
-        await window.aegis.secureStorage.set('aegis.deviceId', id);
-        return id;
-      })();
-      if (socket) {
-        (socket.auth as Record<string, string>)['deviceId'] = deviceId;
-      }
-    } catch {
-      // Non-fatal: relay accepts connections without deviceId
-    }
-  })();
-
-  socket = io(RELAY_URL, {
+  // The socket is created immediately (so callers can attach listeners) but
+  // does NOT auto-connect: the relay admits a desktop session only when the
+  // handshake carries the deviceId that was persisted at link time (audit
+  // 2026-09-16 AL-01, fail-closed). The old background-patch of `socket.auth`
+  // raced the first handshake, which would now be rejected as `device_not_linked`.
+  const created = io(RELAY_URL, {
     transports: ['websocket'],
+    autoConnect: false,
     // ackDelivery: we send 'envelope:ack' after persisting each incoming envelope,
     // so the relay defers deletion until confirmed (at-least-once). audit 2026-07-25.
     auth: { aegisId: identity.aegisId, platform: 'desktop', ackDelivery: true },
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 8000,
+  });
+  socket = created;
+  void getOrCreateDeviceId().then((deviceId) => {
+    // Only connect the socket this call created — a newer connect() may have
+    // replaced it while the storage read was pending.
+    if (socket !== created) return;
+    (created.auth as Record<string, string>)['deviceId'] = deviceId;
+    created.connect();
   });
 
   socket.on('connect', () => {

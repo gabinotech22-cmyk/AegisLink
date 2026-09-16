@@ -294,21 +294,35 @@ export const DEVICE_LINK_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
 // Zod schemas for device linking
 //
-// desktop → relay (unauthenticated): { desktopPubKey, targetAegisId }
+// desktop → relay (unauthenticated): { desktopPubKey, targetAegisId, deviceId, deviceName? }
 // relay   → mobile (authenticated):  { desktopPubKey, tempSocketId }
 //
-// mobile  → relay (authenticated):   { desktopPubKey, encryptedPayload, nonceB64 }
+// mobile  → relay (authenticated):   { desktopPubKey, encryptedPayload, nonceB64, mobilePubKey }
 // relay   → desktop (unauthenticated): { encryptedPayload, nonceB64, mobilePubKey }
+//
+// `mobilePubKey` is the EPHEMERAL X25519 public key the phone generated for this
+// single approval — the one it actually boxed the payload with. The relay must
+// forward exactly that key. Audit 2026-09-16 AL-01: the schema used to drop this
+// field and the relay forwarded the identity's permanent X25519 key instead, so
+// `nacl.box.open` on the desktop failed for every link attempt.
 export const DeviceLink = z.object({
   /** AegisID the desktop wants to link to. */
   targetAegisId: z.string().regex(AEGIS_ID_RE),
   desktopPubKey: z.string().min(1).max(128),
+  /** The desktop's stable per-install id — the same value it later sends as
+   *  `auth.deviceId` at handshake. Persisted on approval so the relay can bind
+   *  the desktop's future sessions to an explicit, revocable link row. */
+  deviceId: z.string().uuid(),
+  /** Human label the desktop chooses for itself (shown in the device list). */
+  deviceName: z.string().min(1).max(64).optional(),
 });
 
 export const DeviceLinkApprove = z.object({
   desktopPubKey: z.string().min(1).max(128),
   encryptedPayload: z.string().min(1).max(4096),
   nonceB64: z.string().min(1).max(64),
+  /** Base64 of the 32-byte ephemeral X25519 public key (44 chars). */
+  mobilePubKey: z.string().length(44),
 });
 
 export const DeviceRevoke = z.object({

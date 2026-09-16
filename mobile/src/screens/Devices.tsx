@@ -207,11 +207,6 @@ export function DevicesScreen({ onBack }: Props) {
         encryptedPayload: encodeBase64(encrypted),
         nonceB64: encodeBase64(nonce),
         mobilePubKey: encodeBase64(myKeypair.publicKey),
-        deviceName: currentDeviceName(),
-        platform: (Platform.OS === 'ios' || Platform.OS === 'android' ? 'mobile' : 'desktop') as
-          | 'mobile'
-          | 'desktop'
-          | 'unknown',
       };
 
       const socket = getSocket();

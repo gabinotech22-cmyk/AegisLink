@@ -774,6 +774,19 @@ export const devicesRepo = {
     );
     return result.changes > 0;
   },
+  /**
+   * Is `deviceId` an ACTIVE (non-revoked) linked device of `aegisId`? The relay
+   * gates every desktop session on this (audit 2026-09-16 AL-01): a desktop
+   * carries a copy of the identity keys, so possession alone can't distinguish a
+   * linked desktop from a revoked one — only this row can.
+   */
+  async isActiveLink(deviceId: string, aegisId: string): Promise<boolean> {
+    const row = await dbGet<{ n: number | string }>(
+      `SELECT COUNT(*) AS n FROM linked_devices WHERE device_id = ? AND aegis_id = ? AND revoked = 0`,
+      [deviceId, aegisId]
+    );
+    return row !== undefined && Number(row.n) > 0;
+  },
   async isRevoked(deviceId: string): Promise<boolean> {
     const row = await dbGet<{ revoked: number }>(
       `SELECT revoked FROM linked_devices WHERE device_id = ? LIMIT 1`,
