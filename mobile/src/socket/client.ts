@@ -4,13 +4,17 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, REMOTE_PUSH_ENABLED } from '../config';
+import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, REMOTE_PUSH_ENABLED, FEDERATION } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery, fetchMailboxOverTor } from './mailboxSocket';
-import { isForeign, relayFor } from '../net/homeRelay';
+import { isForeign, relayFor, getHomeRelay } from '../net/homeRelay';
+import { canonicalRelay } from '../net/officialRelay';
+import { relayRefFromOnion, type RelayRef } from '../net/relayRef';
+import { keyMatchesAegisId } from '../crypto/aegisId';
+import type { StoredContact } from '../db/contacts';
 import { sendViaForeignRelay, foreignRelayHttp, closeForeignRelays } from '../net/relayPool';
 import { isEnvelopeAlreadyPersisted, markEnvelopePersisted } from './envelopeDedupe';
 import { startMailboxPushSubscription, stopMailboxPushSubscription } from '../notifications/mailboxPushSubscription';
@@ -248,10 +252,12 @@ export function forgetGroupAvatarSent(groupId: string): void {
 /**
  * Sealed-sender transport selector for an outgoing envelope — the single source
  * of truth shared by the online group fan-out (sendGroupMessage) and the
- * offline retry path (flushOutbox). Mirrors the inline selector in sendMessage:
- * use v2 (sealed-sender, no `from` on the wire) ONLY when the flag is on, the
+ * live send (sendMessage) and the offline retry path (flushOutbox). Same relay:
+ * v2 (sealed-sender, no `from` on the wire) ONLY when the flag is on, the
  * session is ESTABLISHED (no pending x3dhInit — first contact bootstraps over
- * v1), and we already hold the recipient's delivery token. Otherwise v1.
+ * v1), and we already hold the recipient's delivery token; otherwise v1.
+ * Another relay (federation): always v2, first contact bootstraps INSIDE the
+ * sealed envelope (F3b).
  *
  * Returns the socket event name, the wire fields to spread into the emit
  * payload (ciphertext/nonce[/epk/deliveryToken]) and the advanced ratchet
@@ -265,6 +271,27 @@ export async function buildOutgoingEnvelope(
   identity: Identity,
   session: RatchetState,
 ): Promise<{ event: 'envelope' | 'envelope:v2'; wire: Record<string, unknown>; newState: RatchetState }> {
+  // Federation F3b: a recipient on another relay has NO v1 path — v2 always,
+  // and the very first message carries the X3DH init plus our first-contact
+  // block (identity key, home relay, mailbox root) sealed inside, signed with a
+  // signing key embedded in the sealed layer so a stranger can verify it. The
+  // mailbox transport needs no delivery token (the mailbox id is the capability).
+  const recipient = useContacts.getState().contacts.find((c) => c.aegisId === recipientAegisId);
+  if (recipient && isForeign(recipient)) {
+    const firstContact = session.x3dhInit
+      ? {
+          block: { ik: identity.publicKeyB64, relay: getHomeRelay()?.onion ?? null, root: await getOwnMailboxRootB64() },
+          senderSigningPublicKey: identity.signingPublicKey,
+        }
+      : undefined;
+    const r = encryptMessageV2(payload, identity.aegisId, recipientPubKey, identity.signingSecretKey, session, Date.now(), firstContact);
+    return {
+      event: 'envelope:v2',
+      wire: { ciphertext: r.wire.ciphertext, nonce: r.wire.nonce, epk: r.wire.epk },
+      newState: r.newState,
+    };
+  }
+
   const v2Token =
     SEALED_TRANSPORT_VERSION === 'v2' && !session.x3dhInit
       ? await getContactDeliveryToken(recipientAegisId)
@@ -290,6 +317,47 @@ export async function buildOutgoingEnvelope(
     wire: { ciphertext: r.envelope.ciphertextB64, nonce: r.envelope.nonceB64 },
     newState: r.newState,
   };
+}
+
+/**
+ * Federation F2/F3b: push an already-built wire to a contact on ANOTHER relay.
+ * There is no aegisId transport to them at all (their identity lives on a relay
+ * we never authenticate with), so the sealed v2 wire goes through the relay
+ * pool: a disposable mailbox socket on THEIR relay, addressed to their rotating
+ * mailbox id. Here a `queued` ack IS terminal: the relay holds the row until
+ * their mailbox acks it (at-least-once) and their own relay wakes them (ntfy) —
+ * exactly the SimpleX model.
+ *
+ * One path for the live send, the outbox retry and the profile hand-off, so a
+ * foreign recipient can never fall back to the home socket (which would both
+ * leak the me↔to edge to OUR relay and never arrive). Throws a coded Error on
+ * anything that is not a confirmed hand-off; callers park the job for retry.
+ */
+async function deliverToForeignRelay(
+  contact: { aegisId: string; relayOnion?: string | null },
+  event: 'envelope' | 'envelope:v2',
+  wire: Record<string, unknown>,
+  id: string,
+  ephemeralTtlMs: number | null,
+): Promise<void> {
+  const relay = relayFor(contact);
+  // v1 (no sealed wire) cannot cross relays. With F3b the selector never
+  // produces v1 for a foreign contact; kept as a guard against a stale outbox row.
+  if (event !== 'envelope:v2' || !relay) throw new Error('foreign_contact_needs_sealed_v2');
+  const mboxTo = await getContactCurrentMailboxId(contact.aegisId, Date.now());
+  if (!mboxTo) throw new Error('foreign_contact_mailbox_root_missing');
+  const ack = await sendViaForeignRelay(relay, {
+    id,
+    to: mboxTo,
+    ciphertext: wire.ciphertext as string,
+    nonce: wire.nonce as string,
+    epk: wire.epk as string,
+    ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
+  });
+  if (!ack || !ack.ok) {
+    if (__DEV__) logger.warn('[socket] foreign relay send failed:', ack?.error ?? 'transport');
+    throw new Error(ack?.error ?? 'foreign_relay_unreachable');
+  }
 }
 
 /**
@@ -392,22 +460,28 @@ async function flushOutbox(identity: Identity): Promise<void> {
         session,
       );
       await saveSessionState(job.recipientAegisId, newState);
-      await new Promise<void>((resolve, reject) => {
-        socket!
-          .timeout(EMIT_ACK_TIMEOUT_MS)
-          .emit(
-            event,
-            { id: job.msgId, to: job.recipientAegisId, ...wire, ...(isInit && event === 'envelope' ? { init: true } : {}) },
-            (err: Error | null, ack?: { ok: boolean; error?: string }) => {
-              // With `.timeout()`, socket.io always calls back with (err, ack):
-              // `err` is set on ack timeout (server never responded — dropped
-              // frame / zombie transport), `ack` carries the app-level response.
-              if (err) { reject(err); return; }
-              if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
-              else resolve();
-            },
-          );
-      });
+      const jobContact = useContacts.getState().contacts.find((c) => c.aegisId === job.recipientAegisId);
+      if (jobContact && isForeign(jobContact)) {
+        // Another relay: never the home socket (see deliverToForeignRelay).
+        await deliverToForeignRelay(jobContact, event, wire, job.msgId, null);
+      } else {
+        await new Promise<void>((resolve, reject) => {
+          socket!
+            .timeout(EMIT_ACK_TIMEOUT_MS)
+            .emit(
+              event,
+              { id: job.msgId, to: job.recipientAegisId, ...wire, ...(isInit && event === 'envelope' ? { init: true } : {}) },
+              (err: Error | null, ack?: { ok: boolean; error?: string }) => {
+                // With `.timeout()`, socket.io always calls back with (err, ack):
+                // `err` is set on ack timeout (server never responded — dropped
+                // frame / zombie transport), `ack` carries the app-level response.
+                if (err) { reject(err); return; }
+                if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'flush_failed'));
+                else resolve();
+              },
+            );
+        });
+      }
       await deleteOutboxJob(job.jobId);
       await setJobMessageStatus(job, 'sent');
     } catch (e) {
@@ -3674,11 +3748,15 @@ async function handleIncomingV2(
     try { return decodeBase64(c.signingPublicKeyB64); } catch { return null; }
   };
 
+  // Federation F3b: with the flag on, a sealed message from an UNKNOWN sender is
+  // accepted only as a first-contact bootstrap (x3dh init + fc block, signature
+  // verified against the key it embeds — TOFU, pinned below).
   const inner = openEnvelopeV2(
     { ciphertext: env.ciphertext, nonce: env.nonce, epk: env.epk },
     identity.secretKey,
     resolveSigningKey,
     Date.now(),
+    { allowFirstContact: FEDERATION },
   );
   if (!inner) {
     // NOT a permanent verdict: resolveSigningKey above reads the contact store,
@@ -3689,10 +3767,47 @@ async function handleIncomingV2(
     return 'retry';
   }
 
-  const contact = contacts.find((c) => c.aegisId === inner.from);
+  let contact = contacts.find((c) => c.aegisId === inner.from);
   // Blocked is the user's own decision — discard it for good. An unknown sender
   // is not: the contact record may still be on its way.
   if (contact?.blocked) return 'dropped';
+  let bootstrapped = false;
+  if (!contact && inner.tofuSigningKeyB64 && inner.fc) {
+    // First contact across relays. Bind the claimed id to the identity key the
+    // block carries (X3DH below then binds the session to that very key), and
+    // create the contact as a PENDING message request on THEIR relay, with the
+    // mailbox root that lets us answer. Never done with the flag off.
+    const fc = inner.fc;
+    if (!keyMatchesAegisId(fc.ik, inner.from)) return 'dropped';
+    let relay: RelayRef | null = null;
+    if (fc.relay !== null) {
+      const ref = relayRefFromOnion(fc.relay);
+      if (!ref) return 'dropped'; // malformed relay — never guess "official"
+      relay = canonicalRelay(ref);
+    }
+    try {
+      const { saveContact } = require('../db/local') as typeof import('../db/local');
+      const created: StoredContact = {
+        aegisId: inner.from,
+        publicKeyB64: fc.ik,
+        signingPublicKeyB64: inner.tofuSigningKeyB64,
+        name: inner.from,
+        verified: false,
+        addedAt: Date.now(),
+        profile: 'personal',
+        pending: true,
+        relayOnion: relay?.onion ?? null,
+      };
+      await saveContact(created);
+      await setContactMailboxRoot(inner.from, fc.root);
+      useContacts.setState((s) => ({ contacts: [created, ...s.contacts.filter((c) => c.aegisId !== inner.from)] }));
+      contact = created;
+      bootstrapped = true;
+    } catch (e) {
+      if (__DEV__) logger.warn('[socket] first-contact bootstrap failed', e);
+      return 'retry';
+    }
+  }
   if (!contact) return 'retry';
 
   // Reuse the v1 downstream (ratchet decrypt + glare/desync recovery + dispatch).
@@ -3709,6 +3824,13 @@ async function handleIncomingV2(
   // Only after the message is durably down: a throw above leaves the id unmarked
   // so the relay's re-drain is processed rather than silently swallowed.
   markEnvelopePersisted(env.id);
+  if (bootstrapped) {
+    // Let them learn our name / token / root right away (mirrors the v1
+    // auto-add). AFTER the decrypt on purpose: their X3DH init has just
+    // established our receiver session, so this reply rides it instead of
+    // racing a second handshake (glare) through their relay.
+    void sendProfileTo(contact, identity).catch(() => {});
+  }
   return 'persisted';
 }
 
@@ -4366,36 +4488,18 @@ export async function sendMessage(opts: {
   const session = await getOrCreateSession(opts.recipientAegisId, recipientPublicKeyB64, opts.identity);
 
   // ── Sealed-sender transport selector (v1 vs v2) ─────────────────────────────
-  // Use v2 only when: the flag is on, the session is ESTABLISHED (no pending
-  // x3dhInit — first contact must bootstrap over v1), and we already hold the
-  // recipient's delivery token (shared earlier over E2EE). Otherwise fall back
-  // to v1 — the recipient handles both wires.
-  const v2Token =
-    SEALED_TRANSPORT_VERSION === 'v2' && !session.x3dhInit
-      ? await getContactDeliveryToken(opts.recipientAegisId)
-      : null;
-
-  let emitEvent: 'envelope' | 'envelope:v2';
-  let emitPayload: Record<string, unknown>;
-  let newState: RatchetState;
-  if (v2Token) {
-    const r = encryptMessageV2(
-      payload,
-      opts.identity.aegisId,
-      opts.recipientPublicKey,
-      opts.identity.signingSecretKey,
-      session,
-      Date.now(),
-    );
-    newState = r.newState;
-    emitEvent = 'envelope:v2';
-    emitPayload = { id, to: opts.recipientAegisId, ciphertext: r.wire.ciphertext, nonce: r.wire.nonce, epk: r.wire.epk, deliveryToken: v2Token, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}) };
-  } else {
-    const r = encryptMessage(payload, opts.identity.aegisId, opts.recipientPublicKey, opts.identity.secretKey, session);
-    newState = r.newState;
-    emitEvent = 'envelope';
-    emitPayload = { id, to: opts.recipientAegisId, ciphertext: r.envelope.ciphertextB64, nonce: r.envelope.nonceB64, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}) };
-  }
+  // One selector for the live send and the outbox retry (buildOutgoingEnvelope):
+  // v2 when the session is established and we hold the delivery token; a
+  // foreign (other-relay) recipient is always v2, bootstrapping first contact
+  // inside the sealed envelope (F3b); otherwise v1.
+  const { event: emitEvent, wire: emitWire, newState } = await buildOutgoingEnvelope(
+    payload,
+    opts.recipientAegisId,
+    opts.recipientPublicKey,
+    opts.identity,
+    session,
+  );
+  const emitPayload: Record<string, unknown> = { id, to: opts.recipientAegisId, ...emitWire, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}) };
   await saveSessionState(opts.recipientAegisId, newState);
 
   // ── Fase 4: mailbox addressing ──────────────────────────────────────────────
@@ -4419,43 +4523,17 @@ export async function sendMessage(opts: {
   // preferred path whenever both peers are online; the fallback only fires when
   // mailbox delivery cannot be confirmed. Also falls back when not eligible: no
   // recipient root yet, or our own mailbox socket isn't authed.
-  // ── Federation F2: a contact on ANOTHER relay ──────────────────────────────
-  // There is no aegisId transport to them at all (their identity lives on a
-  // relay we never authenticate with), so the sealed v2 wire goes through the
-  // relay pool: a disposable mailbox socket on THEIR relay, addressed to their
-  // rotating mailbox id. Here a `queued` ack IS terminal: the relay holds the
-  // row until their mailbox acks it (at-least-once) and their own relay wakes
-  // them (ntfy) — exactly the SimpleX model. A transport failure leaves the job
-  // in the outbox for the scheduler.
+  // ── Federation F2/F3b: a contact on ANOTHER relay ──────────────────────────
+  // The sealed wire goes through the relay pool (deliverToForeignRelay); a
+  // transport failure leaves the job in the outbox for the scheduler.
   const recipientContact = useContacts.getState().contacts.find((c) => c.aegisId === opts.recipientAegisId);
   if (recipientContact && isForeign(recipientContact)) {
-    const relay = relayFor(recipientContact);
-    if (emitEvent !== 'envelope:v2' || !relay) {
-      // v1 (no sealed wire) cannot cross relays: keep the job parked for retry
-      // once the contact's profile (delivery token + mailbox root) has arrived.
+    try {
+      await deliverToForeignRelay(recipientContact, emitEvent, emitWire, id, ephemeralTtlMs ?? null);
+    } catch (e) {
       try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
       armOutboxScheduler(opts.identity);
-      throw new Error('foreign_contact_needs_sealed_v2');
-    }
-    const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
-    if (!mboxTo) {
-      try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
-      armOutboxScheduler(opts.identity);
-      throw new Error('foreign_contact_mailbox_root_missing');
-    }
-    const ack = await sendViaForeignRelay(relay, {
-      id,
-      to: mboxTo,
-      ciphertext: emitPayload.ciphertext as string,
-      nonce: emitPayload.nonce as string,
-      epk: emitPayload.epk as string,
-      ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
-    });
-    if (!ack || !ack.ok) {
-      if (__DEV__) logger.warn('[socket] foreign relay send failed, job retained in outbox:', ack?.error ?? 'transport');
-      try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
-      armOutboxScheduler(opts.identity);
-      throw new Error(ack?.error ?? 'foreign_relay_unreachable');
+      throw e;
     }
     try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
     try { await useMessages.getState().updateDelivery(opts.recipientAegisId, id, 'sent'); } catch { /* non-fatal */ }
@@ -4762,6 +4840,17 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
     // Forward lockCtx so that when this runs inside a desync-recovery (already
     // holding contact.aegisId's lock) the nested acquire passes through.
     const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity, lockCtx);
+    // Federation F3b: a contact on another relay only has the sealed path
+    // through THEIR relay — the v1 `envelope` below would leak the me↔to edge
+    // to our relay and never arrive.
+    const stored = useContacts.getState().contacts.find((c) => c.aegisId === contact.aegisId);
+    if (stored && isForeign(stored)) {
+      const { event, wire, newState } = await buildOutgoingEnvelope(payload, contact.aegisId, recipientPub, identity, session);
+      await saveSessionState(contact.aegisId, newState);
+      await deliverToForeignRelay(stored, event, wire, Crypto.randomUUID(), null);
+      rdiag(`[RDIAG] sendProfileTo EMITTED (foreign relay) to=${contact.aegisId}`);
+      return;
+    }
     // Mark first-contact (X3DH-initial) envelopes `init` so the relay attaches
     // our public key when queued for an offline recipient — otherwise the peer
     // cannot decrypt this first profile message and never auto-adds us back.

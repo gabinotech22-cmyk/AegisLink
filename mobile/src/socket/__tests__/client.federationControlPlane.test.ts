@@ -19,6 +19,7 @@ import { encodeBase64 } from 'tweetnacl-util';
 import { encryptMessage } from '../../crypto/messaging';
 import { generateSenderKey, sealSenderKeyForRecipients } from '../../crypto/channelKey';
 import { initRatchet, type RatchetState } from '../../crypto/signal/ratchet';
+import { deriveAegisId } from '../../crypto/aegisId';
 
 // ── db/local mock with an in-memory ratchet session store ────────────────────
 const mockRatchetSessions = new Map<string, string>();
@@ -199,7 +200,7 @@ function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
   return {
-    aegisId: 'AEGIS' + encodeBase64(box.publicKey).slice(0, 6),
+    aegisId: deriveAegisId(box.publicKey), // real format: URL-safe, ID<->key bound
     publicKey: box.publicKey,
     secretKey: box.secretKey,
     publicKeyB64: encodeBase64(box.publicKey),
@@ -354,11 +355,12 @@ describe('federation F3 — foreign contacts: sealed control plane + group re-ke
 
     expect(mockForeignRelayHttp).toHaveBeenCalledWith(expect.objectContaining({ onion: ONION }), `/prekeys/bundle/${peer.aegisId}`);
     expect(mockFakeSocket.emit.mock.calls.map((c) => c[0])).not.toContain('prekeys:fetch');
-    // The very first wire after X3DH is v1 (carries x3dhInit) and v1 cannot cross
-    // relays: nothing leaves on the aegisId socket and nothing reaches the pool.
-    // Bootstrapping that first message over the mailbox is slice F3b.
+    // The very first wire after X3DH bootstraps INSIDE the sealed v2 through
+    // their relay (F3b — see client.firstContact.test.ts); nothing leaves on the
+    // aegisId socket.
     expect(mockFakeSocket.emit.mock.calls.map((c) => c[0])).not.toContain('envelope');
-    expect(mockSendViaForeignRelay).not.toHaveBeenCalled();
+    expect(mockFakeSocket.emit.mock.calls.map((c) => c[0])).not.toContain('envelope:v2');
+    expect(mockSendViaForeignRelay).toHaveBeenCalledTimes(1);
   });
 
   it('read receipts to a foreign contact ride the same sealed path (no msg:read)', async () => {

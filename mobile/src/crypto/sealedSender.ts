@@ -49,6 +49,12 @@ export interface OpenedEnvelope {
   payload: string;
   /** Inner timestamp (ms) the sender stamped. */
   ts: number;
+  /**
+   * Set when the signature was verified against a key EMBEDDED in the envelope
+   * (first contact, TOFU) rather than one we already held — the caller must
+   * pin it on the new contact. Absent for messages from known contacts.
+   */
+  tofuSigningKeyB64?: string;
 }
 
 interface SealedInner {
@@ -56,6 +62,14 @@ interface SealedInner {
   from: string;
   payload: string;
   ts: number;
+  /**
+   * Federation F3b — FIRST-CONTACT bootstrap: the sender's Ed25519 signing
+   * public key, base64. Present only on the first message to someone who
+   * cannot know our key yet (a contact on another relay reached from a link).
+   * The opener uses it ONLY when `resolveSigningKey` has nothing for `from`
+   * (trust-on-first-use, pinned afterwards) — never to override a known key.
+   */
+  spk?: string;
 }
 
 /**
@@ -68,11 +82,14 @@ export function sealEnvelope(
   senderSigningSecretKey: Uint8Array,
   payload: string,
   nowMs: number,
+  /** First contact (F3b): embed our signing public key so the recipient can verify. */
+  senderSigningPublicKeyForFirstContact?: Uint8Array,
 ): SealedWire {
   if (recipientBoxPublicKey.length !== nacl.box.publicKeyLength) {
     throw new Error('sealEnvelope: invalid recipient public key length');
   }
   const inner: SealedInner = { v: SEALED_SENDER_VERSION, from: senderAegisId, payload, ts: nowMs };
+  if (senderSigningPublicKeyForFirstContact) inner.spk = encodeBase64(senderSigningPublicKeyForFirstContact);
   const innerBytes = new TextEncoder().encode(JSON.stringify(inner));
 
   // Authenticate the sender to the RECIPIENT (not the relay) via Ed25519.
@@ -112,6 +129,12 @@ export function openEnvelope(
   myBoxSecretKey: Uint8Array,
   resolveSigningKey: (from: string) => Uint8Array | null,
   nowMs: number,
+  /**
+   * F3b: accept an envelope from an UNKNOWN sender when it embeds its signing
+   * key (`spk`). Off by default — only the first-contact path opts in, and only
+   * when the sender is unknown; a known contact's pinned key always wins.
+   */
+  opts: { allowFirstContact?: boolean } = {},
 ): OpenedEnvelope | null {
   let ciphertext: Uint8Array;
   let nonce: Uint8Array;
@@ -160,10 +183,19 @@ export function openEnvelope(
   if (Math.abs(nowMs - inner.ts) > SEALED_TS_SKEW_MS) return null;
 
   // Authenticate the sender: the signature MUST verify against the signing key
-  // we already hold for the claimed `from`. Unknown sender → reject.
-  const signingPub = resolveSigningKey(inner.from);
+  // we already hold for the claimed `from`. Unknown sender → reject, unless the
+  // caller allowed first contact AND the envelope embeds a key (TOFU; the
+  // caller then binds it to the identity via the X3DH init + ID<->key check).
+  let signingPub = resolveSigningKey(inner.from);
+  let tofu: string | undefined;
+  if (!signingPub && opts.allowFirstContact && typeof inner.spk === 'string') {
+    try { signingPub = decodeBase64(inner.spk); } catch { return null; }
+    tofu = inner.spk;
+  }
   if (!signingPub || signingPub.length !== nacl.sign.publicKeyLength) return null;
   if (!nacl.sign.detached.verify(innerBytes, sig, signingPub)) return null;
 
-  return { from: inner.from, payload: inner.payload, ts: inner.ts };
+  const opened: OpenedEnvelope = { from: inner.from, payload: inner.payload, ts: inner.ts };
+  if (tofu) opened.tofuSigningKeyB64 = tofu;
+  return opened;
 }

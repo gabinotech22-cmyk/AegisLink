@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { canonicalRelay } from '../net/officialRelay';
+import { setContactMailboxRoot } from '../crypto/mailboxStore';
 import type { RelayRef } from '../net/relayRef';
 import { logger } from '../utils/logger';
 import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, pinContact as dbPinContact, type StoredContact } from '../db/local';
@@ -59,7 +60,9 @@ interface ContactsState {
     publicKeyB64: string,
     displayName?: string,
     /** Relay named by a v2 link; null/undefined = official (federation F1). */
-    relay?: RelayRef | null
+    relay?: RelayRef | null,
+    /** Mailbox root carried by a v2 link (F3b): lets us write the first message. */
+    mailboxRootB64?: string | null
   ) => Promise<AddResult>;
   markVerified: (aegisId: string, verified: boolean) => Promise<void>;
   confirmKeyChange: (aegisId: string, newPublicKeyB64: string) => Promise<StoredContact | null>;
@@ -180,7 +183,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
   },
 
-  async addFromQR(aegisId, publicKeyB64, displayName, relay) {
+  async addFromQR(aegisId, publicKeyB64, displayName, relay, mailboxRootB64) {
     set({ error: null });
 
     if (isSelfAegisId(aegisId)) {
@@ -229,6 +232,11 @@ export const useContacts = create<ContactsState>((set, get) => ({
       relayOnion: canonicalRelay(relay)?.onion ?? null,
     };
     await saveContact(contact);
+    // F3b: the v2 link carries their mailbox root — persist it so the very first
+    // message can be addressed to their mailbox on their relay.
+    if (mailboxRootB64) {
+      try { await setContactMailboxRoot(aegisId, mailboxRootB64); } catch { /* non-fatal: profile_update re-sends it */ }
+    }
     set({ contacts: [contact, ...get().contacts] });
 
     // Parallel MITM check against the directory: if the server publishes a

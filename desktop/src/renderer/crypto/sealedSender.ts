@@ -35,6 +35,8 @@ export interface OpenedEnvelope {
   from: string;
   payload: string;
   ts: number;
+  /** F3b: set when verified against a key EMBEDDED in the envelope (first contact, TOFU). */
+  tofuSigningKeyB64?: string;
 }
 
 interface SealedInner {
@@ -42,6 +44,8 @@ interface SealedInner {
   from: string;
   payload: string;
   ts: number;
+  /** F3b first-contact: sender's Ed25519 signing public key (base64). Parity with mobile. */
+  spk?: string;
 }
 
 export function sealEnvelope(
@@ -50,11 +54,14 @@ export function sealEnvelope(
   senderSigningSecretKey: Uint8Array,
   payload: string,
   nowMs: number,
+  /** First contact (F3b): embed our signing public key so the recipient can verify. */
+  senderSigningPublicKeyForFirstContact?: Uint8Array,
 ): SealedWire {
   if (recipientBoxPublicKey.length !== nacl.box.publicKeyLength) {
     throw new Error('sealEnvelope: invalid recipient public key length');
   }
   const inner: SealedInner = { v: SEALED_SENDER_VERSION, from: senderAegisId, payload, ts: nowMs };
+  if (senderSigningPublicKeyForFirstContact) inner.spk = encodeBase64(senderSigningPublicKeyForFirstContact);
   const innerBytes = new TextEncoder().encode(JSON.stringify(inner));
 
   const sig = nacl.sign.detached(innerBytes, senderSigningSecretKey);
@@ -82,6 +89,8 @@ export function openEnvelope(
   myBoxSecretKey: Uint8Array,
   resolveSigningKey: (from: string) => Uint8Array | null,
   nowMs: number,
+  /** F3b: accept an unknown sender that embeds its signing key (TOFU) — first-contact path only. */
+  opts: { allowFirstContact?: boolean } = {},
 ): OpenedEnvelope | null {
   let ciphertext: Uint8Array;
   let nonce: Uint8Array;
@@ -128,9 +137,16 @@ export function openEnvelope(
 
   if (Math.abs(nowMs - inner.ts) > SEALED_TS_SKEW_MS) return null;
 
-  const signingPub = resolveSigningKey(inner.from);
+  let signingPub = resolveSigningKey(inner.from);
+  let tofu: string | undefined;
+  if (!signingPub && opts.allowFirstContact && typeof inner.spk === 'string') {
+    try { signingPub = decodeBase64(inner.spk); } catch { return null; }
+    tofu = inner.spk;
+  }
   if (!signingPub || signingPub.length !== nacl.sign.publicKeyLength) return null;
   if (!nacl.sign.detached.verify(innerBytes, sig, signingPub)) return null;
 
-  return { from: inner.from, payload: inner.payload, ts: inner.ts };
+  const opened: OpenedEnvelope = { from: inner.from, payload: inner.payload, ts: inner.ts };
+  if (tofu) opened.tofuSigningKeyB64 = tofu;
+  return opened;
 }

@@ -43,7 +43,16 @@ interface InnerPayload {
   from: string;
   ratchet: InnerRatchet;
   x3dh?: Record<string, unknown>;
+  /** Federation F3b: first-contact bootstrap block (see FirstContactBlock). */
+  fc?: FirstContactBlock;
   [key: string]: unknown;
+}
+
+/** Federation F3b — parity with mobile/src/crypto/messaging.ts FirstContactBlock. */
+export interface FirstContactBlock {
+  ik: string;
+  relay: string | null;
+  root: string;
 }
 
 const PROTOCOL_VERSION = 2;
@@ -159,9 +168,9 @@ export function tryDecryptMessage(
 // ─── Sealed-sender v2 (Phase 1) ──────────────────────────────────────────────
 // Byte-for-byte parity with mobile/src/crypto/messaging.ts. Same Double Ratchet
 // inner; OUTER envelope is the per-message ephemeral sealed-sender box
-// (crypto/sealedSender.ts) instead of the legacy static-key nacl.box. v2 is for
-// ESTABLISHED sessions only (never carries x3dhInit). See
-// docs/SEALED-SENDER-ARCHITECTURE.md §3.
+// (crypto/sealedSender.ts) instead of the legacy static-key nacl.box. Same relay:
+// ESTABLISHED sessions only. Across relays (federation F3b) v2 may also carry
+// the X3DH init + a first-contact block. See docs/SEALED-SENDER-ARCHITECTURE.md §3.
 
 export function encryptMessageV2(
   plaintext: string,
@@ -170,6 +179,8 @@ export function encryptMessageV2(
   senderSigningSecretKey: Uint8Array,
   ratchetState: RatchetState,
   nowMs: number,
+  /** F3b: bootstrap a session across relays — includes x3dhInit + fc + spk. */
+  firstContact?: { block: FirstContactBlock; senderSigningPublicKey: Uint8Array },
 ): { wire: SealedWire; newState: RatchetState } {
   const payloadBytes = decodeUTF8(plaintext);
   const ratchetOut = ratchetEncrypt(ratchetState, payloadBytes);
@@ -188,6 +199,11 @@ export function encryptMessageV2(
     },
   };
 
+  if (firstContact) {
+    if (ratchetState.x3dhInit) innerPayload.x3dh = ratchetState.x3dhInit;
+    innerPayload.fc = firstContact.block;
+  }
+
   const innerBytes = stripAndPad(innerPayload);
   const wire = sealEnvelope(
     recipientPublicKey,
@@ -195,6 +211,7 @@ export function encryptMessageV2(
     senderSigningSecretKey,
     encodeBase64(innerBytes),
     nowMs,
+    firstContact?.senderSigningPublicKey,
   );
 
   const newState = { ...ratchetState };
@@ -207,8 +224,10 @@ export function openEnvelopeV2(
   myBoxSecretKey: Uint8Array,
   resolveSigningKey: (from: string) => Uint8Array | null,
   nowMs: number,
-): InnerPayload | null {
-  const opened = openSealedEnvelope(wire, myBoxSecretKey, resolveSigningKey, nowMs);
+  /** F3b: accept a first-contact envelope from an unknown sender (TOFU). */
+  opts: { allowFirstContact?: boolean } = {},
+): (InnerPayload & { tofuSigningKeyB64?: string }) | null {
+  const opened = openSealedEnvelope(wire, myBoxSecretKey, resolveSigningKey, nowMs, opts);
   if (!opened) return null;
   let parsed: InnerPayload | null;
   try {
@@ -219,6 +238,12 @@ export function openEnvelopeV2(
   if (!parsed || parsed.v !== PROTOCOL_VERSION) return null;
   if (typeof parsed.from !== 'string' || !parsed.ratchet) return null;
   if (parsed.from !== opened.from) return null;
+  if (opened.tofuSigningKeyB64) {
+    // TOFU is acceptable ONLY as a bootstrap: x3dh init + well-formed fc block.
+    const fc = parsed.fc;
+    if (!parsed.x3dh || !fc || typeof fc.ik !== 'string' || typeof fc.root !== 'string' || (fc.relay !== null && typeof fc.relay !== 'string')) return null;
+    return { ...parsed, tofuSigningKeyB64: opened.tofuSigningKeyB64 };
+  }
   return parsed;
 }
 

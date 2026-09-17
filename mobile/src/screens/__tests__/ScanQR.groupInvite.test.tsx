@@ -170,7 +170,7 @@ describe('ScanQRScreen — group invite routing', () => {
     // waitFor polls until the call lands instead of racing it.
     await waitFor(() => {
       // Federation F1: a v1 QR carries no relay (null = official).
-      expect(mockAddFromQR).toHaveBeenCalledWith(aegisId, key, undefined, null);
+      expect(mockAddFromQR).toHaveBeenCalledWith(aegisId, key, undefined, null, null);
     });
     expect(onGroupInvite).not.toHaveBeenCalled();
   });
