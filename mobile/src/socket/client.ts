@@ -10,6 +10,8 @@ import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRa
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery, fetchMailboxOverTor } from './mailboxSocket';
+import { isForeign, relayFor } from '../net/homeRelay';
+import { sendViaForeignRelay, foreignRelayHttp, closeForeignRelays } from '../net/relayPool';
 import { isEnvelopeAlreadyPersisted, markEnvelopePersisted } from './envelopeDedupe';
 import { startMailboxPushSubscription, stopMailboxPushSubscription } from '../notifications/mailboxPushSubscription';
 import { startCallWakeService, stopCallWakeService } from '../webrtc/callWakeService';
@@ -1737,13 +1739,26 @@ async function getOrCreateSessionLocked(contactAegisId: string, contactPublicKey
   if (!socket) throw new Error('Cannot fetch prekeys offline');
   type PreKeyFetchAck = { ok: true; bundle: PreKeyBundle } | { ok: false; error?: string };
 
-  // Retry up to 3 times with 2 s delay to handle the race where the recipient
-  // is connecting simultaneously and uploads prekeys just after our first attempt.
-  const MAX_PREKEY_RETRIES = 3;
-  const PREKEY_RETRY_DELAY_MS = 2000;
-  let bundle!: PreKeyBundle;
-  for (let attempt = 1; attempt <= MAX_PREKEY_RETRIES; attempt++) {
-    const result = await new Promise<{ ok: true; bundle: PreKeyBundle } | { ok: false; msg: string }>((res) => {
+  // Federation F2: a contact on another relay publishes its bundle THERE. Fetch it
+  // over Tor from that relay's HTTP API (GET /prekeys/bundle/:id — same bundle
+  // the socket ack carries), never through our home relay's control socket.
+  const foreignContact = useContacts.getState().contacts.find((c) => c.aegisId === contactAegisId);
+  const foreignRelay = foreignContact && isForeign(foreignContact) ? relayFor(foreignContact) : null;
+  const fetchBundle = async (): Promise<{ ok: true; bundle: PreKeyBundle } | { ok: false; msg: string }> => {
+    if (foreignRelay) {
+      const res = await foreignRelayHttp(foreignRelay, `/prekeys/bundle/${encodeURIComponent(contactAegisId)}`);
+      if (!res) return { ok: false, msg: 'foreign_relay_unreachable' };
+      if (res.status === 404) return { ok: false, msg: 'Contact is not yet available on this server. Ask them to open AegisLink and try again.' };
+      if (res.status !== 200) return { ok: false, msg: `prekeys_fetch_failed:${res.status}` };
+      try {
+        const parsed = JSON.parse(res.body) as { bundle?: PreKeyBundle | null };
+        if (!parsed.bundle) return { ok: false, msg: 'Contact is not yet available on this server. Ask them to open AegisLink and try again.' };
+        return { ok: true, bundle: parsed.bundle };
+      } catch {
+        return { ok: false, msg: 'prekeys_fetch_failed:malformed' };
+      }
+    }
+    return new Promise((res) => {
       socket!.emit('prekeys:fetch', { aegisId: contactAegisId }, (ack: PreKeyFetchAck) => {
         if (ack?.ok) {
           res({ ok: true, bundle: ack.bundle });
@@ -1756,6 +1771,15 @@ async function getOrCreateSessionLocked(contactAegisId: string, contactPublicKey
         }
       });
     });
+  };
+
+  // Retry up to 3 times with 2 s delay to handle the race where the recipient
+  // is connecting simultaneously and uploads prekeys just after our first attempt.
+  const MAX_PREKEY_RETRIES = 3;
+  const PREKEY_RETRY_DELAY_MS = 2000;
+  let bundle!: PreKeyBundle;
+  for (let attempt = 1; attempt <= MAX_PREKEY_RETRIES; attempt++) {
+    const result = await fetchBundle();
     if (result.ok) {
       bundle = result.bundle;
       break;
@@ -4158,6 +4182,8 @@ export function disconnect(): void {
   // Fase 4: tear down the dedicated mailbox delivery socket alongside the
   // aegisId socket (no-op when mailbox mode was never enabled).
   disconnectMailboxSocket();
+  // Federation F2: drop every disposable mailbox socket on other relays too.
+  closeForeignRelays();
   // Slice 2b.2: stop the ntfy wake subscription too (logout / panic / switch).
   stopMailboxPushSubscription();
   // Call-wake FGS is tied to an active session — tear it down on full disconnect
@@ -4347,6 +4373,56 @@ export async function sendMessage(opts: {
   // preferred path whenever both peers are online; the fallback only fires when
   // mailbox delivery cannot be confirmed. Also falls back when not eligible: no
   // recipient root yet, or our own mailbox socket isn't authed.
+  // ── Federation F2: a contact on ANOTHER relay ──────────────────────────────
+  // There is no aegisId transport to them at all (their identity lives on a
+  // relay we never authenticate with), so the sealed v2 wire goes through the
+  // relay pool: a disposable mailbox socket on THEIR relay, addressed to their
+  // rotating mailbox id. Here a `queued` ack IS terminal: the relay holds the
+  // row until their mailbox acks it (at-least-once) and their own relay wakes
+  // them (ntfy) — exactly the SimpleX model. A transport failure leaves the job
+  // in the outbox for the scheduler.
+  const recipientContact = useContacts.getState().contacts.find((c) => c.aegisId === opts.recipientAegisId);
+  if (recipientContact && isForeign(recipientContact)) {
+    const relay = relayFor(recipientContact);
+    if (emitEvent !== 'envelope:v2' || !relay) {
+      // v1 (no sealed wire) cannot cross relays: keep the job parked for retry
+      // once the contact's profile (delivery token + mailbox root) has arrived.
+      try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
+      armOutboxScheduler(opts.identity);
+      throw new Error('foreign_contact_needs_sealed_v2');
+    }
+    const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
+    if (!mboxTo) {
+      try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
+      armOutboxScheduler(opts.identity);
+      throw new Error('foreign_contact_mailbox_root_missing');
+    }
+    const ack = await sendViaForeignRelay(relay, {
+      id,
+      to: mboxTo,
+      ciphertext: emitPayload.ciphertext as string,
+      nonce: emitPayload.nonce as string,
+      epk: emitPayload.epk as string,
+      ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
+    });
+    if (!ack || !ack.ok) {
+      if (__DEV__) logger.warn('[socket] foreign relay send failed, job retained in outbox:', ack?.error ?? 'transport');
+      try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
+      armOutboxScheduler(opts.identity);
+      throw new Error(ack?.error ?? 'foreign_relay_unreachable');
+    }
+    try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
+    try { await useMessages.getState().updateDelivery(opts.recipientAegisId, id, 'sent'); } catch { /* non-fatal */ }
+    if (!SELF_COPY_EXCLUDED_TYPES.has(msgType)) {
+      const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
+      void sendSelfCopy(socket!, opts.identity, opts.recipientAegisId, id, payload, {
+        viewOnce: msgType === 'view_once',
+        ephemeralSeconds: selfEphemeralSeconds,
+      });
+    }
+    return;
+  }
+
   if (emitEvent === 'envelope:v2' && MAILBOX_ENABLED && isMailboxAuthed()) {
     const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
     if (mboxTo) {

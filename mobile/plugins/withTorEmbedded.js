@@ -115,6 +115,8 @@ import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import org.torproject.jni.TorService
@@ -426,6 +428,97 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
       promise.resolve(true)
     } catch (e: Exception) {
       promise.reject("E_HTTP_UNSUBSCRIBE", e)
+    }
+  }
+
+  // ── Slice 6 + federation F2: one-shot HTTP over Tor ─────────────────────────
+  // Declared on the JS side (net/tor.ts) since #391 but never implemented here,
+  // which left the stateless mailbox drain a silent no-op on device. The
+  // federation pool needs it for prekeys / identity / relay-info on foreign
+  // relays, so it lands now. Resolves a JSON string {"status":<int>,"body":"…"}.
+  // Never rejects on an HTTP error status (the caller inspects status); only
+  // a transport failure rejects (JS maps it to null, fail-soft).
+  @ReactMethod
+  fun httpRequest(url: String, method: String, headersJson: String, body: String, promise: Promise) {
+    try {
+      val port = socksPort()
+      if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
+      val client = torOkHttp(port).newBuilder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+      val builder = Request.Builder().url(url)
+      val headers = JSONObject(headersJson.ifBlank { "{}" })
+      var contentType = "application/json; charset=utf-8"
+      for (key in headers.keys()) {
+        val v = headers.optString(key)
+        if (key.equals("content-type", ignoreCase = true)) contentType = v
+        builder.header(key, v)
+      }
+      if (method.equals("POST", ignoreCase = true)) {
+        builder.post(body.toRequestBody(contentType.toMediaTypeOrNull()))
+      } else {
+        builder.get()
+      }
+      client.newCall(builder.build()).enqueue(object : Callback {
+        override fun onFailure(c: Call, e: IOException) {
+          promise.reject("E_HTTP_REQUEST", e)
+        }
+        override fun onResponse(c: Call, response: Response) {
+          response.use { resp ->
+            // Cap the body we hand to JS — control-plane responses are small
+            // (bundles, identity records, relay info); blobs use httpDownload.
+            val text = resp.peekBody(1024L * 1024L).string()
+            val out = JSONObject()
+            out.put("status", resp.code)
+            out.put("body", text)
+            promise.resolve(out.toString())
+          }
+        }
+      })
+    } catch (e: Exception) {
+      promise.reject("E_HTTP_REQUEST", e)
+    }
+  }
+
+  // Federation F2: download a binary blob over Tor straight to a file (E2EE
+  // attachments hosted on a contact's relay). Resolves {"status":<int>} —
+  // the file is written only on 200 and removed on any other status.
+  @ReactMethod
+  fun httpDownload(url: String, destPath: String, headersJson: String, promise: Promise) {
+    try {
+      val port = socksPort()
+      if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
+      val client = torOkHttp(port).newBuilder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
+      val builder = Request.Builder().url(url).get()
+      val headers = JSONObject(headersJson.ifBlank { "{}" })
+      for (key in headers.keys()) builder.header(key, headers.optString(key))
+      val dest = java.io.File(destPath.removePrefix("file://"))
+      client.newCall(builder.build()).enqueue(object : Callback {
+        override fun onFailure(c: Call, e: IOException) {
+          promise.reject("E_HTTP_DOWNLOAD", e)
+        }
+        override fun onResponse(c: Call, response: Response) {
+          response.use { resp ->
+            if (resp.code == 200) {
+              dest.parentFile?.mkdirs()
+              resp.body?.byteStream()?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+              }
+            } else {
+              dest.delete()
+            }
+            val out = JSONObject()
+            out.put("status", resp.code)
+            promise.resolve(out.toString())
+          }
+        }
+      })
+    } catch (e: Exception) {
+      promise.reject("E_HTTP_DOWNLOAD", e)
     }
   }
 

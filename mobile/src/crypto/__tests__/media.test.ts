@@ -36,6 +36,18 @@ jest.mock('tweetnacl-util', () => ({
   decodeBase64: jest.fn((s: string) => Buffer.from(s, 'base64')),
 }));
 
+// ── federation F2: Tor download + home relay ──────────────────────────────────
+const mockTorHttpDownload = jest.fn();
+const mockHomeRelay = { current: null as { onion: string } | null };
+jest.mock('../../net/tor', () => ({
+  isTorAvailable: () => true,
+  startTor: jest.fn().mockResolvedValue({ state: 'on', socksPort: 9050 }),
+  torHttpDownload: (...args: unknown[]) => mockTorHttpDownload(...args),
+}));
+jest.mock('../../net/homeRelay', () => ({
+  getHomeRelay: () => mockHomeRelay.current,
+}));
+
 // ── crypto/registration (PoW helpers) ─────────────────────────────────────────
 const mockFetchPowChallenge = jest.fn();
 const mockSolvePoW = jest.fn();
@@ -89,6 +101,8 @@ const {
   persistEncryptedBlob,
   resolveMediaDetailed,
   downloadAndDecryptMedia,
+  parseBlobUri,
+  formatBlobUri,
 } = require('../media') as typeof import('../media');
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -245,6 +259,57 @@ describe('encryptAndUploadMedia', () => {
 });
 
 // ── B-7: expired-attachment handling (graceful 404) ──────────────────────────
+describe('federation F2 — blob v3 (host-qualified attachments)', () => {
+  const ONION = 'pg6mmjiyjmcrsslvykfwnntlaru7p5svn6y2ymmju6nubxndf4pscryd.onion';
+
+  beforeEach(() => {
+    mockHomeRelay.current = null;
+    mockTorHttpDownload.mockReset();
+    mockGetInfoAsync.mockImplementation((uri: string) =>
+      Promise.resolve({ exists: typeof uri === 'string' && uri.endsWith('media/') }),
+    );
+    mockDeleteAsync.mockResolvedValue(undefined);
+  });
+
+  it('parses v1, v2 and v3 shapes; a v3 with a bad host is malformed, never "official"', () => {
+    expect(parseBlobUri('blob:id1:K:N')).toEqual({ id: 'id1', keyB64: 'K', nonceB64: 'N', token: '', host: null });
+    expect(parseBlobUri('blob:id1:K:N:T')).toEqual({ id: 'id1', keyB64: 'K', nonceB64: 'N', token: 'T', host: null });
+    expect(parseBlobUri(`blob:id1:K:N:T:${ONION}`)).toEqual({ id: 'id1', keyB64: 'K', nonceB64: 'N', token: 'T', host: ONION });
+    expect(parseBlobUri(`blob:id1:K:N:T:${ONION.toUpperCase()}`)?.host).toBe(ONION);
+    expect(parseBlobUri('blob:id1:K:N:T:evil.example.com')).toBeNull();
+    expect(parseBlobUri('blob:../x:K:N:T:' + ONION)).toBeNull();
+  });
+
+  it('formatBlobUri appends the host only for a non-official relay', () => {
+    expect(formatBlobUri('id', 'K', 'N', 'T', null)).toBe('blob:id:K:N:T');
+    expect(formatBlobUri('id', 'K', 'N', 'T', ONION)).toBe(`blob:id:K:N:T:${ONION}`);
+    expect(formatBlobUri('id', 'K', 'N', '', ONION)).toBe('blob:id:K:N'); // no token → legacy v1, host needs a token
+  });
+
+  it('an upload from a custom home relay returns a v3 URI; from the official relay a v2 one', async () => {
+    setupHappyPath();
+    expect(await encryptAndUploadMedia('file:///img.jpg', 'image/jpeg')).toMatch(/^blob:[^:]+:[^:]+:[^:]+:tok-123$/);
+    mockHomeRelay.current = { onion: ONION };
+    setupHappyPath();
+    expect(await encryptAndUploadMedia('file:///img.jpg', 'image/jpeg')).toBe(`blob:blob-id-001:AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=:AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB:tok-123:${ONION}`);
+  });
+
+  it('a v3 blob is fetched through Tor from ITS relay, never through the OS downloader', async () => {
+    mockTorHttpDownload.mockResolvedValue(200);
+    const state = await persistEncryptedBlob(`blob:bid-v3:AAAA:BBBB:CCCC:${ONION}`);
+    expect(state).toBe('ok');
+    expect(mockDownloadAsync).not.toHaveBeenCalled();
+    expect(mockTorHttpDownload).toHaveBeenCalledTimes(1);
+    expect(String(mockTorHttpDownload.mock.calls[0]![0])).toBe(`http://${ONION}/blob/download/bid-v3?t=CCCC`);
+  });
+
+  it('a v3 blob gone from its relay (404) reports expired without retrying', async () => {
+    mockTorHttpDownload.mockResolvedValue(404);
+    expect(await persistEncryptedBlob(`blob:bid-v3b:AAAA:BBBB:CCCC:${ONION}`)).toBe('expired');
+    expect(mockTorHttpDownload).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('B-7 — expired attachment (server blob TTL elapsed)', () => {
   const BLOB = 'blob:bid-b7:AAAA:BBBB:CCCC';
 

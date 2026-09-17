@@ -632,6 +632,22 @@ a v1 payload with an extra segment is rejected. While the `FEDERATION` flag is
 off, a v2 link naming a non-official relay is recognised but refused with an
 "update AegisLink" message, so no client ever stores a contact it cannot reach.
 
+**Reaching a contact on another relay (F2).** There is no relay-to-relay
+protocol. The sender opens a mailbox socket on the contact's relay with a
+*disposable* mailbox — a random root held only in memory for the session,
+never persisted, never a recipient of anything — proves possession of it
+(§9, mailbox handshake) and submits the same sealed v2 wire addressed to the
+contact's rotating mailbox id. The foreign relay learns two opaque ids and
+nothing else; the sender's identity is never presented there. For a foreign
+contact a `queued` ack is terminal (at-least-once: the relay keeps the row
+until the recipient's mailbox acks it), because no aegisId transport to them
+exists. Prekey bundles for the first X3DH come from `GET /prekeys/bundle/:id`
+on the contact's relay over Tor; attachments carry their hosting relay
+(`blob:<id>:<key>:<nonce>:<token>:<onion>`, v3) only when that relay is not the
+official one, and are fetched through Tor. `GET /relay/info` publishes a
+relay's static capabilities (`protocol`, `features`, `minClient`,
+`maxBlobBytes`) so a client can vet a relay before using it.
+
 **Limitation (product decision pending, see `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` §3.1):**
 because the desktop holds the identity secrets, relay-side revocation blocks a
 *cooperating* client, not an adversary who already extracted the keys. True

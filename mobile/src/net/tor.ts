@@ -42,6 +42,10 @@ interface AegisTorNative {
   // torOkHttp(SOCKS) client the sio/httpSubscribe bridges already use — a request
   // through Tor's local SOCKS5 to the relay's .onion. Native impl: withTorEmbedded*.js.
   httpRequest(url: string, method: string, headersJson: string, body: string): Promise<string>;
+  // Federation F2: binary download over Tor straight to a file (E2EE blobs hosted
+  // on a contact's relay). Resolves a JSON string `{"status":<int>}`; the file
+  // exists only on 200.
+  httpDownload(url: string, destPath: string, headersJson: string): Promise<string>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -227,6 +231,39 @@ export async function torHttpRequest(
     return { status: parsed.status, body: typeof parsed.body === 'string' ? parsed.body : '' };
   } catch (e) {
     if (__DEV__) logger.warn('[tor] httpRequest failed:', (e as Error).message);
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Download a binary resource over Tor to `destPath` (federation F2: attachments
+ * hosted on a contact's relay, which the OS downloader cannot reach — it has no
+ * route to a .onion). Returns the HTTP status, or null (never throws) when the
+ * native module is absent or the transfer failed at the transport level.
+ */
+const TOR_DOWNLOAD_TIMEOUT_MS = 90_000;
+
+export async function torHttpDownload(
+  url: string,
+  destPath: string,
+  headers: Record<string, string> = {},
+  timeoutMs = TOR_DOWNLOAD_TIMEOUT_MS,
+): Promise<number | null> {
+  if (!Native) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const raw = await Promise.race([
+      Native.httpDownload(url, destPath, JSON.stringify(headers)),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('tor download timeout')), timeoutMs);
+      }),
+    ]);
+    const parsed = JSON.parse(raw) as { status?: unknown };
+    return typeof parsed.status === 'number' ? parsed.status : null;
+  } catch (e) {
+    if (__DEV__) logger.warn('[tor] httpDownload failed:', (e as Error).message);
     return null;
   } finally {
     if (timer) clearTimeout(timer);

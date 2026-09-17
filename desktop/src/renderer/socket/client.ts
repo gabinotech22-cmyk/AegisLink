@@ -22,6 +22,8 @@ import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRa
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery } from './mailboxSocket';
+import { isForeign, relayFor } from '../net/homeRelay';
+import { sendViaForeignRelay, foreignRelayHttp, closeForeignRelays } from '../net/relayPool';
 import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { spkRotationDecision, spkPruneTargetKeyId } from './spkRotation';
@@ -1014,12 +1016,26 @@ async function getOrCreateSessionLocked(
   }
 
   if (!socket) throw new Error('Cannot fetch prekeys offline');
-  const bundle = await new Promise<PreKeyBundle>((resolve, reject) => {
-    socket!.emit('prekeys:fetch', { aegisId: contactAegisId }, (ack: any) => {
-      if (!ack?.ok) reject(new Error(ack?.error));
-      else resolve(ack.bundle);
-    });
-  });
+  // Federation F2 (parity with mobile): a contact on another relay publishes its
+  // bundle THERE — fetch it over Tor from that relay's HTTP API.
+  const foreignContact = useContacts.getState().contacts.find((c) => c.aegisId === contactAegisId);
+  const foreignRelay = foreignContact && isForeign(foreignContact) ? relayFor(foreignContact) : null;
+  const bundle = foreignRelay
+    ? await (async (): Promise<PreKeyBundle> => {
+        const res = await foreignRelayHttp(foreignRelay, `/prekeys/bundle/${encodeURIComponent(contactAegisId)}`);
+        if (!res) throw new Error('foreign_relay_unreachable');
+        if (res.status === 404) throw new Error('not_found');
+        if (res.status !== 200) throw new Error(`prekeys_fetch_failed:${res.status}`);
+        const parsed = JSON.parse(res.body) as { bundle?: PreKeyBundle | null };
+        if (!parsed.bundle) throw new Error('not_found');
+        return parsed.bundle;
+      })()
+    : await new Promise<PreKeyBundle>((resolve, reject) => {
+        socket!.emit('prekeys:fetch', { aegisId: contactAegisId }, (ack: any) => {
+          if (!ack?.ok) reject(new Error(ack?.error));
+          else resolve(ack.bundle);
+        });
+      });
 
   const contact = useContacts.getState().contacts.find((c) => c.aegisId === contactAegisId);
   if (!contact) throw new Error('Contact not found');
@@ -2296,6 +2312,8 @@ export function disconnect(): void {
   // Fase 4: tear down the dedicated mailbox delivery socket alongside the
   // aegisId control socket (no-op if it was never opened).
   disconnectMailboxSocket();
+  // Federation F2: drop every disposable mailbox socket on other relays too.
+  closeForeignRelays();
   // Cancel pending recovery fallback flushes — they would fire over a dead
   // socket and leak timer handles.
   for (const t of recoveryFallbackTimers.values()) clearTimeout(t);
@@ -2430,6 +2448,34 @@ export async function sendMessage(opts: {
   // preferred path whenever both peers are online; the fallback only fires when
   // mailbox delivery cannot be confirmed. Also falls back when not eligible: no
   // recipient root yet, or our own mailbox socket isn't authed. Parity: mobile.
+  // ── Federation F2: a contact on ANOTHER relay (parity with mobile) ─────────
+  // No aegisId transport exists to them; the sealed v2 wire goes through the
+  // relay pool (disposable mailbox on THEIR relay). `queued` is terminal there:
+  // their relay holds the row until their mailbox acks it. A failure throws so
+  // the caller's retry path handles it.
+  const recipientContact = useContacts.getState().contacts.find((c) => c.aegisId === opts.recipientAegisId);
+  if (recipientContact && isForeign(recipientContact)) {
+    const relay = relayFor(recipientContact);
+    if (emitEvent !== 'envelope:v2' || !relay) throw new Error('foreign_contact_needs_sealed_v2');
+    const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
+    if (!mboxTo) throw new Error('foreign_contact_mailbox_root_missing');
+    const ack = await sendViaForeignRelay(relay, {
+      id,
+      to: mboxTo,
+      ciphertext: emitPayload.ciphertext as string,
+      nonce: emitPayload.nonce as string,
+      epk: emitPayload.epk as string,
+      ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
+    });
+    if (!ack || !ack.ok) throw new Error(ack?.error ?? 'foreign_relay_unreachable');
+    const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
+    void sendSelfCopy(socket!, opts.identity, opts.recipientAegisId, id, payload, {
+      viewOnce: msgType === 'view_once',
+      ephemeralSeconds: selfEphemeralSeconds,
+    });
+    return;
+  }
+
   if (emitEvent === 'envelope:v2' && MAILBOX_ENABLED && isMailboxAuthed()) {
     const mboxTo = await getContactCurrentMailboxId(opts.recipientAegisId, Date.now());
     if (mboxTo) {

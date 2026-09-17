@@ -12,6 +12,7 @@ import web3Routes from './routes/web3.js';
 import prekeysRoutes from './routes/prekeys.js';
 import blobRoutes from './routes/blob.js';
 import backupRoutes from './routes/backup.js';
+import relayInfoRoutes from './routes/relayInfo.js';
 import { globalJsonParser } from './http/jsonBody.js';
 import mailboxRoutes from './routes/mailbox.js';
 import linksRoutes from './routes/links.js';
@@ -150,6 +151,7 @@ app.use('/prekeys', prekeysRoutes);
 app.use('/blob', blobRoutes);
 app.use('/backup', backupRoutes);
 app.use('/mailbox', mailboxRoutes);
+app.use('/relay', relayInfoRoutes); // federation F2: capabilities a client checks before using a relay
 app.use('/', linksRoutes); // /.well-known/assetlinks.json + /g + /a landings
 app.use('/turn', turnRoutes);
 app.use('/proxy/gif', proxyGifRoutes);

@@ -162,7 +162,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
   insets: { top: number; bottom: number; left: number; right: number };
   onBack: () => void;
   addFromQR: (aegisId: string, publicKeyB64: string, displayName?: string, relay?: RelayRef | null) => Promise<AddResult>;
-  addByAegisId: (aegisId: string, displayName?: string) => Promise<StoredContact>;
+  addByAegisId: (aegisId: string, displayName?: string, opts?: { relay?: RelayRef | null }) => Promise<StoredContact>;
   onAdded: (contact: StoredContact) => void;
 }) {
   const { t: i18nT } = useTranslation();
@@ -570,7 +570,9 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
     if (!idValid) return;
     setSubmitting(true);
     try {
-      const contact = await addByAegisId(trimmedId, name);
+      // Federation: a typed `ID@onion` (only reachable with FEDERATION on — see
+      // idValid) is looked up on that relay and stored with it.
+      const contact = await addByAegisId(trimmedId, name, typedAddress?.relay ? { relay: typedAddress.relay } : undefined);
       if (identity) {
         const { sendProfileTo } = require('../socket/client') as typeof import('../socket/client');
         void sendProfileTo(contact, identity);

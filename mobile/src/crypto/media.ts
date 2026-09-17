@@ -2,6 +2,10 @@ import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import * as FileSystem from 'expo-file-system/legacy';
 import { RELAY_URL as SERVER_URL } from '../config';
+import { normalizeOnion } from '../net/relayRef';
+import { relayBaseUrl } from '../net/relayPoolCore';
+import { getHomeRelay } from '../net/homeRelay';
+import { isTorAvailable, startTor, torHttpDownload } from '../net/tor';
 import { fetchPowChallengeAt, solvePoW } from './registration';
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
@@ -26,11 +30,15 @@ const encPathFor = (id: string): string => `${MEDIA_DIR}${id}.enc`;
 const decPathFor = (id: string, ext: string): string => `${FileSystem.cacheDirectory}dec_${id}.${ext}`;
 
 /**
- * Parse a `blob:` URI. Two on-wire shapes are accepted:
+ * Parse a `blob:` URI. Three on-wire shapes are accepted:
+ *   - v3 (federation): `blob:<id>:<key>:<nonce>:<token>:<onion>` — the relay that
+ *     HOSTS the blob (the sender's home relay) when it is not the official one
  *   - v2 (current): `blob:<id>:<key>:<nonce>:<token>` — token authorizes download
  *   - v1 (legacy):  `blob:<id>:<key>:<nonce>` — pre-C-1, no download token
  * base64 never contains ':', so positional splitting is unambiguous. Returns
- * null for non-blob or malformed URIs.
+ * null for non-blob or malformed URIs. A v3 host that is not a valid v3 onion
+ * makes the whole URI malformed — we never fall back to the official relay for
+ * a blob that was declared to live elsewhere.
  */
 // Server blob ids are `crypto.randomUUID()` (see server/src/routes/blob.ts). The id
 // is interpolated straight into on-device filesystem paths (`${MEDIA_DIR}${id}.enc`,
@@ -39,24 +47,62 @@ const decPathFor = (id: string, ext: string): string => `${FileSystem.cacheDirec
 // that isn't a plain id token. See security audit 2026-07 (M1, path traversal).
 const BLOB_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-function parseBlobUri(
-  mediaUri: string
-): { id: string; keyB64: string; nonceB64: string; token: string } | null {
+export interface ParsedBlobUri {
+  id: string;
+  keyB64: string;
+  nonceB64: string;
+  token: string;
+  /** Onion of the relay hosting the blob (v3); null = the official relay. */
+  host: string | null;
+}
+
+export function parseBlobUri(mediaUri: string): ParsedBlobUri | null {
   if (!mediaUri.startsWith('blob:')) return null;
   const parts = mediaUri.split(':');
+  if (parts.length === 6 && BLOB_ID_RE.test(parts[1])) {
+    const host = normalizeOnion(parts[5]);
+    if (!host) return null;
+    return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: parts[4], host };
+  }
   if (parts.length === 5 && BLOB_ID_RE.test(parts[1])) {
-    return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: parts[4] };
+    return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: parts[4], host: null };
   }
   if (parts.length === 4 && BLOB_ID_RE.test(parts[1])) {
-    return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: '' };
+    return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: '', host: null };
   }
   return null;
 }
 
+/**
+ * Format a blob URI for the wire. The host is appended (v3) ONLY when the blob
+ * lives on a relay other than the official one; otherwise the v2 shape every
+ * shipped client understands.
+ */
+export function formatBlobUri(id: string, keyB64: string, nonceB64: string, token: string, host: string | null): string {
+  const base = token ? `blob:${id}:${keyB64}:${nonceB64}:${token}` : `blob:${id}:${keyB64}:${nonceB64}`;
+  return host && token ? `${base}:${host}` : base;
+}
+
 /** Build the download URL, appending the authorization token when present (v2). */
-function downloadUrlFor(id: string, token: string): string {
-  const base = `${SERVER_URL}/blob/download/${id}`;
+function downloadUrlFor(id: string, token: string, host: string | null): string {
+  const base = `${host ? relayBaseUrl(host) : SERVER_URL}/blob/download/${id}`;
   return token ? `${base}?t=${encodeURIComponent(token)}` : base;
+}
+
+/**
+ * Fetch the ciphertext to `dest`. Official relay → the OS downloader (clearnet +
+ * pins, or Orbot). A blob hosted on another relay is only reachable through
+ * embedded Tor (a .onion has no route otherwise), so it goes through the native
+ * SOCKS download. Both resolve to an HTTP status (null = transport failure).
+ */
+async function fetchBlobTo(url: string, dest: string, host: string | null): Promise<number | null> {
+  if (host) {
+    if (!isTorAvailable()) return null;
+    try { await startTor(); } catch { return null; }
+    return torHttpDownload(url, dest);
+  }
+  const result = await FileSystem.downloadAsync(url, dest);
+  return result.status;
 }
 
 async function fileExists(uri: string): Promise<boolean> {
@@ -192,9 +238,11 @@ export async function encryptAndUploadMedia(fileUri: string, mimeType?: string):
   // 7. Return formatted E2EE uri. The download token (C-1) is appended as a 5th
   // component so it travels inside the E2EE envelope and never reaches the relay
   // out-of-band. Older relays that don't return a token degrade to the v1 shape.
+  // Federation F2: a blob uploaded to a non-official home relay carries that
+  // relay's onion (v3) so a contact on another relay knows where to fetch it.
   const keyB64 = encodeBase64(key);
   const nonceB64 = encodeBase64(nonce);
-  return token ? `blob:${id}:${keyB64}:${nonceB64}:${token}` : `blob:${id}:${keyB64}:${nonceB64}`;
+  return formatBlobUri(id, keyB64, nonceB64, token ?? '', getHomeRelay()?.onion ?? null);
 }
 
 /** Outcome of fetching a server blob into the local encrypted-at-rest store. */
@@ -212,20 +260,20 @@ export type BlobFetchState = 'ok' | 'expired' | 'unavailable';
 export async function persistEncryptedBlob(mediaUri: string): Promise<BlobFetchState> {
   const parsed = parseBlobUri(mediaUri);
   if (!parsed) return 'unavailable';
-  const { id, token } = parsed;
+  const { id, token, host } = parsed;
   await ensureMediaDir();
   if (await fileExists(encPathFor(id))) return 'ok'; // already persisted
-  const downloadUrl = downloadUrlFor(id, token);
+  const downloadUrl = downloadUrlFor(id, token, host);
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt]);
     try {
-      const result = await FileSystem.downloadAsync(downloadUrl, encPathFor(id));
-      if (result.status === 200) return 'ok';
+      const status = await fetchBlobTo(downloadUrl, encPathFor(id), host);
+      if (status === 200) return 'ok';
       await FileSystem.deleteAsync(encPathFor(id), { idempotent: true });
       // 404/410 = the server's 24h TTL elapsed; the blob is gone for good. Stop
       // retrying (it will never reappear) and report it as expired so the UI can
       // render "adjunto expirado" instead of an endless spinner.
-      if (result.status === 404 || result.status === 410) return 'expired';
+      if (status === 404 || status === 410) return 'expired';
     } catch { /* network error — retry */ }
   }
   return 'unavailable';
