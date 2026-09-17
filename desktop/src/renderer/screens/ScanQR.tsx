@@ -51,7 +51,7 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
         setBusy(false);
         return;
       }
-      const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64, undefined, parsed.relay);
+      const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64, undefined, parsed.relay, parsed.mailboxRootB64);
       if (outcome.kind === 'mitm_detected') {
         const accept = window.confirm(
           i18n.t('scanQR.keyChangedForThis', { v0: outcome.oldKey.slice(-8), v1: outcome.newKey.slice(-8) })

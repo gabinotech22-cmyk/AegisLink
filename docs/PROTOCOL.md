@@ -409,8 +409,11 @@ whose `from` is not a string, or which lacks a `ratchet` field.
 allow-list before encryption:
 
 ```
-ALLOWED_INNER_FIELDS = { v, from, senderPubB64, ratchet, x3dh, pad }
+ALLOWED_INNER_FIELDS = { v, from, senderPubB64, ratchet, x3dh, pad, selfCopy, deviceSync, fc }
 ```
+
+`selfCopy`/`deviceSync` serve the multi-device self-copy; `fc` is the federation
+first-contact block (§9.3) and appears only on the first sealed message across relays.
 
 Anything else a caller attaches is dropped, so accidental metadata cannot leak
 into the encrypted body. There are **no client timestamps or counters** in the
@@ -621,14 +624,22 @@ never written on the wire:
 
 | Form | Official relay | Custom relay |
 |---|---|---|
-| QR / deep link | `aegislink://v1/<id>/<pubkey>` | `aegislink://v2/<id>/<pubkey>/<onion>` |
-| https link | `…/a#v1/<id>/<pubkey>` | `…/a#v2/<id>/<pubkey>/<onion>` |
+| QR / deep link | `aegislink://v1/<id>/<pubkey>` | `aegislink://v2/<id>/<pubkey>/<onion>/<mailboxRoot>` |
+| https link | `…/a#v1/<id>/<pubkey>` | `…/a#v2/<id>/<pubkey>/<onion>/<mailboxRoot>` |
 | typed | `ABC-DEFG-HJKM` | `ABC-DEFG-HJKM@<onion>` |
+
+A v2 address also carries the owner's **mailbox root** (base64, 32 bytes): a
+stranger on another relay has no other way to derive the mailbox the very
+first message is written to (the SimpleX model — the address *is* the queue).
+Whoever holds the link can therefore address that mailbox sequence (spam, not
+read); the root is rotated on migration (F5). The typed `ID@onion` form has no
+root and resolves the mailbox root through the identity lookup on that relay.
 
 Parsing rules (identical on mobile and desktop, pinned by shared known-answer
 vectors): the ID↔key binding of §3.2 always applies; a v2 payload whose relay
-is not a valid v3 onion is rejected outright — never downgraded to "official";
-a v1 payload with an extra segment is rejected. While the `FEDERATION` flag is
+is not a valid v3 onion, or whose root is missing or not exactly 32 bytes, is
+rejected outright — never downgraded to "official"; a v1 payload with an extra
+segment is rejected; a v2 relay address without a root is never emitted. While the `FEDERATION` flag is
 off, a v2 link naming a non-official relay is recognised but refused with an
 "update AegisLink" message, so no client ever stores a contact it cannot reach.
 
@@ -654,11 +665,38 @@ receipts to a contact on another relay are sealed E2EE messages
 SenderKey distribution to such a member is a sealed `sender_key_dist` message
 carrying the same per-recipient box `group:rekey` would queue; the recipient
 opens it only against the authenticated sealed-sender's key and requires the
-signed-in distributor id to match. **Known gap (F3b):** the first message of a
-new session always uses the v1 outer envelope (the v2 inner never carries
-`x3dhInit`), and the recipient's mailbox root only arrives over an established
-session, so cross-relay first contact needs the v2 link to carry the mailbox
-root and a v2 inner able to bootstrap — tracked in `FEDERATION-DESIGN.md` F3b.
+signed-in distributor id to match.
+
+**First contact across relays (F3b).** On the same relay a new session still
+bootstraps over the v1 outer envelope (aegisId-addressed, `init` hint). A
+contact on another relay has no v1 path, so the **first sealed v2 message is
+the bootstrap itself**:
+
+- The sender's inner payload carries `x3dh` (the X3DH init, §4.2) and a
+  first-contact block `fc = { ik, relay, root }` — its identity key, its home
+  relay onion (`null` = official) and its mailbox root — and the sealed layer
+  embeds the sender's Ed25519 signing key (`spk`) so a recipient who has never
+  heard of the sender can verify the inner signature. The wire still carries
+  no sender identity. Only a session with a pending X3DH init produces this
+  form; an established session never does, even if asked.
+- The recipient opens a sealed envelope from an **unknown** sender only with
+  `allowFirstContact` (gated by the `FEDERATION` flag) **and** only when the
+  inner is a genuine bootstrap (`x3dh` present, well-formed `fc`). A known
+  contact's pinned signing key always wins over an embedded one, so an
+  impostor cannot re-key an existing contact. The claimed `from` must match
+  `fc.ik` (ID↔key binding, §3.2), and X3DH is then computed against that very
+  key, so a forged block cannot decrypt anything. The contact is created as a
+  **pending message request** (mobile) with the embedded signing key pinned
+  (TOFU — the same trust level v1 first contact has today, where the sender
+  key comes from the relay's directory), its relay and its mailbox root, so
+  the reply can be addressed; the receiver's profile hand-off then rides the
+  session the init just established, through the sender's relay.
+- Every path to a foreign contact — live send, outbox retry, profile hand-off
+  — goes through the relay pool; none can fall back to the home socket, which
+  would both leak the me↔to edge to the home relay and never arrive.
+
+Tests: `crypto/__tests__/messaging.firstContact.test.ts` (same file on both
+platforms) and mobile `socket/__tests__/client.firstContact.test.ts`.
 
 **Limitation (product decision pending, see `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` §3.1):**
 because the desktop holds the identity secrets, relay-side revocation blocks a

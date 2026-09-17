@@ -161,7 +161,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
   identity: Identity | null;
   insets: { top: number; bottom: number; left: number; right: number };
   onBack: () => void;
-  addFromQR: (aegisId: string, publicKeyB64: string, displayName?: string, relay?: RelayRef | null) => Promise<AddResult>;
+  addFromQR: (aegisId: string, publicKeyB64: string, displayName?: string, relay?: RelayRef | null, mailboxRootB64?: string | null) => Promise<AddResult>;
   addByAegisId: (aegisId: string, displayName?: string, opts?: { relay?: RelayRef | null }) => Promise<StoredContact>;
   onAdded: (contact: StoredContact) => void;
 }) {
@@ -215,7 +215,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
           );
           return;
         }
-        const result = await addFromQR(parsed.aegisId, parsed.publicKeyB64, '', parsed.relay);
+        const result = await addFromQR(parsed.aegisId, parsed.publicKeyB64, '', parsed.relay, parsed.mailboxRootB64);
 
         if (result.kind === 'mitm_detected') {
           themedAlert(

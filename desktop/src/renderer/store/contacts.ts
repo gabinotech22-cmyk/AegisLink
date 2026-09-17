@@ -12,6 +12,7 @@ import {
   type StoredContact,
 } from '../db/local';
 import { lookupIdentity, ApiError } from '../api';
+import { setContactMailboxRoot } from '../crypto/mailboxStore';
 
 const DEV = Boolean(import.meta.env?.DEV);
 
@@ -32,6 +33,8 @@ interface ContactsState {
     displayName?: string,
     /** Relay named by a v2 link; null/undefined = official (federation F1). */
     relay?: RelayRef | null,
+    /** Mailbox root carried by a v2 link (F3b): the queue a first message is written to. */
+    mailboxRootB64?: string | null,
   ) => Promise<AddResult>;
   /**
    * Save a contact directly from data embedded in an incoming envelope.
@@ -139,7 +142,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
     return contact;
   },
 
-  async addFromQR(aegisId, publicKeyB64, displayName, relay) {
+  async addFromQR(aegisId, publicKeyB64, displayName, relay, mailboxRootB64) {
     set({ error: null });
     const existing = await getContact(aegisId);
 
@@ -167,6 +170,9 @@ export const useContacts = create<ContactsState>((set, get) => ({
       relayOnion: canonicalRelay(relay)?.onion ?? null,
     };
     await saveContact(contact);
+    // F3b: a v2 link carries the owner's mailbox root — without it there is no
+    // queue on their relay to write the very first message to.
+    if (mailboxRootB64) await setContactMailboxRoot(aegisId, mailboxRootB64);
     set({ contacts: [contact, ...get().contacts] });
 
     void (async () => {

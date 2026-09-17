@@ -22,7 +22,10 @@ const BUCKETS: readonly number[] = [
 ];
 
 const ALLOWED_INNER_FIELDS: ReadonlySet<string> = new Set([
-  'v', 'from', 'senderPubB64', 'ratchet', 'x3dh', 'pad', 'selfCopy', 'deviceSync'
+  'v', 'from', 'senderPubB64', 'ratchet', 'x3dh', 'pad', 'selfCopy', 'deviceSync',
+  // Federation F3b: first-contact bootstrap block (identity key, home relay,
+  // mailbox root) — only on the first sealed message across relays.
+  'fc',
 ]);
 
 export function pickBucket(length: number): number {

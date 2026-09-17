@@ -43,7 +43,24 @@ interface InnerPayload {
   from: string;
   ratchet: InnerRatchet;
   x3dh?: Record<string, unknown>;
+  /** Federation F3b: first-contact bootstrap block (see FirstContactBlock). */
+  fc?: FirstContactBlock;
   [key: string]: unknown;
+}
+
+/**
+ * Federation F3b — what a FIRST sealed message carries so a recipient who has
+ * never heard of us can establish the session and reach us back:
+ *   ik    our X25519 identity key (base64) — X3DH binds the session to it and
+ *         `keyMatchesAegisId(ik, from)` binds it to the claimed id;
+ *   relay the onion of our home relay (null = official) — where our mailbox lives;
+ *   root  our mailbox root (base64) — lets them derive our rotating mailbox id.
+ * The signing key rides in the sealed-sender layer (`spk`), not here.
+ */
+export interface FirstContactBlock {
+  ik: string;
+  relay: string | null;
+  root: string;
 }
 
 const PROTOCOL_VERSION = 2; // Upgraded to V2 for Signal Protocol
@@ -171,9 +188,10 @@ export function tryDecryptMessage(
 // Same Double Ratchet inner as v1, but the OUTER envelope is the per-message
 // ephemeral sealed-sender box (crypto/sealedSender.ts) instead of the legacy
 // static-key nacl.box. The wire carries no `from` and is unlinkable to the
-// sender's static X25519 key. v2 is for ESTABLISHED sessions only — it never
-// carries an x3dhInit (first contact bootstraps over v1), so the recipient must
-// already hold the sender's signing key to authenticate.
+// sender's static X25519 key. Between contacts on the same relay v2 is for
+// ESTABLISHED sessions (first contact bootstraps over v1). Across relays there
+// is no v1, so v2 may also carry the X3DH init plus a first-contact block
+// (federation F3b) when the caller passes `firstContact`.
 
 /**
  * Encrypt for an established contact using the sealed-sender v2 outer envelope.
@@ -188,11 +206,13 @@ export function encryptMessageV2(
   senderSigningSecretKey: Uint8Array,
   ratchetState: RatchetState,
   nowMs: number,
+  /** F3b: bootstrap a session across relays — includes x3dhInit + fc + spk. */
+  firstContact?: { block: FirstContactBlock; senderSigningPublicKey: Uint8Array },
 ): { wire: SealedWire; newState: RatchetState } {
   const payloadBytes = decodeUTF8(plaintext);
   const ratchetOut = ratchetEncrypt(ratchetState, payloadBytes);
 
-  // Inner is identical to v1 minus x3dh (v2 never bootstraps a handshake).
+  // Inner is identical to v1; x3dh rides along ONLY on a first-contact message.
   const innerPayload: Record<string, unknown> = {
     v: PROTOCOL_VERSION,
     from: senderAegisId,
@@ -207,6 +227,11 @@ export function encryptMessageV2(
     },
   };
 
+  if (firstContact) {
+    if (ratchetState.x3dhInit) innerPayload.x3dh = ratchetState.x3dhInit;
+    innerPayload.fc = firstContact.block;
+  }
+
   // Pad to a fixed bucket BEFORE sealing — wire length must not leak size.
   const innerBytes = stripAndPad(innerPayload);
   const wire = sealEnvelope(
@@ -215,6 +240,7 @@ export function encryptMessageV2(
     senderSigningSecretKey,
     encodeBase64(innerBytes),
     nowMs,
+    firstContact?.senderSigningPublicKey,
   );
 
   const newState = { ...ratchetState };
@@ -240,8 +266,10 @@ export function openEnvelopeV2(
   myBoxSecretKey: Uint8Array,
   resolveSigningKey: (from: string) => Uint8Array | null,
   nowMs: number,
-): InnerPayload | null {
-  const opened = openSealedEnvelope(wire, myBoxSecretKey, resolveSigningKey, nowMs);
+  /** F3b: accept a first-contact envelope from an unknown sender (TOFU). */
+  opts: { allowFirstContact?: boolean } = {},
+): (InnerPayload & { tofuSigningKeyB64?: string }) | null {
+  const opened = openSealedEnvelope(wire, myBoxSecretKey, resolveSigningKey, nowMs, opts);
   if (!opened) return null;
   let parsed: InnerPayload | null;
   try {
@@ -253,6 +281,14 @@ export function openEnvelopeV2(
   if (typeof parsed.from !== 'string' || !parsed.ratchet) return null;
   // The authenticated sealed `from` MUST match the inner claim.
   if (parsed.from !== opened.from) return null;
+  if (opened.tofuSigningKeyB64) {
+    // A TOFU-authenticated envelope is only acceptable as a BOOTSTRAP: it must
+    // carry the x3dh init and a well-formed first-contact block. Anything else
+    // from an unknown sender stays rejected.
+    const fc = parsed.fc;
+    if (!parsed.x3dh || !fc || typeof fc.ik !== 'string' || typeof fc.root !== 'string' || (fc.relay !== null && typeof fc.relay !== 'string')) return null;
+    return { ...parsed, tofuSigningKeyB64: opened.tofuSigningKeyB64 };
+  }
   return parsed;
 }
 

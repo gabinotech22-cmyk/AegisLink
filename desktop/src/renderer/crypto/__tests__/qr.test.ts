@@ -12,27 +12,30 @@ const KEY = 'A'.repeat(43) + '=';
 const ID = deriveAegisId(decodeBase64(KEY));
 const ONION = 'abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz'.slice(0, 56) + '.onion';
 const RELAY = { onion: ONION };
+const ROOT = 'A'.repeat(43) + '=';
 
 describe('identity links (desktop parity)', () => {
   it('v1 QR and https forms round-trip with relay: null', () => {
-    expect(parseIdentityQR(encodeIdentityQR(ID, KEY))).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: null });
+    expect(parseIdentityQR(encodeIdentityQR(ID, KEY))).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: null, mailboxRootB64: null });
     const link = encodeIdentityLink(ID, KEY);
     expect(link.startsWith(`${UNIVERSAL_LINK_HOST}/a#v1/`)).toBe(true);
-    expect(parseIdentityQR(link)).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: null });
+    expect(parseIdentityQR(link)).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: null, mailboxRootB64: null });
   });
 
   it('a null relay still emits v1 — nothing changes for today’s users', () => {
     expect(encodeIdentityQR(ID, KEY, null)).toBe(encodeIdentityQR(ID, KEY));
   });
 
-  it('v2 QR and https forms round-trip with the relay', () => {
-    expect(parseIdentityQR(encodeIdentityQR(ID, KEY, RELAY))).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: RELAY });
-    expect(parseIdentityQR(encodeIdentityLink(ID, KEY, RELAY))).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: RELAY });
+  it('v2 QR and https forms round-trip with the relay and the mailbox root', () => {
+    expect(parseIdentityQR(encodeIdentityQR(ID, KEY, RELAY, ROOT))).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: RELAY, mailboxRootB64: ROOT });
+    expect(parseIdentityQR(encodeIdentityLink(ID, KEY, RELAY, ROOT))).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: RELAY, mailboxRootB64: ROOT });
+    expect(() => encodeIdentityQR(ID, KEY, RELAY)).toThrow();
   });
 
-  it('a v2 payload with an invalid relay is rejected, never downgraded', () => {
-    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}/evil.example.com`)).toBeNull();
-    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}`)).toBeNull();
+  it('a v2 payload with an invalid relay or root is rejected, never downgraded', () => {
+    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}/evil.example.com/${encodeURIComponent(ROOT)}`)).toBeNull();
+    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}/${ONION}`)).toBeNull();
+    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}/${ONION}/short`)).toBeNull();
   });
 
   it('binds the ID to the key and survives malformed escapes', () => {

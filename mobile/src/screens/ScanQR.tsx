@@ -93,7 +93,7 @@ export function ScanQRScreen({ onCancel, onAdded, onGroupInvite }: Props) {
     }
     setBusy(true);
     try {
-      const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64, undefined, parsed.relay);
+      const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64, undefined, parsed.relay, parsed.mailboxRootB64);
       if (outcome.kind === 'mitm_detected') {
         themedAlert(
           i18nT('scanQR.mitmTitle', '⚠️ Key Changed'),

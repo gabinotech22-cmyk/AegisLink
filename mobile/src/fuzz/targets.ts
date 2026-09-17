@@ -40,7 +40,7 @@ export const FUZZ_TARGETS: FuzzTarget[] = [
       'https://aegislink.duckdns.org/a#v1/ABC-DEFG-HJKL/key',
       'aegislink://v1/ABC-DEFG-HJKL/',
       // v2 (relay-qualified, federation F1)
-      'aegislink://v2/ABC-DEFG-HJKL/QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQT0=/' + 'a'.repeat(56) + '.onion',
+      'aegislink://v2/ABC-DEFG-HJKL/QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQT0=/' + 'a'.repeat(56) + '.onion/QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQT0%3D',
       'https://aegislink.duckdns.org/a#v2/ABC-DEFG-HJKL/key/not-an-onion',
       'aegislink://v2/ABC-DEFG-HJKL/key/',
     ],

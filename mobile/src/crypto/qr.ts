@@ -1,7 +1,7 @@
 /**
  * QR payload format for sharing an identity:
  *   v1: aegislink://v1/<AEGIS_ID>/<PUBLIC_KEY_BASE64>            (official relay)
- *   v2: aegislink://v2/<AEGIS_ID>/<PUBLIC_KEY_BASE64>/<ONION>    (relay-qualified)
+ *   v2: aegislink://v2/<AEGIS_ID>/<PUBLIC_KEY_BASE64>/<ONION>/<MAILBOX_ROOT_BASE64>
  *
  * v2 carries the relay that hosts the contact's mailbox (docs/FEDERATION-DESIGN.md
  * D1). A v1 payload means "official relay" and is emitted whenever the sharer
@@ -10,6 +10,7 @@
  * opened directly from a scanned URL on iOS/Android.
  */
 
+import { decodeBase64 } from 'tweetnacl-util';
 import { keyMatchesAegisId } from './aegisId';
 import { relayRefFromOnion, type RelayRef } from '../net/relayRef';
 
@@ -63,14 +64,27 @@ export function universalToScheme(url: string): string | null {
  * QR payload for an identity. `relay` null/undefined = official relay → v1 (the
  * form every shipped client understands); a custom relay → v2.
  */
-export function encodeIdentityQR(aegisId: string, publicKeyB64: string, relay?: RelayRef | null): string {
-  if (relay) return `${SCHEME_V2}${aegisId}/${encodeURIComponent(publicKeyB64)}/${relay.onion}`;
+/**
+ * A v2 (custom relay) address ALSO carries the owner's mailbox root (F3b): a
+ * stranger on another relay has no other way to derive the mailbox to write
+ * the very first message to (the SimpleX model — the address includes the
+ * queue). Throws if a relay is given without the root: a v2 link that cannot
+ * be written to must never be emitted.
+ */
+export function encodeIdentityQR(aegisId: string, publicKeyB64: string, relay?: RelayRef | null, mailboxRootB64?: string | null): string {
+  if (relay) {
+    if (!mailboxRootB64) throw new Error('encodeIdentityQR: a custom relay address needs the mailbox root');
+    return `${SCHEME_V2}${aegisId}/${encodeURIComponent(publicKeyB64)}/${relay.onion}/${encodeURIComponent(mailboxRootB64)}`;
+  }
   return `${SCHEME}${aegisId}/${encodeURIComponent(publicKeyB64)}`;
 }
 
 /** https form of the identity link — clickable outside AegisLink. */
-export function encodeIdentityLink(aegisId: string, publicKeyB64: string, relay?: RelayRef | null): string {
-  if (relay) return `${UNIVERSAL_CONTACT_PREFIX}v2/${aegisId}/${encodeURIComponent(publicKeyB64)}/${relay.onion}`;
+export function encodeIdentityLink(aegisId: string, publicKeyB64: string, relay?: RelayRef | null, mailboxRootB64?: string | null): string {
+  if (relay) {
+    if (!mailboxRootB64) throw new Error('encodeIdentityLink: a custom relay address needs the mailbox root');
+    return `${UNIVERSAL_CONTACT_PREFIX}v2/${aegisId}/${encodeURIComponent(publicKeyB64)}/${relay.onion}/${encodeURIComponent(mailboxRootB64)}`;
+  }
   return `${UNIVERSAL_CONTACT_PREFIX}v1/${aegisId}/${encodeURIComponent(publicKeyB64)}`;
 }
 
@@ -79,6 +93,8 @@ export interface ParsedIdentityQR {
   publicKeyB64: string;
   /** null = official relay (every v1 payload; a v2 payload always names one). */
   relay: RelayRef | null;
+  /** Owner's mailbox root (base64, 32 bytes) — present on every v2 payload, null on v1. */
+  mailboxRootB64: string | null;
 }
 
 export function parseIdentityQR(raw: string): ParsedIdentityQR | null {
@@ -94,14 +110,24 @@ export function parseIdentityQR(raw: string): ParsedIdentityQR | null {
   const aegisId = rest.slice(0, slash).trim().toUpperCase();
   let keyPart = rest.slice(slash + 1);
   let relay: RelayRef | null = null;
+  let mailboxRootB64: string | null = null;
   if (v2) {
-    // v2 = <key>/<onion>; the onion is validated strictly — a v2 payload with a
-    // bad relay is rejected outright, never downgraded to "official".
-    const slash2 = keyPart.indexOf('/');
-    if (slash2 < 0) return null;
-    relay = relayRefFromOnion(keyPart.slice(slash2 + 1));
+    // v2 = <key>/<onion>/<root>; the onion is validated strictly and the root
+    // must decode to exactly 32 bytes — a v2 payload missing either is rejected
+    // outright, never downgraded to "official".
+    const segs = keyPart.split('/');
+    if (segs.length !== 3) return null;
+    relay = relayRefFromOnion(segs[1]);
     if (!relay) return null;
-    keyPart = keyPart.slice(0, slash2);
+    const decodedRoot = safeDecodeURIComponent(segs[2]);
+    if (decodedRoot === null) return null;
+    try {
+      if (decodeBase64(decodedRoot).length !== 32) return null;
+    } catch {
+      return null;
+    }
+    mailboxRootB64 = decodedRoot;
+    keyPart = segs[0];
   } else if (keyPart.includes('/')) {
     return null; // v1 has exactly two segments
   }
@@ -117,7 +143,7 @@ export function parseIdentityQR(raw: string): ParsedIdentityQR | null {
   // legitimate QR, generated via encodeIdentityQR from a real identity, always
   // passes because there aegisId === deriveAegisId(publicKey) by construction.
   if (!keyMatchesAegisId(publicKeyB64, aegisId)) return null;
-  return { aegisId, publicKeyB64, relay };
+  return { aegisId, publicKeyB64, relay, mailboxRootB64 };
 }
 
 // ─── Group invite links ───────────────────────────────────────────────────────
