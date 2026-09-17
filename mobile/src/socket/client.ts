@@ -339,6 +339,8 @@ async function deliverToForeignRelay(
   wire: Record<string, unknown>,
   id: string,
   ephemeralTtlMs: number | null,
+  /** F4: `'call'` asks the recipient's relay for a call-class (urgent) wake. */
+  wakeHint?: 'call',
 ): Promise<void> {
   const relay = relayFor(contact);
   // v1 (no sealed wire) cannot cross relays. With F3b the selector never
@@ -353,6 +355,7 @@ async function deliverToForeignRelay(
     nonce: wire.nonce as string,
     epk: wire.epk as string,
     ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
+    ...(wakeHint ? { wakeHint } : {}),
   });
   if (!ack || !ack.ok) {
     if (__DEV__) logger.warn('[socket] foreign relay send failed:', ack?.error ?? 'transport');
@@ -2804,6 +2807,20 @@ async function decryptAndAppendLocked(
         return true;
       }
 
+      // Federation F4: a call-signaling event (1:1 or group) from a contact on
+      // another relay, carried inside the E2EE channel because their relay has
+      // no `to: aegisId` queue for us. The inner call sealing is untouched; the
+      // registered handler receives it with the authenticated sender pinned.
+      // Never appended as a chat row.
+      if (parsedPayload.type === 'call_signal') {
+        if (typeof parsedPayload.text === 'string') {
+          const { dispatchSealedCallSignal } = require('./callSignalRouter') as typeof import('./callSignalRouter');
+          await dispatchSealedCallSignal(contact.aegisId, parsedPayload.text);
+        }
+        await saveSessionState(contact.aegisId, ratchetState);
+        return true;
+      }
+
       if (parsedPayload.type === 'group_msg') {
         const groupId: string = parsedPayload.groupId;
         const claimedName: string = parsedPayload.groupName;
@@ -4154,7 +4171,7 @@ async function sendSelfCopy(
  * mode, or a `["msgId",…]` bubble for a read receipt. Only genuine content
  * (direct_msg + 1:1 media, location, view_once) is self-copied.
  */
-const SELF_COPY_EXCLUDED_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist']);
+const SELF_COPY_EXCLUDED_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist', 'call_signal']);
 
 /**
  * Handle an inbound envelope flagged as a self-copy. Decrypts via the
@@ -4378,6 +4395,13 @@ export async function sendMessage(opts: {
   type?: string;
   expiresAt?: number | null;
   skipLocalAppend?: boolean;
+  /**
+   * F4: best-effort signal (call signaling): never persisted to the outbox —
+   * a candidate or ring replayed minutes later is noise. Offline → rejects.
+   */
+  transient?: boolean;
+  /** F4: outer mailbox-wire hint so the recipient's relay wakes them as a call. */
+  wakeHint?: 'call';
 }): Promise<void> {
   const { useIdentity } = require('../store/identity');
   const idState = useIdentity.getState();
@@ -4446,26 +4470,30 @@ export async function sendMessage(opts: {
 
   // ── Outbox: persist before attempting to emit ────────────────────────────
   // The job survives app close / crash; flushOutbox() will retry on reconnect.
+  // A transient signal (F4 call signaling) is deliberately NOT persisted.
   const jobId = Crypto.randomUUID();
-  try {
-    await enqueueOutboxJob({
-      jobId,
-      msgId: id,
-      recipientAegisId: opts.recipientAegisId,
-      recipientPubkeyB64: recipientPublicKeyB64,
-      payload,
-      kind: 'direct',
-      groupId: null,
-      createdAt,
-    });
-  } catch (e) {
-    // If we can't persist to the outbox (e.g. DB not ready on first launch),
-    // still attempt the send — the best-effort path is better than silence.
-    if (__DEV__) logger.warn('[socket] enqueueOutboxJob failed (best-effort send anyway):', e);
+  if (!opts.transient) {
+    try {
+      await enqueueOutboxJob({
+        jobId,
+        msgId: id,
+        recipientAegisId: opts.recipientAegisId,
+        recipientPubkeyB64: recipientPublicKeyB64,
+        payload,
+        kind: 'direct',
+        groupId: null,
+        createdAt,
+      });
+    } catch (e) {
+      // If we can't persist to the outbox (e.g. DB not ready on first launch),
+      // still attempt the send — the best-effort path is better than silence.
+      if (__DEV__) logger.warn('[socket] enqueueOutboxJob failed (best-effort send anyway):', e);
+    }
   }
 
   // If offline, the job is already persisted — return so UI shows offline indicator
   if (!socket || !connected || !authenticated) {
+    if (opts.transient) throw new Error('offline');
     return; // flushOutbox() will drain on next auth:ok
   }
 
@@ -4529,7 +4557,7 @@ export async function sendMessage(opts: {
   const recipientContact = useContacts.getState().contacts.find((c) => c.aegisId === opts.recipientAegisId);
   if (recipientContact && isForeign(recipientContact)) {
     try {
-      await deliverToForeignRelay(recipientContact, emitEvent, emitWire, id, ephemeralTtlMs ?? null);
+      await deliverToForeignRelay(recipientContact, emitEvent, emitWire, id, ephemeralTtlMs ?? null, opts.wakeHint);
     } catch (e) {
       try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
       armOutboxScheduler(opts.identity);
@@ -4557,6 +4585,7 @@ export async function sendMessage(opts: {
         nonce: emitPayload.nonce as string,
         epk: emitPayload.epk as string,
         ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
+        ...(opts.wakeHint ? { wakeHint: opts.wakeHint } : {}),
       });
       // Only a LIVE mailbox delivery is terminal. `queued` (recipient mailbox
       // offline) falls through so the reliable aegisId transport also delivers.

@@ -462,7 +462,9 @@ export function attachRelay(io: SocketServer) {
           // Slice 2b: best-effort, zero-metadata wake-up publish to the ntfy
           // topic = d.to (co-hosted ntfy, docs/FASE4-SLICE2B-PUSH-DESIGN.md §5.1
           // v1). Flag-gated (PUSH_MAILBOX_ENABLED); never blocks the ack.
-          void notifyMailbox(d.to);
+          // F4: `wakeHint: 'call'` selects the call-class wake (urgent priority,
+          // ringing heads-up on a killed app) — the hint itself goes no further.
+          void notifyMailbox(d.to, d.wakeHint === 'call' ? 'call' : 'message');
           ack?.({ ok: true, delivered: false, queued: true });
         }
       });

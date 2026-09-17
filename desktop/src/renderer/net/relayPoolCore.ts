@@ -57,6 +57,8 @@ export interface OutgoingMailboxEnvelope {
   nonce: string;
   epk: string;
   ephemeralTtl?: number;
+  /** F4: call-class wake for the recipient (the one declared metadata bit, D3). */
+  wakeHint?: 'call';
 }
 
 export type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string };

@@ -33,6 +33,8 @@ vi.mock('../client', () => ({
 vi.mock('../../config', () => ({
   RELAY_URL: 'https://relay.test',
   TOR_RELAY: true,
+  ONION_URL: null, // calls.ts → callSignalRouter → homeRelay reads it (F4)
+  FEDERATION: false,
 }));
 vi.mock('../../db/local', () => ({ saveCall: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../store/messages', () => ({ useMessages: { getState: () => ({ append: vi.fn() }) } }));

@@ -30,6 +30,7 @@ import {
   sealWithCallKey,
   openWithCallKey,
 } from '../crypto/callSession';
+import { onCallSignal, routeCallSignal } from './callSignalRouter';
 
 const DEV = import.meta.env.DEV;
 
@@ -280,8 +281,9 @@ function emitCallSignal(
   const key = callKeys.get(callId);
   if (!key) return false; // fail-closed: no callKey → cannot seal (golden rule #6)
   const wire = sealWithCallKey(key, payload);
-  socket.emit(`call:${kind}:v2`, { callId, to: toAegisId, ...wire });
-  return true;
+  // Federation F4: a peer on another relay gets the same sealed wire inside the
+  // E2EE channel through THEIR relay (callSignalRouter); local peers as before.
+  return routeCallSignal(socket, `call:${kind}:v2`, toAegisId, { callId, ...wire });
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -302,7 +304,14 @@ export function attachCallHandlers(): void {
   // mobile/src/socket/calls.ts; the relay no longer emits v1 events.
   // Sealed-sender v2 invite: no `from`; openCallInvite authenticates the caller
   // and yields the per-call key.
-  socket.on('call:invite:v2', async (msg: SealedInviteWire) => {
+  // Handlers are registered on the socket AND in the sealed dispatch table
+  // (federation F4, parity with mobile): the same event may arrive as a
+  // `call_signal` E2EE message from a contact on another relay, in which case
+  // `from` is the authenticated sealed-sender and MUST agree with the identity
+  // sealed inside / the call's peer.
+  onCallSignal(socket, 'call:invite:v2', async (raw: unknown, from?: string) => {
+    const msg = raw as SealedInviteWire;
+    if (typeof msg?.callId !== 'string' || typeof msg.ciphertext !== 'string' || typeof msg.nonce !== 'string' || typeof msg.epk !== 'string') return;
     const me = ownSealedKeys();
     if (!me) return;
     const opened = openCallInvite(
@@ -315,11 +324,15 @@ export function attachCallHandlers(): void {
       if (DEV) logger.warn('[calls] call:invite:v2 open/auth failed — dropping');
       return;
     }
+    if (from !== undefined && opened.from !== from) return; // sealed path: caller ≠ sender
     rememberCallKey(msg.callId, opened.callKey);
     processIncomingInvite(socket, opened.from, msg.callId, msg.media, opened.offer);
   });
 
-  socket.on('call:answer:v2', async (msg: SealedKeyWire) => {
+  onCallSignal(socket, 'call:answer:v2', async (raw: unknown, from?: string) => {
+    const msg = raw as SealedKeyWire;
+    if (typeof msg?.callId !== 'string' || typeof msg.ciphertext !== 'string' || typeof msg.nonce !== 'string') return;
+    if (from !== undefined && useCall.getState().peer !== from) return;
     const key = callKeys.get(msg.callId);
     if (!key) return;
     const answer = openWithCallKey(key, { ciphertext: msg.ciphertext, nonce: msg.nonce });
@@ -327,7 +340,10 @@ export function attachCallHandlers(): void {
     await processIncomingAnswer(msg.callId, answer);
   });
 
-  socket.on('call:ice:v2', async (msg: SealedKeyWire) => {
+  onCallSignal(socket, 'call:ice:v2', async (raw: unknown, from?: string) => {
+    const msg = raw as SealedKeyWire;
+    if (typeof msg?.callId !== 'string' || typeof msg.ciphertext !== 'string' || typeof msg.nonce !== 'string') return;
+    if (from !== undefined && useCall.getState().peer !== from) return;
     const key = callKeys.get(msg.callId);
     if (!key) return;
     const candidate = openWithCallKey(key, { ciphertext: msg.ciphertext, nonce: msg.nonce });
@@ -335,7 +351,10 @@ export function attachCallHandlers(): void {
     await processIncomingIce(msg.callId, candidate);
   });
 
-  socket.on('call:hangup:v2', (msg: { callId: string; reason?: string }) => {
+  onCallSignal(socket, 'call:hangup:v2', (raw: unknown, from?: string) => {
+    const msg = raw as { callId: string; reason?: string };
+    if (typeof msg?.callId !== 'string') return;
+    if (from !== undefined && useCall.getState().peer !== from) return;
     processIncomingHangup(msg.callId);
   });
 }
@@ -366,7 +385,7 @@ function processIncomingInvite(
   const state = useCall.getState();
   if (state.status !== 'idle' && state.status !== 'ended') {
     // Busy — auto-reject via the sealed v2 channel (the only channel).
-    socket.emit('call:hangup:v2', { callId, to: from, reason: 'busy' });
+    routeCallSignal(socket, 'call:hangup:v2', from, { callId, reason: 'busy' });
     saveCall({ id: callId, contactId: from, direction: 'in', media, status: 'declined', startedAt: Date.now(), durationS: 0 }).catch(() => {});
     if (useIdentity.getState().identity) {
       void useMessages.getState().append({
@@ -461,7 +480,9 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
     const callKey = callKeys.get(callId);
     if (!me || !recipientPub || !callKey) { endCall('encrypt_failure'); return; }
     const sealed = sealCallInvite(recipientPub, me.aegisId, me.signingSecretKey, offer, Date.now(), callKey);
-    socket.emit('call:invite:v2', { callId, to: toAegisId, media, ...sealed.wire });
+    // Federation F4: a callee on another relay is rung through THEIR relay
+    // (sealed call_signal + `wakeHint: 'call'`); a local callee as before.
+    if (!routeCallSignal(socket, 'call:invite:v2', toAegisId, { callId, media, ...sealed.wire })) { endCall('encrypt_failure'); return; }
   } else {
     // v2 policy but sealed-sender is impossible — peer box key or our signing
     // identity is unavailable. Fail CLOSED: never fall back to a `from`-leaking
@@ -528,7 +549,7 @@ export function endCall(reason: string = 'hangup'): void {
   const socket = getSocket();
   if (socket && peerId && callId) {
     // Always v2 — the relay never sees `from` (sealed-sender).
-    socket.emit('call:hangup:v2', { callId, to: peerId, reason });
+    routeCallSignal(socket, 'call:hangup:v2', peerId, { callId, reason });
   }
   if (callId) forgetCallKey(callId);
 

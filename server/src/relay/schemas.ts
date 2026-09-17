@@ -279,4 +279,9 @@ export const MailboxEnvelopeIn = z.object({
   // Purely server-side queue expiry; the recipient reads the burn timer from the
   // decrypted payload, never from this wire field (so online delivery omits it).
   ephemeralTtl: z.number().int().positive().max(MESSAGE_TTL_MS).optional(),
+  // Federation F4 (docs/FEDERATION-DESIGN.md D3): the ONE declared metadata bit
+  // on the outer wire — "this is a call for this mailbox", never who from. Lets
+  // the recipient's home relay publish a call-class (urgent) wake instead of the
+  // message-class one. Never stored, never forwarded to the recipient.
+  wakeHint: z.literal('call').optional(),
 });

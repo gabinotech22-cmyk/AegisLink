@@ -11,6 +11,10 @@
 > 2026-06 y de la regla de oro de seguridad **#4** ("Sealed-sender en TODO,
 > incluidas las llamadas"). Ver `docs/SECURITY-ROADMAP-2026-06.md`,
 > `docs/SEALED-SENDER-ARCHITECTURE.md` y `CLAUDE.md`.
+> **Federación (F4):** hacia un contacto en OTRO relay estos mismos eventos
+> sellados viajan como mensaje E2EE `call_signal` por su relay
+> (`socket/callSignalRouter.ts`, `wakeHint: 'call'`); estado y tests en
+> `docs/FEDERATION-DESIGN.md` §3 F4 y `PROTOCOL.md` §9.3.
 
 ## 1. Contexto y estado actual
 
