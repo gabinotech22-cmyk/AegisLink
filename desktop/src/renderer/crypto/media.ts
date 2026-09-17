@@ -1,6 +1,9 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { SERVER_URL } from '../config';
+import { normalizeOnion } from '../net/relayRef';
+import { relayBaseUrl } from '../net/relayPoolCore';
+import { getHomeRelay } from '../net/homeRelay';
 
 /**
  * Encrypted media upload / download for the Electron renderer.
@@ -80,9 +83,43 @@ export async function encryptAndUploadMedia(file: Blob): Promise<string> {
   const keyB64 = encodeBase64(key);
   const nonceB64 = encodeBase64(nonce);
   key.fill(0);
-  return token
-    ? `blob:${id}:${keyB64}:${nonceB64}:${token}`
-    : `blob:${id}:${keyB64}:${nonceB64}`;
+  // Federation F2: a blob uploaded to a non-official home relay carries that
+  // relay's onion (v3) so a contact on another relay knows where to fetch it.
+  return formatBlobUri(id, keyB64, nonceB64, token ?? '', getHomeRelay()?.onion ?? null);
+}
+
+export interface ParsedBlobUri {
+  id: string;
+  keyB64: string;
+  nonceB64: string;
+  token: string;
+  /** Onion of the relay hosting the blob (v3); null = the official relay. */
+  host: string | null;
+}
+
+/**
+ * Parse a `blob:` URI (parity with mobile/src/crypto/media.ts):
+ *   v3 `blob:<id>:<key>:<nonce>:<token>:<onion>`, v2 `...:<token>`, v1 `blob:<id>:<key>:<nonce>`.
+ * A v3 host that is not a valid v3 onion makes the URI malformed — never a
+ * silent fallback to the official relay.
+ */
+export function parseBlobUri(mediaUri: string): ParsedBlobUri | null {
+  if (!mediaUri.startsWith('blob:')) return null;
+  const parts = mediaUri.split(':');
+  if (parts.length === 6) {
+    const host = normalizeOnion(parts[5]);
+    if (!host) return null;
+    return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: parts[4], host };
+  }
+  if (parts.length === 5) return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: parts[4], host: null };
+  if (parts.length === 4) return { id: parts[1], keyB64: parts[2], nonceB64: parts[3], token: '', host: null };
+  return null;
+}
+
+/** Format for the wire; the host is appended (v3) only for a non-official relay. */
+export function formatBlobUri(id: string, keyB64: string, nonceB64: string, token: string, host: string | null): string {
+  const base = token ? `blob:${id}:${keyB64}:${nonceB64}:${token}` : `blob:${id}:${keyB64}:${nonceB64}`;
+  return host && token ? `${base}:${host}` : base;
 }
 
 /**
@@ -99,18 +136,17 @@ export async function downloadAndDecryptMedia(
 ): Promise<string> {
   if (!mediaUri.startsWith('blob:')) return mediaUri;
 
-  // Accept v2 (`blob:id:key:nonce:token`) and legacy v1 (`blob:id:key:nonce`).
-  // base64 never contains ':', so positional splitting is unambiguous.
-  const parts = mediaUri.split(':');
-  if (parts.length !== 5 && parts.length !== 4) throw new Error('Invalid blob URI format');
-  const [, id, keyB64, nonceB64, token = ''] = parts;
+  const parsed = parseBlobUri(mediaUri);
+  if (!parsed) throw new Error('Invalid blob URI format');
+  const { id, keyB64, nonceB64, token, host } = parsed;
 
   const key = decodeBase64(keyB64);
   const nonce = decodeBase64(nonceB64);
 
-  const downloadUrl = token
-    ? `${SERVER_URL}/blob/download/${id}?t=${encodeURIComponent(token)}`
-    : `${SERVER_URL}/blob/download/${id}`;
+  // A v3 blob lives on the sender's relay; the whole session is proxied through
+  // Tor, so a .onion base resolves inside Tor with the same fetch().
+  const base = `${host ? relayBaseUrl(host) : SERVER_URL}/blob/download/${id}`;
+  const downloadUrl = token ? `${base}?t=${encodeURIComponent(token)}` : base;
   const res = await fetch(downloadUrl);
   if (!res.ok) {
     key.fill(0);

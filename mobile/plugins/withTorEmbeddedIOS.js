@@ -932,6 +932,106 @@ class AegisTorLogic: NSObject {
     resolve(true)
   }
 
+  // ── Slice 6 + federation F2: one-shot HTTP over Tor ─────────────────────────
+  // Declared on the JS side (net/tor.ts) since #391 but never implemented here.
+  // Same SOCKS-proxied URLSession the socket bridge uses. Resolves a JSON string
+  // {"status":<int>,"body":"…"}; only a transport failure rejects.
+  @objc
+  func httpRequest(
+    _ url: String, method: String, headersJson: String, body: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard state == "on" else {
+      reject("E_TOR_NOT_READY", "Tor is not on (state=\\(state))", nil)
+      return
+    }
+    guard let u = URL(string: url) else {
+      reject("E_HTTP_REQUEST", "invalid url: \\(url)", nil)
+      return
+    }
+    var req = URLRequest(url: u)
+    req.httpMethod = method.uppercased()
+    req.timeoutInterval = 30
+    var hasContentType = false
+    if let data = headersJson.data(using: .utf8),
+       let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+      for (k, v) in dict {
+        if k.lowercased() == "content-type" { hasContentType = true }
+        req.setValue(v, forHTTPHeaderField: k)
+      }
+    }
+    if req.httpMethod == "POST" {
+      if !hasContentType { req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type") }
+      req.httpBody = body.data(using: .utf8)
+    }
+    let session = URLSession(configuration: torSessionConfiguration())
+    let task = session.dataTask(with: req) { data, response, error in
+      defer { session.finishTasksAndInvalidate() }
+      if let error = error {
+        reject("E_HTTP_REQUEST", error.localizedDescription, error)
+        return
+      }
+      let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+      // Cap what we hand to JS — control-plane responses are small; blobs use httpDownload.
+      let capped = (data ?? Data()).prefix(1024 * 1024)
+      let text = String(data: capped, encoding: .utf8) ?? ""
+      let out: [String: Any] = ["status": status, "body": text]
+      if let json = try? JSONSerialization.data(withJSONObject: out),
+         let str = String(data: json, encoding: .utf8) {
+        resolve(str)
+      } else {
+        reject("E_HTTP_REQUEST", "encode failure", nil)
+      }
+    }
+    task.resume()
+  }
+
+  // Federation F2: download a binary blob over Tor straight to a file (E2EE
+  // attachments hosted on a contact's relay). Resolves {"status":<int>}; the
+  // file exists only on 200.
+  @objc
+  func httpDownload(
+    _ url: String, destPath: String, headersJson: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard state == "on" else {
+      reject("E_TOR_NOT_READY", "Tor is not on (state=\\(state))", nil)
+      return
+    }
+    guard let u = URL(string: url) else {
+      reject("E_HTTP_DOWNLOAD", "invalid url: \\(url)", nil)
+      return
+    }
+    var req = URLRequest(url: u)
+    req.httpMethod = "GET"
+    req.timeoutInterval = 60
+    if let data = headersJson.data(using: .utf8),
+       let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+      for (k, v) in dict { req.setValue(v, forHTTPHeaderField: k) }
+    }
+    let dest = URL(fileURLWithPath: destPath.hasPrefix("file://") ? String(destPath.dropFirst(7)) : destPath)
+    let session = URLSession(configuration: torSessionConfiguration())
+    let task = session.downloadTask(with: req) { tmp, response, error in
+      defer { session.finishTasksAndInvalidate() }
+      if let error = error {
+        reject("E_HTTP_DOWNLOAD", error.localizedDescription, error)
+        return
+      }
+      let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+      let fm = FileManager.default
+      try? fm.removeItem(at: dest)
+      if status == 200, let tmp = tmp {
+        try? fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do { try fm.moveItem(at: tmp, to: dest) } catch {
+          reject("E_HTTP_DOWNLOAD", error.localizedDescription, error)
+          return
+        }
+      }
+      resolve("{\\"status\\":\\(status)}")
+    }
+    task.resume()
+  }
+
   private func closeSocket(_ id: String, reason: String) {
     tasks[id]?.cancel(with: .goingAway, reason: nil)
     sessions[id]?.invalidateAndCancel()
@@ -1038,6 +1138,25 @@ RCT_EXPORT_METHOD(sioDisconnect:(NSString *)identifier
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
   [self.logic sioDisconnect:identifier resolver:resolve rejecter:reject];
+}
+
+RCT_EXPORT_METHOD(httpRequest:(NSString *)url
+                  method:(NSString *)method
+                  headersJson:(NSString *)headersJson
+                  body:(NSString *)body
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic httpRequest:url method:method headersJson:headersJson body:body resolver:resolve rejecter:reject];
+}
+
+RCT_EXPORT_METHOD(httpDownload:(NSString *)url
+                  destPath:(NSString *)destPath
+                  headersJson:(NSString *)headersJson
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic httpDownload:url destPath:destPath headersJson:headersJson resolver:resolve rejecter:reject];
 }
 
 @end

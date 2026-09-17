@@ -1,4 +1,5 @@
 import { SERVER_URL } from './config';
+import type { RelayRef } from './net/relayRef';
 
 export interface IdentityRecord {
   aegisId: string;
@@ -51,6 +52,26 @@ export function registerIdentity(
 
 export function lookupIdentity(aegisId: string): Promise<IdentityRecord> {
   return request<IdentityRecord>(`/identity/${encodeURIComponent(aegisId)}`);
+}
+
+/**
+ * Federation F2: look an identity up on ANOTHER relay, over Tor through the
+ * relay pool. Same record shape and the same ApiError statuses as
+ * `lookupIdentity`, so callers keep one error path. A relay that disables its
+ * directory (IDENTITY_LOOKUP=off, FEDERATION-DESIGN §4.3) answers 404 like an
+ * unknown id — the contact must then be added from a link/QR, which carries
+ * the key.
+ */
+export async function lookupIdentityAt(relay: RelayRef, aegisId: string): Promise<IdentityRecord> {
+  const { foreignRelayHttp } = require('./net/relayPool') as typeof import('./net/relayPool');
+  const res = await foreignRelayHttp(relay, `/identity/${encodeURIComponent(aegisId)}`);
+  if (!res) throw new ApiError(0, 'Network request failed');
+  if (res.status !== 200) throw new ApiError(res.status, `HTTP ${res.status}`);
+  try {
+    return JSON.parse(res.body) as IdentityRecord;
+  } catch {
+    throw new ApiError(res.status, 'malformed identity record');
+  }
 }
 
 // NOTE: the HTTP poll endpoint was removed in the 2026-06 audit (A-8). Poll

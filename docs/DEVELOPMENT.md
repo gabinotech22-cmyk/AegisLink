@@ -9,6 +9,7 @@
 
 Flags de desarrollo (federación, `docs/FEDERATION-DESIGN.md`): `EXPO_PUBLIC_FEDERATION=on` (mobile) /
 `VITE_FEDERATION=on` (desktop) activan las slices de "elige tu relay" que aún no se exponen; por defecto OFF.
+Relay: `RELAY_NAME` (nombre en `GET /relay/info`) e `IDENTITY_LOOKUP=off` (oculta `GET /identity/:id` en un relay propio; los contactos llegan por enlace/QR, que ya lleva la clave).
 - Android Studio / Xcode (para mobile)
 - Electron (para desktop, ya incluido en dependencias)
 

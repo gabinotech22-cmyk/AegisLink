@@ -3,7 +3,7 @@ import { canonicalRelay } from '../net/officialRelay';
 import type { RelayRef } from '../net/relayRef';
 import { logger } from '../utils/logger';
 import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, pinContact as dbPinContact, type StoredContact } from '../db/local';
-import { lookupIdentity, ApiError } from '../api';
+import { lookupIdentity, lookupIdentityAt, ApiError } from '../api';
 import { keyMatchesAegisId, normalizeAegisId } from '../crypto/aegisId';
 
 /**
@@ -46,7 +46,7 @@ interface ContactsState {
   error: string | null;
   hydrate: () => Promise<void>;
   /** Resolve an Aegis ID against the directory server, then save locally. */
-  addByAegisId: (aegisId: string, displayName?: string, opts?: { pending?: boolean }) => Promise<StoredContact>;
+  addByAegisId: (aegisId: string, displayName?: string, opts?: { pending?: boolean; relay?: RelayRef | null }) => Promise<StoredContact>;
   /** Accept a pending message request — clears the pending flag. */
   acceptContact: (aegisId: string) => Promise<void>;
   /**
@@ -118,9 +118,12 @@ export const useContacts = create<ContactsState>((set, get) => ({
       return existing;
     }
 
+    // Federation F2: an `ID@onion` address is looked up on THAT relay over Tor;
+    // a plain id (or the official onion) uses the home directory as before.
+    const relay = canonicalRelay(opts?.relay);
     let record;
     try {
-      record = await lookupIdentity(aegisId);
+      record = relay ? await lookupIdentityAt(relay, aegisId) : await lookupIdentity(aegisId);
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) {
         throw new Error(`No identity found for ${aegisId}. Has your peer opened the app yet?`);
@@ -158,6 +161,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
       addedAt: Date.now(),
       profile: 'personal',
       pending: opts?.pending === true,
+      relayOnion: relay?.onion ?? null,
     };
     await saveContact(contact);
     set({ contacts: [contact, ...get().contacts.filter((c) => c.aegisId !== aegisId)] });
