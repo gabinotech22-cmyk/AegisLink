@@ -1,12 +1,17 @@
 /**
  * QR payload format for sharing an identity:
- *   aegislink://v1/<AEGIS_ID>/<PUBLIC_KEY_BASE64>
+ *   v1: aegislink://v1/<AEGIS_ID>/<PUBLIC_KEY_BASE64>            (official relay)
+ *   v2: aegislink://v2/<AEGIS_ID>/<PUBLIC_KEY_BASE64>/<ONION>    (relay-qualified)
  *
- * `aegislink://` doubles as a deep-link scheme so the app can be opened
- * directly from a scanned URL on iOS/Android.
+ * v2 carries the relay that hosts the contact's mailbox (docs/FEDERATION-DESIGN.md
+ * D1). A v1 payload means "official relay" and is emitted whenever the sharer
+ * is on it, so nothing changes for today's users; v2 is emitted only for a
+ * custom relay. `aegislink://` doubles as a deep-link scheme so the app can be
+ * opened directly from a scanned URL on iOS/Android.
  */
 
 import { keyMatchesAegisId } from './aegisId';
+import { relayRefFromOnion, type RelayRef } from '../net/relayRef';
 
 /**
  * decodeURIComponent throws a URIError on a malformed percent-escape (a lone
@@ -24,6 +29,7 @@ function safeDecodeURIComponent(s: string): string | null {
 
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 const SCHEME = 'aegislink://v1/';
+const SCHEME_V2 = 'aegislink://v2/';
 const GROUP_SCHEME = 'aegislink://group/v1/';
 
 // ─── Universal (https) links — clickable in ANY app ──────────────────────────
@@ -53,29 +59,53 @@ export function universalToScheme(url: string): string | null {
   return null;
 }
 
-export function encodeIdentityQR(aegisId: string, publicKeyB64: string): string {
+/**
+ * QR payload for an identity. `relay` null/undefined = official relay → v1 (the
+ * form every shipped client understands); a custom relay → v2.
+ */
+export function encodeIdentityQR(aegisId: string, publicKeyB64: string, relay?: RelayRef | null): string {
+  if (relay) return `${SCHEME_V2}${aegisId}/${encodeURIComponent(publicKeyB64)}/${relay.onion}`;
   return `${SCHEME}${aegisId}/${encodeURIComponent(publicKeyB64)}`;
 }
 
 /** https form of the identity link — clickable outside AegisLink. */
-export function encodeIdentityLink(aegisId: string, publicKeyB64: string): string {
+export function encodeIdentityLink(aegisId: string, publicKeyB64: string, relay?: RelayRef | null): string {
+  if (relay) return `${UNIVERSAL_CONTACT_PREFIX}v2/${aegisId}/${encodeURIComponent(publicKeyB64)}/${relay.onion}`;
   return `${UNIVERSAL_CONTACT_PREFIX}v1/${aegisId}/${encodeURIComponent(publicKeyB64)}`;
 }
 
 export interface ParsedIdentityQR {
   aegisId: string;
   publicKeyB64: string;
+  /** null = official relay (every v1 payload; a v2 payload always names one). */
+  relay: RelayRef | null;
 }
 
 export function parseIdentityQR(raw: string): ParsedIdentityQR | null {
   if (typeof raw !== 'string') return null;
   const normalized = universalToScheme(raw) ?? raw;
-  if (!normalized.startsWith(SCHEME)) return null;
-  const rest = normalized.slice(SCHEME.length);
+  let rest: string;
+  let v2: boolean;
+  if (normalized.startsWith(SCHEME)) { rest = normalized.slice(SCHEME.length); v2 = false; }
+  else if (normalized.startsWith(SCHEME_V2)) { rest = normalized.slice(SCHEME_V2.length); v2 = true; }
+  else return null;
   const slash = rest.indexOf('/');
   if (slash < 0) return null;
   const aegisId = rest.slice(0, slash).trim().toUpperCase();
-  const decodedKey = safeDecodeURIComponent(rest.slice(slash + 1));
+  let keyPart = rest.slice(slash + 1);
+  let relay: RelayRef | null = null;
+  if (v2) {
+    // v2 = <key>/<onion>; the onion is validated strictly — a v2 payload with a
+    // bad relay is rejected outright, never downgraded to "official".
+    const slash2 = keyPart.indexOf('/');
+    if (slash2 < 0) return null;
+    relay = relayRefFromOnion(keyPart.slice(slash2 + 1));
+    if (!relay) return null;
+    keyPart = keyPart.slice(0, slash2);
+  } else if (keyPart.includes('/')) {
+    return null; // v1 has exactly two segments
+  }
+  const decodedKey = safeDecodeURIComponent(keyPart);
   if (decodedKey === null) return null;
   const publicKeyB64 = decodedKey.trim();
   if (!AEGIS_ID_RE.test(aegisId)) return null;
@@ -87,7 +117,7 @@ export function parseIdentityQR(raw: string): ParsedIdentityQR | null {
   // legitimate QR, generated via encodeIdentityQR from a real identity, always
   // passes because there aegisId === deriveAegisId(publicKey) by construction.
   if (!keyMatchesAegisId(publicKeyB64, aegisId)) return null;
-  return { aegisId, publicKeyB64 };
+  return { aegisId, publicKeyB64, relay };
 }
 
 // ─── Group invite links ───────────────────────────────────────────────────────

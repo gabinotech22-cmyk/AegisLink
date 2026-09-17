@@ -7,6 +7,8 @@ import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { PrimaryButton } from '../components/Button';
 import { parseIdentityQR, parseGroupInviteLink } from '../crypto/qr';
+import { FEDERATION } from '../config';
+import { isOfficialRelay } from '../net/officialRelay';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import type { StoredContact } from '../db/local';
@@ -80,9 +82,18 @@ export function ScanQRScreen({ onCancel, onAdded, onGroupInvite }: Props) {
       return;
     }
     handledRef.current = result.data;
+    if (!FEDERATION && !isOfficialRelay(parsed.relay)) {
+      // v2 link naming another relay — unreachable until federation ships.
+      themedAlert(
+        i18nT('addContact.relayUnsupportedTitle', 'Relay not supported yet'),
+        i18nT('addContact.relayUnsupportedDesc', 'This contact uses their own relay. Update AegisLink to a version with relay federation to add them.'),
+        [{ text: i18nT('common.ok', 'OK'), onPress: () => (handledRef.current = null) }],
+      );
+      return;
+    }
     setBusy(true);
     try {
-      const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64);
+      const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64, undefined, parsed.relay);
       if (outcome.kind === 'mitm_detected') {
         themedAlert(
           i18nT('scanQR.mitmTitle', '⚠️ Key Changed'),

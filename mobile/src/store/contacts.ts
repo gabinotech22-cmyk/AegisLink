@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { canonicalRelay } from '../net/officialRelay';
+import type { RelayRef } from '../net/relayRef';
 import { logger } from '../utils/logger';
 import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, pinContact as dbPinContact, type StoredContact } from '../db/local';
 import { lookupIdentity, ApiError } from '../api';
@@ -55,7 +57,9 @@ interface ContactsState {
   addFromQR: (
     aegisId: string,
     publicKeyB64: string,
-    displayName?: string
+    displayName?: string,
+    /** Relay named by a v2 link; null/undefined = official (federation F1). */
+    relay?: RelayRef | null
   ) => Promise<AddResult>;
   markVerified: (aegisId: string, verified: boolean) => Promise<void>;
   confirmKeyChange: (aegisId: string, newPublicKeyB64: string) => Promise<StoredContact | null>;
@@ -172,7 +176,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
   },
 
-  async addFromQR(aegisId, publicKeyB64, displayName) {
+  async addFromQR(aegisId, publicKeyB64, displayName, relay) {
     set({ error: null });
 
     if (isSelfAegisId(aegisId)) {
@@ -218,6 +222,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
       verified: true,
       addedAt: Date.now(),
       profile: 'personal',
+      relayOnion: canonicalRelay(relay)?.onion ?? null,
     };
     await saveContact(contact);
     set({ contacts: [contact, ...get().contacts] });

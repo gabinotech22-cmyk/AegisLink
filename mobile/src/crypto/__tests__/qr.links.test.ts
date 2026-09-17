@@ -28,16 +28,61 @@ describe('universal contact links', () => {
   it('encodeIdentityLink → parseIdentityQR round-trips', () => {
     const link = encodeIdentityLink(ID, KEY);
     expect(link.startsWith(`${UNIVERSAL_LINK_HOST}/a#v1/`)).toBe(true);
-    expect(parseIdentityQR(link)).toEqual({ aegisId: ID, publicKeyB64: KEY });
+    expect(parseIdentityQR(link)).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: null });
   });
 
   it('parseIdentityQR still accepts the aegislink:// QR form', () => {
-    expect(parseIdentityQR(encodeIdentityQR(ID, KEY))).toEqual({ aegisId: ID, publicKeyB64: KEY });
+    expect(parseIdentityQR(encodeIdentityQR(ID, KEY))).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: null });
   });
 
   it('rejects malformed ids and keys in the universal form', () => {
     expect(parseIdentityQR(`${UNIVERSAL_LINK_HOST}/a#v1/NOT-AN-ID/${KEY}`)).toBeNull();
     expect(parseIdentityQR(`${UNIVERSAL_LINK_HOST}/a#v1/${ID}/shortkey`)).toBeNull();
+  });
+});
+
+// ── v2: relay-qualified links (federation F1, docs/FEDERATION-DESIGN.md D1) ──
+const ONION = 'abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwxyz'.slice(0, 56) + '.onion';
+const RELAY = { onion: ONION };
+
+describe('relay-qualified (v2) contact links', () => {
+  it('a null/undefined relay still emits v1 — nothing changes for today’s users', () => {
+    expect(encodeIdentityQR(ID, KEY, null)).toBe(encodeIdentityQR(ID, KEY));
+    expect(encodeIdentityLink(ID, KEY, undefined)).toBe(encodeIdentityLink(ID, KEY));
+    expect(encodeIdentityQR(ID, KEY).startsWith('aegislink://v1/')).toBe(true);
+  });
+
+  it('QR v2 round-trips with the relay', () => {
+    const qr = encodeIdentityQR(ID, KEY, RELAY);
+    expect(qr).toBe(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}/${ONION}`);
+    expect(parseIdentityQR(qr)).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: RELAY });
+  });
+
+  it('https v2 round-trips with the relay', () => {
+    const link = encodeIdentityLink(ID, KEY, RELAY);
+    expect(link.startsWith(`${UNIVERSAL_LINK_HOST}/a#v2/`)).toBe(true);
+    expect(parseIdentityQR(link)).toEqual({ aegisId: ID, publicKeyB64: KEY, relay: RELAY });
+  });
+
+  it('normalises the onion spelling but never the identity binding', () => {
+    const upper = `aegislink://v2/${ID}/${encodeURIComponent(KEY)}/${ONION.toUpperCase()}`;
+    expect(parseIdentityQR(upper)?.relay).toEqual(RELAY);
+  });
+
+  it('a v2 payload with an invalid relay is rejected, never downgraded to official', () => {
+    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}/evil.example.com`)).toBeNull();
+    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}/`)).toBeNull();
+    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}`)).toBeNull();
+    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(KEY)}/${'a'.repeat(55)}.onion`)).toBeNull();
+  });
+
+  it('a v1 payload with an extra segment is not silently accepted', () => {
+    expect(parseIdentityQR(`aegislink://v1/${ID}/${encodeURIComponent(KEY)}/${ONION}`)).toBeNull();
+  });
+
+  it('v2 keeps the ID↔key binding', () => {
+    const otherKey = 'B'.repeat(43) + '=';
+    expect(parseIdentityQR(`aegislink://v2/${ID}/${encodeURIComponent(otherKey)}/${ONION}`)).toBeNull();
   });
 });
 

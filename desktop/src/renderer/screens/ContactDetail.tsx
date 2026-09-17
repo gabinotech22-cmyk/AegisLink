@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { shortOnion } from '../net/relayRef';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import type { CSSProperties } from 'react';
@@ -27,6 +28,7 @@ interface StoredContact {
   addedAt: number;
   muted?: boolean;
   mutedUntil?: number | null;
+  relayOnion?: string | null;
 }
 
 interface Props {
@@ -127,6 +129,12 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
           <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5, marginTop: 4, display: 'block' }}>
             {contact.aegisId} · added {daysSinceAdded}d ago
           </span>
+          {contact.relayOnion ? (
+            // Federation F1: a contact on their own relay shows it under the id.
+            <span data-testid="contact-relay" title={contact.relayOnion} style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.3, marginTop: 2, display: 'block' }}>
+              {i18n.t('contactDetail.relayLabel')}: {shortOnion(contact.relayOnion)}
+            </span>
+          ) : null}
           {contact.status && (
             <span style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 6, fontStyle: 'italic', textAlign: 'center', paddingLeft: 16, paddingRight: 16, display: 'block' }}>
               "{contact.status}"

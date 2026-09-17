@@ -7,6 +7,8 @@ import { TopBar } from '../components/TopBar';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { parseIdentityQR } from '../crypto/qr';
+import { FEDERATION } from '../config';
+import { isOfficialRelay } from '../net/officialRelay';
 import type { StoredContact } from '../db/local';
 
 interface Props {
@@ -43,7 +45,13 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
         setBusy(false);
         return;
       }
-      const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64);
+      // v2 link naming another relay — unreachable until federation ships (F7).
+      if (!FEDERATION && !isOfficialRelay(parsed.relay)) {
+        setError(i18n.t('addContact.relayUnsupportedDesc'));
+        setBusy(false);
+        return;
+      }
+      const outcome = await addFromQR(parsed.aegisId, parsed.publicKeyB64, undefined, parsed.relay);
       if (outcome.kind === 'mitm_detected') {
         const accept = window.confirm(
           i18n.t('scanQR.keyChangedForThis', { v0: outcome.oldKey.slice(-8), v1: outcome.newKey.slice(-8) })

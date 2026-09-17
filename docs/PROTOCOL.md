@@ -612,6 +612,26 @@ while that row is active: the handshake `auth.deviceId` must match an
 un-revoked row for the claimed Aegis ID (fail-closed, `device_not_linked`).
 `device:revoke` flips the row and disconnects exactly that device.
 
+### 9.3 Contact address = identity + relay (federation, F1)
+
+A contact address is the Aegis ID plus the relay that hosts the contact's
+mailbox (`docs/FEDERATION-DESIGN.md` D1). Relays are named only by their Tor v3
+onion host (`[a-z2-7]{56}.onion`); the official relay is the default and is
+never written on the wire:
+
+| Form | Official relay | Custom relay |
+|---|---|---|
+| QR / deep link | `aegislink://v1/<id>/<pubkey>` | `aegislink://v2/<id>/<pubkey>/<onion>` |
+| https link | `…/a#v1/<id>/<pubkey>` | `…/a#v2/<id>/<pubkey>/<onion>` |
+| typed | `ABC-DEFG-HJKM` | `ABC-DEFG-HJKM@<onion>` |
+
+Parsing rules (identical on mobile and desktop, pinned by shared known-answer
+vectors): the ID↔key binding of §3.2 always applies; a v2 payload whose relay
+is not a valid v3 onion is rejected outright — never downgraded to "official";
+a v1 payload with an extra segment is rejected. While the `FEDERATION` flag is
+off, a v2 link naming a non-official relay is recognised but refused with an
+"update AegisLink" message, so no client ever stores a contact it cannot reach.
+
 **Limitation (product decision pending, see `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` §3.1):**
 because the desktop holds the identity secrets, relay-side revocation blocks a
 *cooperating* client, not an adversary who already extracted the keys. True

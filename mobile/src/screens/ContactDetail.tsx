@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { shortOnion } from '../net/relayRef';
 import { View, Text, Pressable, ScrollView, ActivityIndicator, Modal, Animated, Easing, Linking } from 'react-native';
 import { WallpaperPicker, loadWallpaper, WALLPAPER_NAMES, type WallpaperOption } from '../components/WallpaperPicker';
 import { decodeBase64 } from 'tweetnacl-util';
@@ -252,6 +253,17 @@ export function ContactDetailScreen({
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5, marginTop: 4 }}>
               {contact.aegisId} · {i18nT('contactDetail.addedAgo', { count: Math.max(1, Math.floor((Date.now() - contact.addedAt) / 86400000)) })}
             </Text>
+            {contact.relayOnion ? (
+              // Federation F1: a contact hosted on their own relay shows it under the
+              // id (never for the official relay — nothing changes for today's users).
+              <Text
+                testID="contact-relay"
+                selectable
+                style={{ fontFamily: t.fontMono, fontSize: 10, color: t.textFaint, letterSpacing: 0.3, marginTop: 2 }}
+              >
+                {i18nT('contactDetail.relayLabel', 'relay')}: {shortOnion(contact.relayOnion)}
+              </Text>
+            ) : null}
             {contact.status ? (
               <Text
                 style={{

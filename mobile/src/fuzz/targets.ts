@@ -15,6 +15,7 @@
  * throw IS the finding, so the targets deliberately do NOT swallow errors.
  */
 import { parseIdentityQR, parseGroupInviteLink, universalToScheme } from '../crypto/qr';
+import { parseContactAddress, normalizeOnion } from '../net/relayRef';
 import { parseMultiPayload } from '../utils/attachmentFormat';
 import { parseGroupPostMarker } from '../utils/groupPost';
 import { parseLocationMessage } from '../utils/parseLocationMessage';
@@ -38,8 +39,23 @@ export const FUZZ_TARGETS: FuzzTarget[] = [
       'aegislink://v1/ABC-DEFG-HJKL/QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQT0=',
       'https://aegislink.duckdns.org/a#v1/ABC-DEFG-HJKL/key',
       'aegislink://v1/ABC-DEFG-HJKL/',
+      // v2 (relay-qualified, federation F1)
+      'aegislink://v2/ABC-DEFG-HJKL/QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQT0=/' + 'a'.repeat(56) + '.onion',
+      'https://aegislink.duckdns.org/a#v2/ABC-DEFG-HJKL/key/not-an-onion',
+      'aegislink://v2/ABC-DEFG-HJKL/key/',
     ],
     run: (s) => void parseIdentityQR(s),
+  },
+  {
+    name: 'parseContactAddress',
+    seeds: [
+      'ABC-DEFG-HJKL',
+      'abc-defg-hjkl@' + 'b'.repeat(56) + '.onion',
+      'ABC-DEFG-HJKL@http://x.onion:80/',
+      '@',
+      'ABC-DEFG-HJKL@@',
+    ],
+    run: (s) => { void parseContactAddress(s); void normalizeOnion(s); },
   },
   {
     name: 'parseGroupInviteLink',

@@ -64,6 +64,16 @@ export const ONION_URL: string | null =
   (process.env.EXPO_PUBLIC_ONION_URL as string | undefined) ?? null;
 
 /**
+ * FEDERATION — "choose your relay" (docs/FEDERATION-DESIGN.md). OFF by default
+ * until slice F7: with it off, every contact lives on the official relay, v2
+ * (relay-qualified) contact links are recognised but refused with a clear
+ * message, and the relay settings screen is not reachable. Opt in via
+ * EXPO_PUBLIC_FEDERATION=on for development builds of the slices.
+ */
+export const FEDERATION: boolean =
+  (process.env.EXPO_PUBLIC_FEDERATION as string | undefined) === 'on';
+
+/**
  * SEALED_TRANSPORT_VERSION — sealed-sender transport for 1:1 chat.
  *   'v2' (default): sealed-sender — the sender's identity never reaches the relay
  *         (sealed inside the box), submission gated by the recipient's delivery

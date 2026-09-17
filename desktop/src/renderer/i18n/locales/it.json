@@ -769,7 +769,9 @@
     "scanQrCode": "Scansiona codice QR",
     "uploadAScreenshotOf": "Carica uno screenshot di un codice QR",
     "upload": "CARICA",
-    "clipboardAccessDeniedPaste": "Accesso agli appunti negato. Incolla manualmente."
+    "clipboardAccessDeniedPaste": "Accesso agli appunti negato. Incolla manualmente.",
+    "relayUnsupportedTitle": "Relay non ancora supportato",
+    "relayUnsupportedDesc": "Questo contatto usa un proprio relay. Aggiorna AegisLink a una versione con federazione dei relay per aggiungerlo."
   },
   "backup": {
     "title": "Backup cifrato",
@@ -1870,7 +1872,8 @@
     "trustOnFirstUse": "Fiducia al primo uso",
     "manageAlertsForThis": "Gestisci avvisi per questo contatto",
     "unblockThisContact": "Sblocca questo contatto",
-    "blockMessagesFromThis": "Blocca i messaggi di questo contatto"
+    "blockMessagesFromThis": "Blocca i messaggi di questo contatto",
+    "relayLabel": "relay"
   },
   "keys": {
     "title": "Identità e chiavi",

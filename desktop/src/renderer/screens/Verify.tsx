@@ -9,6 +9,7 @@ import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import type { StoredContact } from '../db/local';
+import { encodeIdentityQR } from '../crypto/qr';
 
 interface Identity {
   aegisId: string;
@@ -34,9 +35,6 @@ function fingerprintHex(key: Uint8Array): string[] {
   const padded = hex.padEnd(32, '0').slice(0, 32);
   return [padded.slice(0, 4), padded.slice(4, 8), padded.slice(8, 12), padded.slice(12, 16),
           padded.slice(16, 20), padded.slice(20, 24), padded.slice(24, 28), padded.slice(28, 32)].map((s) => s.toUpperCase());
-}
-function encodeIdentityQR(aegisId: string, pubKeyB64: string): string {
-  return `aegislink://v1/${aegisId}/${encodeURIComponent(pubKeyB64)}`;
 }
 
 export function VerifyScreen({ onBack, onScan, onTab, onContactAdded }: Props) {

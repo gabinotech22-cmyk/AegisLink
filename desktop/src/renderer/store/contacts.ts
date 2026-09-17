@@ -1,4 +1,6 @@
 import { logger } from '../utils/logger';
+import { canonicalRelay } from '../net/officialRelay';
+import type { RelayRef } from '../net/relayRef';
 import { create } from 'zustand';
 import {
   loadContacts,
@@ -28,6 +30,8 @@ interface ContactsState {
     aegisId: string,
     publicKeyB64: string,
     displayName?: string,
+    /** Relay named by a v2 link; null/undefined = official (federation F1). */
+    relay?: RelayRef | null,
   ) => Promise<AddResult>;
   /**
    * Save a contact directly from data embedded in an incoming envelope.
@@ -135,7 +139,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
     return contact;
   },
 
-  async addFromQR(aegisId, publicKeyB64, displayName) {
+  async addFromQR(aegisId, publicKeyB64, displayName, relay) {
     set({ error: null });
     const existing = await getContact(aegisId);
 
@@ -160,6 +164,7 @@ export const useContacts = create<ContactsState>((set, get) => ({
       verified: true,
       addedAt: Date.now(),
       profile: 'personal',
+      relayOnion: canonicalRelay(relay)?.onion ?? null,
     };
     await saveContact(contact);
     set({ contacts: [contact, ...get().contacts] });

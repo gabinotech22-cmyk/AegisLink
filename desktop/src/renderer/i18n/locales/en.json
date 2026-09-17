@@ -769,7 +769,9 @@
     "scanQrCode": "Scan QR Code",
     "uploadAScreenshotOf": "Upload a screenshot of a QR code",
     "upload": "UPLOAD",
-    "clipboardAccessDeniedPaste": "Clipboard access denied. Paste manually."
+    "clipboardAccessDeniedPaste": "Clipboard access denied. Paste manually.",
+    "relayUnsupportedTitle": "Relay not supported yet",
+    "relayUnsupportedDesc": "This contact uses their own relay. Update AegisLink to a version with relay federation to add them."
   },
   "backup": {
     "title": "Encrypted Backup",
@@ -1898,7 +1900,8 @@
     "trustOnFirstUse": "Trust on first use",
     "manageAlertsForThis": "Manage alerts for this contact",
     "unblockThisContact": "Unblock this contact",
-    "blockMessagesFromThis": "Block messages from this contact"
+    "blockMessagesFromThis": "Block messages from this contact",
+    "relayLabel": "relay"
   },
   "keys": {
     "title": "Identities & Keys",

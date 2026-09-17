@@ -23,6 +23,12 @@ export interface StoredContact {
   hidden?: boolean;
   /** Auto-added from an unknown incoming sender; awaiting accept/block/delete. */
   pending?: boolean;
+  /**
+   * Onion of the relay that hosts this contact's mailbox (federation F1).
+   * null/undefined = official relay. Set from a v2 contact link or a
+   * `profile_update.mailboxRelay`; every routing decision goes through it.
+   */
+  relayOnion?: string | null;
 }
 
 type ContactRow = {
@@ -46,6 +52,7 @@ type ContactRow = {
   online: number;
   hidden: number;
   pending: number;
+  relay_onion: string | null;
 };
 
 function rowToContact(r: ContactRow): StoredContact {
@@ -70,6 +77,7 @@ function rowToContact(r: ContactRow): StoredContact {
     online: r.online === 1,
     hidden: r.hidden === 1,
     pending: r.pending === 1,
+    relayOnion: r.relay_onion ?? null,
   };
 }
 
@@ -77,8 +85,8 @@ export async function saveContact(c: StoredContact): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(
       `INSERT OR REPLACE INTO contacts
-       (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       c.aegisId,
       c.publicKeyB64,
       c.signingPublicKeyB64 || "",
@@ -98,7 +106,8 @@ export async function saveContact(c: StoredContact): Promise<void> {
       c.lastSeenAt ?? null,
       c.online ? 1 : 0,
       c.hidden ? 1 : 0,
-      c.pending ? 1 : 0
+      c.pending ? 1 : 0,
+      c.relayOnion ?? null
     );
   });
 }
@@ -113,11 +122,11 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
   return withDb(async (d) => {
     const rows = profile
       ? await d.getAllAsync<ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
           profile
         )
       : await d.getAllAsync<ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending FROM contacts ORDER BY added_at DESC`
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion FROM contacts ORDER BY added_at DESC`
         );
     return rows.map(rowToContact);
   });
@@ -126,7 +135,7 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
 export async function getContact(aegisId: string): Promise<StoredContact | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<ContactRow>(
-      `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending FROM contacts WHERE aegis_id = ?`,
+      `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion FROM contacts WHERE aegis_id = ?`,
       aegisId
     );
     if (!row) return null;

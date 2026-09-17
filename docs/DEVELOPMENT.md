@@ -6,6 +6,9 @@
   `ENOENT ... open 'sqlite'`). El CI fija Node 24 para el server (`.github/workflows/ci.yml`).
 - Node.js 22+ para `mobile/` y `desktop/`.
 - npm **10** para regenerar `mobile/package-lock.json` (npm 11 borra una entrada anidada y rompe el CI).
+
+Flags de desarrollo (federación, `docs/FEDERATION-DESIGN.md`): `EXPO_PUBLIC_FEDERATION=on` (mobile) /
+`VITE_FEDERATION=on` (desktop) activan las slices de "elige tu relay" que aún no se exponen; por defecto OFF.
 - Android Studio / Xcode (para mobile)
 - Electron (para desktop, ya incluido en dependencias)
 
