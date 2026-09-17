@@ -9,10 +9,9 @@ import { I } from '../components/icons';
 import { themedAlert } from '../components/AlertHost';
 
 const ALL_VARIANTS = [
-  { id: 'default', bg: '#06090a', mark: '#5bf2b9', workOnly: false },
-  { id: 'light',   bg: '#efece4', mark: '#0d8f5f', workOnly: false },
-  { id: 'tinted',  bg: '#14161c', mark: '#bdbdbd', workOnly: false },
-  { id: 'work',    bg: '#1c1f55', mark: '#ffffff', workOnly: true  },
+  { id: 'default', bg: '#06090a', mark: '#5bf2b9' },
+  { id: 'light',   bg: '#efece4', mark: '#0d8f5f' },
+  { id: 'tinted',  bg: '#14161c', mark: '#bdbdbd' },
 ] as const;
 
 type IconId = (typeof ALL_VARIANTS)[number]['id'];
@@ -28,7 +27,7 @@ export function AppIconScreen({ onBack }: Props) {
   const [current, setCurrent] = useState<IconId>('default');
   const [loading, setLoading] = useState(false);
 
-  const VARIANTS = ALL_VARIANTS.filter((v) => !v.workOnly);
+  const VARIANTS = ALL_VARIANTS;
 
   const { width } = Dimensions.get('window');
   const COLS = 2;
@@ -40,7 +39,6 @@ export function AppIconScreen({ onBack }: Props) {
       case 'default': return i18nT('appIcon.dark');
       case 'light':   return i18nT('appIcon.light');
       case 'tinted':  return i18nT('appIcon.tinted');
-      case 'work':    return i18nT('appIcon.work');
     }
   };
 
@@ -49,7 +47,6 @@ export function AppIconScreen({ onBack }: Props) {
       case 'default': return i18nT('appIcon.darkDesc');
       case 'light':   return i18nT('appIcon.lightDesc');
       case 'tinted':  return i18nT('appIcon.tintedDesc');
-      case 'work':    return i18nT('appIcon.workDesc');
     }
   };
 

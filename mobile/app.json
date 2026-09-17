@@ -222,11 +222,6 @@
               "name": "tinted",
               "ios": "./assets/icon-tinted.png",
               "android": "./assets/icon-tinted.png"
-            },
-            {
-              "name": "work",
-              "ios": "./assets/icon-work.png",
-              "android": "./assets/icon-work.png"
             }
           ]
         }

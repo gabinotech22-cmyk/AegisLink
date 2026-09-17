@@ -27,7 +27,7 @@ decía Node 22+, el server exige Node 24 → sus 55 suites fallaron con
 `ENOENT sqlite`). La regla "La doc no miente" existía en `CLAUDE.md` pero sin
 enforcement; esta tanda añade el gate `docs-sync` en CI y la plantilla de PR.
 
-**Estado:** 8 cerrados (PR #482: AL-01/03/04/05/06/08/10/11) · 3 abiertos → PR-C (AL-02/07/09, extracción de Work).
+**Estado:** 11/11 cerrados — 8 en PR #482 (AL-01/03/04/05/06/08/10/11), 3 por extracción de Work (AL-02/07/09, PR-C `chore/extract-work`, ROADMAP Hito 1).
 
 ## 1. Superficie medida
 
@@ -62,9 +62,9 @@ link del desktop no llevaba `aegisId` y el relay lo expulsaba con `bad_handshake
 
 ### AL-02 · Borrado cross-org en canales Work — **alto**, **CONFIRMADO**
 
-`server/src/relay/handlers/channels.ts:250-262` valida que el llamante es miembro de `orgId` y que
+`server/src/relay/handlers/channels.ts:250-262` validaba que el llamante era miembro de `orgId` y que
 `message.channel_id === channelId`, pero nunca `channel.org_id === orgId`. Superficie sin clientes.
-Estado: **abierto → PR-C** (extracción de Work).
+Estado: **cerrado (PR-C)** — el handler y toda la superficie Work se retiraron del relay.
 
 ### AL-03 · SSRF por DNS rebinding + lectura sin límite en link-preview — **alto**, **CONFIRMADO**
 
@@ -109,7 +109,7 @@ Estado: **cerrado (PR #482)** — `ackScoping.relay.test.ts` (4 casos).
 - **Falso**: "el FTS indexa ciphertext". B-5 ya indexa body vacío: triggers `sqlite.ts:371-392` y
   migración `:492-519` (`delete-all` del índice).
 
-Superficie sin clientes. Estado: **abierto → PR-C** (extracción de Work).
+Superficie sin clientes. Estado: **cerrado (PR-C)** — tabla `work_messages`, FTS y handler retirados.
 
 ### AL-08 · Backups declarados de 5 MB pero bloqueados a 64 KB — **medio**, **CONFIRMADO**
 
@@ -119,7 +119,7 @@ propio; `MAX_BACKUP_BYTES` (`:42`) es inalcanzable. Estado: **cerrado (PR #482)*
 ### AL-09 · `POST /work/org` no puede producir una firma válida — **medio**, **CONFIRMADO**
 
 `server/src/routes/work.ts:136-137` — `orgId = randomUUID()` y luego verifica la firma sobre ese `orgId`.
-Ningún cliente llama al endpoint. Estado: **abierto → PR-C** (extracción de Work).
+Ningún cliente llamaba al endpoint. Estado: **cerrado (PR-C)** — router `/work` retirado.
 
 ### AL-10 · Dependencias con advisories — **medio/alto**, **CONFIRMADO**
 
@@ -161,7 +161,7 @@ Estado: **cerrado (PR #482)** — `mobile/scripts/audit-permissions.mjs` sobre `
 |---|---|---|
 | A | `docs/audit-2026-09-16-verification-and-doc-sync-rule` | DOC-1, regla + gate `docs-sync`, este informe |
 | B | `fix/security-audit-2026-09-16-server` (#482) | AL-01, AL-03, AL-04, AL-05, AL-06, AL-08, AL-10, AL-11 — **cerrados** |
-| C | `chore/extract-work` (Hito 1 del ROADMAP) | AL-02, AL-07, AL-09 |
+| C | `chore/extract-work` (Hito 1 del ROADMAP) | AL-02, AL-07, AL-09 — **cerrados** |
 
 Cada PR se mergea antes de abrir la siguiente (regla de oro de ramas). Este documento es la fuente
 canónica del estado de estos hallazgos; `ROADMAP.md` enlaza aquí.

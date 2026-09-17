@@ -19,7 +19,6 @@ const VARIANTS = [
   { name: 'dark',    src: './assets/icon-dark.png',    bg: '#06090a' },
   { name: 'light',   src: './assets/icon-light.png',   bg: '#efece4' },
   { name: 'tinted',  src: './assets/icon-tinted.png',  bg: '#14161c' },
-  { name: 'work',    src: './assets/icon-work.png',    bg: '#1c1f55' },
 ];
 
 // Standard Android launcher icon sizes (flat fallback)

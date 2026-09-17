@@ -22,11 +22,10 @@
 - [x] **C2**: Borrado seguro de claves Ratchet post-uso — **HECHO** (auditado, LGTM qa-lead).
 
 ## Fase 4 — Work Enterprise real
-- [ ] **P1**: Work Dashboard con datos reales del relay — **PENDIENTE** (solo strings i18n
-  a 2026-06-29; no existe pantalla `WorkDashboard`).
-- [ ] **G2**: UI de pagos Lightning — **PENDIENTE**. Prototipo aparcado en
-  `mobile/src/_unused/web3/payments/LightningPayment.ts` + `_unused/screens/Subscription.tsx`
-  (no cableado).
+- [x] **P1** / **G2**: **movidos al futuro repo de AegisLink Work** (ROADMAP Hito 1, 2026-09-17).
+  El código Work (router `/work`, `repos/work`, handlers de canales de org, tablas `work_*`,
+  strings i18n `workDashboard.*`) y los prototipos de pagos (`_unused/`) se retiraron de este
+  repo; se recuperan de la historia git en `976c09f` (último `main` que los contiene).
 - [x] **G6**: Tor routing — **HECHO (vía Orbot/onion + mailbox)**. `routeViaTor` + `ONION_URL`
   + mailbox mode fail-closed en `mobile/src/config.ts`; transporte mailbox sellado (#171/#172).
   Ver `docs/FASE4-TOR-EMBEDDED-IMPL.md`, `docs/SEALED-SENDER-ARCHITECTURE.md`.

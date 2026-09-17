@@ -18,12 +18,11 @@ import linksRoutes from './routes/links.js';
 import turnRoutes from './routes/turn.js';
 import proxyGifRoutes from './routes/proxyGif.js';
 import proxyLinkPreviewRoutes from './routes/proxyLinkPreview.js';
-import { createWorkRouter } from './routes/work.js';
 import { createPublicChannelsRouter } from './routes/publicChannels.js';
 import { attachRelay } from './relay/handler.js';
 import { attachSocketIoRedisAdapter } from './relay/socketIoRedisAdapter.js';
 import { attachSocketIoClusterAdapter } from './relay/socketIoClusterAdapter.js';
-import { initDb, messageRepo, senderKeyDistRepo, pruneExpiredWorkMessages, pushEndpointRepo, pushMailboxTokenRepo } from './db/client.js';
+import { initDb, messageRepo, senderKeyDistRepo, pushEndpointRepo, pushMailboxTokenRepo } from './db/client.js';
 
 // ── Last-resort error handlers ───────────────────────────────────────────────
 // Log only the error itself (never envelope payloads or user identifiers) to
@@ -267,8 +266,6 @@ if (process.env.REDIS_URL) {
 
 attachRelay(io);
 
-// Routes that require access to the Socket.IO server for real-time events.
-app.use('/work', createWorkRouter(io));
 // NOTE: the legacy HTTP /devices router was removed (security roadmap Ola 3,
 // C-6 + A-7). It was unauthenticated dead code — device linking and revocation
 // run exclusively over the authenticated socket events `device:link`,
@@ -315,12 +312,6 @@ initDb().then(() => {
     void pushEndpointRepo.purgeOlderThan(Date.now() - 48 * 60 * 60 * 1000);
     void pushMailboxTokenRepo.purgeOlderThan(Date.now() - 48 * 60 * 60 * 1000);
   }, 10 * 60 * 1000).unref();
-
-  // Prune work messages that exceed channel retention policies.
-  void pruneExpiredWorkMessages();
-  setInterval(() => {
-    void pruneExpiredWorkMessages();
-  }, 60 * 60 * 1000).unref();
 }).catch((err: unknown) => {
   console.error('[aegislink-server] DB init failed:', err);
   process.exit(1);

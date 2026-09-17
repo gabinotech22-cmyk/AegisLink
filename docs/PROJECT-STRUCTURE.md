@@ -77,7 +77,6 @@ No inventes carpetas nuevas en la raíz de un paquete sin actualizar esta tabla.
 | `hooks/` · `utils/` · `theme/` · `i18n/` | Helpers transversales. |
 | `web3/` | DIDs y pagos — opcional, la app funciona sin esto. |
 | `__tests__/` · `__mocks__/` | Tests Jest + RNTL y sus mocks (ver convención de tests). |
-| `_unused/` | Código aparcado a recuperar (p. ej. Wallet/monetización). No se importa desde producción. |
 
 ### `server/src/`
 | Subcarpeta | Qué contiene |

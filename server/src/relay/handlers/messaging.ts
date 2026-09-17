@@ -27,16 +27,6 @@ export function attachMessagingEphemeral(socket: Socket, { me, sockets }: Messag
     if (target) {
       for (const s of target) s.emit('typing', { from: me, isTyping: parsed.data.isTyping });
     }
-    // Work channel path — also broadcast to the channel room so Work clients
-    // can display per-channel "X is typing" indicators
-    if (parsed.data.channelId) {
-      socket.to(`channel:${parsed.data.channelId}`).emit('typing', {
-        from: me,
-        isTyping: parsed.data.isTyping,
-        orgId: parsed.data.orgId,
-        channelId: parsed.data.channelId,
-      });
-    }
   });
 
   // ─── Read receipts ──────────────────────────────────────────────────────────
