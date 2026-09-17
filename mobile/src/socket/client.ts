@@ -1595,12 +1595,33 @@ export async function rekeyGroupAfterRemoval(
   );
   // Sealed sender (Phase 3b): NO senderAegisId on the wire — it is sealed inside
   // each per-recipient box, so the relay never learns who re-keyed the group.
-  const distributions = sealed.map((dist) => ({
-    aegisId: dist.aegisId,
-    ciphertextB64: dist.ciphertextB64,
-    nonceB64: dist.nonceB64,
-    iteration: dist.iteration,
-  }));
+  //
+  // Federation F3: `group:rekey` is a relay-local queue keyed by aegisId, so a
+  // member on ANOTHER relay can never drain it. Their per-recipient sealed box
+  // travels instead as a `sender_key_dist` E2EE message through their relay
+  // (F2 pool) — same box, same trial-decrypt on receipt, delivered exactly like
+  // any other message (outbox retry, at-least-once on their relay).
+  const foreignDists: typeof sealed = [];
+  const distributions: Array<{ aegisId: string; ciphertextB64: string; nonceB64: string; iteration: number }> = [];
+  for (const dist of sealed) {
+    const member = contactByAegisId.get(dist.aegisId);
+    if (member && isForeign(member)) foreignDists.push(dist);
+    else distributions.push({ aegisId: dist.aegisId, ciphertextB64: dist.ciphertextB64, nonceB64: dist.nonceB64, iteration: dist.iteration });
+  }
+  for (const dist of foreignDists) {
+    const member = contactByAegisId.get(dist.aegisId);
+    if (!member?.publicKeyB64) continue;
+    await sendMessage({
+      identity,
+      recipientAegisId: dist.aegisId,
+      recipientPublicKey: decodeBase64(member.publicKeyB64),
+      plaintext: JSON.stringify({ groupId, ciphertextB64: dist.ciphertextB64, nonceB64: dist.nonceB64, iteration: dist.iteration }),
+      type: 'sender_key_dist',
+      expiresAt: null,
+      skipLocalAppend: true,
+    });
+  }
+  if (distributions.length === 0) return;
 
   // 4. Fan-out in batches of 512 (server-side limit per group:rekey call).
   //    Emit each batch sequentially and await its ack before the next one so
@@ -1627,14 +1648,6 @@ export async function rekeyGroupAfterRemoval(
     const batch = distributions.slice(offset, offset + REKEY_BATCH_SIZE);
     await emitRekeyBatch(groupId, batch);
   }
-}
-
-export function emitDeleteChannelMsg(payload: {
-  channelId: string;
-  orgId: string;
-  messageId: string;
-}): void {
-  socket?.emit('channel:delete_msg', payload);
 }
 
 // ─── Per-peer session-establishment lock ─────────────────────────────────────
@@ -2680,6 +2693,39 @@ async function decryptAndAppendLocked(
             setTimeout(() => useTyping.getState().setTyping(contact.aegisId, false), 5000);
           }
         } catch { /* malformed typing payload — ignore */ }
+        await saveSessionState(contact.aegisId, ratchetState);
+        return true;
+      }
+
+      // Federation F3: a group SenderKey distribution that could not use the
+      // relay-local `group:rekey` queue (the distributor lives on another relay).
+      // The payload is the SAME per-recipient sealed box the drain path handles;
+      // the distributor is the authenticated sealed-sender contact, so the box is
+      // opened against THAT key only and the signed-in senderAegisId must match.
+      if (parsedPayload.type === 'sender_key_dist') {
+        try {
+          const dist = JSON.parse(parsedPayload.text as string) as {
+            groupId?: unknown; ciphertextB64?: unknown; nonceB64?: unknown; iteration?: unknown;
+          };
+          if (typeof dist.groupId === 'string' && typeof dist.ciphertextB64 === 'string' && typeof dist.nonceB64 === 'string') {
+            const { openSenderKeyDistribution } =
+              require('../crypto/channelKey') as typeof import('../crypto/channelKey');
+            const { saveSenderKey } =
+              require('../crypto/channelKeyStore') as typeof import('../crypto/channelKeyStore');
+            const opened = openSenderKeyDistribution(
+              { ciphertextB64: dist.ciphertextB64, nonceB64: dist.nonceB64 },
+              identity.secretKeyB64,
+              contact.publicKeyB64,
+            );
+            if (opened && opened.senderAegisId === contact.aegisId) {
+              await saveSenderKey(dist.groupId, contact.aegisId, opened.senderKey);
+            } else if (__DEV__) {
+              logger.warn('[socket] sender_key_dist rejected: box did not open for the authenticated sender');
+            }
+          }
+        } catch (e) {
+          if (__DEV__) logger.warn('[socket] sender_key_dist handling failed:', (e as Error).message);
+        }
         await saveSessionState(contact.aegisId, ratchetState);
         return true;
       }
@@ -3986,7 +4032,7 @@ async function sendSelfCopy(
  * mode, or a `["msgId",…]` bubble for a read receipt. Only genuine content
  * (direct_msg + 1:1 media, location, view_once) is self-copied.
  */
-const SELF_COPY_EXCLUDED_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete']);
+const SELF_COPY_EXCLUDED_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist']);
 
 /**
  * Handle an inbound envelope flagged as a self-copy. Decrypts via the
@@ -4737,7 +4783,11 @@ const sealedTypingState = new Map<string, { isTyping: boolean; at: number }>();
 
 export function emitTyping(to: string, isTyping: boolean): void {
   if (!socket || !authenticated) return;
-  if (MAILBOX_ENABLED) {
+  // Federation F3: a contact on another relay has no relay-local `typing`
+  // event — the sealed message (below) is the only path, and F2 already routes
+  // it through their relay. Same for read receipts.
+  const typingContact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+  if (MAILBOX_ENABLED || (typingContact && isForeign(typingContact))) {
     // The plaintext `typing` event carries the peer's aegisId on the control-
     // plane socket, relinking the me↔to edge mailbox mode just sealed. Send it
     // SEALED through the E2EE channel instead (same pattern as read receipts).
@@ -4771,7 +4821,9 @@ export function sendReadReceipts(to: string, msgIds: string[]): void {
   // never sees the me↔to aegisId edge on the plaintext control-plane socket.
   // Outside mailbox mode, keep the lightweight plaintext event — it exposes no
   // more than the v2 message transport already does (same aegisId routing).
-  if (MAILBOX_ENABLED) {
+  // Federation F3: a foreign contact only has the sealed path.
+  const receiptContact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+  if (MAILBOX_ENABLED || (receiptContact && isForeign(receiptContact))) {
     const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
     const identity = useIdentity.getState().identity;
     const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
