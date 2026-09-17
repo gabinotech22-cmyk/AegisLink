@@ -29,7 +29,6 @@ const VARIANTS = [
   { name: 'dark',   bg: '#06090a' },
   { name: 'light',  bg: '#efece4' },
   { name: 'tinted', bg: '#14161c' },
-  { name: 'work',   bg: '#1c1f55' },
 ];
 
 const FLAT_FOLDERS = ['mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi'];
