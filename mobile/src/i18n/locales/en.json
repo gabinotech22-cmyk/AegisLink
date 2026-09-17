@@ -609,7 +609,9 @@
     "nicknameLabel": "NICKNAME (OPTIONAL)",
     "nicknamePlaceholder": "What do you want to call them?",
     "adding": "Adding…",
-    "networkError": "Cannot connect to the AegisLink server. Check your connection."
+    "networkError": "Cannot connect to the AegisLink server. Check your connection.",
+    "relayUnsupportedTitle": "Relay not supported yet",
+    "relayUnsupportedDesc": "This contact uses their own relay. Update AegisLink to a version with relay federation to add them."
   },
   "backup": {
     "title": "Encrypted Backup",
@@ -1371,7 +1373,8 @@
     "clearBlockBtn": "Clear and block",
     "addedAgo": "{{count}}d ago",
     "addedAgoLabel": "added",
-    "viewPhoto": "View photo"
+    "viewPhoto": "View photo",
+    "relayLabel": "relay"
   },
   "keys": {
     "title": "Identities & Keys",

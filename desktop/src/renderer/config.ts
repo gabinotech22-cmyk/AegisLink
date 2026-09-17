@@ -15,6 +15,14 @@ export const ONION_URL: string | null =
   (import.meta.env.VITE_ONION_URL as string | undefined) ?? null;
 
 /**
+ * FEDERATION — "choose your relay" (docs/FEDERATION-DESIGN.md). OFF by default
+ * until slice F7 (parity with mobile EXPO_PUBLIC_FEDERATION). Opt in via
+ * VITE_FEDERATION=on for development builds of the slices.
+ */
+export const FEDERATION: boolean =
+  (import.meta.env.VITE_FEDERATION as string | undefined) === 'on';
+
+/**
  * Tor always-on (desktop): the main process proxies the whole session through
  * the embedded Tor, so when the relay's .onion is configured EVERYTHING — the
  * aegisId control socket, HTTP (PoW, prekeys, TURN creds), the mailbox socket —

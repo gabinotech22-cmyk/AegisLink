@@ -67,7 +67,8 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
       verified                INTEGER NOT NULL DEFAULT 0,
       added_at                INTEGER NOT NULL,
       color                   TEXT,
-      avatar_image            TEXT
+      avatar_image            TEXT,
+      relay_onion             TEXT
     );
 
     CREATE TABLE IF NOT EXISTS messages (
@@ -394,6 +395,9 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   // The chat opens in "accept/block/delete" mode and sending is gated until the
   // user accepts — a stranger never lands directly in a normal thread.
   await addColumn(d, 'contacts', 'pending INTEGER NOT NULL DEFAULT 0;');
+  // Federation F1 (docs/FEDERATION-DESIGN.md D2): onion of the relay hosting the
+  // contact's mailbox; NULL = official relay (every contact today).
+  await addColumn(d, 'contacts', 'relay_onion TEXT;');
 
   // Message capabilities (replies, reactions, star, delete, media)
   await addColumn(d, 'messages', 'type TEXT;');

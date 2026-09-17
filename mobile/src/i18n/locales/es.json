@@ -609,7 +609,9 @@
     "nicknameLabel": "APODO (OPCIONAL)",
     "nicknamePlaceholder": "¿Cómo quieres llamarle?",
     "adding": "Añadiendo…",
-    "networkError": "No se puede conectar al servidor AegisLink. Verifica tu conexión."
+    "networkError": "No se puede conectar al servidor AegisLink. Verifica tu conexión.",
+    "relayUnsupportedTitle": "Relay aún no soportado",
+    "relayUnsupportedDesc": "Este contacto usa su propio relay. Actualiza AegisLink a una versión con federación de relays para añadirlo."
   },
   "backup": {
     "title": "Copia de seguridad cifrada",
@@ -1371,7 +1373,8 @@
     "clearBlockBtn": "Borrar y bloquear",
     "addedAgo": "hace {{count}}d",
     "addedAgoLabel": "añadido",
-    "viewPhoto": "Ver foto"
+    "viewPhoto": "Ver foto",
+    "relayLabel": "relay"
   },
   "keys": {
     "title": "Identidades y claves",

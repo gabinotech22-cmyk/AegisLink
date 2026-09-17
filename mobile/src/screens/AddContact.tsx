@@ -12,6 +12,9 @@ import { PrimaryButton, GhostButton } from '../components/Button';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { encodeIdentityQR, encodeIdentityLink, parseIdentityQR } from '../crypto/qr';
+import { FEDERATION } from '../config';
+import { isOfficialRelay } from '../net/officialRelay';
+import { parseContactAddress, type RelayRef } from '../net/relayRef';
 import type { StoredContact } from '../db/local';
 import type { Theme } from '../theme/vault';
 import type { Identity } from '../crypto/identity';
@@ -158,7 +161,7 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
   identity: Identity | null;
   insets: { top: number; bottom: number; left: number; right: number };
   onBack: () => void;
-  addFromQR: (aegisId: string, publicKeyB64: string, displayName?: string) => Promise<AddResult>;
+  addFromQR: (aegisId: string, publicKeyB64: string, displayName?: string, relay?: RelayRef | null) => Promise<AddResult>;
   addByAegisId: (aegisId: string, displayName?: string) => Promise<StoredContact>;
   onAdded: (contact: StoredContact) => void;
 }) {
@@ -200,7 +203,19 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
       // Try full identity QR first (aegislink://v1/{id}/{pubkey})
       const parsed = parseIdentityQR(data);
       if (parsed) {
-        const result = await addFromQR(parsed.aegisId, parsed.publicKeyB64, '');
+        // A relay-qualified (v2) link names a relay other than the official one.
+        // Until federation ships (FEDERATION flag, docs/FEDERATION-DESIGN.md) this
+        // client cannot deliver there, so refuse loudly instead of adding a
+        // contact we could never reach.
+        if (!FEDERATION && !isOfficialRelay(parsed.relay)) {
+          themedAlert(
+            i18nT('addContact.relayUnsupportedTitle', 'Relay not supported yet'),
+            i18nT('addContact.relayUnsupportedDesc', 'This contact uses their own relay. Update AegisLink to a version with relay federation to add them.'),
+            [{ text: i18nT('common.ok', 'OK'), onPress: () => { setScanned(false); setScanning(false); setMode('show'); } }],
+          );
+          return;
+        }
+        const result = await addFromQR(parsed.aegisId, parsed.publicKeyB64, '', parsed.relay);
 
         if (result.kind === 'mitm_detected') {
           themedAlert(
@@ -535,8 +550,12 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const trimmedId = aegisId.trim().toUpperCase();
-  const idValid = AEGIS_ID_RE.test(trimmedId);
+  // Typed `ID@onion` (federation F1): recognised so the error is specific, but
+  // only the official relay is reachable until the FEDERATION flag ships.
+  const typedAddress = parseContactAddress(aegisId);
+  const typedForeignRelay = typedAddress !== null && !isOfficialRelay(typedAddress.relay);
+  const trimmedId = (typedAddress?.aegisId ?? aegisId.trim().toUpperCase());
+  const idValid = AEGIS_ID_RE.test(trimmedId) && (!typedForeignRelay || FEDERATION);
 
   const handlePaste = async () => {
     const text = await Clipboard.getStringAsync();
@@ -632,7 +651,9 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
           </View>
           {aegisId.length > 0 && !idValid && (
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.danger, marginTop: 6 }}>
-              {i18nT('addContact.invalidFormat', 'Formato inválido — debe ser XXX-XXXX-XXXX')}
+              {typedForeignRelay
+                ? i18nT('addContact.relayUnsupportedDesc', 'This contact uses their own relay. Update AegisLink to a version with relay federation to add them.')
+                : i18nT('addContact.invalidFormat', 'Formato inválido — debe ser XXX-XXXX-XXXX')}
             </Text>
           )}
         </View>

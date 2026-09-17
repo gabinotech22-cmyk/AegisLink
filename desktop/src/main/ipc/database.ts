@@ -287,7 +287,8 @@ function ensureSchema(db: Database.Database): void {
       muted_until             INTEGER,
       blocked                 INTEGER NOT NULL DEFAULT 0,
       archived                INTEGER NOT NULL DEFAULT 0,
-      profile                 TEXT NOT NULL DEFAULT 'personal'
+      profile                 TEXT NOT NULL DEFAULT 'personal',
+      relay_onion             TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS messages (
       id              TEXT PRIMARY KEY,
@@ -376,6 +377,8 @@ function ensureSchema(db: Database.Database): void {
   safeAddColumn('contacts', 'blocked', 'INTEGER NOT NULL DEFAULT 0')
   safeAddColumn('contacts', 'archived', 'INTEGER NOT NULL DEFAULT 0')
   safeAddColumn('contacts', 'profile', "TEXT NOT NULL DEFAULT 'personal'")
+  // Federation F1: relay hosting the contact's mailbox; NULL = official relay.
+  safeAddColumn('contacts', 'relay_onion', 'TEXT')
 
   safeAddColumn('groups', 'avatar_color', 'TEXT')
   safeAddColumn('groups', 'avatar_image', 'TEXT')
@@ -589,8 +592,8 @@ export function registerDatabaseHandlers(): void {
     assertMaxLen(c?.color, MAX_METADATA_FIELD_BYTES, 'contact.color')
     assertMaxLen(c?.avatarImage, MAX_AVATAR_IMAGE_BYTES, 'contact.avatarImage')
     const sql = `INSERT OR REPLACE INTO contacts
-     (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     db.prepare(sql).run(
       c.aegisId,
       c.publicKeyB64,
@@ -606,7 +609,8 @@ export function registerDatabaseHandlers(): void {
       c.mutedUntil ?? null,
       c.blocked ? 1 : 0,
       c.archived ? 1 : 0,
-      c.profile ?? 'personal'
+      c.profile ?? 'personal',
+      c.relayOnion ?? null
     )
   })
 
@@ -616,13 +620,13 @@ export function registerDatabaseHandlers(): void {
     if (profile) {
       rows = db
         .prepare<unknown[], ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile FROM contacts WHERE profile = ? ORDER BY added_at DESC`
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion FROM contacts WHERE profile = ? ORDER BY added_at DESC`
         )
         .all(profile)
     } else {
       rows = db
         .prepare<unknown[], ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile FROM contacts ORDER BY added_at DESC`
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion FROM contacts ORDER BY added_at DESC`
         )
         .all()
     }
@@ -641,7 +645,8 @@ export function registerDatabaseHandlers(): void {
       status: r.status ?? undefined,
       blocked: r.blocked === 1,
       archived: r.archived === 1,
-      profile: r.profile
+      profile: r.profile,
+      relayOnion: r.relay_onion ?? null
     }))
   })
 
@@ -649,7 +654,7 @@ export function registerDatabaseHandlers(): void {
     assertTrustedSender(event)
     const r = db
       .prepare<unknown[], ContactRow>(
-        `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile FROM contacts WHERE aegis_id = ?`
+        `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion FROM contacts WHERE aegis_id = ?`
       )
       .get(aegisId)
     return r
@@ -668,7 +673,8 @@ export function registerDatabaseHandlers(): void {
           status: r.status ?? undefined,
           blocked: r.blocked === 1,
           archived: r.archived === 1,
-          profile: r.profile
+          profile: r.profile,
+          relayOnion: r.relay_onion ?? null
         }
       : null
   })

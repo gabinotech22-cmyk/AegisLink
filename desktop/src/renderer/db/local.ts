@@ -101,6 +101,8 @@ export interface StoredContact {
   blocked?: boolean;
   archived?: boolean;
   profile?: 'personal' | 'work';
+  /** Onion of the relay hosting this contact's mailbox (federation F1); null = official. */
+  relayOnion?: string | null;
 }
 
 export async function saveContact(c: StoredContact): Promise<void> {

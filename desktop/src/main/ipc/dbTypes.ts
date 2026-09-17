@@ -38,6 +38,7 @@ export interface ContactInput {
   blocked?: boolean;
   archived?: boolean;
   profile?: string;
+  relayOnion?: string | null;
 }
 
 export interface MessageInput {
@@ -105,6 +106,7 @@ export interface ContactRow {
   blocked: number;
   archived: number;
   profile: string;
+  relay_onion: string | null;
 }
 
 export interface MessageRow {
