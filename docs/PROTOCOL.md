@@ -648,6 +648,18 @@ official one, and are fetched through Tor. `GET /relay/info` publishes a
 relay's static capabilities (`protocol`, `features`, `minClient`,
 `maxBlobBytes`) so a client can vet a relay before using it.
 
+**Control plane and groups across relays (F3).** Typing indicators and read
+receipts to a contact on another relay are sealed E2EE messages
+(`type: 'typing'` / `'read_receipt'`), never relay-local events. A group
+SenderKey distribution to such a member is a sealed `sender_key_dist` message
+carrying the same per-recipient box `group:rekey` would queue; the recipient
+opens it only against the authenticated sealed-sender's key and requires the
+signed-in distributor id to match. **Known gap (F3b):** the first message of a
+new session always uses the v1 outer envelope (the v2 inner never carries
+`x3dhInit`), and the recipient's mailbox root only arrives over an established
+session, so cross-relay first contact needs the v2 link to carry the mailbox
+root and a v2 inner able to bootstrap — tracked in `FEDERATION-DESIGN.md` F3b.
+
 **Limitation (product decision pending, see `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` §3.1):**
 because the desktop holds the identity secrets, relay-side revocation blocks a
 *cooperating* client, not an adversary who already extracted the keys. True

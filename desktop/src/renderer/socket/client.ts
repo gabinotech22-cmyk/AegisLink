@@ -2672,7 +2672,10 @@ const sealedTypingState = new Map<string, { isTyping: boolean; at: number }>();
 
 export function emitTyping(to: string, isTyping: boolean): void {
   if (!socket || !authenticated) return;
-  if (MAILBOX_ENABLED) {
+  // Federation F3 (parity with mobile): a contact on another relay has no
+  // relay-local `typing` event — the sealed message is the only path.
+  const typingContact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+  if (MAILBOX_ENABLED || (typingContact && isForeign(typingContact))) {
     // The plaintext `typing` event would relink the me↔to edge on the control-
     // plane socket. Send it SEALED through the E2EE channel instead (same pattern
     // as read receipts). It arrives with mailbox/Tor latency — acceptable for a
@@ -2708,7 +2711,9 @@ export function sendReadReceipts(to: string, msgIds: string[]): void {
   // never sees the me↔to aegisId edge on the plaintext control-plane socket.
   // Outside mailbox mode, keep the lightweight plaintext event — it exposes no
   // more than the v2 message transport already does (same aegisId routing).
-  if (MAILBOX_ENABLED) {
+  // Federation F3: a foreign contact only has the sealed path.
+  const receiptContact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+  if (MAILBOX_ENABLED || (receiptContact && isForeign(receiptContact))) {
     void (async () => {
       const { useIdentity } = await import('../store/identity');
       const identity = useIdentity.getState().identity;
