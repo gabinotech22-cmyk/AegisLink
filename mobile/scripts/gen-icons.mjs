@@ -15,7 +15,7 @@ const root = join(__dirname, '..');
 const iconsDir = join(root, 'assets', 'icons');
 const assetsDir = join(root, 'assets');
 
-const VARIANTS = ['dark', 'light', 'tinted', 'work'];
+const VARIANTS = ['dark', 'light', 'tinted'];
 
 // Sizes needed for each variant (main icon: 1024, app store source)
 const MAIN_SIZE = 1024;

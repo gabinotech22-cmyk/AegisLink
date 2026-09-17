@@ -28,5 +28,4 @@ export {
   type RevocationPayload,
 } from './deviceRevocation/RevokeDevice';
 
-// Lightning payments — removed until wallet monetization is re-added
-// See src/_unused/web3/payments/LightningPayment.ts
+// Lightning payments (section 14) left this repo with AegisLink Work (ROADMAP Hito 1).

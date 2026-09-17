@@ -88,7 +88,7 @@ function walk(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === '__tests__' || entry.name === '_unused') continue;
+      if (entry.name === '__tests__') continue;
       walk(full, out);
     } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
       out.push(full);

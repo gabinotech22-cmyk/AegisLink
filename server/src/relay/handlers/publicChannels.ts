@@ -1,6 +1,6 @@
 // Public Channels relay events (Phase 1, docs/SEALED-PUBLIC-CHANNELS.md).
 // Extracted from relay/handler.ts into its own module to match the modular
-// handler layout (parity with handlers/channels.ts, prekeys.ts, etc.).
+// handler layout (parity with handlers/groups.ts, prekeys.ts, etc.).
 // The relay is a blind forwarder — no `from` field in any pubchannel event.
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { randomUUID } from 'node:crypto';

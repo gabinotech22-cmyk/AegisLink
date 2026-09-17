@@ -69,8 +69,6 @@ export const DeliveryTokenRegister = z.object({
 export const TypingEvent = z.object({
   to: z.string().regex(AEGIS_ID_RE),
   isTyping: z.boolean(),
-  orgId: z.string().regex(UUID_RE).optional(),
-  channelId: z.string().regex(UUID_RE).optional(),
 });
 
 export const MsgRead = z.object({
@@ -196,67 +194,6 @@ export const PreKeyUpload = z.object({
 
 export const PreKeyFetch = z.object({
   aegisId: z.string().regex(AEGIS_ID_RE)
-});
-
-// ── Work channel schemas ──────────────────────────────────────────────────────
-export const CHANNEL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const ORG_ID_RE = CHANNEL_ID_RE; // both are UUIDs
-
-export const ChannelJoin = z.object({
-  channelId: z.string().regex(CHANNEL_ID_RE),
-  orgId: z.string().regex(ORG_ID_RE),
-});
-
-export const ChannelMsgAttachment = z.object({
-  blobId: z.string().uuid(),
-  filename: z.string().min(1).max(255),
-  mimeType: z.string().min(1).max(127),
-  sizeBytes: z.number().int().min(1).max(50 * 1024 * 1024), // 50 MB per file
-});
-
-export const ChannelMsg = z.object({
-  id: z.string().uuid(),
-  channelId: z.string().regex(CHANNEL_ID_RE),
-  orgId: z.string().regex(ORG_ID_RE),
-  body: z.string().min(1).max(65536),
-  type: z.enum(['text', 'image', 'file']).default('text'),
-  parent_id: z.string().uuid().optional(),
-  attachments: z.array(ChannelMsgAttachment).max(5).optional(),
-  // E2EE Work channel fields — opaque to the relay, passed through verbatim
-  encrypted: z.boolean().optional(),
-  nonce: z.string().max(128).optional(),
-});
-
-export const ChannelDeleteMsg = z.object({
-  messageId: z.string().uuid(),
-  channelId: z.string().regex(CHANNEL_ID_RE),
-  orgId: z.string().regex(ORG_ID_RE),
-});
-
-// ── Work E2EE SenderKey distribution schemas ──────────────────────────────────
-
-export const SenderKeyRecipient = z.object({
-  aegisId: z.string().min(1).max(64),
-  ciphertextB64: z.string().max(1024),
-  nonceB64: z.string().length(44),
-  iteration: z.number().int().min(0),
-  // Server-derived (golden rule #7): the distributor identity is taken from the
-  // authenticated socket, NOT from this client-supplied field, which is ignored
-  // if present. The recipient also recovers + verifies the real distributor from
-  // inside the sealed box (channelKey.ts, Phase 3b), so this never gates trust.
-  senderAegisId: z.string().min(1).max(64).optional(),
-});
-
-export const SenderKeyDistEvent = z.object({
-  channelId: z.string().uuid(),
-  orgId: z.string().uuid(),
-  recipients: z.array(SenderKeyRecipient).min(1).max(100),
-});
-
-export const RequestSenderKeyEvent = z.object({
-  channelId: z.string().uuid(),
-  orgId: z.string().uuid(),
-  fromAegisId: z.string().min(1).max(64),
 });
 
 // ── Group (1:1 messaging) re-key after member removal ─────────────────────────

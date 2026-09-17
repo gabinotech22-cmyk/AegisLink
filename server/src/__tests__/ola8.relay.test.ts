@@ -6,9 +6,8 @@
  *        it is purged at its intended expiry instead of the 30-day default.
  *        Control: a message WITHOUT ephemeralTtl survives the same purge.
  *
- *   M-6: a Work `channel:msg` whose body is not E2EE (encrypted !== true or no
- *        nonce) is rejected (`encryption_required`) — the relay never persists a
- *        cleartext channel body.
+ *   (M-6 — Work channel encryption — moved out with the Work extraction,
+ *   ROADMAP Hito 1; the Work handlers no longer exist in this repo.)
  *
  * Self-contained harness (mirrors sealedSenderV2.relay.test.ts) so it runs scoped
  * under --runInBand without sharing state with sibling suites.
@@ -134,12 +133,6 @@ function sendEnvelope(socket: ClientSocket, payload: Record<string, unknown>): P
   });
 }
 
-function sendChannelMsg(socket: ClientSocket, payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
-  return new Promise((resolve) => {
-    socket.emit('channel:msg', payload, (res: { ok: boolean; error?: string }) => resolve(res));
-  });
-}
-
 function v1Wire(to: string, id: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id,
@@ -201,48 +194,3 @@ describe('Ola 8 — A-3 ephemeral queue TTL', () => {
   }, 30_000);
 });
 
-describe('Ola 8 — M-6 Work channel encryption required', () => {
-  const ORG = '11111111-1111-1111-1111-111111111111';
-  const CHAN = '22222222-2222-2222-2222-222222222222';
-
-  test('rejects a channel:msg with a cleartext (unencrypted) body', async () => {
-    const sender = makeAgentKeys(90011);
-    await registerAgent(sender);
-    const sock = await connectAgent(sender);
-
-    // No `encrypted` flag → must be rejected before any persistence.
-    const ack = await sendChannelMsg(sock, {
-      id: '33333333-3333-4333-8333-333333333333',
-      channelId: CHAN,
-      orgId: ORG,
-      body: 'hello in cleartext',
-      type: 'text',
-    });
-    expect(ack.ok).toBe(false);
-    expect(ack.error).toBe('encryption_required');
-
-    sock.disconnect();
-    await new Promise((r) => setTimeout(r, 50));
-  }, 30_000);
-
-  test('rejects a channel:msg marked encrypted but missing the nonce', async () => {
-    const sender = makeAgentKeys(90012);
-    await registerAgent(sender);
-    const sock = await connectAgent(sender);
-
-    const ack = await sendChannelMsg(sock, {
-      id: '44444444-4444-4444-8444-444444444444',
-      channelId: CHAN,
-      orgId: ORG,
-      body: encodeBase64(nacl.randomBytes(32)),
-      type: 'text',
-      encrypted: true,
-      // nonce intentionally omitted
-    });
-    expect(ack.ok).toBe(false);
-    expect(ack.error).toBe('encryption_required');
-
-    sock.disconnect();
-    await new Promise((r) => setTimeout(r, 50));
-  }, 30_000);
-});

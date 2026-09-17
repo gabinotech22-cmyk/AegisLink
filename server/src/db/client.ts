@@ -923,8 +923,6 @@ export const web3Repo = {
 // server — removing it is the zero-metadata-correct fix. The `poll_votes` table
 // DDL is likewise gone; any pre-existing empty table is harmless.
 
-// ── Work repos → ./repos/work (M4 split) ─────────────────────────────────────
-export * from './repos/work';
 // ── backupRepo ────────────────────────────────────────────────────────────────
 // Stores one encrypted backup blob per user.
 // The key is SHA-256(aegisId) so the aegisId itself never appears in the DB row.

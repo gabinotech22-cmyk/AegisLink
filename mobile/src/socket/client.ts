@@ -1531,40 +1531,6 @@ export function connect(identity: Identity): Socket {
   return socket;
 }
 
-export function joinChannel(channelId: string, orgId: string): void {
-  socket?.emit('channel:join', { channelId, orgId });
-}
-
-export function emitChannelMsg(payload: {
-  id: string;
-  channelId: string;
-  orgId: string;
-  body: string;
-  type: string;
-  encrypted?: boolean;
-  nonce?: string;
-  keyIteration?: number;
-}): void {
-  socket?.emit('channel:msg', payload);
-}
-
-export function emitSenderKeyDist(payload: {
-  channelId: string;
-  orgId: string;
-  toAegisId: string;
-  dist: object;
-}): void {
-  socket?.emit('work:sender_key_dist', payload);
-}
-
-export function emitRequestSenderKey(payload: {
-  channelId: string;
-  orgId: string;
-  fromAegisId: string;
-}): void {
-  socket?.emit('work:request_sender_key', payload);
-}
-
 /**
  * Forward-secrecy re-key after a group membership change (member removal).
  *

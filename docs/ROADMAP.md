@@ -60,7 +60,9 @@ CI de los dos PRs abiertos estaba en rojo. Reglas de oro de ramas/estructura rot
       aislados (sin debilitar ninguna validación de seguridad al reconciliar `blob.ts`/`publicChannels.ts`)
       y mergeados como PR #241–#245. Cero ramas remotas huérfanas al cierre, salvo #246 en curso.
 
-## Hito 1 — Extraer Work + pagos de este repo 🟠 EN CURSO (PR-C de la auditoría 2026-09-16)
+## Hito 1 — Extraer Work + pagos de este repo ✅ HECHO (2026-09-17)
+
+Último `main` con el código Work: `976c09f` (recuperable por SHA al crear el repo Work). Cierra AL-02/07/09 de la auditoría 2026-09-16.
 
 Objetivo: dejar este repo como **AegisLink normal puro**. El código Work es un bloque coherente
 y separable (NO enredado con los canales públicos sellados, que son normales y viven en
@@ -76,18 +78,20 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 | Mobile | iconos `assets/icon-work.*`, `android-icon-assets/work/**`, strings i18n `work.*` |
 | Pagos (muerto) | `mobile/src/_unused/screens/Subscription.tsx`, `mobile/src/_unused/web3/payments/LightningPayment.ts` |
 
-**Plan:**
-- [ ] **Preservar antes de borrar**: el código Work debe poder migrar a su repo futuro. Opción
-      recomendada = mantenerlo en historia git (basta `git rm`; se recupera por SHA / `git filter-repo`
-      al crear el repo Work). Alternativa = branch de archivo `archive/work-snapshot`.
-- [ ] **Borrar ya (cero acoplamiento)**: los prototipos de pagos en `_unused/` — código muerto, no cableado.
-- [ ] **Extraer server**: quitar router `/work` + prune de `index.ts`, quitar `repos/work` y su
-      re-export, quitar `channels.ts` (handler de org) y su `attach`, limpiar schemas Work.
-- [ ] **Schema DB**: retirar `CREATE TABLE work_*`/`workspaces*` de `pg.ts` y `sqlite.ts` (migración
-      de retirada documentada; datos Work en prod, si los hay, se exportan antes).
-- [ ] **Verificar fail-closed**: tras la poda, `npm run build` + tests server verdes; confirmar que
-      canales públicos sellados (normal) siguen intactos (no comparten `workRepo`).
-- [ ] **Doc↔código**: actualizar `backlog_fases3_4.md` (P1/G2 → "movidos a repo Work") y este roadmap.
+**Hecho (PR `chore/extract-work`):**
+- [x] **Preservado en historia git** (`976c09f`); sin branch de archivo.
+- [x] **Prototipos de pagos** `mobile/src/_unused/**` borrados; `tsconfig` ya no los excluye.
+- [x] **Server**: router `/work`, `repos/work`, tipos Work, schemas Work, rate-limit de `channel:msg`,
+      rama Work del `typing`, presencia de org y el cron `pruneExpiredWorkMessages` eliminados.
+      Los handlers `group:rekey`/`group:rekey_drain_ack` de grupos normales, que convivían en
+      `handlers/channels.ts`, viven ahora en `handlers/groups.ts` sin cambios (mismos tests).
+- [x] **Schema DB**: `CREATE TABLE work_*`/`workspaces*`/FTS y sus migraciones retirados de `sqlite.ts`
+      y `pg.ts`. Las tablas huérfanas de despliegues existentes **no se tocan** desde el código
+      (regla de oro de herramientas destructivas): un `DROP` es operador-local.
+- [x] **Verificado**: tsc server/mobile, suites de grupos (`group-rekey-offline`, `drain-storm`,
+      `drain-cap`, `ackScoping`, `ola8`) verdes; canales públicos sellados intactos.
+- [x] **Doc↔código**: `backlog_fases3_4.md` (P1/G2), `PROJECT-STRUCTURE.md`, informe de auditoría
+      (AL-02/07/09 cerrados por extracción).
 
 ## Hito 2 — Privacidad por defecto: sealed-sender activo 🔴 (diferenciador de mercado)
 

@@ -32,7 +32,7 @@ import { checkDeviceLinkRateLimit, RATE_LIMIT_MAP_MAX } from './rateLimits.js';
 import { liveSockets } from './liveSockets.js';
 import { attachPrekeys } from './handlers/prekeys.js';
 import { attachMessagingEphemeral } from './handlers/messaging.js';
-import { attachChannels } from './handlers/channels.js';
+import { attachGroups } from './handlers/groups.js';
 import { attachPublicChannelEvents } from './handlers/publicChannels.js';
 import { attachDevices } from './handlers/devices.js';
 import { appVersionInfo } from './appVersion';
@@ -43,13 +43,6 @@ import { appVersionInfo } from './appVersion';
 // recipient — closes a low-severity existence oracle. (The `getHash` DB lookup
 // is a weaker residual timing oracle, out of scope for this application guard.)
 const DUMMY_DELIVERY_TOKEN_HASH = Buffer.alloc(32).toString('base64');
-
-// ── Online presence (ephemeral — never persisted, zero metadata) ─────────────
-// orgId → Set of aegisIds currently online in that org
-const orgPresence = new Map<string, Set<string>>();
-
-// socketId → orgIds this socket has joined (for cleanup on disconnect)
-const socketOrgMembership = new Map<string, string[]>();
 
 // In-memory socket data (never persisted)
 type Platform = 'mobile' | 'desktop' | 'unknown';
@@ -962,8 +955,8 @@ export function attachRelay(io: SocketServer) {
     // ─── Device linking (approve / list / revoke) ────────────────────────────
     attachDevices(socket, { me, sockets, linkingSockets, socketMeta });
 
-    // ─── Work channels / SenderKey / group re-key ────────────────────────────
-    attachChannels(socket, { me, deviceId, sockets, io, orgPresence, socketOrgMembership });
+    // ─── Group SenderKey re-key (normal groups) ──────────────────────────────
+    attachGroups(socket, { me, deviceId, sockets });
 
     // ─── Public channels (sealed, blind-forwarded — no `from`) ───────────────
     attachPublicChannelEvents(socket, io);
@@ -992,25 +985,6 @@ export function attachRelay(io: SocketServer) {
           break;
         }
       }
-
-      // Presence cleanup — only remove from org if this was the last socket for `me`
-      const remainingSockets = sockets.get(me);
-      const isLastSocket = !remainingSockets || remainingSockets.size === 0;
-      if (isLastSocket) {
-        const orgs = socketOrgMembership.get(socket.id) ?? [];
-        for (const orgId of orgs) {
-          const presenceSet = orgPresence.get(orgId);
-          if (presenceSet) {
-            presenceSet.delete(me);
-            // Broadcast departure to the org room before pruning the empty set
-          io.to(`org:${orgId}`).emit('work:presence_leave', { orgId, aegisId: me });
-            if (presenceSet.size === 0) {
-              orgPresence.delete(orgId);
-            }
-          }
-        }
-      }
-      socketOrgMembership.delete(socket.id);
     });
   }
 }

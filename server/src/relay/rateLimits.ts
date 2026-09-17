@@ -44,21 +44,6 @@ export function evictExpired(map: Map<string, { count: number; reset: number }>)
   }
 }
 
-// Rate-limit buckets for channel:msg — keyed by aegisId, max 120/min
-const channelMsgRateLimit = new Map<string, { count: number; reset: number }>();
-
-export async function checkChannelMsgRateLimit(aegisId: string): Promise<boolean> {
-  const count = await redisIncrAtomic(`ratelimit:channelMsg:${aegisId}`, 60);
-  if (count !== null) return count <= 120;
-  const now = Date.now();
-  const entry = channelMsgRateLimit.get(aegisId) ?? { count: 0, reset: now + 60_000 };
-  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60_000; }
-  entry.count++;
-  channelMsgRateLimit.set(aegisId, entry);
-  evictExpired(channelMsgRateLimit);
-  return entry.count <= 120;
-}
-
 // ── Shared low-frequency rate-limit (FIX D) ───────────────────────────────────
 // typing + msg:read share a single bucket: 30 ops / 10 s per socket.
 // group:rekey has its own stricter bucket: 10 ops / 60 s per aegisId.
