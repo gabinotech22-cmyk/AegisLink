@@ -449,6 +449,8 @@ async function deliverToForeignRelay(
   wire: Record<string, unknown>,
   id: string,
   ephemeralTtlMs: number | null,
+  /** F4: `'call'` asks the recipient's relay for a call-class (urgent) wake. */
+  wakeHint?: 'call',
 ): Promise<void> {
   const relay = relayFor(contact);
   if (event !== 'envelope:v2' || !relay) throw new Error('foreign_contact_needs_sealed_v2');
@@ -461,9 +463,17 @@ async function deliverToForeignRelay(
     nonce: wire.nonce as string,
     epk: wire.epk as string,
     ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
+    ...(wakeHint ? { wakeHint } : {}),
   });
   if (!ack || !ack.ok) throw new Error(ack?.error ?? 'foreign_relay_unreachable');
 }
+
+/**
+ * Control payloads that must never be self-copied to our other devices (parity
+ * with mobile SELF_COPY_EXCLUDED_TYPES): handleSelfCopy would render them as a
+ * raw outgoing bubble.
+ */
+const SELF_COPY_EXCLUDED_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist', 'call_signal']);
 
 async function flushOfflineQueue(identity: Identity) {
   if (offlineQueue.length === 0) return;
@@ -1715,6 +1725,19 @@ async function decryptAndAppendLocked(
         return true;
       }
 
+      // Federation F4: a call-signaling event from a contact on another relay,
+      // carried inside the E2EE channel because their relay has no `to: aegisId`
+      // queue for us. The inner call sealing is untouched; the registered
+      // handler receives it with the authenticated sender pinned. No chat row.
+      if (parsedPayload.type === 'call_signal') {
+        if (typeof parsedPayload.text === 'string') {
+          const { dispatchSealedCallSignal } = await import('./callSignalRouter');
+          await dispatchSealedCallSignal(contact.aegisId, parsedPayload.text);
+        }
+        await saveSessionState(contact.aegisId, ratchetState);
+        return true;
+      }
+
       if (parsedPayload.type === 'group_msg') {
         const groupId: string = parsedPayload.groupId;
         const claimedName: string = parsedPayload.groupName;
@@ -2442,6 +2465,13 @@ export async function sendMessage(opts: {
   type?: string;
   expiresAt?: number | null;
   skipLocalAppend?: boolean;
+  /**
+   * F4: best-effort signal (call signaling): never queued for retry —
+   * a candidate or ring replayed minutes later is noise. Offline → rejects.
+   */
+  transient?: boolean;
+  /** F4: outer mailbox-wire hint so the recipient's relay wakes them as a call. */
+  wakeHint?: 'call';
 }): Promise<void> {
   const { useIdentity } = await import('../store/identity');
   const idState = useIdentity.getState();
@@ -2481,6 +2511,7 @@ export async function sendMessage(opts: {
   }
 
   if (!socket || !connected || !authenticated) {
+    if (opts.transient) throw new Error('offline');
     offlineQueue.push({
       msgId: id,
       recipientAegisId: opts.recipientAegisId,
@@ -2548,12 +2579,14 @@ export async function sendMessage(opts: {
   // failure throws so the caller's retry path handles it.
   const recipientContact = useContacts.getState().contacts.find((c) => c.aegisId === opts.recipientAegisId);
   if (recipientContact && isForeign(recipientContact)) {
-    await deliverToForeignRelay(recipientContact, emitEvent, emitWire, id, ephemeralTtlMs ?? null);
-    const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
-    void sendSelfCopy(socket!, opts.identity, opts.recipientAegisId, id, payload, {
-      viewOnce: msgType === 'view_once',
-      ephemeralSeconds: selfEphemeralSeconds,
-    });
+    await deliverToForeignRelay(recipientContact, emitEvent, emitWire, id, ephemeralTtlMs ?? null, opts.wakeHint);
+    if (!SELF_COPY_EXCLUDED_TYPES.has(msgType)) {
+      const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
+      void sendSelfCopy(socket!, opts.identity, opts.recipientAegisId, id, payload, {
+        viewOnce: msgType === 'view_once',
+        ephemeralSeconds: selfEphemeralSeconds,
+      });
+    }
     return;
   }
 
@@ -2567,6 +2600,7 @@ export async function sendMessage(opts: {
         nonce: emitPayload.nonce as string,
         epk: emitPayload.epk as string,
         ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
+        ...(opts.wakeHint ? { wakeHint: opts.wakeHint } : {}),
       });
       // Only a LIVE mailbox delivery is terminal. `queued` (recipient mailbox
       // offline) falls through so the reliable aegisId transport also delivers.

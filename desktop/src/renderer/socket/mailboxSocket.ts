@@ -67,6 +67,8 @@ export interface OutgoingMailboxEnvelope {
   epk: string;
   /** Slice 5: ephemeral TTL (ms) — server uses it ONLY to bound offline-queue life. */
   ephemeralTtl?: number;
+  /** F4: call-class wake for the recipient (the one declared metadata bit, D3). */
+  wakeHint?: 'call';
 }
 
 export type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string };

@@ -698,6 +698,35 @@ the bootstrap itself**:
 Tests: `crypto/__tests__/messaging.firstContact.test.ts` (same file on both
 platforms) and mobile `socket/__tests__/client.firstContact.test.ts`.
 
+**Calls across relays (F4).** Every 1:1 and group call event
+(`call:invite:v2`/`answer:v2`/`ice:v2`/`hangup:v2`, `group_call:*`) is already
+sealed end-to-end and routed by the relay only through `to: aegisId` — a
+queue a contact on another relay does not have on our relay. So for such a
+contact the very same sealed event travels as a `call_signal` payload inside
+the Double Ratchet channel (`text = JSON { event, msg }`, `msg` being exactly
+what the relay would have delivered), through the contact's relay by mailbox
+like every other message; relay-local peers keep the socket events. The inner
+call sealing (per-call key, per-recipient box) is untouched, so a handler
+cannot tell which way an event arrived — except that the mailbox path also
+hands it the **authenticated sealed-sender `from`**, which the handler pins:
+an invite's sealed-inside caller must equal it, answer/ICE/hangup must come
+from the call's peer, and a group signal is opened against that identity only
+(and only if it is on the roster). Per-recipient fan-outs (`items`) split:
+relay-local items stay in one emit, each foreign member gets its own sealed
+copy. Call signals are *transient*: never persisted to the outbox (a
+candidate replayed minutes later is noise), relay queue life bounded to 60 s.
+
+The outer mailbox wire (`envelope:mb`) gains one optional field,
+`wakeHint: 'call'` (the only value the schema accepts), set on invites only.
+It is the single declared metadata bit of `FEDERATION-DESIGN.md` D3: "this
+is a call for this mailbox", never who from. The recipient's home relay uses
+it solely to publish a *call-class* wake instead of the message-class one
+(`Priority: urgent` on ntfy/UnifiedPush; the ringing heads-up on the token
+wake) and never stores or forwards it — a live recipient's wire carries no
+hint. Tests: server `relay.federation.test.ts` (wake class, hint stripped,
+free-form values rejected), mobile `socket/__tests__/client.callSignal.test.ts`,
+desktop `socket/__tests__/callSignalRouter.test.ts`.
+
 **Limitation (product decision pending, see `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` §3.1):**
 because the desktop holds the identity secrets, relay-side revocation blocks a
 *cooperating* client, not an adversary who already extracted the keys. True

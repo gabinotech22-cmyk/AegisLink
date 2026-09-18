@@ -89,23 +89,40 @@ export function isExpoWakeToken(raw: string): boolean {
  * binding); 'failed' for everything else (non-2xx, malformed body, timeout) so
  * the caller can fall back to the ntfy topic instead of losing the wake.
  */
-async function sendTokenWake(expoToken: string): Promise<'ok' | 'gone' | 'failed'> {
+async function sendTokenWake(expoToken: string, kind: WakeKind): Promise<'ok' | 'gone' | 'failed'> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PUBLISH_TIMEOUT_MS);
   try {
+    // F4: a call-class wake mirrors sendCallWakeUp (push/expo.ts) — generic
+    // ringing heads-up, call channel/category, short TTL — still zero-metadata
+    // (no caller, no callId). The message-class wake is unchanged.
+    const body = kind === 'call'
+      ? {
+          to: expoToken,
+          sound: 'default',
+          priority: 'high',
+          ttl: 30,
+          title: 'AegisLink',
+          body: 'Llamada entrante · E2EE',
+          data: { kind: 'call_wakeup' },
+          categoryId: 'aegislink-call',
+          channelId: 'aegislink-calls',
+          _contentAvailable: true,
+        }
+      : {
+          to: expoToken,
+          sound: 'default',
+          priority: 'high',
+          title: 'AegisLink',
+          body: 'Nuevo mensaje cifrado · E2EE',
+          data: { kind: 'wakeup' },
+          _contentAvailable: true,
+          channelId: 'aegislink-messages',
+        };
     const res = await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        to: expoToken,
-        sound: 'default',
-        priority: 'high',
-        title: 'AegisLink',
-        body: 'Nuevo mensaje cifrado · E2EE',
-        data: { kind: 'wakeup' },
-        _contentAvailable: true,
-        channelId: 'aegislink-messages',
-      }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     const parsed = (await res.json().catch(() => null)) as
@@ -132,7 +149,7 @@ async function sendTokenWake(expoToken: string): Promise<'ok' | 'gone' | 'failed
  * caller can drop the dead binding; 'ok' otherwise (including network errors —
  * best-effort, the queued message is safe either way).
  */
-async function publishToEndpoint(endpoint: string): Promise<'ok' | 'gone'> {
+async function publishToEndpoint(endpoint: string, kind: WakeKind): Promise<'ok' | 'gone'> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PUBLISH_TIMEOUT_MS);
   try {
@@ -140,7 +157,7 @@ async function publishToEndpoint(endpoint: string): Promise<'ok' | 'gone'> {
       method: 'POST',
       // R2: nothing readable in the wake-up — empty body, no title/sender.
       body: '',
-      headers: { Priority: 'high' },
+      headers: { Priority: wakePriority(kind) },
       signal: controller.signal,
     });
     if (res.status === 404 || res.status === 410) return 'gone';
@@ -154,6 +171,18 @@ async function publishToEndpoint(endpoint: string): Promise<'ok' | 'gone'> {
 }
 
 /**
+ * F4: which wake to publish. 'message' is the Slice 2b wake; 'call' is the
+ * call-class wake requested by `wakeHint: 'call'` on the mailbox wire — the
+ * only thing the hint changes is priority/channel, never content.
+ */
+export type WakeKind = 'message' | 'call';
+
+/** ntfy / UnifiedPush `Priority` header: calls ring through DND ('urgent' = 5). */
+export function wakePriority(kind: WakeKind): 'high' | 'urgent' {
+  return kind === 'call' ? 'urgent' : 'high';
+}
+
+/**
  * Publishes an empty, high-priority wake-up to the ntfy topic derived from
  * `mailboxIdB64`. Best-effort and silent: any failure (flag off, ntfy down,
  * timeout) is swallowed — the message stays safely queued either way and the
@@ -162,7 +191,7 @@ async function publishToEndpoint(endpoint: string): Promise<'ok' | 'gone'> {
  * NEVER logs the mailbox id / topic in production — that would put an opaque
  * routing id (already minimized elsewhere) into logs for no operational gain.
  */
-export async function notifyMailbox(mailboxIdB64: string): Promise<void> {
+export async function notifyMailbox(mailboxIdB64: string, kind: WakeKind = 'message'): Promise<void> {
   if (!isPushMailboxEnabled()) return;
 
   // Slice 2b.3b: a registered UnifiedPush endpoint (app-killed path, external
@@ -171,7 +200,7 @@ export async function notifyMailbox(mailboxIdB64: string): Promise<void> {
   try {
     const endpoint = await pushEndpointRepo.get(mailboxIdB64);
     if (endpoint) {
-      const outcome = await publishToEndpoint(endpoint);
+      const outcome = await publishToEndpoint(endpoint, kind);
       if (outcome === 'gone') await pushEndpointRepo.delete(mailboxIdB64);
       return;
     }
@@ -187,7 +216,7 @@ export async function notifyMailbox(mailboxIdB64: string): Promise<void> {
     try {
       const token = await pushMailboxTokenRepo.get(mailboxIdB64);
       if (token) {
-        const outcome = await sendTokenWake(token);
+        const outcome = await sendTokenWake(token, kind);
         if (outcome === 'gone') await pushMailboxTokenRepo.delete(mailboxIdB64);
         // Only a confirmed accepted ticket ends here; 'gone' and 'failed' fall
         // through to the topic publish so the wake is never silently lost
@@ -210,7 +239,7 @@ export async function notifyMailbox(mailboxIdB64: string): Promise<void> {
       method: 'POST',
       // Empty body, no title/tags/click — R2: nothing readable in the wake-up.
       body: '',
-      headers: { Priority: 'high' },
+      headers: { Priority: wakePriority(kind) },
       signal: controller.signal,
     });
   } catch (e) {

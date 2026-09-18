@@ -21,6 +21,7 @@
 
 process.env['AEGIS_DB_PATH'] = ':memory:';
 
+import { jest } from '@jest/globals';
 import express from 'express';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -34,6 +35,7 @@ const { encodeBase64, decodeBase64 } = naclUtil;
 import { initDb, identityRepo } from '../db/client.js';
 import { attachRelay } from '../relay/handler.js';
 import { mailboxIdForSignPublicKey } from '../crypto/mailbox.js';
+import { mailboxTopic } from '../push/ntfy.js';
 
 interface Relay { httpServer: ReturnType<typeof createServer>; io: SocketServer; url: string; name: string }
 
@@ -164,6 +166,51 @@ describe('federation: A (home R1) delivers to B (home R2) through a disposable m
     expect((await sendMb(s2, { ...base, id: 'fed-msg-4' })).delivered).toBe(true);
     await new Promise((r) => setTimeout(r, 50));
     expect(got).toEqual(expect.arrayContaining(['fed-msg-3', 'fed-msg-4']));
+  });
+
+  test('F4: `wakeHint: call` to an OFFLINE foreign mailbox publishes a call-class (urgent) wake — and the hint never reaches a live recipient', async () => {
+    const offline = makeMailbox(7002); // never binds a socket on R2
+    const prevFlag = process.env['PUSH_MAILBOX_ENABLED'];
+    const prevUrl = process.env['NTFY_URL'];
+    process.env['PUSH_MAILBOX_ENABLED'] = 'on';
+    process.env['NTFY_URL'] = 'http://ntfy.test:80';
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const d = disposableMailbox();
+      const aOnR2 = await connectMailbox(R2, d);
+      const base = { ciphertext: encodeBase64(nacl.randomBytes(48)), nonce: encodeBase64(nacl.randomBytes(24)), epk: encodeBase64(nacl.randomBytes(32)) };
+
+      // Offline callee: queued + urgent wake on THEIR home relay's ntfy topic.
+      const ack = await sendMb(aOnR2, { ...base, id: 'fed-call-1', to: offline.mailboxId, wakeHint: 'call' });
+      expect(ack).toEqual({ ok: true, delivered: false, queued: true });
+      await new Promise((r) => setTimeout(r, 50));
+      const wake = fetchSpy.mock.calls.find((c) => String(c[0]) === `http://ntfy.test:80/${mailboxTopic(offline.mailboxId)}`);
+      expect(wake).toBeDefined();
+      expect((wake![1] as RequestInit).headers).toMatchObject({ Priority: 'urgent' });
+      expect((wake![1] as RequestInit).body).toBe(''); // still nothing readable
+
+      // A plain message to the same offline mailbox stays a message-class wake.
+      fetchSpy.mockClear();
+      await sendMb(aOnR2, { ...base, id: 'fed-call-2', to: offline.mailboxId });
+      await new Promise((r) => setTimeout(r, 50));
+      const plain = fetchSpy.mock.calls.find((c) => String(c[0]) === `http://ntfy.test:80/${mailboxTopic(offline.mailboxId)}`);
+      expect((plain![1] as RequestInit).headers).toMatchObject({ Priority: 'high' });
+
+      // Live callee: delivered, and the wire it receives carries NO wakeHint.
+      const bSock = await connectMailbox(R2, bMailbox);
+      const received = new Promise<Record<string, unknown>>((resolve) => bSock.once('envelope:mb', resolve));
+      expect((await sendMb(aOnR2, { ...base, id: 'fed-call-3', to: bMailbox.mailboxId, wakeHint: 'call' })).delivered).toBe(true);
+      const wire = await received;
+      expect(wire).not.toHaveProperty('wakeHint');
+      bSock.emit('envelope:ack', { id: 'fed-call-3' });
+
+      // Anything but 'call' is rejected by the schema — no free-form metadata slot.
+      expect((await sendMb(aOnR2, { ...base, id: 'fed-call-4', to: bMailbox.mailboxId, wakeHint: 'urgent-please' })).ok).toBe(false);
+    } finally {
+      fetchSpy.mockRestore();
+      if (prevFlag === undefined) delete process.env['PUSH_MAILBOX_ENABLED']; else process.env['PUSH_MAILBOX_ENABLED'] = prevFlag;
+      if (prevUrl === undefined) delete process.env['NTFY_URL']; else process.env['NTFY_URL'] = prevUrl;
+    }
   });
 
   test('a disposable mailbox must still PROVE possession: a wrong signature is refused', async () => {
