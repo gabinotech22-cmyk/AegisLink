@@ -54,7 +54,9 @@ interface AegisTorNative {
   removeListeners(count: number): void;
 }
 
-const Native = (NativeModules as { AegisTor?: AegisTorNative }).AegisTor ?? null;
+// `?.`: test harnesses mock react-native without NativeModules; any module
+// that now reaches tor.ts through net/relayHttp (F5) must still load.
+const Native = (NativeModules as { AegisTor?: AegisTorNative } | undefined)?.AegisTor ?? null;
 const emitter = Native ? new NativeEventEmitter(Native as unknown as never) : null;
 
 const OFF: TorStatus = { state: 'off', socksPort: 0 };
