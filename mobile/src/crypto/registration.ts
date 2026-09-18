@@ -13,6 +13,7 @@
  *   - All errors are surfaced as `{ ok: false, error }` — never thrown to UI.
  */
 
+import { relayFetch, type RelayResponse } from '../net/relayHttp';
 import nacl from 'tweetnacl';
 import { logger } from '../utils/logger';
 import * as SecureStore from 'expo-secure-store';
@@ -129,7 +130,7 @@ export async function fetchPowChallenge(
 export async function fetchPowChallengeAt(
   challengeUrl: string,
 ): Promise<PowChallenge> {
-  const res = await fetch(trimSlash(challengeUrl), {
+  const res = await relayFetch(trimSlash(challengeUrl), {
     method: 'GET',
     headers: { Accept: 'application/json' },
     signal: makeTimeoutSignal(8000),
@@ -288,9 +289,9 @@ export async function uploadIdentityAndPrekeys(
     powNonce,
   };
 
-  let identityRes: Response;
+  let identityRes: RelayResponse;
   try {
-    identityRes = await fetch(`${base}/identity`, {
+    identityRes = await relayFetch(`${base}/identity`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -362,9 +363,9 @@ export async function uploadIdentityAndPrekeys(
     ...(pqSignedPreKeyPublic ? { pqSignedPreKey: pqSignedPreKeyPublic } : {}),
   };
 
-  let prekeysRes: Response;
+  let prekeysRes: RelayResponse;
   try {
-    prekeysRes = await fetch(`${base}/prekeys`, {
+    prekeysRes = await relayFetch(`${base}/prekeys`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -408,7 +409,7 @@ function errMsg(e: unknown): string {
  * `Retry-After` header (seconds → ms). Returns undefined when neither is
  * present or parseable.
  */
-function parseRetryAfterMs(detail: string, res: Response): number | undefined {
+function parseRetryAfterMs(detail: string, res: RelayResponse): number | undefined {
   try {
     const body = JSON.parse(detail) as { retryAfterMs?: unknown };
     if (typeof body.retryAfterMs === 'number' && body.retryAfterMs > 0) {
@@ -425,7 +426,7 @@ function parseRetryAfterMs(detail: string, res: Response): number | undefined {
   return undefined;
 }
 
-async function safeText(res: Response): Promise<string> {
+async function safeText(res: RelayResponse): Promise<string> {
   try {
     const t = await res.text();
     return t.slice(0, 200);

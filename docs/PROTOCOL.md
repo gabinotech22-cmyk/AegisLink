@@ -727,6 +727,23 @@ hint. Tests: server `relay.federation.test.ts` (wake class, hint stripped,
 free-form values rejected), mobile `socket/__tests__/client.callSignal.test.ts`,
 desktop `socket/__tests__/callSignalRouter.test.ts`.
 
+**Home relay (F5a).** Which relay hosts OUR identity and mailbox is a
+per-profile setting (`net/homeRelay.ts`, secure storage
+`aegis.homeRelay[.<slot>]` = `{ onion, since, previous }`; absent = official).
+It is hydrated before anything registers or connects and read synchronously
+everywhere: `getHomeRelay()` (null = official), `homeRelayBaseUrl()` (HTTP
+base) and `homeRelayOnionUrl()` (mailbox / ntfy). A self-hosted home is
+`.onion`-only, so on mobile the identity socket rides the native Tor bridge
+(the same socket.io-over-SOCKS pipe as the mailbox, forwarding every relay
+event the client handles) and every HTTP call goes through `relayFetch`,
+which dispatches by URL — `.onion` → Tor (any verb), else the clearnet HTTPS
+(pinned) fetch of today — with binary blob uploads through a native Tor
+upload. Fail-closed: without the embedded Tor a self-hosted home gets no
+socket and no request, never a clearnet attempt and never the official relay
+"instead". On desktop the whole session is already proxied through Tor, so
+only the base URL changes. `previous` records the old home during a
+migration's grace window (F5b).
+
 **Limitation (product decision pending, see `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` §3.1):**
 because the desktop holds the identity secrets, relay-side revocation blocks a
 *cooperating* client, not an adversary who already extracted the keys. True

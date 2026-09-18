@@ -1,4 +1,5 @@
-import { SERVER_URL } from './config';
+import { homeRelayBaseUrl } from './net/homeRelay';
+import { relayFetch } from './net/relayHttp';
 import type { RelayRef } from './net/relayRef';
 
 export interface IdentityRecord {
@@ -21,10 +22,12 @@ function makeSignal(ms: number): AbortSignal {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${SERVER_URL}${path}`, {
+  // F5: OUR relay — clearnet HTTPS for the official one, embedded Tor for a
+  // self-hosted (.onion) home; relayFetch dispatches by URL.
+  const res = await relayFetch(`${homeRelayBaseUrl()}${path}`, {
     headers: { 'content-type': 'application/json' },
     signal: makeSignal(10_000),
-    ...init,
+    ...(init as { method?: 'GET' | 'POST' | 'DELETE' | 'PUT'; body?: string; headers?: Record<string, string> }),
   });
   if (!res.ok) {
     let detail = res.statusText;

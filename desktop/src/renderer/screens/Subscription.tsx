@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
-import { SERVER_URL } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
 
 type PlanId = 30 | 90 | 365;
 
@@ -48,7 +48,7 @@ export function SubscriptionScreen({ onBack }: Props) {
   async function requestInvoice() {
     setLoading(true);
     try {
-      const res = await fetch(`${SERVER_URL}/web3/subscription/invoice`, {
+      const res = await fetch(`${homeRelayBaseUrl()}/web3/subscription/invoice`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ planDays: selectedPlan }),
@@ -72,7 +72,7 @@ export function SubscriptionScreen({ onBack }: Props) {
     }
     setActivating(true);
     try {
-      const res = await fetch(`${SERVER_URL}/web3/subscription/activate`, {
+      const res = await fetch(`${homeRelayBaseUrl()}/web3/subscription/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ preimage: hex, paymentHash: invoice.paymentHash }),

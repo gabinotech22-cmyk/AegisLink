@@ -33,7 +33,7 @@ vi.mock('../../crypto/registration', () => ({
   uploadIdentityAndPrekeys: vi.fn(),
 }));
 vi.mock('../../crypto/signal/x3dh', () => ({ generatePreKeys: vi.fn() }));
-vi.mock('../../config', () => ({ SERVER_URL: 'https://test.invalid' }));
+vi.mock('../../config', () => ({ SERVER_URL: 'https://test.invalid', RELAY_URL: 'https://test.invalid', ONION_URL: null }));
 
 beforeEach(() => {
   vi.clearAllMocks();

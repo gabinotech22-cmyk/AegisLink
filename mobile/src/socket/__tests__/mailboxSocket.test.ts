@@ -81,8 +81,11 @@ function fireAppState(state: string): void {
 const mockConfig = { ONION_URL: 'http://onion.test', MAILBOX_ENABLED: true };
 jest.mock('../../config', () => ({
   __esModule: true,
-  get ONION_URL() { return mockConfig.ONION_URL; },
-  get MAILBOX_ENABLED() { return mockConfig.MAILBOX_ENABLED; },
+  // `?? …`: net/officialRelay reads ONION_URL at import time (F1), before the
+  // hoisted `mockConfig` binding above has been initialised.
+  get ONION_URL() { return mockConfig?.ONION_URL ?? 'http://onion.test'; },
+  get MAILBOX_ENABLED() { return mockConfig?.MAILBOX_ENABLED ?? true; },
+  SERVER_URL: 'https://relay.test',
 }));
 
 // A deterministic mailbox from a fixed root, returned by the store mock.

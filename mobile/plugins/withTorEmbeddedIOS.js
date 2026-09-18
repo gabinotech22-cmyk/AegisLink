@@ -960,7 +960,9 @@ class AegisTorLogic: NSObject {
         req.setValue(v, forHTTPHeaderField: k)
       }
     }
-    if req.httpMethod == "POST" {
+    // F5: a self-hosted home relay is reached ONLY this way — every verb the
+    // relay API uses carries its (possibly empty) body except GET/HEAD.
+    if req.httpMethod != "GET" && req.httpMethod != "HEAD" {
       if !hasContentType { req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type") }
       req.httpBody = body.data(using: .utf8)
     }
@@ -981,6 +983,60 @@ class AegisTorLogic: NSObject {
         resolve(str)
       } else {
         reject("E_HTTP_REQUEST", "encode failure", nil)
+      }
+    }
+    task.resume()
+  }
+
+  // Federation F5: upload a file (E2EE blob ciphertext) over Tor to OUR
+  // self-hosted relay — FileSystem.uploadAsync has no route to a .onion.
+  // Resolves {"status":<int>,"body":"…"}; only a transport failure rejects.
+  @objc
+  func httpUpload(
+    _ url: String, filePath: String, headersJson: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard state == "on" else {
+      reject("E_TOR_NOT_READY", "Tor is not on (state=\\(state))", nil)
+      return
+    }
+    guard let u = URL(string: url) else {
+      reject("E_HTTP_UPLOAD", "invalid url: \\(url)", nil)
+      return
+    }
+    let src = URL(fileURLWithPath: filePath.hasPrefix("file://") ? String(filePath.dropFirst(7)) : filePath)
+    guard FileManager.default.isReadableFile(atPath: src.path) else {
+      reject("E_HTTP_UPLOAD", "file not found", nil)
+      return
+    }
+    var req = URLRequest(url: u)
+    req.httpMethod = "POST"
+    req.timeoutInterval = 120
+    var hasContentType = false
+    if let data = headersJson.data(using: .utf8),
+       let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+      for (k, v) in dict {
+        if k.lowercased() == "content-type" { hasContentType = true }
+        req.setValue(v, forHTTPHeaderField: k)
+      }
+    }
+    if !hasContentType { req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type") }
+    let session = URLSession(configuration: torSessionConfiguration())
+    let task = session.uploadTask(with: req, fromFile: src) { data, response, error in
+      defer { session.finishTasksAndInvalidate() }
+      if let error = error {
+        reject("E_HTTP_UPLOAD", error.localizedDescription, error)
+        return
+      }
+      let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+      let capped = (data ?? Data()).prefix(64 * 1024)
+      let text = String(data: capped, encoding: .utf8) ?? ""
+      let out: [String: Any] = ["status": status, "body": text]
+      if let json = try? JSONSerialization.data(withJSONObject: out),
+         let str = String(data: json, encoding: .utf8) {
+        resolve(str)
+      } else {
+        reject("E_HTTP_UPLOAD", "encode failure", nil)
       }
     }
     task.resume()
@@ -1157,6 +1213,15 @@ RCT_EXPORT_METHOD(httpDownload:(NSString *)url
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
   [self.logic httpDownload:url destPath:destPath headersJson:headersJson resolver:resolve rejecter:reject];
+}
+
+RCT_EXPORT_METHOD(httpUpload:(NSString *)url
+                  filePath:(NSString *)filePath
+                  headersJson:(NSString *)headersJson
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic httpUpload:url filePath:filePath headersJson:headersJson resolver:resolve rejecter:reject];
 }
 
 @end

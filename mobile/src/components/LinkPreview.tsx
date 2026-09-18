@@ -17,7 +17,9 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, Image, Pressable, Linking } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../theme/vault';
-import { SERVER_URL, isSecureUrl } from '../config';
+import { isSecureUrl } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
+import { relayFetch } from '../net/relayHttp';
 
 interface Props {
   url: string;
@@ -54,8 +56,8 @@ export function LinkPreview({ url, t }: Props) {
 
     void (async () => {
       try {
-        const proxyUrl = `${SERVER_URL}/proxy/linkpreview?url=${encodeURIComponent(url)}`;
-        const res = await fetch(proxyUrl, { signal: controller.signal });
+        const proxyUrl = `${homeRelayBaseUrl()}/proxy/linkpreview?url=${encodeURIComponent(url)}`;
+        const res = await relayFetch(proxyUrl, { signal: controller.signal });
         if (!res.ok) {
           cache.set(url, 'error');
           return;

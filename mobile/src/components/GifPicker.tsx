@@ -13,7 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from './icons';
-import { SERVER_URL, isSecureUrl } from '../config';
+import { isSecureUrl } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
+import { relayFetch, type RelayResponse } from '../net/relayHttp';
 import { VAULT_PACK } from './stickers/VaultPack';
 import { ErrorBoundary } from './ErrorBoundary';
 
@@ -63,14 +65,14 @@ export function GifPicker({ visible, onSelectGif, onSelectSticker }: Props) {
     setErrorMessage('Could not connect to the GIF service. Check your internet connection.');
     try {
       const endpoint = q.trim()
-        ? `${SERVER_URL}/proxy/gif?q=${encodeURIComponent(q)}`
-        : `${SERVER_URL}/proxy/gif`;
+        ? `${homeRelayBaseUrl()}/proxy/gif?q=${encodeURIComponent(q)}`
+        : `${homeRelayBaseUrl()}/proxy/gif`;
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 8000);
-      let res: Response;
+      let res: RelayResponse;
       try {
-        res = await fetch(endpoint, { signal: controller.signal });
+        res = await relayFetch(endpoint, { signal: controller.signal });
       } finally {
         clearTimeout(timer);
       }

@@ -39,13 +39,17 @@ jest.mock('tweetnacl-util', () => ({
 // ── federation F2: Tor download + home relay ──────────────────────────────────
 const mockTorHttpDownload = jest.fn();
 const mockHomeRelay = { current: null as { onion: string } | null };
+const mockTorHttpUpload = jest.fn();
 jest.mock('../../net/tor', () => ({
   isTorAvailable: () => true,
   startTor: jest.fn().mockResolvedValue({ state: 'on', socksPort: 9050 }),
   torHttpDownload: (...args: unknown[]) => mockTorHttpDownload(...args),
+  torHttpUpload: (...args: unknown[]) => mockTorHttpUpload(...args),
 }));
 jest.mock('../../net/homeRelay', () => ({
   getHomeRelay: () => mockHomeRelay.current,
+  // F5: the blob endpoints resolve their base from the home relay setting.
+  homeRelayBaseUrl: () => (mockHomeRelay.current ? `http://${mockHomeRelay.current.onion}` : 'https://relay.test'),
 }));
 
 // ── crypto/registration (PoW helpers) ─────────────────────────────────────────
@@ -286,12 +290,21 @@ describe('federation F2 — blob v3 (host-qualified attachments)', () => {
     expect(formatBlobUri('id', 'K', 'N', '', ONION)).toBe('blob:id:K:N'); // no token → legacy v1, host needs a token
   });
 
-  it('an upload from a custom home relay returns a v3 URI; from the official relay a v2 one', async () => {
+  it('an upload from a custom home relay goes over Tor to OUR onion and returns a v3 URI; from the official relay a v2 one via the OS uploader', async () => {
     setupHappyPath();
     expect(await encryptAndUploadMedia('file:///img.jpg', 'image/jpeg')).toMatch(/^blob:[^:]+:[^:]+:[^:]+:tok-123$/);
+    expect(mockTorHttpUpload).not.toHaveBeenCalled();
+
+    // F5: a self-hosted home is .onion-only — FileSystem.uploadAsync cannot reach
+    // it; the ciphertext goes through the native Tor upload instead.
     mockHomeRelay.current = { onion: ONION };
     setupHappyPath();
+    mockUploadAsync.mockClear();
+    mockTorHttpUpload.mockResolvedValue({ status: 200, body: JSON.stringify({ id: 'blob-id-001', token: 'tok-123' }) });
     expect(await encryptAndUploadMedia('file:///img.jpg', 'image/jpeg')).toBe(`blob:blob-id-001:AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=:AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB:tok-123:${ONION}`);
+    expect(mockUploadAsync).not.toHaveBeenCalled();
+    expect(mockTorHttpUpload).toHaveBeenCalledTimes(1);
+    expect(String(mockTorHttpUpload.mock.calls[0]![0]).startsWith(`http://${ONION}/blob/upload?powChallenge=`)).toBe(true);
   });
 
   it('a v3 blob is fetched through Tor from ITS relay, never through the OS downloader', async () => {

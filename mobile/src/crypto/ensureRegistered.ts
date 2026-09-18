@@ -12,7 +12,7 @@ import { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys, type Registratio
 import { ensureDevicePreKeys } from './signal/x3dh';
 import { lookupIdentity } from '../api';
 import type { Identity } from './identity';
-import { SERVER_URL } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
 
 /**
  * Full registration result, including the verification step.
@@ -66,7 +66,7 @@ export async function ensureRegistered(identity: Identity): Promise<EnsureResult
     let challenge: string;
     let difficulty: number;
     try {
-      ({ challenge, difficulty } = await fetchPowChallenge(SERVER_URL));
+      ({ challenge, difficulty } = await fetchPowChallenge(homeRelayBaseUrl()));
     } catch (e) {
       throw describeStepError('fetchPowChallenge', e);
     }
@@ -91,7 +91,7 @@ export async function ensureRegistered(identity: Identity): Promise<EnsureResult
         signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
         opkSecrets: preKeys.opkSecrets,
       },
-      SERVER_URL,
+      homeRelayBaseUrl(),
       challenge,
       nonce,
       preKeys.oneTimePreKeys,

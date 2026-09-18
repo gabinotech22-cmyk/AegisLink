@@ -117,6 +117,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import org.torproject.jni.TorService
@@ -455,10 +456,14 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
         if (key.equals("content-type", ignoreCase = true)) contentType = v
         builder.header(key, v)
       }
-      if (method.equals("POST", ignoreCase = true)) {
-        builder.post(body.toRequestBody(contentType.toMediaTypeOrNull()))
+      // F5: a self-hosted home relay is reached ONLY this way, so the whole
+      // relay API surface must be expressible: GET/HEAD without body, every
+      // other verb (POST/PUT/DELETE/PATCH) with the (possibly empty) body.
+      val verb = method.uppercase()
+      if (verb == "GET" || verb == "HEAD") {
+        builder.method(verb, null)
       } else {
-        builder.get()
+        builder.method(verb, body.toRequestBody(contentType.toMediaTypeOrNull()))
       }
       client.newCall(builder.build()).enqueue(object : Callback {
         override fun onFailure(c: Call, e: IOException) {
@@ -519,6 +524,49 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
       })
     } catch (e: Exception) {
       promise.reject("E_HTTP_DOWNLOAD", e)
+    }
+  }
+
+  // Federation F5: upload a file (E2EE blob ciphertext) over Tor to OUR
+  // self-hosted relay — the OS uploader (FileSystem.uploadAsync) has no route
+  // to a .onion. Mirrors httpDownload. Resolves {"status":<int>,"body":"…"}.
+  @ReactMethod
+  fun httpUpload(url: String, filePath: String, headersJson: String, promise: Promise) {
+    try {
+      val port = socksPort()
+      if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
+      val client = torOkHttp(port).newBuilder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(120, TimeUnit.SECONDS)
+        .build()
+      val src = java.io.File(filePath.removePrefix("file://"))
+      if (!src.isFile) { promise.reject("E_HTTP_UPLOAD", "file not found"); return }
+      val headers = JSONObject(headersJson.ifBlank { "{}" })
+      var contentType = "application/octet-stream"
+      val builder = Request.Builder().url(url)
+      for (key in headers.keys()) {
+        val v = headers.optString(key)
+        if (key.equals("content-type", ignoreCase = true)) contentType = v
+        builder.header(key, v)
+      }
+      builder.post(src.asRequestBody(contentType.toMediaTypeOrNull()))
+      client.newCall(builder.build()).enqueue(object : Callback {
+        override fun onFailure(c: Call, e: IOException) {
+          promise.reject("E_HTTP_UPLOAD", e)
+        }
+        override fun onResponse(c: Call, response: Response) {
+          response.use { resp ->
+            val text = resp.peekBody(64L * 1024L).string()
+            val out = JSONObject()
+            out.put("status", resp.code)
+            out.put("body", text)
+            promise.resolve(out.toString())
+          }
+        }
+      })
+    } catch (e: Exception) {
+      promise.reject("E_HTTP_UPLOAD", e)
     }
   }
 

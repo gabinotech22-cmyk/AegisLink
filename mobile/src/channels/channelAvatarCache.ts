@@ -156,17 +156,15 @@ export async function hashLocalFile(uri: string): Promise<Uint8Array> {
  */
 export async function uploadAvatarBlob(uri: string): Promise<string> {
   const { fetchPowChallengeAt, solvePoW } = await import('../crypto/registration');
-  const { SERVER_URL } = await import('../config');
+  const { homeRelayBaseUrl } = await import('../net/homeRelay');
+  const { uploadFileToRelay } = await import('../crypto/media');
 
-  const challenge = await fetchPowChallengeAt(`${SERVER_URL}/blob/challenge`);
+  const challenge = await fetchPowChallengeAt(`${homeRelayBaseUrl()}/blob/challenge`);
   const powNonce = await solvePoW(challenge.challenge, challenge.difficulty);
-  const uploadUrl = `${SERVER_URL}/blob/upload?powChallenge=${encodeURIComponent(challenge.challenge)}&powNonce=${encodeURIComponent(powNonce)}`;
+  const uploadUrl = `${homeRelayBaseUrl()}/blob/upload?powChallenge=${encodeURIComponent(challenge.challenge)}&powNonce=${encodeURIComponent(powNonce)}`;
 
-  const result = await FileSystem.uploadAsync(uploadUrl, uri, {
-    httpMethod: 'POST',
-    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-    headers: { 'Content-Type': 'application/octet-stream' },
-  });
+  const result = await uploadFileToRelay(uploadUrl, uri);
+  if (!result) throw new Error('avatar_upload_transport_unavailable');
 
   if (result.status !== 200) {
     throw new Error(`avatar_upload_http_${result.status}`);
