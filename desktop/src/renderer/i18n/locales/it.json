@@ -455,7 +455,9 @@
     "switchToV0Mode": "Passa alla modalità {{v0}}",
     "torAlwaysOn": "Tor — sempre attivo",
     "torAlwaysOnSub": "Tutto il traffico passa dalla rete Tor integrata. Non esiste una modalità senza Tor.",
-    "torOn": "ATTIVO"
+    "torOn": "ATTIVO",
+    "myRelay": "Il mio relay",
+    "myRelaySub": "Relay ufficiale o il tuo (.onion)"
   },
   "lock": {
     "locked": "BLOCCATO · AEGISLINK",
@@ -2362,5 +2364,36 @@
     "splashReady": "CIRCUITO TOR PRONTO",
     "splashError": "ERRORE TOR · {{v0}}",
     "splashConnecting": "CONNESSIONE TRAMITE TOR · {{v0}}%"
+  },
+  "relaySettings": {
+    "title": "Il mio relay",
+    "currentSection": "RELAY ATTUALE",
+    "officialRelay": "Relay ufficiale di AegisLink",
+    "ownRelay": "Il tuo relay",
+    "since": "Dal {{date}}",
+    "previousUntil": "Continui a ricevere sul relay precedente ({{relay}}) fino al {{date}}. Chi non apre l'app entro allora avrà bisogno del tuo nuovo link.",
+    "ownSection": "USA IL MIO RELAY",
+    "ownDesc": "Collega AegisLink a un relay gestito da te (o da qualcuno di fiducia). Sono accettati solo servizi nascosti Tor (.onion): il tuo IP non viene mai esposto e non serve alcun certificato. Verificalo prima.",
+    "onionPlaceholder": "xxxxxxxx…xxxx.onion",
+    "verify": "Verifica relay",
+    "verifying": "Verifica via Tor…",
+    "verifiedTitle": "Relay verificato",
+    "switchCta": "Passa a {{relay}}",
+    "backToOfficial": "Torna al relay ufficiale",
+    "confirmTitle": "Cambiare relay?",
+    "consequences": "I tuoi contatti riceveranno automaticamente il nuovo indirizzo. Per 7 giorni continui a ricevere sul relay precedente; chi non apre l'app in quel periodo perde i tuoi messaggi finché non gli rimandi il link. Chiavi e chat restano su questo dispositivo.",
+    "confirmCta": "Cambia relay",
+    "migrating": "Registrazione sul nuovo relay e avviso ai contatti…",
+    "done": "Fatto. Ora sei sul nuovo relay.",
+    "errors": {
+      "invalid_onion": "Non è un indirizzo .onion valido (56 caratteri + .onion).",
+      "tor_unavailable": "Tor non è disponibile su questo dispositivo. Un relay proprio richiede il Tor integrato.",
+      "unreachable": "Impossibile raggiungere quel relay via Tor.",
+      "not_a_relay": "Quell'indirizzo non risponde come un relay AegisLink.",
+      "missing_features": "Quel relay non supporta mailbox o prekey — aggiornalo.",
+      "same_relay": "Sei già su quel relay.",
+      "register_failed": "Il relay ha rifiutato la registrazione. Riprova più tardi.",
+      "unknown": "Qualcosa è andato storto."
+    }
   }
 }

@@ -50,7 +50,11 @@ function trimSlash(url: string): string {
  * a message; the caller must NOT wipe locally unless the user explicitly
  * chooses to.
  */
-export async function deleteAccountOnRelay(identity: Identity): Promise<DeleteAccountResult> {
+export async function deleteAccountOnRelay(
+  identity: Identity,
+  /** F5b: delete at THIS relay instead of the current home (the old home once the grace window ends). */
+  opts: { relayBaseUrl?: string } = {},
+): Promise<DeleteAccountResult> {
   const ts = Date.now();
   const timeBucket = Math.floor(ts / 30_000);
   const sig = encodeBase64(
@@ -63,7 +67,7 @@ export async function deleteAccountOnRelay(identity: Identity): Promise<DeleteAc
   let res: Response;
   try {
     res = await fetch(
-      `${trimSlash(homeRelayBaseUrl())}/identity/${encodeURIComponent(identity.aegisId)}`,
+      `${trimSlash(opts.relayBaseUrl ?? homeRelayBaseUrl())}/identity/${encodeURIComponent(identity.aegisId)}`,
       {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

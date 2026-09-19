@@ -358,7 +358,9 @@
     "languageItalian": "🇮🇹 Italiano",
     "languageSpanish": "🇪🇸 Español",
     "deleteAccount": "Delete account",
-    "deleteAccountSub": "Permanently erase your identity from the relay and this device"
+    "deleteAccountSub": "Permanently erase your identity from the relay and this device",
+    "myRelay": "My relay",
+    "myRelaySub": "Official relay or your own (.onion)"
   },
   "lock": {
     "locked": "LOCKED · AEGISLINK",
@@ -1728,5 +1730,36 @@
     "requiredBody": "This version ({{installed}}) is no longer supported by the server. Update to {{min}} or later to keep using AegisLink.",
     "requiredCta": "Update now",
     "notifBody": "A new version is available ({{version}}). Update from the store."
+  },
+  "relaySettings": {
+    "title": "My relay",
+    "currentSection": "CURRENT RELAY",
+    "officialRelay": "Official AegisLink relay",
+    "ownRelay": "Your own relay",
+    "since": "Since {{date}}",
+    "previousUntil": "Still receiving on the previous relay ({{relay}}) until {{date}}. Contacts who have not opened the app by then will need your new link.",
+    "ownSection": "USE MY OWN RELAY",
+    "ownDesc": "Point AegisLink at a relay you (or someone you trust) run. Only Tor hidden services (.onion) are accepted: your IP is never exposed and no certificate is needed. Verify it first.",
+    "onionPlaceholder": "xxxxxxxx…xxxx.onion",
+    "verify": "Verify relay",
+    "verifying": "Verifying over Tor…",
+    "verifiedTitle": "Relay verified",
+    "switchCta": "Switch to {{relay}}",
+    "backToOfficial": "Back to the official relay",
+    "confirmTitle": "Change relay?",
+    "consequences": "Your contacts will receive your new address automatically. For 7 days you keep receiving on the previous relay; anyone who does not open the app in that time loses your messages until you send them your link again. Your keys and chats stay on this device.",
+    "confirmCta": "Change relay",
+    "migrating": "Registering on the new relay and telling your contacts…",
+    "done": "Done. You are now on the new relay.",
+    "errors": {
+      "invalid_onion": "That is not a valid .onion address (56 characters + .onion).",
+      "tor_unavailable": "Tor is not available on this device. A self-hosted relay needs the embedded Tor.",
+      "unreachable": "Could not reach that relay over Tor.",
+      "not_a_relay": "That address does not answer like an AegisLink relay.",
+      "missing_features": "That relay does not support mailboxes or prekeys — update it.",
+      "same_relay": "You are already on that relay.",
+      "register_failed": "The relay refused the registration. Try again later.",
+      "unknown": "Something went wrong."
+    }
   }
 }

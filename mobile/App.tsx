@@ -33,6 +33,7 @@ import { ProfileScreen } from './src/screens/Profile';
 import { NotificationsScreen } from './src/screens/Notifications';
 import { BackupScreen } from './src/screens/Backup';
 import { DevicesScreen } from './src/screens/Devices';
+import { RelaySettingsScreen } from './src/screens/RelaySettings';
 import { LockScreen } from './src/screens/Lock';
 import { UpdateRequiredScreen } from './src/screens/UpdateRequired';
 import { useAppVersion, isUpdateRequired } from './src/store/appVersion';
@@ -140,6 +141,7 @@ type PushRoute =
   | { name: 'notifs' }
   | { name: 'backup' }
   | { name: 'devices' }
+  | { name: 'relay' }
   | { name: 'lockConfig' }
   | { name: 'lock' }
   | { name: 'panic' }
@@ -1494,6 +1496,8 @@ function Shell() {
         return <BackupScreen onBack={pop} />;
       case 'devices':
         return <DevicesScreen onBack={pop} />;
+      case 'relay':
+        return <RelaySettingsScreen onBack={pop} />;
       case 'lockConfig':
         return <LockConfigScreen onBack={pop} onLockTest={() => push({ name: 'lock' })} onLockSettings={() => push({ name: 'lockSettings' })} />;
       case 'lockSettings':

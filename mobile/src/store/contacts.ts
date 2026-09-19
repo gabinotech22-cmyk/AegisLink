@@ -68,6 +68,8 @@ interface ContactsState {
   confirmKeyChange: (aegisId: string, newPublicKeyB64: string) => Promise<StoredContact | null>;
   get: (aegisId: string) => StoredContact | undefined;
   updateContactProfile: (aegisId: string, name: string, color?: string, avatarImage?: string | null, status?: string) => Promise<void>;
+  /** F5b: the contact announced a new home relay (`profile_update.mailboxRelay`); null = official. */
+  updateContactRelay: (aegisId: string, relayOnion: string | null) => Promise<void>;
   muteContact: (aegisId: string, muted: boolean, mutedUntil?: number | null) => Promise<void>;
   setZeroTrust: (aegisId: string, enabled: boolean) => Promise<void>;
   setBlocked: (aegisId: string, blocked: boolean) => Promise<void>;
@@ -325,6 +327,14 @@ export const useContacts = create<ContactsState>((set, get) => ({
       status: status !== undefined ? status : existing.status,
     };
     await saveContact(updated);
+    set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
+  },
+
+  async updateContactRelay(aegisId, relayOnion) {
+    const existing = get().contacts.find((c) => c.aegisId === aegisId);
+    if (!existing || (existing.relayOnion ?? null) === relayOnion) return;
+    const updated: StoredContact = { ...existing, relayOnion };
+    if (!isDuressActive()) await saveContact(updated);
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
   },
 

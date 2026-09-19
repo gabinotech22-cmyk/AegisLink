@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { FEDERATION } from '../config';
 import i18n from '../i18n';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -19,7 +20,7 @@ import { usePreferences } from '../store/preferences';
 // Types
 // ---------------------------------------------------------------------------
 
-type NavTarget = 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices';
+type NavTarget = 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'relay';
 
 interface Props {
   onTab: (tab: Tab) => void;
@@ -111,6 +112,9 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
                 : i18n.t('tor.connecting', { v0: torStatus.progress })}
             trailing={<span style={{ fontFamily: t.fontMono, fontSize: 10, color: torStatus.state === 'on' ? t.accent : t.textDim, letterSpacing: 1 }}>{torStatus.state === 'on' ? i18n.t('privacy.torOn') : `${torStatus.progress}%`}</span>}
           />
+          {FEDERATION && (
+            <Row t={t} icon={<I.Globe size={20} color={t.textDim} />} label={i18n.t('privacy.myRelay')} sub={i18n.t('privacy.myRelaySub')} onPress={() => onNav('relay')} />
+          )}
           <Row t={t} icon={<I.Cloud size={20} color={t.textDim} />} label={i18n.t('privacy.encryptedBackup')} sub={i18n.t('privacy.backUpYourMessages')} onPress={() => onNav('backup')} />
           <Row t={t} icon={<I.Timer size={20} color={t.textDim} />} label={i18n.t('privacy.disappearingMessages')} sub={i18n.t('privacy.setAGlobalTimer')} onPress={() => onNav('ephemeral')} noBorder />
         </Section>

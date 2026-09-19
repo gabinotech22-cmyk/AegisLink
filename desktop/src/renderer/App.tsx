@@ -23,6 +23,7 @@ import { SearchScreen } from './screens/Search';
 import { ScanQRScreen } from './screens/ScanQR';
 import { BackupScreen } from './screens/Backup';
 import { DevicesScreen } from './screens/Devices';
+import { RelaySettingsScreen } from './screens/RelaySettings';
 import { LockConfigScreen } from './screens/LockConfig';
 import { LockSettingsScreen } from './screens/LockSettings';
 import { LockScreen } from './screens/Lock';
@@ -72,6 +73,7 @@ type PushRoute =
   | { name: 'notifs' }
   | { name: 'backup' }
   | { name: 'devices' }
+  | { name: 'relay' }
   | { name: 'lockConfig' }
   | { name: 'lock' }
   | { name: 'panic' }
@@ -494,6 +496,8 @@ function Shell() {
           return <BackupScreen onBack={pop} />;
         case 'devices':
           return <DevicesScreen onBack={pop} />;
+        case 'relay':
+          return <RelaySettingsScreen onBack={pop} />;
         case 'lockConfig':
           return <LockConfigScreen onBack={pop} onLockTest={() => push({ name: 'lock' })} />;
         case 'lockSettings':
