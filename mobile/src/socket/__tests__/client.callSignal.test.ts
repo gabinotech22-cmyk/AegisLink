@@ -345,7 +345,7 @@ describe('federation F4 — call signaling across relays', () => {
     expect(mockSendViaForeignRelay).not.toHaveBeenCalled();
 
     mockFakeSocket.emit.mockClear();
-    expect(router.routeCallSignal(mockFakeSocket, 'call:invite:v2', foreign.aegisId, { callId: 'c2', media: 'audio', ciphertext: 'x', nonce: 'y', epk: 'z' })).toBe(true);
+    expect(router.routeCallSignal(mockFakeSocket, 'call:invite:v2', foreign.aegisId, { callId: 'call-id-must-stay-sealed', media: 'audio', ciphertext: 'x', nonce: 'y', epk: 'z' })).toBe(true);
     await settle();
     const events = mockFakeSocket.emit.mock.calls.map((c) => c[0] as string);
     expect(events.filter((e) => e.startsWith('call:'))).toEqual([]); // never the home socket
@@ -358,13 +358,13 @@ describe('federation F4 — call signaling across relays', () => {
     expect(env.wakeHint).toBe('call');
     expect(env.ephemeralTtl).toBeGreaterThan(0); // bounded relay life
     expect(JSON.stringify(env)).not.toContain(me.aegisId);
-    expect(JSON.stringify(env)).not.toContain('c2'); // callId sealed too
+    expect(JSON.stringify(env)).not.toContain('call-id-must-stay-sealed'); // callId sealed too
     expect(mockEnqueueOutboxJob).not.toHaveBeenCalled(); // transient: never persisted
     expect(mockAppend).not.toHaveBeenCalled();
 
     // Non-invite signals carry no wake hint.
     mockSendViaForeignRelay.mockClear();
-    router.routeCallSignal(mockFakeSocket, 'call:ice:v2', foreign.aegisId, { callId: 'c2', ciphertext: 'x', nonce: 'y' });
+    router.routeCallSignal(mockFakeSocket, 'call:ice:v2', foreign.aegisId, { callId: 'call-id-must-stay-sealed', ciphertext: 'x', nonce: 'y' });
     await settle();
     expect((mockSendViaForeignRelay.mock.calls[0] as unknown as [unknown, Record<string, unknown>])[1].wakeHint).toBeUndefined();
   });
