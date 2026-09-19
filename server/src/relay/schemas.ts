@@ -284,4 +284,9 @@ export const MailboxEnvelopeIn = z.object({
   // the recipient's home relay publish a call-class (urgent) wake instead of the
   // message-class one. Never stored, never forwarded to the recipient.
   wakeHint: z.literal('call').optional(),
+  // Federation F6 (docs/FEDERATION-DESIGN.md D5): proof-of-work on submission,
+  // required only when the relay runs with MAILBOX_SUBMIT_POW=on (a self-hosted
+  // relay under spam pressure). Challenge from the `mailbox:pow:challenge` ack
+  // or the `pow_required` rejection; one solve per envelope (consumed).
+  pow: z.object({ challenge: z.string().length(64), nonce: z.string().min(1).max(32) }).optional(),
 });

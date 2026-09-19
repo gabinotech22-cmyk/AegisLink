@@ -2,7 +2,9 @@
 
 > Estado: **IMPLEMENTADO** — ya NO es una propuesta. Ocultar `from` (Fases 1–3)
 > está **habilitado por defecto**; ocultar `to` (Fase 4, mailbox IDs + Tor
-> embebido #171/#172) está implementado tras flag. Ver el detalle de fases en §5.
+> embebido #171/#172) está implementado y, desde la federación F5b (#491), el
+> modo buzón va **activo por defecto** en mobile y desktop (`MAILBOX_MODE`
+> opt-out, fail-closed sin onion). Ver el detalle de fases en §5.
 > Origen: auditoría profunda 2026-06, hallazgo A-6 (el relay ve `from→to` en
 > signaling de llamadas). Al investigarlo se confirmó que el leak está **a la
 > par de los envelopes de chat** (handler.ts:572), así que el problema no es de
@@ -187,7 +189,7 @@ Lo que cambia:
 - **Fase 3 — grupos. ✅ HABILITADO POR DEFECTO.** El fan-out de grupo rutea por el
   selector compartido `buildOutgoingEnvelope`, así que un envío de grupo oculta el
   `from` igual que un 1:1.
-- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). 🟢 IMPLEMENTADO tras flag OFF — Slices 1, 2, 3a, 3b, 4, 5, 6 hechas y testeadas; transporte Tor embebido shipped (#171/#172). 2b.0/2b.1 (push wake-up server+infra) también hechos — ver `docs/FASE4-SLICE2B-PUSH-DESIGN.md` §9. Pendiente para cerrarla del todo: 2b.2+ = suscripción móvil al wake-up, validación en vivo 2-dispositivos y flip del flag a ON.** (El antiguo bloque "PENDIENTE (el grueso, XL)" de más abajo describía trabajo que estas slices YA cubren — prueba: `server/src/__tests__/mailboxAuth.relay.test.ts`.)
+- **Fase 4 — ocultar `to` (mailbox IDs, §3.4). ✅ IMPLEMENTADO Y ACTIVO POR DEFECTO — Slices 1, 2, 3a, 3b, 4, 5, 6 hechas y testeadas; transporte Tor embebido shipped (#171/#172); push wake-up 2b.x hecho (`docs/FASE4-SLICE2B-PUSH-DESIGN.md` §9); producción lo lleva ON desde 1.0.x y desde F5b (#491) el flag `MAILBOX_MODE` es opt-out en el código (fail-closed sin onion). Las notas "flag OFF" de las slices de abajo describen el estado en que se escribieron. Con la federación (`FEDERATION-DESIGN.md`) el buzón es además el único transporte entre relays.** (El antiguo bloque "PENDIENTE (el grueso, XL)" de más abajo describía trabajo que estas slices YA cubren — prueba: `server/src/__tests__/mailboxAuth.relay.test.ts`.)
   **Slice 1 ✅ (server):** auth de socket por mailbox — handshake `{mailboxId,
   mailboxSignPubKey}` sin aegisId → challenge random → possession proof Ed25519 →
   el relay verifica Y recomputa `id=SHA256(pubkey)[0:16]` (binding anti-hijack) →
@@ -309,9 +311,10 @@ Por eso, **bajo `MAILBOX_ENABLED`**:
   vía `sendMessage`), igual que delete-for-everyone — el relay solo ve un blob
   opaco. Fuera de mailbox mode se mantiene el evento plaintext ligero (no expone
   más que el propio mensaje v2).
-- El **typing** se **suprime** en mailbox mode (es best-effort/efímero; sellarlo
-  de forma durable mostraría un "escribiendo…" rancio). Fuera de mailbox mode,
-  sin cambios.
+- El **typing** viaja también **sellado** (`{type:'typing'}`, con throttle
+  `socket/typingThrottle.ts`) en mailbox mode y hacia contactos de otro relay
+  (federación F3, #487); llega con la latencia del buzón/Tor, aceptable para una
+  señal best-effort. Fuera de mailbox mode, sin cambios. (Antes se suprimía.)
 
 Regla operativa: cualquier señal nueva dirigida a un aegisId por el control-plane
 debe pasar por este mismo filtro antes de flipear `MAILBOX_ENABLED` a ON, o

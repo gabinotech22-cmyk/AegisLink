@@ -143,7 +143,9 @@ lleva el relay, el cliente habla con varios relays, sin relay-a-relay. Pantalla 
 `Privacy → Red → Mi relay`. Diseño, slices F0–F7 y su **estado canónico** en
 [`FEDERATION-DESIGN.md`](./FEDERATION-DESIGN.md) (aquí no se duplica).
 
-Orden: se arranca F1 cuando #482 (auditoría) y el Hito 1 (extraer Work) estén en `main`.
+Estado 2026-09-19: **F0–F6 mergeadas** (#483, #485, #486, #487, #488, #489, #490, #491, #492);
+queda **F7** (encender `FEDERATION`, subir `minVersion`, build nativo y prueba real con 2
+dispositivos × 2 relays). Mientras tanto la pantalla "Mi relay" existe pero está oculta.
 
 ---
 

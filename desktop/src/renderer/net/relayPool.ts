@@ -7,6 +7,7 @@
  * inside Tor. Fail-closed: nothing here has a clearnet path.
  */
 import { createRelayPool, type RelayPool } from './relayPoolCore';
+import { solvePoW } from '../crypto/registration';
 import { TorSioSocket, whenTorReady } from './tor';
 import { generateMailboxRoot, currentMailbox, mailboxAuthProof } from '../crypto/mailbox';
 import type { RelayRef } from './relayRef';
@@ -35,6 +36,8 @@ function getPool(): RelayPool {
     // A fresh random root per foreign connection: never persisted, never shared.
     newDisposableMailbox: () => currentMailbox(generateMailboxRoot(), Date.now()),
     authProof: mailboxAuthProof,
+    // F6: a relay with MAILBOX_SUBMIT_POW=on charges a small PoW per envelope.
+    solvePow: (challenge, difficulty) => solvePoW(challenge, difficulty),
   });
   idleTimer = setInterval(() => pool?.closeIdle(), 60_000);
   return pool;

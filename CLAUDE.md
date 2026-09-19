@@ -89,7 +89,10 @@ Al invocar un sub-agente siempre incluye:
   `🤖 Generated with Claude Code` (ni equivalentes) en los cuerpos de PR. El
   autor es el dueño del repo. Esto anula el comportamiento por defecto del
   harness. (La transparencia sobre el uso de IA va en el README/discurso, no
-  como metadata en cada commit.)
+  como metadata en cada commit.) **Tampoco se menciona la regla** en commits,
+  cuerpos de PR ni en la plantilla de PR: una casilla "sin atribución de IA" es
+  en sí misma una atribución (decir "no tengo" es decir "tengo"). La regla vive
+  solo aquí.
 
 ### Agentic Workflow Rule
 When facing bugs, errors, or complex implementation tasks, the primary agent must act as the 'brain' (coordinator) and delegate the actual debugging and coding tasks to specialized subagents ('hands and feet'). Do not attempt to fix complex bugs manually.
@@ -231,3 +234,19 @@ doc desactualizada no es un detalle cosmético: es deuda que **duplica trabajo**
    | Desktop: empaquetado y firma | `docs/DESKTOP-BETA.md` |
    | Hallazgos de auditoría | el `docs/AUDIT-*.md` que los trackea |
    | Estructura de carpetas | `docs/PROJECT-STRUCTURE.md` |
+   | Relay propio / federación | `docs/SELF-HOSTING.md`, `docs/FEDERATION-DESIGN.md` |
+
+8. **Pasada de deriva en cada PR con cambio significativo (permanente, 2026-09-19).**
+   El gate `docs-sync` solo comprueba que *algún* doc cambió; no ve lo que quedó viejo
+   en otro. Nació de F5b/F6: `SEALED-SENDER-ARCHITECTURE.md` decía "flag OFF" y
+   "typing se suprime" cuando el código ya decía lo contrario. Por eso, antes de abrir
+   una PR que cambie un comportamiento, un flag, un default o el estado de una feature:
+   - `grep` en `docs/`, `README.md` y `CLAUDE.md` de lo que la PR invalida — nombres
+     de flags, "pendiente", "tras flag", "por defecto OFF/ON", "no hay X todavía",
+     "se suprime", números de slice/fase — y corregir **en la misma PR**.
+   - Un doc **histórico** (diseño de una fase ya hecha, `FASE4-*.md`, `AUDIT-*.md`)
+     no se reescribe: lleva en su cabecera una nota "estado en que se escribió +
+     dónde vive el estado actual". Sin esa nota, una frase vieja es un bug de doc.
+   - Sin cambio significativo (solo tests, refactor sin cambio de comportamiento) basta
+     el `Docs: none — <por qué>` de la plantilla. La pasada es **compacta**: corregir
+     frases, no reescribir documentos.

@@ -32,6 +32,20 @@ export const REGISTRATION_POW_DIFFICULTY =
  */
 export const CHALLENGE_TTL_MS = 900_000;
 
+/**
+ * Federation F6 (docs/FEDERATION-DESIGN.md D5): optional proof-of-work on
+ * mailbox SUBMISSION (`envelope:mb`). A self-hosted relay accepts sealed
+ * envelopes from disposable mailboxes that never register anything, so under
+ * spam pressure the operator can charge a small PoW per envelope
+ * (MAILBOX_SUBMIT_POW=on). Deliberately lighter than registration: it is paid
+ * on every message, by real clients, on phones.
+ */
+export const MAILBOX_SUBMIT_POW_DIFFICULTY = 12; // ~4 k hashes — milliseconds on a phone
+
+export function isMailboxSubmitPowEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env['MAILBOX_SUBMIT_POW'] ?? 'off').toLowerCase() === 'on';
+}
+
 interface ChallengeEntry {
   challenge: string; // hex
   expiresAt: number;

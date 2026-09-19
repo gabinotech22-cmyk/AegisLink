@@ -29,6 +29,7 @@
 import { logger } from '../utils/logger';
 import { TorSioSocket } from '../net/tor';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import { solvePoW } from '../crypto/registration';
 import { MAILBOX_ENABLED } from '../config';
 import { homeRelayOnionUrl } from '../net/homeRelay';
 import {
@@ -70,9 +71,11 @@ export interface OutgoingMailboxEnvelope {
   ephemeralTtl?: number;
   /** F4: call-class wake for the recipient (the one declared metadata bit, D3). */
   wakeHint?: 'call';
+  /** F6: submission proof-of-work (only when the relay demands it). */
+  pow?: { challenge: string; nonce: string };
 }
 
-export type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string };
+export type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string; challenge?: string; difficulty?: number };
 
 /**
  * True only when the relay confirms the wire was handed to a LIVE recipient
@@ -221,16 +224,25 @@ export async function connectMailboxSocket(
  */
 export async function sendViaMailbox(env: OutgoingMailboxEnvelope): Promise<EnvelopeAck | null> {
   if (!isMailboxAuthed() || !mboxSocket) return null;
-  return new Promise<EnvelopeAck | null>((resolve) => {
+  const emitOnce = (payload: OutgoingMailboxEnvelope): Promise<EnvelopeAck | null> => new Promise<EnvelopeAck | null>((resolve) => {
     let settled = false;
     const t = setTimeout(() => { if (!settled) { settled = true; resolve(null); } }, 15000);
-    mboxSocket!.emit('envelope:mb', env, (ack: EnvelopeAck) => {
+    mboxSocket!.emit('envelope:mb', payload, (ack: EnvelopeAck) => {
       if (settled) return;
       settled = true;
       clearTimeout(t);
       resolve(ack ?? null);
     });
   });
+  const first = await emitOnce(env);
+  // Federation F6: our own home may run MAILBOX_SUBMIT_POW — solve the challenge
+  // it handed back and resend exactly once (same rule as the relay pool).
+  if (first && !first.ok && first.error === 'pow_required' && typeof first.challenge === 'string' && typeof first.difficulty === 'number') {
+    let nonce: string;
+    try { nonce = await solvePoW(first.challenge, first.difficulty); } catch { return first; }
+    return emitOnce({ ...env, pow: { challenge: first.challenge, nonce } });
+  }
+  return first;
 }
 
 /**

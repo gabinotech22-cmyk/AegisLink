@@ -93,13 +93,14 @@ short version:
 
 ## Quick start — run a relay locally
 
-The relay is fully self-hostable (AGPL-3.0). **Today the published clients are fixed to the
-official relay** (URL, `.onion` and TLS pins are compiled into the binary), so pointing a
-client at your own relay means building the client yourself with
-`EXPO_PUBLIC_SERVER_URL` (mobile) or `VITE_RELAY_URL` (desktop), and there is **no federation
-yet**: every contact must be on the same relay. Choosing your own relay from the app, with
-contacts on different relays, is designed in `docs/FEDERATION-DESIGN.md` and tracked in
-`docs/ROADMAP.md`.
+The relay is fully self-hostable (AGPL-3.0). **Running your own relay for real users:**
+`infra/selfhost/` + `docs/SELF-HOSTING.md` — one `./up.sh` brings up relay + Tor onion
+service + wake-up push, `.onion`-only (no domain, no TLS, no open port), and prints the
+address users paste into *Privacy → Network → My relay*. Contacts on different relays reach
+each other directly through Tor (no relay-to-relay protocol; `docs/FEDERATION-DESIGN.md`).
+**Until federation is switched on in the published clients (slice F7, `docs/ROADMAP.md`)**
+that screen is hidden and the published binaries stay on the official relay; the sections
+below run a relay for development.
 
 **A. Node directly** (Node.js 24+ — `node:sqlite`; fastest):
 

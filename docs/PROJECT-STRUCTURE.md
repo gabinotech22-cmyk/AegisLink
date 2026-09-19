@@ -19,7 +19,7 @@ previene. **La raíz es sagrada: solo lo canónico vive ahí.**
 | `mobile/` | App Expo SDK 54 + React Native + TS (cliente principal) | `mobile-lead` |
 | `desktop/` | Cliente desktop (Electron/Tauri); **paridad obligatoria** con mobile en crypto/sesión | `mobile-lead` / `crypto-lead` |
 | `server/` | Relay Socket.IO, SQLite, push, señalización WebRTC | `backend-lead` |
-| `infra/` | CI/CD, EAS, coturn, Docker, deploy, runbooks | `infra-lead` |
+| `infra/` | CI/CD, EAS, coturn, Docker, deploy, runbooks; **`infra/selfhost/`** = paquete para montar un relay propio (`docs/SELF-HOSTING.md`) | `infra-lead` |
 | `web/` | Landing / web pública | `mobile-lead` |
 | `docs/` | Toda la documentación: protocolo, seguridad, roadmaps, legal, testing | todos |
 | `prototype/` | Prototipos de diseño originales (`*.jsx`, `*.html`, canvas). **Referencia, no build.** | diseño |
