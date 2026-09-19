@@ -639,9 +639,10 @@ Parsing rules (identical on mobile and desktop, pinned by shared known-answer
 vectors): the ID↔key binding of §3.2 always applies; a v2 payload whose relay
 is not a valid v3 onion, or whose root is missing or not exactly 32 bytes, is
 rejected outright — never downgraded to "official"; a v1 payload with an extra
-segment is rejected; a v2 relay address without a root is never emitted. While the `FEDERATION` flag is
-off, a v2 link naming a non-official relay is recognised but refused with an
-"update AegisLink" message, so no client ever stores a contact it cannot reach.
+segment is rejected; a v2 relay address without a root is never emitted. The `FEDERATION` flag is on
+by default since 1.0.7 (F7); with it forced off (`…_FEDERATION=off`, emergency brake), a v2 link naming
+a non-official relay is recognised but refused with an "update AegisLink" message, so no client ever
+stores a contact it cannot reach.
 
 **Reaching a contact on another relay (F2).** There is no relay-to-relay
 protocol. The sender opens a mailbox socket on the contact's relay with a
@@ -680,7 +681,7 @@ the bootstrap itself**:
   no sender identity. Only a session with a pending X3DH init produces this
   form; an established session never does, even if asked.
 - The recipient opens a sealed envelope from an **unknown** sender only with
-  `allowFirstContact` (gated by the `FEDERATION` flag) **and** only when the
+  `allowFirstContact` (the `FEDERATION` flag, on by default since F7) **and** only when the
   inner is a genuine bootstrap (`x3dh` present, well-formed `fc`). A known
   contact's pinned signing key always wins over an embedded one, so an
   impostor cannot re-key an existing contact. The claimed `from` must match

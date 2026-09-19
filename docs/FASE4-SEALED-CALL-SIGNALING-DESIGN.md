@@ -1,5 +1,7 @@
 # Fase 4 — Sealed-sender para señalización de llamadas (1:1 v1 + grupo)
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. **Estado actual:** Fases A+B+C ✅ (como dice el doc) y, desde la federación F4 (#489), la misma señalización sellada cruza relays: `socket/callSignalRouter.ts` (mobile + desktop) la envía como `call_signal` transitorio por el relay del destinatario con `wakeHint: 'call'` — `docs/PROTOCOL.md` §7.1, `docs/FEDERATION-DESIGN.md` fila F4.
+
 > **Estado:** **Fases A + B + C ✅ HECHAS.** A: clientes 1:1 sellados-only,
 > fail-closed, paridad mobile↔desktop. B: señalización de grupo sealed-sender —
 > el relay ya no estampa `from` en NINGÚN `group_call:*` y el roster del heartbeat

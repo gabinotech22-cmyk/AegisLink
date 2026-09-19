@@ -1,5 +1,7 @@
 # Fase 4 — Plano de control vs entrega: decisión de diseño
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. Escrito pre-Slice 4. **Estado actual:** la bifurcación decidida aquí (socket de control-plane por aegisId + socket mailbox aparte autenticado por posesión) está implementada y activa por defecto — `docs/SEALED-SENDER-ARCHITECTURE.md` §5 (Fase 4 ✅), código `mobile/src/socket/mailboxSocket.ts`, `server/src/relay/handler.ts`. Con la federación (F5a, #490) el socket de control-plane también puede vivir en un relay `.onion` propio (`net/homeRelay.ts`).
+
 > Estado: **documento de decisión, pre-Slice 4.** Bloquea la reescritura del path
 > de auth del socket. Escrito porque Slice 4 obliga a una bifurcación de
 > arquitectura con implicación directa de privacidad — y CLAUDE.md manda mirar a

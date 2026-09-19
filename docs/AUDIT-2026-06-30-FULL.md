@@ -1,5 +1,7 @@
 # AegisLink — Full audit (2026-06-30)
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. Instantánea de `main` a 2026-06-30. Los hallazgos se cerraron vía `SECURITY-ROADMAP-2026-06.md` y PRs posteriores; lo que describa como "ausente" o "pendiente" se verifica contra el código actual (regla doc #6), no contra este doc. Estado del producto: `docs/ROADMAP.md`.
+
 > Scope requested: **security + quality + architecture + tests**, deliverable **report + fix**.
 > Method: orchestrated multi-surface audit (relay, crypto, desktop, mobile, infra/web3,
 > arch, docs/tests). Findings below are **directly verified against code** (file:line).

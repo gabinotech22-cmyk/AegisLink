@@ -196,6 +196,12 @@ jobs:
           # Onion-only: no service may publish a host port.
           if docker compose config | grep -E '^\s+published:'; then echo "self-host compose publishes a port" >&2; exit 1; fi
           bash -n up.sh print-onion.sh backup-onion-key.sh
+          # F7: a self-hosted relay must NOT inherit the official relay's
+          # single-onion (non-anonymous) mode — its location stays hidden.
+          docker compose config | grep -q 'TORRC: torrc.selfhost'
+          if grep -Eq '^\s*HiddenService(SingleHopMode|NonAnonymousMode)\s+1' ../tor/torrc.selfhost; then echo "torrc.selfhost must be location-hidden" >&2; exit 1; fi
+          docker compose build tor
+          docker run --rm --add-host relay:127.0.0.1 --add-host ntfy:127.0.0.1 aegislink-tor:selfhost tor --verify-config -f /etc/tor/torrc
 
   # ─── Mobile — typecheck ───────────────────────────────────────────────────
   mobile-typecheck:

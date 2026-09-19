@@ -1,5 +1,7 @@
 # Verificación de la auditoría externa 2026-09-16
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. Verificación contra `main @ 07076c1`. Los fixes acordados se mergearon en #481/#482 y la federación (F0–F7, `docs/FEDERATION-DESIGN.md`) llegó después; lo que este doc llame "pendiente" se comprueba contra el código actual, no aquí.
+
 > **Método:** cada hallazgo del informe externo se contrastó contra el código y
 > los tests de `main @ 07076c1` (regla de oro doc↔código #6: `grep` y tests, no
 > memoria ni `.md` viejo). Cada veredicto lleva su `archivo:línea`.

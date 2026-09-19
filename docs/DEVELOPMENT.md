@@ -7,9 +7,9 @@
 - Node.js 22+ para `mobile/` y `desktop/`.
 - npm **10** para regenerar `mobile/package-lock.json` (npm 11 borra una entrada anidada y rompe el CI).
 
-Flags de desarrollo (federación, `docs/FEDERATION-DESIGN.md`): `EXPO_PUBLIC_FEDERATION=on` (mobile) /
-`VITE_FEDERATION=on` (desktop) activan la pantalla "Mi relay" y la aceptación de enlaces v2; por
-defecto OFF hasta F7. El modo buzón (`EXPO_PUBLIC_MAILBOX_MODE` / `VITE_MAILBOX_MODE`) va **ON por
+Flags (federación, `docs/FEDERATION-DESIGN.md`): `EXPO_PUBLIC_FEDERATION` (mobile) /
+`VITE_FEDERATION` (desktop) van **ON por defecto** desde F7 (1.0.7) — pantalla "Mi relay" y enlaces
+v2 activos; `=off` es el freno de emergencia (solo relay oficial, enlaces v2 ajenos rechazados). El modo buzón (`EXPO_PUBLIC_MAILBOX_MODE` / `VITE_MAILBOX_MODE`) va **ON por
 defecto** desde F5b y solo se apaga con `=off`; sin `*_ONION_URL` queda fail-closed.
 Relay: `RELAY_NAME` (nombre en `GET /relay/info`), `IDENTITY_LOOKUP=off` (oculta `GET /identity/:id`
 en un relay propio; los contactos llegan por enlace/QR, que ya lleva la clave) y
@@ -68,10 +68,10 @@ cd mobile && npx expo start
 | `EXPO_PUBLIC_TURN_URL` | Mobile | Servidor TURN/STUN para llamadas WebRTC |
 | `EXPO_PUBLIC_ONION_URL` | Mobile | Dirección .onion del relay oficial; requerida para el modo buzón (fail-closed sin ella) |
 | `EXPO_PUBLIC_MAILBOX_MODE` | Mobile | Modo buzón (ocultar `to`). ON por defecto; `off` solo para depurar |
-| `EXPO_PUBLIC_FEDERATION` | Mobile | `on` expone "Mi relay" y acepta enlaces v2 (OFF hasta F7) |
+| `EXPO_PUBLIC_FEDERATION` | Mobile | Federación ("Mi relay", enlaces v2). ON por defecto desde 1.0.7; `off` = freno de emergencia |
 | `VITE_ONION_URL` | Desktop | Dirección .onion del relay oficial (toda la sesión va por Tor) |
 | `VITE_MAILBOX_MODE` | Desktop | Modo buzón. ON por defecto; `off` solo para depurar |
-| `VITE_FEDERATION` | Desktop | `on` expone "Mi relay" (OFF hasta F7) |
+| `VITE_FEDERATION` | Desktop | Federación ("Mi relay", enlaces v2). ON por defecto desde F7; `off` = freno de emergencia |
 | `VITE_RELAY_URL` | Desktop | URL del relay para Vite/Electron renderer |
 | `VITE_TURN_URL` | Desktop | Servidor TURN/STUN para llamadas WebRTC |
 | `PORT` | Server | Puerto en que escucha el relay (default: 3001) |

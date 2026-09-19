@@ -143,9 +143,11 @@ lleva el relay, el cliente habla con varios relays, sin relay-a-relay. Pantalla 
 `Privacy → Red → Mi relay`. Diseño, slices F0–F7 y su **estado canónico** en
 [`FEDERATION-DESIGN.md`](./FEDERATION-DESIGN.md) (aquí no se duplica).
 
-Estado 2026-09-19: **F0–F6 mergeadas** (#483, #485, #486, #487, #488, #489, #490, #491, #492);
-queda **F7** (encender `FEDERATION`, subir `minVersion`, build nativo y prueba real con 2
-dispositivos × 2 relays). Mientras tanto la pantalla "Mi relay" existe pero está oculta.
+Estado 2026-09-19: **F0–F7 en `main`** (#483, #485, #486, #487, #488, #489, #490, #491, #492 y
+la PR de F7). `FEDERATION` va **ON por defecto** en ambos clientes desde **1.0.7**; la pantalla
+"Mi relay" es visible. Lo que queda es operativo, no de código: publicar 1.0.7 y entonces
+`APP_MIN_VERSION=1.0.7` en el relay (clientes viejos ante un enlace v2 → "Actualiza"); la prueba
+real 2 dispositivos × 2 relays y sus resultados viven en `AUDIT-2026-09-19-FEDERATION-F7.md`.
 
 ---
 

@@ -165,6 +165,16 @@ Lo que cambia:
 
 ## 5. Fases (cada una = rama, mergeable, detrás de flag `sealed: v1|v2`)
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** las fases de abajo
+> conservan su redacción original; su estado ✅ es el vigente. Desde la
+> federación (F0–F7, `docs/FEDERATION-DESIGN.md`) el mismo transporte sellado
+> funciona **entre relays**: la dirección de contacto lleva el relay del buzón,
+> los sobres a un relay ajeno salen por un buzón desechable de ese relay
+> (`net/relayPoolCore.ts`), el primer contacto va sellado con bootstrap X3DH
+> (`fc`, PROTOCOL §7.1) y el usuario puede mover su buzón a un relay `.onion`
+> propio. Fase 5 (cover traffic) y Fase 6 (retirar v1 del código;
+> `SEALED_TRANSPORT_VERSION` aún degrada a v1 por contacto) siguen **sin hacer**.
+
 - **Fase 0 — spike. ✅ HECHO (2026-06-19, PR #50).** Sobre sealed (epk + firma
   interna) + delivery-token en `server/src/crypto/`, aislado del path vivo, con
   11 tests (correctitud, autenticación, anti-forja, anti-replay, benchmark).

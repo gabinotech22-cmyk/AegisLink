@@ -94,14 +94,20 @@ services:
       - aegis_internal
 
   # ── Tor onion service (the relay's only door) ────────────────────────────
-  # Same image and torrc as the official deployment (infra/tor): v3 onion,
-  # virtual port 80 → relay:3001, 8090 → ntfy:80. The onion identity key lives
-  # ONLY in tor_keys — back it up: losing it changes your address and every
-  # user has to re-point the app.
+  # Same image as the official deployment (infra/tor) but with the
+  # LOCATION-HIDDEN torrc (torrc.selfhost): full 3-hop service side, so the
+  # Tor network never learns this machine's IP. The official relay runs
+  # single-onion mode because its location is public anyway; yours is not.
+  # ONION_TORRC=torrc in .env opts back into that mode (see .env.example).
+  # v3 onion, virtual port 80 → relay:3001, 8090 → ntfy:80. The onion identity
+  # key lives ONLY in tor_keys — back it up: losing it changes your address
+  # and every user has to re-point the app.
   tor:
     build:
       context: ../tor
       dockerfile: Dockerfile
+      args:
+        TORRC: ${ONION_TORRC:-torrc.selfhost}
     image: aegislink-tor:selfhost
     container_name: aegislink-tor
     restart: unless-stopped

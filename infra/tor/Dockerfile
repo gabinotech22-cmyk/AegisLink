@@ -7,8 +7,11 @@ RUN apk add --no-cache tor
 
 # torrc is baked into the image (config is code); the onion identity key is
 # NOT — it lives in the tor_keys volume mounted at /var/lib/tor so the .onion
-# address survives container rebuilds.
-COPY torrc /etc/tor/torrc
+# address survives container rebuilds. TORRC selects the flavour: `torrc`
+# (official relay, single-onion) or `torrc.selfhost` (location-hidden, the
+# self-hosting default — infra/selfhost/docker-compose.yml).
+ARG TORRC=torrc
+COPY ${TORRC} /etc/tor/torrc
 
 # The alpine tor package creates the `tor` user and /var/lib/tor (0700,
 # tor:tor). The named volume inherits that ownership on first use, which is
