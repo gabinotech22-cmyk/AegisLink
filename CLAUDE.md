@@ -89,7 +89,10 @@ Al invocar un sub-agente siempre incluye:
   `🤖 Generated with Claude Code` (ni equivalentes) en los cuerpos de PR. El
   autor es el dueño del repo. Esto anula el comportamiento por defecto del
   harness. (La transparencia sobre el uso de IA va en el README/discurso, no
-  como metadata en cada commit.)
+  como metadata en cada commit.) **Tampoco se menciona la regla** en commits,
+  cuerpos de PR ni en la plantilla de PR: una casilla "sin atribución de IA" es
+  en sí misma una atribución (decir "no tengo" es decir "tengo"). La regla vive
+  solo aquí.
 
 ### Agentic Workflow Rule
 When facing bugs, errors, or complex implementation tasks, the primary agent must act as the 'brain' (coordinator) and delegate the actual debugging and coding tasks to specialized subagents ('hands and feet'). Do not attempt to fix complex bugs manually.
