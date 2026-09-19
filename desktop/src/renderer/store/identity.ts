@@ -104,9 +104,18 @@ function publishToServer(identity: Identity, slotId: string): Promise<boolean> {
   return publishInFlight;
 }
 
-async function doPublishToServer(identity: Identity, slotId: string): Promise<boolean> {
+/**
+ * Federation F5b: register identity + prekeys at an explicit relay (the
+ * migration target) — the same publish, base URL overridden.
+ */
+export function publishIdentityAt(identity: Identity, relayBaseUrl: string): Promise<boolean> {
+  return doPublishToServer(identity, useIdentity.getState().activeSlotId, relayBaseUrl);
+}
+
+async function doPublishToServer(identity: Identity, slotId: string, relayBaseUrl?: string): Promise<boolean> {
+  const base = relayBaseUrl ?? homeRelayBaseUrl();
   try {
-    const { challenge, difficulty } = await fetchPowChallenge(homeRelayBaseUrl());
+    const { challenge, difficulty } = await fetchPowChallenge(base);
     const nonce = await solvePoW(challenge, difficulty);
 
     const preKeys = generatePreKeys(identity);
@@ -139,7 +148,7 @@ async function doPublishToServer(identity: Identity, slotId: string): Promise<bo
         signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
         opkSecrets: preKeys.opkSecrets,
       },
-      homeRelayBaseUrl(),
+      base,
       challenge,
       nonce,
       preKeys.oneTimePreKeys,

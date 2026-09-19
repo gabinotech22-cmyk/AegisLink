@@ -56,16 +56,17 @@ export const SEALED_TRANSPORT_VERSION: 'v1' | 'v2' =
 /**
  * MAILBOX_MODE / MAILBOX_ENABLED — sealed-sender Fase 4: hide the recipient
  * (`to`) from the relay by addressing a rotating, opaque mailbox id over a
- * dedicated delivery socket. Parity with mobile/src/config.ts. Opt IN via
- * VITE_MAILBOX_MODE=on. Live cutover is validated by the 2-device test, not unit
- * tests. Default OFF.
+ * dedicated delivery socket. Parity with mobile/src/config.ts. Default ON
+ * (federation F5b: the mailbox is the only transport between relays, so a
+ * client without one is unreachable from any self-hosted relay); opt OUT via
+ * VITE_MAILBOX_MODE=off (debug only).
  *
- * Fail-closed: enabling it REQUIRES Tor (ONION_URL present), so the opaque
- * mailbox socket can't be relinked to our IP next to the aegisId control socket.
+ * Fail-closed: it REQUIRES Tor (ONION_URL present), so the opaque mailbox
+ * socket can't be relinked to our IP next to the aegisId control socket.
  * Without Tor, MAILBOX_ENABLED is false and delivery stays on the aegisId
  * transport rather than ship a relinkable "private" mode.
  */
 export const MAILBOX_MODE: boolean =
-  (import.meta.env.VITE_MAILBOX_MODE as string | undefined) === 'on';
+  (import.meta.env.VITE_MAILBOX_MODE as string | undefined) !== 'off';
 
 export const MAILBOX_ENABLED: boolean = MAILBOX_MODE && ONION_URL !== null;

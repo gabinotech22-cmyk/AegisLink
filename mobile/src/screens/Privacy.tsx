@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { FEDERATION } from '../config';
 import { useTranslation } from 'react-i18next';
 import { useLocale } from '../i18n/useLocale';
 import type { SupportedLocale } from '../i18n';
@@ -41,7 +42,7 @@ const SOURCE_URL = 'https://github.com/gabinotech22-cmyk/AegisLink';
 
 interface Props {
   onTab: (tab: Tab) => void;
-  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices') => void;
+  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'relay') => void;
   onCreateProfile?: () => void;
 }
 
@@ -213,6 +214,15 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
                 </Text>
               </Pressable>
             </View>
+          )}
+          {FEDERATION && (
+            <Row
+              t={t}
+              icon={<I.Globe size={20} color={t.textDim} />}
+              label={i18nT('privacy.myRelay')}
+              sub={i18nT('privacy.myRelaySub')}
+              onPress={() => onNav('relay')}
+            />
           )}
           <Row
             t={t}

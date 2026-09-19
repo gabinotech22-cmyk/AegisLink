@@ -86,9 +86,10 @@ privada.
 3. ✅ Reachability por Tor — HECHO 2026-07-03 (`REACH_OK`: cliente Tor efímero
    → `http://<addr>.onion/health` respondió `ok` de extremo a extremo por la
    red Tor real, no en loopback).
-4. ☐ En EAS (o `.env.production`): `EXPO_PUBLIC_ONION_URL=http://<addr>.onion`
-   y `EXPO_PUBLIC_MAILBOX_MODE=on`. Sin la URL, `MAILBOX_ENABLED` queda `false`
-   (fail-closed por diseño, `mobile/src/config.ts`).
+4. ✅ En EAS (o `.env.production`): `EXPO_PUBLIC_ONION_URL=http://<addr>.onion`.
+   Desde F5b el modo buzón está **activo por defecto** (`EXPO_PUBLIC_MAILBOX_MODE=off`
+   solo para depurar); sin la URL, `MAILBOX_ENABLED` queda `false` (fail-closed por
+   diseño, `mobile/src/config.ts`).
 5. ☐ Build **nativo** del APK (el módulo `AegisTor` no existe en Expo Go).
 6. ☐ Validación 2 dispositivos reales, ambos en mailbox mode, roots
    intercambiados (mensajes en ambos sentidos + receipts sellados de #229).

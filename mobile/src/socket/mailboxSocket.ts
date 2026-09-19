@@ -487,7 +487,12 @@ let statelessDrainInFlight: Promise<number> | null = null;
  */
 export function fetchMailboxOverTor(
   onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
+  /** F5b: drain THIS relay's copy of our mailbox (the previous home during the grace window). */
+  opts: { onionUrl?: string } = {},
 ): Promise<number> {
+  // The previous-home drain is a separate flight: it must not be coalesced with
+  // (or block) the home drain.
+  if (opts.onionUrl) return drainMailboxStateless(onEnvelope, opts.onionUrl);
   if (statelessDrainInFlight) return statelessDrainInFlight;
   statelessDrainInFlight = drainMailboxStateless(onEnvelope).finally(() => {
     statelessDrainInFlight = null;
@@ -497,8 +502,9 @@ export function fetchMailboxOverTor(
 
 async function drainMailboxStateless(
   onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
+  onionUrl?: string,
 ): Promise<number> {
-  const ONION_URL = homeRelayOnionUrl();
+  const ONION_URL = onionUrl ?? homeRelayOnionUrl();
   if (!MAILBOX_ENABLED || !ONION_URL) return 0;
   if (!isTorAvailable()) return 0;
   try {
@@ -548,7 +554,8 @@ async function drainMailboxStateless(
   }
 
   // 3. Fetch, acking the ids we persisted last round (at-least-once).
-  const ackIds = statelessPendingAcks.get(mailboxId) ?? [];
+  const ackKey = `${ONION_URL}|${mailboxId}`; // acks are per relay copy
+  const ackIds = statelessPendingAcks.get(ackKey) ?? [];
   const res = await torHttpRequest(
     `${ONION_URL}/mailbox/fetch`,
     'POST',
@@ -563,7 +570,7 @@ async function drainMailboxStateless(
   );
   if (!res || res.status !== 200) return 0;
   // The acks we just sent were honored server-side; forget them.
-  statelessPendingAcks.delete(mailboxId);
+  statelessPendingAcks.delete(ackKey);
 
   let envelopes: IncomingMailboxEnvelope[];
   try {
@@ -585,6 +592,6 @@ async function drainMailboxStateless(
     }
   }
   // Ack the persisted ids on the NEXT fetch — never before they're stored.
-  if (persisted.length) statelessPendingAcks.set(mailboxId, persisted);
+  if (persisted.length) statelessPendingAcks.set(ackKey, persisted);
   return persisted.length;
 }

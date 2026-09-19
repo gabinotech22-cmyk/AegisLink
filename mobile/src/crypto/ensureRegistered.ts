@@ -61,12 +61,17 @@ function describeStepError(step: string, e: unknown): Error {
   return new Error(`[${step}] non-Error throw: ${rendered}`);
 }
 
-export async function ensureRegistered(identity: Identity): Promise<EnsureResult> {
+export async function ensureRegistered(
+  identity: Identity,
+  /** F5b: register at THIS relay instead of the current home (migration target). */
+  opts: { relayBaseUrl?: string } = {},
+): Promise<EnsureResult> {
+  const base = opts.relayBaseUrl ?? homeRelayBaseUrl();
   try {
     let challenge: string;
     let difficulty: number;
     try {
-      ({ challenge, difficulty } = await fetchPowChallenge(homeRelayBaseUrl()));
+      ({ challenge, difficulty } = await fetchPowChallenge(base));
     } catch (e) {
       throw describeStepError('fetchPowChallenge', e);
     }
@@ -91,7 +96,7 @@ export async function ensureRegistered(identity: Identity): Promise<EnsureResult
         signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
         opkSecrets: preKeys.opkSecrets,
       },
-      homeRelayBaseUrl(),
+      base,
       challenge,
       nonce,
       preKeys.oneTimePreKeys,

@@ -855,6 +855,12 @@ export function connect(identity: Identity): Socket {
   });
 
   socket.on('auth:ok', async (res?: { opkCount?: number }) => {
+    // Federation F5b: during a migration's grace window keep draining the OLD
+    // home's copy of our mailbox, and retire it once the window has passed.
+    {
+      const { runMigrationHousekeeping } = await import('../net/relayMigration');
+      void runMigrationHousekeeping(identity, (env) => handleIncomingV2(env, identity)).catch(() => {});
+    }
     authenticated = true;
     clearAuthWatchdog();
     if (DEV) logger.debug('[socket] authenticated');
@@ -995,6 +1001,15 @@ async function ownDeliveryTokenField(): Promise<Record<string, string>> {
  * eagerly under v2 (like the delivery token): pre-distribution makes the
  * mailbox-transport cutover (Fase 4, flag-gated) seamless. No-op under v1.
  */
+/**
+ * Federation F5b: `{ mailboxRelay }` — the onion of OUR home relay, or null for
+ * the official one; how every contact learns where our mailbox lives after a
+ * migration (parity with mobile).
+ */
+function ownMailboxRelayField(): Record<string, string | null> {
+  return { mailboxRelay: getHomeRelay()?.onion ?? null };
+}
+
 async function ownMailboxRootField(): Promise<Record<string, string>> {
   if (SEALED_TRANSPORT_VERSION !== 'v2') return {};
   try { return { mailboxRoot: await getOwnMailboxRootB64() }; } catch { return {}; }
@@ -1669,6 +1684,15 @@ async function decryptAndAppendLocked(
         // them. setContactMailboxRoot ignores malformed input.
         if (typeof parsedPayload.mailboxRoot === 'string' && parsedPayload.mailboxRoot) {
           try { await setContactMailboxRoot(contact.aegisId, parsedPayload.mailboxRoot); } catch { /* non-fatal */ }
+        }
+        // Federation F5b: the contact moved (or announced) its home relay. Only a
+        // valid v3 onion or an explicit null (official) is honoured (parity: mobile).
+        if ('mailboxRelay' in parsedPayload) {
+          const raw: unknown = parsedPayload.mailboxRelay;
+          const ref = raw === null ? null : relayRefFromOnion(raw);
+          if (raw === null || ref) {
+            try { await useContacts.getState().updateContactRelay(contact.aegisId, canonicalRelay(ref)?.onion ?? null); } catch { /* non-fatal */ }
+          }
         }
         await saveSessionState(contact.aegisId, ratchetState);
         return true;
@@ -2662,7 +2686,11 @@ async function toDataUri(imageField: string | null): Promise<string | null> {
   return imageField;
 }
 
-export async function broadcastProfileUpdate(identity: Identity): Promise<void> {
+export async function broadcastProfileUpdate(
+  identity: Identity,
+  /** F5b: `force` skips the change fingerprint (a relay migration must always announce). */
+  opts: { force?: boolean } = {},
+): Promise<void> {
   if (!socket || !connected || !authenticated) return;
 
   const { useIdentity } = await import('../store/identity');
@@ -2676,6 +2704,7 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
   // the loop, and fold them into the change fingerprint below.
   const deliveryTokenField = await ownDeliveryTokenField();
   const mailboxRootField = await ownMailboxRootField();
+  const mailboxRelayField = ownMailboxRelayField();
 
   // Phantom-notification guard (audit 2026-07-26, parity with mobile). A profile
   // broadcast is a real E2EE envelope: to an OFFLINE contact the relay queues it
@@ -2687,12 +2716,14 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
   // first message — so skip the whole thing when nothing has changed since the
   // last broadcast for THIS identity.
   const fingerprint = profileFingerprint(
-    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, ...deliveryTokenField, ...mailboxRootField }),
+    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, ...deliveryTokenField, ...mailboxRootField, ...mailboxRelayField }),
   );
   const hashKey = profileBroadcastHashKey(identity.aegisId);
-  try {
-    if ((await SecureStore.getItemAsync(hashKey)) === fingerprint) return;
-  } catch { /* unreadable → fall through and broadcast (correctness over dedupe) */ }
+  if (!opts.force) {
+    try {
+      if ((await SecureStore.getItemAsync(hashKey)) === fingerprint) return;
+    } catch { /* unreadable → fall through and broadcast (correctness over dedupe) */ }
+  }
 
   const contacts = useContacts.getState().contacts;
   for (const contact of contacts) {
@@ -2706,8 +2737,17 @@ export async function broadcastProfileUpdate(identity: Identity): Promise<void> 
         senderStatus,
         ...deliveryTokenField,
         ...mailboxRootField,
+        ...mailboxRelayField,
       });
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
+      // Federation: a contact on another relay only has the sealed path through
+      // THEIR relay (never the v1 `envelope` on our home socket).
+      if (isForeign(contact)) {
+        const built = await buildOutgoingEnvelope(payload, contact.aegisId, recipientPub, identity, session);
+        await saveSessionState(contact.aegisId, built.newState);
+        await deliverToForeignRelay(contact, built.event, built.wire, crypto.randomUUID(), null);
+        continue;
+      }
       const { envelope, newState } = encryptMessage(
         payload,
         identity.aegisId,
@@ -2759,6 +2799,7 @@ export async function sendProfileTo(
       senderStatus,
       ...(await ownDeliveryTokenField()),
       ...(await ownMailboxRootField()),
+      ...ownMailboxRelayField(),
     });
     const recipientPub = decodeBase64(contact.publicKeyB64);
     // Forward lockCtx so that when this runs inside a desync-recovery (already

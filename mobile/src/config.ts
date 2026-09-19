@@ -94,18 +94,20 @@ export const SEALED_TRANSPORT_VERSION: 'v1' | 'v2' =
  * (prekeys/push/token/profile) is unaffected — see docs/FASE4-CONTROL-PLANE-DESIGN.md
  * (Option A + mandatory Tor).
  *
- * Default OFF: this is an all-or-nothing transport cutover that only works once
- * both contacts are in mailbox mode with roots exchanged, and is validated by the
- * 2-device APK test, not unit tests. Opt IN via EXPO_PUBLIC_MAILBOX_MODE=on.
+ * Default ON (federation F5b): the mailbox is the ONLY transport between
+ * relays, so a client without one is unreachable from any self-hosted relay
+ * (docs/FEDERATION-DESIGN.md D3). Production builds have shipped with it on
+ * since 1.0.x; the default now matches. Opt OUT via
+ * EXPO_PUBLIC_MAILBOX_MODE=off (debug builds only).
  *
  * Privacy gate: mailbox mode is meaningless if the relay still sees our IP next
- * to the control-plane aegisId — temporal/IP correlation relinks them. So when
- * enabled we REQUIRE Tor (ONION_URL present); MAILBOX_ENABLED is false otherwise
+ * to the control-plane aegisId — temporal/IP correlation relinks them. So we
+ * REQUIRE Tor (ONION_URL present); MAILBOX_ENABLED is false otherwise
  * (fail-closed: degrade to aegisId transport rather than ship a relinkable
  * "private" mode). See design note §4.
  */
 export const MAILBOX_MODE: boolean =
-  (process.env.EXPO_PUBLIC_MAILBOX_MODE as string | undefined) === 'on';
+  (process.env.EXPO_PUBLIC_MAILBOX_MODE as string | undefined) !== 'off';
 
 /** True only when mailbox mode is requested AND Tor is available (fail-closed). */
 export const MAILBOX_ENABLED: boolean = MAILBOX_MODE && ONION_URL !== null;

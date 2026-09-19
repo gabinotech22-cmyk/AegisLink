@@ -455,7 +455,9 @@
     "switchToV0Mode": "Cambiar al modo {{v0}}",
     "torAlwaysOn": "Tor — siempre activo",
     "torAlwaysOnSub": "Todo el tráfico va por la red Tor integrada. No existe modo sin Tor.",
-    "torOn": "ACTIVO"
+    "torOn": "ACTIVO",
+    "myRelay": "Mi relay",
+    "myRelaySub": "Relay oficial o el tuyo propio (.onion)"
   },
   "lock": {
     "locked": "BLOQUEADO · AEGISLINK",
@@ -2362,5 +2364,44 @@
     "splashReady": "CIRCUITO TOR LISTO",
     "splashError": "ERROR DE TOR · {{v0}}",
     "splashConnecting": "CONECTANDO A TRAVÉS DE TOR · {{v0}}%"
+  },
+  "relaySettings": {
+    "title": "Mi relay",
+    "currentSection": "RELAY ACTUAL",
+    "officialRelay": "Relay oficial de AegisLink",
+    "ownRelay": "Tu propio relay",
+    "since": "Desde el {{date}}",
+    "previousUntil": "Sigues recibiendo en el relay anterior ({{relay}}) hasta el {{date}}. Quien no abra la app antes necesitará tu enlace nuevo.",
+    "ownSection": "USAR MI PROPIO RELAY",
+    "ownDesc": "Apunta AegisLink a un relay que tú (o alguien de confianza) mantengas. Solo se aceptan servicios ocultos de Tor (.onion): tu IP nunca se expone y no hace falta certificado. Verifícalo primero.",
+    "onionPlaceholder": "xxxxxxxx…xxxx.onion",
+    "verify": "Verificar relay",
+    "verifying": "Verificando por Tor…",
+    "verifiedTitle": "Relay verificado",
+    "switchCta": "Cambiar a {{relay}}",
+    "backToOfficial": "Volver al relay oficial",
+    "confirmTitle": "¿Cambiar de relay?",
+    "consequences": "Tus contactos recibirán tu nueva dirección automáticamente. Durante 7 días seguirás recibiendo en el relay anterior; quien no abra la app en ese tiempo perderá tus mensajes hasta que le reenvíes tu enlace. Tus claves y chats se quedan en este dispositivo.",
+    "confirmCta": "Cambiar de relay",
+    "migrating": "Registrando en el nuevo relay y avisando a tus contactos…",
+    "done": "Listo. Ya estás en el nuevo relay.",
+    "errors": {
+      "invalid_onion": "Eso no es una dirección .onion válida (56 caracteres + .onion).",
+      "tor_unavailable": "Tor no está disponible en este dispositivo. Un relay propio necesita el Tor integrado.",
+      "unreachable": "No se pudo alcanzar ese relay por Tor.",
+      "not_a_relay": "Esa dirección no responde como un relay de AegisLink.",
+      "missing_features": "Ese relay no soporta buzones o prekeys — actualízalo.",
+      "same_relay": "Ya estás en ese relay.",
+      "register_failed": "El relay rechazó el registro. Inténtalo más tarde.",
+      "unknown": "Algo ha fallado."
+    }
+  },
+  "lockConfirm": {
+    "title": "Confirma que eres tú",
+    "body": "Introduce el PIN de la app para continuar.",
+    "prompt": "Confirma que eres tú",
+    "usePin": "Usar PIN",
+    "wrongPin": "PIN incorrecto.",
+    "confirm": "Confirmar"
   }
 }

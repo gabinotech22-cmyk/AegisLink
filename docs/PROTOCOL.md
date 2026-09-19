@@ -744,6 +744,27 @@ socket and no request, never a clearnet attempt and never the official relay
 only the base URL changes. `previous` records the old home during a
 migration's grace window (F5b).
 
+**Changing home (F5b).** Every profile payload (`profile_update`, the profile
+hand-off on first contact) carries `mailboxRelay`: the onion of the sender's
+home relay, or `null` for the official one. A recipient honours only a valid
+v3 onion or an explicit `null` (anything else is ignored) and updates the
+contact's `relayOnion` — the field is authenticated by the sealed sender and
+the MAC like every other profile field, never by the relay. A migration
+(`net/relayMigration.ts`) is client-driven and ordered so nothing switches
+until the new relay has confirmed us: verify the target (`GET /relay/info`
+with `features ⊇ {mailbox, prekeys}` + `/health`, over Tor) → register the
+identity and prekeys there (PoW) → announce `mailboxRelay` to every contact
+over the *current* transport → persist `{ relay, since, previous: { old,
+until: now + 7 d } }` → reconnect. During the grace window the client keeps
+draining the old relay's copy of its mailbox (stateless fetch, mobile) on
+every connect; once the window has passed it deletes its identity from the
+old relay (signed `DELETE /identity/:id`) and forgets it. A contact that has
+not opened the app within the window keeps writing to the old relay and
+needs the new link — the SimpleX limit, declared. Tests:
+`net/__tests__/relayMigration.test.ts` (both platforms), mobile
+`socket/__tests__/client.profileRelay.test.ts`,
+`screens/__tests__/RelaySettings.test.tsx`.
+
 **Limitation (product decision pending, see `AUDIT-2026-09-16-EXTERNAL-VERIFICATION.md` §3.1):**
 because the desktop holds the identity secrets, relay-side revocation blocks a
 *cooperating* client, not an adversary who already extracted the keys. True
