@@ -1,5 +1,7 @@
 # Auditoría funcional 2026-08 — AegisLink vs. Signal / Session / SimpleX
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. Instantánea a 2026-08-09 (#435). Desde entonces: federación completa F0–F7 (`docs/FEDERATION-DESIGN.md`: elegir relay, enlaces v2, relay propio `.onion`), modo buzón ON por defecto (F5b), aviso de versión in-app (#478). Cualquier veredicto de "AegisLink no permite X" se verifica contra el código actual antes de citarlo.
+
 > **Método:** el código y los tests son la única fuente de verdad (regla de oro
 > doc↔código #6). Cada veredicto lleva su `archivo:línea` o su suite. Nada aquí
 > se afirma desde un `.md` anterior ni desde memoria.

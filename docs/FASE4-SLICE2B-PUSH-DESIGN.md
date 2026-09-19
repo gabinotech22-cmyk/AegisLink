@@ -1,5 +1,7 @@
 # Fase 4 · Slice 2b — Push wake-up por mailbox (documento de decisión)
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. **Estado actual:** 2b.0–2b.4 desplegados (ntfy sobre onion co-hospedado con el relay; token wake iOS tras flag); 2b.3c (UnifiedPush) sigue en backlog. Desde F4 el wake tiene clase (`wakeHint: 'call'` → prioridad urgente, `server/src/push/ntfy.ts`) y desde F6 el mismo ntfy forma parte del paquete de relay propio (`infra/selfhost/`, `docs/SELF-HOSTING.md`). Estado canónico: `docs/SEALED-SENDER-ARCHITECTURE.md` §5 y `docs/ROADMAP.md`.
+
 > Estado: **decisión resuelta; 2b.0, 2b.1 y 2b.2 (app viva) implementados**
 > (server + infra desplegados en el VM 2026-07-12; suscripción móvil sobre onion
 > con validación en dispositivo pendiente). 2b.3a/2b.3b-relay y 2b.4 (iOS APNs,

@@ -98,9 +98,9 @@ The relay is fully self-hostable (AGPL-3.0). **Running your own relay for real u
 service + wake-up push, `.onion`-only (no domain, no TLS, no open port), and prints the
 address users paste into *Privacy → Network → My relay*. Contacts on different relays reach
 each other directly through Tor (no relay-to-relay protocol; `docs/FEDERATION-DESIGN.md`).
-**Until federation is switched on in the published clients (slice F7, `docs/ROADMAP.md`)**
-that screen is hidden and the published binaries stay on the official relay; the sections
-below run a relay for development.
+Federation is **on by default since 1.0.7** (slice F7): every published client accepts
+relay-qualified (`v2`) contact links and shows that screen. The sections below run a relay
+for development.
 
 **A. Node directly** (Node.js 24+ — `node:sqlite`; fastest):
 

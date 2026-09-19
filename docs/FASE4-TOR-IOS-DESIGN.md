@@ -1,5 +1,7 @@
 # Fase 4 · Tor embebido en iOS — documento de diseño (pre-implementación)
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. Escrito pre-implementación. **Estado actual:** implementado — Tor embebido en iOS arranca al 100 % en dispositivo (`mobile/plugins/withTorEmbeddedIOS.js`, build 21+), con las mismas extensiones del bridge que Android (`httpRequest`/`httpDownload`/`httpUpload`, F2/F5a). Lo que iOS no permite (wake con app matada sin APNs) sigue como se describe en §0; estado en `docs/ROADMAP.md`.
+
 > Estado: **diseño, pre-implementación.** Cierra la brecha de paridad que
 > `FASE4-TOR-EMBEDDED-IMPL.md` §7 dejó anotada ("iOS es fast-follow, necesita
 > Mac"). Objetivo: llevar el **transporte mailbox sobre Tor** a iOS con el mismo

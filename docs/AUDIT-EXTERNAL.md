@@ -1,5 +1,7 @@
 # External security audit — application package
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. Paquete de solicitud de auditoría externa (borrador). Las capacidades del producto que describe deben contrastarse con `README.md`/`docs/ROADMAP.md` antes de enviarlo: desde 2026-09-19 incluye federación de relays (`docs/FEDERATION-DESIGN.md`, `docs/SELF-HOSTING.md`).
+
 Draft request materials for a **professional, fund-sponsored** security audit of
 AegisLink. Two complementary sponsors are targeted (apply to both — they fund
 different things and review on different cadences):

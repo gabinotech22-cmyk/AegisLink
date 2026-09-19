@@ -1,5 +1,7 @@
 # Relay Onion Service — runbook (Fase 4 · mailbox mode)
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. Runbook del onion del **relay oficial** (sigue vigente para esa máquina). **Estado actual:** desde F6 (#492) montar un relay propio ya no sigue este runbook sino `infra/selfhost/up.sh` (`docs/SELF-HOSTING.md`, `.onion`-only, sin clearnet ni TLS), y desde F7 los clientes eligen relay en Privacidad → Red → "Mi relay".
+
 > Estado: **✅ DESPLEGADO EN PROD (2026-07-03).** Deploy ejecutado por el owner
 > vía el wrapper de escritorio: prod en `47c060d`, contenedor `aegislink-tor`
 > corriendo, volumen `aegislink_tor_keys` creado. Dirección onion publicada:

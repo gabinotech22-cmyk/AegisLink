@@ -1,5 +1,7 @@
 # Fase 4 · Tor embebido (Tier 2) — spec de implementación
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. Escrito como spec Android-first. **Estado actual:** implementado en Android **y** iOS (`mobile/plugins/withTorEmbedded.js`, `withTorEmbeddedIOS.js`; `docs/FASE4-TOR-IOS-DESIGN.md`), en producción desde 1.0.x; el bridge nativo creció con la federación: `httpRequest` (cualquier verbo), `httpDownload`, `httpUpload` y un socket de identidad sobre Tor (`TorSioSocket`, `mobile/src/net/tor.ts`, F2/F5a). El desktop lleva Tor embebido en el proceso principal (#475). La API vigente es la del código, no la de §3 de este doc.
+
 > Estado: **spec de build, Android primero.** Decisión tomada en
 > `FASE4-TOR-TRANSPORT-DESIGN.md` (Tier 2: Tor embebido sin Orbot). Este doc es el
 > contrato de ingeniería: API del módulo nativo, bridge JS↔nativo, integración de

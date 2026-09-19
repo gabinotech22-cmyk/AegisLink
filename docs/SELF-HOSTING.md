@@ -1,10 +1,10 @@
 # Self-hosting an AegisLink relay (federation F6)
 
-> Estado: **✅ paquete listo** (`infra/selfhost/`, rama `feat/federation-selfhost`).
-> Este doc es la fuente canónica de cómo montar un relay propio; el diseño y
-> el estado de la federación viven en `docs/FEDERATION-DESIGN.md` (fila F6).
-> Los usuarios lo eligen desde la app en **Privacidad → Red → "Mi relay"**
-> (pantalla de F5b; visible cuando la federación esté activada, F7).
+> Estado: **✅ paquete listo** (`infra/selfhost/`, #492) y **✅ federación activa por
+> defecto** en los clientes desde 1.0.7 (F7). Este doc es la fuente canónica de cómo
+> montar un relay propio; el diseño y el estado de la federación viven en
+> `docs/FEDERATION-DESIGN.md`. Los usuarios lo eligen desde la app en
+> **Privacidad → Red → "Mi relay"**.
 
 ## Qué es (y qué no)
 
@@ -19,7 +19,11 @@ habla con los relays que necesita).
 - **Solo `.onion`.** El relay se publica como servicio oculto de Tor v3.
   No hay listener clearnet, ni TLS, ni certificado, ni dominio, ni puerto
   abierto en tu router. Tu máquina no aprende la IP de nadie y nadie
-  necesita saber dónde está.
+  necesita saber dónde está: el servicio va **con ubicación oculta** (3
+  saltos también del lado servidor, `infra/tor/torrc.selfhost`), a
+  diferencia del relay oficial, que usa single-onion porque su ubicación ya
+  es pública. Ver `ONION_TORRC` en las opciones si prefieres latencia a
+  ocultar dónde corre.
 - **No es un relay de Tor** ni un exit: el sidecar solo publica tu servicio.
 - **No federa con nadie**: no hay directorio global ni relay-a-relay. La
   dirección de un contacto (`aegislink://v2/...`) incluye su relay y su buzón;
@@ -92,6 +96,7 @@ no contiene mensajes en claro ni claves privadas de usuarios.
 | `IDENTITY_LOOKUP` | `on` | `GET /identity/:id`. `off` = tus ids no son consultables; los contactos llegan solo por enlace/QR (que ya lleva la clave). |
 | `PUBLIC_CHANNELS` | `off` | Canales públicos (función local del relay). |
 | `TURN_HOST` / `TURN_PORT` | vacío | Ver **Llamadas**. |
+| `ONION_TORRC` | `torrc.selfhost` | Sabor del onion. `torrc.selfhost` = ubicación oculta (3 saltos servidor). `torrc` = single-onion del relay oficial: mitad de latencia, pero la red Tor ve tu IP — solo si tu máquina ya es pública. Cambiar de modo exige un **onion nuevo** (`docker volume rm selfhost_tor_keys` y `./up.sh`). |
 
 ## Llamadas
 
@@ -130,5 +135,9 @@ docker compose down -v         # BORRAR todo, incluida la dirección .onion
   ser alcanzable.
 - **"Ese relay no soporta buzones o prekeys"**: estás usando una versión del
   relay anterior a F2 — `git pull && ./up.sh`.
+- **`tor` reinicia en bucle tras cambiar `ONION_TORRC`**: Tor no reutiliza el
+  directorio de claves entre el modo oculto y el single-onion. Es deliberado
+  (protege contra errores de config): `docker compose down && docker volume
+  rm selfhost_tor_keys && ./up.sh` — dirección nueva, avisa a tus usuarios.
 - **Quiero volver al oficial**: en la app, "Volver al relay oficial" (misma
   migración al revés, con sus 7 días de gracia en tu relay).

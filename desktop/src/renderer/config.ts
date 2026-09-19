@@ -15,12 +15,14 @@ export const ONION_URL: string | null =
   (import.meta.env.VITE_ONION_URL as string | undefined) ?? null;
 
 /**
- * FEDERATION — "choose your relay" (docs/FEDERATION-DESIGN.md). OFF by default
- * until slice F7 (parity with mobile EXPO_PUBLIC_FEDERATION). Opt in via
- * VITE_FEDERATION=on for development builds of the slices.
+ * FEDERATION — "choose your relay" (docs/FEDERATION-DESIGN.md). ON by default
+ * since slice F7 (parity with mobile EXPO_PUBLIC_FEDERATION): contacts may live
+ * on any `.onion` relay, v2 links are accepted and Privacy → "My relay" is
+ * reachable. VITE_FEDERATION=off is the emergency brake (official relay only,
+ * v2 links to other relays refused, screen hidden).
  */
 export const FEDERATION: boolean =
-  (import.meta.env.VITE_FEDERATION as string | undefined) === 'on';
+  (import.meta.env.VITE_FEDERATION as string | undefined) !== 'off';
 
 /**
  * Tor always-on (desktop): the main process proxies the whole session through

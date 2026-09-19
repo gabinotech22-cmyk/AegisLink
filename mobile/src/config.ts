@@ -64,14 +64,16 @@ export const ONION_URL: string | null =
   (process.env.EXPO_PUBLIC_ONION_URL as string | undefined) ?? null;
 
 /**
- * FEDERATION — "choose your relay" (docs/FEDERATION-DESIGN.md). OFF by default
- * until slice F7: with it off, every contact lives on the official relay, v2
- * (relay-qualified) contact links are recognised but refused with a clear
- * message, and the relay settings screen is not reachable. Opt in via
- * EXPO_PUBLIC_FEDERATION=on for development builds of the slices.
+ * FEDERATION — "choose your relay" (docs/FEDERATION-DESIGN.md). ON by default
+ * since slice F7 (1.0.7): contacts may live on any `.onion` relay, v2
+ * (relay-qualified) contact links are accepted, and Privacy → Network → "My
+ * relay" lets the user move their mailbox to a self-hosted relay
+ * (docs/SELF-HOSTING.md). EXPO_PUBLIC_FEDERATION=off is the emergency brake:
+ * with it off every contact must live on the official relay, v2 links to other
+ * relays are refused with a clear message and the relay screen is hidden.
  */
 export const FEDERATION: boolean =
-  (process.env.EXPO_PUBLIC_FEDERATION as string | undefined) === 'on';
+  (process.env.EXPO_PUBLIC_FEDERATION as string | undefined) !== 'off';
 
 /**
  * SEALED_TRANSPORT_VERSION — sealed-sender transport for 1:1 chat.

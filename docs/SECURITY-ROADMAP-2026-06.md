@@ -1,5 +1,7 @@
 # AegisLink — Roadmap de remediación de seguridad (auditoría 2026-06)
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. Cerrado en 2026-06-21 (como dice su propio estado); las reglas de oro de seguridad de `CLAUDE.md` nacieron de él. Estado del producto: `docs/ROADMAP.md`.
+
 > Estado: **CERRADO** (jun-21) salvo A-1, diferido por diseño. Origen: auditoría de
 > superficie (21 hallazgos) + auditoría profunda (4 críticos nuevos confirmados a mano +
 > ~15 nuevos). Ningún hueco se cierra como "hecho" hasta estar **commiteado, testeado y

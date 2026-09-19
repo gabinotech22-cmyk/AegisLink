@@ -1,5 +1,7 @@
 # Fase 4 · Transporte Tor para el path mailbox (documento de decisión)
 
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. **Estado actual (además de la nota siguiente):** con la federación (F5a/F5b) el transporte Tor ya no es solo para el buzón del relay oficial — todo relay propio es `.onion`-only y todo el tráfico a él (identidad, prekeys, adjuntos, buzón) va por el mismo Tor embebido; `docs/FEDERATION-DESIGN.md` D1, `docs/SELF-HOSTING.md`.
+
 > Estado: **decisión tomada e IMPLEMENTADA — Tier 2 (Tor embebido), NO Orbot.**
 > Este doc registra el análisis que llevó a la decisión; la recomendación
 > original de "Tier 1 Orbot ahora" (§4) quedó **superada**: el código fue directo
