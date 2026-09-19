@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
-import { SERVER_URL } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
 
 interface Props {
   onRetry: () => void;
@@ -30,7 +30,7 @@ export function NetworkErrorScreen({ onRetry }: Props) {
     let cancelled = false;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 2000);
-    fetch(`${SERVER_URL}/health`, { signal: ctrl.signal })
+    fetch(`${homeRelayBaseUrl()}/health`, { signal: ctrl.signal })
       .then(() => {
         if (!cancelled) {
           setRelays(RELAY_LABELS.map((label) => ({ label, state: 'up' as RelayState, detail: 'ok' })));

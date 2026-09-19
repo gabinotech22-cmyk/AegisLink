@@ -42,6 +42,10 @@ interface AegisTorNative {
   // torOkHttp(SOCKS) client the sio/httpSubscribe bridges already use — a request
   // through Tor's local SOCKS5 to the relay's .onion. Native impl: withTorEmbedded*.js.
   httpRequest(url: string, method: string, headersJson: string, body: string): Promise<string>;
+  // Federation F5: binary upload (a file) over Tor to OUR self-hosted relay —
+  // FileSystem.uploadAsync has no route to a .onion. Resolves the same
+  // `{"status","body"}` JSON as httpRequest.
+  httpUpload(url: string, filePath: string, headersJson: string): Promise<string>;
   // Federation F2: binary download over Tor straight to a file (E2EE blobs hosted
   // on a contact's relay). Resolves a JSON string `{"status":<int>}`; the file
   // exists only on 200.
@@ -50,7 +54,9 @@ interface AegisTorNative {
   removeListeners(count: number): void;
 }
 
-const Native = (NativeModules as { AegisTor?: AegisTorNative }).AegisTor ?? null;
+// `?.`: test harnesses mock react-native without NativeModules; any module
+// that now reaches tor.ts through net/relayHttp (F5) must still load.
+const Native = (NativeModules as { AegisTor?: AegisTorNative } | undefined)?.AegisTor ?? null;
 const emitter = Native ? new NativeEventEmitter(Native as unknown as never) : null;
 
 const OFF: TorStatus = { state: 'off', socksPort: 0 };
@@ -212,7 +218,7 @@ const TOR_HTTP_TIMEOUT_MS = 25_000;
 
 export async function torHttpRequest(
   url: string,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
   body = '',
   headers: Record<string, string> = {},
   timeoutMs = TOR_HTTP_TIMEOUT_MS,
@@ -270,6 +276,39 @@ export async function torHttpDownload(
   }
 }
 
+/**
+ * Upload a file over Tor (federation F5: E2EE blob ciphertext to OUR self-hosted
+ * relay). Returns `{ status, body }` or null (never throws) when the native
+ * module is absent or the transfer failed at the transport level.
+ */
+const TOR_UPLOAD_TIMEOUT_MS = 150_000;
+
+export async function torHttpUpload(
+  url: string,
+  filePath: string,
+  headers: Record<string, string> = {},
+  timeoutMs = TOR_UPLOAD_TIMEOUT_MS,
+): Promise<TorHttpResponse | null> {
+  if (!Native) return null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const raw = await Promise.race([
+      Native.httpUpload(url, filePath, JSON.stringify(headers)),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('tor upload timeout')), timeoutMs);
+      }),
+    ]);
+    const parsed = JSON.parse(raw) as { status?: unknown; body?: unknown };
+    if (typeof parsed.status !== 'number') return null;
+    return { status: parsed.status, body: typeof parsed.body === 'string' ? parsed.body : '' };
+  } catch (e) {
+    if (__DEV__) logger.warn('[tor] httpUpload failed:', (e as Error).message);
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // ─── F2: socket.io-over-Tor transport ─────────────────────────────────────────
 
 /** Generic event/ack callback. */
@@ -283,31 +322,53 @@ interface SioForward { id: string; event: string; args: string }
 /** Custom socket.io events the mailbox protocol expects forwarded from native. */
 const MAILBOX_FORWARD_EVENTS = ['mailbox:challenge', 'auth:ok', 'error_msg', 'envelope:mb'];
 
+/**
+ * Federation F5: the aegisId (identity) socket to a SELF-HOSTED home relay also
+ * rides this bridge — a custom home is .onion-only. These are every server →
+ * client event the identity socket handles (socket/client.ts, calls.ts,
+ * groupCalls.ts); the native side forwards only what is listed, so a new relay
+ * event must be added here too or a Tor-homed client never sees it.
+ */
+export const IDENTITY_FORWARD_EVENTS = [
+  'auth:challenge', 'auth:ok', 'error_msg',
+  'envelope', 'envelope:v2', 'msg:delivered', 'msg:read', 'typing',
+  'group:rekey_dist', 'push:register',
+  'call:invite:v2', 'call:answer:v2', 'call:ice:v2', 'call:hangup:v2',
+  'group_call:accept', 'group_call:decline', 'group_call:offer', 'group_call:answer',
+  'group_call:ice', 'group_call:channel', 'group_call:hangup',
+];
+
 let _sioCounter = 0;
 
 /**
  * A minimal socket.io-client-shaped transport backed by the native
- * socket.io-over-SOCKS bridge (every byte rides Tor). Implements exactly the
- * subset `mailboxSocket.ts` uses — `on` / `emit(+ack)` / `connected` /
- * `disconnect` / `removeAllListeners` — so the mailbox transport is a drop-in
- * swap for `io(ONION_URL)` with no protocol logic leaving JS.
+ * socket.io-over-SOCKS bridge (every byte rides Tor). Implements the subset
+ * `mailboxSocket.ts` and (F5, self-hosted home) `socket/client.ts` use — `on` /
+ * `off` / `emit(+ack)` / `timeout(ms).emit` / `connected` / `connect` /
+ * `disconnect` / `removeAllListeners` — so both are a drop-in swap for
+ * `io(url)` with no protocol logic leaving JS. Reconnection is native
+ * (socket.io-client-java / Socket.IO-Client-Swift, `reconnection = true`), so
+ * `connect()` after a native drop is a no-op: the bridge is already retrying.
  */
 export class TorSioSocket {
-  private readonly id: string;
+  private id = '';
   private readonly handlers = new Map<string, Set<SioListener>>();
   private readonly acks = new Map<string, SioListener>();
   private ackCounter = 0;
   private unsub: (() => void) | null = null;
+  private readonly url: string;
+  private readonly authStr: Record<string, string>;
+  private readonly forwardEvents: readonly string[];
+  /** Handshake auth as given (socket.io exposes the same; client.ts reads `auth.aegisId`). */
+  public readonly auth: Record<string, unknown>;
   /** True between the native 'connect' and 'disconnect'/'connect_error' events. */
   public connected = false;
 
-  constructor(url: string, auth: Record<string, unknown>) {
+  constructor(url: string, auth: Record<string, unknown>, forwardEvents: readonly string[] = MAILBOX_FORWARD_EVENTS) {
     if (!Native || !emitter) throw new Error('[tor] native module unavailable');
-    this.id = `mbx-${++_sioCounter}`;
-    const sub = emitter.addListener('AegisTorSio', (ev: SioForward) => {
-      if (ev?.id === this.id) this.dispatch(ev.event, ev.args);
-    });
-    this.unsub = () => sub.remove();
+    this.url = url;
+    this.auth = auth;
+    this.forwardEvents = forwardEvents;
     // socket.io-client-java handshake auth is Map<String,String>; non-string
     // values (the catch-up `binds` array) are pre-serialized to JSON strings —
     // the relay tolerates a stringified `binds` (see relay/handler.ts).
@@ -315,7 +376,19 @@ export class TorSioSocket {
     for (const [k, v] of Object.entries(auth)) {
       authStr[k] = typeof v === 'string' ? v : JSON.stringify(v);
     }
-    void Native.sioConnect(this.id, url, JSON.stringify(authStr), JSON.stringify(MAILBOX_FORWARD_EVENTS))
+    this.authStr = authStr;
+    this.open();
+  }
+
+  /** Open (or re-open after disconnect()) the native socket under a fresh bridge id. */
+  private open(): void {
+    if (!Native || !emitter || this.unsub) return;
+    this.id = `mbx-${++_sioCounter}`;
+    const sub = emitter.addListener('AegisTorSio', (ev: SioForward) => {
+      if (ev?.id === this.id) this.dispatch(ev.event, ev.args);
+    });
+    this.unsub = () => sub.remove();
+    void Native.sioConnect(this.id, this.url, JSON.stringify(this.authStr), JSON.stringify(this.forwardEvents))
       .catch((e: Error) => { if (__DEV__) logger.warn('[tor] sioConnect failed:', e.message); });
   }
 
@@ -339,6 +412,46 @@ export class TorSioSocket {
     let set = this.handlers.get(event);
     if (!set) { set = new Set(); this.handlers.set(event, set); }
     set.add(cb);
+    return this;
+  }
+
+  /** socket.io semantics: no listener → every listener for the event. */
+  off(event: string, cb?: SioListener): this {
+    if (!cb) { this.handlers.delete(event); return this; }
+    this.handlers.get(event)?.delete(cb);
+    return this;
+  }
+
+  /**
+   * socket.io v4 `.timeout(ms).emit(ev, payload, (err, ack) => …)`: the callback
+   * fires with `err` set when no ack arrived in time — never twice.
+   */
+  timeout(ms: number): { emit: (event: string, payload: unknown, cb: (err: Error | null, ack?: unknown) => void) => void } {
+    return {
+      emit: (event, payload, cb) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cb(new Error('operation has timed out'));
+        }, ms);
+        this.emit(event, payload, (ack: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          cb(null, ack);
+        });
+      },
+    };
+  }
+
+  /**
+   * socket.io's `socket.connect()`: a no-op while the native socket is up
+   * (its own reconnection is on); after `disconnect()` it opens a fresh one
+   * — the auth watchdog in client.ts relies on disconnect()+connect().
+   */
+  connect(): this {
+    this.open();
     return this;
   }
 

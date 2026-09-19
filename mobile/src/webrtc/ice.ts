@@ -19,7 +19,9 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
-import { RELAY_URL as SERVER_URL, TURN_SERVER_URL } from '../config';
+import { TURN_SERVER_URL } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
+import { relayFetch } from '../net/relayHttp';
 
 export interface RTCConfigShape {
   iceServers: { urls: string | string[]; username?: string; credential?: string }[];
@@ -130,8 +132,10 @@ export async function fetchTurnConfig(aegisId: string, forceRelay: boolean = tru
       `aegisId=${encodeURIComponent(signed.aegisId)}` +
       `&sig=${encodeURIComponent(signed.sig)}` +
       `&ts=${signed.ts}`;
-    const res = await fetch(
-      `${SERVER_URL}/turn/credentials?${query}`,
+    // F5: TURN credentials come from OUR home relay (each side uses its own
+    // home's TURN — D3); a self-hosted home is reached over Tor.
+    const res = await relayFetch(
+      `${homeRelayBaseUrl()}/turn/credentials?${query}`,
       { signal: (() => { const c = new AbortController(); setTimeout(() => c.abort(), 3000); return c.signal; })() },
     );
     if (!res.ok) return rtcConfig(forceRelay);

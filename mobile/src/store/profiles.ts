@@ -281,6 +281,9 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     // 2. Switch slot FIRST so any store effects triggered by resetAllStores()
     //    open the new slot's DB rather than racing against the old one.
     setActiveDbSlot(slotId);
+    // The previous profile's home relay must not leak into the new slot's
+    // first connection; identity.hydrate() below loads the right one (F5).
+    (require('../net/homeRelay') as typeof import('../net/homeRelay')).resetHomeRelay();
 
     // 3. Flush all in-memory Zustand stores (may trigger DB reads on new slot).
     resetAllStores();

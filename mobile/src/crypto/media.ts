@@ -1,11 +1,11 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import * as FileSystem from 'expo-file-system/legacy';
-import { RELAY_URL as SERVER_URL } from '../config';
 import { normalizeOnion } from '../net/relayRef';
 import { relayBaseUrl } from '../net/relayPoolCore';
-import { getHomeRelay } from '../net/homeRelay';
-import { isTorAvailable, startTor, torHttpDownload } from '../net/tor';
+import { getHomeRelay, homeRelayBaseUrl } from '../net/homeRelay';
+import { isOnionUrl } from '../net/relayHttp';
+import { isTorAvailable, startTor, torHttpDownload, torHttpUpload } from '../net/tor';
 import { fetchPowChallengeAt, solvePoW } from './registration';
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
@@ -85,24 +85,49 @@ export function formatBlobUri(id: string, keyB64: string, nonceB64: string, toke
 
 /** Build the download URL, appending the authorization token when present (v2). */
 function downloadUrlFor(id: string, token: string, host: string | null): string {
-  const base = `${host ? relayBaseUrl(host) : SERVER_URL}/blob/download/${id}`;
+  const base = `${host ? relayBaseUrl(host) : homeRelayBaseUrl()}/blob/download/${id}`;
   return token ? `${base}?t=${encodeURIComponent(token)}` : base;
 }
 
 /**
  * Fetch the ciphertext to `dest`. Official relay → the OS downloader (clearnet +
- * pins, or Orbot). A blob hosted on another relay is only reachable through
- * embedded Tor (a .onion has no route otherwise), so it goes through the native
- * SOCKS download. Both resolve to an HTTP status (null = transport failure).
+ * pins, or Orbot). A blob on a .onion — another relay (F2) or our own
+ * self-hosted home (F5) — is only reachable through embedded Tor, so it goes
+ * through the native SOCKS download. Both resolve to an HTTP status (null =
+ * transport failure).
  */
-async function fetchBlobTo(url: string, dest: string, host: string | null): Promise<number | null> {
-  if (host) {
+async function fetchBlobTo(url: string, dest: string): Promise<number | null> {
+  if (isOnionUrl(url)) {
     if (!isTorAvailable()) return null;
     try { await startTor(); } catch { return null; }
     return torHttpDownload(url, dest);
   }
   const result = await FileSystem.downloadAsync(url, dest);
   return result.status;
+}
+
+/**
+ * POST a local file as `application/octet-stream` to a relay blob endpoint.
+ * Official relay → FileSystem.uploadAsync (clearnet + pins). A self-hosted
+ * .onion home (F5) → the native Tor upload; fail-closed (no Tor → status null).
+ * Shared by E2EE media and public-channel avatars.
+ */
+export async function uploadFileToRelay(uploadUrl: string, fileUri: string): Promise<{ status: number; body: string } | null> {
+  if (isOnionUrl(uploadUrl)) {
+    if (!isTorAvailable()) return null;
+    try { await startTor(); } catch { return null; }
+    return torHttpUpload(uploadUrl, fileUri, { 'Content-Type': 'application/octet-stream' });
+  }
+  const result = await FileSystem.uploadAsync(uploadUrl, fileUri, {
+    httpMethod: 'POST',
+    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+    // MUST declare a Content-Type: the relay's body parser (express.raw via
+    // type-is) only buffers the request into a Buffer when a Content-Type is
+    // present. Without this header uploadAsync sends none → express.raw skips
+    // → req.body is not a Buffer → 400 body_must_be_binary.
+    headers: { 'Content-Type': 'application/octet-stream' },
+  });
+  return { status: result.status, body: result.body };
 }
 
 async function fileExists(uri: string): Promise<boolean> {
@@ -178,33 +203,24 @@ export async function encryptAndUploadMedia(fileUri: string, mimeType?: string):
   // request then fails for another reason. Reusing the same challenge on a retry
   // would therefore always come back `challenge_unknown` (403), making the retry
   // loop useless. Re-solving per attempt lets a retry actually recover.
-  let uploadResult: Awaited<ReturnType<typeof FileSystem.uploadAsync>> | null = null;
+  let uploadResult: { status: number; body: string } | null = null;
   let lastUploadError: Error = new Error('upload_not_attempted');
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt]);
 
     let uploadUrl: string;
     try {
-      const challenge = await fetchPowChallengeAt(`${SERVER_URL}/blob/challenge`);
+      const challenge = await fetchPowChallengeAt(`${homeRelayBaseUrl()}/blob/challenge`);
       const powNonce = await solvePoW(challenge.challenge, challenge.difficulty);
-      uploadUrl = `${SERVER_URL}/blob/upload?powChallenge=${encodeURIComponent(challenge.challenge)}&powNonce=${encodeURIComponent(powNonce)}`;
+      uploadUrl = `${homeRelayBaseUrl()}/blob/upload?powChallenge=${encodeURIComponent(challenge.challenge)}&powNonce=${encodeURIComponent(powNonce)}`;
     } catch (e) {
       lastUploadError = new Error(`blob_pow_failed: ${(e as Error).message}`);
       continue;
     }
 
     try {
-      const result = await FileSystem.uploadAsync(uploadUrl, tempUri, {
-        httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        // MUST declare a Content-Type: the relay's body parser (express.raw via
-        // type-is) only buffers the request into a Buffer when a Content-Type is
-        // present. Without this header uploadAsync sends none → express.raw skips
-        // → req.body is not a Buffer → 400 body_must_be_binary. This is what broke
-        // ALL media (image/audio/gif), in both 1:1 and group chats, since they all
-        // share this single upload path.
-        headers: { 'Content-Type': 'application/octet-stream' },
-      });
+      const result = await uploadFileToRelay(uploadUrl, tempUri);
+      if (!result) { lastUploadError = new Error('upload_transport_unavailable'); continue; }
       if (result.status === 200) {
         uploadResult = result;
         break;
@@ -267,7 +283,7 @@ export async function persistEncryptedBlob(mediaUri: string): Promise<BlobFetchS
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt]);
     try {
-      const status = await fetchBlobTo(downloadUrl, encPathFor(id), host);
+      const status = await fetchBlobTo(downloadUrl, encPathFor(id));
       if (status === 200) return 'ok';
       await FileSystem.deleteAsync(encPathFor(id), { idempotent: true });
       // 404/410 = the server's 24h TTL elapsed; the blob is gone for good. Stop

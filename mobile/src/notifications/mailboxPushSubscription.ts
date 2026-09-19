@@ -19,7 +19,8 @@
  */
 
 import { logger } from '../utils/logger';
-import { ONION_URL, MAILBOX_ENABLED } from '../config';
+import { MAILBOX_ENABLED } from '../config';
+import { homeRelayOnionUrl } from '../net/homeRelay';
 import { isTorAvailable, subscribeNtfyOverTor } from '../net/tor';
 import { epochFor, MAILBOX_EPOCH_MS } from '../crypto/mailbox';
 import { getOwnCurrentMailbox } from '../crypto/mailboxStore';
@@ -35,6 +36,7 @@ export function mailboxTopic(mailboxIdB64: string): string {
 
 /** Derive the ntfy stream URL for a topic on the relay onion (virtual port 8090). */
 function ntfyStreamUrl(topic: string): string | null {
+  const ONION_URL = homeRelayOnionUrl(); // F5: ntfy lives on OUR home relay
   if (!ONION_URL) return null;
   // ONION_URL is http://<host>.onion (relay virtual port 80). ntfy is published
   // on the SAME onion at virtual port 8090 (infra/tor/torrc, Slice 2b).
@@ -112,7 +114,7 @@ function scheduleEpochBoundary(): void {
  * No-op when mailbox mode / Tor is unavailable (fail-closed).
  */
 export function startMailboxPushSubscription(onWake: () => void): void {
-  if (!MAILBOX_ENABLED || !ONION_URL || !isTorAvailable()) return;
+  if (!MAILBOX_ENABLED || !homeRelayOnionUrl() || !isTorAvailable()) return;
   onWakeCb = onWake;
   wantSub = true;
   void resubscribe();

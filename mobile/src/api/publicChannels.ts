@@ -11,7 +11,8 @@
  * All endpoints 404 when the relay's PUBLIC_CHANNELS flag is off.
  */
 
-import { SERVER_URL } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
+import { relayFetch } from '../net/relayHttp';
 import { ApiError } from '../api';
 
 const TIMEOUT_MS = 10_000;
@@ -23,10 +24,10 @@ function makeSignal(ms: number): AbortSignal {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${SERVER_URL}${path}`, {
+  const res = await relayFetch(`${homeRelayBaseUrl()}${path}`, {
     headers: { 'content-type': 'application/json' },
     signal: makeSignal(TIMEOUT_MS),
-    ...init,
+    ...(init as { method?: 'GET' | 'POST' | 'DELETE' | 'PUT'; body?: string; headers?: Record<string, string> }),
   });
   if (!res.ok) {
     let detail = res.statusText;
@@ -100,7 +101,7 @@ export function deleteChannelAvatar(
  * SERVER_URL is not configured.
  */
 export function channelAvatarUrl(channelId: string): string {
-  return `${SERVER_URL}/public-channels/${encodeURIComponent(channelId)}/avatar`;
+  return `${homeRelayBaseUrl()}/public-channels/${encodeURIComponent(channelId)}/avatar`;
 }
 
 /** A single channel's signed manifest blob. Verify its signature before trusting it. */

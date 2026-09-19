@@ -5,7 +5,7 @@ import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
-import { SERVER_URL } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
 import { identityFromStored } from '../crypto/identity';
 import { saveSpkSecret, getOrCreateDeviceId } from '../socket/client';
 
@@ -99,7 +99,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
       // 2. Connect temp socket to relay
       // Link-only handshake: no identity yet, the relay only lets this socket
       // register a `device:link` request and wait for the phone's approval.
-      const socket = io(SERVER_URL, { transports: ['websocket'], auth: { linkRequest: true } });
+      const socket = io(homeRelayBaseUrl(), { transports: ['websocket'], auth: { linkRequest: true } });
       socketRef.current = socket;
 
       socket.on('connect_error', (err: Error) => {
@@ -120,7 +120,7 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
         });
         
         // 4. Generate QR payload
-        const payloadJson = JSON.stringify({ v: 1, pubKey: ephemeralPubKeyB64, relay: SERVER_URL });
+        const payloadJson = JSON.stringify({ v: 1, pubKey: ephemeralPubKeyB64, relay: homeRelayBaseUrl() });
         setQrPayload(payloadJson);
         setStep('qr');
         setLoading(false);

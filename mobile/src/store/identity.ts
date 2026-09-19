@@ -289,6 +289,12 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       const { setActiveDbSlot } = require('../db/local');
       setActiveDbSlot(activeSlotId);
 
+      // Federation F5: the slot's home relay must be known BEFORE anything
+      // registers or connects (runPublish below, App.tsx connect) — every relay
+      // call resolves its base URL from this in-memory setting.
+      const { hydrateHomeRelay } = require('../net/homeRelay') as typeof import('../net/homeRelay');
+      await hydrateHomeRelay();
+
       const stored = await loadIdentity();
       if (!stored) {
         set({ identity: null, activeSlotId, slotsList, status: 'idle', hydrated: true });

@@ -21,7 +21,8 @@ import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { utf8ToBytes } from '@noble/hashes/utils';
 import type { Identity } from './identity';
-import { SERVER_URL } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
+import { relayFetch, type RelayResponse } from '../net/relayHttp';
 
 export interface DeleteAccountResult {
   /**
@@ -63,10 +64,10 @@ export async function deleteAccountOnRelay(identity: Identity): Promise<DeleteAc
     ),
   );
 
-  let res: Response;
+  let res: RelayResponse;
   try {
-    res = await fetch(
-      `${trimSlash(SERVER_URL)}/identity/${encodeURIComponent(identity.aegisId)}`,
+    res = await relayFetch(
+      `${trimSlash(homeRelayBaseUrl())}/identity/${encodeURIComponent(identity.aegisId)}`,
       {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

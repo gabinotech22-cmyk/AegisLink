@@ -6,7 +6,7 @@
  * instead of Expo's EXPO_PUBLIC_SERVER_URL.
  */
 
-import { RELAY_URL } from './config';
+import { homeRelayBaseUrl } from './net/homeRelay';
 
 export interface IdentityRecord {
   aegisId: string;
@@ -22,7 +22,8 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${RELAY_URL}${path}`, {
+  // F5: OUR relay — official or self-hosted (.onion, proxied through Tor).
+  const res = await fetch(`${homeRelayBaseUrl()}${path}`, {
     headers: { 'content-type': 'application/json' },
     ...init,
   });

@@ -29,7 +29,8 @@
 import { logger } from '../utils/logger';
 import { TorSioSocket } from '../net/tor';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import { ONION_URL, MAILBOX_ENABLED } from '../config';
+import { MAILBOX_ENABLED } from '../config';
+import { homeRelayOnionUrl } from '../net/homeRelay';
 import {
   getOwnCurrentMailbox,
   getOwnMailboxesForEpochs,
@@ -110,6 +111,7 @@ export function isMailboxAuthed(): boolean {
 export async function connectMailboxSocket(
   onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
 ): Promise<Socket | null> {
+  const ONION_URL = homeRelayOnionUrl(); // F5: our home's onion (official or self-hosted)
   if (!MAILBOX_ENABLED || !ONION_URL) return null; // fail-closed: needs Tor
   if (mboxSocket && mboxSocket.connected) return mboxSocket;
   onEnvelopeCb = onEnvelope;

@@ -17,12 +17,12 @@ import { io, type Socket } from 'socket.io-client';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { RELAY_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, FEDERATION } from '../config';
+import { SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, FEDERATION } from '../config';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery } from './mailboxSocket';
-import { isForeign, relayFor, getHomeRelay } from '../net/homeRelay';
+import { isForeign, relayFor, getHomeRelay, homeRelayBaseUrl, homeRelayOnionUrl } from '../net/homeRelay';
 import { canonicalRelay } from '../net/officialRelay';
 import { relayRefFromOnion, type RelayRef } from '../net/relayRef';
 import { keyMatchesAegisId } from '../crypto/qr';
@@ -725,7 +725,9 @@ export function connect(identity: Identity): Socket {
   // handshake carries the deviceId that was persisted at link time (audit
   // 2026-09-16 AL-01, fail-closed). The old background-patch of `socket.auth`
   // raced the first handshake, which would now be rejected as `device_not_linked`.
-  const created = io(RELAY_URL, {
+  // F5: OUR home relay — official, or a self-hosted .onion the session
+  // proxies through Tor (parity with mobile's Tor bridge).
+  const created = io(homeRelayBaseUrl(), {
     transports: ['websocket'],
     autoConnect: false,
     // ackDelivery: we send 'envelope:ack' after persisting each incoming envelope,

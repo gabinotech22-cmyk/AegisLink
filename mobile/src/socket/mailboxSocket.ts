@@ -34,7 +34,8 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { AppState, type AppStateStatus } from 'react-native';
 import { logger } from '../utils/logger';
 import { Platform } from 'react-native';
-import { ONION_URL, MAILBOX_ENABLED, MAILBOX_IOS_WAKE } from '../config';
+import { MAILBOX_ENABLED, MAILBOX_IOS_WAKE } from '../config';
+import { homeRelayOnionUrl } from '../net/homeRelay';
 import {
   getOwnCurrentMailbox,
   getOwnMailboxesForEpochs,
@@ -238,6 +239,7 @@ export function registerIosWakeBinding(
 export async function connectMailboxSocket(
   onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
 ): Promise<Socket | null> {
+  const ONION_URL = homeRelayOnionUrl(); // F5: our home's onion (official or self-hosted)
   if (!MAILBOX_ENABLED || !ONION_URL) return null; // fail-closed: needs Tor
   if (mboxSocket && mboxSocket.connected) return mboxSocket;
   if (!isTorAvailable()) return null; // fail-closed: no embedded Tor module (Expo Go / non-prebuilt)
@@ -496,6 +498,7 @@ export function fetchMailboxOverTor(
 async function drainMailboxStateless(
   onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
 ): Promise<number> {
+  const ONION_URL = homeRelayOnionUrl();
   if (!MAILBOX_ENABLED || !ONION_URL) return 0;
   if (!isTorAvailable()) return 0;
   try {

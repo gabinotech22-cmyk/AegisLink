@@ -1,7 +1,9 @@
 import * as Notifications from 'expo-notifications';
 import { logger } from '../utils/logger';
 import { Platform } from 'react-native';
-import { SERVER_URL, REMOTE_PUSH_ENABLED } from '../config';
+import { REMOTE_PUSH_ENABLED } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
+import { relayFetch } from '../net/relayHttp';
 import type { Identity } from '../crypto/identity';
 import { tAsync } from '../i18n';
 
@@ -534,7 +536,7 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
 /** Revoke push token on logout */
 export async function unregisterPush(aegisId: string): Promise<void> {
   try {
-    await fetch(`${SERVER_URL}/push/unregister`, {
+    await relayFetch(`${homeRelayBaseUrl()}/push/unregister`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       signal: makeSignal(8_000),

@@ -1,9 +1,8 @@
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import { SERVER_URL } from '../config';
 import { normalizeOnion } from '../net/relayRef';
 import { relayBaseUrl } from '../net/relayPoolCore';
-import { getHomeRelay } from '../net/homeRelay';
+import { getHomeRelay, homeRelayBaseUrl } from '../net/homeRelay';
 
 /**
  * Encrypted media upload / download for the Electron renderer.
@@ -60,7 +59,7 @@ export async function encryptAndUploadMedia(file: Blob): Promise<string> {
   const ciphertext = nacl.secretbox(fileBytes, nonce, key);
 
   // 4. Fetch PoW challenge from relay
-  const challengeRes = await fetch(`${SERVER_URL}/blob/challenge`);
+  const challengeRes = await fetch(`${homeRelayBaseUrl()}/blob/challenge`);
   if (!challengeRes.ok) throw new Error('Failed to fetch upload challenge');
   const { challenge, difficulty } = (await challengeRes.json()) as { challenge: string; difficulty: number };
 
@@ -68,7 +67,7 @@ export async function encryptAndUploadMedia(file: Blob): Promise<string> {
   const powNonce = await solvePoW(challenge, difficulty);
 
   // 6. Upload ciphertext with solved PoW as query params
-  const uploadUrl = `${SERVER_URL}/blob/upload?powChallenge=${challenge}&powNonce=${powNonce}`;
+  const uploadUrl = `${homeRelayBaseUrl()}/blob/upload?powChallenge=${challenge}&powNonce=${powNonce}`;
   const res = await fetch(uploadUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream' },
@@ -145,7 +144,7 @@ export async function downloadAndDecryptMedia(
 
   // A v3 blob lives on the sender's relay; the whole session is proxied through
   // Tor, so a .onion base resolves inside Tor with the same fetch().
-  const base = `${host ? relayBaseUrl(host) : SERVER_URL}/blob/download/${id}`;
+  const base = `${host ? relayBaseUrl(host) : homeRelayBaseUrl()}/blob/download/${id}`;
   const downloadUrl = token ? `${base}?t=${encodeURIComponent(token)}` : base;
   const res = await fetch(downloadUrl);
   if (!res.ok) {

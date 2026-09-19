@@ -21,7 +21,8 @@ import { saveCall } from '../db/local';
 import { useMessages } from '../store/messages';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
-import { RELAY_URL, TOR_RELAY } from '../config';
+import { TOR_RELAY } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
 import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import {
@@ -102,7 +103,7 @@ async function fetchTurnConfig(_aegisId: string): Promise<RTCConfigShape> {
       `&sig=${encodeURIComponent(sig)}` +
       `&ts=${ts}`;
     const res = await fetch(
-      `${RELAY_URL}/turn/credentials?${query}`,
+      `${homeRelayBaseUrl()}/turn/credentials?${query}`, // F5: OUR home's TURN
       { signal: AbortSignal.timeout(3000) },
     );
     if (!res.ok) return defaultRtcConfig();

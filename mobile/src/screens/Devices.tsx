@@ -292,8 +292,9 @@ export function DevicesScreen({ onBack }: Props) {
           identity.signingPublicKeyB64,
         );
         // POST the revocation to the relay's web3 endpoint (best-effort).
-        const { SERVER_URL } = await import('../config');
-        void fetch(`${SERVER_URL}/web3/device/revoke`, {
+        const { homeRelayBaseUrl } = await import('../net/homeRelay');
+        const { relayFetch } = await import('../net/relayHttp');
+        void relayFetch(`${homeRelayBaseUrl()}/web3/device/revoke`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),

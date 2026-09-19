@@ -6,7 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { PrimaryButton } from '../components/Button';
-import { SERVER_URL } from '../config';
+import { homeRelayBaseUrl } from '../net/homeRelay';
+import { relayFetch } from '../net/relayHttp';
 import { themedAlert } from '../components/AlertHost';
 import { useIdentity } from '../store/identity';
 
@@ -17,7 +18,7 @@ interface Props {
 type RelayState = 'up' | 'down' | 'probing';
 interface RelayStatus { label: string; state: RelayState; detail: string }
 
-// The app talks to ONE real relay (config SERVER_URL). We probe its live
+// The app talks to ONE real relay (its home: official or self-hosted). We probe its live
 // reachability but show a generic "AegisLink relay" label — no need to surface
 // the real hostname in the UI — instead of the old hard-coded mock list
 // (zurich/berlin/…) that falsely reported every node "UP · ok" even offline.
@@ -40,7 +41,7 @@ export function NetworkErrorScreen({ onRetry }: Props) {
 
   // Show a generic label instead of the real relay hostname — no need to expose
   // the actual endpoint in the UI. The status (reachable/unreachable) is still
-  // probed live against the real SERVER_URL below.
+  // probed live against the real home relay below.
   const host = i18nT('networkError.relayLabel', 'AegisLink relay');
   const [relays, setRelays] = useState<RelayStatus[]>([
     { label: host, state: 'probing', detail: i18nT('networkError.probing', 'probing…') },
@@ -50,7 +51,7 @@ export function NetworkErrorScreen({ onRetry }: Props) {
     let cancelled = false;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 4000);
-    fetch(`${SERVER_URL}/health`, { signal: ctrl.signal })
+    relayFetch(`${homeRelayBaseUrl()}/health`, { signal: ctrl.signal })
       .then((res) => {
         if (cancelled) return;
         setRelays([{

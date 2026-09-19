@@ -11,7 +11,7 @@ import {
 } from '../db/local';
 import { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } from '../crypto/registration';
 import { generatePreKeys } from '../crypto/signal/x3dh';
-import { SERVER_URL } from '../config';
+import { homeRelayBaseUrl, hydrateHomeRelay, resetHomeRelay } from '../net/homeRelay';
 import '../crypto/ipc-types';
 
 const secureStorage = () => window.aegis.secureStorage;
@@ -106,7 +106,7 @@ function publishToServer(identity: Identity, slotId: string): Promise<boolean> {
 
 async function doPublishToServer(identity: Identity, slotId: string): Promise<boolean> {
   try {
-    const { challenge, difficulty } = await fetchPowChallenge(SERVER_URL);
+    const { challenge, difficulty } = await fetchPowChallenge(homeRelayBaseUrl());
     const nonce = await solvePoW(challenge, difficulty);
 
     const preKeys = generatePreKeys(identity);
@@ -139,7 +139,7 @@ async function doPublishToServer(identity: Identity, slotId: string): Promise<bo
         signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
         opkSecrets: preKeys.opkSecrets,
       },
-      SERVER_URL,
+      homeRelayBaseUrl(),
       challenge,
       nonce,
       preKeys.oneTimePreKeys,
@@ -278,6 +278,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       const slotsList = slotsListRaw ? (JSON.parse(slotsListRaw) as string[]) : ['self'];
 
       setActiveDbSlot(activeSlotId);
+      // Federation F5: the slot's home relay must be known BEFORE anything
+      // registers or connects; never the previous slot's relay.
+      resetHomeRelay();
+      await hydrateHomeRelay();
 
       const stored = await loadIdentity();
       if (!stored) {
