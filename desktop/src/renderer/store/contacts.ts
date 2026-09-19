@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import { canonicalRelay } from '../net/officialRelay';
+import { getHomeRelay } from '../net/homeRelay';
 import type { RelayRef } from '../net/relayRef';
 import { create } from 'zustand';
 import {
@@ -138,6 +139,8 @@ export const useContacts = create<ContactsState>((set, get) => ({
       verified: false,
       addedAt: Date.now(),
       profile: 'personal',
+      // Resolved on OUR home relay → that is where they live (parity with mobile).
+      relayOnion: canonicalRelay(getHomeRelay())?.onion ?? null,
     };
     await saveContact(contact);
     set({ contacts: [contact, ...get().contacts.filter((c) => c.aegisId !== aegisId)] });

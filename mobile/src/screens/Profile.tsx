@@ -11,6 +11,7 @@ import { AvatarCropModal } from '../components/AvatarCropModal';
 import { ImageViewerModal } from '../components/ImageViewerModal';
 import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import { encodeIdentityLink } from '../crypto/qr';
+import { useOwnAddressParts } from '../net/ownAddress';
 import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
@@ -47,6 +48,7 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { identity, displayName, avatarColor, avatarImage, profileStatus, updateProfile, updateStatus, reset } = useIdentity();
+  const own = useOwnAddressParts(); // F7: v2 share link when our home is a custom relay
 
   const [showShareLink, setShowShareLink] = useState(false);
   const [did, setDid] = useState<string | null>(null);
@@ -488,7 +490,7 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
         visible={showShareLink}
         onClose={() => setShowShareLink(false)}
         title={i18nT('profile.shareMyId', 'Compartir mi ID')}
-        link={identity ? encodeIdentityLink(identity.aegisId, identity.publicKeyB64) : ''}
+        link={identity && own.ready ? encodeIdentityLink(identity.aegisId, identity.publicKeyB64, own.relay, own.mailboxRootB64) : ''}
       />
 
       {/* Edit Profile Modal */}

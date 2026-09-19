@@ -34,7 +34,7 @@ const mockSlot = h;
 
 import {
   parseHomeRelaySetting, hydrateHomeRelay, setHomeRelay, getHomeRelay, getHomeRelaySetting,
-  isCustomHome, homeRelayBaseUrl, homeRelayOnionUrl, isForeign, relayFor, resetHomeRelay,
+  isCustomHome, homeRelayBaseUrl, homeRelayOnionUrl, isForeign, relayFor, resolveRelay, resetHomeRelay,
 } from '../homeRelay';
 
 const OFFICIAL = 'o'.repeat(56) + '.onion';
@@ -84,6 +84,11 @@ describe('homeRelay (F5)', () => {
     expect(isForeign({ relayOnion: MINE })).toBe(false);
     expect(isForeign({ relayOnion: THEIRS })).toBe(true);
     expect(relayFor({ relayOnion: MINE })).toEqual({ onion: MINE });
+    // F7 regression: from a self-hosted home, a contact on the OFFICIAL relay is
+    // foreign and the transport needs the official onion, not null.
+    expect(relayFor({ relayOnion: null })).toBeNull();
+    expect(resolveRelay({ relayOnion: null })).toEqual({ onion: OFFICIAL });
+    expect(resolveRelay({ relayOnion: THEIRS })).toEqual({ onion: THEIRS });
 
     resetHomeRelay();
     expect(getHomeRelay()).toBeNull();

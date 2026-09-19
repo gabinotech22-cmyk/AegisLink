@@ -10,6 +10,7 @@ import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import type { StoredContact } from '../db/local';
 import { encodeIdentityQR } from '../crypto/qr';
+import { useOwnAddressParts } from '../net/ownAddress';
 
 interface Identity {
   aegisId: string;
@@ -80,7 +81,8 @@ export function VerifyScreen({ onBack, onScan, onTab, onContactAdded }: Props) {
   const words = useMemo(() => identity ? fingerprintWords(identity.publicKey) : [], [identity]);
   const hex   = useMemo(() => identity ? fingerprintHex(identity.publicKey)   : [], [identity]);
 
-  const qrPayload = identity ? encodeIdentityQR(identity.aegisId, identity.publicKeyB64) : '';
+  const own = useOwnAddressParts(); // F7: v2 (relay + mailbox root) once our home is a custom relay
+  const qrPayload = identity && own.ready ? encodeIdentityQR(identity.aegisId, identity.publicKeyB64, own.relay, own.mailboxRootB64) : '';
 
   async function handleCopyId() {
     if (!identity) return;

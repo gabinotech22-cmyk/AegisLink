@@ -60,6 +60,21 @@ el directorio de claves entre modos, así que cambiar implica onion nuevo (docum
 
 Sin la prueba real no habría salido: el `docker compose config` del CI no arranca Tor.
 
+## 3b. Hallazgos de la prueba en emulador (2 × Android, APK `1de1424`) — arreglados en la misma rama
+
+Los tres salieron en los primeros 20 minutos con la app real; ningún test los cubría porque
+ninguna suite combinaba *home propio* + *contacto en otro relay* + *pantallas*.
+
+| # | Síntoma en el dispositivo | Causa | Fix | Test |
+|---|---|---|---|---|
+| H1 | B (en relay propio) → A: **"Errore di invio: `foreign_contact_needs_sealed_v2`"** en cada mensaje | `relayFor(contact)` devuelve `null` para "relay oficial"; desde un home propio ese contacto es *foreign* y `deliverToForeignRelay` tomaba `null` como "sin relay" → **ningún usuario en relay propio podía escribir a nadie del oficial** (la precondición de F7, rota). Mismo `null` en la descarga de prekeys (`GET /prekeys/bundle` iba al home equivocado). | `net/homeRelay.ts` **`resolveRelay(contact)`** = relay concreto incluido el oficial (`OFFICIAL_RELAY`); `deliverToForeignRelay` y la descarga de prekeys lo usan; error propio `foreign_relay_unknown` si no hay onion oficial configurado. Mobile + desktop. | `client.firstContact` (+1: home propio → contacto oficial: bundle y sobre por el pool al **onion oficial**, nada por el socket home, `fc.relay` = nuestro onion); `net/homeRelay` (+2 aserciones, ambas plataformas) |
+| H2 | Contacto añadido **por ID** desde un home propio queda como "oficial" (`relayOnion: null`) aunque se resolvió en **nuestro** relay → tratado como foreign del oficial (dispara H1) | `addByAegisId` sin relay explícito guardaba `null` | Sin relay explícito → `relayOnion = canonicalRelay(getHomeRelay())` (un ID resuelto en nuestro home vive en nuestro home). Mobile + desktop. | cubierto por H1 + `contacts.*` verdes |
+| H3 | El **enlace/QR propio** de B tras migrar seguía siendo **v1** (`…/a#v1/ID/clave`): sin relay ni root, nadie fuera del oficial puede alcanzarle | Los codificadores v2 existían desde F1 pero `AddContact`/`Profile`/`Verify` nunca pasaban relay+root; y pegar un enlace v2 en "Por ID" reducía a la ID pelada (perdía el root) | `net/ownAddress.ts` (byte-idéntico mobile↔desktop): `useOwnAddressParts()` → relay + root propios; todas las pantallas lo usan (v2 solo cuando está listo, nunca un v1 inalcanzable); "Por ID" con un enlace v2 pegado pasa por `addFromQR` (relay + root). | `qr.links` verdes; pantallas `tsc`; verificación en dispositivo (fila 3 del cuadro) |
+
+Además, en el emulador A quedó una DB SQLCipher con clave perdida (restos de otra sesión) y la
+app se quedó en "Initializing secure storage…" reintentando en bucle en vez de fallar claro —
+**decisión de producto pendiente** (§5).
+
 ## 4. Protocolo de prueba en dispositivo (2 dispositivos × 2 relays)
 
 Build: APK de prueba del workflow `test-apk.yml` sobre esta rama
@@ -73,8 +88,8 @@ Dispositivo **A** = relay oficial (sin tocar nada). Dispositivo **B** = migra al
 
 | # | Paso | Qué demuestra | Resultado |
 |---|---|---|---|
-| 1 | B: Privacidad → Red → **Mi relay** → pegar onion → **Verificar** | `verifyRelay` por Tor nativo (`httpRequest` GET) | ⬜ |
-| 2 | B: **Cambiar** → confirmación (PIN/biometría si hay bloqueo) → estado "relay propio desde hoy, gracia 7 d" | `migrateHomeRelay`: registro + prekeys en el destino por Tor (POST), anuncio `profile_update.mailboxRelay`, `setHomeRelay`, reconexión del socket de identidad por `TorSioSocket` | ⬜ |
+| 1 | B: Privacidad → Red → **Mi relay** → pegar onion → **Verificar** | `verifyRelay` por Tor nativo (`httpRequest` GET) | ✅ emulador B (~15 s, "Relay verificato · mailbox · prekeys") y A |
+| 2 | B: **Cambiar** → confirmación (PIN/biometría si hay bloqueo) → estado "relay propio desde hoy, gracia 7 d" | `migrateHomeRelay`: registro + prekeys en el destino por Tor (POST), anuncio `profile_update.mailboxRelay`, `setHomeRelay`, reconexión del socket de identidad por `TorSioSocket` | ✅ A y B: en el relay de prueba 2 identidades, 2 prekeys firmadas, 199 one-time, 2 delivery tokens; B sin ninguna conexión clearnet (solo guardas Tor) |
 | 3 | B: compartir enlace/QR → A lo añade | enlace **v2** `aegislink://v2/<id>/<pk>/<onion>/<root>` aceptado con `FEDERATION` ON | ⬜ |
 | 4 | A → B primer mensaje; B responde | **primer contacto** sellado con bootstrap X3DH (`fc`) hacia un relay ajeno por el pool; respuesta por el relay oficial | ⬜ |
 | 5 | A ↔ B: entregado / leído / "escribiendo…" | receipts y typing sellados cross-relay | ⬜ |
@@ -96,3 +111,4 @@ una release sin este cuadro completo**.
 2. En el relay oficial (`/opt/aegislink/.env`, ambos `.env` — ver deriva conocida): `APP_LATEST_VERSION=1.0.7` al publicar; `APP_MIN_VERSION=1.0.7` **cuando la 1.0.7 lleve unos días en tiendas** (el bloqueo es inmediato para quien no actualice).
 3. Relay de prueba: `docker compose down -v` en `/opt/aegislink-testrelay/infra/selfhost` al cerrar F7 (o conservarlo como relay de demo: entonces `./backup-onion-key.sh`).
 4. Pendiente de decisión de producto (ya en `FEDERATION-DESIGN.md` §2): sealed-to también para llamadas (D6), retirar v1 del transporte (Fase 6 de `SEALED-SENDER-ARCHITECTURE.md`).
+5. **Decisión de producto (nueva, §3b):** una DB SQLCipher cuya clave ya no está en SecureStore deja la app en "Initializing secure storage…" para siempre. Recomendación: tras N fallos de descifrado de `page 1`, pantalla clara "Los datos locales no se pueden abrir" con **Restaurar backup** / **Empezar de cero** (borra la DB; la identidad sin backup se pierde y se dice). Sin esto, un usuario real lo vive como "la app no abre".
