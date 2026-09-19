@@ -59,9 +59,15 @@ export interface OutgoingMailboxEnvelope {
   ephemeralTtl?: number;
   /** F4: call-class wake for the recipient (the one declared metadata bit, D3). */
   wakeHint?: 'call';
+  /** F6: submission proof-of-work (only when the relay demands it). */
+  pow?: { challenge: string; nonce: string };
 }
 
-export type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string };
+/**
+ * F6: a relay running MAILBOX_SUBMIT_POW rejects a submission with
+ * `pow_required` + a fresh challenge; the pool solves it and resends once.
+ */
+export type EnvelopeAck = { ok: boolean; delivered?: boolean; queued?: boolean; error?: string; challenge?: string; difficulty?: number };
 
 export interface RelayPoolDeps {
   transport: PoolTransport;
@@ -75,6 +81,12 @@ export interface RelayPoolDeps {
   connectTimeoutMs?: number;
   /** Ack wait for a single envelope send (default 15 s). */
   sendTimeoutMs?: number;
+  /**
+   * F6: solve a submission proof-of-work (SHA-256 leading-zero bits, the same
+   * solver registration uses). Without it a `pow_required` relay is simply a
+   * failed send (null) — never a silent drop.
+   */
+  solvePow?: (challenge: string, difficulty: number) => Promise<string>;
 }
 
 export const DEFAULT_IDLE_MS = 5 * 60_000;
@@ -202,18 +214,30 @@ export function createRelayPool(deps: RelayPoolDeps): RelayPool {
       } catch {
         return null;
       }
-      conn.lastUsed = deps.transport.now();
-      return new Promise<EnvelopeAck | null>((resolve) => {
-        let settled = false;
-        const t = setTimeout(() => { if (!settled) { settled = true; resolve(null); } }, sendTimeoutMs);
-        conn.socket.emit('envelope:mb', env, (ack: EnvelopeAck) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(t);
-          conn.lastUsed = deps.transport.now();
-          resolve(ack ?? null);
+      const emitOnce = (payload: OutgoingMailboxEnvelope): Promise<EnvelopeAck | null> => {
+        conn.lastUsed = deps.transport.now();
+        return new Promise<EnvelopeAck | null>((resolve) => {
+          let settled = false;
+          const t = setTimeout(() => { if (!settled) { settled = true; resolve(null); } }, sendTimeoutMs);
+          conn.socket.emit('envelope:mb', payload, (ack: EnvelopeAck) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(t);
+            conn.lastUsed = deps.transport.now();
+            resolve(ack ?? null);
+          });
         });
-      });
+      };
+      const first = await emitOnce(env);
+      // F6: the relay charges a proof-of-work per submission — solve the
+      // challenge it handed back and resend exactly once (a second rejection is
+      // the relay's final word: the caller retries later from its outbox).
+      if (first && !first.ok && first.error === 'pow_required' && deps.solvePow && typeof first.challenge === 'string' && typeof first.difficulty === 'number') {
+        let nonce: string;
+        try { nonce = await deps.solvePow(first.challenge, first.difficulty); } catch { return first; }
+        return emitOnce({ ...env, pow: { challenge: first.challenge, nonce } });
+      }
+      return first;
     },
 
     http(onion, path, method = 'GET', body = '', headers = {}) {

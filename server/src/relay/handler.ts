@@ -5,6 +5,7 @@ import naclUtil from 'tweetnacl-util';
 const { decodeBase64, encodeBase64 } = naclUtil;
 import { messageRepo, senderKeyDistRepo, prekeysRepo, identityRepo, deliveryTokenRepo, pushEndpointRepo, pushMailboxTokenRepo, devicesRepo } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
+import { issueChallenge as issuePowChallenge, verifyPoW, MAILBOX_SUBMIT_POW_DIFFICULTY, isMailboxSubmitPowEnabled } from '../pow/challenge.js';
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';
 import { notifyRecipient } from '../push/expo.js';
@@ -427,14 +428,33 @@ export function attachRelay(io: SocketServer) {
 
       const limiter = makeEnvelopeLimiter();
 
+      // Federation F6: a submission PoW challenge for THIS socket (only meaningful
+      // when MAILBOX_SUBMIT_POW=on; harmless otherwise). No identity involved —
+      // the challenge is a random token bound to nothing but its difficulty.
+      socket.on('mailbox:pow:challenge', (ack?: (r: { challenge: string; difficulty: number; expiresAt: number; required: boolean }) => void) => {
+        if (!limiter.consume()) return;
+        ack?.({ ...issuePowChallenge(MAILBOX_SUBMIT_POW_DIFFICULTY), required: isMailboxSubmitPowEnabled() });
+      });
+
       socket.on('envelope:mb', async (
         rawEnv: unknown,
-        ack?: (r: { ok: boolean; delivered?: boolean; queued?: boolean; error?: string }) => void,
+        ack?: (r: { ok: boolean; delivered?: boolean; queued?: boolean; error?: string; challenge?: string; difficulty?: number }) => void,
       ) => {
         if (!limiter.consume()) { ack?.({ ok: false, error: 'rate_limited' }); return; }
         const parsed = MailboxEnvelopeIn.safeParse(rawEnv);
         if (!parsed.success) { ack?.({ ok: false, error: 'invalid_envelope' }); return; }
         const d = parsed.data;
+        // Federation F6: with MAILBOX_SUBMIT_POW=on every submission must carry a
+        // fresh, valid proof-of-work. A missing/invalid one is rejected WITH a new
+        // challenge so the client solves and resends in a single extra round trip.
+        if (isMailboxSubmitPowEnabled()) {
+          const powError = d.pow ? verifyPoW(d.pow.challenge, d.pow.nonce) : 'pow_missing';
+          if (powError) {
+            const fresh = issuePowChallenge(MAILBOX_SUBMIT_POW_DIFFICULTY);
+            ack?.({ ok: false, error: 'pow_required', challenge: fresh.challenge, difficulty: fresh.difficulty });
+            return;
+          }
+        }
         // The relay never stamps a sender — the source mailbox is sealed inside.
         const env = { id: d.id, to: d.to, ciphertext: d.ciphertext, nonce: d.nonce, epk: d.epk, createdAt: Date.now() };
         // AT-LEAST-ONCE (audit 2026-07-24): ALWAYS enqueue first — a durable backup

@@ -38,6 +38,9 @@ export interface RelayInfo {
 export function relayInfo(env: NodeJS.ProcessEnv = process.env): RelayInfo {
   const features = ['mailbox', 'prekeys', 'blob', 'calls'];
   if ((env['PUSH_MAILBOX_ENABLED'] ?? 'off').toLowerCase() === 'on') features.push('ntfy');
+  // F6: submissions to this relay's mailboxes need a proof-of-work (clients also
+  // learn it from the `pow_required` rejection, so this is informational).
+  if ((env['MAILBOX_SUBMIT_POW'] ?? 'off').toLowerCase() === 'on') features.push('submit-pow');
   // Directory lookups (GET /identity/:id) are a per-relay policy: a self-hosted
   // relay may keep its identities private (contacts then come from links/QRs,
   // which carry the key). Default: on, to match today's official relay.

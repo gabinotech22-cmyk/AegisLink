@@ -727,6 +727,19 @@ hint. Tests: server `relay.federation.test.ts` (wake class, hint stripped,
 free-form values rejected), mobile `socket/__tests__/client.callSignal.test.ts`,
 desktop `socket/__tests__/callSignalRouter.test.ts`.
 
+**Submission proof-of-work (F6, `MAILBOX_SUBMIT_POW`).** A relay accepts
+sealed envelopes from disposable mailboxes that never register anything, so
+an operator under spam pressure can charge a small proof-of-work per
+submission: with `MAILBOX_SUBMIT_POW=on` every `envelope:mb` must carry
+`pow: { challenge, nonce }` where `SHA-256(nonce + challenge)` has 12 leading
+zero bits (the registration solver, `solvePoW`) and `challenge` was issued by
+this relay and not yet consumed (one solve pays for one envelope). A missing
+or invalid proof is rejected with `{ ok: false, error: 'pow_required',
+challenge, difficulty }` — a fresh challenge in the rejection, so the client
+solves and resends once in a single extra round trip; `mailbox:pow:challenge`
+hands one out up front, and `GET /relay/info` lists `submit-pow`. Nothing
+about the sender is involved: the challenge is bound only to its difficulty.
+
 **Home relay (F5a).** Which relay hosts OUR identity and mailbox is a
 per-profile setting (`net/homeRelay.ts`, secure storage
 `aegis.homeRelay[.<slot>]` = `{ onion, since, previous }`; absent = official).

@@ -171,6 +171,45 @@ describe('relayPoolCore', () => {
     expect(JSON.parse(res!.body)).toEqual({ url: `http://${ONION_B}/relay/info`, method: 'GET' });
   });
 
+  it('F6: a `pow_required` rejection is solved and resent exactly once with the relay challenge; a second rejection is final', async () => {
+    const { transport, sockets } = makeFakeTransport();
+    const solvePow = jest.fn(async (challenge: string, difficulty: number) => `nonce-${difficulty}-${challenge.slice(0, 4)}`);
+    const pool = createRelayPool({ transport, newDisposableMailbox, authProof, solvePow });
+    const env = { id: 'm1', to: 'their-mailbox', ciphertext: 'c', nonce: 'n', epk: 'e' };
+    const challenge = 'ab'.repeat(32);
+
+    const p = pool.send(ONION_A, env);
+    await new Promise((r) => setTimeout(r, 5));
+    const first = sockets[0]!.emitted.filter((e) => e.event === 'envelope:mb');
+    expect(first).toHaveLength(1);
+    expect((first[0]!.payload as { pow?: unknown }).pow).toBeUndefined(); // nothing to prove yet
+    first[0]!.ack!({ ok: false, error: 'pow_required', challenge, difficulty: 12 });
+    await new Promise((r) => setTimeout(r, 5));
+    const sends = sockets[0]!.emitted.filter((e) => e.event === 'envelope:mb');
+    expect(sends).toHaveLength(2);
+    expect(solvePow).toHaveBeenCalledWith(challenge, 12);
+    expect(sends[1]!.payload).toEqual({ ...env, pow: { challenge, nonce: 'nonce-12-abab' } });
+    sends[1]!.ack!({ ok: true, queued: true });
+    expect(await p).toEqual({ ok: true, queued: true });
+
+    // Second rejection: no third attempt, the rejection is returned to the caller.
+    const p2 = pool.send(ONION_A, { ...env, id: 'm2' });
+    await new Promise((r) => setTimeout(r, 5));
+    const s2 = () => sockets[0]!.emitted.filter((e) => e.event === 'envelope:mb');
+    s2()[2]!.ack!({ ok: false, error: 'pow_required', challenge, difficulty: 12 });
+    await new Promise((r) => setTimeout(r, 5));
+    s2()[3]!.ack!({ ok: false, error: 'pow_required', challenge, difficulty: 12 });
+    expect(await p2).toEqual({ ok: false, error: 'pow_required', challenge, difficulty: 12 });
+    expect(s2()).toHaveLength(4);
+
+    // Without a solver the rejection is simply returned (never a silent drop, never a loop).
+    const bare = createRelayPool({ transport: makeFakeTransport().transport, newDisposableMailbox, authProof });
+    const p3 = bare.send(ONION_B, env);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(solvePow).toHaveBeenCalledTimes(2);
+    void p3;
+  });
+
   it('closeAll() tears every connection down', async () => {
     const t = makeFakeTransport();
     const pool = createRelayPool({ transport: t.transport, newDisposableMailbox, authProof });

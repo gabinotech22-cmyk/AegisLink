@@ -8,6 +8,7 @@
  */
 import { createRelayPool, type RelayPool } from './relayPoolCore';
 import { TorSioSocket, isTorAvailable, startTor, torHttpRequest } from './tor';
+import { solvePoW } from '../crypto/registration';
 import { generateMailboxRoot, currentMailbox, mailboxAuthProof } from '../crypto/mailbox';
 import type { RelayRef } from './relayRef';
 import type { OutgoingMailboxEnvelope, EnvelopeAck, PoolHttpResponse } from './relayPoolCore';
@@ -27,6 +28,8 @@ function getPool(): RelayPool {
     // shared with a contact, never the root our own mailbox derives from.
     newDisposableMailbox: () => currentMailbox(generateMailboxRoot(), Date.now()),
     authProof: mailboxAuthProof,
+    // F6: a relay with MAILBOX_SUBMIT_POW=on charges a small PoW per envelope.
+    solvePow: (challenge, difficulty) => solvePoW(challenge, difficulty),
   });
   idleTimer = setInterval(() => pool?.closeIdle(), 60_000);
   // Never keep the JS runtime alive for the sweeper (tests, background).

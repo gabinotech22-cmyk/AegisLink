@@ -282,6 +282,14 @@ todos los plugins y módulos autolinkeados) y la contrasta con una allowlist exp
 listadas, un texto genérico de plugin (`$(PRODUCT_NAME)`) falla, y `UIBackgroundModes` debe
 coincidir. En local: `cd mobile && node scripts/audit-permissions.mjs`. Para añadir un permiso,
 se añade a la allowlist del script con su justificación en la misma PR.
+## Job CI `selfhost-compose` (federación F6)
+
+Valida el paquete de self-hosting sin construir imágenes: `docker compose
+config` de `infra/selfhost/docker-compose.yml` con el `.env.example` (+ secretos
+de humo), comprueba que **ningún** servicio publica un puerto (el relay propio
+es solo `.onion`) y hace `bash -n` de `up.sh`/`print-onion.sh`/
+`backup-onion-key.sh`. Ver `docs/SELF-HOSTING.md`.
+
 ## Gate CI `docs-sync` (regla de oro "La doc no miente" #7)
 
 Job `docs-sync` en `.github/workflows/ci.yml`, solo en `pull_request`. Falla si el diff contra la

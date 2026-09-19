@@ -178,6 +178,25 @@ jobs:
       - name: Run tests
         run: npm test
 
+  # ─── Self-hosted relay compose — smoke (federation F6) ────────────────────
+  # The self-hosting package must at least parse and resolve with the documented
+  # .env (docs/SELF-HOSTING.md). Best-effort: no images are built here.
+  selfhost-compose:
+    name: Self-host compose smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate infra/selfhost/docker-compose.yml
+        working-directory: infra/selfhost
+        run: |
+          cp .env.example .env
+          echo "BLOB_SECRET=ci-smoke-blob-secret" >> .env
+          echo "TURN_SECRET=ci-smoke-turn-secret" >> .env
+          docker compose config --quiet
+          # Onion-only: no service may publish a host port.
+          if docker compose config | grep -E '^\s+published:'; then echo "self-host compose publishes a port" >&2; exit 1; fi
+          bash -n up.sh print-onion.sh backup-onion-key.sh
+
   # ─── Mobile — typecheck ───────────────────────────────────────────────────
   mobile-typecheck:
     name: Mobile TypeScript check

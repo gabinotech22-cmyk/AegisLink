@@ -34,13 +34,31 @@ const { encodeBase64, decodeBase64 } = naclUtil;
 
 import { initDb, identityRepo } from '../db/client.js';
 import { attachRelay } from '../relay/handler.js';
+import relayInfoRoutes from '../routes/relayInfo.js';
 import { mailboxIdForSignPublicKey } from '../crypto/mailbox.js';
 import { mailboxTopic } from '../push/ntfy.js';
+import { createHash } from 'node:crypto';
+
+/** Brute-force the submission PoW exactly like the client solver (SHA-256(nonce+challenge) leading zero bits). */
+function solvePow(challenge: string, difficulty: number): string {
+  for (let i = 0; ; i++) {
+    const nonce = i.toString(16);
+    const digest = createHash('sha256').update(nonce + challenge).digest();
+    let zeros = 0;
+    for (const byte of digest) {
+      if (byte === 0) { zeros += 8; continue; }
+      zeros += Math.clz32(byte) - 24;
+      break;
+    }
+    if (zeros >= difficulty) return nonce;
+  }
+}
 
 interface Relay { httpServer: ReturnType<typeof createServer>; io: SocketServer; url: string; name: string }
 
 async function startRelay(name: string): Promise<Relay> {
   const app = express();
+  app.use('/relay', relayInfoRoutes);
   const httpServer = createServer(app);
   const io = new SocketServer(httpServer, { cors: { origin: '*' } });
   attachRelay(io);
@@ -211,6 +229,58 @@ describe('federation: A (home R1) delivers to B (home R2) through a disposable m
       if (prevFlag === undefined) delete process.env['PUSH_MAILBOX_ENABLED']; else process.env['PUSH_MAILBOX_ENABLED'] = prevFlag;
       if (prevUrl === undefined) delete process.env['NTFY_URL']; else process.env['NTFY_URL'] = prevUrl;
     }
+  });
+
+  test('F6: with MAILBOX_SUBMIT_POW=on a submission needs a fresh proof-of-work — rejected with a challenge, accepted once solved, never reusable; off = as before', async () => {
+    const prev = process.env['MAILBOX_SUBMIT_POW'];
+    process.env['MAILBOX_SUBMIT_POW'] = 'on';
+    try {
+      const d = disposableMailbox();
+      const aOnR2 = await connectMailbox(R2, d);
+      const base = { to: bMailbox.mailboxId, ciphertext: encodeBase64(nacl.randomBytes(48)), nonce: encodeBase64(nacl.randomBytes(24)), epk: encodeBase64(nacl.randomBytes(32)) };
+
+      // No proof: rejected WITH a challenge (one round trip to recover).
+      const rej = await sendMb(aOnR2, { ...base, id: 'fed-pow-1' }) as MbAck & { challenge?: string; difficulty?: number };
+      expect(rej.ok).toBe(false);
+      expect(rej.error).toBe('pow_required');
+      expect(typeof rej.challenge).toBe('string');
+      expect(rej.difficulty).toBe(12);
+
+      // A wrong nonce: rejected again, new challenge.
+      const bad = await sendMb(aOnR2, { ...base, id: 'fed-pow-1', pow: { challenge: rej.challenge!, nonce: 'ff' } }) as MbAck & { challenge?: string };
+      expect(bad.error).toBe('pow_required');
+      expect(bad.challenge).not.toBe(rej.challenge);
+
+      // Solved: accepted (queued — B is not bound in this test).
+      const nonce = solvePow(bad.challenge!, 12);
+      const ok = await sendMb(aOnR2, { ...base, id: 'fed-pow-1', pow: { challenge: bad.challenge!, nonce } });
+      expect(ok.ok).toBe(true);
+
+      // The same proof cannot pay for a second envelope (consumed).
+      const replay = await sendMb(aOnR2, { ...base, id: 'fed-pow-2', pow: { challenge: bad.challenge!, nonce } });
+      expect(replay.ok).toBe(false);
+      expect(replay.error).toBe('pow_required');
+
+      // The dedicated challenge event hands out the same kind of challenge up front.
+      const issued = await new Promise<{ challenge: string; difficulty: number; required: boolean }>((resolve) => aOnR2.emit('mailbox:pow:challenge', resolve));
+      expect(issued.required).toBe(true);
+      const ok2 = await sendMb(aOnR2, { ...base, id: 'fed-pow-3', pow: { challenge: issued.challenge, nonce: solvePow(issued.challenge, issued.difficulty) } });
+      expect(ok2.ok).toBe(true);
+
+      // /relay/info advertises it.
+      const info = await (await fetch(`${R2.url}/relay/info`)).json() as { features: string[] };
+      expect(info.features).toContain('submit-pow');
+    } finally {
+      if (prev === undefined) delete process.env['MAILBOX_SUBMIT_POW']; else process.env['MAILBOX_SUBMIT_POW'] = prev;
+    }
+
+    // Flag off (the default): no proof needed, and a stray proof is simply ignored.
+    const d2 = disposableMailbox();
+    const s2 = await connectMailbox(R2, d2);
+    const plain = await sendMb(s2, { id: 'fed-pow-4', to: bMailbox.mailboxId, ciphertext: encodeBase64(nacl.randomBytes(48)), nonce: encodeBase64(nacl.randomBytes(24)), epk: encodeBase64(nacl.randomBytes(32)) });
+    expect(plain.ok).toBe(true);
+    const issued = await new Promise<{ required: boolean }>((resolve) => s2.emit('mailbox:pow:challenge', resolve));
+    expect(issued.required).toBe(false);
   });
 
   test('a disposable mailbox must still PROVE possession: a wrong signature is refused', async () => {
