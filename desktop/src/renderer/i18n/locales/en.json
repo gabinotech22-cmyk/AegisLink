@@ -2395,5 +2395,13 @@
       "register_failed": "The relay refused the registration. Try again later.",
       "unknown": "Something went wrong."
     }
+  },
+  "lockConfirm": {
+    "title": "Confirm it's you",
+    "body": "Enter your app PIN to continue.",
+    "prompt": "Confirm it's you",
+    "usePin": "Use PIN",
+    "wrongPin": "Wrong PIN.",
+    "confirm": "Confirm"
   }
 }

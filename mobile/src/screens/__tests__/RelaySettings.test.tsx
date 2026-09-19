@@ -52,6 +52,12 @@ jest.mock('../../store/identity', () => ({
   useIdentity: (sel: (s: { identity: { aegisId: string } }) => unknown) => sel({ identity: { aegisId: 'ME' } }),
 }));
 
+// App-lock confirmation (D4): resolves true unless a test flips it.
+const mockLockConfirm = { ok: true };
+jest.mock('../../components/LockConfirm', () => ({
+  useLockConfirm: () => ({ confirm: async () => mockLockConfirm.ok, element: null }),
+}));
+
 const mockHome = { official: true, onion: null as string | null, since: 0, previous: null as { onion: string | null; until: number } | null };
 const mockVerify = jest.fn();
 const mockMigrate = jest.fn();
@@ -69,6 +75,17 @@ describe('RelaySettingsScreen (F5b)', () => {
   beforeEach(() => {
     mockHome.official = true; mockHome.onion = null; mockHome.since = 0; mockHome.previous = null;
     mockVerify.mockReset(); mockMigrate.mockReset();
+    mockLockConfirm.ok = true;
+  });
+
+  it('with the app lock on, a refused PIN/biometric confirmation cancels the change (D4)', async () => {
+    mockHome.official = false; mockHome.onion = MINE;
+    mockLockConfirm.ok = false;
+    const { getByTestId, queryByTestId } = render(<RelaySettingsScreen onBack={jest.fn()} />);
+    fireEvent.press(getByTestId('relay-back-official'));
+    await act(async () => { fireEvent.press(getByTestId('btn:relaySettings.confirmCta')); });
+    expect(mockMigrate).not.toHaveBeenCalled();
+    expect(queryByTestId('relay-consequences')).toBeNull(); // back to idle
   });
 
   it('shows the official relay by default and no "back to official" action', () => {

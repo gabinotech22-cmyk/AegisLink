@@ -1761,5 +1761,13 @@
       "register_failed": "Il relay ha rifiutato la registrazione. Riprova più tardi.",
       "unknown": "Qualcosa è andato storto."
     }
+  },
+  "lockConfirm": {
+    "title": "Conferma che sei tu",
+    "body": "Inserisci il PIN dell'app per continuare.",
+    "prompt": "Conferma che sei tu",
+    "usePin": "Usa il PIN",
+    "wrongPin": "PIN errato.",
+    "confirm": "Conferma"
   }
 }

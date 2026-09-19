@@ -90,7 +90,7 @@ la app sin empaquetar: `node scripts/native-abi.mjs electron && npx electron-vit
 
 `desktop/.env` (gitignored) debe apuntar al relay de producción:
 `VITE_RELAY_URL=https://aegislink.duckdns.org`, `VITE_TURN_URL=turn:aegislink.duckdns.org:3478`,
-`VITE_ONION_URL=http://<onion>.onion`, `VITE_MAILBOX_MODE=on` (ver `.env.example`).
+`VITE_ONION_URL=http://<onion>.onion` (ver `.env.example`; el modo buzón va activo por defecto desde F5b, `VITE_MAILBOX_MODE=off` solo para depurar).
 Sin `.env` el build apunta a `localhost:3001` (`desktop/src/renderer/config.ts`) —
 que Chromium no pasa por el proxy (loopback), así que el relay local de dev funciona
 con Tor arrancado.

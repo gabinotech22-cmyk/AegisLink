@@ -22,12 +22,8 @@
  *
  * "Back to the official relay" is the same migration with target = null.
  *
- * Parity with mobile/src/net/relayMigration.ts. Desktop differences: HTTP is
- * the session `fetch` (proxied through Tor by the main process), and the
- * previous home is NOT drained during the grace window — the desktop has no
- * stateless mailbox fetch (PAR-1); it only retires the old registration when
- * the window ends. Migrate from the phone when messages during the window
- * matter.
+ * Parity with mobile/src/net/relayMigration.ts. The only desktop difference:
+ * HTTP is the session `fetch` (proxied through Tor by the main process).
  */
 const DEV = import.meta.env.DEV;
 
@@ -211,9 +207,11 @@ export interface HousekeepingDeps {
 function defaultHousekeepingDeps(
   onEnvelope: (env: import('../socket/mailboxSocket').IncomingMailboxEnvelope) => void | Promise<void>,
 ): HousekeepingDeps {
-  void onEnvelope; // desktop: no stateless mailbox fetch (PAR-1) — nothing to drain with
   return {
-    drainPrevious: async () => 0,
+    drainPrevious: async (onionUrl) => {
+      const { fetchMailboxOverTor } = await import('../socket/mailboxSocket');
+      return fetchMailboxOverTor(onEnvelope, { onionUrl });
+    },
     deleteAt: async (identity, relayBaseUrl) => {
       const { deleteAccountOnRelay } = await import('../crypto/accountDeletion');
       return deleteAccountOnRelay(identity, { relayBaseUrl });

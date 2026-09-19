@@ -855,10 +855,11 @@ export function connect(identity: Identity): Socket {
   });
 
   socket.on('auth:ok', async (res?: { opkCount?: number }) => {
-    // Federation F5b: retire a previous home whose grace window has passed.
+    // Federation F5b: during a migration's grace window keep draining the OLD
+    // home's copy of our mailbox, and retire it once the window has passed.
     {
       const { runMigrationHousekeeping } = await import('../net/relayMigration');
-      void runMigrationHousekeeping(identity, async () => undefined).catch(() => {});
+      void runMigrationHousekeeping(identity, (env) => handleIncomingV2(env, identity)).catch(() => {});
     }
     authenticated = true;
     clearAuthWatchdog();

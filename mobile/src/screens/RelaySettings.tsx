@@ -18,6 +18,7 @@ import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
+import { useLockConfirm } from '../components/LockConfirm';
 import { relayRefFromOnion, shortOnion, type RelayRef } from '../net/relayRef';
 import { describeHome, migrateHomeRelay, verifyRelay, type RelayInfo, type MigrateError, type VerifyRelayResult } from '../net/relayMigration';
 
@@ -52,6 +53,8 @@ export function RelaySettingsScreen({ onBack }: Props) {
   const insets = useSafeAreaInsets();
   const identity = useIdentity((s) => s.identity);
 
+  // D4: with the app lock on, changing relay needs PIN / biometrics first.
+  const { confirm: confirmLock, element: lockConfirmElement } = useLockConfirm();
   const [home, setHome] = useState(() => describeHome());
   const [onionInput, setOnionInput] = useState('');
   const [verify, setVerify] = useState<VerifyState>({ kind: 'idle' });
@@ -70,6 +73,7 @@ export function RelaySettingsScreen({ onBack }: Props) {
 
   const runMigration = useCallback(async (target: RelayRef | null) => {
     if (!identity) return;
+    if (!(await confirmLock())) { setMigrate({ kind: 'idle' }); return; }
     setMigrate({ kind: 'running', target });
     const r = await migrateHomeRelay(target, identity);
     if (r.ok) {
@@ -80,7 +84,7 @@ export function RelaySettingsScreen({ onBack }: Props) {
     } else {
       setMigrate({ kind: 'error', error: r.error, detail: r.detail });
     }
-  }, [identity]);
+  }, [identity, confirmLock]);
 
   const errorText = (code: string): string => i18nT(`relaySettings.errors.${code}`, i18nT('relaySettings.errors.unknown'));
 
@@ -241,6 +245,7 @@ export function RelaySettingsScreen({ onBack }: Props) {
           </View>
         </View>
       </Modal>
+      {lockConfirmElement}
     </View>
   );
 }

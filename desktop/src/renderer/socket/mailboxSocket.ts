@@ -279,3 +279,98 @@ export function disconnectMailboxSocket(): void {
 export function ownCurrentMailboxId(): string | null {
   return currentEpochMailbox?.mailboxIdB64 ?? null;
 }
+
+// ─── Stateless mailbox fetch (parity with mobile fetchMailboxOverTor) ─────────
+//
+// One HTTP round (challenge → signed fetch → ack next time) against a relay's
+// copy of our current-epoch mailbox. Federation F5b uses it to keep draining
+// the PREVIOUS home during a migration's grace window: a contact who has not
+// learnt the new address may still write there, and the live mailbox socket is
+// bound to the new home only. The session `fetch` is proxied through Tor by the
+// main process, so a .onion base works like any other URL.
+
+const statelessPendingAcks = new Map<string, string[]>();
+
+/**
+ * Drain `onionUrl`'s copy of our mailbox (default: the home). `onEnvelope` is the
+ * same sealed-v2 handler the socket uses (client.ts handleIncomingV2). Returns the
+ * number of envelopes persisted; fail-soft (0) on any transport/auth error. Ids
+ * are acked on the NEXT fetch, never before they are stored (at-least-once).
+ */
+export async function fetchMailboxOverTor(
+  onEnvelope: (env: IncomingMailboxEnvelope) => void | Promise<void>,
+  opts: { onionUrl?: string } = {},
+): Promise<number> {
+  const base = (opts.onionUrl ?? homeRelayOnionUrl())?.replace(/\/+$/, '');
+  if (!MAILBOX_ENABLED || !base) return 0;
+
+  let mb: Mailbox;
+  try {
+    mb = await getOwnCurrentMailbox(Date.now());
+  } catch {
+    return 0;
+  }
+  const mailboxId = mb.mailboxIdB64;
+  const signPubB64 = encodeBase64(mb.signPublicKey);
+  const headers = { 'content-type': 'application/json' };
+  const withDeadline = (): AbortSignal => {
+    const c = new AbortController();
+    setTimeout(() => c.abort(), 25_000);
+    return c.signal;
+  };
+
+  let nonceB64: string;
+  try {
+    const chal = await fetch(`${base}/mailbox/challenge`, {
+      method: 'POST', headers, signal: withDeadline(),
+      body: JSON.stringify({ mailboxId, mailboxSignPubKey: signPubB64 }),
+    });
+    if (!chal.ok) return 0;
+    const parsed = (await chal.json()) as { nonce?: unknown };
+    if (typeof parsed.nonce !== 'string') return 0;
+    nonceB64 = parsed.nonce;
+  } catch {
+    return 0;
+  }
+
+  // Possession proof over the SERVER nonce only when it is the exact 32-byte
+  // challenge the relay issues — never a signing oracle for relay-chosen bytes.
+  let sigB64: string;
+  try {
+    const nonceBytes = decodeBase64(nonceB64);
+    if (nonceBytes.length !== 32) return 0;
+    sigB64 = encodeBase64(mailboxAuthProof(mb.signSecretKey, nonceBytes));
+  } catch {
+    return 0;
+  }
+
+  const ackKey = `${base}|${mailboxId}`; // acks are per relay copy
+  const ackIds = statelessPendingAcks.get(ackKey) ?? [];
+  let envelopes: IncomingMailboxEnvelope[];
+  try {
+    const res = await fetch(`${base}/mailbox/fetch`, {
+      method: 'POST', headers, signal: withDeadline(),
+      body: JSON.stringify({ mailboxId, mailboxSignPubKey: signPubB64, nonce: nonceB64, sig: sigB64, ...(ackIds.length ? { ackIds } : {}) }),
+    });
+    if (!res.ok) return 0;
+    statelessPendingAcks.delete(ackKey);
+    const parsed = (await res.json()) as { envelopes?: unknown };
+    envelopes = Array.isArray(parsed.envelopes) ? (parsed.envelopes as IncomingMailboxEnvelope[]) : [];
+  } catch {
+    return 0;
+  }
+
+  const persisted: string[] = [];
+  for (const env of envelopes) {
+    if (!env || typeof env.id !== 'string' || typeof env.ciphertext !== 'string') continue;
+    try {
+      await onEnvelope(env);
+      persisted.push(env.id);
+    } catch (e) {
+      // Left un-acked → re-drained next time; the handler dedups by id.
+      if (DEV) logger.warn('[mailbox] stateless drain handler threw:', (e as Error).message);
+    }
+  }
+  if (persisted.length) statelessPendingAcks.set(ackKey, persisted);
+  return persisted.length;
+}

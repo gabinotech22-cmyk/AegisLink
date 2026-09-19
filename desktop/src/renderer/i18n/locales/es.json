@@ -2395,5 +2395,13 @@
       "register_failed": "El relay rechazó el registro. Inténtalo más tarde.",
       "unknown": "Algo ha fallado."
     }
+  },
+  "lockConfirm": {
+    "title": "Confirma que eres tú",
+    "body": "Introduce el PIN de la app para continuar.",
+    "prompt": "Confirma que eres tú",
+    "usePin": "Usar PIN",
+    "wrongPin": "PIN incorrecto.",
+    "confirm": "Confirmar"
   }
 }
