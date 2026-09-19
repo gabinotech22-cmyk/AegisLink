@@ -90,8 +90,8 @@ Dispositivo **A** = relay oficial (sin tocar nada). Dispositivo **B** = migra al
 |---|---|---|---|
 | 1 | B: Privacidad → Red → **Mi relay** → pegar onion → **Verificar** | `verifyRelay` por Tor nativo (`httpRequest` GET) | ✅ emulador B (~15 s, "Relay verificato · mailbox · prekeys") y A |
 | 2 | B: **Cambiar** → confirmación (PIN/biometría si hay bloqueo) → estado "relay propio desde hoy, gracia 7 d" | `migrateHomeRelay`: registro + prekeys en el destino por Tor (POST), anuncio `profile_update.mailboxRelay`, `setHomeRelay`, reconexión del socket de identidad por `TorSioSocket` | ✅ A y B: en el relay de prueba 2 identidades, 2 prekeys firmadas, 199 one-time, 2 delivery tokens; B sin ninguna conexión clearnet (solo guardas Tor) |
-| 3 | B: compartir enlace/QR → A lo añade | enlace **v2** `aegislink://v2/<id>/<pk>/<onion>/<root>` aceptado con `FEDERATION` ON | ⬜ |
-| 4 | A → B primer mensaje; B responde | **primer contacto** sellado con bootstrap X3DH (`fc`) hacia un relay ajeno por el pool; respuesta por el relay oficial | ⬜ |
+| 3 | B: compartir enlace/QR → A lo añade | enlace **v2** `aegislink://v2/<id>/<pk>/<onion>/<root>` aceptado con `FEDERATION` ON | ✅ APK `faca282` (2026-09-19, identidades nuevas): B en el relay propio, A en el oficial; A añade a B por enlace y viceversa (H2/H3 verificados) |
+| 4 | A → B primer mensaje; B responde | **primer contacto** sellado con bootstrap X3DH (`fc`) hacia un relay ajeno por el pool; respuesta por el relay oficial | ✅ APK `faca282`: mensaje en ambos sentidos, doble check; en el relay de prueba 1 one-time prekey consumida (199→198) y 1 mensaje en buzón a la hora del envío (H1 verificado) |
 | 5 | A ↔ B: entregado / leído / "escribiendo…" | receipts y typing sellados cross-relay | ⬜ |
 | 6 | A → B foto; B → A documento | blob **v3** con host `.onion`: subida por `httpUpload` nativo y descarga por `httpDownload` | ⬜ |
 | 7 | Grupo de 3: A, B y C (C en el oficial) — mensajes en ambos sentidos | fan-out con miembros en 2 relays | ⬜ |
