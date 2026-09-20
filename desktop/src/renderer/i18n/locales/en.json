@@ -362,6 +362,11 @@
     "none": "None",
     "addStatusPlaceholder": "Add a status…"
   },
+  "blocked": {
+    "title": "Blocked contacts",
+    "emptyTitle": "Nobody blocked",
+    "unblockTitle": "Unblock {{name}}? They will be able to message and call you again."
+  },
   "privacy": {
     "title": "Privacy",
     "appearanceSection": "APPEARANCE",
