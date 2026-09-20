@@ -376,6 +376,14 @@ interface SealedKeyWire {
 }
 
 /** Incoming invite handling — caller identity recovered from sealed ciphertext. */
+/** Only an accepted, unblocked contact may ring us (exported for tests). */
+export function callerMayRing(aegisId: string): boolean {
+  // Desktop has no message-request flow yet; `pending` is read structurally so
+  // the rule holds the day it does.
+  const c = useContacts.getState().get(aegisId) as { blocked?: boolean; pending?: boolean } | undefined;
+  return !!c && c.blocked !== true && c.pending !== true;
+}
+
 function processIncomingInvite(
   socket: NonNullable<ReturnType<typeof getSocket>>,
   from: string,
@@ -383,6 +391,12 @@ function processIncomingInvite(
   media: CallMedia,
   offer: string,
 ): void {
+  // "Block" must include ringing (parity with mobile): a blocked contact or a
+  // not-yet-accepted message request gets nothing back — not even "busy".
+  if (!callerMayRing(from)) {
+    if (DEV) logger.warn('[calls] invite from a blocked/pending contact — dropped silently');
+    return;
+  }
   const state = useCall.getState();
   if (state.status !== 'idle' && state.status !== 'ended') {
     // Busy — auto-reject via the sealed v2 channel (the only channel).

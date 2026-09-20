@@ -99,6 +99,19 @@ function ownSealedKeys(): { secretKey: Uint8Array; signingSecretKey: Uint8Array;
   }
 }
 
+/** Only an accepted, unblocked contact may ring us (exported for tests). */
+export function callerMayRing(aegisId: string): boolean {
+  try {
+    const { useContacts } = require('../store/contacts') as {
+      useContacts: { getState: () => { get: (id: string) => { blocked?: boolean; pending?: boolean } | undefined } };
+    };
+    const c = useContacts.getState().get(aegisId);
+    return !!c && c.blocked !== true && c.pending !== true;
+  } catch {
+    return false;
+  }
+}
+
 /** Resolve a contact's Ed25519 signing public key (to authenticate a v2 invite). */
 function peerSigningKey(aegisId: string): Uint8Array | null {
   try {
@@ -296,6 +309,13 @@ async function processIncomingInvite(
   media: CallMedia,
   offer: string,
 ): Promise<void> {
+  // "Block" promises they cannot reach you: that must include ringing. A
+  // blocked contact, or a message request not yet accepted (`pending`), gets
+  // nothing back — not even "busy", which would confirm we are online.
+  if (!callerMayRing(from)) {
+    if (__DEV__) logger.warn('[calls] invite from a blocked/pending contact — dropped silently');
+    return;
+  }
   const state = useCall.getState();
   if (state.status !== 'idle' && state.status !== 'ended') {
     // Busy — auto-reject via the sealed v2 channel (the only channel).
