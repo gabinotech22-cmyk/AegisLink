@@ -1596,6 +1596,7 @@
     "appIconCustomizationIs": "App icon customization is only available on mobile. Open AegisLink on your iOS or Android device to change the app icon."
   },
   "scanQR": {
+    "noQrInImage": "No QR code found in that image. Try a sharper screenshot or paste the Aegis ID below.",
     "title": "Scan QR",
     "instruction": "Point camera at an Aegis QR code",
     "permissionDenied": "Camera permission denied",
@@ -1612,13 +1613,12 @@
     "networkError": "Could not connect to the server. Check your internet connection and try again.",
     "addError": "Could not add contact",
     "adding": "Adding…",
-    "qrScanningFromFile": "QR scanning from file is not supported in this build. Please use the text field below to paste the Aegis ID or JSON payload.",
     "enterAnAegisId": "Enter an Aegis ID or JSON payload.",
     "notAValidAegislink": "Not a valid AegisLink ID. Try the full JSON from a QR code.",
     "keyChangedForThis": "Key changed for this contact.\n\nOld key: …{{v0}}\nNew key: …{{v1}}\n\nAccept new key?",
     "couldNotAddContact": "Could not add contact: {{v0}}",
     "scanQrAddContact": "Scan QR / Add contact",
-    "cameraQrScanningIs": "Camera QR scanning is not available on desktop. Use the mobile app to scan in-person, or paste the Aegis ID / JSON payload below.",
+    "cameraQrScanningIs": "Camera scanning is not available on desktop: upload an image of the QR or paste the Aegis ID / link below.",
     "qrFromImageFile": "QR FROM IMAGE FILE (stub)",
     "uploadQrImage": "Upload QR image",
     "pasteAegisIdOr": "PASTE AEGIS ID OR JSON",

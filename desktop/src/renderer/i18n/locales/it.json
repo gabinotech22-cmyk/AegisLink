@@ -1568,6 +1568,7 @@
     "appIconCustomizationIs": "La personalizzazione dell'icona è disponibile solo su mobile. Apri AegisLink sul tuo dispositivo iOS o Android per cambiare l'icona dell'app."
   },
   "scanQR": {
+    "noQrInImage": "Nessun codice QR trovato nell'immagine. Prova con uno screenshot più nitido o incolla l'Aegis ID qui sotto.",
     "title": "Scansiona QR",
     "instruction": "Punta la fotocamera su un codice QR Aegis",
     "permissionDenied": "Permesso fotocamera negato",
@@ -1584,13 +1585,12 @@
     "networkError": "Impossibile connettersi al server. Controlla la connessione a internet e riprova.",
     "addError": "Impossibile aggiungere il contatto",
     "adding": "Aggiunta in corso…",
-    "qrScanningFromFile": "La lettura del QR da file non è supportata in questa versione. Usa il campo di testo qui sotto per incollare l'Aegis ID o il JSON.",
     "enterAnAegisId": "Inserisci un Aegis ID o un JSON.",
     "notAValidAegislink": "Non è un ID AegisLink valido. Prova con il JSON completo di un codice QR.",
     "keyChangedForThis": "La chiave di questo contatto è cambiata.\n\nChiave precedente: …{{v0}}\nChiave nuova: …{{v1}}\n\nAccettare la nuova chiave?",
     "couldNotAddContact": "Impossibile aggiungere il contatto: {{v0}}",
     "scanQrAddContact": "Scansiona QR / Aggiungi contatto",
-    "cameraQrScanningIs": "La scansione QR con fotocamera non è disponibile su desktop. Usa l'app mobile per scansionare di persona o incolla qui sotto l'Aegis ID / JSON.",
+    "cameraQrScanningIs": "La scansione con fotocamera non è disponibile su desktop: carica un'immagine del QR o incolla qui sotto l'Aegis ID / link.",
     "qrFromImageFile": "QR DA FILE IMMAGINE (provvisorio)",
     "uploadQrImage": "Carica immagine QR",
     "pasteAegisIdOr": "INCOLLA AEGIS ID O JSON",
