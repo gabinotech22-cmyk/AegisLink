@@ -440,7 +440,7 @@
     "privacySecurity": "Privacy & Security",
     "letOthersKnowYou": "Let others know you've read their messages",
     "showWhenYouRe": "Show when you're composing a message",
-    "preventScreenCaptureOf": "Prevent screen capture of message content",
+    "preventScreenCaptureOf": "Keeps the window out of screenshots and screen sharing (Windows and macOS).",
     "anonymizeTrafficThroughThe": "Anonymize traffic through the Tor network (slower)",
     "backUpYourMessages": "Back up your messages with a key only you hold",
     "setAGlobalTimer": "Set a global timer for all messages",

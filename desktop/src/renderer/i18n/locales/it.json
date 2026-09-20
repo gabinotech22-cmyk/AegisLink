@@ -440,7 +440,7 @@
     "privacySecurity": "Privacy e sicurezza",
     "letOthersKnowYou": "Fai sapere agli altri che hai letto i loro messaggi",
     "showWhenYouRe": "Mostra quando stai scrivendo un messaggio",
-    "preventScreenCaptureOf": "Impedisce la cattura dello schermo del contenuto dei messaggi",
+    "preventScreenCaptureOf": "Esclude la finestra da screenshot e condivisione schermo (Windows e macOS).",
     "anonymizeTrafficThroughThe": "Anonimizza il traffico tramite la rete Tor (più lento)",
     "backUpYourMessages": "Esegui il backup dei messaggi con una chiave che solo tu possiedi",
     "setAGlobalTimer": "Imposta un timer globale per tutti i messaggi",

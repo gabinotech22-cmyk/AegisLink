@@ -103,6 +103,11 @@ contextBridge.exposeInMainWorld('aegis', {
     show: (title: string, body: string): Promise<void> =>
       ipcRenderer.invoke('notifications:show', title, body)
   },
+  window: {
+    /** Exclude the window from screen capture / sharing. Resolves whether the platform enforces it. */
+    setContentProtection: (enabled: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('window:set-content-protection', enabled)
+  },
   // ── Embedded Tor (main/tor/*) — status + the socket.io-over-Tor dumb pipe ──
   tor: {
     status: (): Promise<unknown> => ipcRenderer.invoke('tor:status'),

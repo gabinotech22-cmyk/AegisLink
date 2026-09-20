@@ -105,6 +105,16 @@ function Shell() {
   const { identity, status, hydrated, hydrate, publishStatus } = useIdentity();
   const hydratePrefs = usePreferences((s) => s.hydrate);
   const appLockEnabled = usePreferences((s) => s.appLockEnabled);
+  const blockScreenshots = usePreferences((s) => s.blockScreenshots);
+  const prefsHydrated = usePreferences((s) => s.hydrated);
+
+  // Privacy → "Block screenshots" = Electron content protection (window
+  // excluded from screen capture / sharing on Windows and macOS). Applied on
+  // every change and after hydration so a restart keeps it.
+  useEffect(() => {
+    if (!prefsHydrated) return;
+    window.aegis.window?.setContentProtection(blockScreenshots).catch(() => { /* older preload */ });
+  }, [blockScreenshots, prefsHydrated]);
   const lockTimeoutMin = usePreferences((s) => s.lockTimeoutMin);
   const duressActive = usePreferences((s) => s.duressActive);
 

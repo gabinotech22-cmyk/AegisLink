@@ -74,6 +74,9 @@ export interface AegisIPC {
   notifications: {
     show(title: string, body: string): Promise<void>;
   };
+  window: {
+    setContentProtection(enabled: boolean): Promise<boolean>;
+  };
   tor: {
     status(): Promise<unknown>;
     onStatus(cb: (status: unknown) => void): () => void;
