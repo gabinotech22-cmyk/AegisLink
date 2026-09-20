@@ -131,7 +131,7 @@ export interface MessageRow {
 
 export type LastMessageRow = Pick<
   MessageRow,
-  'id' | 'chat_id' | 'direction' | 'body' | 'created_at'
+  'id' | 'chat_id' | 'direction' | 'body' | 'created_at' | 'type' | 'deleted' | 'expires_at'
 >;
 
 export interface RatchetRow {

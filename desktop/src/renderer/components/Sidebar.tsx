@@ -225,7 +225,10 @@ function ChatItem({
   const [hovered, setHovered] = useState(false);
 
   let previewText: string;
-  if (preview) {
+  if (preview?.deleted) {
+    // A message deleted (for me or for everyone) must not keep its text in the list.
+    previewText = i18n.t('chat.deletedMessage');
+  } else if (preview) {
     if (preview.direction === 'out') {
       previewText = `You: ${preview.body || (preview.type === 'image' ? 'Image' : preview.type === 'audio' ? 'Audio' : '...')}`;
     } else {
