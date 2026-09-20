@@ -97,6 +97,12 @@ con Tor arrancado.
 
 ## Limitaciones conocidas de Beta 1 (declaradas, no ocultas)
 
+> Ajustes de privacidad en desktop (2026-09-20): recibos de lectura y
+> "escribiendo" se envían desde `Chat.tsx` gobernados por Privacidad;
+> "Bloquear capturas" = content protection de Electron (Windows/macOS; en Linux
+> no aplica). No hay "ocultar en recientes" ni "última vez" — no existen en
+> escritorio ni en el producto (cero metadatos).
+
 1. ~~Sin Tor~~ → ✅ resuelto (sección Tor). Queda: sin bridges/PT para redes que
    bloquean Tor; latencia de llamadas mayor (TURN-TCP por Tor).
 2. ~~UI solo en inglés~~ → ✅ resuelto (rama `feat/desktop-i18n`): las 44
