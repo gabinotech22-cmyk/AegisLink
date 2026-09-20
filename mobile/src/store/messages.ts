@@ -21,6 +21,14 @@ import {
 
 interface MessagesState {
   byChat: Record<string, StoredMessage[]>;
+  /**
+   * Chats whose `byChat` list came from a real load (DB or decoy blob). Any
+   * other action may create a `byChat` entry for a chat it touches (a receipt,
+   * a reaction, an incoming message) with only the rows it knows about; before
+   * this flag `loadChat` trusted such partial lists and a group opened empty,
+   * or a 1:1 showed one message, until restart. Only a flagged entry is a cache.
+   */
+  loadedChats: Record<string, true>;
   previews: Record<string, StoredMessage>;
   pinnedMsg: Record<string, StoredMessage | null>;
   /** @deprecated Use ephemeralTimers[chatId] instead. Kept for backward compatibility. */
@@ -77,6 +85,14 @@ function isDuress(): boolean {
   return usePreferences.getState().duressActive;
 }
 
+/** Tray notifications for a chat go away when the chat is read in-app. */
+function dismissTrayFor(chatId: string): void {
+  try {
+    const { dismissNotificationsForChat } = require('../notifications/push') as typeof import('../notifications/push');
+    void dismissNotificationsForChat(chatId);
+  } catch { /* push module unavailable (unit tests) */ }
+}
+
 /**
  * Keep the app-icon badge equal to the unread total after every counter change.
  * Inline require: notifications/push imports this store (require cycle).
@@ -90,6 +106,7 @@ function syncBadge(): void {
 
 export const useMessages = create<MessagesState>((set, get) => ({
   byChat: {},
+  loadedChats: {},
   previews: {},
   pinnedMsg: {},
   ephemeralTimer: 0,
@@ -113,7 +130,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
       // In-session decoy edits (star/pin/soft-delete/clearChat) live only in
       // byChat — reloading from the blob on reopen would clobber them.
       const cachedDecoy = get().byChat[chatId];
-      if (cachedDecoy) return cachedDecoy;
+      if (cachedDecoy && get().loadedChats[chatId]) return cachedDecoy;
       // Decoy mode: serve the seeded fake conversation from the SecureStore
       // decoy blob. The real SQLite DB is never read while under duress.
       const { getOrCreateDecoyBlob } = require('./duressDecoy') as typeof import('./duressDecoy');
@@ -122,6 +139,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
       const pinned = list.find((m) => m.pinned) ?? null;
       set((s) => ({
         byChat: { ...s.byChat, [chatId]: list },
+        loadedChats: { ...s.loadedChats, [chatId]: true },
         pinnedMsg: { ...s.pinnedMsg, [chatId]: pinned },
       }));
       const last = list[list.length - 1];
@@ -129,7 +147,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
       return list;
     }
     const cached = get().byChat[chatId];
-    if (cached) return cached;
+    if (cached && get().loadedChats[chatId]) return cached;
     let list = await loadMessagesByChat(chatId);
 
     // Filter already-expired messages (expiresAt is the authoritative expiry field;
@@ -142,6 +160,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
 
     set((s) => ({
       byChat: { ...s.byChat, [chatId]: list },
+      loadedChats: { ...s.loadedChats, [chatId]: true },
       pinnedMsg: { ...s.pinnedMsg, [chatId]: pinned },
       drafts: draft !== null ? { ...s.drafts, [chatId]: draft } : s.drafts,
       unreadCounts: { ...s.unreadCounts, [chatId]: unreadCount },
@@ -213,8 +232,12 @@ export const useMessages = create<MessagesState>((set, get) => ({
     // reading the real DB here would leak real message previews into the decoy.
     if (isDuress()) return;
     const last = await lastMessageByChat(chatId);
-    if (!last) return;
-    set((s) => ({ previews: { ...s.previews, [chatId]: last } }));
+    set((s) => {
+      const previews = { ...s.previews };
+      if (last) previews[chatId] = last;
+      else delete previews[chatId];
+      return { previews };
+    });
   },
 
   async markRead(chatId) {
@@ -226,6 +249,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
     await resetUnread(chatId);
     set((s) => ({ unreadCounts: { ...s.unreadCounts, [chatId]: 0 } }));
     syncBadge();
+    dismissTrayFor(chatId);
   },
 
   async saveDraft(chatId, text) {
@@ -307,7 +331,16 @@ export const useMessages = create<MessagesState>((set, get) => ({
     }
 
     if (changed) set({ byChat: updatedByChat });
-    deleteExpiredMessages().catch(() => {});
+    // Refresh the list previews of the chats that lost rows, AFTER the DB
+    // purge so the new "last message" is a live one — otherwise the chat list
+    // kept showing an expired message's text.
+    const touched = Object.keys(get().byChat).filter((chatId) => {
+      const pv = get().previews[chatId];
+      return !!pv && pv.expiresAt != null && now >= pv.expiresAt;
+    });
+    deleteExpiredMessages()
+      .catch(() => {})
+      .then(() => { for (const chatId of touched) void get().refreshPreview(chatId); });
   },
 
   async toggleStar(chatId, id) {
@@ -341,6 +374,11 @@ export const useMessages = create<MessagesState>((set, get) => ({
         ),
       },
     }));
+    // The chat list must not keep showing the text of a message that is gone.
+    const pv = get().previews[chatId];
+    if (pv && pv.id === id) {
+      set((s) => ({ previews: { ...s.previews, [chatId]: { ...pv, deleted: true, body: '', mediaUri: null } } }));
+    }
   },
 
   async toggleReaction(chatId, id, emoji, aegisId) {
@@ -435,6 +473,11 @@ export const useMessages = create<MessagesState>((set, get) => ({
         ),
       },
     }));
+    // The chat list must not keep showing the text of a message that is gone.
+    const pv = get().previews[chatId];
+    if (pv && pv.id === id) {
+      set((s) => ({ previews: { ...s.previews, [chatId]: { ...pv, deleted: true, body: '', mediaUri: null } } }));
+    }
   },
 
   async togglePin(chatId, id) {
@@ -480,19 +523,20 @@ export const useMessages = create<MessagesState>((set, get) => ({
     }
     set((s) => {
       const byChat = { ...s.byChat };
+      const loadedChats = { ...s.loadedChats };
       const previews = { ...s.previews };
       const unreadCounts = { ...s.unreadCounts };
       const pinnedMsg = { ...s.pinnedMsg };
       const drafts = { ...s.drafts };
-      // Under duress keep an (empty) entry so loadChat's in-memory cache wins
-      // and the cleared chat isn't resurrected from the decoy blob on reopen.
-      if (duress) byChat[chatId] = [];
-      else delete byChat[chatId];
+      // Under duress keep an (empty, loaded) entry so loadChat's in-memory
+      // cache wins and the cleared chat isn't resurrected from the decoy blob.
+      if (duress) { byChat[chatId] = []; loadedChats[chatId] = true; }
+      else { delete byChat[chatId]; delete loadedChats[chatId]; }
       delete previews[chatId];
       delete unreadCounts[chatId];
       delete pinnedMsg[chatId];
       delete drafts[chatId];
-      return { byChat, previews, unreadCounts, pinnedMsg, drafts };
+      return { byChat, loadedChats, previews, unreadCounts, pinnedMsg, drafts };
     });
   },
 }));

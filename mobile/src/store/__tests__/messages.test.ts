@@ -30,6 +30,8 @@ jest.mock('../../db/local', () => ({
   setRemoteMessageDeleted: jest.fn().mockImplementation((id: string, chatId: string, senderId: string) => Promise.resolve(true)),
   setMessageReactions: jest.fn().mockResolvedValue(undefined),
   updateMessageDelivery: jest.fn().mockResolvedValue(undefined),
+  advanceMessageDelivery: jest.fn().mockResolvedValue(undefined),
+  nextDeliveryStatus: (cur: string, inc: string) => inc,
   setMessagePinned: jest.fn().mockResolvedValue(undefined),
 }));
 
@@ -641,5 +643,79 @@ describe('loadChat — duress mode', () => {
 
     expect(result).toEqual(fakeDecoyMessages);
     expect(dbLocal.loadMessagesByChat).not.toHaveBeenCalled();
+  });
+});
+
+// ─── State reconciliation audit (2026-09-20) ─────────────────────────────────
+// A store action on a chat that was never loaded must not leave behind a
+// partial list that loadChat later trusts as the whole history.
+
+describe('loadedChats — partial lists are never a cache', () => {
+  beforeEach(() => { resetStore(); useMessages.setState({ loadedChats: {} }); jest.clearAllMocks(); });
+
+  it('a delivery receipt for an unopened group does not make the group open empty', async () => {
+    (dbLocal.loadMessagesByChat as jest.Mock).mockResolvedValueOnce([makeMsg({ id: 'old-1', chatId: 'grp' }), makeMsg({ id: 'old-2', chatId: 'grp' })]);
+    await useMessages.getState().updateDelivery('grp', 'old-2', 'delivered'); // seeds byChat.grp = []
+    expect(useMessages.getState().byChat['grp']).toEqual([]);
+    const list = await useMessages.getState().loadChat('grp');
+    expect(list.map((m) => m.id)).toEqual(['old-1', 'old-2']); // DB, not the seed
+    expect(dbLocal.loadMessagesByChat).toHaveBeenCalledWith('grp');
+  });
+
+  it('an incoming message before the chat is loaded does not hide the history', async () => {
+    (dbLocal.loadMessagesByChat as jest.Mock).mockResolvedValueOnce([makeMsg({ id: 'old', chatId: 'chat-alice' }), makeMsg({ id: 'new', chatId: 'chat-alice', direction: 'in' })]);
+    await useMessages.getState().append(makeMsg({ id: 'new', chatId: 'chat-alice', direction: 'in' }));
+    expect(useMessages.getState().byChat['chat-alice'].map((m) => m.id)).toEqual(['new']);
+    const list = await useMessages.getState().loadChat('chat-alice');
+    expect(list.map((m) => m.id)).toEqual(['old', 'new']);
+  });
+
+  it('once loaded, the cache is used and the DB is not re-read', async () => {
+    (dbLocal.loadMessagesByChat as jest.Mock).mockResolvedValueOnce([makeMsg({ id: 'a', chatId: 'c' })]);
+    await useMessages.getState().loadChat('c');
+    await useMessages.getState().loadChat('c');
+    expect(dbLocal.loadMessagesByChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('clearChat forgets the loaded flag so the next open reads the (now empty) DB', async () => {
+    (dbLocal.loadMessagesByChat as jest.Mock).mockResolvedValueOnce([makeMsg({ id: 'a', chatId: 'c' })]);
+    await useMessages.getState().loadChat('c');
+    await useMessages.getState().clearChat('c');
+    expect(useMessages.getState().loadedChats['c']).toBeUndefined();
+  });
+});
+
+describe('previews follow deletes and expiry', () => {
+  beforeEach(() => { resetStore(); useMessages.setState({ loadedChats: {} }); jest.clearAllMocks(); });
+
+  it('softDelete of the last message blanks the list preview', async () => {
+    const m = makeMsg({ id: 'last', chatId: 'c', body: 'secret' });
+    useMessages.setState({ byChat: { c: [m] }, previews: { c: m } });
+    await useMessages.getState().softDelete('c', 'last');
+    const pv = useMessages.getState().previews['c'];
+    expect(pv.deleted).toBe(true);
+    expect(pv.body).toBe('');
+  });
+
+  it('remoteDelete (delete for everyone) blanks the preview too, only when it is that message', async () => {
+    const a = makeMsg({ id: 'a', chatId: 'c', body: 'first', direction: 'in' });
+    const b = makeMsg({ id: 'b', chatId: 'c', body: 'second', direction: 'in' });
+    useMessages.setState({ byChat: { c: [a, b] }, previews: { c: b } });
+    await useMessages.getState().remoteDelete('c', 'a', 'peer');
+    expect(useMessages.getState().previews['c'].body).toBe('second'); // untouched
+    await useMessages.getState().remoteDelete('c', 'b', 'peer');
+    expect(useMessages.getState().previews['c'].deleted).toBe(true);
+  });
+
+  it('pruneExpired refreshes the preview of a chat whose last message expired', async () => {
+    const gone = makeMsg({ id: 'gone', chatId: 'c', body: 'ephemeral', expiresAt: Date.now() - 1 });
+    const keep = makeMsg({ id: 'keep', chatId: 'c', body: 'still here', createdAt: Date.now() - 10_000 });
+    useMessages.setState({ byChat: { c: [keep, gone] }, previews: { c: gone } });
+    (dbLocal.lastMessageByChat as jest.Mock).mockResolvedValueOnce(keep);
+    useMessages.getState().pruneExpired();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(dbLocal.lastMessageByChat).toHaveBeenCalledWith('c');
+    expect(useMessages.getState().previews['c'].id).toBe('keep');
   });
 });

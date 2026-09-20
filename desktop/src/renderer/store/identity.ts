@@ -446,7 +446,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     const { useMessages } = await import('./messages');
     useContacts.setState({ contacts: [], loading: false, error: null });
     useGroups.setState({ groups: [] });
-    useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {}, pendingMediaUri: null });
+    useMessages.setState({ byChat: {}, loadedChats: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {}, pendingMediaUri: null });
 
     set({
       identity: null,
@@ -558,7 +558,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       const { useMessages } = await import('./messages');
       useContacts.setState({ contacts: [], loading: false, error: null });
       useGroups.setState({ groups: [] });
-      useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {}, pendingMediaUri: null });
+      useMessages.setState({ byChat: {}, loadedChats: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {}, pendingMediaUri: null });
 
       setActiveDbSlot(slotId);
       await secureStorage().set('aegis.activeSlotId', slotId);
