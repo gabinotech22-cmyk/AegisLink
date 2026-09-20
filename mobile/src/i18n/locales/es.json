@@ -937,6 +937,8 @@
     "fewOptionsDesc": "Añade al menos 2 opciones."
   },
   "dataExport": {
+    "noShareTitle": "No se puede compartir",
+    "noShareDesc": "Ninguna app de este dispositivo puede recibir el archivo.",
     "title": "Tus datos",
     "export": "Exportar datos",
     "deleteAccount": "Eliminar cuenta",
