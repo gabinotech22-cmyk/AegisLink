@@ -459,6 +459,43 @@ The wire envelope the relay validates (`server/src/relay/handler.ts`,
   recipient **trial-decrypts** the outer box against each known contact's public
   key to learn the sender.
 
+**Transport selector (1.0.7, `buildOutgoingEnvelope`, mobile + desktop).** The
+v1 `envelope` above (socket-authenticated sender, `to` on the wire) is now the
+last resort, not the default:
+
+| Recipient | Wire |
+|---|---|
+| On another relay (federation) | sealed v2 through their relay, always; first message carries the `fc` bootstrap (§9.3) |
+| On our relay, **mailbox root known** (v2 link, prior `fc`, or their profile) and our mailbox socket authenticated | sealed v2 through **their mailbox**, first message with `fc`; no delivery token needed, so a `queued` ack is terminal (there is no aegisId transport to fall through to — the outbox drain uses the mailbox too) |
+| On our relay, established session, delivery token held | sealed v2 addressed by aegisId with the token (as before) |
+| On our relay, no root and no token (bare ID / v1 link first contact), or our mailbox down | v1 `envelope` (as before) |
+
+A recipient we already hold without a signing key (added from their link,
+never messaged) opens such a first contact by TOFU and **pins** the embedded
+signing key, bound to the identity key it already trusts (`handleIncomingV2`).
+
+**Capabilities.** Every E2EE profile carries `caps` (`net/caps.ts`, byte-identical
+mobile/desktop; sanitized and pinned per contact, `contacts.caps`). Today:
+`sealed-calls` and `sealed-first-contact`. A peer that announces nothing is
+treated as ≤ 1.0.6 and gets exactly the pre-1.0.7 transports.
+
+**Calls on our own relay (FEDERATION-DESIGN D6, decided 2026-09-20).** A local
+contact that announced `sealed-calls` receives call signaling as the same
+transient sealed `call_signal` a foreign contact gets — through our mailbox
+socket, `wakeHint: 'call'` on invites — so the relay no longer sees
+`to: aegisId` on calls. Without the cap, or whenever the mailbox is not usable
+at that instant, the relay-visible `call:*` event goes out as before: a call
+never fails to ring for want of privacy. Signals to one peer are chained so
+invite precedes ICE. Tests: `socket/__tests__/client.sealedLocal.test.ts` (6),
+desktop `callSignalRouter.test.ts` (+2), `net/__tests__/caps.test.ts`,
+`client.firstContact.test.ts` (+2 TOFU pin), `client.profileRelay.test.ts` (+1).
+
+**Still v1-capable on purpose.** The relay keeps accepting v1 until
+`APP_MIN_VERSION=1.0.7` has been enforced for a while; removing the v1 handler
+server-side (Fase 6 of `SEALED-SENDER-ARCHITECTURE.md`) is a later, relay-only
+change. Bare-ID first contact stays on v1 until the peer's first reply (which
+carries root + token + caps) upgrades the pair.
+
 > **⚠ Disclosure — what sealed sender does and does not protect.**
 > **Protects:** there is no plaintext sender field on the wire or in the at-rest
 > message queue; ciphertext size is normalized (§7.2).

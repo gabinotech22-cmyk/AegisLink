@@ -31,6 +31,8 @@
 import { logger } from '../utils/logger';
 import { decodeBase64 } from 'tweetnacl-util';
 import { isForeign } from '../net/homeRelay';
+import { CAP_SEALED_CALLS, contactHasCap } from '../net/caps';
+import { MAILBOX_ENABLED } from '../config';
 
 /** Socket-like sink: the real socket.io client or a test double. */
 export interface SignalSocket {
@@ -73,7 +75,7 @@ export function clearCallSignalHandlers(): void {
   handlers.clear();
 }
 
-function contactFor(aegisId: string): { publicKeyB64: string; relayOnion?: string | null } | undefined {
+function contactFor(aegisId: string): { publicKeyB64: string; relayOnion?: string | null; caps?: string[] | null } | undefined {
   try {
     const { useContacts } = require('../store/contacts') as typeof import('../store/contacts');
     return useContacts.getState().contacts.find((c) => c.aegisId === aegisId);
@@ -89,24 +91,29 @@ function contactFor(aegisId: string): { publicKeyB64: string; relayOnion?: strin
  * signaling failure, never as "try the home socket" (a foreign aegisId has no
  * queue there and the emit would only hand our relay the me↔to edge).
  */
-export function routeCallSignal(
-  socket: SignalSocket,
-  event: string,
+/**
+ * Per-recipient send chain: the local-contact sealed decision needs one async
+ * lookup (their mailbox id), and signals to the same peer must keep their
+ * order (invite before ICE). Chaining per `to` preserves it.
+ */
+const sendChains = new Map<string, Promise<void>>();
+function chainFor(to: string, step: () => Promise<void>): void {
+  const prev = sendChains.get(to) ?? Promise.resolve();
+  const next = prev.then(step, step).finally(() => {
+    if (sendChains.get(to) === next) sendChains.delete(to);
+  });
+  sendChains.set(to, next);
+}
+
+function sealAndSend(
+  identity: import('../crypto/identity').Identity,
   to: string,
+  recipientPublicKey: Uint8Array,
+  event: string,
   msg: Record<string, unknown>,
-): boolean {
-  const contact = contactFor(to);
-  if (!contact || !isForeign(contact)) {
-    socket.emit(event, { ...msg, to });
-    return true;
-  }
-  let recipientPublicKey: Uint8Array;
-  try { recipientPublicKey = decodeBase64(contact.publicKeyB64); } catch { return false; }
-  const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
-  const identity = useIdentity.getState().identity;
-  if (!identity) return false;
+): Promise<void> {
   const { sendMessage } = require('./client') as typeof import('./client');
-  void sendMessage({
+  return sendMessage({
     identity,
     recipientAegisId: to,
     recipientPublicKey,
@@ -119,6 +126,61 @@ export function routeCallSignal(
     wakeHint: event === 'call:invite:v2' ? 'call' : undefined,
   }).catch((e: unknown) => {
     if (__DEV__) logger.warn('[calls] sealed call signal failed:', event, (e as Error).message);
+  });
+}
+
+export function routeCallSignal(
+  socket: SignalSocket,
+  event: string,
+  to: string,
+  msg: Record<string, unknown>,
+  /** How to put this signal on the home socket when sealing is not possible
+   *  (default: `{ ...msg, to }`; the `items` fan-out passes its own shape). */
+  emitLegacy: () => void = () => { socket.emit(event, { ...msg, to }); },
+): boolean {
+  const contact = contactFor(to);
+  if (!contact) {
+    emitLegacy();
+    return true;
+  }
+  const foreign = isForeign(contact);
+  // D6 (FEDERATION-DESIGN): a contact on OUR relay gets the same sealed
+  // `call_signal` as a foreign one when it announced `sealed-calls` — the
+  // relay then stops seeing `to: aegisId` on calls — provided the sealed path
+  // is usable right now (our mailbox socket up, their mailbox id derivable).
+  // Otherwise the relay-visible event goes out as before, so a call never
+  // fails to ring for want of privacy. A pre-caps peer never sees a sealed one.
+  const sealedLocal = !foreign && MAILBOX_ENABLED && contactHasCap(contact, CAP_SEALED_CALLS);
+  if (!foreign && !sealedLocal) {
+    emitLegacy();
+    return true;
+  }
+  let recipientPublicKey: Uint8Array;
+  try { recipientPublicKey = decodeBase64(contact.publicKeyB64); } catch {
+    if (foreign) return false;
+    emitLegacy();
+    return true;
+  }
+  const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+  const identity = useIdentity.getState().identity;
+  if (!identity) {
+    if (foreign) return false;
+    emitLegacy();
+    return true;
+  }
+  if (foreign) {
+    chainFor(to, () => sealAndSend(identity, to, recipientPublicKey, event, msg));
+    return true;
+  }
+  chainFor(to, async () => {
+    const { isMailboxAuthed } = require('./mailboxSocket') as typeof import('./mailboxSocket');
+    const { getContactCurrentMailboxId } = require('../crypto/mailboxStore') as typeof import('../crypto/mailboxStore');
+    let mboxTo: string | null = null;
+    if (isMailboxAuthed()) {
+      try { mboxTo = await getContactCurrentMailboxId(to, Date.now()); } catch { mboxTo = null; }
+    }
+    if (mboxTo) await sealAndSend(identity, to, recipientPublicKey, event, msg);
+    else emitLegacy();
   });
   return true;
 }
@@ -137,8 +199,12 @@ export function routeCallSignalItems(
   const local: typeof items = [];
   for (const it of items) {
     const contact = contactFor(it.to);
-    if (contact && isForeign(contact)) {
-      routeCallSignal(socket, event, it.to, { ...base, ciphertext: it.ciphertext, nonce: it.nonce });
+    if (contact && (isForeign(contact) || (MAILBOX_ENABLED && contactHasCap(contact, CAP_SEALED_CALLS)))) {
+      routeCallSignal(
+        socket, event, it.to, { ...base, ciphertext: it.ciphertext, nonce: it.nonce },
+        // Sealing not possible right now → this member's item in the fan-out shape.
+        () => { socket.emit(event, { ...base, items: [it] }); },
+      );
     } else {
       local.push(it);
     }

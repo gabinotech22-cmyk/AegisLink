@@ -105,6 +105,10 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
       experimental en README y no venderlo como cero-metadatos hasta el cutover).
 - [ ] Sellar o documentar como limitación los indicadores en tiempo real que hoy exponen el par al
       relay: `typing` (`messaging.ts:28`) y read-receipts `msg:read` (`messaging.ts:52`).
+- [x] **v1 solo como último recurso + llamadas selladas en el oficial (2026-09-20):** con raíz de
+      buzón conocida el cliente emite siempre v2 (primer contacto incluido); llamadas a contactos
+      que anuncian `sealed-calls` por buzón. Gateado por `caps` en el perfil para convivir con
+      1.0.6. `docs/PROTOCOL.md` §7.3. Pendiente: retirar v1 en el relay tras `APP_MIN_VERSION`.
 
 ## Hito 3 — Terminar el endurecimiento cripto 🟠
 
