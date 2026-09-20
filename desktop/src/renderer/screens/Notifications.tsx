@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { usePreferences } from '../store/preferences';
 import { useContacts } from '../store/contacts';
+import { useGroups } from '../store/groups';
+import { isContactMutedNow, isChatMutedNow, withChatMute } from '../utils/mute';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import type { CSSProperties } from 'react';
@@ -38,17 +40,30 @@ export function NotificationsScreen({ onBack }: Props) {
   const [kwInput, setKwInput] = useState('');
   const [showKwInput, setShowKwInput] = useState(false);
 
-  // Muted conversations come from the contacts themselves (muted / mutedUntil).
+  // Muted conversations: contacts from their record, groups (any chat id)
+  // from preferences.mutedChats(+Until) — one semantics via utils/mute.ts.
   const contacts = useContacts((s) => s.contacts);
-  const unmute = useContacts((s) => s.muteContact);
+  const groups = useGroups((s) => s.groups);
+  const unmuteContact = useContacts((s) => s.muteContact);
+  const mutedChats = usePreferences((s) => s.mutedChats);
+  const mutedChatsUntil = usePreferences((s) => s.mutedChatsUntil);
   const now = Date.now();
-  const muted = contacts
-    .filter((c) => c.muted || (c.mutedUntil != null && c.mutedUntil > now))
-    .map((c) => ({
-      id: c.aegisId,
-      name: c.name,
-      until: c.mutedUntil != null && c.mutedUntil > now ? new Date(c.mutedUntil).toLocaleString() : 'always',
-    }));
+  const untilLabel = (until: number | null | undefined): string =>
+    until && until > 0 ? new Date(until).toLocaleString() : i18n.t('notifications.always');
+  const muted: { id: string; name: string; until: string; kind: 'contact' | 'chat' }[] = [
+    ...contacts
+      .filter((c) => isContactMutedNow(c, now))
+      .map((c) => ({ id: c.aegisId, name: c.name, until: untilLabel(c.mutedUntil), kind: 'contact' as const })),
+    ...mutedChats
+      .filter((id) => isChatMutedNow({ mutedChats, mutedChatsUntil }, id, now))
+      .map((id) => ({ id, name: groups.find((g) => g.id === id)?.name ?? contacts.find((c) => c.aegisId === id)?.name ?? id, until: untilLabel(mutedChatsUntil?.[id]), kind: 'chat' as const })),
+  ];
+  function unmute(m: { id: string; kind: 'contact' | 'chat' }): void {
+    if (m.kind === 'contact') { void unmuteContact(m.id, false); return; }
+    const next = withChatMute({ mutedChats, mutedChatsUntil }, m.id, false);
+    void setPref('mutedChats', next.mutedChats);
+    void setPref('mutedChatsUntil', next.mutedChatsUntil);
+  }
 
   function removeKeyword(k: string) {
     void setPref('notifKeywords', keywords.filter((x) => x !== k));
@@ -147,7 +162,7 @@ export function NotificationsScreen({ onBack }: Props) {
                     </span>
                   </div>
                   <button
-                    onClick={() => { void unmute(m.id, false); }}
+                    onClick={() => unmute(m)}
                     aria-label={i18n.t('notifications.unmuteV0', { v0: m.name })}
                     style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, background: 'none', cursor: 'pointer' }}
                   >

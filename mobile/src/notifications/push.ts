@@ -7,6 +7,7 @@ import { relayFetch } from '../net/relayHttp';
 import type { Identity } from '../crypto/identity';
 import i18n, { tAsync, resolveActiveLocale } from '../i18n';
 import { previewLabel } from '../utils/messagePreview';
+import { isContactMutedNow, isChatMutedNow } from '../utils/mute';
 
 /** Language-neutral marker appended to message notifications. */
 const E2EE_MARK = ' ● E2EE';
@@ -602,15 +603,16 @@ export async function showIncomingNotification(
     const prefs = usePreferences.getState();
 
     const targetChatId = isGroup ? (groupId ?? groupName ?? senderAegisId) : senderAegisId;
-    let isMuted = prefs.mutedChats.includes(targetChatId);
+    // Group (or any chat id) muted through preferences; a contact through its
+    // record. One helper for both so "always" and timed mutes mean the same
+    // everywhere (utils/mute.ts).
+    let isMuted = isChatMutedNow(prefs, targetChatId, Date.now());
 
-    if (!isMuted) {
+    if (!isMuted && !isGroup) {
       try {
         const { getContact } = require('../db/local');
         const contact = await getContact(senderAegisId);
-        if (contact && contact.mutedUntil && contact.mutedUntil > Date.now()) {
-          isMuted = true;
-        }
+        if (isContactMutedNow(contact, Date.now())) isMuted = true;
       } catch (e) {
         if (__DEV__) logger.warn('[push] failed to check database muted_until:', e);
       }
@@ -784,7 +786,7 @@ export async function showGroupCallChannelNotification(
     const { usePreferences } = require('../store/preferences');
     const prefs = usePreferences.getState();
     if (!prefs.notifMaster) return;
-    if (prefs.mutedChats.includes(groupId)) return;
+    if (isChatMutedNow(prefs, groupId, Date.now())) return;
 
     await Notifications.scheduleNotificationAsync({
       content: {
@@ -926,11 +928,11 @@ export async function showMissedCallNotification(
     const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
     const prefs = usePreferences.getState();
     if (!prefs.notifMaster) return;
-    if (prefs.mutedChats.includes(callerAegisId)) return;
+    if (isChatMutedNow(prefs, callerAegisId, Date.now())) return;
     try {
       const { getContact } = require('../db/local') as typeof import('../db/local');
       const c = await getContact(callerAegisId);
-      if (c?.mutedUntil && c.mutedUntil > Date.now()) return;
+      if (isContactMutedNow(c, Date.now())) return;
     } catch { /* treat as not muted */ }
     await Notifications.scheduleNotificationAsync({
       identifier: `missed-call-${callId}`,
