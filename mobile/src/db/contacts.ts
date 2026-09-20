@@ -184,9 +184,17 @@ export async function getContact(aegisId: string): Promise<StoredContact | null>
 }
 
 export async function deleteContactMessages(chatId: string): Promise<void> {
-  return withDb(async (d) => {
+  const uris = await withDb(async (d) => {
+    const rows = await d.getAllAsync<{ media_uri: string | null; attachments: string | null }>(
+      'SELECT media_uri, attachments FROM messages WHERE chat_id = ? AND (media_uri IS NOT NULL OR attachments IS NOT NULL)', chatId,
+    );
+    const { mediaUrisOfRows } = require('./messages') as typeof import('./messages');
+    const found = await mediaUrisOfRows(rows);
     await d.runAsync('DELETE FROM messages WHERE chat_id = ?', chatId);
+    return found;
   });
+  const { wipeMediaFiles } = require('./messages') as typeof import('./messages');
+  await wipeMediaFiles(uris);
 }
 
 export async function deleteContactRatchetSession(aegisId: string): Promise<void> {

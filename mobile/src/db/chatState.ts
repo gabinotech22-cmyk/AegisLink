@@ -92,13 +92,23 @@ export async function getAllChatEphemeralTimers(): Promise<Record<string, number
 // ─── Ephemeral cleanup ────────────────────────────────────────────────────────
 
 export async function deleteExpiredMessages(_timerSeconds?: number): Promise<void> {
-  return withDb(async (d) => {
+  const uris = await withDb(async (d) => {
     const now = Date.now();
     // Only delete messages that have an explicit expiresAt set and have passed it.
     // The global timer is no longer used — expiresAt is authoritative.
+    const rows = await d.getAllAsync<{ media_uri: string | null; attachments: string | null }>(
+      'SELECT media_uri, attachments FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ? AND (media_uri IS NOT NULL OR attachments IS NOT NULL)',
+      now
+    );
+    const { mediaUrisOfRows } = require('./messages') as typeof import('./messages');
+    const found = await mediaUrisOfRows(rows);
     await d.runAsync(
       'DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?',
       now
     );
+    return found;
   });
+  // An ephemeral attachment must not outlive its row on disk.
+  const { wipeMediaFiles } = require('./messages') as typeof import('./messages');
+  await wipeMediaFiles(uris);
 }
