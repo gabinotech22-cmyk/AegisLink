@@ -17,6 +17,7 @@ import { usePreferences } from '../store/preferences';
 import type { StoredContact } from '../db/local';
 import { themedAlert } from '../components/AlertHost';
 import { ImageViewerModal } from '../components/ImageViewerModal';
+import { NicknameModal } from '../components/NicknameModal';
 
 // Abuse reports are delivered by the reporter's own mail client — nothing touches
 // the relay, so this stays compatible with the zero-metadata guarantee. Reporting
@@ -52,9 +53,10 @@ export function ContactDetailScreen({
   // Full-screen expanded view of the contact's profile photo (standard
   // messenger behavior: tap the avatar → see it big). Only when a photo is set.
   const [photoOpen, setPhotoOpen] = useState(false);
+  const [nicknameOpen, setNicknameOpen] = useState(false);
 
   // Use live contact from store so muted/zeroTrust updates reflect instantly
-  const { muteContact, setZeroTrust, setBlocked, removeContact, confirmKeyChange, markVerified } = useContacts();
+  const { muteContact, setZeroTrust, setBlocked, removeContact, confirmKeyChange, markVerified, setNickname } = useContacts();
   const contact =
     useContacts((s) => s.contacts.find((c) => c.aegisId === contactProp.aegisId)) ?? contactProp;
 
@@ -250,6 +252,13 @@ export function ContactDetailScreen({
             >
               {contact.name}
             </Text>
+            {contact.nickname?.trim() && contact.profileName && contact.profileName !== contact.aegisId && contact.profileName !== contact.name ? (
+              // Signal-style "~Name": the name they chose for themselves, shown
+              // under the nickname we gave them.
+              <Text testID="contact-profile-name" style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 2 }}>
+                ~{contact.profileName}
+              </Text>
+            ) : null}
             <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5, marginTop: 4 }}>
               {contact.aegisId} · {i18nT('contactDetail.addedAgo', { count: Math.max(1, Math.floor((Date.now() - contact.addedAt) / 86400000)) })}
             </Text>
@@ -452,8 +461,16 @@ export function ContactDetailScreen({
           <Section t={t} label={i18nT('contactDetail.thisConversationSection').toUpperCase()}>
             <Row
               t={t}
+              testID="contact-nickname-row"
+              icon={<I.User size={18} color={t.textDim} />}
+              label={i18nT('contactDetail.nicknameTitle')}
+              sub={contact.nickname?.trim() || i18nT('contactDetail.nicknameNone')}
+              onPress={() => setNicknameOpen(true)}
+            />
+            <Row
+              t={t}
               icon={<I.Image size={18} color={t.textDim} />}
-              label="Chat wallpaper"
+              label={i18nT('contactDetail.wallpaper')}
               sub={WALLPAPER_NAMES[wallpaper]}
               onPress={() => setWallpaperPickerOpen(true)}
             />
@@ -505,6 +522,14 @@ export function ContactDetailScreen({
           </Section>
         </ScrollView>
       )}
+
+      <NicknameModal
+        visible={nicknameOpen}
+        value={contact.nickname}
+        profileName={contact.profileName && contact.profileName !== contact.aegisId ? contact.profileName : contact.aegisId}
+        onCancel={() => setNicknameOpen(false)}
+        onSave={(n) => { setNicknameOpen(false); void setNickname(contact.aegisId, n); }}
+      />
 
       <WallpaperPicker
         visible={wallpaperPickerOpen}

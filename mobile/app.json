@@ -211,20 +211,24 @@
       ],
       [
         "expo-alternate-app-icons",
-        {
-          "icons": [
-            {
-              "name": "light",
-              "ios": "./assets/icon-light.png",
-              "android": "./assets/icon-light.png"
-            },
-            {
-              "name": "tinted",
-              "ios": "./assets/icon-tinted.png",
-              "android": "./assets/icon-tinted.png"
+        [
+          {
+            "name": "Light",
+            "ios": "./assets/icon-light.png",
+            "android": {
+              "foregroundImage": "./assets/adaptive-icon-light.png",
+              "backgroundColor": "#f5f3ed"
             }
-          ]
-        }
+          },
+          {
+            "name": "Tinted",
+            "ios": "./assets/icon-tinted.png",
+            "android": {
+              "foregroundImage": "./assets/adaptive-icon-tinted.png",
+              "backgroundColor": "#1b1e25"
+            }
+          }
+        ]
       ],
       "expo-font"
     ],

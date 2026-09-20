@@ -41,6 +41,10 @@ export interface ContactInput {
   relayOnion?: string | null;
   /** Capabilities announced in the contact's E2EE profile (renderer net/caps.ts). */
   caps?: string[] | null;
+  /** Display name the contact announces (column `name`); `name` may be the local nickname. */
+  profileName?: string;
+  /** Local nickname chosen by the user (own column); null/empty = none. */
+  nickname?: string | null;
 }
 
 export interface MessageInput {
@@ -110,6 +114,7 @@ export interface ContactRow {
   profile: string;
   relay_onion: string | null;
   caps: string | null;
+  nickname: string | null;
 }
 
 export interface MessageRow {

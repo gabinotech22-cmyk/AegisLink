@@ -8,13 +8,23 @@ import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { themedAlert } from '../components/AlertHost';
 
-const ALL_VARIANTS = [
-  { id: 'default', bg: '#06090a', mark: '#5bf2b9' },
-  { id: 'light',   bg: '#efece4', mark: '#0d8f5f' },
-  { id: 'tinted',  bg: '#14161c', mark: '#bdbdbd' },
+// Native names must match the PascalCase entries of the expo-alternate-app-icons
+// plugin in app.json (`Light`, `Tinted`): on Android they are the
+// `MainActivity<Name>` activity-aliases, on iOS the alternate icon sets. `null`
+// is the primary icon on both platforms.
+export const ALL_VARIANTS = [
+  { id: 'default', native: null,     bg: '#06090a', mark: '#5bf2b9' },
+  { id: 'light',   native: 'Light',  bg: '#f5f3ed', mark: '#0d8f5f' },
+  { id: 'tinted',  native: 'Tinted', bg: '#1b1e25', mark: '#bdbdbd' },
 ] as const;
 
 type IconId = (typeof ALL_VARIANTS)[number]['id'];
+
+/** Maps what the native module reports back to a variant id (default when unknown). */
+export function variantFromNativeName(name: string | null | undefined): IconId {
+  const v = ALL_VARIANTS.find((x) => x.native === (name ?? null));
+  return v ? v.id : 'default';
+}
 
 interface Props {
   onBack: () => void;
@@ -53,12 +63,7 @@ export function AppIconScreen({ onBack }: Props) {
   // Load which icon is currently active — getAppIconName() is synchronous
   useEffect(() => {
     try {
-      const name = AlternateAppIcons.getAppIconName();
-      // null means the default icon is active
-      const active = (name ?? 'default') as IconId;
-      if (ALL_VARIANTS.some((v) => v.id === active)) {
-        setCurrent(active);
-      }
+      setCurrent(variantFromNativeName(AlternateAppIcons.getAppIconName()));
     } catch {
       // API unavailable in Expo Go / dev builds without native module — stay on default
     }
@@ -74,7 +79,8 @@ export function AppIconScreen({ onBack }: Props) {
     setLoading(true);
     try {
       // null resets to the primary app icon; any other string activates the alternate
-      await AlternateAppIcons.setAlternateAppIcon(id === 'default' ? null : id);
+      const native = ALL_VARIANTS.find((v) => v.id === id)?.native ?? null;
+      await AlternateAppIcons.setAlternateAppIcon(native);
       setCurrent(id);
     } catch {
       themedAlert(i18nT('common.error'), i18nT('appIcon.changeError'));

@@ -401,6 +401,9 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   // Capabilities announced in the contact's E2EE profile (net/caps.ts), JSON
   // array; NULL = pre-caps client. Gates sealed call signaling (D6).
   await addColumn(d, 'contacts', 'caps TEXT;');
+  // Local nickname chosen by the user (never leaves the device). `name` keeps
+  // the display name the contact announces; the nickname wins on screen.
+  await addColumn(d, 'contacts', 'nickname TEXT;');
 
   // Message capabilities (replies, reactions, star, delete, media)
   await addColumn(d, 'messages', 'type TEXT;');

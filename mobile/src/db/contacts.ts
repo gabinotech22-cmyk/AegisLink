@@ -3,7 +3,18 @@ import { withDb } from './core';
 export interface StoredContact {
   aegisId: string;
   publicKeyB64: string;
+  /**
+   * What we show for this contact: the local `nickname` when set, otherwise the
+   * `profileName` they announce, otherwise the Aegis ID. Read this everywhere;
+   * write through setNickname / updateContactProfile so the two sources never
+   * overwrite each other (the nickname typed at add-time used to be silently
+   * replaced by the first profile_update).
+   */
   name: string;
+  /** Display name the contact announces in its E2EE profile (column `name`). */
+  profileName?: string;
+  /** Nickname chosen locally by the user; null/empty = none. Never sent. */
+  nickname?: string | null;
   verified: boolean;
   addedAt: number;
   signingPublicKeyB64?: string;
@@ -59,14 +70,22 @@ type ContactRow = {
   pending: number;
   relay_onion: string | null;
   caps: string | null;
+  nickname: string | null;
 };
+
+/** Effective display name: nickname → announced profile name → Aegis ID. */
+export function effectiveContactName(c: { aegisId: string; profileName?: string; nickname?: string | null }): string {
+  return c.nickname?.trim() || c.profileName?.trim() || c.aegisId;
+}
 
 function rowToContact(r: ContactRow): StoredContact {
   return {
     aegisId: r.aegis_id,
     publicKeyB64: r.public_key_b64,
     signingPublicKeyB64: r.signing_public_key_b64 || undefined,
-    name: r.name,
+    name: effectiveContactName({ aegisId: r.aegis_id, profileName: r.name, nickname: r.nickname }),
+    profileName: r.name,
+    nickname: r.nickname ?? null,
     verified: r.verified === 1,
     addedAt: r.added_at,
     color: r.color || undefined,
@@ -102,12 +121,14 @@ export async function saveContact(c: StoredContact): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(
       `INSERT OR REPLACE INTO contacts
-       (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps, nickname)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       c.aegisId,
       c.publicKeyB64,
       c.signingPublicKeyB64 || "",
-      c.name,
+      // Column `name` is the announced profile name; a contact built without
+      // one (legacy callers) has no nickname either, so its display name is it.
+      c.profileName ?? c.name,
       c.verified ? 1 : 0,
       c.addedAt,
       c.color || null,
@@ -125,7 +146,8 @@ export async function saveContact(c: StoredContact): Promise<void> {
       c.hidden ? 1 : 0,
       c.pending ? 1 : 0,
       c.relayOnion ?? null,
-      c.caps && c.caps.length > 0 ? JSON.stringify(c.caps) : null
+      c.caps && c.caps.length > 0 ? JSON.stringify(c.caps) : null,
+      c.nickname?.trim() || null
     );
   });
 }
@@ -140,11 +162,11 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
   return withDb(async (d) => {
     const rows = profile
       ? await d.getAllAsync<ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps, nickname FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
           profile
         )
       : await d.getAllAsync<ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps FROM contacts ORDER BY added_at DESC`
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps, nickname FROM contacts ORDER BY added_at DESC`
         );
     return rows.map(rowToContact);
   });
@@ -153,7 +175,7 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
 export async function getContact(aegisId: string): Promise<StoredContact | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<ContactRow>(
-      `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps FROM contacts WHERE aegis_id = ?`,
+      `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps, nickname FROM contacts WHERE aegis_id = ?`,
       aegisId
     );
     if (!row) return null;
