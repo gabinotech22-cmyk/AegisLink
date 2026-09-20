@@ -210,8 +210,9 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
           // A fresh objectURL is created here because the staging previewUrl
           // was revoked by clearStagedItems() above.
           const localMediaUrl = URL.createObjectURL(item.blob);
+          const id = crypto.randomUUID();
           await append({
-            id: crypto.randomUUID(),
+            id,
             chatId: contact.aegisId,
             direction: 'out',
             body: caption,
@@ -227,6 +228,7 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
             plaintext,
             replyToId: i === 0 ? capturedReplyTo : undefined,
             skipLocalAppend: true,
+            messageId: id,
           });
         }
       } else {

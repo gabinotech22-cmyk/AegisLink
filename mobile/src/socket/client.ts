@@ -41,6 +41,8 @@ import {
   loadDueOutboxJobs,
   nextOutboxDueAt,
   countOutboxJobsForBubble,
+  findOrphanedPendingMessages,
+  advanceMessageDelivery,
   deleteOutboxJob,
   markOutboxAttemptFailed,
   saveSpkSecret,
@@ -64,6 +66,7 @@ import {
 import { decideV2GroupMetadata, decideGovernanceUpdate } from './groupMetadataDecision';
 import { serializeRatchetState, reviveRatchetState } from './ratchetSerde';
 import { shouldSendSealedTyping } from './typingThrottle';
+import { isMediaMessage, mediaWireText, mediaMimeFor, mediaExtFor } from '../utils/mediaWire';
 import {
   computeRosterHash,
   signGroupMetadata,
@@ -403,6 +406,37 @@ async function setJobMessageStatus(job: OutboxJob, status: DeliveryStatus): Prom
 }
 
 /**
+ * A `pending` row with no outbox job can never settle on its own. Builds up to
+ * 1.0.6 left such rows behind for every photo/video/voice note (their bubble id
+ * diverged from the wire id), and any build can with a crash between the
+ * append and the enqueue. Once per process, on the first drain, mark the ones
+ * older than an hour `failed` so they offer retry instead of "sending" forever.
+ * An hour is far beyond any upload — a row younger than that may legitimately
+ * be mid-upload with its job not written yet.
+ */
+export const ORPHANED_PENDING_MIN_AGE_MS = 60 * 60 * 1000;
+let orphanSweepDone = false;
+export async function settleOrphanedPendingOnce(): Promise<void> {
+  if (orphanSweepDone) return;
+  orphanSweepDone = true;
+  let orphans: Array<{ id: string; chatId: string }>;
+  try {
+    orphans = await findOrphanedPendingMessages(Date.now() - ORPHANED_PENDING_MIN_AGE_MS);
+  } catch (e) {
+    if (__DEV__) logger.warn('[socket] orphan sweep: could not query', e);
+    return;
+  }
+  for (const { id, chatId } of orphans) {
+    try {
+      // The store action also mutates its per-chat cache; for a chat it has not
+      // loaded yet, write the DB alone rather than seed an empty list.
+      if (useMessages.getState().byChat[chatId]) await useMessages.getState().updateDelivery(chatId, id, 'failed');
+      else await advanceMessageDelivery(id, 'failed');
+    } catch { /* next launch */ }
+  }
+}
+
+/**
  * Drain every outbox job whose backoff has elapsed, in FIFO order.
  *
  * Each job is re-encrypted with the CURRENT ratchet state at drain time — the
@@ -429,6 +463,7 @@ async function flushOutbox(identity: Identity): Promise<void> {
     if (__DEV__) logger.warn('[socket] flushOutbox: could not load jobs', e);
     return;
   }
+  void settleOrphanedPendingOnce();
   if (jobs.length === 0) {
     armOutboxScheduler(identity);
     return;
@@ -581,6 +616,29 @@ export async function retryFailedMessage(
 ): Promise<boolean> {
   const msg = (useMessages.getState().byChat[chatId] ?? []).find((m) => m.id === msgId);
   if (!msg || msg.direction !== 'out' || msg.deliveryStatus !== 'failed') return false;
+  // View-once media travels inline in the original envelope and the local row
+  // keeps no re-sendable copy; a retry would ship an empty marker.
+  if (msg.type === 'view_once' || msg.body.startsWith('[viewonce')) return false;
+
+  // Media: the wire text is `[image:blob:…]caption`, not the caption we store.
+  // A retry also needs a FRESH blob: the relay deletes uploads after 24 h,
+  // the same window after which the outbox gives up, so the reference we hold
+  // is either expired or (upload failed at send time) never existed. Re-upload
+  // from the local copy — the decrypted cache for a blob ref, the picker file
+  // otherwise — and point the bubble at the new reference.
+  let plaintext = msg.body;
+  let mediaUri = msg.mediaUri ?? undefined;
+  if (isMediaMessage(msg.type) && msg.mediaUri) {
+    const { resolveMedia, encryptAndUploadMedia } = require('../crypto/media') as typeof import('../crypto/media');
+    const localPath = msg.mediaUri.startsWith('blob:')
+      ? await resolveMedia(msg.mediaUri, mediaExtFor(msg.type))
+      : msg.mediaUri;
+    if (!localPath) return false; // nothing left to send: the media is gone
+    const freshUri = await encryptAndUploadMedia(localPath, mediaMimeFor(msg.type, localPath));
+    await useMessages.getState().setMediaUri(chatId, msgId, freshUri);
+    mediaUri = freshUri;
+    plaintext = mediaWireText({ type: msg.type, body: msg.body, mediaUri: freshUri });
+  }
 
   // Group retry: re-run the fan-out against the CURRENT roster, reusing the
   // bubble so the row the user tapped is the one that updates. Membership may
@@ -592,9 +650,9 @@ export async function retryFailedMessage(
     await sendGroupMessage({
       identity,
       groupId: chatId,
-      plaintext: msg.body,
+      plaintext,
       msgType: msg.type,
-      mediaUri: msg.mediaUri ?? undefined,
+      mediaUri,
       skipLocalAppend: true,
       bubbleId: msgId,
     });
@@ -608,9 +666,14 @@ export async function retryFailedMessage(
   // import of the store would close a require cycle through socket/client.
   const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
   const idState = useIdentity.getState();
+  // Wire type, not the local row type: the receive path only renders
+  // `direct_msg` / `location` / `view_once` and shows the raw JSON for `text`
+  // or `image` (see the payload.type chain in handleIncoming). `direct_msg`
+  // covers everything retryable here — a location body (`📍…`) renders by
+  // content, and view-once was rejected above.
   const payload = JSON.stringify({
-    type: msg.type ?? 'text',
-    text: msg.body,
+    type: 'direct_msg',
+    text: plaintext,
     senderName: idState.displayName,
     senderColor: idState.avatarColor,
     senderStatus: idState.profileStatus,
@@ -636,6 +699,19 @@ export async function retryFailedMessage(
   if (socket && connected && authenticated) void flushOutbox(identity);
   else armOutboxScheduler(identity);
   return true;
+}
+
+/**
+ * Settle a pre-appended bubble whose send threw BEFORE anything reached the
+ * outbox (media upload failed, DB not ready): with no job to retry it, the row
+ * would sit on "sending" forever. Marks it `failed` so the bubble offers
+ * retry. A bubble that does have a job is left alone — the scheduler owns it.
+ */
+export async function markSendFailedIfNotQueued(chatId: string, msgId: string): Promise<void> {
+  let queued = 0;
+  try { queued = await countOutboxJobsForBubble(msgId); } catch { /* treat as none */ }
+  if (queued > 0) return;
+  try { await useMessages.getState().updateDelivery(chatId, msgId, 'failed'); } catch { /* non-fatal */ }
 }
 
 // Ratchet state JSON revival — see ./ratchetSerde (pure, unit-tested).
@@ -4453,6 +4529,15 @@ export async function sendMessage(opts: {
   expiresAt?: number | null;
   skipLocalAppend?: boolean;
   /**
+   * Id of the bubble the caller ALREADY appended (media senders pre-append so
+   * the image renders before the upload finishes). It becomes the wire id and
+   * the outbox `msgId`, so the relay ack, the peer's delivered/read receipts
+   * and the 24 h give-up all land on that row. Without it a pre-appended
+   * bubble is orphaned: its status is written to an id nothing renders and it
+   * shows "sending" forever, whether or not the message arrived.
+   */
+  messageId?: string;
+  /**
    * F4: best-effort signal (call signaling): never persisted to the outbox —
    * a candidate or ring replayed minutes later is noise. Offline → rejects.
    */
@@ -4466,7 +4551,7 @@ export async function sendMessage(opts: {
   const senderColor = idState.avatarColor;
   const senderStatus = idState.profileStatus;
 
-  const id = Crypto.randomUUID();
+  const id = opts.messageId ?? Crypto.randomUUID();
   const createdAt = Date.now();
 
   let expiresAt = opts.expiresAt ?? null;

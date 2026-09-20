@@ -25,7 +25,7 @@ import { useTyping } from '../store/typing';
 import { useConnection } from '../store/connection';
 import { usePreferences } from '../store/preferences';
 import { useContacts } from '../store/contacts';
-import { sendMessage, emitTyping, sendReadReceipts, sendDeleteForEveryone, retryFailedMessage } from '../socket/client';
+import { sendMessage, emitTyping, sendReadReceipts, sendDeleteForEveryone, retryFailedMessage, markSendFailedIfNotQueued } from '../socket/client';
 import { startCall } from '../socket/calls';
 import { WEBRTC_AVAILABLE } from '../runtime';
 import { SoundFX } from '../hooks/useSoundFX';
@@ -361,8 +361,8 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   async function sendEditedImage(uri: string, caption: string) {
     if (!identity) return;
     setEditorUri(null);
+    const id = Crypto.randomUUID();
     try {
-      const id = Crypto.randomUUID();
       await appendMsg({
         id, chatId: contact.aegisId, direction: 'out', body: caption.trim(),
         createdAt: Date.now(), type: 'image', mediaUri: uri, deliveryStatus: 'pending',
@@ -376,9 +376,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
         plaintext: `[image:${blobUri}]${caption.trim()}`,
         skipLocalAppend: true,
+        messageId: id,
       });
       void SoundFX.msgSent();
     } catch (e) {
+      await markSendFailedIfNotQueued(contact.aegisId, id);
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
@@ -387,8 +389,8 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   async function sendViewOnceImage(uri: string, caption: string) {
     if (!identity) return;
     setEditorUri(null);
+    const id = Crypto.randomUUID();
     try {
-      const id = Crypto.randomUUID();
       const bodyText = caption.trim() ? `[viewonce]\n${caption.trim()}` : '[viewonce]';
       await appendMsg({
         id, chatId: contact.aegisId, direction: 'out', body: bodyText,
@@ -407,9 +409,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
         plaintext: `[viewonce:data:image/jpeg;base64,${base64}${captionPart}]`,
         skipLocalAppend: true,
+        messageId: id,
       });
       void SoundFX.msgSent();
     } catch (e) {
+      await markSendFailedIfNotQueued(contact.aegisId, id);
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
@@ -417,8 +421,8 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   // Upload + send a trimmed video (from the native video editor).
   async function sendVideo(uri: string) {
     if (!identity) return;
+    const id = Crypto.randomUUID();
     try {
-      const id = Crypto.randomUUID();
       await appendMsg({
         id, chatId: contact.aegisId, direction: 'out', body: '',
         createdAt: Date.now(), type: 'video', mediaUri: uri, deliveryStatus: 'pending',
@@ -432,9 +436,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
         plaintext: `[video:${blobUri}]`,
         skipLocalAppend: true,
+        messageId: id,
       });
       void SoundFX.msgSent();
     } catch (e) {
+      await markSendFailedIfNotQueued(contact.aegisId, id);
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
@@ -446,8 +452,8 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     if (!identity) return;
     setShowVoiceRecorder(false);
     const durSec = Math.max(1, Math.round(durationMs / 1000));
+    const id = Crypto.randomUUID();
     try {
-      const id = Crypto.randomUUID();
       await appendMsg({
         id, chatId: contact.aegisId, direction: 'out',
         body: `[audio:${durSec}s]`,
@@ -461,9 +467,11 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
         plaintext: `[audio:${durSec}s:${blobUri}]`,
         skipLocalAppend: true,
+        messageId: id,
       });
       void SoundFX.msgSent();
     } catch (e) {
+      await markSendFailedIfNotQueued(contact.aegisId, id);
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }
@@ -487,10 +495,13 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     const replying = replyTo;
     setReplyTo(null);
 
+    // Id of the staged image's bubble, so a failed upload can settle it.
+    let stagedMsgId: string | null = null;
     try {
       // Send image first if staged
       if (imageUri) {
         const id = Crypto.randomUUID();
+        stagedMsgId = id;
         const caption = hasText ? text : '';
         await appendMsg({
           id,
@@ -515,6 +526,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           recipientPublicKey: decodeBase64(contact.publicKeyB64),
           plaintext: `[image:${blobUri}]${caption}`,
           skipLocalAppend: true,
+          messageId: id,
         });
       }
       // Send text message if typed and no image was staged
@@ -533,6 +545,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
       // it survives leaving the screen or killing the app.
       setDraft(text);
       void saveDraft(contact.aegisId, text);
+      if (stagedMsgId) await markSendFailedIfNotQueued(contact.aegisId, stagedMsgId);
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     } finally {
       sendingRef.current = false;
@@ -632,6 +645,8 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
     // can render the GIF locally — same pattern as sendEditedImage. Without
     // this the sender saw the raw "[image:blob:…]" text (Bug fix).
     const localPath = `${cacheDir}gif_${gifId}.gif`;
+    // Set once the bubble exists: from then on the local file is its retry copy.
+    let bubbleId: string | null = null;
 
     try {
       // Enforce a 10 MB size guard by checking after download
@@ -652,6 +667,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         id, chatId: contact.aegisId, direction: 'out', body: '',
         createdAt: Date.now(), type: 'image', mediaUri: localPath, deliveryStatus: 'pending',
       });
+      bubbleId = id;
 
       const { encryptAndUploadMedia } = require('../crypto/media');
       const blobUri = await encryptAndUploadMedia(localPath, 'image/gif');
@@ -663,9 +679,13 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
         recipientPublicKey: decodeBase64(contact.publicKeyB64),
         plaintext: `[image:${blobUri}]`,
         skipLocalAppend: true,
+        messageId: id,
       });
     } catch (e) {
-      await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+      // No bubble yet (download/size guard failed): drop the file. With a
+      // bubble, keep it — a retry re-uploads from exactly this path.
+      if (bubbleId) await markSendFailedIfNotQueued(contact.aegisId, bubbleId);
+      else await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
   }

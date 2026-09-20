@@ -188,11 +188,11 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     if (!identity) return;
     try {
       const id = Crypto.randomUUID();
-      await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'video', mediaUri: uri });
+      await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'video', mediaUri: uri, deliveryStatus: 'pending' });
       const { encryptAndUploadMedia } = require('../crypto/media');
       const blobUri = await encryptAndUploadMedia(uri, 'video/mp4');
       await useMessages.getState().setMediaUri(group.id, id, blobUri);
-      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[video:${blobUri}]`, skipLocalAppend: true });
+      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[video:${blobUri}]`, skipLocalAppend: true, bubbleId: id });
     } catch (e) {
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
@@ -312,13 +312,13 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       }
 
       const id = Crypto.randomUUID();
-      await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: localPath });
+      await appendMsg({ id, chatId: group.id, direction: 'out', body: '', createdAt: Date.now(), type: 'image', mediaUri: localPath, deliveryStatus: 'pending' });
 
       const { encryptAndUploadMedia } = require('../crypto/media');
       const blobUri = await encryptAndUploadMedia(localPath, 'image/gif');
       await useMessages.getState().setMediaUri(group.id, id, blobUri);
 
-      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]`, skipLocalAppend: true });
+      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]`, skipLocalAppend: true, bubbleId: id });
     } catch (e) {
       await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});
       themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
@@ -336,11 +336,11 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     setEditorUri(null);
     try {
       const id = Crypto.randomUUID();
-      await appendMsg({ id, chatId: group.id, direction: 'out', body: caption.trim(), createdAt: Date.now(), type: 'image', mediaUri: uri });
+      await appendMsg({ id, chatId: group.id, direction: 'out', body: caption.trim(), createdAt: Date.now(), type: 'image', mediaUri: uri, deliveryStatus: 'pending' });
       const { encryptAndUploadMedia } = require('../crypto/media');
       const blobUri = await encryptAndUploadMedia(uri, 'image/jpeg');
       await useMessages.getState().setMediaUri(group.id, id, blobUri);
-      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]${caption.trim()}`, skipLocalAppend: true });
+      await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]${caption.trim()}`, skipLocalAppend: true, bubbleId: id });
     } catch (e) {
       themedAlert(i18nT('chat.sendError'), (e as Error).message);
     }
@@ -366,12 +366,12 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
       if (imageUri) {
         const id = Crypto.randomUUID();
         const caption = hasText ? text : '';
-        await appendMsg({ id, chatId: group.id, direction: 'out', body: caption, createdAt: Date.now(), type: 'image', mediaUri: imageUri });
+        await appendMsg({ id, chatId: group.id, direction: 'out', body: caption, createdAt: Date.now(), type: 'image', mediaUri: imageUri, deliveryStatus: 'pending' });
         const { encryptAndUploadMedia } = require('../crypto/media');
         const blobUri = await encryptAndUploadMedia(imageUri, 'image/jpeg');
         // Persist the blob ref so the sent image survives cache purges (decrypt-on-view).
         await useMessages.getState().setMediaUri(group.id, id, blobUri);
-        await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]${caption}`, skipLocalAppend: true });
+        await sendGroupMessage({ identity, groupId: group.id, plaintext: `[image:${blobUri}]${caption}`, skipLocalAppend: true, bubbleId: id });
       }
       if (hasText && !imageUri) {
         const id = Crypto.randomUUID();
@@ -383,8 +383,9 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
           createdAt: Date.now(),
           type: 'text',
           replyToId: replying?.id,
+          deliveryStatus: 'pending',
         });
-        await sendGroupMessage({ identity, groupId: group.id, plaintext: text, skipLocalAppend: true });
+        await sendGroupMessage({ identity, groupId: group.id, plaintext: text, skipLocalAppend: true, bubbleId: id });
       }
     } catch (e) {
       setDraft(text);
@@ -413,6 +414,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         createdAt: Date.now(),
         type: 'audio',
         mediaUri: uri,
+        deliveryStatus: 'pending',
       });
       await sendGroupMessage({
         identity,
@@ -421,6 +423,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         msgType: 'audio',
         mediaUri: blobUri,
         skipLocalAppend: true,
+        bubbleId: id,
       });
     } catch (e) {
       themedAlert(i18nT('common.error', 'Error'), (e as Error).message);
