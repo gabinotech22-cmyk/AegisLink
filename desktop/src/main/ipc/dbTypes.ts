@@ -39,6 +39,8 @@ export interface ContactInput {
   archived?: boolean;
   profile?: string;
   relayOnion?: string | null;
+  /** Capabilities announced in the contact's E2EE profile (renderer net/caps.ts). */
+  caps?: string[] | null;
 }
 
 export interface MessageInput {
@@ -107,6 +109,7 @@ export interface ContactRow {
   archived: number;
   profile: string;
   relay_onion: string | null;
+  caps: string | null;
 }
 
 export interface MessageRow {

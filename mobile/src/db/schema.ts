@@ -398,6 +398,9 @@ export async function initSchema(d: SQLite.SQLiteDatabase): Promise<void> {
   // Federation F1 (docs/FEDERATION-DESIGN.md D2): onion of the relay hosting the
   // contact's mailbox; NULL = official relay (every contact today).
   await addColumn(d, 'contacts', 'relay_onion TEXT;');
+  // Capabilities announced in the contact's E2EE profile (net/caps.ts), JSON
+  // array; NULL = pre-caps client. Gates sealed call signaling (D6).
+  await addColumn(d, 'contacts', 'caps TEXT;');
 
   // Message capabilities (replies, reactions, star, delete, media)
   await addColumn(d, 'messages', 'type TEXT;');

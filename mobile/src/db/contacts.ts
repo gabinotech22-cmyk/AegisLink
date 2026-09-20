@@ -29,6 +29,11 @@ export interface StoredContact {
    * `profile_update.mailboxRelay`; every routing decision goes through it.
    */
   relayOnion?: string | null;
+  /**
+   * Capabilities the contact announced in its E2EE profile (net/caps.ts).
+   * Absent/empty = pre-caps client: every transport behaves as before.
+   */
+  caps?: string[] | null;
 }
 
 type ContactRow = {
@@ -53,6 +58,7 @@ type ContactRow = {
   hidden: number;
   pending: number;
   relay_onion: string | null;
+  caps: string | null;
 };
 
 function rowToContact(r: ContactRow): StoredContact {
@@ -78,15 +84,26 @@ function rowToContact(r: ContactRow): StoredContact {
     hidden: r.hidden === 1,
     pending: r.pending === 1,
     relayOnion: r.relay_onion ?? null,
+    caps: parseCaps(r.caps),
   };
+}
+
+function parseCaps(raw: string | null): string[] | null {
+  if (!raw) return null;
+  try {
+    const v: unknown = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function saveContact(c: StoredContact): Promise<void> {
   return withDb(async (d) => {
     await d.runAsync(
       `INSERT OR REPLACE INTO contacts
-       (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       c.aegisId,
       c.publicKeyB64,
       c.signingPublicKeyB64 || "",
@@ -107,7 +124,8 @@ export async function saveContact(c: StoredContact): Promise<void> {
       c.online ? 1 : 0,
       c.hidden ? 1 : 0,
       c.pending ? 1 : 0,
-      c.relayOnion ?? null
+      c.relayOnion ?? null,
+      c.caps && c.caps.length > 0 ? JSON.stringify(c.caps) : null
     );
   });
 }
@@ -122,11 +140,11 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
   return withDb(async (d) => {
     const rows = profile
       ? await d.getAllAsync<ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps FROM contacts WHERE profile = ? ORDER BY added_at DESC`,
           profile
         )
       : await d.getAllAsync<ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion FROM contacts ORDER BY added_at DESC`
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps FROM contacts ORDER BY added_at DESC`
         );
     return rows.map(rowToContact);
   });
@@ -135,7 +153,7 @@ export async function loadContacts(profile?: 'personal' | 'work'): Promise<Store
 export async function getContact(aegisId: string): Promise<StoredContact | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<ContactRow>(
-      `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion FROM contacts WHERE aegis_id = ?`,
+      `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, pinned, last_seen_at, online, hidden, pending, relay_onion, caps FROM contacts WHERE aegis_id = ?`,
       aegisId
     );
     if (!row) return null;

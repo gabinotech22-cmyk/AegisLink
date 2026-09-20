@@ -128,9 +128,11 @@ sellados dentro de `envelope:mb`, gateados por capacidades del contacto (D6):
   del relay, #478): al activar la feature se sube `minVersion`.
 - Los payloads nuevos por mailbox se emiten a contactos **ajenos** (`isForeign`), que por
   construcción son clientes nuevos (un cliente viejo no parsea el enlace v2) — no hace falta
-  `caps` para ellos (F3/F4). `caps: ['mbx-calls', …]` queda reservado para un cutover
-  **opcional** posterior: mover también las llamadas del relay oficial al buzón (el relay
-  dejaría de ver `to: aegisId` en llamadas). No está en F0–F7; se decide tras F7 con datos.
+  `caps` para ellos (F3/F4). **Decidido y hecho tras F7 (2026-09-20, `feat/sealed-transport-everywhere`):** el perfil
+  E2EE anuncia `caps` (`net/caps.ts`: `sealed-calls`, `sealed-first-contact`) y las llamadas a
+  un contacto del relay oficial que anuncia `sealed-calls` van por su buzón como `call_signal`
+  (el relay deja de ver `to: aegisId` en llamadas); sin la cap o con el buzón caído, el evento
+  `call:*` de siempre. Detalle en `docs/PROTOCOL.md` §7.3 "Transport selector".
 
 ## 3. Slices (una rama `feat/federation-*` por slice; flag OFF hasta F7, ON desde F7)
 
