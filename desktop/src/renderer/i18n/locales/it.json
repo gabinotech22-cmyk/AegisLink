@@ -362,6 +362,11 @@
     "none": "Nessuno",
     "addStatusPlaceholder": "Aggiungi uno stato…"
   },
+  "blocked": {
+    "title": "Contatti bloccati",
+    "emptyTitle": "Nessun bloccato",
+    "unblockTitle": "Sbloccare {{name}}? Potrà di nuovo scriverti e chiamarti."
+  },
   "privacy": {
     "title": "Privacy",
     "appearanceSection": "ASPETTO",
