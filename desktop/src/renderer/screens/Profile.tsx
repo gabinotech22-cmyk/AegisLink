@@ -7,7 +7,7 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
-import { Section, Row, Toggle } from '../components/Section';
+import { Section, Row } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
 import { fileToDownscaledDataUrl } from '../utils/image';
@@ -58,8 +58,6 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
   const profileStatus = storeProfileStatus;
 
   const photoVis = usePreferences((s) => s.photoVis);
-  const lastSeen = usePreferences((s) => s.lastSeenVisible);
-  const typing = usePreferences((s) => s.typingVisible);
   const setPref = usePreferences((s) => s.set);
   // Changing "who sees my photo" re-announces the profile: contacts that lose
   // access get an explicit clear, contacts that gain it get the photo.
@@ -74,8 +72,6 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
       } catch { /* offline: the reconnect broadcast picks up the new fingerprint */ }
     })();
   }
-  function setLastSeen(v: boolean) { void setPref('lastSeenVisible', v); }
-  function setTyping(v: boolean) { void setPref('typingVisible', v); }
 
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(displayName);
@@ -181,8 +177,9 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
             <span style={{ flex: 1, fontFamily: t.font, fontSize: 14, color: t.text }}>{i18n.t('profile.profilePhoto')}</span>
             <PhotoVisPicker t={t} value={photoVis} onChange={setPhotoVis} />
           </div>
-          <Toggle t={t} label={i18n.t('profile.lastSeen')} sub={i18n.t('profile.showWhenYouWere')} value={lastSeen} onChange={setLastSeen} />
-          <Toggle t={t} label={i18n.t('profile.typingIndicator')} value={typing} onChange={setTyping} noBorder />
+          {/* No "last seen" toggle: AegisLink has no presence feature (zero
+              metadata), and the typing indicator lives in Privacy with the
+              preference that actually governs it. */}
         </Section>
 
         <Section t={t} label={i18n.t('profile.appearanceSection')}>
