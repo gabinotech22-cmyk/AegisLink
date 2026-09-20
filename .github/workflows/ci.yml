@@ -202,6 +202,10 @@ jobs:
           if grep -Eq '^\s*HiddenService(SingleHopMode|NonAnonymousMode)\s+1' ../tor/torrc.selfhost; then echo "torrc.selfhost must be location-hidden" >&2; exit 1; fi
           docker compose build tor
           docker run --rm --add-host relay:127.0.0.1 --add-host ntfy:127.0.0.1 aegislink-tor:selfhost tor --verify-config -f /etc/tor/torrc
+          # The relay's volume mount points must be writable by its own user:
+          # a root-owned /app/uploads turned every attachment upload into a 500.
+          docker compose build relay
+          docker run --rm aegislink-relay:selfhost sh -c 'touch /app/uploads/.w /data/.w' || { echo "relay image: /app/uploads or /data not writable by aegis" >&2; exit 1; }
 
   # ─── Mobile — typecheck ───────────────────────────────────────────────────
   mobile-typecheck:
