@@ -31,10 +31,7 @@ export interface Preferences {
   appLockEnabled: boolean;
   biometricsEnabled: boolean;
   lockTimeoutMin: number;
-  hideRecents: boolean;
   photoVis: 'all' | 'contacts' | 'none';
-  lastSeenVisible: boolean;
-  typingVisible: boolean;
   language: SupportedLocale;
 }
 
@@ -54,10 +51,7 @@ const DEFAULTS: Preferences = {
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
-  hideRecents: true,
   photoVis: 'contacts',
-  lastSeenVisible: false,
-  typingVisible: true,
   language: 'en',
 };
 
@@ -87,10 +81,7 @@ function snapshot(get: () => PrefsState): Preferences {
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,
-    hideRecents: s.hideRecents,
     photoVis: s.photoVis,
-    lastSeenVisible: s.lastSeenVisible,
-    typingVisible: s.typingVisible,
     language: s.language,
   };
 }

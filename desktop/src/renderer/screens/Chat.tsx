@@ -12,6 +12,8 @@ import { useMessages } from '../store/messages';
 import { useConnection } from '../store/connection';
 import { useTyping } from '../store/typing';
 import { useContacts } from '../store/contacts';
+import { usePreferences } from '../store/preferences';
+import { emitTyping, sendReadReceipts } from '../socket/client';
 import type { StoredMessage } from '../db/local';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +51,11 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
   const { identity } = useIdentity();
   const online = useConnection((s) => s.online);
   const isContactTyping = useTyping((s) => s.typing[contact.aegisId] ?? false);
+  // Privacy → read receipts / typing indicator (parity with mobile Chat).
+  const readReceipts = usePreferences((s) => s.readReceipts);
+  const typingIndicator = usePreferences((s) => s.typingIndicator);
+  const sentReceiptIdsRef = useRef<Set<string>>(new Set());
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const byChat = useMessages((s) => s.byChat);
   const pinnedMsgMap = useMessages((s) => s.pinnedMsg);
@@ -140,7 +147,26 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
   useEffect(() => {
     void loadChat(contact.aegisId);
     void markRead(contact.aegisId);
+    sentReceiptIdsRef.current = new Set();
+    return () => {
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      if (typingIndicator) emitTyping(contact.aegisId, false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contact.aegisId]);
+
+  // Read receipts for new (not yet receipted) incoming messages — the sender's
+  // ticks never turned "read" from a desktop before, because these functions
+  // existed but no screen called them.
+  useEffect(() => {
+    if (!online || !readReceipts) return;
+    const unsentIds = list
+      .filter((m) => m.direction === 'in' && !m.deleted && !sentReceiptIdsRef.current.has(m.id))
+      .map((m) => m.id);
+    if (unsentIds.length === 0) return;
+    sendReadReceipts(contact.aegisId, unsentIds);
+    for (const id of unsentIds) sentReceiptIdsRef.current.add(id);
+  }, [contact.aegisId, list.length, online, readReceipts]);
 
   // Sync draft from store on contact change
   useEffect(() => {
@@ -166,6 +192,12 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
     draftTimer.current = setTimeout(() => {
       void saveDraft(contact.aegisId, val);
     }, 600);
+    if (!online || !typingIndicator) return;
+    emitTyping(contact.aegisId, val.length > 0);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    if (val.length > 0) {
+      typingTimerRef.current = setTimeout(() => emitTyping(contact.aegisId, false), 3000);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -186,6 +218,8 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
 
     const capturedDraft = draft.trim();
     const capturedItems = [...stagedItems];
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    if (typingIndicator) emitTyping(contact.aegisId, false);
     const capturedReplyTo = replyTo?.id ?? undefined;
 
     // Optimistic clear so UI feels fast

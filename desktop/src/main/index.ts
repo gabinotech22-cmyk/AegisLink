@@ -5,6 +5,7 @@ import { is } from '@electron-toolkit/utils'
 import { registerSecureStorageHandlers } from './ipc/secureStorage'
 import { registerDatabaseHandlers, openMainDbIfUnwrapped, closeDatabase } from './ipc/database'
 import { registerNotificationHandlers } from './ipc/notifications'
+import { registerWindowHandlers } from './ipc/window'
 import { startTor, stopTor, getTorStatus } from './tor/torProcess'
 import { registerTorSioHandlers, disconnectAllTorSockets } from './tor/sioBridge'
 
@@ -100,6 +101,7 @@ function createWindow(): void {
 registerSecureStorageHandlers()
 registerDatabaseHandlers()
 registerNotificationHandlers()
+registerWindowHandlers()
 registerTorSioHandlers()
 
 app.whenReady().then(async () => {
