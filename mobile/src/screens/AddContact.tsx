@@ -12,6 +12,7 @@ import { PrimaryButton, GhostButton } from '../components/Button';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { encodeIdentityQR, encodeIdentityLink, parseIdentityQR } from '../crypto/qr';
+import { useOwnAddressParts } from '../net/ownAddress';
 import { FEDERATION } from '../config';
 import { isOfficialRelay } from '../net/officialRelay';
 import { parseContactAddress, type RelayRef } from '../net/relayRef';
@@ -77,6 +78,7 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
         insets={insets}
         identity={identity}
         addByAegisId={addByAegisId}
+        addFromQR={addFromQR}
         onBack={goBack}
         onAdded={onAdded}
       />
@@ -172,8 +174,11 @@ function QRScreen({ t, identity, insets, onBack, addFromQR, addByAegisId, onAdde
   const [scanning, setScanning] = useState(false);
   const [addedContact, setAddedContact] = useState<StoredContact | null>(null);
 
-  const myQRData = identity
-    ? encodeIdentityQR(identity.aegisId, identity.publicKeyB64)
+  // F7: v2 (relay + mailbox root) once our home is a self-hosted relay —
+  // nothing is shown until the parts are known, never a v1 nobody can reach.
+  const own = useOwnAddressParts();
+  const myQRData = identity && own.ready
+    ? encodeIdentityQR(identity.aegisId, identity.publicKeyB64, own.relay, own.mailboxRootB64)
     : '';
 
   const handleScan = async () => {
@@ -447,7 +452,8 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
   // Real universal link on OUR domain (aegislink.app was a placeholder we do
   // not own). Includes the public key → the receiver gets the same TOFU
   // guarantees as scanning the QR; the fragment never reaches the server.
-  const link = identity ? encodeIdentityLink(identity.aegisId, identity.publicKeyB64) : '';
+  const own = useOwnAddressParts(); // F7: v2 link when our home is a custom relay
+  const link = identity && own.ready ? encodeIdentityLink(identity.aegisId, identity.publicKeyB64, own.relay, own.mailboxRootB64) : '';
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -545,7 +551,7 @@ function LinkScreen({ t, i18nT, identity, insets, onBack, addByAegisId, onAdded 
 }
 
 // ── Por Aegis ID ─────────────────────────────────────────────────────────────
-function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded }: any) {
+function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, addFromQR, onBack, onAdded }: any) {
   const [aegisId, setAegisId] = useState('');
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -561,8 +567,31 @@ function ByIdScreen({ t, i18nT, insets, identity, addByAegisId, onBack, onAdded 
     const text = await Clipboard.getStringAsync();
     if (!text) return;
     // A pasted invite link (https universal or aegislink:// QR payload) is
-    // accepted directly — extract the id instead of failing validation.
+    // accepted directly. A v2 link carries the contact's relay AND mailbox
+    // root (F3b): it must go through the same path as a scanned QR — reducing
+    // it to the bare id would drop the root and the first message to a
+    // contact on another relay could never be addressed (F7 device test).
     const parsed = parseIdentityQR(text.trim());
+    if (parsed?.relay && parsed.mailboxRootB64 && typeof addFromQR === 'function') {
+      setSubmitting(true);
+      try {
+        const result = await addFromQR(parsed.aegisId, parsed.publicKeyB64, name, parsed.relay, parsed.mailboxRootB64);
+        if (result.kind === 'added' || result.kind === 'already_exists') {
+          if (identity) {
+            const { sendProfileTo } = require('../socket/client') as typeof import('../socket/client');
+            void sendProfileTo(result.contact, identity);
+          }
+          onAdded(result.contact);
+          return;
+        }
+        themedAlert(i18nT('addContact.addError', 'No se pudo agregar'), result.kind);
+      } catch (e) {
+        themedAlert(i18nT('addContact.addError', 'No se pudo agregar'), (e as Error).message ?? '');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
     setAegisId(parsed ? parsed.aegisId : text.trim());
   };
 

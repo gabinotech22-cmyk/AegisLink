@@ -22,7 +22,7 @@ import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRa
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery } from './mailboxSocket';
-import { isForeign, relayFor, getHomeRelay, homeRelayBaseUrl, homeRelayOnionUrl } from '../net/homeRelay';
+import { isForeign, getHomeRelay, homeRelayBaseUrl, homeRelayOnionUrl, resolveRelay } from '../net/homeRelay';
 import { canonicalRelay } from '../net/officialRelay';
 import { relayRefFromOnion, type RelayRef } from '../net/relayRef';
 import { keyMatchesAegisId } from '../crypto/qr';
@@ -452,8 +452,11 @@ async function deliverToForeignRelay(
   /** F4: `'call'` asks the recipient's relay for a call-class (urgent) wake. */
   wakeHint?: 'call',
 ): Promise<void> {
-  const relay = relayFor(contact);
-  if (event !== 'envelope:v2' || !relay) throw new Error('foreign_contact_needs_sealed_v2');
+  // The official relay counts: from a self-hosted home, a contact there is
+  // foreign and is reached through the pool on the official onion.
+  const relay = resolveRelay(contact);
+  if (!relay) throw new Error('foreign_relay_unknown');
+  if (event !== 'envelope:v2') throw new Error('foreign_contact_needs_sealed_v2');
   const mboxTo = await getContactCurrentMailboxId(contact.aegisId, Date.now());
   if (!mboxTo) throw new Error('foreign_contact_mailbox_root_missing');
   const ack = await sendViaForeignRelay(relay, {
@@ -1158,7 +1161,7 @@ async function getOrCreateSessionLocked(
   // Federation F2 (parity with mobile): a contact on another relay publishes its
   // bundle THERE — fetch it over Tor from that relay's HTTP API.
   const foreignContact = useContacts.getState().contacts.find((c) => c.aegisId === contactAegisId);
-  const foreignRelay = foreignContact && isForeign(foreignContact) ? relayFor(foreignContact) : null;
+  const foreignRelay = foreignContact && isForeign(foreignContact) ? resolveRelay(foreignContact) : null;
   const bundle = foreignRelay
     ? await (async (): Promise<PreKeyBundle> => {
         const res = await foreignRelayHttp(foreignRelay, `/prekeys/bundle/${encodeURIComponent(contactAegisId)}`);

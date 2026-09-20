@@ -27,7 +27,7 @@
 import { logger } from '../utils/logger';
 import { RELAY_URL, ONION_URL } from '../config';
 import { getActiveDbSlot } from '../db/local';
-import { canonicalRelay } from './officialRelay';
+import { canonicalRelay, OFFICIAL_RELAY } from './officialRelay';
 import { relayRefFromOnion, sameRelay, type RelayRef } from './relayRef';
 
 const DEV = import.meta.env.DEV;
@@ -150,6 +150,20 @@ export function homeRelayOnionUrl(): string | null {
 export function relayFor(contact: { relayOnion?: string | null } | null | undefined): RelayRef | null {
   if (!contact?.relayOnion) return null;
   return canonicalRelay(relayRefFromOnion(contact.relayOnion));
+}
+
+/**
+ * The CONCRETE relay a contact's mailbox lives on — the official one included
+ * (unlike `relayFor`, whose null means "official"). This is what a transport
+ * needs to reach a foreign contact: when OUR home is a self-hosted relay, a
+ * contact on the official relay is foreign and must be reached through the
+ * pool on the official onion. null only when no official onion is configured
+ * (a build without ONION_URL cannot reach anyone off its home). Found in the
+ * F7 device test: `deliverToForeignRelay` treated that null as "no relay" and
+ * every message from a self-hosted home to the official relay failed.
+ */
+export function resolveRelay(contact: { relayOnion?: string | null } | null | undefined): RelayRef | null {
+  return relayFor(contact) ?? OFFICIAL_RELAY;
 }
 
 /**

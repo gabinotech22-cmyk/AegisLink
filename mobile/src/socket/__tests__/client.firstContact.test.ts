@@ -143,7 +143,8 @@ jest.mock('expo-secure-store', () => ({
 }));
 jest.mock('expo-crypto', () => ({ __esModule: true, randomUUID: () => '00000000-0000-0000-0000-000000000000' }));
 // FEDERATION on: the receiver accepts a first-contact bootstrap from a stranger.
-jest.mock('../../config', () => ({ __esModule: true, SERVER_URL: 'http://localhost', SEALED_TRANSPORT_VERSION: 'v2', MAILBOX_ENABLED: false, ONION_URL: null, FEDERATION: true }));
+// ONION_URL = the official relay's onion (needed by the 'official relay is foreign' case below).
+jest.mock('../../config', () => ({ __esModule: true, SERVER_URL: 'http://localhost', SEALED_TRANSPORT_VERSION: 'v2', MAILBOX_ENABLED: false, ONION_URL: 'http://' + 'f'.repeat(56) + '.onion', FEDERATION: true }));
 jest.mock('../../crypto/deliveryToken', () => ({
   __esModule: true,
   getContactDeliveryToken: jest.fn(async () => null), // no token yet: a stranger
@@ -154,6 +155,7 @@ jest.mock('../../crypto/deliveryToken', () => ({
 
 // ── Federation seams ─────────────────────────────────────────────────────────
 const ONION = 'pg6mmjiyjmcrsslvykfwnntlaru7p5svn6y2ymmju6nubxndf4pscryd.onion';
+const OFFICIAL_ONION = 'f'.repeat(56) + '.onion';
 const MY_ROOT = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 const mockSendViaForeignRelay = jest.fn(async (..._a: unknown[]) => ({ ok: true, queued: true }));
 const mockForeignRelayHttp = jest.fn<Promise<unknown>, unknown[]>();
@@ -441,6 +443,43 @@ describe('federation F3b — first contact across relays', () => {
     expect(mockSaveContact).not.toHaveBeenCalled();
     expect(mockAppend).not.toHaveBeenCalled();
     expect(mockFakeSocket.emit).not.toHaveBeenCalledWith('envelope:ack', expect.anything()); // retry, relay keeps its copy
+  });
+
+  it('sender (F7): from a self-hosted home, a contact on the OFFICIAL relay is foreign and is reached through the pool on the official onion', async () => {
+    const me = buildIdentity();
+    const peer = buildIdentity();
+    const homeRelay = require('../../net/homeRelay') as typeof import('../../net/homeRelay');
+    // Connect on the official home (the Tor bridge is out of scope here), then
+    // move: only the routing decision is under test.
+    client.connect(me);
+    bringOnline();
+    await flush();
+    mockIdentityState.identity = me;
+    await homeRelay.setHomeRelay({ relay: { onion: ONION }, since: 1, previous: null });
+    try {
+      // Added by bare ID before F7 or from a v1 link: relayOnion null = official.
+      mockContactsState.contacts = [{ aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64, relayOnion: null }];
+      foreignPeerBundleVia(peer);
+
+      mockFakeSocket.emit.mockClear();
+      await client.sendMessage({ identity: me, recipientAegisId: peer.aegisId, recipientPublicKey: peer.publicKey, plaintext: 'hola', skipLocalAppend: true });
+      await settle();
+
+      // Bundle from the official relay over Tor, wire through the pool to the
+      // official onion â€” never our home socket (which is a different relay).
+      expect(mockForeignRelayHttp).toHaveBeenCalledWith(expect.objectContaining({ onion: OFFICIAL_ONION }), `/prekeys/bundle/${peer.aegisId}`);
+      const events = mockFakeSocket.emit.mock.calls.map((c) => c[0] as string);
+      expect(events).not.toContain('envelope');
+      expect(events).not.toContain('envelope:v2');
+      expect(mockSendViaForeignRelay).toHaveBeenCalledTimes(1);
+      expect((mockSendViaForeignRelay.mock.calls[0] as unknown as [{ onion: string }])[0].onion).toBe(OFFICIAL_ONION);
+      // And the bootstrap tells them where WE live now.
+      const env = (mockSendViaForeignRelay.mock.calls[0] as unknown as [unknown, { ciphertext: string; nonce: string; epk: string }])[1];
+      const inner = openEnvelopeV2(env, peer.secretKey, () => null, Date.now(), { allowFirstContact: true });
+      expect(inner!.fc).toEqual(expect.objectContaining({ relay: ONION }));
+    } finally {
+      homeRelay.resetHomeRelay();
+    }
   });
 
   it('sender: a foreign contact\'s message never leaks to the home socket even when their relay is down (parked for retry)', async () => {

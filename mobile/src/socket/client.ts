@@ -10,7 +10,7 @@ import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRa
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery, fetchMailboxOverTor } from './mailboxSocket';
-import { isForeign, relayFor, getHomeRelay, isCustomHome, homeRelayOnionUrl } from '../net/homeRelay';
+import { isForeign, getHomeRelay, isCustomHome, homeRelayOnionUrl, resolveRelay } from '../net/homeRelay';
 import { TorSioSocket, IDENTITY_FORWARD_EVENTS, isTorAvailable, startTor } from '../net/tor';
 import { canonicalRelay } from '../net/officialRelay';
 import { relayRefFromOnion, type RelayRef } from '../net/relayRef';
@@ -343,10 +343,13 @@ async function deliverToForeignRelay(
   /** F4: `'call'` asks the recipient's relay for a call-class (urgent) wake. */
   wakeHint?: 'call',
 ): Promise<void> {
-  const relay = relayFor(contact);
+  // The official relay counts: from a self-hosted home, a contact there is
+  // foreign and is reached through the pool on the official onion.
+  const relay = resolveRelay(contact);
+  if (!relay) throw new Error('foreign_relay_unknown');
   // v1 (no sealed wire) cannot cross relays. With F3b the selector never
   // produces v1 for a foreign contact; kept as a guard against a stale outbox row.
-  if (event !== 'envelope:v2' || !relay) throw new Error('foreign_contact_needs_sealed_v2');
+  if (event !== 'envelope:v2') throw new Error('foreign_contact_needs_sealed_v2');
   const mboxTo = await getContactCurrentMailboxId(contact.aegisId, Date.now());
   if (!mboxTo) throw new Error('foreign_contact_mailbox_root_missing');
   const ack = await sendViaForeignRelay(relay, {
@@ -1868,7 +1871,7 @@ async function getOrCreateSessionLocked(contactAegisId: string, contactPublicKey
   // over Tor from that relay's HTTP API (GET /prekeys/bundle/:id — same bundle
   // the socket ack carries), never through our home relay's control socket.
   const foreignContact = useContacts.getState().contacts.find((c) => c.aegisId === contactAegisId);
-  const foreignRelay = foreignContact && isForeign(foreignContact) ? relayFor(foreignContact) : null;
+  const foreignRelay = foreignContact && isForeign(foreignContact) ? resolveRelay(foreignContact) : null;
   const fetchBundle = async (): Promise<{ ok: true; bundle: PreKeyBundle } | { ok: false; msg: string }> => {
     if (foreignRelay) {
       const res = await foreignRelayHttp(foreignRelay, `/prekeys/bundle/${encodeURIComponent(contactAegisId)}`);

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { canonicalRelay } from '../net/officialRelay';
+import { getHomeRelay } from '../net/homeRelay';
 import { setContactMailboxRoot } from '../crypto/mailboxStore';
 import type { RelayRef } from '../net/relayRef';
 import { logger } from '../utils/logger';
@@ -166,7 +167,9 @@ export const useContacts = create<ContactsState>((set, get) => ({
       addedAt: Date.now(),
       profile: 'personal',
       pending: opts?.pending === true,
-      relayOnion: relay?.onion ?? null,
+      // No explicit relay = the ID was resolved on OUR home relay, so that is
+      // where they live (null = official would be wrong from a self-hosted home).
+      relayOnion: canonicalRelay(relay ?? getHomeRelay())?.onion ?? null,
     };
     await saveContact(contact);
     set({ contacts: [contact, ...get().contacts.filter((c) => c.aegisId !== aegisId)] });

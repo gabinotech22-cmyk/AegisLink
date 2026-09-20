@@ -10,6 +10,7 @@ import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { fingerprintWords, fingerprintHex } from '../crypto/fingerprint';
 import { encodeIdentityQR, encodeIdentityLink } from '../crypto/qr';
+import { useOwnAddressParts } from '../net/ownAddress';
 import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import type { Theme } from '../theme/vault';
 import { themedAlert } from '../components/AlertHost';
@@ -60,6 +61,8 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
     }
   }, [contact?.publicKeyB64]);
 
+  const own = useOwnAddressParts(); // F7: our v2 address once the home is a custom relay
+
   if (!identity) {
     return (
       <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
@@ -71,7 +74,7 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
     );
   }
 
-  const qrPayload = encodeIdentityQR(identity.aegisId, identity.publicKeyB64);
+  const qrPayload = own.ready ? encodeIdentityQR(identity.aegisId, identity.publicKeyB64, own.relay, own.mailboxRootB64) : '';
   const screenTitle = contactId && contact
     ? `Verificar — ${contact.name}`
     : i18nT('verify.title', 'Verify');
@@ -398,7 +401,7 @@ export function VerifyScreen({ onBack, onScan, contactId }: Props) {
         visible={showShareLink}
         onClose={() => setShowShareLink(false)}
         title={i18nT('verify.shareTitle', 'Mi contacto AegisLink')}
-        link={identity ? encodeIdentityLink(identity.aegisId, identity.publicKeyB64) : ''}
+        link={identity && own.ready ? encodeIdentityLink(identity.aegisId, identity.publicKeyB64, own.relay, own.mailboxRootB64) : ''}
       />
     </View>
   );
