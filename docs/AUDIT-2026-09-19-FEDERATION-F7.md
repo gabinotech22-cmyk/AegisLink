@@ -77,6 +77,13 @@ app se quedó en "Initializing secure storage…" reintentando en bucle en vez d
 
 ## 4. Protocolo de prueba en dispositivo (2 dispositivos × 2 relays)
 
+> **Lección de la pasada 2026-09-20:** reinstalar sobre identidades que ya habían migrado de relay
+> varias veces (`adb install -r` sobre restos de sesiones anteriores) dejó a los dos emuladores con
+> mensajes en "enviando" para siempre y pareció una regresión. Con **instalación limpia**
+> (desinstalar → instalar) todo pasó a la primera. Las filas de este cuadro se validan siempre desde
+> identidades limpias; un `-r` solo vale para comprobar un fix concreto sobre un estado conocido.
+
+
 Build: APK de prueba del workflow `test-apk.yml` sobre esta rama
 (`gh workflow run test-apk.yml --ref feat/federation-enable`; artifact
 `aegislink-test-apk-release`; instalar con `adb install -r` para conservar la identidad). Es
@@ -92,8 +99,8 @@ Dispositivo **A** = relay oficial (sin tocar nada). Dispositivo **B** = migra al
 | 2 | B: **Cambiar** → confirmación (PIN/biometría si hay bloqueo) → estado "relay propio desde hoy, gracia 7 d" | `migrateHomeRelay`: registro + prekeys en el destino por Tor (POST), anuncio `profile_update.mailboxRelay`, `setHomeRelay`, reconexión del socket de identidad por `TorSioSocket` | ✅ A y B: en el relay de prueba 2 identidades, 2 prekeys firmadas, 199 one-time, 2 delivery tokens; B sin ninguna conexión clearnet (solo guardas Tor) |
 | 3 | B: compartir enlace/QR → A lo añade | enlace **v2** `aegislink://v2/<id>/<pk>/<onion>/<root>` aceptado con `FEDERATION` ON | ✅ APK `faca282` (2026-09-19, identidades nuevas): B en el relay propio, A en el oficial; A añade a B por enlace y viceversa (H2/H3 verificados) |
 | 4 | A → B primer mensaje; B responde | **primer contacto** sellado con bootstrap X3DH (`fc`) hacia un relay ajeno por el pool; respuesta por el relay oficial | ✅ APK `faca282`: mensaje en ambos sentidos, doble check; en el relay de prueba 1 one-time prekey consumida (199→198) y 1 mensaje en buzón a la hora del envío (H1 verificado) |
-| 5 | A ↔ B: entregado / leído / "escribiendo…" | receipts y typing sellados cross-relay | ⬜ |
-| 6 | A → B foto; B → A documento | blob **v3** con host `.onion`: subida por `httpUpload` nativo y descarga por `httpDownload` | ⬜ |
+| 5 | A ↔ B: entregado / leído / "escribiendo…" | receipts y typing sellados cross-relay | 🟡 APK final `main@3e31ffc` (2026-09-20, instalación limpia): **entregado** ✅ (doble check en ambos sentidos con B en el relay propio); leído y "escribiendo…" sin comprobar explícitamente |
+| 6 | A → B foto; B → A foto | blob **v3** con host `.onion`: subida por `httpUpload` nativo y descarga por `httpDownload` | ✅ APK final `main@3e31ffc`: foto en ambos sentidos con B en el relay propio, tras #495 (burbuja = wire id) y #496 (volumen de uploads del relay propio era de root → 500). No hay envío de documentos en el chat 1:1 (solo imagen/vídeo/audio/GIF), la fila se ajusta |
 | 7 | Grupo de 3: A, B y C (C en el oficial) — mensajes en ambos sentidos | fan-out con miembros en 2 relays | ⬜ |
 | 8 | A llama a B (audio) y B a A; colgar; con B en segundo plano/app cerrada | señalización `call_signal` sellada por el relay de B con `wakeHint: 'call'`; wake urgente por ntfy del relay propio | ⬜ |
 | 9 | B: **Volver al relay oficial** → A sigue escribiendo a B sin tocar nada | migración de vuelta; A recibe el `mailboxRelay=null` y re-enruta; drenaje del buzón viejo (`fetchMailboxOverTor` stateless) | ⬜ |
