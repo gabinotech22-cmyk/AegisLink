@@ -1266,6 +1266,8 @@
     "attachments": "Attachments"
   },
   "groupAdmin": {
+    "mutedSub": "Muted · no alerts from this group",
+    "notMutedSub": "Alerts for messages and calls from this group",
     "title": "Group admin",
     "members": "Members",
     "addMember": "Add member",

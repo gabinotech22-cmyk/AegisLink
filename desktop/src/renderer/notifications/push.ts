@@ -17,6 +17,7 @@
  *   - badge = unread total, re-derived on every counter change (0 when off).
  */
 import { logger } from '../utils/logger';
+import { isContactMutedNow, isChatMutedNow } from '../utils/mute';
 import { usePreferences } from '../store/preferences';
 import i18n from '../i18n';
 import { previewLabel } from '../utils/messagePreview';
@@ -60,7 +61,7 @@ export function matchesKeyword(body: string, keywords: readonly string[]): boole
 
 /** Pure decision so the policy is unit-testable without Electron. */
 export function decideNotification(input: {
-  prefs: { notifMaster: boolean; notifPreview: boolean; notifSound: boolean; notifKeywords: readonly string[] };
+  prefs: { notifMaster: boolean; notifPreview: boolean; notifSound: boolean; notifKeywords: readonly string[]; mutedChats?: string[]; mutedChatsUntil?: Record<string, number> };
   contact: { muted?: boolean; mutedUntil?: number | null } | null | undefined;
   chatId: string;
   activeChatId: string | null;
@@ -74,7 +75,11 @@ export function decideNotification(input: {
   const { prefs, contact } = input;
   const keyword = matchesKeyword(input.body, prefs.notifKeywords);
   if (!prefs.notifMaster && !keyword) return { show: false };
-  const muted = !!contact?.muted || (!!contact?.mutedUntil && contact.mutedUntil > input.now);
+  // utils/mute.ts: "always" (mutedUntil 0) mutes, a timed mute expires, and a
+  // group is muted through preferences.mutedChats(+Until).
+  const muted =
+    isContactMutedNow(contact, input.now) ||
+    isChatMutedNow({ mutedChats: prefs.mutedChats ?? [], mutedChatsUntil: prefs.mutedChatsUntil }, input.chatId, input.now);
   if (muted && !keyword) return { show: false };
   if (input.windowFocused && input.activeChatId === input.chatId) return { show: false };
   const who = input.isGroup ? (input.groupName ? `${input.groupName} · ${input.senderName}` : input.senderName) : input.senderName;

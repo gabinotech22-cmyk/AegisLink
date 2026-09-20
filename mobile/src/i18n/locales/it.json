@@ -1248,6 +1248,8 @@
     "attachments": "Allegati"
   },
   "groupAdmin": {
+    "mutedSub": "Silenziato · nessun avviso da questo gruppo",
+    "notMutedSub": "Avvisi per messaggi e chiamate di questo gruppo",
     "title": "Amministrazione gruppo",
     "members": "Membri",
     "addMember": "Aggiungi membro",
