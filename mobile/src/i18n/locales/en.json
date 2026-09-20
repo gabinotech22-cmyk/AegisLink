@@ -456,6 +456,18 @@
     "relayLabel": "AegisLink relay",
     "unreachable": "unreachable"
   },
+  "storageLocked": {
+    "status": "SECURE STORAGE LOCKED",
+    "title": "Your data can't be unlocked",
+    "desc": "The encrypted database on this device exists, but the key that opens it is no longer in the secure store. Without that key nothing in it can be read — not by you, not by us.",
+    "why": "This happens after restoring the phone from a system backup, a keystore reset, or an install that was interrupted. Your identity and messages are not recoverable from this device.",
+    "restore": "Restore from an AegisLink backup",
+    "reset": "Start over with a new identity",
+    "confirmTitle": "Delete the locked data?",
+    "confirmBody": "The unreadable database and this profile's keys will be deleted from this device. This cannot be undone. Your contacts will need your new link or QR.",
+    "confirmRestore": "Delete and restore",
+    "confirmReset": "Delete and start over"
+  },
   "tabBar": {
     "chats": "CHATS",
     "groups": "COMMUNITIES",

@@ -456,6 +456,18 @@
     "relayLabel": "Relay de AegisLink",
     "unreachable": "inaccesible"
   },
+  "storageLocked": {
+    "status": "ALMACENAMIENTO SEGURO BLOQUEADO",
+    "title": "No se pueden desbloquear tus datos",
+    "desc": "La base de datos cifrada existe en este dispositivo, pero la clave que la abre ya no está en el almacén seguro. Sin esa clave no se puede leer nada — ni tú ni nosotros.",
+    "why": "Ocurre tras restaurar el teléfono desde una copia del sistema, un reinicio del almacén de claves o una instalación interrumpida. Tu identidad y tus mensajes no se pueden recuperar desde este dispositivo.",
+    "restore": "Restaurar desde una copia de AegisLink",
+    "reset": "Empezar de cero con una identidad nueva",
+    "confirmTitle": "¿Borrar los datos bloqueados?",
+    "confirmBody": "Se borrarán de este dispositivo la base de datos ilegible y las claves de este perfil. No se puede deshacer. Tus contactos necesitarán tu nuevo enlace o QR.",
+    "confirmRestore": "Borrar y restaurar",
+    "confirmReset": "Borrar y empezar de cero"
+  },
   "tabBar": {
     "chats": "CHATS",
     "groups": "COMUNIDADES",
