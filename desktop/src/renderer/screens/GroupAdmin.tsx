@@ -8,6 +8,8 @@ import { Section, Toggle } from '../components/Section';
 import { useGroups } from '../store/groups';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
+import { usePreferences } from '../store/preferences';
+import { isChatMutedNow, withChatMute } from '../utils/mute';
 import type { StoredGroup } from '../db/local';
 
 interface Props {
@@ -18,6 +20,18 @@ interface Props {
 export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
   useTranslation(); // re-render on language change
   const { t } = useTheme();
+  // Notifications for this group — every member, local only (parity with mobile).
+  const mutedChats = usePreferences((s) => s.mutedChats);
+  const mutedChatsUntil = usePreferences((s) => s.mutedChatsUntil);
+  const setPref = usePreferences((s) => s.set);
+  const groupMuted = isChatMutedNow({ mutedChats, mutedChatsUntil }, groupProp.id, Date.now());
+  const [muteChooser, setMuteChooser] = useState(false);
+  function applyGroupMute(muted: boolean, until: number | null = 0): void {
+    const next = withChatMute({ mutedChats, mutedChatsUntil }, groupProp.id, muted, until);
+    void setPref('mutedChats', next.mutedChats);
+    void setPref('mutedChatsUntil', next.mutedChatsUntil);
+    setMuteChooser(false);
+  }
   const { renameGroup, addMember, removeMember, updateGroupPermissions, leaveGroup, dissolveGroup } = useGroups();
   const contacts = useContacts((s) => s.contacts);
   const identity = useIdentity((s) => s.identity);
@@ -169,6 +183,27 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
           </button>
         </Section>
 
+        <Section t={t} label={i18n.t('contactDetail.notificationsTitle')}>
+          <div data-testid="group-mute-row" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
+            <I.Mute size={18} color={groupMuted ? t.warn : t.textDim} />
+            <div style={{ flex: 1 }}>
+              <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, display: 'block' }}>{groupMuted ? i18n.t('contactDetail.unmute') : i18n.t('contactDetail.mute')}</span>
+              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block' }}>{groupMuted ? i18n.t('groupAdmin.mutedSub') : i18n.t('groupAdmin.notMutedSub')}</span>
+            </div>
+            {groupMuted ? (
+              <button onClick={() => applyGroupMute(false)} style={btnStyle(t)}>{i18n.t('contactDetail.unmute')}</button>
+            ) : muteChooser ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => applyGroupMute(true, Date.now() + 3_600_000)} style={btnStyle(t)}>{i18n.t('contactDetail.mute1h')}</button>
+                <button onClick={() => applyGroupMute(true, Date.now() + 28_800_000)} style={btnStyle(t)}>{i18n.t('contactDetail.mute8h')}</button>
+                <button onClick={() => applyGroupMute(true, 0)} style={btnStyle(t)}>{i18n.t('contactDetail.muteAlways')}</button>
+              </div>
+            ) : (
+              <button onClick={() => setMuteChooser(true)} style={btnStyle(t)}>{i18n.t('contactDetail.mute')}</button>
+            )}
+          </div>
+        </Section>
+
         {/* Permissions */}
         <Section t={t} label={i18n.t('groupAdmin.permissionsSection')}>
           <Toggle
@@ -218,4 +253,8 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
       </div>
     </div>
   );
+}
+
+function btnStyle(t: { font: string; text: string; borderStrong: string; radiusS: number }): React.CSSProperties {
+  return { background: 'none', border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontSize: 12, fontWeight: 600, color: t.text, padding: '6px 10px' };
 }
