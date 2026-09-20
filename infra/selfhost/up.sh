@@ -22,6 +22,11 @@ done
 echo "[selfhost] building + starting relay, tor, ntfy…"
 docker compose up -d --build
 
+# Volumes created by a relay image older than 2026-09-20 belong to root while
+# the relay runs as `aegis` — attachments then fail with HTTP 500. Heal in
+# place (idempotent; a fresh install is already right from the image).
+docker compose exec -T -u root relay chown -R aegis:aegis /app/uploads /data >/dev/null 2>&1 || true
+
 echo "[selfhost] waiting for the onion service (first boot generates the key)…"
 for _ in $(seq 1 60); do
   ONION="$(docker compose exec -T tor cat /var/lib/tor/aegislink_relay/hostname 2>/dev/null | tr -d '[:space:]' || true)"

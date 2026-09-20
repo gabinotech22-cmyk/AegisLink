@@ -30,8 +30,12 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Copy source (tsx runs TypeScript directly in production to avoid a compile step)
 COPY --from=builder /app/src ./src
 
-# Persistent volume mount point for SQLite DB
-RUN mkdir -p /data && chown aegis:aegis /data
+# Persistent volume mount points: SQLite DB and the 24 h blob store. Both must
+# belong to `aegis` IN THE IMAGE — a fresh named volume copies the mount
+# point's ownership on first use, and the relay writes as uid 100. Without the
+# uploads line every self-hosted relay answered POST /blob/upload with 500
+# (EACCES on a root-owned volume): no attachment could ever be sent through it.
+RUN mkdir -p /data /app/uploads && chown aegis:aegis /data /app/uploads
 
 USER aegis
 

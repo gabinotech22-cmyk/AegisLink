@@ -135,6 +135,11 @@ docker compose down -v         # BORRAR todo, incluida la dirección .onion
   ser alcanzable.
 - **"Ese relay no soporta buzones o prekeys"**: estás usando una versión del
   relay anterior a F2 — `git pull && ./up.sh`.
+- **Las fotos/audios no salen ("no enviado", `upload_http_500`) pero el texto
+  sí**: relay levantado con una imagen anterior al 2026-09-20 — el volumen de
+  adjuntos quedó propiedad de root y el relay (usuario `aegis`) no podía
+  escribir. `git pull && ./up.sh` lo corrige en el sitio (la imagen nueva crea
+  el directorio con el dueño correcto y `up.sh` repara los volúmenes viejos).
 - **`tor` reinicia en bucle tras cambiar `ONION_TORRC`**: Tor no reutiliza el
   directorio de claves entre el modo oculto y el single-onion. Es deliberado
   (protege contra errores de config): `docker compose down && docker volume
