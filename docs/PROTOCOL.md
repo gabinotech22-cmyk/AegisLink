@@ -587,7 +587,21 @@ with a key derived from a user passphrase the relay never sees:
 - Only salt, nonce and ciphertext are stored; the passphrase never touches disk.
   Minimum passphrase length 12.
 - Legacy envelopes (v1/v2, PBKDF2-HMAC-SHA256 at 100k/600k iterations) remain
-  *decryptable* for restore, but all new backups are written as v3.
+  *decryptable* for restore, but all new backups are written as v3 — on
+  **both** platforms (`desktop/src/renderer/crypto/backup.ts` mirrors the
+  mobile module; until 2026-09-20 desktop wrote v1 and its restore discarded
+  the decrypted payload).
+- **Payload** (`BackupPayload`): identity keys, profile, every persisted
+  contact field (`toBackupContact`: nickname, announced name, own relay, caps,
+  pinned/hidden/pending, profile slot…), the groups with their signed roster
+  and governance (`toBackupGroup`), and the data preferences
+  (`restorablePreferences`: lock settings are excluded on purpose — no PIN
+  hash travels, restoring `appLockEnabled` would lock the user out), and the
+  **text messages** of every chat (`toBackupMessage`: deleted rows without
+  text, expired ephemerals skipped, a media message as its caption plus an
+  `attachment: true` flag that restores as an "attachment not included" note).
+  Attachments themselves are **not** in the backup — their blobs expire on the
+  relay and the files would make it huge; the Backup screen says so.
 
 > **⚠ Disclosure — KDF parameters are implied by version, not stored.**
 > The v3 Argon2id parameters are fixed by the envelope version rather than
@@ -600,6 +614,15 @@ with a key derived from a user passphrase the relay never sees:
 
 - **Panic mode** performs an instant local wipe, with an optional **decoy
   profile** for coerced-unlock scenarios.
+- **Decoy session scope.** Under the duress PIN every store that renders user
+  data re-hydrates duress-aware (identity, contacts, messages, groups,
+  channels, scheduled posts, profiles) — and so do **preferences**: the alert
+  keywords and the muted / mentions-only chat, group and channel lists read as
+  defaults in memory (`store/preferences.ts` `maskForDuress`), the stored real
+  values are never touched, and a preference changed inside the decoy is
+  memory-only (the real PIN re-hydrates the real ones). Neutral preferences
+  (theme, language, master switch…) stay as they are so the decoy looks like the
+  user's app.
 - **Multiple profiles** are cryptographically isolated: each has its own
   identity and its own SecureStore slot, and a non-primary profile never reads
   the primary's keys (`signSecretKeySlot` per-profile derivation).

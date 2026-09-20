@@ -16,8 +16,16 @@ import {
   ratePassphrase,
   isBackupEnvelope,
   BACKUP_MIN_PASSPHRASE_LEN,
+  BACKUP_VERSION,
+  toBackupContact,
+  toBackupGroup,
+  toBackupMessage,
+  restorablePreferences,
+  type BackupPayload,
   type PassphraseStrength,
 } from '../crypto/backup';
+import { saveContact, saveGroup, saveMessage, loadMessagesByChat, type StoredContact, type StoredGroup, type StoredMessage } from '../db/local';
+import { usePreferences } from '../store/preferences';
 import { WORDLIST_256 } from '../crypto/wordlist';
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
@@ -56,11 +64,8 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   const [lastBackupAt, setLastBackupAt] = useState<number | null>(null);
   const [error, setError] = useState('');
 
-  const totalMessages = Object.values(byChat).reduce((s, l) => s + l.length, 0);
   const totalConversations = contacts.length;
   const totalGroups = groups.length;
-  const totalMedia = Object.values(byChat).reduce((s, l) =>
-    s + l.filter((m) => m.type === 'image' || m.type === 'audio' || m.type === 'file').length, 0);
 
   const lastBackupLabel = lastBackupAt
     ? `${Math.max(1, Math.floor((Date.now() - lastBackupAt) / 60000))} min ago`
@@ -92,10 +97,13 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     setError('');
   }
 
-  function buildPayload() {
+  async function buildPayload(): Promise<BackupPayload> {
     if (!identity) throw new Error('No identity loaded');
+    const messages = await collectMessages();
+    // Same payload as mobile (crypto/backup.ts): contacts with every persisted
+    // field, groups with their signed governance, data preferences.
     return {
-      v: 1 as const,
+      v: BACKUP_VERSION,
       createdAt: Date.now(),
       identity: {
         aegisId: identity.aegisId,
@@ -111,24 +119,26 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         avatarImage,
         profileStatus,
       },
-      contacts: contacts.map((c) => ({
-        aegisId: c.aegisId,
-        publicKeyB64: c.publicKeyB64,
-        signingPublicKeyB64: c.signingPublicKeyB64,
-        name: c.name,
-        verified: c.verified,
-        addedAt: c.addedAt,
-        color: c.color,
-        avatarImage: c.avatarImage ?? null,
-        status: c.status,
-        muted: c.muted,
-        mutedUntil: c.mutedUntil ?? null,
-        zeroTrust: c.zeroTrust,
-        blocked: c.blocked,
-        archived: c.archived,
-      })),
+      contacts: contacts.map((ct) => toBackupContact(ct)),
+      groups: groups.map((g) => toBackupGroup(g as never)),
+      preferences: restorablePreferences(usePreferences.getState() as unknown as Record<string, unknown>),
+      messages,
     };
   }
+
+  async function collectMessages(): Promise<BackupPayload['messages']> {
+    const out: NonNullable<BackupPayload['messages']> = [];
+    for (const id of [...contacts.map((ct) => ct.aegisId), ...groups.map((g) => g.id)]) {
+      let list: StoredMessage[] = [];
+      try { list = await loadMessagesByChat(id); } catch { /* skip */ }
+      for (const m of list) {
+        const row = toBackupMessage(m as never);
+        if (row) out.push(row);
+      }
+    }
+    return out;
+  }
+
 
   async function confirmBackup() {
     if (passphrase.length < BACKUP_MIN_PASSPHRASE_LEN) {
@@ -141,8 +151,8 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     }
     setBusy(true);
     try {
-      const payload = buildPayload();
-      const envelope = encryptBackup(payload, passphrase);
+      const payload = await buildPayload();
+      const envelope = await encryptBackup(payload, passphrase);
       const json = JSON.stringify(envelope, null, 2);
       const blob = new Blob([json], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
@@ -190,11 +200,52 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     try {
       const envelope = JSON.parse(pendingEnvelope) as unknown;
       if (!isBackupEnvelope(envelope)) throw new Error('Invalid backup envelope');
-      const payload = decryptBackup(envelope, passphrase);
+      const payload = await decryptBackup(envelope, passphrase);
       resetPassphrase();
+      // The payload used to be decrypted and then dropped — "Account restored"
+      // with nothing written. Now: identity, profile, contacts, groups, prefs.
+      await useIdentity.getState().linkDevice(identityFromStored({
+        publicKeyB64: payload.identity.publicKeyB64,
+        secretKeyB64: payload.identity.secretKeyB64,
+        signingPublicKeyB64: payload.identity.signingPublicKeyB64,
+        signingSecretKeyB64: payload.identity.signingSecretKeyB64,
+        createdAt: payload.identity.createdAt,
+      }));
+      await useIdentity.getState().updateProfile(payload.profile.displayName, payload.profile.avatarColor, payload.profile.avatarImage);
+      if (payload.profile.profileStatus) await useIdentity.getState().updateStatus(payload.profile.profileStatus);
+      for (const ct of payload.contacts) {
+        const contact: StoredContact = {
+          ...toBackupContact(ct),
+          avatarImage: ct.avatarImage ?? null,
+          mutedUntil: ct.mutedUntil ?? null,
+          profile: ct.profile === 'work' ? 'work' : 'personal',
+        };
+        await saveContact(contact);
+      }
+      for (const g of payload.groups ?? []) await saveGroup(toBackupGroup(g) as unknown as StoredGroup);
+      const prefs = restorablePreferences(payload.preferences);
+      if (Object.keys(prefs).length > 0) await usePreferences.getState().restoreFrom(prefs as never);
+      for (const m of payload.messages ?? []) {
+        await saveMessage({
+          id: m.id,
+          chatId: m.chatId,
+          direction: m.direction,
+          body: m.attachment ? (m.body ? `${m.body}\n${i18n.t('backup.attachmentNotIncluded')}` : i18n.t('backup.attachmentNotIncluded')) : m.body,
+          createdAt: m.createdAt,
+          type: (m.attachment ? 'text' : (m.type ?? 'text')) as StoredMessage['type'],
+          replyToId: m.replyToId ?? null,
+          reactions: m.reactions as StoredMessage['reactions'],
+          starred: m.starred === true,
+          pinned: m.pinned === true,
+          deleted: m.deleted === true,
+          expiresAt: m.expiresAt ?? null,
+          deliveryStatus: (m.deliveryStatus ?? 'sent') as StoredMessage['deliveryStatus'],
+        } as StoredMessage);
+      }
       await hydrateIdentity();
       await hydrateContacts();
-      const msg = `Account restored. Aegis ID: ${payload.identity.aegisId}, ${payload.contacts.length} contacts recovered.`;
+      await useGroups.getState().hydrate();
+      const msg = i18n.t('backup.restoredMsg', { id: payload.identity.aegisId, count: payload.contacts.length });
       if (onRestored) {
         window.alert(msg);
         onRestored();
@@ -244,15 +295,17 @@ export function BackupScreen({ onBack, onRestored }: Props) {
             <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim }}>{i18n.t('backup.realtimeStats')}</span>
           </div>
           <span style={{ fontFamily: t.fontDisplay, fontSize: 32, fontWeight: '600', letterSpacing: -0.6, color: t.text, display: 'block' }}>
-            {totalMessages.toLocaleString()} messages
+            {i18n.t('backup.headline', { count: totalConversations })}
           </span>
           <span style={{ fontFamily: t.fontMono, fontSize: 12, color: t.textDim, marginTop: 2, display: 'block' }}>{i18n.t('backup.databaseEncryptedAtRest')}</span>
           <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 18, gap: 10 }}>
             <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.conversations')} val={String(totalConversations)} /></div>
             <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.groups')} val={String(totalGroups)} /></div>
-            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.media')} val={String(totalMedia)} /></div>
-            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.devices')} val="1" /></div>
+            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.identityStat')} val="1" /></div>
+            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.settingsStat')} val="✓" /></div>
+            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.messagesStat')} val="✓" /></div>
           </div>
+          <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 12, lineHeight: '17px', display: 'block' }}>{i18n.t('backup.messagesNotIncluded')}</span>
         </div>
 
         {/* Recovery phrase card */}

@@ -781,6 +781,15 @@
     "relayUnsupportedDesc": "Questo contatto usa un proprio relay. Aggiorna AegisLink a una versione con federazione dei relay per aggiungerlo."
   },
   "backup": {
+    "messagesStat": "MESSAGGI",
+    "attachmentNotIncluded": "[Allegato non incluso nel backup]",
+    "headline": "{{count}} contatti",
+    "headline_one": "{{count}} contatto",
+    "headline_other": "{{count}} contatti",
+    "identityStat": "IDENTITÀ",
+    "settingsStat": "IMPOSTAZIONI",
+    "messagesNotIncluded": "Il backup contiene identità, profilo, contatti (con soprannomi e relay), gruppi, impostazioni e messaggi di testo. Gli allegati (foto, audio, file) non sono inclusi.",
+    "restoredMsg": "Account ripristinato. Aegis ID: {{id}}, {{count}} contatti recuperati.",
     "title": "Backup cifrato",
     "exportSection": "ESPORTA",
     "importSection": "RIPRISTINA",
@@ -1721,6 +1730,8 @@
     "attachments": "Allegati"
   },
   "groupAdmin": {
+    "mutedSub": "Silenziato · nessun avviso da questo gruppo",
+    "notMutedSub": "Avvisi per messaggi e chiamate di questo gruppo",
     "title": "Amministrazione gruppo",
     "members": "Membri",
     "addMember": "Aggiungi membro",
