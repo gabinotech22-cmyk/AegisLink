@@ -178,6 +178,27 @@ export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[
   return await db().loadMessagesByChat(activeSlot, chatId);
 }
 
+/**
+ * Case-insensitive search over message text across every chat, newest first
+ * (decrypted and matched in the main process; see db:search-messages).
+ */
+export async function searchMessages(query: string, limit?: number): Promise<StoredMessage[]> {
+  if (!query.trim()) return [];
+  return await db().searchMessages(activeSlot, query, limit);
+}
+
+/** Text a search hit may show: typed text, or a file's name; null for other wire tags. */
+const NON_TEXT_BODY = /^\[(image|video|audio|gif|sticker|viewonce|location|poll|call|join_request|multi)[:\]]/;
+export function searchableText(body: string): string | null {
+  if (body.startsWith('[file:')) {
+    const name = body.slice(6).split(':')[0]?.trim();
+    return name || null;
+  }
+  if (NON_TEXT_BODY.test(body)) return null;
+  const trimmed = body.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export async function getMessage(id: string): Promise<StoredMessage | null> {
   return await db().getMessage(activeSlot, id);
 }

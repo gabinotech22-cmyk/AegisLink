@@ -115,6 +115,7 @@
     "unpin": "Desfijar"
   },
   "chat": {
+    "emptyState": "Sin mensajes aún. Todo cifrado de extremo a extremo.",
     "previewShowImage": "Mostrar imagen",
     "previewImageHint": "Se carga desde el sitio del remitente y le revela tu IP",
     "gifProviderNotice": "La búsqueda y las vistas previas de GIF se cargan del proveedor (ve tu IP). Los GIF enviados van cifrados de extremo a extremo.",

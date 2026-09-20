@@ -35,6 +35,7 @@ export interface AegisIPC {
     saveMessage(activeSlot: string, m: unknown): Promise<void>;
     updateMessageDelivery(id: string, status: string): Promise<void>;
     loadMessagesByChat(activeSlot: string, chatId: string): Promise<any[]>;
+    searchMessages(activeSlot: string, query: string, limit?: number): Promise<any[]>;
     getMessage(activeSlot: string, id: string): Promise<any>;
     setMessagePinned(id: string, pinned: boolean): Promise<void>;
     getPinnedMessage(activeSlot: string, chatId: string): Promise<any>;

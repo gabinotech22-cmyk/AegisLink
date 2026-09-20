@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld('aegis', {
       ipcRenderer.invoke('db:load-messages-by-chat', activeSlot, chatId),
     getMessage: (activeSlot: string, id: string): Promise<any> =>
       ipcRenderer.invoke('db:get-message', activeSlot, id),
+    searchMessages: (activeSlot: string, query: string, limit?: number): Promise<any[]> =>
+      ipcRenderer.invoke('db:search-messages', activeSlot, query, limit),
     setMessagePinned: (id: string, pinned: boolean): Promise<void> =>
       ipcRenderer.invoke('db:set-message-pinned', id, pinned),
     getPinnedMessage: (activeSlot: string, chatId: string): Promise<any> =>
