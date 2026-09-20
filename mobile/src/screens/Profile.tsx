@@ -71,7 +71,18 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
   // account — it would reveal that a real, hidden identity exists.
   const duressActive = usePreferences((s) => s.duressActive);
 
-  const setPhotoVis = (v: 'all' | 'contacts' | 'none') => void setPreference('photoVis', v);
+  // Changing "who sees my photo" re-announces the profile: contacts that lose
+  // access get an explicit clear, contacts that gain it get the photo.
+  const setPhotoVis = (v: 'all' | 'contacts' | 'none') => {
+    void (async () => {
+      await setPreference('photoVis', v);
+      if (!identity) return;
+      try {
+        const { broadcastProfileUpdate } = require('../socket/client') as typeof import('../socket/client');
+        await broadcastProfileUpdate(identity);
+      } catch { /* offline: the reconnect broadcast picks up the new fingerprint */ }
+    })();
+  };
 
 
   // Profile Editor States

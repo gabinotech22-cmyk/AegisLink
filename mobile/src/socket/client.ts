@@ -10,6 +10,13 @@ import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRa
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId, getContactMailboxRoot } from '../crypto/mailboxStore';
 import { OWN_CAPS, sanitizeCaps } from '../net/caps';
+import { avatarFieldsFor, receivedAvatar } from '../utils/photoVisibility';
+
+/** preferences.photoVis at send time ("who sees my photo"). */
+function photoVisNow(): import('../utils/photoVisibility').PhotoVis {
+  const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
+  return usePreferences.getState().photoVis ?? 'contacts';
+}
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery, fetchMailboxOverTor } from './mailboxSocket';
 import { isForeign, getHomeRelay, isCustomHome, homeRelayOnionUrl, resolveRelay } from '../net/homeRelay';
 import { TorSioSocket, IDENTITY_FORWARD_EVENTS, isTorAvailable, startTor } from '../net/tor';
@@ -2859,7 +2866,7 @@ async function decryptAndAppendLocked(
             contact.aegisId,
             parsedPayload.senderName,
             parsedPayload.senderColor,
-            parsedPayload.senderImage ?? undefined,
+            receivedAvatar(parsedPayload),
             parsedPayload.senderStatus ?? undefined
           );
         }
@@ -3412,11 +3419,14 @@ async function decryptAndAppendLocked(
 
         // Dynamically update sender contact details
         if (parsedPayload.senderName) {
+          // `senderImage: null` after the first group message means "no
+          // change", not "remove" — passing it through used to wipe the
+          // sender's photo on their second message.
           void useContacts.getState().updateContactProfile(
             senderId,
             parsedPayload.senderName,
             parsedPayload.senderColor,
-            parsedPayload.senderImage
+            receivedAvatar(parsedPayload)
           );
         }
 
@@ -3635,7 +3645,7 @@ async function decryptAndAppendLocked(
             contact.aegisId,
             parsedPayload.senderName,
             parsedPayload.senderColor,
-            parsedPayload.senderImage ?? undefined,
+            receivedAvatar(parsedPayload),
             parsedPayload.senderStatus ?? undefined
           );
         }
@@ -4669,15 +4679,17 @@ export async function sendMessage(opts: {
     });
   }
 
-  // Include senderImage only on the first message to each contact per session.
-  // This avoids embedding a large base64 blob in every envelope while still
-  // ensuring the recipient always has an up-to-date avatar.
-  const rawImage = idState.avatarImage;
-  let senderImage: string | null = null;
-  if (!profiledContacts.has(opts.recipientAegisId)) {
-    senderImage = await toDataUri(rawImage);
-    if (senderImage) profiledContacts.add(opts.recipientAegisId);
-  }
+  // Avatar only on the first message to each contact per session (no large
+  // base64 blob in every envelope), and only if "who sees my photo" allows
+  // this recipient — otherwise an explicit clear, once.
+  const already = profiledContacts.has(opts.recipientAegisId);
+  const avatar = avatarFieldsFor(
+    photoVisNow(),
+    useContacts.getState().get(opts.recipientAegisId) ?? null,
+    already ? null : await toDataUri(idState.avatarImage),
+    already,
+  );
+  if (!already) profiledContacts.add(opts.recipientAegisId);
 
   const payloadObj = {
     type: msgType,
@@ -4685,7 +4697,7 @@ export async function sendMessage(opts: {
     senderName,
     senderColor,
     senderStatus,
-    senderImage,
+    ...avatar,
     replyToId: opts.replyToId,
     expiresAt,
   };
@@ -4971,6 +4983,7 @@ export async function broadcastProfileUpdate(
   const rawImage = idState.avatarImage;
   // Encode local file URIs to base64 data URIs so other devices can render them
   const senderImage = await toDataUri(rawImage);
+  const photoVis = photoVisNow();
 
   // Identity-global fields (identical for every contact) — compute once, out of
   // the loop, and fold them into the change fingerprint below.
@@ -4988,7 +5001,9 @@ export async function broadcastProfileUpdate(
   // the !existing guard below skips sessionless peers — so skip the whole thing
   // when nothing has changed since the last broadcast for THIS identity.
   const fingerprint = profileFingerprint(
-    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, ...deliveryTokenField, ...mailboxRootField, ...mailboxRelayField, ...ownCapsField() }),
+    // photoVis is part of the fingerprint: changing "who sees my photo" must
+    // re-announce (with a clear for the contacts that lost it).
+    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, photoVis, ...deliveryTokenField, ...mailboxRootField, ...mailboxRelayField, ...ownCapsField() }),
   );
   const hashKey = profileBroadcastHashKey(identity.aegisId);
   if (!opts.force) {
@@ -5015,7 +5030,7 @@ export async function broadcastProfileUpdate(
         type: 'profile_update',
         senderName,
         senderColor,
-        senderImage,
+        ...avatarFieldsFor(photoVis, contact, senderImage),
         senderStatus,
         ...deliveryTokenField,
         ...mailboxRootField,
@@ -5073,7 +5088,7 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
     type: 'profile_update',
     senderName: idState.displayName,
     senderColor: idState.avatarColor,
-    senderImage,
+    ...avatarFieldsFor(photoVisNow(), useContacts.getState().get(contact.aegisId) ?? null, senderImage),
     senderStatus: idState.profileStatus,
     ...(await ownDeliveryTokenField()),
     ...(await ownMailboxRootField()),
@@ -5321,6 +5336,7 @@ export async function sendGroupMessage(opts: {
     (m: string) => m !== opts.identity.aegisId && !profiledContacts.has(m),
   );
   const imageDataUri = anyNeedsImage ? await toDataUri(rawImage) : null;
+  const photoVis = photoVisNow();
 
   // Group avatar: color always included (7 bytes). Image included only on the
   // first message per group per session — same optimization as senderImage.
@@ -5353,6 +5369,9 @@ export async function sendGroupMessage(opts: {
     // materialize them from the directory (same auto-add the RECEIVE path does
     // for unknown senders — keeps both directions symmetric and caches the key).
     let contact = contacts.find((c) => c.aegisId === memberId);
+    // "Contacts only" means people in OUR list — a member materialized below
+    // just to reach them through the group is not one.
+    const knownContact = contact ?? null;
     if (!contact) {
       try {
         contact = await useContacts.getState().addByAegisId(memberId);
@@ -5366,8 +5385,9 @@ export async function sendGroupMessage(opts: {
     }
     if (!contact) continue;
 
-    const senderImage = profiledContacts.has(contact.aegisId) ? null : imageDataUri;
-    if (senderImage) profiledContacts.add(contact.aegisId);
+    const alreadyProfiled = profiledContacts.has(contact.aegisId);
+    const avatar = avatarFieldsFor(photoVis, knownContact, alreadyProfiled ? null : imageDataUri, alreadyProfiled);
+    if (!alreadyProfiled) profiledContacts.add(contact.aegisId);
 
     const msgId = Crypto.randomUUID();
 
@@ -5415,7 +5435,7 @@ export async function sendGroupMessage(opts: {
       senderId: opts.identity.aegisId,
       senderName,
       senderColor,
-      senderImage,
+      ...avatar,
       body: opts.plaintext,
       msgType: opts.msgType ?? null,
       mediaUri: opts.mediaUri ?? null,
