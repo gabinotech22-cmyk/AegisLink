@@ -8,6 +8,8 @@ import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { usePreferences } from '../store/preferences';
 import { useContacts } from '../store/contacts';
+import { useGroups } from '../store/groups';
+import { isContactMutedNow, isChatMutedNow, withChatMute } from '../utils/mute';
 
 interface Props {
   onBack: () => void;
@@ -27,6 +29,7 @@ export function NotificationsScreen({ onBack }: Props) {
   const summary  = usePreferences((s) => s.notifSummary);
   const keywords = usePreferences((s) => s.notifKeywords);
   const mutedIds = usePreferences((s) => s.mutedChats);
+  const mutedUntilMap = usePreferences((s) => s.mutedChatsUntil);
   const setPref  = usePreferences((s) => s.set);
 
   useEffect(() => { if (!hydrated) void hydrate(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -43,19 +46,30 @@ export function NotificationsScreen({ onBack }: Props) {
   const setSummary = (v: boolean) => void setPref('notifSummary', v);
 
   const contacts = useContacts((s) => s.contacts);
-  const getContactDisplayName = (id: string) => {
-    const found = contacts.find((c) => c.aegisId === id);
-    return found ? found.name : id;
-  };
+  const muteContact = useContacts((s) => s.muteContact);
+  const groups = useGroups((s) => s.groups);
 
-  const muted = mutedIds.map((id) => ({
-    id,
-    name: getContactDisplayName(id),
-    until: i18nT('notifications.always', 'always')
-  }));
+  // Real list: contacts muted on their record + chats (groups) muted through
+  // preferences. `mutedChats` had no writer before, so this was always empty.
+  const now = Date.now();
+  const untilLabel = (until: number | null | undefined) =>
+    until && until > 0 ? new Date(until).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : i18nT('notifications.always', 'always');
+  const muted: { id: string; name: string; until: string; kind: 'contact' | 'chat' }[] = [
+    ...contacts
+      .filter((ct) => isContactMutedNow(ct, now))
+      .map((ct) => ({ id: ct.aegisId, name: ct.name, until: untilLabel(ct.mutedUntil), kind: 'contact' as const })),
+    ...mutedIds
+      .filter((id) => isChatMutedNow({ mutedChats: mutedIds, mutedChatsUntil: mutedUntilMap }, id, now))
+      .map((id) => ({ id, name: groups.find((g) => g.id === id)?.name ?? contacts.find((ct) => ct.aegisId === id)?.name ?? id, until: untilLabel(mutedUntilMap?.[id]), kind: 'chat' as const })),
+  ];
 
   const removeKeyword = (k: string) => void setPref('notifKeywords', keywords.filter((x) => x !== k));
-  const unmuteChat    = (id: string) => void setPref('mutedChats', mutedIds.filter((x) => x !== id));
+  const unmuteChat = (id: string, kind: 'contact' | 'chat') => {
+    if (kind === 'contact') { void muteContact(id, false); return; }
+    const next = withChatMute({ mutedChats: mutedIds, mutedChatsUntil: mutedUntilMap }, id, false);
+    void setPref('mutedChats', next.mutedChats);
+    void setPref('mutedChatsUntil', next.mutedChatsUntil);
+  };
 
   const [kwInput, setKwInput] = useState('');
   const [showKwInput, setShowKwInput] = useState(false);
@@ -221,7 +235,8 @@ export function NotificationsScreen({ onBack }: Props) {
                 </Text>
               </View>
               <Pressable
-                onPress={() => unmuteChat(m.id)}
+                testID={`unmute-${m.id}`}
+                onPress={() => unmuteChat(m.id, m.kind)}
                 style={({ pressed }) => ({
                   paddingHorizontal: 10,
                   paddingVertical: 4,

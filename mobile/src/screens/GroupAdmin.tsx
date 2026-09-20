@@ -18,6 +18,8 @@ import { ShareLinkSheet } from '../components/ShareLinkSheet';
 import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useGroups } from '../store/groups';
+import { usePreferences } from '../store/preferences';
+import { isChatMutedNow, withChatMute } from '../utils/mute';
 import { useContacts } from '../store/contacts';
 import { useIdentity } from '../store/identity';
 import { encodeGroupInviteLinkUniversal } from '../crypto/qr';
@@ -142,6 +144,26 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
 
   function handleAddMember() {
     setShowAddMember(true);
+  }
+
+  const mutedChats = usePreferences((s) => s.mutedChats);
+  const mutedChatsUntil = usePreferences((s) => s.mutedChatsUntil);
+  const mutePrefs = { mutedChats, mutedChatsUntil };
+  const setPref = usePreferences((s) => s.set);
+  const groupMuted = isChatMutedNow(mutePrefs, group.id, Date.now());
+  function applyGroupMute(muted: boolean, until: number | null = 0) {
+    const next = withChatMute(mutePrefs, group.id, muted, until);
+    void setPref('mutedChats', next.mutedChats);
+    void setPref('mutedChatsUntil', next.mutedChatsUntil);
+  }
+  function handleGroupMute() {
+    if (groupMuted) { applyGroupMute(false); return; }
+    themedAlert(i18nT('contactDetail.muteTitle'), i18nT('contactDetail.muteTimeQuestion'), [
+      { text: i18nT('contactDetail.mute1h'), onPress: () => applyGroupMute(true, Date.now() + 3_600_000) },
+      { text: i18nT('contactDetail.mute8h'), onPress: () => applyGroupMute(true, Date.now() + 28_800_000) },
+      { text: i18nT('contactDetail.muteAlways'), onPress: () => applyGroupMute(true, 0) },
+      { text: i18nT('common.cancel'), style: 'cancel' },
+    ]);
   }
 
   function handleRemoveMember(aegisId: string) {
@@ -448,6 +470,27 @@ export function GroupAdminScreen({ group: groupProp, onBack, onOpenPosts }: Prop
             </Pressable>
           </Section>
         )}
+
+        {/* Notifications for this group — every member, local only (groups
+            could not be muted at all before: nothing wrote mutedChats). */}
+        <Section t={t} label={i18nT('contactDetail.notificationsTitle').toUpperCase()}>
+          <Pressable
+            testID="group-mute-row"
+            onPress={handleGroupMute}
+            style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: pressed ? t.surface2 : 'transparent' })}
+          >
+            <I.Mute size={18} color={groupMuted ? t.warn : t.textDim} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>
+                {groupMuted ? i18nT('contactDetail.unmute') : i18nT('contactDetail.mute')}
+              </Text>
+              <Text style={{ fontFamily: t.font, fontSize: 11.5, color: t.textDim, marginTop: 1 }}>
+                {groupMuted ? i18nT('groupAdmin.mutedSub') : i18nT('groupAdmin.notMutedSub')}
+              </Text>
+            </View>
+            <I.Chevron size={16} color={t.textFaint} />
+          </Pressable>
+        </Section>
 
         {/* Permissions — owner-only (only the owner signs governance). Each
             toggle maps a permission gate: ON = 'admins', OFF = 'everyone'. */}

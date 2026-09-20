@@ -53,6 +53,8 @@ export interface Preferences {
   notifSummary: boolean;
   notifKeywords: string[];
   mutedChats: string[]; // aegisIds or group ids
+  /** Deadline (epoch ms) of a timed mute per chat id; absent/0 = always (utils/mute.ts). */
+  mutedChatsUntil: Record<string, number>;
   mentionsOnlyChats: string[]; // aegisIds/group ids that only alert on a keyword/mention match
   /**
    * Public channel ids whose post notifications are muted. Device-local only:
@@ -93,6 +95,7 @@ const DEFAULTS: Preferences = {
   notifSummary: false,
   notifKeywords: ['urgente', 'multisig', 'audit'],
   mutedChats: [],
+  mutedChatsUntil: {},
   mentionsOnlyChats: [],
   mutedChannels: [],
   appLockEnabled: false,
@@ -136,6 +139,7 @@ function snapshot(get: () => PrefsState): Preferences {
     notifSummary: s.notifSummary,
     notifKeywords: s.notifKeywords,
     mutedChats: s.mutedChats,
+    mutedChatsUntil: s.mutedChatsUntil,
     mentionsOnlyChats: s.mentionsOnlyChats,
     mutedChannels: s.mutedChannels,
     appLockEnabled: s.appLockEnabled,
