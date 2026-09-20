@@ -11,7 +11,9 @@ import { Section, Toggle } from '../components/Section';
 import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
+import { useGroups } from '../store/groups';
 import { usePreferences } from '../store/preferences';
+import { buildExportPayload } from '../utils/dataExport';
 import { themedAlert } from '../components/AlertHost';
 
 interface Props {
@@ -28,49 +30,29 @@ export function DataExportScreen({ onBack }: Props) {
   const [exporting, setExporting] = useState(false);
   const { identity, reset } = useIdentity();
   const { contacts } = useContacts();
+  const groups = useGroups((s) => s.groups);
   const readReceipts = usePreferences((s) => s.readReceipts);
   const typingIndicator = usePreferences((s) => s.typingIndicator);
   const blockScreenshots = usePreferences((s) => s.blockScreenshots);
 
   async function handleExport() {
     setExporting(true);
+    // The file is plaintext by design (portability). It lives in the cache
+    // directory only for the duration of the share sheet and is deleted right
+    // after — never a lingering clear copy of the history next to the
+    // encrypted database.
+    const fileUri = (FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? '') + `aegis_export_${Date.now()}.json`;
     try {
       const { loadMessagesByChat } = require('../db/local') as typeof import('../db/local');
-
-      let conversations: Record<string, object[]> = {};
-      let totalMessages = 0;
-      if (pick.messages) {
-        for (const c of contacts) {
-          try {
-            const msgs = await loadMessagesByChat(c.aegisId);
-            if (msgs.length > 0) {
-              conversations[c.name] = msgs.map((m) => ({
-                id: m.id,
-                direction: m.direction,
-                body: m.mediaUri ? '[media omitted]' : m.body,
-                createdAt: new Date(m.createdAt).toISOString(),
-                type: m.type ?? 'text',
-                deleted: m.deleted ?? false,
-              }));
-              totalMessages += msgs.length;
-            }
-          } catch { /* skip inaccessible chat */ }
-        }
-      }
-
-      const dbData = {
-        version: 1,
-        exportedAt: new Date().toISOString(),
+      const dbData = await buildExportPayload({
         aegisId: identity?.aegisId ?? null,
-        contacts: pick.contacts
-          ? contacts.map((c) => ({ name: c.name, aegisId: c.aegisId, verified: c.verified, color: c.color }))
-          : [],
-        conversations: pick.messages ? conversations : {},
-        totalMessages,
-        settings: pick.settings ? { readReceipts, typingIndicator, blockScreenshots } : null,
-      };
+        contacts,
+        groups,
+        pick,
+        settings: { readReceipts, typingIndicator, blockScreenshots },
+        loadMessages: loadMessagesByChat,
+      });
 
-      const fileUri = (FileSystem.documentDirectory ?? '') + 'aegis_export.json';
       await FileSystem.writeAsStringAsync(fileUri, JSON.stringify(dbData, null, 2));
 
       if (await Sharing.isAvailableAsync()) {
@@ -80,13 +62,14 @@ export function DataExportScreen({ onBack }: Props) {
         });
       } else {
         themedAlert(
-          i18nT('dataExport.fileSaved', 'File saved'),
-          i18nT('dataExport.savedTo', 'Saved to: {{uri}}', { uri: fileUri })
+          i18nT('dataExport.noShareTitle', 'Cannot share'),
+          i18nT('dataExport.noShareDesc', 'No app on this device can receive the file.'),
         );
       }
     } catch (e) {
       themedAlert(i18nT('dataExport.exportError', 'Export error'), (e as Error).message);
     } finally {
+      await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => { /* best effort */ });
       setExporting(false);
     }
   }
