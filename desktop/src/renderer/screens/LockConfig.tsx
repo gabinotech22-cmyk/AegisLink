@@ -77,7 +77,6 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
   const appLockEnabled = usePreferences((s) => s.appLockEnabled);
   const biometricsEnabled = usePreferences((s) => s.biometricsEnabled);
   const lockTimeoutMin = usePreferences((s) => s.lockTimeoutMin);
-  const hideRecents = usePreferences((s) => s.hideRecents);
   const setPref = usePreferences((s) => s.set);
   const [pinStored, setPinStored] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
@@ -327,10 +326,6 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
             </button>
           </Section>
         )}
-
-        <Section t={t} label={i18n.t('lockConfig.screenPrivacy')}>
-          <Toggle t={t} label={i18n.t('lockConfig.hideRecents')} sub={i18n.t('lockConfig.screenGoesBlackWhen')} value={hideRecents} onChange={(v) => void setPref('hideRecents', v)} noBorder />
-        </Section>
 
         <div style={{ paddingLeft: 18, paddingRight: 18, marginTop: 10 }}>
           <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '18px', display: 'block' }}>{i18n.t('lockConfig.aegislinkHasNoAccess')}</span>
