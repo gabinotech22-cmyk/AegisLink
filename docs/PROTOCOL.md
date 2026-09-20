@@ -541,6 +541,15 @@ Attachments (`mobile/src/crypto/media.ts`) never reach the relay in plaintext:
   `socket/__tests__/outbox.test.ts` (❺ ❻ ❼), `utils/__tests__/mediaWire.test.ts`,
   `db/__tests__/orphanedPending.db.test.ts`.
 
+**Attachment lifetime on the device (mobile).** A received blob is kept as
+ciphertext (`media/<id>.enc`) and decrypted on demand into the purgeable cache
+(`dec_<id>.<ext>`); a sent attachment keeps its local original. All of them are
+deleted together with the message row — delete for me, delete for everyone
+(receiver side), ephemeral expiry and a chat/contact wipe call
+`utils/mediaFiles.ts` on the URIs of the affected rows (main and multi-
+attachment). The decrypted cache is additionally purged 30 s after the app goes
+to background. Desktop keeps no attachment on disk.
+
 ### 7.4b Local database at rest (SQLCipher) and the lost-key case
 
 The whole SQLite file is SQLCipher-encrypted (`useSQLCipher: true`); the 256-bit
