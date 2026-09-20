@@ -14,8 +14,10 @@
     "incomingVoiceCall": "Incoming E2EE voice call",
     "missedCall": "Missed call",
     "dailySummaryTitle": "Daily summary",
-    "dailySummaryBody_one": "You received {{count}} message today from {{names}}.",
-    "dailySummaryBody_other": "You received {{count}} messages today from {{names}}."
+    "dailySummaryBody_one": "You have {{count}} unread message.",
+    "dailySummaryBody_other": "You have {{count}} unread messages.",
+    "dailySummaryNamesBody_one": "You have {{count}} unread message from {{names}}.",
+    "dailySummaryNamesBody_other": "You have {{count}} unread messages from {{names}}."
   },
   "common": {
     "cancel": "Cancel",
@@ -115,6 +117,7 @@
     "unpin": "Unpin"
   },
   "chat": {
+    "emptyState": "No messages yet. Everything is end-to-end encrypted.",
     "previewShowImage": "Show image",
     "previewImageHint": "Loads from the sender’s site and reveals your IP to it",
     "gifProviderNotice": "GIF search and previews load from the GIF provider (it sees your IP). Sent GIFs are encrypted end-to-end.",
@@ -1240,7 +1243,8 @@
     "poll": "Poll",
     "sticker": "Sticker",
     "video": "Video",
-    "videoGallery": "Gallery · E2EE"
+    "videoGallery": "Gallery · E2EE",
+    "attachments": "Attachments"
   },
   "groupAdmin": {
     "title": "Group admin",

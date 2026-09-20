@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import type { CSSProperties } from 'react';
@@ -6,37 +6,10 @@ import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { useContacts } from '../store/contacts';
+import { useGroups } from '../store/groups';
+import { searchMessages, searchableText, type StoredContact, type StoredGroup, type StoredMessage } from '../db/local';
 
-// ---------------------------------------------------------------------------
-// Stub types
-// ---------------------------------------------------------------------------
-
-interface StoredContact {
-  aegisId: string;
-  name: string;
-  publicKeyB64: string;
-  color?: string;
-  avatarImage?: string | null;
-  verified: boolean;
-  addedAt: number;
-}
-
-interface StoredGroup {
-  id: string;
-  name: string;
-  members: string[];
-  avatarColor?: string;
-  avatarImage?: string;
-  createdAt: number;
-}
-
-interface StoredMessage {
-  id: string;
-  body: string;
-  direction: 'in' | 'out';
-  type: 'text' | 'image' | 'audio' | 'file';
-  createdAt: number;
-}
 
 type Filter = 'all' | 'messages' | 'files' | 'people' | 'groups';
 
@@ -63,10 +36,8 @@ function formatTime(ts: number): string {
   return d.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
 }
 
-const FILE_PREFIXES = ['attachment ·', '📎', '📁', '📄', '🗂'];
-function isFileMessage(body: string): boolean {
-  return FILE_PREFIXES.some((p) => body.startsWith(p));
-}
+/** Debounce so a fast typist does not decrypt the whole history per keystroke. */
+const SEARCH_DEBOUNCE_MS = 250;
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', get label() { return i18n.t('profile.all'); } },
@@ -82,10 +53,27 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
 
-  // Stub data
-  const contacts: StoredContact[] = [];
-  const groups: StoredGroup[] = [];
-  const byChat: Record<string, StoredMessage[]> = {};
+  const contacts = useContacts((st) => st.contacts);
+  const groups = useGroups((st) => st.groups);
+
+  // Message hits come from the DB (every chat, decrypted in the main process),
+  // not from the in-memory store — that only holds the chats opened this session.
+  const [messageHits, setMessageHits] = useState<StoredMessage[]>([]);
+  const searchSeq = useRef(0);
+  useEffect(() => {
+    const query = q.trim();
+    const seq = ++searchSeq.current;
+    if (!query) {
+      setMessageHits([]);
+      return;
+    }
+    const handle = setTimeout(() => {
+      searchMessages(query)
+        .then((hits) => { if (seq === searchSeq.current) setMessageHits(hits); })
+        .catch(() => { if (seq === searchSeq.current) setMessageHits([]); });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [q]);
 
   const contactById = useMemo(() => {
     const m = new Map<string, StoredContact>();
@@ -108,21 +96,22 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
         out.push({ type: 'group', group: g });
       }
     }
+    // DB hits are already filtered to typed text / file names — never a wire
+    // tag with a blob key inside.
     if (queryActive) {
-      for (const [chatId, list] of Object.entries(byChat)) {
+      for (const m of messageHits) {
+        const chatId = m.chatId;
         const c = contactById.get(chatId);
         const g = groups.find((x) => x.id === chatId);
         const chatName = c?.name ?? g?.name ?? chatId;
         const chatColor = c?.color ?? g?.avatarColor;
         const chatAvatar = c?.avatarImage ?? g?.avatarImage ?? null;
-        for (const m of list) {
-          if (!m.body.toLowerCase().includes(query)) continue;
-          if (isFileMessage(m.body)) {
-            const fname = m.body.replace(/^attachment · /i, '').split(' ')[0];
-            out.push({ type: 'file', chatId, chatName, name: fname || 'file', size: '—', from: m.direction === 'out' ? 'You' : chatName, time: formatTime(m.createdAt), ts: m.createdAt });
-          } else {
-            out.push({ type: 'message', chatId, chatName, chatColor, chatAvatar, text: m.body, time: formatTime(m.createdAt), ts: m.createdAt });
-          }
+        const text = searchableText(m.body);
+        if (!text) continue;
+        if (m.body.startsWith('[file:')) {
+          out.push({ type: 'file', chatId, chatName, name: text, size: '—', from: m.direction === 'out' ? i18n.t('search.fromYou') : chatName, time: formatTime(m.createdAt), ts: m.createdAt });
+        } else {
+          out.push({ type: 'message', chatId, chatName, chatColor, chatAvatar, text, time: formatTime(m.createdAt), ts: m.createdAt });
         }
       }
     }
@@ -134,7 +123,7 @@ export function SearchScreen({ onBack, onOpenChat, onOpenContact, onOpenGroupCha
       if (filter === 'groups') return r.type === 'group';
       return true;
     });
-  }, [q, filter, contacts, groups, byChat, contactById]);
+  }, [q, filter, contacts, groups, messageHits, contactById]);
 
   const hasResults = results.length > 0;
   const hasQuery = q.trim().length > 0;

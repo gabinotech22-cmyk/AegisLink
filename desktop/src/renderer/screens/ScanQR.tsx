@@ -10,6 +10,7 @@ import { parseIdentityQR } from '../crypto/qr';
 import { FEDERATION } from '../config';
 import { isOfficialRelay } from '../net/officialRelay';
 import type { StoredContact } from '../db/local';
+import { decodeQrFromImage } from '../utils/qrImage';
 
 interface Props {
   onCancel: () => void;
@@ -26,16 +27,37 @@ export function ScanQRScreen({ onCancel, onAdded }: Props) {
   const confirmKeyChange = useContacts((s) => s.confirmKeyChange);
   const identity = useIdentity((s) => s.identity);
 
+  // A QR in an image (screenshot, photo, exported PNG) is decoded locally and
+  // then goes through exactly the same path as pasted text, so a v2 link keeps
+  // its relay + mailbox root (never reduced to the bare id — F7 lesson).
   async function handleFileQR(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
-    setError(i18n.t('scanQR.qrScanningFromFile'));
     e.target.value = '';
+    if (!file) return;
+    setBusy(true);
+    setError('');
+    let decoded: string | null = null;
+    try {
+      decoded = await decodeQrFromImage(file);
+    } catch {
+      decoded = null;
+    }
+    if (!decoded) {
+      setBusy(false);
+      setError(i18n.t('scanQR.noQrInImage'));
+      return;
+    }
+    setManualInput(decoded);
+    await submitRaw(decoded);
   }
 
   async function handleManualSubmit() {
     const raw = manualInput.trim();
     if (!raw) { setError(i18n.t('scanQR.enterAnAegisId')); return; }
+    await submitRaw(raw);
+  }
+
+  async function submitRaw(raw: string) {
     setBusy(true);
     setError('');
     try {

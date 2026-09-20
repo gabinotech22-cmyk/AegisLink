@@ -647,7 +647,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
           ListEmptyComponent={
             <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 40 }}>
               <Text style={{ fontFamily: t.font, fontSize: 14, color: t.textDim }}>
-                Sin mensajes aún. Todo cifrado de extremo a extremo.
+                {i18nT('chat.emptyState')}
               </Text>
             </View>
           }

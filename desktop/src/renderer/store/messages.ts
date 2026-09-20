@@ -57,6 +57,11 @@ interface MessagesState {
   clearChat: (chatId: string) => Promise<void>;
 }
 
+/** Keep the dock/taskbar badge equal to the unread total after every counter change. */
+function syncBadge(): void {
+  void import('../notifications/push').then(({ syncAppBadge }) => syncAppBadge()).catch(() => {});
+}
+
 export const useMessages = create<MessagesState>((set, get) => ({
   byChat: {},
   loadedChats: {},
@@ -100,18 +105,32 @@ export const useMessages = create<MessagesState>((set, get) => ({
 
   async append(m) {
     await saveMessage(m);
+    // A message that arrives while its own chat is on screen has been seen:
+    // it must not bump the counter (mobile has had this guard; desktop counted
+    // messages the user was reading, and the badge with them).
+    let isActiveChat = false;
+    if (m.direction === 'in') {
+      try {
+        const { getActiveChatNotificationId } = await import('../notifications/push');
+        isActiveChat = getActiveChatNotificationId() === m.chatId;
+      } catch { /* push module unavailable (tests) — count it */ }
+    }
+    if (isActiveChat) resetUnread(m.chatId).catch(() => {});
     set((s) => {
       const existing = s.byChat[m.chatId] ?? [];
       const next: Partial<MessagesState> = {
         byChat: { ...s.byChat, [m.chatId]: [...existing, m] },
         previews: { ...s.previews, [m.chatId]: m },
       };
-      if (m.direction === 'in') {
+      if (m.direction === 'in' && !isActiveChat) {
         next.unreadCounts = { ...s.unreadCounts, [m.chatId]: (s.unreadCounts[m.chatId] ?? 0) + 1 };
         incrementUnread(m.chatId).catch(() => {});
+      } else if (m.direction === 'in') {
+        next.unreadCounts = { ...s.unreadCounts, [m.chatId]: 0 };
       }
       return next;
     });
+    if (m.direction === 'in') syncBadge();
   },
 
   async refreshPreview(chatId) {
@@ -144,6 +163,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
   async markRead(chatId) {
     await resetUnread(chatId);
     set((s) => ({ unreadCounts: { ...s.unreadCounts, [chatId]: 0 } }));
+    syncBadge();
   },
 
   async saveDraft(chatId, text) {
@@ -163,6 +183,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
   async loadAllUnreads() {
     const counts = await getAllUnreadCounts();
     set((s) => ({ unreadCounts: { ...s.unreadCounts, ...counts } }));
+    syncBadge();
   },
 
   setEphemeralTimer(seconds) {
