@@ -78,6 +78,9 @@ export interface AegisIPC {
     isFocused(): Promise<boolean>;
     onOpenChat(cb: (chatId: string) => void): () => void;
   };
+  window: {
+    setContentProtection(enabled: boolean): Promise<boolean>;
+  };
   tor: {
     status(): Promise<unknown>;
     onStatus(cb: (status: unknown) => void): () => void;
