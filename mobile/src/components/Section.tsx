@@ -60,9 +60,10 @@ interface RowProps {
   trailing?: ReactNode;
   danger?: boolean;
   noBorder?: boolean;
+  testID?: string;
 }
 
-export function Row({ t, icon, label, sub, onPress, trailing, danger, noBorder }: RowProps) {
+export function Row({ t, icon, label, sub, onPress, trailing, danger, noBorder, testID }: RowProps) {
   const labelColor = danger ? t.danger : t.text;
   const content = (
     <View
@@ -88,6 +89,7 @@ export function Row({ t, icon, label, sub, onPress, trailing, danger, noBorder }
   );
   return onPress ? (
     <Pressable
+      testID={testID}
       onPress={onPress}
       android_ripple={{ color: t.surface2 }}
       style={({ pressed }) => ({ backgroundColor: pressed ? t.surface2 : 'transparent' })}
