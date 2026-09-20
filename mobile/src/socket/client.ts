@@ -413,11 +413,14 @@ async function setJobMessageStatus(job: OutboxJob, status: DeliveryStatus): Prom
  * 1.0.6 left such rows behind for every photo/video/voice note (their bubble id
  * diverged from the wire id), and any build can with a crash between the
  * append and the enqueue. Once per process, on the first drain, mark the ones
- * older than an hour `failed` so they offer retry instead of "sending" forever.
- * An hour is far beyond any upload — a row younger than that may legitimately
- * be mid-upload with its job not written yet.
+ * older than ten minutes `failed` so they offer retry instead of "sending"
+ * forever. Ten minutes covers the upload retry ladder (3 attempts, seconds
+ * apart) with room for a slow Tor circuit; a row younger than that may
+ * legitimately be mid-upload with its job not written yet. Product decision
+ * 2026-09-20: an hour of "sending" was judged too long to leave the user
+ * without a retry.
  */
-export const ORPHANED_PENDING_MIN_AGE_MS = 60 * 60 * 1000;
+export const ORPHANED_PENDING_MIN_AGE_MS = 10 * 60 * 1000;
 let orphanSweepDone = false;
 export async function settleOrphanedPendingOnce(): Promise<void> {
   if (orphanSweepDone) return;

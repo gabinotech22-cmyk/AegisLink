@@ -499,7 +499,7 @@ Attachments (`mobile/src/crypto/media.ts`) never reach the relay in plaintext:
   is never retried: it only ever lived inline in the original envelope. Rows
   that predate this (every attachment sent by ≤ 1.0.6) or that lost their job
   to a crash are swept once per launch on the first outbox drain: `pending`,
-  older than an hour, referenced by no outbox job → `failed`
+  older than ten minutes, referenced by no outbox job → `failed`
   (`findOrphanedPendingMessages`, `settleOrphanedPendingOnce`). Tests:
   `socket/__tests__/outbox.test.ts` (❺ ❻ ❼), `utils/__tests__/mediaWire.test.ts`,
   `db/__tests__/orphanedPending.db.test.ts`.
