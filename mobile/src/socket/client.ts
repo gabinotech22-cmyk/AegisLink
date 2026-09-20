@@ -1019,22 +1019,41 @@ function armForegroundReconnect(): void {
     if (next !== 'active') return;
     const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
     const id = useIdentity.getState().identity;
-    // Independent of whatever the sockets do below: one request/response over
-    // Tor that empties the mailbox. See drainMailboxNow — this is the path that
-    // works when the persistent mailbox socket is losing the cold-bootstrap race
-    // or is stuck in reconnect backoff, which on iOS is most cold starts.
-    if (id) void drainMailboxNow(id);
-    // Push the OUTBOX too, not just the inbound mailbox. Resuming is the moment
-    // the user expects their queued messages to go out, and it is the one signal
-    // we get that does not depend on the socket having dropped first.
-    if (id) void flushOutbox(id);
-    if (socket) {
-      if (!socket.connected) socket.connect();
-      return;
-    }
-    // No socket at all (e.g. cold resume before connect ran): bring it up.
-    if (id) connect(id);
+    if (id) void syncNow(id);
+    else if (socket && !socket.connected) socket.connect();
   });
+}
+
+/**
+ * Everything that can move mail RIGHT NOW, in one call. The foreground resume
+ * and the pull-to-refresh gesture (hooks/useSyncRefresh) both run this — the
+ * gesture exists precisely because on a slow Tor bootstrap the user otherwise
+ * has no way to nudge the app short of backgrounding and reopening it.
+ *
+ *  - Independent of whatever the sockets do: one request/response over Tor
+ *    that empties the mailbox. See drainMailboxNow — this is the path that
+ *    works when the persistent mailbox socket is losing the cold-bootstrap race
+ *    or is stuck in reconnect backoff, which on iOS is most cold starts.
+ *  - Push the OUTBOX too, not just the inbound mailbox. This is the moment the
+ *    user expects their queued messages to go out, and it is the one signal we
+ *    get that does not depend on the socket having dropped first.
+ *  - Reconnect (or first-connect) the identity socket when it is down.
+ *
+ * Resolves once the drain and the outbox pass have settled; never rejects
+ * (each leg is fail-soft) — callers only need "done" for a spinner. Records
+ * nothing: a manual sync is indistinguishable from a foreground resume.
+ */
+export async function syncNow(identity: Identity): Promise<void> {
+  if (socket) {
+    if (!socket.connected) socket.connect();
+  } else {
+    // No socket at all (e.g. cold resume before connect ran): bring it up.
+    connect(identity);
+  }
+  await Promise.all([
+    drainMailboxNow(identity).catch(() => 0),
+    flushOutbox(identity).catch(() => undefined),
+  ]);
 }
 
 /**

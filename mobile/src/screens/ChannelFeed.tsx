@@ -12,7 +12,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, Modal, AppState, type AppStateStatus } from 'react-native';
+import { View, Text, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform, ScrollView, Image, Modal, AppState, RefreshControl, type AppStateStatus } from 'react-native';
+import { useSyncRefresh } from '../hooks/useSyncRefresh';
 import * as ImagePicker from 'expo-image-picker';
 import * as Crypto from 'expo-crypto';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -145,6 +146,13 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     const off = attachLive(identity);
     return off;
   }, [channelId, identity, loadFeed, attachLive]);
+
+  // Pull down = re-pull this feed from its relay, plus the usual sync.
+  const refreshFeed = useCallback(
+    () => (identity ? loadFeed(channelId, identity) : Promise.resolve()),
+    [channelId, identity, loadFeed],
+  );
+  const { refreshing, onRefresh } = useSyncRefresh(identity, refreshFeed);
 
   // Pull-on-foreground: if the user backgrounds the app while this screen is
   // mounted (e.g. a scheduled post fired while backgrounded, or the socket
@@ -520,6 +528,7 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
       <FlatList
         data={posts ?? []}
         keyExtractor={(p) => p.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.accent} colors={[t.accent]} progressBackgroundColor={t.surface2} />}
         renderItem={renderPost}
         contentContainerStyle={{ paddingBottom: 12 }}
         ListEmptyComponent={

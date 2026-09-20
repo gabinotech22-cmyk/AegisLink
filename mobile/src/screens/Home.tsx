@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AppState, View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, PanResponder, ActivityIndicator, Linking } from 'react-native';
+import { AppState, View, Text, FlatList, Pressable, StyleSheet, Animated, Easing, PanResponder, ActivityIndicator, Linking, RefreshControl } from 'react-native';
+import { useSyncRefresh } from '../hooks/useSyncRefresh';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
@@ -50,6 +51,8 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
     publishCooldownUntilMs,
     retryPublish,
   } = useIdentity();
+  // Pull down = sync now (mailbox drain + outbox + reconnect), see useSyncRefresh.
+  const { refreshing, onRefresh } = useSyncRefresh(identity);
   const contacts = useContacts((s) => s.contacts);
   const hydrate = useContacts((s) => s.hydrate);
   const archiveContact = useContacts((s) => s.archiveContact);
@@ -525,6 +528,7 @@ export function HomeScreen({ onOpenChat, onAddContact, onSearch, onProfile, onCo
         <FlatList
           data={displayed}
           keyExtractor={(c) => c.aegisId}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.accent} colors={[t.accent]} progressBackgroundColor={t.surface2} />}
           renderItem={({ item }) => (
             <ContactRow
               t={t}
