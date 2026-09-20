@@ -26,6 +26,8 @@ export interface Preferences {
   notifSummary: boolean;
   notifKeywords: string[];
   mutedChats: string[];
+  /** Groups we left; a straggler's message must not recreate them. */
+  leftGroupIds: string[];
   appLockEnabled: boolean;
   biometricsEnabled: boolean;
   lockTimeoutMin: number;
@@ -48,6 +50,7 @@ const DEFAULTS: Preferences = {
   notifSummary: false,
   notifKeywords: ['urgente', 'multisig', 'audit'],
   mutedChats: [],
+  leftGroupIds: [],
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
@@ -80,6 +83,7 @@ function snapshot(get: () => PrefsState): Preferences {
     notifSummary: s.notifSummary,
     notifKeywords: s.notifKeywords,
     mutedChats: s.mutedChats,
+    leftGroupIds: s.leftGroupIds,
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,

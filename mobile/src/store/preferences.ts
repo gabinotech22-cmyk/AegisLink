@@ -60,6 +60,8 @@ export interface Preferences {
    * learn which channels a user follows or mutes).
    */
   mutedChannels: string[];
+  /** Groups we left; a straggler's message must not recreate them (socket/client group_msg). */
+  leftGroupIds: string[];
 
   // App lock
   appLockEnabled: boolean;
@@ -95,6 +97,7 @@ const DEFAULTS: Preferences = {
   mutedChats: [],
   mentionsOnlyChats: [],
   mutedChannels: [],
+  leftGroupIds: [],
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
@@ -138,6 +141,7 @@ function snapshot(get: () => PrefsState): Preferences {
     mutedChats: s.mutedChats,
     mentionsOnlyChats: s.mentionsOnlyChats,
     mutedChannels: s.mutedChannels,
+    leftGroupIds: s.leftGroupIds,
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,
