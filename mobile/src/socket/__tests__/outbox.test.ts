@@ -609,3 +609,21 @@ describe('syncNow', () => {
     expect(mockLoadDueOutboxJobs).toHaveBeenCalled();
   });
 });
+
+describe('silentWakeHintFor — protocol traffic never wakes the recipient (phantom notifications)', () => {
+  it('marks receipts, typing, profile, delete, key distribution and group control carriers silent', () => {
+    const { silentWakeHintFor } = require('../client') as typeof import('../client');
+    for (const type of ['typing', 'read_receipt', 'msg_delete', 'sender_key_dist', 'profile_update']) {
+      expect(silentWakeHintFor(JSON.stringify({ type, text: 'x' }))).toBe('silent');
+    }
+    expect(silentWakeHintFor(JSON.stringify({ type: 'group_msg', body: '[group:meta]' }))).toBe('silent');
+    expect(silentWakeHintFor(JSON.stringify({ type: 'group_msg', body: '[group:dissolved]' }))).toBe('silent');
+  });
+  it('leaves real messages, group content and call signals alone', () => {
+    const { silentWakeHintFor } = require('../client') as typeof import('../client');
+    expect(silentWakeHintFor(JSON.stringify({ type: 'direct_msg', text: 'hola' }))).toBeUndefined();
+    expect(silentWakeHintFor(JSON.stringify({ type: 'group_msg', body: 'hola grupo' }))).toBeUndefined();
+    expect(silentWakeHintFor(JSON.stringify({ type: 'call_signal', text: '{}' }))).toBeUndefined();
+    expect(silentWakeHintFor('not json')).toBeUndefined();
+  });
+});

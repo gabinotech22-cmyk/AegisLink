@@ -474,7 +474,7 @@ async function deliverToForeignRelay(
   id: string,
   ephemeralTtlMs: number | null,
   /** F4: `'call'` asks the recipient's relay for a call-class (urgent) wake. */
-  wakeHint?: 'call',
+  wakeHint?: 'call' | 'silent',
 ): Promise<void> {
   // The official relay counts: from a self-hosted home, a contact there is
   // foreign and is reached through the pool on the official onion.
@@ -501,6 +501,25 @@ async function deliverToForeignRelay(
  * raw outgoing bubble.
  */
 const SELF_COPY_EXCLUDED_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist', 'call_signal']);
+
+/**
+ * Payload types that render nothing on the recipient: sent with
+ * `wakeHint: 'silent'` so the relay never raises the generic push for them
+ * (phantom-notification fix, parity with mobile).
+ */
+const SILENT_WAKE_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist', 'profile_update']);
+
+export function silentWakeHintFor(payloadJson: string): 'silent' | undefined {
+  try {
+    const p = JSON.parse(payloadJson) as { type?: unknown; body?: unknown };
+    if (typeof p.type !== 'string') return undefined;
+    if (SILENT_WAKE_TYPES.has(p.type)) return 'silent';
+    if (p.type === 'group_msg' && typeof p.body === 'string' && p.body.startsWith('[group:')) return 'silent';
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 async function flushOfflineQueue(identity: Identity) {
   if (offlineQueue.length === 0) return;
@@ -727,6 +746,8 @@ async function uploadPreKeys(identity: Identity) {
               to: identity.aegisId,
               ciphertext: encodeBase64(outerCiphertext),
               nonce: encodeBase64(outerNonce),
+              // Device key sync renders nothing: never a push.
+              wakeHint: 'silent',
               selfCopy: true,
             });
           } catch (e) {
@@ -1415,6 +1436,8 @@ async function sendNudgeOverExistingSession(
       to: contact.aegisId,
       ciphertext: envelope.ciphertextB64,
       nonce: envelope.nonceB64,
+      // Desync escalation carrier renders nothing: never a push.
+      wakeHint: 'silent',
     });
     return true;
   } catch (e) {
@@ -2376,6 +2399,8 @@ async function sendSelfCopy(
       to: identity.aegisId,
       ciphertext: encodeBase64(outerCiphertext),
       nonce: encodeBase64(outerNonce),
+      // Self-copy to our other devices: they sync, they do not get a banner.
+      wakeHint: 'silent',
       selfCopy: true,
     });
   } catch (e) {
@@ -2580,7 +2605,7 @@ export async function sendMessage(opts: {
    */
   transient?: boolean;
   /** F4: outer mailbox-wire hint so the recipient's relay wakes them as a call. */
-  wakeHint?: 'call';
+  wakeHint?: 'call' | 'silent';
 }): Promise<void> {
   const { useIdentity } = await import('../store/identity');
   const idState = useIdentity.getState();
@@ -2594,6 +2619,8 @@ export async function sendMessage(opts: {
 
   let expiresAt = opts.expiresAt ?? null;
   const msgType = opts.type ?? 'direct_msg';
+  const wakeHint: 'call' | 'silent' | undefined =
+    opts.wakeHint ?? (SILENT_WAKE_TYPES.has(msgType) ? 'silent' : undefined);
   if (msgType === 'direct_msg' && !expiresAt) {
     const timer = useMessages.getState().ephemeralTimer;
     if (timer > 0) {
@@ -2659,7 +2686,7 @@ export async function sendMessage(opts: {
     opts.identity,
     session,
   );
-  const emitPayload: Record<string, unknown> = { id, to: opts.recipientAegisId, ...emitWire, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}) };
+  const emitPayload: Record<string, unknown> = { id, to: opts.recipientAegisId, ...emitWire, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}), ...(wakeHint ? { wakeHint } : {}) };
   await saveSessionState(opts.recipientAegisId, newState);
 
   // ── Fase 4: mailbox addressing ──────────────────────────────────────────────
@@ -2688,7 +2715,7 @@ export async function sendMessage(opts: {
   // failure throws so the caller's retry path handles it.
   const recipientContact = useContacts.getState().contacts.find((c) => c.aegisId === opts.recipientAegisId);
   if (recipientContact && isForeign(recipientContact)) {
-    await deliverToForeignRelay(recipientContact, emitEvent, emitWire, id, ephemeralTtlMs ?? null, opts.wakeHint);
+    await deliverToForeignRelay(recipientContact, emitEvent, emitWire, id, ephemeralTtlMs ?? null, wakeHint);
     if (!SELF_COPY_EXCLUDED_TYPES.has(msgType)) {
       const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
       void sendSelfCopy(socket!, opts.identity, opts.recipientAegisId, id, payload, {
@@ -2709,7 +2736,7 @@ export async function sendMessage(opts: {
         nonce: emitPayload.nonce as string,
         epk: emitPayload.epk as string,
         ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
-        ...(opts.wakeHint ? { wakeHint: opts.wakeHint } : {}),
+        ...(wakeHint ? { wakeHint } : {}),
       });
       // Only a LIVE mailbox delivery is terminal. `queued` (recipient mailbox
       // offline) falls through so the reliable aegisId transport also delivers.
@@ -2854,6 +2881,8 @@ export async function broadcastProfileUpdate(
         to: contact.aegisId,
         ciphertext: envelope.ciphertextB64,
         nonce: envelope.nonceB64,
+        // Profile refresh renders nothing: never a push.
+        wakeHint: 'silent',
       });
     } catch (e) {
       if (DEV) logger.warn('[socket] profile broadcast failed:', (e as Error).message);
@@ -3138,7 +3167,7 @@ export async function sendGroupMessage(opts: {
       await new Promise<void>((resolve, reject) => {
         socket!.emit(
           event,
-          { id, to: contact.aegisId, ...wire },
+          { id, to: contact.aegisId, ...wire, ...(silentWakeHintFor(payload) ? { wakeHint: 'silent' } : {}) },
           (ack: any) => {
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
             else resolve();

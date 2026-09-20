@@ -58,7 +58,7 @@ export interface OutgoingMailboxEnvelope {
   epk: string;
   ephemeralTtl?: number;
   /** F4: call-class wake for the recipient (the one declared metadata bit, D3). */
-  wakeHint?: 'call';
+  wakeHint?: 'call' | 'silent';
   /** F6: submission proof-of-work (only when the relay demands it). */
   pow?: { challenge: string; nonce: string };
 }

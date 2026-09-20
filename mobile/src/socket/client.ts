@@ -367,8 +367,8 @@ async function deliverToForeignRelay(
   wire: Record<string, unknown>,
   id: string,
   ephemeralTtlMs: number | null,
-  /** F4: `'call'` asks the recipient's relay for a call-class (urgent) wake. */
-  wakeHint?: 'call',
+  /** F4: `'call'` = call-class (urgent) wake; `'silent'` = no wake at all. */
+  wakeHint?: 'call' | 'silent',
 ): Promise<void> {
   // The official relay counts: from a self-hosted home, a contact there is
   // foreign and is reached through the pool on the official onion.
@@ -521,6 +521,9 @@ async function flushOutbox(identity: Identity): Promise<void> {
       // only applies to the v1 path: the v2 selector never fires while a session
       // still has a pending x3dhInit, so v2 envelopes are always established.
       const isInit = !!session.x3dhInit;
+      // A replayed receipt/typing/profile job stays silent (derived from the
+      // stored payload type, exactly like a live send).
+      const replayHint = silentWakeHintFor(job.payload);
       const { event, wire, newState } = await buildOutgoingEnvelope(
         job.payload,
         job.recipientAegisId,
@@ -546,6 +549,7 @@ async function flushOutbox(identity: Identity): Promise<void> {
           ciphertext: wire.ciphertext as string,
           nonce: wire.nonce as string,
           epk: wire.epk as string,
+          ...(replayHint ? { wakeHint: replayHint } : {}),
         });
         if (!ack || ack.ok !== true) throw new Error(ack?.error ?? 'mailbox_rejected');
       } else {
@@ -554,7 +558,7 @@ async function flushOutbox(identity: Identity): Promise<void> {
             .timeout(EMIT_ACK_TIMEOUT_MS)
             .emit(
               event,
-              { id: job.msgId, to: job.recipientAegisId, ...wire, ...(isInit && event === 'envelope' ? { init: true } : {}) },
+              { id: job.msgId, to: job.recipientAegisId, ...wire, ...(isInit && event === 'envelope' ? { init: true } : {}), ...(replayHint ? { wakeHint: replayHint } : {}) },
               (err: Error | null, ack?: { ok: boolean; error?: string }) => {
                 // With `.timeout()`, socket.io always calls back with (err, ack):
                 // `err` is set on ack timeout (server never responded — dropped
@@ -1026,6 +1030,8 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
             to: identity.aegisId,
             ciphertext: encodeBase64(outerCiphertext),
             nonce: encodeBase64(outerNonce),
+            // Device key sync renders nothing: never a push.
+            wakeHint: 'silent',
             selfCopy: true,
           });
         } catch (e) {
@@ -2323,6 +2329,8 @@ async function sendNudgeOverExistingSession(
       to: contact.aegisId,
       ciphertext: envelope.ciphertextB64,
       nonce: envelope.nonceB64,
+      // Desync escalation carrier renders nothing: never a push.
+      wakeHint: 'silent',
     });
     rdiag(`[RDIAG] nudge sent me=${identity.aegisId} -> peer=${contact.aegisId} reset=${requestSessionReset}`);
     return true;
@@ -4385,6 +4393,8 @@ async function sendSelfCopy(
       to: identity.aegisId,
       ciphertext: encodeBase64(outerCiphertext),
       nonce: encodeBase64(outerNonce),
+      // Self-copy to our other devices: they sync, they do not get a banner.
+      wakeHint: 'silent',
       selfCopy: true,
     });
   } catch (e) {
@@ -4403,6 +4413,30 @@ async function sendSelfCopy(
  * (direct_msg + 1:1 media, location, view_once) is self-copied.
  */
 const SELF_COPY_EXCLUDED_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist', 'call_signal']);
+
+/**
+ * Payload types that render nothing on the recipient: queued and drained like
+ * any envelope, but sent with `wakeHint: 'silent'` so the relay never raises
+ * the generic "new encrypted message" push for them. `call_signal` keeps its
+ * own hint (F4). `group_msg` control carriers (meta / dissolved / left) opt in
+ * per call from sendGroupMessage.
+ */
+const SILENT_WAKE_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist', 'profile_update']);
+
+/** `'silent'` when a (decrypted) payload JSON is protocol traffic, else undefined. */
+export function silentWakeHintFor(payloadJson: string): 'silent' | undefined {
+  try {
+    const p = JSON.parse(payloadJson) as { type?: unknown; body?: unknown };
+    if (typeof p.type !== 'string') return undefined;
+    if (SILENT_WAKE_TYPES.has(p.type)) return 'silent';
+    // Group control carriers ([group:meta] / [group:dissolved] / [group:left])
+    // render nothing either.
+    if (p.type === 'group_msg' && typeof p.body === 'string' && p.body.startsWith('[group:')) return 'silent';
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Handle an inbound envelope flagged as a self-copy. Decrypts via the
@@ -4640,8 +4674,12 @@ export async function sendMessage(opts: {
    * a candidate or ring replayed minutes later is noise. Offline → rejects.
    */
   transient?: boolean;
-  /** F4: outer mailbox-wire hint so the recipient's relay wakes them as a call. */
-  wakeHint?: 'call';
+  /**
+   * Wake class on the outer wire. `'call'` (F4) = urgent; `'silent'` = protocol
+   * traffic that renders nothing and must not raise a push (derived
+   * automatically from `type` when absent — see SILENT_WAKE_TYPES).
+   */
+  wakeHint?: 'call' | 'silent';
 }): Promise<void> {
   const { useIdentity } = require('../store/identity');
   const idState = useIdentity.getState();
@@ -4654,6 +4692,10 @@ export async function sendMessage(opts: {
 
   let expiresAt = opts.expiresAt ?? null;
   const msgType = opts.type ?? 'direct_msg';
+  // Phantom-notification fix: protocol traffic never wakes the recipient's
+  // device. The relay only sees "do not push", never what the payload is.
+  const wakeHint: 'call' | 'silent' | undefined =
+    opts.wakeHint ?? (SILENT_WAKE_TYPES.has(msgType) ? 'silent' : undefined);
   if (msgType === 'direct_msg' && !expiresAt) {
     const timer = useMessages.getState().getEphemeralTimer(opts.recipientAegisId);
     if (timer > 0) {
@@ -4769,7 +4811,7 @@ export async function sendMessage(opts: {
     opts.identity,
     session,
   );
-  const emitPayload: Record<string, unknown> = { id, to: opts.recipientAegisId, ...emitWire, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}) };
+  const emitPayload: Record<string, unknown> = { id, to: opts.recipientAegisId, ...emitWire, ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}), ...(wakeHint ? { wakeHint } : {}) };
   await saveSessionState(opts.recipientAegisId, newState);
 
   // ── Fase 4: mailbox addressing ──────────────────────────────────────────────
@@ -4799,7 +4841,7 @@ export async function sendMessage(opts: {
   const recipientContact = useContacts.getState().contacts.find((c) => c.aegisId === opts.recipientAegisId);
   if (recipientContact && isForeign(recipientContact)) {
     try {
-      await deliverToForeignRelay(recipientContact, emitEvent, emitWire, id, ephemeralTtlMs ?? null, opts.wakeHint);
+      await deliverToForeignRelay(recipientContact, emitEvent, emitWire, id, ephemeralTtlMs ?? null, wakeHint);
     } catch (e) {
       try { await markOutboxAttemptFailed(jobId, Date.now() + nextOutboxDelayMs(0)); } catch { /* non-fatal */ }
       armOutboxScheduler(opts.identity);
@@ -4827,7 +4869,7 @@ export async function sendMessage(opts: {
         nonce: emitPayload.nonce as string,
         epk: emitPayload.epk as string,
         ...(ephemeralTtlMs ? { ephemeralTtl: ephemeralTtlMs } : {}),
-        ...(opts.wakeHint ? { wakeHint: opts.wakeHint } : {}),
+        ...(wakeHint ? { wakeHint } : {}),
       });
       // Only a LIVE mailbox delivery is terminal. `queued` (recipient mailbox
       // offline) falls through so the reliable aegisId transport also delivers.
@@ -5068,6 +5110,8 @@ export async function broadcastProfileUpdate(
         to: contact.aegisId,
         ciphertext: envelope.ciphertextB64,
         nonce: envelope.nonceB64,
+        // Profile refresh renders nothing: never a push (phantom-notification fix).
+        wakeHint: 'silent',
         ...(isInit ? { init: true } : {}),
       });
     } catch (e) {
@@ -5484,9 +5528,10 @@ export async function sendGroupMessage(opts: {
       await saveSessionState(contact.aegisId, newState);
 
       await new Promise<void>((resolve, reject) => {
+        const groupHint = silentWakeHintFor(payload);
         socket!.emit(
           event,
-          { id: msgId, to: contact.aegisId, ...wire },
+          { id: msgId, to: contact.aegisId, ...wire, ...(groupHint ? { wakeHint: groupHint } : {}) },
           (ack: { ok: boolean; error?: string } | undefined) => {
             if (!ack || !ack.ok) reject(new Error(ack?.error ?? 'send_failed'));
             else resolve();
