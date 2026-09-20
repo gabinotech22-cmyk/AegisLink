@@ -20,7 +20,8 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, FEDERATION } from '../config';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
-import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
+import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId, getContactMailboxRoot } from '../crypto/mailboxStore';
+import { OWN_CAPS, sanitizeCaps } from '../net/caps';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery } from './mailboxSocket';
 import { isForeign, getHomeRelay, homeRelayBaseUrl, homeRelayOnionUrl, resolveRelay } from '../net/homeRelay';
 import { canonicalRelay } from '../net/officialRelay';
@@ -390,8 +391,18 @@ async function buildOutgoingEnvelope(
   // block (identity key, home relay, mailbox root) sealed inside, signed with a
   // signing key embedded in the sealed layer so a stranger can verify it. The
   // mailbox transport needs no delivery token (the mailbox id is the capability).
+  // Retiring v1 (Fase 6, client side): the same sealed bootstrap serves a
+  // contact on OUR relay whenever we hold their mailbox root — a v2 link, a
+  // prior fc, or their profile gave it to us, so they run mailbox mode and
+  // open sealed envelopes — and our own mailbox socket is up to carry it. v1
+  // remains only for a bare-ID/v1-link first contact (no root yet) or while
+  // our mailbox is not authenticated; both keep today's behaviour exactly.
   const recipient = useContacts.getState().contacts.find((c) => c.aegisId === recipientAegisId);
-  if (recipient && isForeign(recipient)) {
+  const sealedLocal =
+    !!recipient && !isForeign(recipient) && MAILBOX_ENABLED && isMailboxAuthed()
+      ? (await getContactMailboxRoot(recipientAegisId)) !== null
+      : false;
+  if (recipient && (isForeign(recipient) || sealedLocal)) {
     const firstContact = session.x3dhInit
       ? {
           block: { ik: identity.publicKeyB64, relay: getHomeRelay()?.onion ?? null, root: await getOwnMailboxRootB64() },
@@ -501,6 +512,23 @@ async function flushOfflineQueue(identity: Identity) {
       if (itemContact && isForeign(itemContact)) {
         // Another relay: never the home socket (see deliverToForeignRelay).
         await deliverToForeignRelay(itemContact, event, wire, item.msgId, null);
+        continue;
+      }
+      if (event === 'envelope:v2' && !('deliveryToken' in wire)) {
+        // Sealed to a contact on our relay whose delivery token we do not hold
+        // (buildOutgoingEnvelope sealedLocal): the ONLY transport for this
+        // wire is their mailbox — the relay rejects an aegisId-addressed v2
+        // without a token. Not reachable right now → re-queue.
+        const mboxTo = isMailboxAuthed() ? await getContactCurrentMailboxId(item.recipientAegisId, Date.now()) : null;
+        if (!mboxTo) throw new Error('mailbox_unavailable');
+        const ack = await sendViaMailbox({
+          id: item.msgId,
+          to: mboxTo,
+          ciphertext: wire.ciphertext as string,
+          nonce: wire.nonce as string,
+          epk: wire.epk as string,
+        });
+        if (!ack || ack.ok !== true) throw new Error(ack?.error ?? 'mailbox_rejected');
         continue;
       }
       await new Promise<void>((resolve, reject) => {
@@ -1013,6 +1041,11 @@ function ownMailboxRelayField(): Record<string, string | null> {
   return { mailboxRelay: getHomeRelay()?.onion ?? null };
 }
 
+/** `{ caps }` — what this client can follow (net/caps.ts); every profile carries it. */
+function ownCapsField(): { caps: string[] } {
+  return { caps: [...OWN_CAPS] };
+}
+
 async function ownMailboxRootField(): Promise<Record<string, string>> {
   if (SEALED_TRANSPORT_VERSION !== 'v2') return {};
   try { return { mailboxRoot: await getOwnMailboxRootB64() }; } catch { return {}; }
@@ -1075,6 +1108,25 @@ async function handleIncomingV2(env: WireSealedEnvelopeV2, identity: Identity) {
     }
   }
   if (!contact) return;
+  if (contact && !bootstrapped && inner.tofuSigningKeyB64 && inner.fc) {
+    // First contact from a peer we ALREADY hold (added from their link, never
+    // messaged): the envelope opened by TOFU because we had no signing key for
+    // them. Pin it now — bound to the identity key we already trust — or every
+    // later envelope (no `spk`) would fail to authenticate.
+    if (!contact.signingPublicKeyB64) {
+      if (inner.fc.ik !== contact.publicKeyB64 || !keyMatchesAegisId(inner.fc.ik, inner.from)) return;
+      try {
+        const pinned: StoredContact = { ...contact, signingPublicKeyB64: inner.tofuSigningKeyB64 };
+        await saveContact(pinned);
+        await setContactMailboxRoot(inner.from, inner.fc.root);
+        useContacts.setState((s) => ({ contacts: s.contacts.map((c) => (c.aegisId === inner.from ? pinned : c)) }));
+        contact = pinned;
+      } catch (e) {
+        if (DEV) logger.warn('[socket] first-contact signing key pin failed', e);
+        return;
+      }
+    }
+  }
   const synthEnv: WireSealedEnvelope = {
     id: env.id,
     to: env.to,
@@ -1696,6 +1748,12 @@ async function decryptAndAppendLocked(
           if (raw === null || ref) {
             try { await useContacts.getState().updateContactRelay(contact.aegisId, canonicalRelay(ref)?.onion ?? null); } catch { /* non-fatal */ }
           }
+        }
+        // Capabilities (net/caps.ts): what transports this peer can follow.
+        // Sanitized; a missing/garbage field leaves the pinned list untouched.
+        const caps = sanitizeCaps(parsedPayload.caps);
+        if (caps) {
+          try { await useContacts.getState().updateContactCaps(contact.aegisId, caps); } catch { /* non-fatal */ }
         }
         await saveSessionState(contact.aegisId, ratchetState);
         return true;
@@ -2641,7 +2699,11 @@ export async function sendMessage(opts: {
       });
       // Only a LIVE mailbox delivery is terminal. `queued` (recipient mailbox
       // offline) falls through so the reliable aegisId transport also delivers.
-      if (mailboxAckConfirmsDelivery(ack)) {
+      // Without a delivery token there is no aegisId transport for this wire
+      // (sealedLocal in buildOutgoingEnvelope): the relay holds the queued
+      // row like it does for a foreign recipient, so `queued` is terminal.
+      const tokenless = !('deliveryToken' in emitWire);
+      if (mailboxAckConfirmsDelivery(ack) || (tokenless && !!ack && ack.ok === true)) {
         // Multi-device self-copy stays on the aegisId control socket (it is
         // identity-scoped sync, not a recipient-graph leak). Same as below.
         const selfEphemeralSeconds = expiresAt ? Math.round((expiresAt - createdAt) / 1000) : 0;
@@ -2727,7 +2789,7 @@ export async function broadcastProfileUpdate(
   // first message — so skip the whole thing when nothing has changed since the
   // last broadcast for THIS identity.
   const fingerprint = profileFingerprint(
-    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, ...deliveryTokenField, ...mailboxRootField, ...mailboxRelayField }),
+    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, ...deliveryTokenField, ...mailboxRootField, ...mailboxRelayField, ...ownCapsField() }),
   );
   const hashKey = profileBroadcastHashKey(identity.aegisId);
   if (!opts.force) {
@@ -2749,6 +2811,7 @@ export async function broadcastProfileUpdate(
         ...deliveryTokenField,
         ...mailboxRootField,
         ...mailboxRelayField,
+        ...ownCapsField(),
       });
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
       // Federation: a contact on another relay only has the sealed path through
@@ -2811,6 +2874,7 @@ export async function sendProfileTo(
       ...(await ownDeliveryTokenField()),
       ...(await ownMailboxRootField()),
       ...ownMailboxRelayField(),
+      ...ownCapsField(),
     });
     const recipientPub = decodeBase64(contact.publicKeyB64);
     // Forward lockCtx so that when this runs inside a desync-recovery (already

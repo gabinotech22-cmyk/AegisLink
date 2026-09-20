@@ -8,7 +8,8 @@ import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, REMOT
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
-import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId } from '../crypto/mailboxStore';
+import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId, getContactMailboxRoot } from '../crypto/mailboxStore';
+import { OWN_CAPS, sanitizeCaps } from '../net/caps';
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery, fetchMailboxOverTor } from './mailboxSocket';
 import { isForeign, getHomeRelay, isCustomHome, homeRelayOnionUrl, resolveRelay } from '../net/homeRelay';
 import { TorSioSocket, IDENTITY_FORWARD_EVENTS, isTorAvailable, startTor } from '../net/tor';
@@ -280,8 +281,18 @@ export async function buildOutgoingEnvelope(
   // block (identity key, home relay, mailbox root) sealed inside, signed with a
   // signing key embedded in the sealed layer so a stranger can verify it. The
   // mailbox transport needs no delivery token (the mailbox id is the capability).
+  // Retiring v1 (Fase 6, client side): the same sealed bootstrap serves a
+  // contact on OUR relay whenever we hold their mailbox root — a v2 link, a
+  // prior fc, or their profile gave it to us, so they run mailbox mode and
+  // open sealed envelopes — and our own mailbox socket is up to carry it. v1
+  // remains only for a bare-ID/v1-link first contact (no root yet) or while
+  // our mailbox is not authenticated; both keep today's behaviour exactly.
   const recipient = useContacts.getState().contacts.find((c) => c.aegisId === recipientAegisId);
-  if (recipient && isForeign(recipient)) {
+  const sealedLocal =
+    !!recipient && !isForeign(recipient) && MAILBOX_ENABLED && isMailboxAuthed()
+      ? (await getContactMailboxRoot(recipientAegisId)) !== null
+      : false;
+  if (recipient && (isForeign(recipient) || sealedLocal)) {
     const firstContact = session.x3dhInit
       ? {
           block: { ik: identity.publicKeyB64, relay: getHomeRelay()?.onion ?? null, root: await getOwnMailboxRootB64() },
@@ -509,6 +520,21 @@ async function flushOutbox(identity: Identity): Promise<void> {
       if (jobContact && isForeign(jobContact)) {
         // Another relay: never the home socket (see deliverToForeignRelay).
         await deliverToForeignRelay(jobContact, event, wire, job.msgId, null);
+      } else if (event === 'envelope:v2' && !('deliveryToken' in wire)) {
+        // Sealed to a contact on our relay whose delivery token we do not hold
+        // (buildOutgoingEnvelope sealedLocal): the ONLY transport for this
+        // wire is their mailbox — the relay rejects an aegisId-addressed v2
+        // without a token. Not reachable right now → throw, the job backs off.
+        const mboxTo = isMailboxAuthed() ? await getContactCurrentMailboxId(job.recipientAegisId, Date.now()) : null;
+        if (!mboxTo) throw new Error('mailbox_unavailable');
+        const ack = await sendViaMailbox({
+          id: job.msgId,
+          to: mboxTo,
+          ciphertext: wire.ciphertext as string,
+          nonce: wire.nonce as string,
+          epk: wire.epk as string,
+        });
+        if (!ack || ack.ok !== true) throw new Error(ack?.error ?? 'mailbox_rejected');
       } else {
         await new Promise<void>((resolve, reject) => {
           socket!
@@ -2859,6 +2885,12 @@ async function decryptAndAppendLocked(
             try { await useContacts.getState().updateContactRelay(contact.aegisId, canonicalRelay(ref)?.onion ?? null); } catch { /* non-fatal */ }
           }
         }
+        // Capabilities (net/caps.ts): what transports this peer can follow.
+        // Sanitized; a missing/garbage field leaves the pinned list untouched.
+        const caps = sanitizeCaps(parsedPayload.caps);
+        if (caps) {
+          try { await useContacts.getState().updateContactCaps(contact.aegisId, caps); } catch { /* non-fatal */ }
+        }
         await saveSessionState(contact.aegisId, ratchetState);
         return true;
       }
@@ -3882,6 +3914,11 @@ function ownMailboxRelayField(): Record<string, string | null> {
   return { mailboxRelay: getHomeRelay()?.onion ?? null };
 }
 
+/** `{ caps }` — what this client can follow (net/caps.ts); every profile carries it. */
+function ownCapsField(): { caps: string[] } {
+  return { caps: [...OWN_CAPS] };
+}
+
 /**
  * What happened to an incoming envelope, and therefore whether the relay may
  * delete its queued copy.
@@ -3984,6 +4021,26 @@ async function handleIncomingV2(
     }
   }
   if (!contact) return 'retry';
+  if (contact && !bootstrapped && inner.tofuSigningKeyB64 && inner.fc) {
+    // First contact from a peer we ALREADY hold (added from their link, never
+    // messaged): the envelope opened by TOFU because we had no signing key for
+    // them. Pin it now — bound to the identity key we already trust — or every
+    // later envelope (no `spk`) would fail to authenticate and sit in retry.
+    if (!contact.signingPublicKeyB64) {
+      if (inner.fc.ik !== contact.publicKeyB64 || !keyMatchesAegisId(inner.fc.ik, inner.from)) return 'dropped';
+      try {
+        const { saveContact } = require('../db/local') as typeof import('../db/local');
+        const pinned: StoredContact = { ...contact, signingPublicKeyB64: inner.tofuSigningKeyB64 };
+        await saveContact(pinned);
+        await setContactMailboxRoot(inner.from, inner.fc.root);
+        useContacts.setState((s) => ({ contacts: s.contacts.map((c) => (c.aegisId === inner.from ? pinned : c)) }));
+        contact = pinned;
+      } catch (e) {
+        if (__DEV__) logger.warn('[socket] first-contact signing key pin failed', e);
+        return 'retry';
+      }
+    }
+  }
 
   // Reuse the v1 downstream (ratchet decrypt + glare/desync recovery + dispatch).
   const synthEnv: WireSealedEnvelope = {
@@ -4756,7 +4813,11 @@ export async function sendMessage(opts: {
       });
       // Only a LIVE mailbox delivery is terminal. `queued` (recipient mailbox
       // offline) falls through so the reliable aegisId transport also delivers.
-      if (mailboxAckConfirmsDelivery(ack)) {
+      // Without a delivery token there is no aegisId transport for this wire
+      // (sealedLocal in buildOutgoingEnvelope): the relay holds the queued
+      // row like it does for a foreign recipient, so `queued` is terminal.
+      const tokenless = !('deliveryToken' in emitWire);
+      if (mailboxAckConfirmsDelivery(ack) || (tokenless && !!ack && ack.ok === true)) {
         try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
         // Multi-device self-copy stays on the aegisId control socket (it is
         // identity-scoped sync, not a recipient-graph leak). Same as below.
@@ -4927,7 +4988,7 @@ export async function broadcastProfileUpdate(
   // the !existing guard below skips sessionless peers — so skip the whole thing
   // when nothing has changed since the last broadcast for THIS identity.
   const fingerprint = profileFingerprint(
-    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, ...deliveryTokenField, ...mailboxRootField, ...mailboxRelayField }),
+    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, ...deliveryTokenField, ...mailboxRootField, ...mailboxRelayField, ...ownCapsField() }),
   );
   const hashKey = profileBroadcastHashKey(identity.aegisId);
   if (!opts.force) {
@@ -4959,6 +5020,7 @@ export async function broadcastProfileUpdate(
         ...deliveryTokenField,
         ...mailboxRootField,
         ...mailboxRelayField,
+        ...ownCapsField(),
       });
       const session = await getOrCreateSession(contact.aegisId, contact.publicKeyB64, identity);
       // Federation: a contact on another relay only has the sealed path through
@@ -5016,6 +5078,7 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
     ...(await ownDeliveryTokenField()),
     ...(await ownMailboxRootField()),
     ...ownMailboxRelayField(),
+    ...ownCapsField(),
   });
 
   // Persist the first-contact profile/init in the outbox so it is retried on the

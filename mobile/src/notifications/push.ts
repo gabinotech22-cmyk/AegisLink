@@ -690,14 +690,41 @@ export async function showIncomingNotification(
       trigger: null,
     });
 
-    if (prefs.notifBadge) {
-      const { useMessages } = require('../store/messages');
-      const unreadCounts = useMessages.getState().unreadCounts ?? {};
-      const totalUnread = Object.values(unreadCounts).reduce((acc: number, val: unknown) => acc + (typeof val === 'number' ? val : 0), 0);
-      await Notifications.setBadgeCountAsync(totalUnread + 1);
-    }
+    // The app-icon badge is derived, never incremented: see syncAppBadge.
+    await syncAppBadge();
   } catch (err) {
     if (__DEV__) logger.warn('[push] showIncomingNotification failed:', err);
+  }
+}
+
+/**
+ * Total unread across chats and groups, from the in-memory counters (the same
+ * numbers the chat list shows). Pure so the badge rule is unit-testable.
+ */
+export function totalUnreadFrom(unreadCounts: Record<string, number> | null | undefined): number {
+  if (!unreadCounts) return 0;
+  let total = 0;
+  for (const v of Object.values(unreadCounts)) if (typeof v === 'number' && v > 0) total += v;
+  return total;
+}
+
+/**
+ * Make the app-icon badge equal the number of unread messages — or 0 when the
+ * user turned badges off. Called wherever the unread counters change (a
+ * message arrives, a chat is opened and read, counters are loaded on start,
+ * the app returns to the foreground, the setting is toggled). Until this
+ * existed the badge was only ever bumped when a notification fired and never
+ * recomputed, so it kept showing a count after every message had been read.
+ * Fail-soft: a platform without badge support just ignores the call.
+ */
+export async function syncAppBadge(): Promise<void> {
+  try {
+    const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
+    const { useMessages } = require('../store/messages') as typeof import('../store/messages');
+    const count = usePreferences.getState().notifBadge ? totalUnreadFrom(useMessages.getState().unreadCounts) : 0;
+    await Notifications.setBadgeCountAsync(count);
+  } catch (err) {
+    if (__DEV__) logger.warn('[push] syncAppBadge failed:', err);
   }
 }
 

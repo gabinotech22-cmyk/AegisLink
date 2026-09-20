@@ -361,6 +361,10 @@ function Shell() {
           clearTimeout(purgeTimer);
           purgeTimer = null;
         }
+        // The icon badge follows the unread total; re-derive it on every
+        // return so a count consumed while backgrounded never lingers.
+        const { syncAppBadge } = require('./src/notifications/push') as typeof import('./src/notifications/push');
+        void syncAppBadge();
       }
     };
     const sub = AppState.addEventListener('change', handler);

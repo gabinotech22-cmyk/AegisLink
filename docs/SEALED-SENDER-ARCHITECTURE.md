@@ -172,8 +172,13 @@ Lo que cambia:
 > los sobres a un relay ajeno salen por un buzón desechable de ese relay
 > (`net/relayPoolCore.ts`), el primer contacto va sellado con bootstrap X3DH
 > (`fc`, PROTOCOL §7.1) y el usuario puede mover su buzón a un relay `.onion`
-> propio. Fase 5 (cover traffic) y Fase 6 (retirar v1 del código;
-> `SEALED_TRANSPORT_VERSION` aún degrada a v1 por contacto) siguen **sin hacer**.
+> propio. **Fase 6, lado cliente, hecha (2026-09-20, `feat/sealed-transport-everywhere`,
+> `docs/PROTOCOL.md` §7.3 "Transport selector"):** con raíz de buzón conocida el cliente ya
+> no emite v1 (primer contacto incluido, `fc`), y las llamadas a contactos del relay oficial
+> van selladas por buzón cuando el contacto anuncia `sealed-calls` (D6). v1 queda solo para
+> primer contacto por ID pelado / enlace v1 o con el buzón caído. Lo que sigue **sin hacer**:
+> Fase 5 (cover traffic) y la retirada de v1 **en el relay**, que espera a que
+> `APP_MIN_VERSION=1.0.7` lleve tiempo aplicado.
 
 - **Fase 0 — spike. ✅ HECHO (2026-06-19, PR #50).** Sobre sealed (epk + firma
   interna) + delivery-token en `server/src/crypto/`, aislado del path vivo, con
@@ -292,8 +297,10 @@ Lo que cambia:
   `from` (✅).
 - **Fase 5 — anti-correlación + push.** Cover traffic / jitter; notifier
   separado o push self-hosted (UnifiedPush/ntfy) para cortar el último reducto.
-- **Fase 6 — retirar v1.** Cuando todos los clientes estén en v2, eliminar el
-  estampado de `from`/`to` y el envío autenticado-por-emisor del código.
+- **Fase 6 — retirar v1.** 🟡 **Cliente hecho (2026-09-20):** el selector no emite
+  v1 cuando hay raíz de buzón (ver cabecera). **Relay pendiente:** eliminar el
+  handler `envelope` v1 y el estampado de `from`/`to` cuando todos los clientes
+  estén en ≥ 1.0.7 (`APP_MIN_VERSION`).
 
 ## 6. Límite honesto
 

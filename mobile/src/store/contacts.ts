@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { sameCaps } from '../net/caps';
 import { canonicalRelay } from '../net/officialRelay';
 import { getHomeRelay } from '../net/homeRelay';
 import { setContactMailboxRoot } from '../crypto/mailboxStore';
@@ -71,6 +72,8 @@ interface ContactsState {
   updateContactProfile: (aegisId: string, name: string, color?: string, avatarImage?: string | null, status?: string) => Promise<void>;
   /** F5b: the contact announced a new home relay (`profile_update.mailboxRelay`); null = official. */
   updateContactRelay: (aegisId: string, relayOnion: string | null) => Promise<void>;
+  /** Pin the caps a contact announced (net/caps.ts); no-op when unchanged. */
+  updateContactCaps: (aegisId: string, caps: string[]) => Promise<void>;
   muteContact: (aegisId: string, muted: boolean, mutedUntil?: number | null) => Promise<void>;
   setZeroTrust: (aegisId: string, enabled: boolean) => Promise<void>;
   setBlocked: (aegisId: string, blocked: boolean) => Promise<void>;
@@ -337,6 +340,14 @@ export const useContacts = create<ContactsState>((set, get) => ({
     const existing = get().contacts.find((c) => c.aegisId === aegisId);
     if (!existing || (existing.relayOnion ?? null) === relayOnion) return;
     const updated: StoredContact = { ...existing, relayOnion };
+    if (!isDuressActive()) await saveContact(updated);
+    set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
+  },
+
+  async updateContactCaps(aegisId, caps) {
+    const existing = get().contacts.find((c) => c.aegisId === aegisId);
+    if (!existing || sameCaps(existing.caps, caps)) return;
+    const updated: StoredContact = { ...existing, caps };
     if (!isDuressActive()) await saveContact(updated);
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
   },

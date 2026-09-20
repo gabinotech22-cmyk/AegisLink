@@ -103,6 +103,8 @@ export interface StoredContact {
   profile?: 'personal' | 'work';
   /** Onion of the relay hosting this contact's mailbox (federation F1); null = official. */
   relayOnion?: string | null;
+  /** Capabilities announced in the contact's E2EE profile (net/caps.ts); absent = pre-caps. */
+  caps?: string[] | null;
 }
 
 export async function saveContact(c: StoredContact): Promise<void> {
