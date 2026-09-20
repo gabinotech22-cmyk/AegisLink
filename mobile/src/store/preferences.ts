@@ -149,6 +149,21 @@ function snapshot(get: () => PrefsState): Preferences {
   };
 }
 
+/**
+ * Preferences that describe the REAL user's life and must not show under the
+ * duress (decoy) PIN: keywords they asked to be alerted on, the chats/groups/
+ * channels they muted or set to mentions-only. Under duress they read as
+ * defaults in memory; the stored (real) values are never touched.
+ */
+const DURESS_MASKED: (keyof Preferences)[] = ['notifKeywords', 'mutedChats', 'mentionsOnlyChats', 'mutedChannels'];
+
+export function maskForDuress(prefs: Preferences): Preferences {
+  const out: Record<string, unknown> = { ...prefs };
+  const defaults: Record<string, unknown> = { ...DEFAULTS };
+  for (const k of DURESS_MASKED) out[k] = defaults[k];
+  return out as unknown as Preferences;
+}
+
 async function persist(prefs: Preferences): Promise<void> {
   try {
     await ss.set(STORAGE_KEY, JSON.stringify(prefs));
@@ -167,7 +182,9 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
       const raw = await ss.get(STORAGE_KEY);
       if (raw) {
         const loaded = JSON.parse(raw) as Partial<Preferences>;
-        setState({ ...DEFAULTS, ...loaded, hydrated: true });
+        const merged = { ...DEFAULTS, ...loaded };
+        // Decoy session: the real lists stay on disk, the screens see defaults.
+        setState({ ...(get().duressActive ? maskForDuress(merged) : merged), hydrated: true });
         return;
       }
     } catch (e) {
@@ -178,6 +195,9 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
 
   async set(key, value) {
     setState({ [key]: value } as Pick<PrefsState, typeof key>);
+    // Under duress a change lives in memory only: the coerced session must not
+    // rewrite the real user's preferences (and the real PIN re-hydrates them).
+    if (get().duressActive) return;
     await persist(snapshot(get));
   },
 

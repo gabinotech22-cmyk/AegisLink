@@ -591,6 +591,15 @@ with a key derived from a user passphrase the relay never sees:
 
 - **Panic mode** performs an instant local wipe, with an optional **decoy
   profile** for coerced-unlock scenarios.
+- **Decoy session scope.** Under the duress PIN every store that renders user
+  data re-hydrates duress-aware (identity, contacts, messages, groups,
+  channels, scheduled posts, profiles) — and so do **preferences**: the alert
+  keywords and the muted / mentions-only chat, group and channel lists read as
+  defaults in memory (`store/preferences.ts` `maskForDuress`), the stored real
+  values are never touched, and a preference changed inside the decoy is
+  memory-only (the real PIN re-hydrates the real ones). Neutral preferences
+  (theme, language, master switch…) stay as they are so the decoy looks like the
+  user's app.
 - **Multiple profiles** are cryptographically isolated: each has its own
   identity and its own SecureStore slot, and a non-primary profile never reads
   the primary's keys (`signSecretKeySlot` per-profile derivation).
