@@ -15,6 +15,7 @@ import { DeleteAccountSection } from '../components/DeleteAccountSection';
 import type { Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
+import { useContacts } from '../store/contacts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,6 +31,7 @@ interface Props {
 export function PrivacyScreen({ onTab, onNav }: Props) {
   useTranslation(); // re-render on language change
   const { t, toggle } = useTheme();
+  const blockedContacts = useContacts((st) => st.contacts.filter((c) => c.blocked));
 
   // Real identity
   const identity = useIdentity((s) => s.identity);
@@ -98,6 +100,31 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
           <Toggle t={t} label={i18n.t('privacy.readReceipts')} sub={i18n.t('privacy.letOthersKnowYou')} value={readReceipts} onChange={setReadReceipts} />
           <Toggle t={t} label={i18n.t('privacy.typingIndicator')} sub={i18n.t('privacy.showWhenYouRe')} value={typing} onChange={setTyping} />
           <Toggle t={t} label={i18n.t('privacy.blockScreenshots')} sub={i18n.t('privacy.preventScreenCaptureOf')} value={screenshot} onChange={setScreenshot} noBorder />
+        </Section>
+
+        {/* Blocked contacts — the list "Block" never had (parity with mobile
+            Privacy → Blocked contacts). Local flag; nothing leaves the device. */}
+        <Section t={t} label={i18n.t('blocked.title')}>
+          {blockedContacts.length === 0 ? (
+            <div data-testid="blocked-empty" style={{ padding: '12px 16px', fontFamily: t.font, fontSize: 13, color: t.textDim }}>{i18n.t('blocked.emptyTitle')}</div>
+          ) : (
+            blockedContacts.map((c) => (
+              <div key={c.aegisId} data-testid={`blocked-row-${c.aegisId}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: `1px solid ${t.divider}` }}>
+                <Avatar t={t} name={c.avatarImage ?? c.name} color={c.color ?? t.surface2} size={36} photoUri={c.avatarImage ?? undefined} seed={c.publicKeyB64 || c.aegisId} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontFamily: t.font, fontSize: 14, color: t.text, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                  <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, display: 'block' }}>{c.aegisId}</span>
+                </div>
+                <button
+                  data-testid={`unblock-${c.aegisId}`}
+                  onClick={() => { if (window.confirm(i18n.t('blocked.unblockTitle', { name: c.name }))) void useContacts.getState().setBlocked(c.aegisId, false); }}
+                  style={{ background: 'none', border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontSize: 13, fontWeight: 600, color: t.text, padding: '7px 12px' }}
+                >
+                  {i18n.t('contactDetail.unblock')}
+                </button>
+              </div>
+            ))
+          )}
         </Section>
 
         <Section t={t} label={i18n.t('privacy.networkSection')}>
