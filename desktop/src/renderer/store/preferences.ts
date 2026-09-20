@@ -26,6 +26,8 @@ export interface Preferences {
   notifSummary: boolean;
   notifKeywords: string[];
   mutedChats: string[];
+  /** Deadline (epoch ms) of a timed mute per chat id; absent/0 = always (utils/mute.ts). */
+  mutedChatsUntil: Record<string, number>;
   appLockEnabled: boolean;
   biometricsEnabled: boolean;
   lockTimeoutMin: number;
@@ -48,6 +50,7 @@ const DEFAULTS: Preferences = {
   notifSummary: false,
   notifKeywords: ['urgente', 'multisig', 'audit'],
   mutedChats: [],
+  mutedChatsUntil: {},
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
@@ -80,6 +83,7 @@ function snapshot(get: () => PrefsState): Preferences {
     notifSummary: s.notifSummary,
     notifKeywords: s.notifKeywords,
     mutedChats: s.mutedChats,
+    mutedChatsUntil: s.mutedChatsUntil,
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,
