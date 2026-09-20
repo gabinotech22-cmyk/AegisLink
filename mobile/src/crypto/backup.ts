@@ -86,10 +86,24 @@ export interface BackupContact {
   zeroTrust?: boolean;
   blocked?: boolean;
   archived?: boolean;
+  // Added 2026-09-20 (audit R25): everything a restore used to lose.
+  /** Display name the contact announces (name may be the local nickname). */
+  profileName?: string;
+  /** Local nickname; null/absent = none. */
+  nickname?: string | null;
+  /** Relay hosting the contact's mailbox (federation); null/absent = official. */
+  relayOnion?: string | null;
+  /** Capabilities the contact announced (net/caps.ts). */
+  caps?: string[] | null;
+  pinned?: boolean;
+  hidden?: boolean;
+  pending?: boolean;
+  profile?: 'personal' | 'work';
 }
 
 /**
- * Mirrors StoredGroup from db/local.ts exactly.
+ * Mirrors StoredGroup from db/local.ts (every persisted field, so a restored
+ * group is the same group — signed governance included).
  * Kept as a standalone type here to avoid any circular import with the DB layer.
  */
 export interface BackupGroup {
@@ -105,6 +119,137 @@ export interface BackupGroup {
   adminSig?: string;
   moderators?: string[];
   admins?: string[];
+  rosterVersion?: number;
+  permissions?: unknown;
+  govSig?: string;
+  govVersion?: number;
+  pending?: boolean;
+}
+
+/** Contact record → backup row: copies exactly the persisted fields. */
+export function toBackupContact(c: BackupContact): BackupContact {
+  return {
+    aegisId: c.aegisId,
+    publicKeyB64: c.publicKeyB64,
+    signingPublicKeyB64: c.signingPublicKeyB64,
+    name: c.name,
+    verified: c.verified,
+    addedAt: c.addedAt,
+    color: c.color,
+    avatarImage: c.avatarImage ?? null,
+    status: c.status,
+    muted: c.muted,
+    mutedUntil: c.mutedUntil ?? null,
+    zeroTrust: c.zeroTrust,
+    blocked: c.blocked,
+    archived: c.archived,
+    profileName: c.profileName,
+    nickname: c.nickname ?? null,
+    relayOnion: c.relayOnion ?? null,
+    caps: c.caps ?? null,
+    pinned: c.pinned,
+    hidden: c.hidden,
+    pending: c.pending,
+    profile: c.profile,
+  };
+}
+
+/** Group record → backup row (all persisted fields). */
+export function toBackupGroup(g: BackupGroup): BackupGroup {
+  return {
+    id: g.id,
+    name: g.name,
+    members: [...g.members],
+    createdAt: g.createdAt,
+    avatarColor: g.avatarColor,
+    avatarImage: g.avatarImage,
+    adminOnlyInvite: g.adminOnlyInvite,
+    moderateNewMembers: g.moderateNewMembers,
+    adminId: g.adminId,
+    adminSig: g.adminSig,
+    moderators: g.moderators,
+    admins: g.admins,
+    rosterVersion: g.rosterVersion,
+    permissions: g.permissions,
+    govSig: g.govSig,
+    govVersion: g.govVersion,
+    pending: g.pending,
+  };
+}
+
+/**
+ * Preference keys a restore may apply. Lock-related keys are excluded on
+ * purpose: restoring `appLockEnabled: true` onto a device that has no PIN
+ * hash would lock the user out of their own restored account.
+ */
+export const RESTORABLE_PREFERENCE_KEYS = [
+  'readReceipts', 'typingIndicator', 'blockScreenshots', 'requireGroupApproval', 'hideCallIp', 'callWakeService',
+  'notifMaster', 'notifPreview', 'notifSound', 'notifBadge', 'notifSummary', 'notifKeywords',
+  'mutedChats', 'mutedChatsUntil', 'mentionsOnlyChats', 'mutedChannels',
+  'photoVis', 'language', 'themeDark', 'themeAutoMode',
+] as const;
+
+export function restorablePreferences(prefs: Record<string, unknown> | undefined | null): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!prefs) return out;
+  for (const k of RESTORABLE_PREFERENCE_KEYS) if (k in prefs) out[k] = prefs[k];
+  return out;
+}
+
+/**
+ * A text message in the backup. Attachments are NOT backed up (their blobs
+ * expire on the relay and their local files would make the file huge), so a
+ * media message travels as its caption with `attachment: true`; deleted
+ * rows travel as deleted (no text). Wire tags never appear.
+ */
+export interface BackupMessage {
+  id: string;
+  chatId: string;
+  direction: 'in' | 'out';
+  body: string;
+  createdAt: number;
+  type?: string | null;
+  senderId?: string | null;
+  replyToId?: string | null;
+  reactions?: unknown;
+  starred?: boolean;
+  pinned?: boolean;
+  deleted?: boolean;
+  expiresAt?: number | null;
+  deliveryStatus?: string | null;
+  /** True when the original carried media that is not in the backup. */
+  attachment?: true;
+}
+
+const MESSAGE_WIRE_TAG = /^\[(image|video|audio|gif|sticker|viewonce|location|file|poll|call|join_request|multi)[:\]]/;
+
+/** Message record → backup row (text only; null = not worth backing up). */
+export function toBackupMessage(m: {
+  id: string; chatId: string; direction: 'in' | 'out'; body: string; createdAt: number; type?: string | null;
+  mediaUri?: string | null; attachments?: unknown[] | null; senderId?: string | null; replyToId?: string | null;
+  reactions?: unknown; starred?: boolean; pinned?: boolean; deleted?: boolean; expiresAt?: number | null; deliveryStatus?: string | null;
+}): BackupMessage | null {
+  // An ephemeral that already expired must not be resurrected by a restore.
+  if (m.expiresAt && m.expiresAt <= Date.now()) return null;
+  const hasMedia = !!m.mediaUri || (Array.isArray(m.attachments) && m.attachments.length > 0) || MESSAGE_WIRE_TAG.test(m.body);
+  const out: BackupMessage = {
+    id: m.id,
+    chatId: m.chatId,
+    direction: m.direction,
+    body: m.deleted ? '' : hasMedia ? (MESSAGE_WIRE_TAG.test(m.body) ? '' : m.body) : m.body,
+    createdAt: m.createdAt,
+    type: m.type ?? 'text',
+    senderId: m.senderId ?? null,
+    replyToId: m.replyToId ?? null,
+    reactions: m.reactions,
+    starred: m.starred === true,
+    pinned: m.pinned === true,
+    deleted: m.deleted === true,
+    expiresAt: m.expiresAt ?? null,
+    deliveryStatus: m.deliveryStatus ?? null,
+  };
+  if (hasMedia && !m.deleted) out.attachment = true;
+  return out;
 }
 
 export interface BackupPayload {
@@ -134,6 +279,8 @@ export interface BackupPayload {
   preferences?: Record<string, unknown>;
   /** Groups the user was part of at backup time. Optional — absent in legacy backups. */
   groups?: BackupGroup[];
+  /** Text messages of every chat (contacts + groups), no attachments. Optional. */
+  messages?: BackupMessage[];
 }
 
 export type PassphraseStrength = 'too_short' | 'weak' | 'fair' | 'strong';

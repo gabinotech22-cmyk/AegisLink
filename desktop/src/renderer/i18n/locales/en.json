@@ -781,6 +781,15 @@
     "relayUnsupportedDesc": "This contact uses their own relay. Update AegisLink to a version with relay federation to add them."
   },
   "backup": {
+    "messagesStat": "MESSAGES",
+    "attachmentNotIncluded": "[Attachment not included in the backup]",
+    "headline": "{{count}} contacts",
+    "headline_one": "{{count}} contact",
+    "headline_other": "{{count}} contacts",
+    "identityStat": "IDENTITY",
+    "settingsStat": "SETTINGS",
+    "messagesNotIncluded": "The backup carries your identity, profile, contacts (with nicknames and relay), groups, settings and text messages. Attachments (photos, audio, files) are not included.",
+    "restoredMsg": "Account restored. Aegis ID: {{id}}, {{count}} contacts recovered.",
     "title": "Encrypted Backup",
     "exportSection": "EXPORT",
     "importSection": "RESTORE",
@@ -1749,6 +1758,8 @@
     "attachments": "Attachments"
   },
   "groupAdmin": {
+    "mutedSub": "Muted · no alerts from this group",
+    "notMutedSub": "Alerts for messages and calls from this group",
     "title": "Group admin",
     "members": "Members",
     "addMember": "Add member",

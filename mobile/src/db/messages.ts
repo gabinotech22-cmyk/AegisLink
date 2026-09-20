@@ -345,16 +345,53 @@ export async function setMessageStarred(id: string, starred: boolean): Promise<v
   });
 }
 
+/**
+ * Media URIs (main + multi-attachment) of the given rows, decrypted, so the
+ * files behind them can be removed when the rows go. Exported for the other
+ * DB modules that delete rows (expiry, chat wipe).
+ */
+export async function mediaUrisOfRows(rows: { media_uri: string | null; attachments: string | null }[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const r of rows) {
+    if (r.media_uri) {
+      try { const u = await decryptBody(r.media_uri); if (u) out.push(u); } catch { /* skip */ }
+    }
+    if (r.attachments) {
+      try {
+        const atts = JSON.parse(r.attachments) as { uri?: string }[];
+        for (const a of atts) if (a?.uri) out.push(a.uri);
+      } catch { /* skip */ }
+    }
+  }
+  return out;
+}
+
+/** Remove the on-disk files of these URIs (best effort; never throws). */
+export async function wipeMediaFiles(uris: string[]): Promise<void> {
+  if (uris.length === 0) return;
+  try {
+    const { deleteMediaFilesFor } = require('../utils/mediaFiles') as typeof import('../utils/mediaFiles');
+    await deleteMediaFilesFor(uris);
+  } catch { /* file system unavailable — the row is gone either way */ }
+}
+
 export async function setMessageDeleted(id: string): Promise<void> {
-  return withDb(async (d) => {
+  const uris = await withDb(async (d) => {
+    const row = await d.getFirstAsync<{ media_uri: string | null; attachments: string | null }>(
+      'SELECT media_uri, attachments FROM messages WHERE id = ?', id,
+    );
+    const found = row ? await mediaUrisOfRows([row]) : [];
     // Soft delete: keep row, clear body, mark deleted
     const empty = await encryptBody('');
     await d.runAsync(
-      `UPDATE messages SET deleted = 1, body = ?, media_uri = NULL WHERE id = ?`,
+      `UPDATE messages SET deleted = 1, body = ?, media_uri = NULL, attachments = NULL WHERE id = ?`,
       empty,
       id
     );
+    return found;
   });
+  // The files go with the row: ciphertext, decrypted cache copy, local original.
+  await wipeMediaFiles(uris);
 }
 
 /**
@@ -368,18 +405,25 @@ export async function setMessageDeleted(id: string): Promise<void> {
  * chats by supplying an arbitrary id. Returns true iff a row was deleted.
  */
 export async function setRemoteMessageDeleted(id: string, chatId: string, senderId: string): Promise<boolean> {
-  return withDb(async (d) => {
+  const { changed, uris } = await withDb(async (d) => {
+    const row = await d.getFirstAsync<{ media_uri: string | null; attachments: string | null }>(
+      `SELECT media_uri, attachments FROM messages WHERE id = ? AND chat_id = ? AND sender_id = ? AND direction = 'in'`,
+      id, chatId, senderId,
+    );
+    const found = row ? await mediaUrisOfRows([row]) : [];
     const empty = await encryptBody('');
     const res = await d.runAsync(
-      `UPDATE messages SET deleted = 1, body = ?, media_uri = NULL
+      `UPDATE messages SET deleted = 1, body = ?, media_uri = NULL, attachments = NULL
          WHERE id = ? AND chat_id = ? AND sender_id = ? AND direction = 'in'`,
       empty,
       id,
       chatId,
       senderId
     );
-    return res.changes > 0;
+    return { changed: res.changes > 0, uris: res.changes > 0 ? found : [] };
   });
+  await wipeMediaFiles(uris);
+  return changed;
 }
 
 export async function setMessageReactions(id: string, reactions: MessageReactions): Promise<void> {

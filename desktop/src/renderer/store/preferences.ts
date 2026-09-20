@@ -26,6 +26,8 @@ export interface Preferences {
   notifSummary: boolean;
   notifKeywords: string[];
   mutedChats: string[];
+  /** Deadline (epoch ms) of a timed mute per chat id; absent/0 = always (utils/mute.ts). */
+  mutedChatsUntil: Record<string, number>;
   appLockEnabled: boolean;
   biometricsEnabled: boolean;
   lockTimeoutMin: number;
@@ -45,6 +47,7 @@ const DEFAULTS: Preferences = {
   notifSummary: false,
   notifKeywords: ['urgente', 'multisig', 'audit'],
   mutedChats: [],
+  mutedChatsUntil: {},
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
@@ -58,6 +61,8 @@ interface PrefsState extends Preferences {
   hydrate: () => Promise<void>;
   set: <K extends keyof Preferences>(key: K, value: Preferences[K]) => Promise<void>;
   reset: () => Promise<void>;
+  /** Restore from a backup payload: merges over DEFAULTS, then persists (parity with mobile). */
+  restoreFrom: (prefs: Partial<Preferences>) => Promise<void>;
 }
 
 function snapshot(get: () => PrefsState): Preferences {
@@ -74,12 +79,27 @@ function snapshot(get: () => PrefsState): Preferences {
     notifSummary: s.notifSummary,
     notifKeywords: s.notifKeywords,
     mutedChats: s.mutedChats,
+    mutedChatsUntil: s.mutedChatsUntil,
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,
     photoVis: s.photoVis,
     language: s.language,
   };
+}
+
+/**
+ * Preferences that describe the REAL user and must not show under a duress
+ * (decoy) session: alert keywords, muted chats. Masked to defaults in memory;
+ * storage is never touched. Same list as mobile store/preferences.ts.
+ */
+const DURESS_MASKED: (keyof Preferences)[] = ['notifKeywords', 'mutedChats'];
+
+export function maskForDuress(prefs: Preferences): Preferences {
+  const out: Record<string, unknown> = { ...prefs };
+  const defaults: Record<string, unknown> = { ...DEFAULTS };
+  for (const k of DURESS_MASKED) out[k] = defaults[k];
+  return out as unknown as Preferences;
 }
 
 async function persist(prefs: Preferences): Promise<void> {
@@ -100,7 +120,9 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
       const raw = await secureStorage().get(STORAGE_KEY);
       if (raw) {
         const loaded = JSON.parse(raw) as Partial<Preferences>;
-        setState({ ...DEFAULTS, ...loaded, hydrated: true });
+        const merged = { ...DEFAULTS, ...loaded };
+        // Decoy session (parity with mobile): the real lists stay on disk.
+        setState({ ...(get().duressActive ? maskForDuress(merged) : merged), hydrated: true });
         return;
       }
     } catch (e) {
@@ -111,7 +133,15 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
 
   async set(key, value) {
     setState({ [key]: value } as Pick<PrefsState, typeof key>);
+    // Under duress a change lives in memory only (parity with mobile).
+    if (get().duressActive) return;
     await persist(snapshot(get));
+  },
+
+  async restoreFrom(prefs) {
+    const merged = { ...DEFAULTS, ...prefs };
+    setState(merged);
+    await persist(merged);
   },
 
   async reset() {

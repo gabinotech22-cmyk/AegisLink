@@ -15,10 +15,17 @@ describe('decideNotification', () => {
     expect(decideNotification({ ...base, prefs: { ...prefs, notifMaster: false }, body: 'es URGENTE' }).show).toBe(true);
   });
 
-  it('muted contact (flag or until-future) → nothing; expired mute → shows; keyword breaks through', () => {
+  it('muted contact ("always" or until-future) → nothing; expired mute → shows; muted group → nothing; keyword breaks through', () => {
+    // utils/mute.ts: the flag is the source of truth, mutedUntil qualifies it
+    // (0/null = always; a past deadline = expired). A timed mute used to never
+    // expire here because the flag alone was enough.
     expect(decideNotification({ ...base, contact: { muted: true } })).toEqual({ show: false });
-    expect(decideNotification({ ...base, contact: { mutedUntil: 5_000 } })).toEqual({ show: false });
-    expect(decideNotification({ ...base, contact: { mutedUntil: 500 } }).show).toBe(true);
+    expect(decideNotification({ ...base, contact: { muted: true, mutedUntil: 0 } })).toEqual({ show: false });
+    expect(decideNotification({ ...base, contact: { muted: true, mutedUntil: 5_000 } })).toEqual({ show: false });
+    expect(decideNotification({ ...base, contact: { muted: true, mutedUntil: 500 } }).show).toBe(true);
+    expect(decideNotification({ ...base, contact: { mutedUntil: 5_000 } }).show).toBe(true);
+    expect(decideNotification({ ...base, prefs: { ...base.prefs, mutedChats: [base.chatId] } })).toEqual({ show: false });
+    expect(decideNotification({ ...base, prefs: { ...base.prefs, mutedChats: [base.chatId], mutedChatsUntil: { [base.chatId]: 500 } } }).show).toBe(true);
     expect(decideNotification({ ...base, contact: { muted: true }, body: 'urgente!' }).show).toBe(true);
   });
 

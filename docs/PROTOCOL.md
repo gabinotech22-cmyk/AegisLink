@@ -541,6 +541,15 @@ Attachments (`mobile/src/crypto/media.ts`) never reach the relay in plaintext:
   `socket/__tests__/outbox.test.ts` (❺ ❻ ❼), `utils/__tests__/mediaWire.test.ts`,
   `db/__tests__/orphanedPending.db.test.ts`.
 
+**Attachment lifetime on the device (mobile).** A received blob is kept as
+ciphertext (`media/<id>.enc`) and decrypted on demand into the purgeable cache
+(`dec_<id>.<ext>`); a sent attachment keeps its local original. All of them are
+deleted together with the message row — delete for me, delete for everyone
+(receiver side), ephemeral expiry and a chat/contact wipe call
+`utils/mediaFiles.ts` on the URIs of the affected rows (main and multi-
+attachment). The decrypted cache is additionally purged 30 s after the app goes
+to background. Desktop keeps no attachment on disk.
+
 ### 7.4b Local database at rest (SQLCipher) and the lost-key case
 
 The whole SQLite file is SQLCipher-encrypted (`useSQLCipher: true`); the 256-bit
@@ -578,7 +587,21 @@ with a key derived from a user passphrase the relay never sees:
 - Only salt, nonce and ciphertext are stored; the passphrase never touches disk.
   Minimum passphrase length 12.
 - Legacy envelopes (v1/v2, PBKDF2-HMAC-SHA256 at 100k/600k iterations) remain
-  *decryptable* for restore, but all new backups are written as v3.
+  *decryptable* for restore, but all new backups are written as v3 — on
+  **both** platforms (`desktop/src/renderer/crypto/backup.ts` mirrors the
+  mobile module; until 2026-09-20 desktop wrote v1 and its restore discarded
+  the decrypted payload).
+- **Payload** (`BackupPayload`): identity keys, profile, every persisted
+  contact field (`toBackupContact`: nickname, announced name, own relay, caps,
+  pinned/hidden/pending, profile slot…), the groups with their signed roster
+  and governance (`toBackupGroup`), and the data preferences
+  (`restorablePreferences`: lock settings are excluded on purpose — no PIN
+  hash travels, restoring `appLockEnabled` would lock the user out), and the
+  **text messages** of every chat (`toBackupMessage`: deleted rows without
+  text, expired ephemerals skipped, a media message as its caption plus an
+  `attachment: true` flag that restores as an "attachment not included" note).
+  Attachments themselves are **not** in the backup — their blobs expire on the
+  relay and the files would make it huge; the Backup screen says so.
 
 > **⚠ Disclosure — KDF parameters are implied by version, not stored.**
 > The v3 Argon2id parameters are fixed by the envelope version rather than
@@ -591,6 +614,15 @@ with a key derived from a user passphrase the relay never sees:
 
 - **Panic mode** performs an instant local wipe, with an optional **decoy
   profile** for coerced-unlock scenarios.
+- **Decoy session scope.** Under the duress PIN every store that renders user
+  data re-hydrates duress-aware (identity, contacts, messages, groups,
+  channels, scheduled posts, profiles) — and so do **preferences**: the alert
+  keywords and the muted / mentions-only chat, group and channel lists read as
+  defaults in memory (`store/preferences.ts` `maskForDuress`), the stored real
+  values are never touched, and a preference changed inside the decoy is
+  memory-only (the real PIN re-hydrates the real ones). Neutral preferences
+  (theme, language, master switch…) stay as they are so the decoy looks like the
+  user's app.
 - **Push wake-ups and multiple profiles.** Only the **active** profile is
   bound to the device's push tokens. On a profile switch the outgoing identity
   retracts its own bindings over its authenticated socket (`push:unregister`,

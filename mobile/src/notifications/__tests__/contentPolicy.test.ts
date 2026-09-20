@@ -19,7 +19,7 @@ jest.mock('../../config', () => ({ SERVER_URL: 'https://example.test' }));
 jest.mock('../../utils/secureStore', () => ({
   ss: { get: jest.fn(async () => null), set: jest.fn(async () => undefined), delete: jest.fn(async () => undefined) },
 }));
-const mockGetContact = jest.fn(async (_id: string) => null as null | { mutedUntil?: number | null });
+const mockGetContact = jest.fn(async (_id: string) => null as null | { muted?: boolean; mutedUntil?: number | null });
 jest.mock('../../db/local', () => ({ getContact: (id: string) => mockGetContact(id) }));
 jest.mock('../../store/messages', () => ({ useMessages: { getState: () => ({ unreadCounts: {} }) } }));
 
@@ -87,8 +87,16 @@ describe('missed call', () => {
     await showMissedCallNotification('ALICE', 'Alice', 'c2');
     expect(sched).not.toHaveBeenCalled();
     usePreferences.setState({ notifMaster: true });
-    mockGetContact.mockResolvedValue({ mutedUntil: Date.now() + 60_000 });
+    mockGetContact.mockResolvedValue({ muted: true, mutedUntil: Date.now() + 60_000 });
     await showMissedCallNotification('ALICE', 'Alice', 'c3');
     expect(sched).not.toHaveBeenCalled();
+    // "Mute always" stores mutedUntil = 0 — it used to be treated as NOT muted.
+    mockGetContact.mockResolvedValue({ muted: true, mutedUntil: 0 });
+    await showMissedCallNotification('ALICE', 'Alice', 'c4');
+    expect(sched).not.toHaveBeenCalled();
+    // An expired timed mute no longer mutes.
+    mockGetContact.mockResolvedValue({ muted: true, mutedUntil: Date.now() - 1 });
+    await showMissedCallNotification('ALICE', 'Alice', 'c5');
+    expect(sched).toHaveBeenCalledTimes(1);
   });
 });
