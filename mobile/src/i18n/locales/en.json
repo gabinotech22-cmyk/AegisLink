@@ -491,6 +491,7 @@
     "channels": "CHANNELS"
   },
   "profileSwitch": {
+    "onlyActiveNotifies": "Only the active profile receives notifications. Messages for your other profiles wait encrypted on the relay until you switch to them (30 days).",
     "title": "Change profile",
     "newProfile": "New profile",
     "activeLabel": "Active profile",

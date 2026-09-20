@@ -619,8 +619,10 @@ export const useIdentity = create<IdentityState>((set, get) => ({
   async switchSlot(slotId: string) {
     set({ status: 'loading', error: null });
     try {
-      // 1. Disconnect socket
-      const { getSocket } = require('../socket/client');
+      // 1. Retract this profile's push bindings (only the active profile
+      //    notifies — decision B), then disconnect.
+      const { getSocket, unregisterPushForActiveIdentity } = require('../socket/client') as typeof import('../socket/client');
+      try { await unregisterPushForActiveIdentity(); } catch { /* best effort */ }
       const sock = getSocket();
       if (sock) {
         sock.disconnect();

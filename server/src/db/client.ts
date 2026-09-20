@@ -564,6 +564,10 @@ export const pushRepo = {
   async delete(token: string): Promise<void> {
     await dbRun(`DELETE FROM push_tokens WHERE expo_token = ?`, [token]);
   },
+  /** One identity retracting its own binding of a token (push:unregister). */
+  async deleteFor(aegisId: string, token: string): Promise<void> {
+    await dbRun(`DELETE FROM push_tokens WHERE aegis_id = ? AND expo_token = ?`, [aegisId, token]);
+  },
 };
 
 // ── voipTokenRepo ─────────────────────────────────────────────────────────────
@@ -594,6 +598,9 @@ export const voipTokenRepo = {
   },
   async delete(token: string): Promise<void> {
     await dbRun(`DELETE FROM voip_tokens WHERE voip_token = ?`, [token]);
+  },
+  async deleteFor(aegisId: string, token: string): Promise<void> {
+    await dbRun(`DELETE FROM voip_tokens WHERE aegis_id = ? AND voip_token = ?`, [aegisId, token]);
   },
 };
 

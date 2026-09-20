@@ -79,6 +79,27 @@ export function attachMessagingEphemeral(socket: Socket, { me, sockets }: Messag
     }
   });
 
+  // ─── Retracting a binding (profile switch) ─────────────────────────────────
+  // Only the ACTIVE profile on a device is meant to receive push wake-ups: when
+  // the user switches profiles the outgoing identity drops its own (aegisId,
+  // token) row. Scoped to `me` — an identity can never unbind another one's
+  // token, even on the same device. Messages for the inactive identity wait in
+  // its queue; nothing is lost, nothing is announced.
+  socket.on('push:unregister', async (raw, ack) => {
+    const sendAck = (ok: boolean): void => { if (typeof ack === 'function') ack({ ok }); };
+    if (!(await checkLowFreqRateLimit(me))) { sendAck(false); return; }
+    const parsed = PushRegister.safeParse(raw);
+    if (!parsed.success) { sendAck(false); return; }
+    try { await pushRepo.deleteFor(me, parsed.data.token); sendAck(true); } catch { sendAck(false); }
+  });
+  socket.on('voip:unregister', async (raw, ack) => {
+    const sendAck = (ok: boolean): void => { if (typeof ack === 'function') ack({ ok }); };
+    if (!(await checkLowFreqRateLimit(me))) { sendAck(false); return; }
+    const parsed = VoipRegister.safeParse(raw);
+    if (!parsed.success) { sendAck(false); return; }
+    try { await voipTokenRepo.deleteFor(me, parsed.data.token); sendAck(true); } catch { sendAck(false); }
+  });
+
   // ─── iOS VoIP (PushKit) token registration ───────────────────────────────
   // Same authenticated path as push:register: the token is bound to `me`, the
   // aegisId proven via the Ed25519 challenge-response. Knowing an aegisId never
