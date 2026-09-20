@@ -10,6 +10,9 @@ import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import type { StoredContact } from '../db/local';
 import { encodeIdentityQR } from '../crypto/qr';
+// The real fingerprint (sha256 of the X25519 key): it must be what the other
+// person's phone shows or reading it aloud verifies nothing.
+import { fingerprintHex, fingerprintWords } from '../crypto/fingerprint';
 import { useOwnAddressParts } from '../net/ownAddress';
 
 interface Identity {
@@ -26,17 +29,6 @@ interface Props {
   onContactAdded?: (contact: StoredContact) => void;
 }
 
-// Stub fingerprint functions
-function fingerprintWords(key: Uint8Array): string[] {
-  const wordlist = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'];
-  return wordlist.slice(0, 8);
-}
-function fingerprintHex(key: Uint8Array): string[] {
-  const hex = Array.from(key).map((b) => b.toString(16).padStart(2, '0')).join('');
-  const padded = hex.padEnd(32, '0').slice(0, 32);
-  return [padded.slice(0, 4), padded.slice(4, 8), padded.slice(8, 12), padded.slice(12, 16),
-          padded.slice(16, 20), padded.slice(20, 24), padded.slice(24, 28), padded.slice(28, 32)].map((s) => s.toUpperCase());
-}
 
 export function VerifyScreen({ onBack, onScan, onTab, onContactAdded }: Props) {
   useTranslation(); // re-render on language change

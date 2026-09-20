@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld('aegis', {
       ipcRenderer.invoke('db:load-messages-by-chat', activeSlot, chatId),
     getMessage: (activeSlot: string, id: string): Promise<any> =>
       ipcRenderer.invoke('db:get-message', activeSlot, id),
+    searchMessages: (activeSlot: string, query: string, limit?: number): Promise<any[]> =>
+      ipcRenderer.invoke('db:search-messages', activeSlot, query, limit),
     setMessagePinned: (id: string, pinned: boolean): Promise<void> =>
       ipcRenderer.invoke('db:set-message-pinned', id, pinned),
     getPinnedMessage: (activeSlot: string, chatId: string): Promise<any> =>
@@ -100,8 +102,15 @@ contextBridge.exposeInMainWorld('aegis', {
       ipcRenderer.invoke('db:get-call-history', contactId, limit)
   },
   notifications: {
-    show: (title: string, body: string): Promise<void> =>
-      ipcRenderer.invoke('notifications:show', title, body)
+    show: (title: string, body: string, opts?: { preview?: boolean; silent?: boolean; chatId?: string }): Promise<void> =>
+      ipcRenderer.invoke('notifications:show', title, body, opts),
+    setBadge: (count: number): Promise<void> => ipcRenderer.invoke('notifications:badge', count),
+    isFocused: (): Promise<boolean> => ipcRenderer.invoke('notifications:focused'),
+    onOpenChat: (cb: (chatId: string) => void): (() => void) => {
+      const listener = (_e: unknown, chatId: unknown): void => { if (typeof chatId === 'string') cb(chatId) }
+      ipcRenderer.on('notifications:open-chat', listener)
+      return () => { ipcRenderer.removeListener('notifications:open-chat', listener) }
+    }
   },
   window: {
     /** Exclude the window from screen capture / sharing. Resolves whether the platform enforces it. */

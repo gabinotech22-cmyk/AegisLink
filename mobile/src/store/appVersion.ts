@@ -79,6 +79,9 @@ async function persistNotified(notifiedFor: string): Promise<void> {
 async function announceInBackground(latestVersion: string): Promise<boolean> {
   if (AppState.currentState === 'active') return false;
   try {
+    // "Master switch — turns off all notifications" includes this one.
+    const { usePreferences } = require('./preferences') as typeof import('./preferences');
+    if (!usePreferences.getState().notifMaster) return false;
     const Notifications = require('expo-notifications') as typeof import('expo-notifications');
     const { tAsync } = require('../i18n') as typeof import('../i18n');
     await Notifications.scheduleNotificationAsync({

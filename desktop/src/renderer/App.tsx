@@ -57,6 +57,7 @@ import { connect as connectSocket, disconnect as disconnectSocket } from './sock
 import { shouldConnectSocket } from './utils/socketGate';
 import { attachCallHandlers, acceptCall, endCall } from './socket/calls';
 import { setNotificationOpenChatHandler } from './notifications/push';
+import { startDailySummaryTimer } from './notifications/dailySummary';
 import { Sidebar } from './components/Sidebar';
 import { AegisMark } from './components/AegisMark';
 import type { Tab } from './components/TabBar';
@@ -287,10 +288,15 @@ function Shell() {
     if (shouldConnectSocket({ hasIdentity: !!identity, identityStatus: status, publishStatus, duressActive })) {
       connectSocket(identity!);
       attachCallHandlers();
-      setNotificationOpenChatHandler((aegisId) => {
+      startDailySummaryTimer();
+      setNotificationOpenChatHandler((chatId) => {
         void import('./store/contacts').then(({ useContacts }) => {
-          const contact = (useContacts.getState() as { contacts: StoredContact[] }).contacts.find((c) => c.aegisId === aegisId);
-          if (contact) { setStack([]); push({ name: 'chat', contact }); }
+          const contact = (useContacts.getState() as { contacts: StoredContact[] }).contacts.find((c) => c.aegisId === chatId);
+          if (contact) { setActiveChatId(contact.aegisId); setStack([]); push({ name: 'chat', contact }); return; }
+          void import('./store/groups').then(({ useGroups }) => {
+            const group = (useGroups.getState() as { groups: StoredGroup[] }).groups.find((g) => g.id === chatId);
+            if (group) { setStack([]); push({ name: 'groupChat', group }); }
+          });
         });
       });
     } else if (!identity && status === 'idle') {

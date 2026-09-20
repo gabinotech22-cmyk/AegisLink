@@ -35,6 +35,7 @@ export interface AegisIPC {
     saveMessage(activeSlot: string, m: unknown): Promise<void>;
     updateMessageDelivery(id: string, status: string): Promise<void>;
     loadMessagesByChat(activeSlot: string, chatId: string): Promise<any[]>;
+    searchMessages(activeSlot: string, query: string, limit?: number): Promise<any[]>;
     getMessage(activeSlot: string, id: string): Promise<any>;
     setMessagePinned(id: string, pinned: boolean): Promise<void>;
     getPinnedMessage(activeSlot: string, chatId: string): Promise<any>;
@@ -72,7 +73,10 @@ export interface AegisIPC {
     getCallHistory(contactId: string, limit: number): Promise<any[]>;
   };
   notifications: {
-    show(title: string, body: string): Promise<void>;
+    show(title: string, body: string, opts?: { preview?: boolean; silent?: boolean; chatId?: string }): Promise<void>;
+    setBadge(count: number): Promise<void>;
+    isFocused(): Promise<boolean>;
+    onOpenChat(cb: (chatId: string) => void): () => void;
   };
   window: {
     setContentProtection(enabled: boolean): Promise<boolean>;

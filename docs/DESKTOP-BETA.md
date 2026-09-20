@@ -111,8 +111,13 @@ con Tor arrancado.
    del SO. Test de integridad `i18n/__tests__/locales.test.ts` (todas las claves
    usadas existen en los 3 idiomas, placeholders iguales). Queda solo en inglés
    el cuerpo genérico de la notificación del SO ("New message", proceso main).
-3. **Sin lectura de QR.** `ScanQR.tsx` acepta pegar el Aegis ID / JSON; no
-   decodifica imágenes ni usa cámara.
+3. ~~Sin lectura de QR~~ → ✅ resuelto (rama `feat/desktop-qr-from-image`): "Escanear
+   QR" y "Añadir contacto" leen un QR desde una **imagen** (captura, foto, PNG
+   exportado) con `jsqr` en el renderer (`utils/qrImage.ts`; Chromium en
+   Windows/Linux no trae `BarcodeDetector`); nada sale del equipo y el texto
+   decodificado sigue el mismo camino que el pegado (clave TOFU del QR, relay +
+   raíz de mailbox de un enlace v2). Test `utils/__tests__/qrImage.test.ts`.
+   Queda: sin cámara (no tiene sentido en escritorio).
 4. **Sin canales públicos, sin llamadas de grupo, sin múltiples perfiles**
    (sección 11). El API multi-slot de `secureStorage`/`db` existe pero main
    **no aísla por slot** (PAR-1b del audit de agosto) — no cablear

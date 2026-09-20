@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { usePreferences } from '../store/preferences';
+import { useContacts } from '../store/contacts';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import type { CSSProperties } from 'react';
@@ -15,26 +17,46 @@ export function NotificationsScreen({ onBack }: Props) {
   useTranslation(); // re-render on language change
   const { t } = useTheme();
 
-  // Stub preferences
-  const [master, setMaster] = useState(true);
-  const [preview, setPreview] = useState(true);
-  const [sound, setSound] = useState(true);
-  const [badge, setBadge] = useState(true);
-  const [summary, setSummary] = useState(false);
-  const [keywords, setKeywords] = useState<string[]>([]);
-  const [mutedIds] = useState<string[]>([]);
+  // Real preferences (store/preferences, persisted) — every switch here is
+  // honoured by notifications/push.ts. Until 1.0.7 this screen was a stub.
+  const master = usePreferences((s) => s.notifMaster);
+  const preview = usePreferences((s) => s.notifPreview);
+  const sound = usePreferences((s) => s.notifSound);
+  const badge = usePreferences((s) => s.notifBadge);
+  const summary = usePreferences((s) => s.notifSummary);
+  const keywords = usePreferences((s) => s.notifKeywords);
+  const setPref = usePreferences((s) => s.set);
+  const setMaster = (v: boolean) => void setPref('notifMaster', v);
+  const setPreview = (v: boolean) => void setPref('notifPreview', v);
+  const setSound = (v: boolean) => void setPref('notifSound', v);
+  const setBadge = (v: boolean) => {
+    void setPref('notifBadge', v);
+    // Off → clear the dock/taskbar badge now; on → show the current total.
+    setTimeout(() => { void import('../notifications/push').then(({ syncAppBadge }) => syncAppBadge()); }, 0);
+  };
+  const setSummary = (v: boolean) => void setPref('notifSummary', v);
   const [kwInput, setKwInput] = useState('');
   const [showKwInput, setShowKwInput] = useState(false);
 
-  const muted = mutedIds.map((id) => ({ id, name: id, until: 'always' }));
+  // Muted conversations come from the contacts themselves (muted / mutedUntil).
+  const contacts = useContacts((s) => s.contacts);
+  const unmute = useContacts((s) => s.muteContact);
+  const now = Date.now();
+  const muted = contacts
+    .filter((c) => c.muted || (c.mutedUntil != null && c.mutedUntil > now))
+    .map((c) => ({
+      id: c.aegisId,
+      name: c.name,
+      until: c.mutedUntil != null && c.mutedUntil > now ? new Date(c.mutedUntil).toLocaleString() : 'always',
+    }));
 
   function removeKeyword(k: string) {
-    setKeywords((prev) => prev.filter((x) => x !== k));
+    void setPref('notifKeywords', keywords.filter((x) => x !== k));
   }
 
   function commitKeyword() {
     const v = kwInput.trim().toLowerCase();
-    if (v && !keywords.includes(v)) setKeywords((prev) => [...prev, v]);
+    if (v && !keywords.includes(v)) void setPref('notifKeywords', [...keywords, v]);
     setKwInput('');
     setShowKwInput(false);
   }
@@ -56,7 +78,7 @@ export function NotificationsScreen({ onBack }: Props) {
         <Section t={t} label={i18n.t('notifications.generalSection')}>
           <Toggle t={t} label={i18n.t('notifications.title')} sub={i18n.t('notifications.masterSwitchTurnsOff')} value={master} onChange={setMaster} />
           <div style={{ opacity: master ? 1 : 0.4, pointerEvents: master ? 'auto' : 'none' }}>
-            <Toggle t={t} label={i18n.t('notifications.showContent')} sub='If off, only displays "new encrypted message"' value={preview} onChange={setPreview} />
+            <Toggle t={t} label={i18n.t('notifications.showContent')} sub={i18n.t('notifications.showContentSub')} value={preview} onChange={setPreview} />
             <Toggle t={t} label={i18n.t('notifications.sound')} value={sound} onChange={setSound} />
             <Toggle t={t} label={i18n.t('notifications.badge')} sub={i18n.t('notifications.badgeSub')} value={badge} onChange={setBadge} noBorder />
           </div>
@@ -125,7 +147,7 @@ export function NotificationsScreen({ onBack }: Props) {
                     </span>
                   </div>
                   <button
-                    onClick={() => {}}
+                    onClick={() => { void unmute(m.id, false); }}
                     aria-label={i18n.t('notifications.unmuteV0', { v0: m.name })}
                     style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, background: 'none', cursor: 'pointer' }}
                   >
