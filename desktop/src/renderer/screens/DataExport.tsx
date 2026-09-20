@@ -7,7 +7,10 @@ import { TopBar } from '../components/TopBar';
 import { Section, Toggle } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
+import { useGroups } from '../store/groups';
 import { usePreferences } from '../store/preferences';
+import { loadMessagesByChat } from '../db/local';
+import { buildExportPayload } from '../utils/dataExport';
 
 interface Props {
   onBack: () => void;
@@ -22,6 +25,7 @@ export function DataExportScreen({ onBack }: Props) {
 
   const { identity, reset } = useIdentity();
   const { contacts } = useContacts();
+  const groups = useGroups((st) => st.groups);
   const readReceipts = usePreferences((s) => s.readReceipts);
   const typingIndicator = usePreferences((s) => s.typingIndicator);
   const blockScreenshots = usePreferences((s) => s.blockScreenshots);
@@ -29,17 +33,15 @@ export function DataExportScreen({ onBack }: Props) {
   async function handleExport() {
     setExporting(true);
     try {
-      const dbData = {
-        version: 1,
-        exportedAt: new Date().toISOString(),
+      // Messages used to be an empty object whatever the toggle said.
+      const dbData = await buildExportPayload({
         aegisId: identity?.aegisId ?? null,
-        contacts: pick.contacts
-          ? contacts.map((c) => ({ name: c.name, aegisId: c.aegisId, verified: c.verified, color: c.color }))
-          : [],
-        conversations: pick.messages ? {} : {},
-        totalMessages: 0,
-        settings: pick.settings ? { readReceipts, typingIndicator, blockScreenshots } : null,
-      };
+        contacts,
+        groups,
+        pick,
+        settings: { readReceipts, typingIndicator, blockScreenshots },
+        loadMessages: loadMessagesByChat,
+      });
 
       const json = JSON.stringify(dbData, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
