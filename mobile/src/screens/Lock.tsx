@@ -505,6 +505,9 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       // restored the instant the real PIN is entered.
       usePreferences.setState({ duressActive: true });
       try {
+        // Preferences too: keywords / muted lists describe the real user and
+        // must read as defaults in the decoy (store/preferences maskForDuress).
+        await usePreferences.getState().hydrate();
         await useIdentity.getState().hydrate();
         await useContacts.getState().hydrate();
         useMessages.setState({ byChat: {}, previews: {}, pinnedMsg: {}, unreadCounts: {}, drafts: {} });
@@ -562,6 +565,7 @@ export function LockScreen({ onUnlock, onPanic }: Props) {
       if (wasDecoy) {
         // Reload real identity and data now that decoy mode is off
         try {
+          await usePreferences.getState().hydrate();
           await useIdentity.getState().hydrate();
           await useContacts.getState().hydrate();
           useMessages.setState({
