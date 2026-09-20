@@ -445,7 +445,7 @@
     "privacySecurity": "Privacidad y seguridad",
     "letOthersKnowYou": "Permite que otros sepan que has leído sus mensajes",
     "showWhenYouRe": "Mostrar cuando estás escribiendo un mensaje",
-    "preventScreenCaptureOf": "Impide capturas de pantalla del contenido de los mensajes",
+    "preventScreenCaptureOf": "Excluye la ventana de capturas de pantalla y de compartir pantalla (Windows y macOS).",
     "anonymizeTrafficThroughThe": "Anonimiza el tráfico a través de la red Tor (más lento)",
     "backUpYourMessages": "Haz copia de tus mensajes con una clave que solo tú tienes",
     "setAGlobalTimer": "Configura un temporizador global para todos los mensajes",
