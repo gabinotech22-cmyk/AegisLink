@@ -1204,6 +1204,7 @@ export function closeDatabase(): void {
 /** Effective display name: local nickname → announced name → Aegis ID. */
 function effectiveContactName(r: { aegis_id: string; name: string; nickname: string | null }): string {
   return r.nickname?.trim() || r.name?.trim() || r.aegis_id
+}
 
 export const SEARCH_RESULT_LIMIT = 200
 export const SEARCH_SCAN_LIMIT = 5000
