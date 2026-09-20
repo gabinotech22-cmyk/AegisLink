@@ -22,6 +22,19 @@ import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRa
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
 import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId, getContactMailboxRoot } from '../crypto/mailboxStore';
 import { OWN_CAPS, sanitizeCaps } from '../net/caps';
+import { avatarFieldsFor, receivedAvatar, type PhotoVis } from '../utils/photoVisibility';
+
+/** Contact record for a recipient (list lookup; test doubles of the store may not expose `get`). */
+function contactRecord(aegisId: string): { pending?: boolean; blocked?: boolean } | null {
+  const list = useContacts.getState().contacts as { aegisId: string; pending?: boolean; blocked?: boolean }[] | undefined;
+  return list?.find((c) => c.aegisId === aegisId) ?? null;
+}
+
+/** preferences.photoVis at send time ("who sees my photo"). */
+async function photoVisNow(): Promise<PhotoVis> {
+  const { usePreferences } = await import('../store/preferences');
+  return usePreferences.getState().photoVis ?? 'contacts';
+}
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery } from './mailboxSocket';
 import { isForeign, getHomeRelay, homeRelayBaseUrl, homeRelayOnionUrl, resolveRelay } from '../net/homeRelay';
 import { canonicalRelay } from '../net/officialRelay';
@@ -1725,7 +1738,7 @@ async function decryptAndAppendLocked(
             contact.aegisId,
             parsedPayload.senderName,
             parsedPayload.senderColor,
-            parsedPayload.senderImage ?? undefined,
+            receivedAvatar(parsedPayload),
             parsedPayload.senderStatus ?? undefined,
           );
         }
@@ -1970,7 +1983,8 @@ async function decryptAndAppendLocked(
             senderId,
             parsedPayload.senderName,
             parsedPayload.senderColor,
-            parsedPayload.senderImage,
+            // null after a sender's first group message = "no change", never "remove".
+            receivedAvatar(parsedPayload),
           );
         }
 
@@ -2772,6 +2786,7 @@ export async function broadcastProfileUpdate(
   const senderColor = idState.avatarColor;
   const senderStatus = idState.profileStatus;
   const senderImage = await toDataUri(idState.avatarImage);
+  const photoVis = await photoVisNow();
 
   // Identity-global fields (identical for every contact) — compute once, out of
   // the loop, and fold them into the change fingerprint below.
@@ -2789,7 +2804,9 @@ export async function broadcastProfileUpdate(
   // first message — so skip the whole thing when nothing has changed since the
   // last broadcast for THIS identity.
   const fingerprint = profileFingerprint(
-    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, ...deliveryTokenField, ...mailboxRootField, ...mailboxRelayField, ...ownCapsField() }),
+    // photoVis is part of the fingerprint: changing "who sees my photo" must
+    // re-announce (with a clear for the contacts that lost it).
+    JSON.stringify({ senderName, senderColor, senderStatus, senderImage, photoVis, ...deliveryTokenField, ...mailboxRootField, ...mailboxRelayField, ...ownCapsField() }),
   );
   const hashKey = profileBroadcastHashKey(identity.aegisId);
   if (!opts.force) {
@@ -2806,7 +2823,7 @@ export async function broadcastProfileUpdate(
         type: 'profile_update',
         senderName,
         senderColor,
-        senderImage,
+        ...avatarFieldsFor(photoVis, contact, senderImage),
         senderStatus,
         ...deliveryTokenField,
         ...mailboxRootField,
@@ -2869,7 +2886,7 @@ export async function sendProfileTo(
       type: 'profile_update',
       senderName,
       senderColor,
-      senderImage,
+      ...avatarFieldsFor(await photoVisNow(), contactRecord(contact.aegisId), senderImage),
       senderStatus,
       ...(await ownDeliveryTokenField()),
       ...(await ownMailboxRootField()),
@@ -3076,6 +3093,7 @@ export async function sendGroupMessage(opts: {
     const senderName = idState.displayName;
     const senderColor = idState.avatarColor;
     const senderImage = await toDataUri(idState.avatarImage);
+    const avatar = avatarFieldsFor(await photoVisNow(), contact, senderImage);
 
     const payload = JSON.stringify({
       type: 'group_msg',
@@ -3093,7 +3111,7 @@ export async function sendGroupMessage(opts: {
       senderId: opts.identity.aegisId,
       senderName,
       senderColor,
-      senderImage,
+      ...avatar,
       body: opts.plaintext,
     });
 
