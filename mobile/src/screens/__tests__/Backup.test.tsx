@@ -116,6 +116,10 @@ jest.mock('../../crypto/backup', () => ({
   BACKUP_FILE_EXTENSION: 'aegis',
   BACKUP_MIN_PASSPHRASE_LEN: 8,
   BACKUP_VERSION: 1,
+  // Pure mappers: the real ones (the payload shape is what we assert on).
+  toBackupContact: jest.requireActual('../../crypto/backup').toBackupContact,
+  toBackupGroup: jest.requireActual('../../crypto/backup').toBackupGroup,
+  restorablePreferences: jest.requireActual('../../crypto/backup').restorablePreferences,
 }));
 
 // ── wordlist (256 words) + identity/db helpers ──────────────────────────────
@@ -176,7 +180,10 @@ describe('BackupScreen', () => {
   it('renders the title and live DB stats', () => {
     const { getByText } = render(<BackupScreen onBack={jest.fn()} />);
     expect(getByText('backup.title')).toBeTruthy();
-    expect(getByText('0 messages')).toBeTruthy();
+    // The card lists what the file contains (contacts / groups / identity /
+    // settings) — it used to count messages that never went into the backup.
+    expect(getByText('backup.headline')).toBeTruthy();
+    expect(getByText('backup.messagesNotIncluded')).toBeTruthy();
   });
 
   it('masks the recovery phrase until revealed', () => {
@@ -227,6 +234,11 @@ describe('BackupScreen', () => {
 
     await waitFor(() => expect(mockEncryptBackup).toHaveBeenCalledTimes(1));
     expect(mockEncryptBackup).toHaveBeenCalledWith(expect.any(Object), 'a-strong-pass');
+    // Groups and data preferences travel in the payload now.
+    const payload = mockEncryptBackup.mock.calls[0][0] as { groups?: unknown[]; preferences?: Record<string, unknown> };
+    expect(Array.isArray(payload.groups)).toBe(true);
+    expect(payload.preferences).toBeDefined();
+    expect(payload.preferences).not.toHaveProperty('appLockEnabled');
     expect(mockFileWrite).toHaveBeenCalled();
     await waitFor(() => expect(mockShareAsync).toHaveBeenCalled());
     expect(mockSsSet).toHaveBeenCalledWith('aegis.backup.lastAt', expect.any(String));

@@ -642,6 +642,12 @@
     "relayUnsupportedDesc": "Este contacto usa su propio relay. Actualiza AegisLink a una versión con federación de relays para añadirlo."
   },
   "backup": {
+    "headline": "{{count}} contactos",
+    "headline_one": "{{count}} contacto",
+    "headline_other": "{{count}} contactos",
+    "identityStat": "IDENTIDAD",
+    "settingsStat": "AJUSTES",
+    "messagesNotIncluded": "El backup lleva tu identidad, perfil, contactos (con apodos y relay), grupos y ajustes. Los mensajes y adjuntos no se incluyen: viven solo en este dispositivo.",
     "title": "Copia de seguridad cifrada",
     "exportSection": "EXPORTAR",
     "importSection": "RESTAURAR",
