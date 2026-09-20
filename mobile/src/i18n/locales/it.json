@@ -14,8 +14,10 @@
     "incomingVoiceCall": "Chiamata vocale E2EE in arrivo",
     "missedCall": "Chiamata persa",
     "dailySummaryTitle": "Riepilogo giornaliero",
-    "dailySummaryBody_one": "Hai ricevuto {{count}} messaggio oggi da {{names}}.",
-    "dailySummaryBody_other": "Hai ricevuto {{count}} messaggi oggi da {{names}}."
+    "dailySummaryBody_one": "Hai {{count}} messaggio non letto.",
+    "dailySummaryBody_other": "Hai {{count}} messaggi non letti.",
+    "dailySummaryNamesBody_one": "Hai {{count}} messaggio non letto da {{names}}.",
+    "dailySummaryNamesBody_other": "Hai {{count}} messaggi non letti da {{names}}."
   },
   "common": {
     "cancel": "Annulla",

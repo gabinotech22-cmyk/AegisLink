@@ -14,8 +14,10 @@
     "incomingVoiceCall": "Llamada de voz E2EE entrante",
     "missedCall": "Llamada perdida",
     "dailySummaryTitle": "Resumen diario",
-    "dailySummaryBody_one": "Recibiste {{count}} mensaje hoy de {{names}}.",
-    "dailySummaryBody_other": "Recibiste {{count}} mensajes hoy de {{names}}."
+    "dailySummaryBody_one": "Tienes {{count}} mensaje sin leer.",
+    "dailySummaryBody_other": "Tienes {{count}} mensajes sin leer.",
+    "dailySummaryNamesBody_one": "Tienes {{count}} mensaje sin leer de {{names}}.",
+    "dailySummaryNamesBody_other": "Tienes {{count}} mensajes sin leer de {{names}}."
   },
   "common": {
     "cancel": "Cancelar",

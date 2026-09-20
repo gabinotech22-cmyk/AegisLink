@@ -100,8 +100,15 @@ contextBridge.exposeInMainWorld('aegis', {
       ipcRenderer.invoke('db:get-call-history', contactId, limit)
   },
   notifications: {
-    show: (title: string, body: string): Promise<void> =>
-      ipcRenderer.invoke('notifications:show', title, body)
+    show: (title: string, body: string, opts?: { preview?: boolean; silent?: boolean; chatId?: string }): Promise<void> =>
+      ipcRenderer.invoke('notifications:show', title, body, opts),
+    setBadge: (count: number): Promise<void> => ipcRenderer.invoke('notifications:badge', count),
+    isFocused: (): Promise<boolean> => ipcRenderer.invoke('notifications:focused'),
+    onOpenChat: (cb: (chatId: string) => void): (() => void) => {
+      const listener = (_e: unknown, chatId: unknown): void => { if (typeof chatId === 'string') cb(chatId) }
+      ipcRenderer.on('notifications:open-chat', listener)
+      return () => { ipcRenderer.removeListener('notifications:open-chat', listener) }
+    }
   },
   // ── Embedded Tor (main/tor/*) — status + the socket.io-over-Tor dumb pipe ──
   tor: {

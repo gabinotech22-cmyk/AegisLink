@@ -1,64 +1,157 @@
 /**
  * AegisLink Desktop — notifications module.
  *
- * Replaces mobile/src/notifications/push.ts (which uses expo-notifications).
- * On desktop, notifications are shown via window.aegis.notifications.show()
- * (IPC bridge to Electron's Notification API exposed in preload/index.ts).
+ * Desktop twin of mobile/src/notifications/push.ts. Notifications are shown
+ * through window.aegis.notifications (IPC → Electron Notification in the main
+ * process, main/ipc/notifications.ts). No push tokens: the socket delivers
+ * while the app runs.
  *
- * Push tokens and deep-link handling are not applicable on desktop:
- *   - No APNs/FCM registration needed — the relay uses Socket.IO for real-time
- *     delivery when the app is open, and the OS wakes the app on launch.
- *   - setNotificationOpenChatHandler is a stub for API compatibility with callers
- *     that import this module (e.g. mobile components shared via monorepo).
+ * Policy — the same switches the Notifications screen exposes, every one of
+ * them honoured here (until 1.0.7 the screen was a stub and this module
+ * ignored all of them):
+ *   - master OFF → nothing, unless a keyword matched;
+ *   - muted contact (`muted` / `mutedUntil`) → nothing, unless a keyword matched;
+ *   - the chat is open and the window focused → nothing (the user is looking at it);
+ *   - "show content" OFF → generic title/body, nothing about who or what;
+ *   - sound OFF → silent;
+ *   - badge = unread total, re-derived on every counter change (0 when off).
  */
+import { logger } from '../utils/logger';
+import { usePreferences } from '../store/preferences';
 
-type NotificationOpenHandler = (contactId: string) => void;
+const DEV = import.meta.env.DEV;
+
+type NotificationOpenHandler = (chatId: string) => void;
 
 let _openHandler: NotificationOpenHandler | null = null;
+let _unsubscribeOpen: (() => void) | null = null;
+let activeChatId: string | null = null;
 
-/**
- * Show a system notification via Electron's main process.
- * Never includes message content in the title/body beyond the sender name —
- * consistent with the mobile wake-up-only policy.
- */
-// M-3: body is intentionally ignored — main process always shows a generic body.
-export async function showNotification(_title: string, _body: string): Promise<void> {
-  await window.aegis.notifications.show('AegisLink', '');
+/** The chat currently on screen (contact aegisId or group id), or null. */
+export function setActiveChatNotificationId(id: string | null): void {
+  activeChatId = id;
+}
+
+export function getActiveChatNotificationId(): string | null {
+  return activeChatId;
+}
+
+/** Generic (content-free) notification, e.g. security events. */
+export async function showNotification(title: string, body: string): Promise<void> {
+  try {
+    const prefs = usePreferences.getState();
+    await window.aegis.notifications.show(title, body, { preview: false, silent: !prefs.notifSound });
+  } catch (e) {
+    if (DEV) logger.warn('[push] showNotification failed:', (e as Error).message);
+  }
+}
+
+/** True when one of the user's keywords appears in the (decrypted, local) body. */
+export function matchesKeyword(body: string, keywords: readonly string[]): boolean {
+  const lower = body.toLowerCase();
+  for (const kw of keywords) {
+    const k = kw.trim().toLowerCase();
+    if (k && lower.includes(k)) return true;
+  }
+  return false;
+}
+
+/** Pure decision so the policy is unit-testable without Electron. */
+export function decideNotification(input: {
+  prefs: { notifMaster: boolean; notifPreview: boolean; notifSound: boolean; notifKeywords: readonly string[] };
+  contact: { muted?: boolean; mutedUntil?: number | null } | null | undefined;
+  chatId: string;
+  activeChatId: string | null;
+  windowFocused: boolean;
+  senderName: string;
+  body: string;
+  isGroup: boolean;
+  groupName?: string;
+  now: number;
+}): { show: false } | { show: true; title: string; body: string; preview: boolean; silent: boolean } {
+  const { prefs, contact } = input;
+  const keyword = matchesKeyword(input.body, prefs.notifKeywords);
+  if (!prefs.notifMaster && !keyword) return { show: false };
+  const muted = !!contact?.muted || (!!contact?.mutedUntil && contact.mutedUntil > input.now);
+  if (muted && !keyword) return { show: false };
+  if (input.windowFocused && input.activeChatId === input.chatId) return { show: false };
+  const who = input.isGroup ? (input.groupName ? `${input.groupName} · ${input.senderName}` : input.senderName) : input.senderName;
+  return {
+    show: true,
+    preview: prefs.notifPreview,
+    // With preview OFF the main process replaces both lines with generic text;
+    // we still send nothing identifying, so a policy slip there leaks nothing.
+    title: prefs.notifPreview ? who : 'AegisLink',
+    body: prefs.notifPreview ? input.body : '',
+    silent: !prefs.notifSound,
+  };
 }
 
 /**
- * Show an incoming message notification.
- *
- * Mirrors the mobile showIncomingNotification signature so callers in shared
- * code compile without changes.
- *
- * @param _contactId  - sender's aegisId (not shown in notification for privacy)
- * @param senderName  - display name (may be truncated aegisId)
- * @param _body       - raw plaintext (NOT included in notification body)
- * @param isGroup     - whether the message is from a group
- * @param groupName   - optional group name for group messages
+ * Incoming message notification. Signature mirrors mobile so shared call
+ * sites compile unchanged.
  */
 export async function showIncomingNotification(
-  _contactId: string,
-  _senderName: string,
-  _body: string,
-  _isGroup: boolean,
-  _groupName?: string,
+  contactId: string,
+  senderName: string,
+  body: string,
+  isGroup: boolean,
+  groupName?: string,
+  groupId?: string,
 ): Promise<void> {
-  // M-3: title and body are generic — no plaintext message content on the wire.
-  await window.aegis.notifications.show('AegisLink', '');
+  try {
+    const prefs = usePreferences.getState();
+    const chatId = isGroup ? (groupId ?? contactId) : contactId;
+    let contact: { muted?: boolean; mutedUntil?: number | null } | undefined;
+    try {
+      const { useContacts } = await import('../store/contacts');
+      contact = useContacts.getState().contacts.find((c) => c.aegisId === contactId);
+    } catch { /* store unavailable — treat as not muted */ }
+    let windowFocused = false;
+    try { windowFocused = await window.aegis.notifications.isFocused(); } catch { /* unknown → notify */ }
+    const d = decideNotification({
+      prefs, contact, chatId, activeChatId, windowFocused, senderName, body, isGroup, groupName, now: Date.now(),
+    });
+    if (!d.show) return;
+    await window.aegis.notifications.show(d.title, d.body, { preview: d.preview, silent: d.silent, chatId });
+  } catch (e) {
+    if (DEV) logger.warn('[push] showIncomingNotification failed:', (e as Error).message);
+  }
+}
+
+/** Unread total from the store counters (same rule as mobile totalUnreadFrom). */
+export function totalUnreadFrom(unreadCounts: Record<string, number> | null | undefined): number {
+  if (!unreadCounts) return 0;
+  let total = 0;
+  for (const v of Object.values(unreadCounts)) if (typeof v === 'number' && v > 0) total += v;
+  return total;
 }
 
 /**
- * Register a handler to be called when the user clicks a notification and
- * the app should navigate to a specific chat.
- *
- * Desktop stub: Electron notifications do not carry a contactId payload in
- * the current IPC surface. This is a no-op until deep-link support is added
- * to the notifications IPC handler (Fase 4+ hardening).
+ * Make the dock/taskbar badge equal the unread total — 0 when the badge
+ * setting is off. Called from the messages store after every counter change.
+ */
+export async function syncAppBadge(): Promise<void> {
+  try {
+    const prefs = usePreferences.getState();
+    const { useMessages } = await import('../store/messages');
+    const count = prefs.notifBadge ? totalUnreadFrom(useMessages.getState().unreadCounts) : 0;
+    await window.aegis.notifications.setBadge(count);
+  } catch (e) {
+    if (DEV) logger.warn('[push] syncAppBadge failed:', (e as Error).message);
+  }
+}
+
+/**
+ * Called when the user clicks a notification: the main process sends the
+ * chat id it was shown for, we hand it to the app's navigation.
  */
 export function setNotificationOpenChatHandler(handler: NotificationOpenHandler): void {
   _openHandler = handler;
-  // _openHandler is stored but never called until the IPC surface is extended.
-  void _openHandler; // suppress unused variable lint warning
+  if (_unsubscribeOpen) return; // already listening — the handler above is what changed
+  try {
+    _unsubscribeOpen = window.aegis.notifications.onOpenChat((chatId) => { _openHandler?.(chatId); });
+  } catch (e) {
+    if (DEV) logger.warn('[push] onOpenChat unavailable:', (e as Error).message);
+  }
 }

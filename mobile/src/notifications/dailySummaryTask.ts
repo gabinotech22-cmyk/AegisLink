@@ -2,75 +2,57 @@ import * as Notifications from 'expo-notifications';
 import { logger } from '../utils/logger';
 import { ss } from '../utils/secureStore';
 import { tAsync } from '../i18n';
-import type { StoredContact } from '../db/contacts';
+import { decideDailySummary, localDayKey } from './dailySummaryCore';
 
 export const DAILY_SUMMARY_TASK = 'aegis.daily-summary';
+const LAST_RUN_KEY = 'lastDailySummary';
 
+/**
+ * Show the daily digest if it is due (see dailySummaryCore for the rules:
+ * opt-in, after 19:30, once a day, UNREAD counts, names only with previews).
+ * Runs from the background-fetch task and from the foreground interval, so a
+ * device where background fetch never fires still gets it while the app is
+ * open. Returns true when a notification was shown.
+ */
 export async function runDailySummary(): Promise<boolean> {
   try {
     const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
     const prefs = usePreferences.getState();
     if (prefs.hydrate) await prefs.hydrate();
-    if (!prefs.notifSummary) return false;
-    
-    // Check if we already ran today
-    const now = new Date();
-    if (now.getHours() < 19 || (now.getHours() === 19 && now.getMinutes() < 30)) {
-      return false; // too early
-    }
-    // Dedup key must match the local-time gate above (not UTC) — otherwise near
-    // midnight UTC the gate (local hour) and the dedup key (UTC date) can point
-    // at different calendar days and the task fires twice, or never, per day.
-    const todayString = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const lastRun = await ss.get('lastDailySummary');
-    if (lastRun === todayString) return false; // already ran today
+    const { useMessages } = require('../store/messages') as typeof import('../store/messages');
+    const { useContacts } = require('../store/contacts') as typeof import('../store/contacts');
+    const { getAllUnreadCounts } = require('../db/local') as typeof import('../db/local');
+    // Counters from the DB, not only the in-memory store: the background task
+    // may run with the store cold.
+    let unreadCounts: Record<string, number> = useMessages.getState().unreadCounts ?? {};
+    try { unreadCounts = { ...unreadCounts, ...(await getAllUnreadCounts()) }; } catch { /* store counters only */ }
+    let contacts = useContacts.getState().contacts;
+    if (contacts.length === 0) { try { await useContacts.getState().hydrate(); contacts = useContacts.getState().contacts; } catch { /* names optional */ } }
+    const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+    const groups = useGroups.getState().groups;
 
-    // Run summary
-    let total = 0;
-    let names: string[] = [];
-    const { withDb } = require('../db/local') as typeof import('../db/local');
-    await withDb(async (db) => {
-      // Get messages from today
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      const startTs = startOfDay.getTime();
-      
-      const res = await db.getAllAsync<{ sender_id: string; c: number }>(`
-        SELECT chat_id as sender_id, COUNT(*) as c
-        FROM messages
-        WHERE created_at >= ? AND direction = 'in'
-        GROUP BY chat_id
-      `, [startTs]);
-
-      if (res && res.length > 0) {
-        const { useContacts } = require('../store/contacts') as typeof import('../store/contacts');
-        await useContacts.getState().hydrate();
-        const contacts = useContacts.getState().contacts;
-        
-        for (const r of res) {
-          total += r.c;
-          const contact = contacts.find((c: StoredContact) => c.aegisId === r.sender_id);
-          names.push(contact ? contact.name : r.sender_id);
-        }
-      }
+    const decision = decideDailySummary({
+      enabled: prefs.notifSummary,
+      previewOn: prefs.notifPreview,
+      now: new Date(),
+      lastRunDayKey: await ss.get(LAST_RUN_KEY),
+      unreadCounts,
+      nameOf: (chatId) => contacts.find((c) => c.aegisId === chatId)?.name ?? groups.find((g) => g.id === chatId)?.name ?? null,
     });
+    if (!decision) return false;
+    if (decision.markDone) await ss.set(LAST_RUN_KEY, localDayKey(new Date()));
+    if (decision.count === 0) return false;
 
-    if (total > 0) {
-      const namesStr = names.slice(0, 3).join(', ') + (names.length > 3 ? '...' : '');
-      const body = await tAsync('notif.dailySummaryBody', { count: total, names: namesStr });
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: await tAsync('notif.dailySummaryTitle'),
-          body: body,
-          sound: prefs.notifSound ? 'default' : undefined,
-          priority: Notifications.AndroidNotificationPriority.DEFAULT,
-        },
-        trigger: null,
-      });
-    }
-
-    await ss.set('lastDailySummary', todayString);
+    const body = await tAsync(decision.key, { count: decision.count, names: decision.names.join(', ') });
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: await tAsync('notif.dailySummaryTitle'),
+        body,
+        sound: prefs.notifSound ? 'default' : undefined,
+        priority: Notifications.AndroidNotificationPriority.DEFAULT,
+      },
+      trigger: null,
+    });
     return true;
   } catch (e) {
     if (__DEV__) logger.warn('[daily-summary] failed:', e);
