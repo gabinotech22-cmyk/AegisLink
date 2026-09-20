@@ -45,7 +45,7 @@ const DEFAULTS: Preferences = {
   notifPreview: false,
   notifSound: true,
   notifBadge: true,
-  notifSummary: true,
+  notifSummary: false,
   notifKeywords: ['urgente', 'multisig', 'audit'],
   mutedChats: [],
   appLockEnabled: false,

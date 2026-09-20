@@ -14,8 +14,10 @@
     "incomingVoiceCall": "Incoming E2EE voice call",
     "missedCall": "Missed call",
     "dailySummaryTitle": "Daily summary",
-    "dailySummaryBody_one": "You received {{count}} message today from {{names}}.",
-    "dailySummaryBody_other": "You received {{count}} messages today from {{names}}."
+    "dailySummaryBody_one": "You have {{count}} unread message.",
+    "dailySummaryBody_other": "You have {{count}} unread messages.",
+    "dailySummaryNamesBody_one": "You have {{count}} unread message from {{names}}.",
+    "dailySummaryNamesBody_other": "You have {{count}} unread messages from {{names}}."
   },
   "common": {
     "cancel": "Cancel",
@@ -1238,7 +1240,8 @@
     "poll": "Poll",
     "sticker": "Sticker",
     "video": "Video",
-    "videoGallery": "Gallery · E2EE"
+    "videoGallery": "Gallery · E2EE",
+    "attachments": "Attachments"
   },
   "groupAdmin": {
     "title": "Group admin",

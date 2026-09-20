@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { setActiveChatNotificationId } from '../notifications/push';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import type { CSSProperties } from 'react';
@@ -128,6 +129,13 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
       })
       .catch(() => URL.revokeObjectURL(uri));
   }, [pendingMediaUri]);
+
+  // Tell the notifications module this chat is on screen: an incoming
+  // message for it neither notifies (window focused) nor bumps the counter.
+  useEffect(() => {
+    setActiveChatNotificationId(contact.aegisId);
+    return () => setActiveChatNotificationId(null);
+  }, [contact.aegisId]);
 
   useEffect(() => {
     void loadChat(contact.aegisId);

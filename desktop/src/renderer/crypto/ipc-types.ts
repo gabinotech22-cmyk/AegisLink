@@ -72,7 +72,10 @@ export interface AegisIPC {
     getCallHistory(contactId: string, limit: number): Promise<any[]>;
   };
   notifications: {
-    show(title: string, body: string): Promise<void>;
+    show(title: string, body: string, opts?: { preview?: boolean; silent?: boolean; chatId?: string }): Promise<void>;
+    setBadge(count: number): Promise<void>;
+    isFocused(): Promise<boolean>;
+    onOpenChat(cb: (chatId: string) => void): () => void;
   };
   tor: {
     status(): Promise<unknown>;

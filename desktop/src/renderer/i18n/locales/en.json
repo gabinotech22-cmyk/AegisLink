@@ -1740,7 +1740,8 @@
     "processing": "PROCESSING…",
     "fromFiles": "From files",
     "fromFiles2": "FROM FILES",
-    "anyType2": "ANY TYPE"
+    "anyType2": "ANY TYPE",
+    "attachments": "Attachments"
   },
   "groupAdmin": {
     "title": "Group admin",
@@ -1959,8 +1960,10 @@
     "incomingVoiceCall": "Incoming E2EE voice call",
     "missedCall": "Missed call",
     "dailySummaryTitle": "Daily summary",
-    "dailySummaryBody_one": "You received {{count}} message today from {{names}}.",
-    "dailySummaryBody_other": "You received {{count}} messages today from {{names}}."
+    "dailySummaryBody_one": "You have {{count}} unread message.",
+    "dailySummaryBody_other": "You have {{count}} unread messages.",
+    "dailySummaryNamesBody_one": "You have {{count}} unread message from {{names}}.",
+    "dailySummaryNamesBody_other": "You have {{count}} unread messages from {{names}}."
   },
   "profileSwitch": {
     "title": "Change profile",
