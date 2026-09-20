@@ -557,6 +557,24 @@ export function setActiveChatNotificationId(id: string | null) {
 }
 
 /**
+ * Remove the tray notifications that belong to `chatId` (a contact's aegisId or
+ * a group id). Called when the chat is read from inside the app: until now
+ * only a TAP on a notification dismissed it, so opening the chat from the list
+ * left every notification for it sitting in the tray. Fail-soft.
+ */
+export async function dismissNotificationsForChat(chatId: string): Promise<void> {
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    const mine = presented.filter((n) => {
+      const d = (n.request.content.data ?? null) as { fromAegisId?: string; groupId?: string; isGroup?: boolean } | null;
+      if (!d) return false;
+      return d.isGroup ? d.groupId === chatId : d.fromAegisId === chatId;
+    });
+    await Promise.all(mine.map((n) => Notifications.dismissNotificationAsync(n.request.identifier).catch(() => {})));
+  } catch { /* notification center unavailable — fine */ }
+}
+
+/**
  * The chat id (contact aegisId or group id) whose screen is currently focused,
  * or null. Used to suppress unread-count increments for messages that arrive
  * while the user is already looking at the conversation — same guard the push

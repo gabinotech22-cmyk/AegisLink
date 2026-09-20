@@ -30,7 +30,7 @@ import { useActiveCalls } from '../store/activeCalls';
 import { useGroupCall } from '../store/groupCall';
 import { canScheduleGroupPost } from '../store/scheduledMessages';
 import { parseGroupPostMarker } from '../utils/groupPost';
-import { sendGroupMessage, sendGroupVote } from '../socket/client';
+import { sendGroupMessage, sendGroupVote, retryFailedMessage } from '../socket/client';
 import { useConnection } from '../store/connection';
 import { usePollsStore, type PollResult } from '../store/polls';
 import type { StoredGroup, StoredMessage } from '../db/local';
@@ -267,6 +267,21 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   }
 
   function handleStar() { if (!actionsMsg) return; void toggleStar(group.id, actionsMsg.id); }
+
+  /** Re-fan-out a group message the outbox gave up on (any member's job expired). */
+  function handleRetrySend() {
+    const msg = actionsMsg;
+    if (!msg || !identity) return;
+    setActionsMsg(null);
+    void (async () => {
+      try {
+        const ok = await retryFailedMessage(identity, group.id, msg.id);
+        if (!ok) themedAlert(i18nT('chat.sendError'), i18nT('chat.retrySendDesc'));
+      } catch (e) {
+        themedAlert(i18nT('chat.sendError'), (e as Error).message);
+      }
+    })();
+  }
   function handleDelete() {
     if (!actionsMsg) return;
     themedAlert(
@@ -845,6 +860,11 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
         onStar={handleStar}
         onDelete={handleDelete}
         onReact={handleReact}
+        onRetrySend={
+          actionsMsg?.direction === 'out' && actionsMsg.deliveryStatus === 'failed'
+            ? handleRetrySend
+            : undefined
+        }
       />
       {/* Voice recorder — full-screen modal */}
       <Modal
@@ -906,7 +926,16 @@ function GroupBubble({
 }: GroupBubbleProps) {
   const { t: i18nT } = useTranslation();
   const me = m.direction === 'out';
-  const time = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // Send state where the time goes: a group message is born `pending` and only
+  // settles when the LAST member's outbox job resolves (or fails). Until 1.0.7
+  // the store tracked it but the bubble never showed it — a message the outbox
+  // gave up on looked exactly like one delivered to everyone.
+  const clock = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const time =
+    !me ? clock
+    : m.deliveryStatus === 'failed' ? i18nT('chat.sendFailed')
+    : m.deliveryStatus === 'pending' ? i18nT('chat.sendingNow')
+    : clock;
   const reactions = m.reactions ? Object.entries(m.reactions).filter(([, ids]) => ids.length > 0) : [];
 
   // senderId is natively verified from the E2EE envelope (m.senderId).

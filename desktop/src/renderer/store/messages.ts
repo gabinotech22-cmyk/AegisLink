@@ -23,6 +23,14 @@ import {
 
 interface MessagesState {
   byChat: Record<string, StoredMessage[]>;
+  /**
+   * Chats whose `byChat` list came from a real load. Any other action may
+   * create a `byChat` entry for a chat it touches (a receipt, a reaction, an
+   * incoming message) with only the rows it knows about; before this flag
+   * `loadChat` trusted such partial lists and the chat opened with a fraction
+   * of its history until restart. Only a flagged entry is a cache.
+   */
+  loadedChats: Record<string, true>;
   previews: Record<string, StoredMessage>;
   pinnedMsg: Record<string, StoredMessage | null>;
   ephemeralTimer: number;
@@ -51,6 +59,7 @@ interface MessagesState {
 
 export const useMessages = create<MessagesState>((set, get) => ({
   byChat: {},
+  loadedChats: {},
   previews: {},
   pinnedMsg: {},
   ephemeralTimer: 0,
@@ -67,7 +76,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
     if (usePreferences.getState().duressActive) return [];
 
     const cached = get().byChat[chatId];
-    if (cached) return cached;
+    if (cached && get().loadedChats[chatId]) return cached;
     let list = await loadMessagesByChat(chatId);
 
     const now = Date.now();
@@ -78,6 +87,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
 
     set((s) => ({
       byChat: { ...s.byChat, [chatId]: list },
+      loadedChats: { ...s.loadedChats, [chatId]: true },
       pinnedMsg: { ...s.pinnedMsg, [chatId]: pinned },
       drafts: draft !== null ? { ...s.drafts, [chatId]: draft } : s.drafts,
       unreadCounts: { ...s.unreadCounts, [chatId]: unreadCount },
@@ -106,8 +116,12 @@ export const useMessages = create<MessagesState>((set, get) => ({
 
   async refreshPreview(chatId) {
     const last = await lastMessageByChat(chatId);
-    if (!last) return;
-    set((s) => ({ previews: { ...s.previews, [chatId]: last } }));
+    set((s) => {
+      const previews = { ...s.previews };
+      if (last) previews[chatId] = last;
+      else delete previews[chatId];
+      return { previews };
+    });
   },
 
   // Bulk-load the last message for every chat so the sidebar shows previews at
@@ -175,7 +189,15 @@ export const useMessages = create<MessagesState>((set, get) => ({
     }
 
     if (changed) set({ byChat: updatedByChat });
-    deleteExpiredMessages(timer).catch(() => {});
+    // Refresh the list previews of the chats that lost rows, AFTER the DB
+    // purge so the new "last message" is a live one.
+    const touched = Object.keys(get().byChat).filter((chatId) => {
+      const pv = get().previews[chatId];
+      return !!pv && ((pv.expiresAt != null && now >= pv.expiresAt) || (timer > 0 && now - pv.createdAt >= timer * 1000));
+    });
+    deleteExpiredMessages(timer)
+      .catch(() => {})
+      .then(() => { for (const chatId of touched) void get().refreshPreview(chatId); });
   },
 
   async toggleStar(chatId, id) {
@@ -201,6 +223,11 @@ export const useMessages = create<MessagesState>((set, get) => ({
         [chatId]: list.map((m) => (m.id === id ? { ...m, deleted: true, body: '', mediaUri: null } : m)),
       },
     }));
+    // The chat list must not keep showing the text of a message that is gone.
+    const pv = get().previews[chatId];
+    if (pv && pv.id === id) {
+      set((s) => ({ previews: { ...s.previews, [chatId]: { ...pv, deleted: true, body: '', mediaUri: null } } }));
+    }
   },
 
   async toggleReaction(chatId, id, emoji, aegisId) {
@@ -247,6 +274,11 @@ export const useMessages = create<MessagesState>((set, get) => ({
         [chatId]: list.map((m) => (m.id === id ? { ...m, deleted: true, body: '', mediaUri: null } : m)),
       },
     }));
+    // The chat list must not keep showing the text of a message that is gone.
+    const pv = get().previews[chatId];
+    if (pv && pv.id === id) {
+      set((s) => ({ previews: { ...s.previews, [chatId]: { ...pv, deleted: true, body: '', mediaUri: null } } }));
+    }
   },
 
   async togglePin(chatId, id) {
@@ -283,16 +315,18 @@ export const useMessages = create<MessagesState>((set, get) => ({
     }
     set((s) => {
       const byChat = { ...s.byChat };
+      const loadedChats = { ...s.loadedChats };
       const previews = { ...s.previews };
       const unreadCounts = { ...s.unreadCounts };
       const pinnedMsg = { ...s.pinnedMsg };
       const drafts = { ...s.drafts };
       delete byChat[chatId];
+      delete loadedChats[chatId];
       delete previews[chatId];
       delete unreadCounts[chatId];
       delete pinnedMsg[chatId];
       delete drafts[chatId];
-      return { byChat, previews, unreadCounts, pinnedMsg, drafts };
+      return { byChat, loadedChats, previews, unreadCounts, pinnedMsg, drafts };
     });
   },
 }));

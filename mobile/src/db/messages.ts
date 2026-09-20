@@ -335,8 +335,11 @@ export async function lastMessageByChat(chatId: string): Promise<StoredMessage |
       direction: string;
       body: string;
       created_at: number;
+      type: string | null;
+      deleted: number;
+      expires_at: number | null;
     }>(
-      `SELECT id, chat_id, direction, body, created_at FROM messages
+      `SELECT id, chat_id, direction, body, created_at, type, deleted, expires_at FROM messages
        WHERE chat_id = ? ORDER BY created_at DESC LIMIT 1`,
       chatId
     );
@@ -345,8 +348,11 @@ export async function lastMessageByChat(chatId: string): Promise<StoredMessage |
       id: row.id,
       chatId: row.chat_id,
       direction: row.direction as 'in' | 'out',
-      body: await decryptBody(row.body),
+      body: row.deleted === 1 ? '' : await decryptBody(row.body),
       createdAt: row.created_at,
+      type: (row.type as StoredMessage['type']) ?? undefined,
+      deleted: row.deleted === 1,
+      expiresAt: row.expires_at ?? null,
     };
   });
 }

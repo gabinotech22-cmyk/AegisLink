@@ -772,6 +772,9 @@ function ContactRow({
   let previewText: string;
   if (isTyping) {
     previewText = i18nT('home.typing');
+  } else if (preview?.deleted) {
+    // A message deleted (for me or for everyone) must not keep its text in the list.
+    previewText = i18nT('chat.deletedMessage', 'Deleted message');
   } else if (preview) {
     const typeFallback = preview.type === 'image' ? '📷 ' + i18nT('attachSheet.image') : preview.type === 'audio' ? '🎙 ' + i18nT('attachSheet.audio') : preview.type === 'file' ? '📎 ' + i18nT('attachSheet.file') : '...';
     const label = previewLabel(preview.body, i18nT) || typeFallback;
