@@ -77,6 +77,17 @@ function isDuress(): boolean {
   return usePreferences.getState().duressActive;
 }
 
+/**
+ * Keep the app-icon badge equal to the unread total after every counter change.
+ * Inline require: notifications/push imports this store (require cycle).
+ */
+function syncBadge(): void {
+  try {
+    const { syncAppBadge } = require('../notifications/push') as typeof import('../notifications/push');
+    void syncAppBadge();
+  } catch { /* push module unavailable (unit tests) */ }
+}
+
 export const useMessages = create<MessagesState>((set, get) => ({
   byChat: {},
   previews: {},
@@ -187,6 +198,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
       }
       return next;
     });
+    if (m.direction === 'in') syncBadge();
     // A new message (sent or received) un-hides a chat that was "deleted" from
     // the list, so it reappears — without ever having removed the contact.
     try {
@@ -208,10 +220,12 @@ export const useMessages = create<MessagesState>((set, get) => ({
   async markRead(chatId) {
     if (isDuress()) {
       set((s) => ({ unreadCounts: { ...s.unreadCounts, [chatId]: 0 } }));
+      syncBadge();
       return;
     }
     await resetUnread(chatId);
     set((s) => ({ unreadCounts: { ...s.unreadCounts, [chatId]: 0 } }));
+    syncBadge();
   },
 
   async saveDraft(chatId, text) {
@@ -242,6 +256,7 @@ export const useMessages = create<MessagesState>((set, get) => ({
     if (isDuress()) return;
     const counts = await getAllUnreadCounts();
     set((s) => ({ unreadCounts: { ...s.unreadCounts, ...counts } }));
+    syncBadge();
   },
 
   setEphemeralTimer(seconds) {

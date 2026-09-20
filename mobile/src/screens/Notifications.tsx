@@ -34,7 +34,12 @@ export function NotificationsScreen({ onBack }: Props) {
   const setMaster  = (v: boolean) => void setPref('notifMaster', v);
   const setPreview = (v: boolean) => void setPref('notifPreview', v);
   const setSound   = (v: boolean) => void setPref('notifSound', v);
-  const setBadge   = (v: boolean) => void setPref('notifBadge', v);
+  const setBadge   = (v: boolean) => {
+    void setPref('notifBadge', v);
+    // Off → clear the icon now; on → show the current unread total.
+    const { syncAppBadge } = require('../notifications/push') as typeof import('../notifications/push');
+    setTimeout(() => { void syncAppBadge(); }, 0);
+  };
   const setSummary = (v: boolean) => void setPref('notifSummary', v);
 
   const contacts = useContacts((s) => s.contacts);
