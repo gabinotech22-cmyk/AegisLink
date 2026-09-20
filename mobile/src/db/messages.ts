@@ -250,6 +250,67 @@ export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[
   });
 }
 
+/**
+ * The part of a body that search may match and show. Text the user typed is
+ * returned as is; a file attachment (`[file:<name>:<blob…>]`) is searchable by
+ * its NAME only; every other wire tag (media reference, poll, call marker…)
+ * yields null — a media wire carries the blob key/nonce/token and a "hit" on
+ * it would print that.
+ */
+const NON_TEXT_BODY = /^\[(image|video|audio|gif|sticker|viewonce|location|poll|call|join_request|multi)[:\]]/;
+export function searchableText(body: string): string | null {
+  if (body.startsWith('[file:')) {
+    const name = body.slice(6).split(':')[0]?.trim();
+    return name || null;
+  }
+  if (NON_TEXT_BODY.test(body)) return null;
+  const trimmed = body.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export const SEARCH_RESULT_LIMIT = 200;
+export const SEARCH_SCAN_LIMIT = 5000;
+
+/**
+ * Case-insensitive substring search over message text, newest first.
+ *
+ * The body column is encrypted at rest, so SQL cannot see it: rows are read
+ * newest-first (deleted, expired, media and view-once rows excluded in SQL —
+ * `type` also holds wire kinds such as `direct_msg`, so it is an exclusion
+ * list, not an allow list), decrypted
+ * one by one and matched in memory, stopping at `limit` hits or after `scan`
+ * rows. Every chat is covered — not only the ones the UI has loaded.
+ */
+export async function searchMessages(
+  query: string,
+  opts: { limit?: number; scan?: number; now?: number } = {},
+): Promise<StoredMessage[]> {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const limit = opts.limit ?? SEARCH_RESULT_LIMIT;
+  const scan = opts.scan ?? SEARCH_SCAN_LIMIT;
+  const now = opts.now ?? Date.now();
+  return withDb(async (d) => {
+    const rows = await d.getAllAsync<MessageRow>(
+      `${MSG_SELECT} FROM messages
+       WHERE deleted = 0 AND (expires_at IS NULL OR expires_at > ?)
+         AND (type IS NULL OR type NOT IN ('image', 'video', 'audio', 'view_once'))
+       ORDER BY created_at DESC LIMIT ?`,
+      now,
+      scan,
+    );
+    const out: StoredMessage[] = [];
+    for (const r of rows) {
+      const body = await decryptBody(r.body);
+      const text = searchableText(body);
+      if (!text || !text.toLowerCase().includes(q)) continue;
+      out.push(await rowToMessage(r, body));
+      if (out.length >= limit) break;
+    }
+    return out;
+  });
+}
+
 export async function getMessage(id: string): Promise<StoredMessage | null> {
   return withDb(async (d) => {
     const row = await d.getFirstAsync<MessageRow>(

@@ -30,7 +30,7 @@ export function GroupAdminScreen({ group: groupProp, onBack }: Props) {
   const amIAdmin = !!identity && identity.aegisId === group.adminId;
 
   function getMemberName(id: string) {
-    if (isMe(id)) return 'You';
+    if (isMe(id)) return i18n.t('channelInfo.you');
     return contacts.find((c) => c.aegisId === id)?.name ?? id.slice(0, 8) + '…';
   }
 

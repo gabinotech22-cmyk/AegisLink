@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { setActiveChatNotificationId } from '../notifications/push';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import type { CSSProperties } from 'react';
@@ -104,6 +105,13 @@ export function GroupChatScreen({ group, onBack, onGroupDetail, onPoll, onGroupP
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const memberNames: Record<string, string> = {};
+
+  // Tell the notifications module this chat is on screen: an incoming
+  // message for it neither notifies (window focused) nor bumps the counter.
+  useEffect(() => {
+    setActiveChatNotificationId(group.id);
+    return () => setActiveChatNotificationId(null);
+  }, [group.id]);
 
   useEffect(() => {
     void loadChat(group.id);

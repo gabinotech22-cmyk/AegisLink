@@ -1601,6 +1601,7 @@
     "appIconCustomizationIs": "La personalización del icono solo está disponible en móvil. Abre AegisLink en tu dispositivo iOS o Android para cambiar el icono de la app."
   },
   "scanQR": {
+    "noQrInImage": "No se encontró ningún código QR en la imagen. Prueba con una captura más nítida o pega el Aegis ID abajo.",
     "title": "Escanear QR",
     "instruction": "Apunta la cámara a un código QR de Aegis",
     "permissionDenied": "Permiso de cámara denegado",
@@ -1617,13 +1618,12 @@
     "networkError": "No se pudo conectar al servidor. Comprueba tu conexión a internet e inténtalo de nuevo.",
     "addError": "No se pudo añadir el contacto",
     "adding": "Añadiendo…",
-    "qrScanningFromFile": "La lectura de QR desde archivo no está disponible en esta versión. Usa el campo de texto de abajo para pegar el Aegis ID o el JSON.",
     "enterAnAegisId": "Introduce un Aegis ID o un JSON.",
     "notAValidAegislink": "No es un ID de AegisLink válido. Prueba con el JSON completo de un código QR.",
     "keyChangedForThis": "La clave de este contacto ha cambiado.\n\nClave anterior: …{{v0}}\nClave nueva: …{{v1}}\n\n¿Aceptar la nueva clave?",
     "couldNotAddContact": "No se pudo añadir el contacto: {{v0}}",
     "scanQrAddContact": "Escanear QR / Añadir contacto",
-    "cameraQrScanningIs": "El escaneo de QR con cámara no está disponible en escritorio. Usa la app móvil para escanear en persona o pega abajo el Aegis ID / JSON.",
+    "cameraQrScanningIs": "El escaneo con cámara no está disponible en escritorio: sube una imagen del QR o pega abajo el Aegis ID / enlace.",
     "qrFromImageFile": "QR DESDE ARCHIVO DE IMAGEN (provisional)",
     "uploadQrImage": "Subir imagen de QR",
     "pasteAegisIdOr": "PEGAR AEGIS ID O JSON",
@@ -1745,7 +1745,8 @@
     "processing": "PROCESANDO…",
     "fromFiles": "Desde archivos",
     "fromFiles2": "DESDE ARCHIVOS",
-    "anyType2": "CUALQUIER TIPO"
+    "anyType2": "CUALQUIER TIPO",
+    "attachments": "Adjuntos"
   },
   "groupAdmin": {
     "title": "Admin del grupo",
@@ -1964,8 +1965,10 @@
     "incomingVoiceCall": "Llamada de voz E2EE entrante",
     "missedCall": "Llamada perdida",
     "dailySummaryTitle": "Resumen diario",
-    "dailySummaryBody_one": "Recibiste {{count}} mensaje hoy de {{names}}.",
-    "dailySummaryBody_other": "Recibiste {{count}} mensajes hoy de {{names}}."
+    "dailySummaryBody_one": "Tienes {{count}} mensaje sin leer.",
+    "dailySummaryBody_other": "Tienes {{count}} mensajes sin leer.",
+    "dailySummaryNamesBody_one": "Tienes {{count}} mensaje sin leer de {{names}}.",
+    "dailySummaryNamesBody_other": "Tienes {{count}} mensajes sin leer de {{names}}."
   },
   "profileSwitch": {
     "title": "Cambiar perfil",
