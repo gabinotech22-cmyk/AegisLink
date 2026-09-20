@@ -10,6 +10,7 @@ import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
+import { useContacts } from '../store/contacts';
 import { DeleteAccountSection } from '../components/DeleteAccountSection';
 import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
@@ -42,7 +43,7 @@ const SOURCE_URL = 'https://github.com/gabinotech22-cmyk/AegisLink';
 
 interface Props {
   onTab: (tab: Tab) => void;
-  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'relay') => void;
+  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'relay' | 'blocked') => void;
   onCreateProfile?: () => void;
 }
 
@@ -60,6 +61,7 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
   const readReceipts = usePreferences((s) => s.readReceipts);
   const typing = usePreferences((s) => s.typingIndicator);
   const screenshot = usePreferences((s) => s.blockScreenshots);
+  const blockedCount = useContacts((s) => s.contacts.filter((c) => c.blocked).length);
   const routeViaTor = usePreferences((s) => s.routeViaTor);
   const hideCallIp = usePreferences((s) => s.hideCallIp);
   const callWakeService = usePreferences((s) => s.callWakeService);
@@ -165,6 +167,18 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
             sub={i18nT('privacy.requireGroupApprovalSub', 'Recibe una invitación que aceptas en vez de entrar directo')}
             value={requireGroupApproval}
             onChange={(v) => void setPref('requireGroupApproval', v)}
+            noBorder
+          />
+        </Section>
+
+        <Section t={t} label={i18nT('privacy.contactsSection')}>
+          <Row
+            t={t}
+            testID="privacy-blocked"
+            icon={<I.X size={18} color={t.textDim} />}
+            label={i18nT('blocked.title')}
+            sub={blockedCount > 0 ? i18nT('blocked.countSub', { count: blockedCount }) : i18nT('blocked.emptyTitle')}
+            onPress={() => onNav('blocked')}
             noBorder
           />
         </Section>
