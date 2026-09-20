@@ -2495,6 +2495,13 @@ export async function sendMessage(opts: {
   expiresAt?: number | null;
   skipLocalAppend?: boolean;
   /**
+   * Id of the bubble the caller ALREADY appended (media senders pre-append so
+   * the image renders before the upload finishes). It becomes the wire id, so
+   * the peer's delivered/read receipts land on that row instead of on an id
+   * nothing renders. Parity with mobile.
+   */
+  messageId?: string;
+  /**
    * F4: best-effort signal (call signaling): never queued for retry —
    * a candidate or ring replayed minutes later is noise. Offline → rejects.
    */
@@ -2509,7 +2516,7 @@ export async function sendMessage(opts: {
   const senderStatus = idState.profileStatus;
 
   // Web Crypto API UUID — available in Chromium renderer
-  const id = crypto.randomUUID();
+  const id = opts.messageId ?? crypto.randomUUID();
   const createdAt = Date.now();
 
   let expiresAt = opts.expiresAt ?? null;

@@ -486,6 +486,23 @@ Attachments (`mobile/src/crypto/media.ts`) never reach the relay in plaintext:
   media is always the secretbox ciphertext, and the cache is purged on
   panic/logout and after time in background (`purgeCachedDecryptedMedia`).
 - A strict MIME allow-list and a 50 MB size cap are enforced before upload.
+- **Send state of an attachment message.** The bubble a media sender renders
+  before the upload finishes is the message: its id is the wire id and the
+  outbox `msgId` (`sendMessage({ messageId })`, `sendGroupMessage({ bubbleId })`),
+  so the relay ack, the peer's delivered/read receipts and the outbox's 24 h
+  give-up all settle that row — never a detached id. An upload that fails
+  before any outbox job exists marks the row `failed` (`markSendFailedIfNotQueued`);
+  the manual retry re-uploads from the local copy (decrypted cache for a
+  `blob:` reference, picker file otherwise — the blob TTL equals the retry
+  window, so the old reference is treated as gone) and rebuilds the wire text
+  from the split local row (`mobile/src/utils/mediaWire.ts`). View-once media
+  is never retried: it only ever lived inline in the original envelope. Rows
+  that predate this (every attachment sent by ≤ 1.0.6) or that lost their job
+  to a crash are swept once per launch on the first outbox drain: `pending`,
+  older than an hour, referenced by no outbox job → `failed`
+  (`findOrphanedPendingMessages`, `settleOrphanedPendingOnce`). Tests:
+  `socket/__tests__/outbox.test.ts` (❺ ❻ ❼), `utils/__tests__/mediaWire.test.ts`,
+  `db/__tests__/orphanedPending.db.test.ts`.
 
 ### 7.5 Encrypted backups
 

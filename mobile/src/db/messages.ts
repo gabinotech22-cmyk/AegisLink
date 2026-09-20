@@ -214,6 +214,30 @@ export async function updateMessageMediaUri(id: string, mediaUri: string): Promi
   });
 }
 
+/**
+ * Outgoing rows still `pending` with NO outbox job to ever settle them, older
+ * than `olderThanMs`. They are exactly the orphans a pre-fix build left behind:
+ * a media bubble whose wire id diverged from its row id, or an append followed
+ * by a crash/failed upload before the job was written. Nothing in the outbox
+ * will touch them, so without this they show "sending" forever. Returned (not
+ * updated here) so the caller can route them through the store and keep the
+ * in-memory list in step with the DB.
+ */
+export async function findOrphanedPendingMessages(
+  olderThanMs: number,
+): Promise<Array<{ id: string; chatId: string }>> {
+  return withDb(async (d) => {
+    const rows = await d.getAllAsync<{ id: string; chat_id: string }>(
+      `SELECT id, chat_id FROM messages
+       WHERE direction = 'out' AND delivery_status = 'pending' AND created_at < ?
+         AND id NOT IN (SELECT msg_id FROM outbox)
+         AND id NOT IN (SELECT bubble_id FROM outbox WHERE bubble_id IS NOT NULL)`,
+      olderThanMs,
+    );
+    return rows.map((r) => ({ id: r.id, chatId: r.chat_id }));
+  });
+}
+
 const MSG_SELECT = `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at, attachments, sender_id`;
 
 export async function loadMessagesByChat(chatId: string): Promise<StoredMessage[]> {

@@ -31,9 +31,13 @@ const mockGetGroup = jest.fn();
 const mockSaveGroup = jest.fn().mockResolvedValue(undefined);
 const mockLoadRatchetSession = jest.fn().mockResolvedValue(null);
 const mockSaveRatchetSession = jest.fn().mockResolvedValue(undefined);
+const mockFindOrphanedPending = jest.fn().mockResolvedValue([]);
+const mockAdvanceMessageDelivery = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('../../db/local', () => ({
   __esModule: true,
+  findOrphanedPendingMessages: (...args: unknown[]) => mockFindOrphanedPending(...args),
+  advanceMessageDelivery: (...args: unknown[]) => mockAdvanceMessageDelivery(...args),
   enqueueOutboxJob: (...args: unknown[]) => mockEnqueueOutboxJob(...args),
   loadOutboxJobs: (...args: unknown[]) => mockLoadOutboxJobs(...args),
   deleteOutboxJob: (...args: unknown[]) => mockDeleteOutboxJob(...args),
@@ -61,11 +65,36 @@ jest.mock('../../store/contacts', () => ({
 // --- store/messages ----------------------------------------------------------
 const mockAppend = jest.fn().mockResolvedValue(undefined);
 const mockGetEphemeralTimer = jest.fn().mockReturnValue(0);
+const mockUpdateDelivery = jest.fn().mockResolvedValue(undefined);
+const mockSetMediaUri = jest.fn().mockResolvedValue(undefined);
+/** Mutable per test: what retryFailedMessage finds in the store. */
+const mockByChat: Record<string, Array<Record<string, unknown>>> = {};
 jest.mock('../../store/messages', () => ({
   __esModule: true,
   useMessages: {
-    getState: () => ({ append: mockAppend, getEphemeralTimer: mockGetEphemeralTimer }),
+    getState: () => ({
+      append: mockAppend,
+      getEphemeralTimer: mockGetEphemeralTimer,
+      updateDelivery: mockUpdateDelivery,
+      setMediaUri: mockSetMediaUri,
+      byChat: mockByChat,
+    }),
   },
+}));
+
+// --- store/groups (retry path: 1:1 unless the chat is a group) --------------
+jest.mock('../../store/groups', () => ({
+  __esModule: true,
+  useGroups: { getState: () => ({ groups: [] }) },
+}));
+
+// --- crypto/media (retry re-uploads media from the local copy) ---------------
+const mockResolveMedia = jest.fn().mockResolvedValue('file:///cache/dec.jpg');
+const mockEncryptAndUploadMedia = jest.fn().mockResolvedValue('blob:fresh:k==:n==');
+jest.mock('../../crypto/media', () => ({
+  __esModule: true,
+  resolveMedia: (...args: unknown[]) => mockResolveMedia(...args),
+  encryptAndUploadMedia: (...args: unknown[]) => mockEncryptAndUploadMedia(...args),
 }));
 
 // --- store/identity ----------------------------------------------------------
@@ -183,7 +212,7 @@ jest.mock('../../config', () => ({
 
 // ─── Actual imports ───────────────────────────────────────────────────────────
 
-import { sendMessage, sendGroupMessage } from '../client';
+import { sendMessage, sendGroupMessage, retryFailedMessage, settleOrphanedPendingOnce, ORPHANED_PENDING_MIN_AGE_MS } from '../client';
 import type { Identity } from '../../crypto/identity';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -407,5 +436,147 @@ describe('flushOutbox — FIFO drain via auth:ok (indirect)', () => {
     });
     expect(payloads[0].text).toBe('first');
     expect(payloads[1].text).toBe('second');
+  });
+});
+
+// ─── ❺  Pre-appended media bubbles keep their id ──────────────────────────────
+// A media sender appends its own bubble, then calls sendMessage with
+// skipLocalAppend. Without `messageId` the outbox job (and every status update
+// that follows: sent, delivered, read, failed) targeted a fresh uuid nothing
+// rendered — the photo sat on "sending" forever, delivered or not.
+
+describe('sendMessage — messageId ties the outbox job to the pre-appended bubble', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUuidCounter = 0;
+  });
+
+  it('uses the caller bubble id as the outbox msgId', async () => {
+    await sendMessage({
+      identity: BASE_IDENTITY,
+      recipientAegisId: 'peer-1',
+      recipientPublicKey: RECIPIENT_PUB_KEY,
+      plaintext: '[image:blob:x:k==:n==]hola',
+      skipLocalAppend: true,
+      messageId: 'bubble-photo-1',
+    });
+    expect(mockAppend).not.toHaveBeenCalled();
+    expect(mockEnqueueOutboxJob).toHaveBeenCalledTimes(1);
+    expect((mockEnqueueOutboxJob.mock.calls[0][0] as { msgId: string }).msgId).toBe('bubble-photo-1');
+  });
+
+  it('without messageId the id is still generated (text path unchanged)', async () => {
+    await sendMessage({
+      identity: BASE_IDENTITY,
+      recipientAegisId: 'peer-1',
+      recipientPublicKey: RECIPIENT_PUB_KEY,
+      plaintext: 'plain',
+    });
+    const job = mockEnqueueOutboxJob.mock.calls[0][0] as { msgId: string };
+    expect(job.msgId).toMatch(/^uuid-/);
+    expect(mockAppend).toHaveBeenCalledWith(expect.objectContaining({ id: job.msgId }));
+  });
+});
+
+// ─── ❻  retryFailedMessage rebuilds a media message ──────────────────────────
+
+describe('retryFailedMessage — 1:1', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockUuidCounter = 0;
+    for (const k of Object.keys(mockByChat)) delete mockByChat[k];
+  });
+
+  it('image: re-uploads from the local copy and sends [image:<fresh>]caption as direct_msg', async () => {
+    mockByChat['member-a'] = [{
+      id: 'msg-img', chatId: 'member-a', direction: 'out', type: 'image',
+      body: 'mira', mediaUri: 'blob:old:k==:n==', createdAt: 1, deliveryStatus: 'failed',
+    }];
+
+    const ok = await retryFailedMessage(BASE_IDENTITY, 'member-a', 'msg-img');
+
+    expect(ok).toBe(true);
+    // Stale reference → decrypt the local ciphertext, upload it again.
+    expect(mockResolveMedia).toHaveBeenCalledWith('blob:old:k==:n==', 'jpg');
+    expect(mockEncryptAndUploadMedia).toHaveBeenCalledWith('file:///cache/dec.jpg', 'image/jpeg');
+    expect(mockSetMediaUri).toHaveBeenCalledWith('member-a', 'msg-img', 'blob:fresh:k==:n==');
+    // Same bubble id, wire type the receiver renders, attachment + caption joined.
+    expect(mockEnqueueOutboxJob).toHaveBeenCalledTimes(1);
+    const job = mockEnqueueOutboxJob.mock.calls[0][0] as { msgId: string; payload: string };
+    expect(job.msgId).toBe('msg-img');
+    const payload = JSON.parse(job.payload) as { type: string; text: string };
+    expect(payload.type).toBe('direct_msg');
+    expect(payload.text).toBe('[image:blob:fresh:k==:n==]mira');
+    expect(mockUpdateDelivery).toHaveBeenCalledWith('member-a', 'msg-img', 'pending');
+  });
+
+  it('image whose upload never succeeded: uploads the picker file directly', async () => {
+    mockByChat['member-a'] = [{
+      id: 'msg-local', chatId: 'member-a', direction: 'out', type: 'image',
+      body: '', mediaUri: 'file:///picker/photo.jpg', createdAt: 1, deliveryStatus: 'failed',
+    }];
+    expect(await retryFailedMessage(BASE_IDENTITY, 'member-a', 'msg-local')).toBe(true);
+    expect(mockResolveMedia).not.toHaveBeenCalled();
+    expect(mockEncryptAndUploadMedia).toHaveBeenCalledWith('file:///picker/photo.jpg', 'image/jpeg');
+  });
+
+  it('text: wire type is direct_msg (not the local row type)', async () => {
+    mockByChat['member-a'] = [{
+      id: 'msg-txt', chatId: 'member-a', direction: 'out', type: 'text',
+      body: 'hey', mediaUri: null, createdAt: 1, deliveryStatus: 'failed',
+    }];
+    expect(await retryFailedMessage(BASE_IDENTITY, 'member-a', 'msg-txt')).toBe(true);
+    const payload = JSON.parse((mockEnqueueOutboxJob.mock.calls[0][0] as { payload: string }).payload) as { type: string; text: string };
+    expect(payload).toMatchObject({ type: 'direct_msg', text: 'hey' });
+    expect(mockEncryptAndUploadMedia).not.toHaveBeenCalled();
+  });
+
+  it('media gone from the device: not retryable, nothing enqueued', async () => {
+    mockResolveMedia.mockResolvedValueOnce(null);
+    mockByChat['member-a'] = [{
+      id: 'msg-gone', chatId: 'member-a', direction: 'out', type: 'video',
+      body: '', mediaUri: 'blob:old:k==:n==', createdAt: 1, deliveryStatus: 'failed',
+    }];
+    expect(await retryFailedMessage(BASE_IDENTITY, 'member-a', 'msg-gone')).toBe(false);
+    expect(mockEnqueueOutboxJob).not.toHaveBeenCalled();
+  });
+
+  it('view-once: never retried (the media only ever lived in the original envelope)', async () => {
+    mockByChat['member-a'] = [{
+      id: 'msg-vo', chatId: 'member-a', direction: 'out', type: 'image',
+      body: '[viewonce]', mediaUri: 'file:///x.jpg', createdAt: 1, deliveryStatus: 'failed',
+    }];
+    expect(await retryFailedMessage(BASE_IDENTITY, 'member-a', 'msg-vo')).toBe(false);
+    expect(mockEnqueueOutboxJob).not.toHaveBeenCalled();
+  });
+});
+
+// ─── ❼  Orphan sweep: pending rows nothing will ever settle ─────────────────
+
+describe('settleOrphanedPendingOnce', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    for (const k of Object.keys(mockByChat)) delete mockByChat[k];
+  });
+
+  it('marks orphans failed — through the store for loaded chats, DB-only otherwise — and runs once', async () => {
+    mockByChat['peer-loaded'] = [];
+    mockFindOrphanedPending.mockResolvedValueOnce([
+      { id: 'm-1', chatId: 'peer-loaded' },
+      { id: 'm-2', chatId: 'peer-cold' },
+    ]);
+    const before = Date.now();
+
+    await settleOrphanedPendingOnce();
+
+    // Age cutoff: now minus the grace window (a fresh upload is not an orphan).
+    const cutoff = mockFindOrphanedPending.mock.calls[0][0] as number;
+    expect(before - cutoff).toBeGreaterThanOrEqual(ORPHANED_PENDING_MIN_AGE_MS - 5);
+    expect(mockUpdateDelivery).toHaveBeenCalledWith('peer-loaded', 'm-1', 'failed');
+    expect(mockAdvanceMessageDelivery).toHaveBeenCalledWith('m-2', 'failed');
+    expect(mockAdvanceMessageDelivery).not.toHaveBeenCalledWith('m-1', 'failed');
+
+    await settleOrphanedPendingOnce();
+    expect(mockFindOrphanedPending).toHaveBeenCalledTimes(1);
   });
 });

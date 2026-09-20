@@ -201,6 +201,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
             recipientPublicKey: decodeBase64(contact.publicKeyB64),
             plaintext: `[viewonce:data:video/mp4;base64,${base64}]`,
             skipLocalAppend: true,
+            messageId: id,
           });
         } catch {
           // queued offline — bubble already shows
@@ -383,6 +384,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
           recipientPublicKey: decodeBase64(contact.publicKeyB64),
           plaintext: `[viewonce:data:image/jpeg;base64,${base64}${captionPart}]`,
           skipLocalAppend: true,
+          messageId: id,
         });
       } catch {
         // queued offline — bubble already shows
@@ -510,6 +512,7 @@ export function ViewOnceSendScreen({ contact, onBack, onSent }: Props) {
           recipientPublicKey: decodeBase64(contact.publicKeyB64),
           plaintext: `[viewonce:audio:${durSec}s:data:audio/m4a;base64,${base64}]`,
           skipLocalAppend: true,
+          messageId: id,
         });
       } catch {
         // queued offline
