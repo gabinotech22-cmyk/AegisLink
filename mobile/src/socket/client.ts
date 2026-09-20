@@ -535,7 +535,7 @@ async function flushOutbox(identity: Identity): Promise<void> {
       const jobContact = useContacts.getState().contacts.find((c) => c.aegisId === job.recipientAegisId);
       if (jobContact && isForeign(jobContact)) {
         // Another relay: never the home socket (see deliverToForeignRelay).
-        await deliverToForeignRelay(jobContact, event, wire, job.msgId, null);
+        await deliverToForeignRelay(jobContact, event, wire, job.msgId, null, replayHint);
       } else if (event === 'envelope:v2' && !('deliveryToken' in wire)) {
         // Sealed to a contact on our relay whose delivery token we do not hold
         // (buildOutgoingEnvelope sealedLocal): the ONLY transport for this
@@ -5091,7 +5091,7 @@ export async function broadcastProfileUpdate(
       if (isForeign(contact)) {
         const built = await buildOutgoingEnvelope(payload, contact.aegisId, recipientPub, identity, session);
         await saveSessionState(contact.aegisId, built.newState);
-        await deliverToForeignRelay(contact, built.event, built.wire, Crypto.randomUUID(), null);
+        await deliverToForeignRelay(contact, built.event, built.wire, Crypto.randomUUID(), null, 'silent');
         continue;
       }
       const isInit = !!session.x3dhInit;

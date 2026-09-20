@@ -804,8 +804,12 @@ devices — is queued and drained like any envelope but never raises the
 generic "new encrypted message" push. Before that, every such envelope woke a
 closed app to nothing (phantom notification). The sender sets it (only it
 knows the payload); the relay reads it once and never stores or forwards it.
-The cost is one declared metadata bit ("this envelope is not a message") on
-the outer wire, the same class as `'call'`.
+The hint travels on every transport the sender may pick — home socket,
+mailbox submit and a federated contact's relay (`deliverToForeignRelay`) —
+on live sends, outbox replays and profile broadcasts alike, on mobile and
+desktop (`desktop/src/renderer/socket/silentWake.ts`, mirror of the mobile
+table). The cost is one declared metadata bit ("this envelope is not a
+message") on the outer wire, the same class as `'call'`.
 It is the single declared metadata bit of `FEDERATION-DESIGN.md` D3: "this
 is a call for this mailbox", never who from. The recipient's home relay uses
 it solely to publish a *call-class* wake instead of the message-class one

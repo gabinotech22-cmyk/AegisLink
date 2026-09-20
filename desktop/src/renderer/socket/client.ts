@@ -45,6 +45,7 @@ import type { SealedWire } from '../crypto/sealedSender';
 import type { Identity } from '../crypto/identity';
 import { spkRotationDecision, spkPruneTargetKeyId } from './spkRotation';
 import { profileFingerprint, profileBroadcastHashKey } from './profileBroadcast';
+import { SILENT_WAKE_TYPES, silentWakeHintFor } from './silentWake';
 import { shouldSendSealedTyping } from './typingThrottle';
 import { serializeRatchetState, reviveRatchetState } from './ratchetSerde';
 import { useContacts } from '../store/contacts';
@@ -502,25 +503,6 @@ async function deliverToForeignRelay(
  */
 const SELF_COPY_EXCLUDED_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist', 'call_signal']);
 
-/**
- * Payload types that render nothing on the recipient: sent with
- * `wakeHint: 'silent'` so the relay never raises the generic push for them
- * (phantom-notification fix, parity with mobile).
- */
-const SILENT_WAKE_TYPES = new Set<string>(['typing', 'read_receipt', 'msg_delete', 'sender_key_dist', 'profile_update']);
-
-export function silentWakeHintFor(payloadJson: string): 'silent' | undefined {
-  try {
-    const p = JSON.parse(payloadJson) as { type?: unknown; body?: unknown };
-    if (typeof p.type !== 'string') return undefined;
-    if (SILENT_WAKE_TYPES.has(p.type)) return 'silent';
-    if (p.type === 'group_msg' && typeof p.body === 'string' && p.body.startsWith('[group:')) return 'silent';
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 async function flushOfflineQueue(identity: Identity) {
   if (offlineQueue.length === 0) return;
   const items = offlineQueue.splice(0);
@@ -532,6 +514,9 @@ async function flushOfflineQueue(identity: Identity) {
         item.recipientPublicKeyB64,
         identity,
       );
+      // Replay keeps the wake class of a live send (derived from the stored
+      // payload type) so a queued receipt never becomes a phantom push.
+      const replayHint = silentWakeHintFor(item.plaintext);
       const { event, wire, newState } = await buildOutgoingEnvelope(
         item.plaintext,
         item.recipientAegisId,
@@ -543,7 +528,7 @@ async function flushOfflineQueue(identity: Identity) {
       const itemContact = useContacts.getState().contacts.find((c) => c.aegisId === item.recipientAegisId);
       if (itemContact && isForeign(itemContact)) {
         // Another relay: never the home socket (see deliverToForeignRelay).
-        await deliverToForeignRelay(itemContact, event, wire, item.msgId, null);
+        await deliverToForeignRelay(itemContact, event, wire, item.msgId, null, replayHint);
         continue;
       }
       if (event === 'envelope:v2' && !('deliveryToken' in wire)) {
@@ -559,6 +544,7 @@ async function flushOfflineQueue(identity: Identity) {
           ciphertext: wire.ciphertext as string,
           nonce: wire.nonce as string,
           epk: wire.epk as string,
+          ...(replayHint ? { wakeHint: replayHint } : {}),
         });
         if (!ack || ack.ok !== true) throw new Error(ack?.error ?? 'mailbox_rejected');
         continue;
@@ -568,7 +554,7 @@ async function flushOfflineQueue(identity: Identity) {
           .timeout(EMIT_ACK_TIMEOUT_MS)
           .emit(
             event,
-            { id: item.msgId, to: item.recipientAegisId, ...wire },
+            { id: item.msgId, to: item.recipientAegisId, ...wire, ...(replayHint ? { wakeHint: replayHint } : {}) },
             (err: Error | null, ack?: { ok: boolean; error?: string }) => {
               // `.timeout()` switches the ack callback to (err, ack): err is set
               // when the server never responds (zombie transport / dropped frame).
@@ -2863,7 +2849,7 @@ export async function broadcastProfileUpdate(
       if (isForeign(contact)) {
         const built = await buildOutgoingEnvelope(payload, contact.aegisId, recipientPub, identity, session);
         await saveSessionState(contact.aegisId, built.newState);
-        await deliverToForeignRelay(contact, built.event, built.wire, crypto.randomUUID(), null);
+        await deliverToForeignRelay(contact, built.event, built.wire, crypto.randomUUID(), null, 'silent');
         continue;
       }
       const { envelope, newState } = encryptMessage(

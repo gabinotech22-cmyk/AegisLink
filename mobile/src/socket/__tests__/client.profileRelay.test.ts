@@ -393,6 +393,9 @@ describe('federation F5b — profile_update.mailboxRelay', () => {
     expect(mockSendViaForeignRelay).toHaveBeenCalledTimes(1);
     expect((mockSendViaForeignRelay.mock.calls[0] as unknown as [{ onion: string }, { to: string }])[0].onion).toBe(ONION);
     expect((mockSendViaForeignRelay.mock.calls[0] as unknown as [{ onion: string }, { to: string }])[1].to).toBe('their-mailbox-id');
+    // A profile update renders nothing: silent on BOTH transports (phantom push fix).
+    expect((envelopes[0][1] as { wakeHint?: string }).wakeHint).toBe('silent');
+    expect((mockSendViaForeignRelay.mock.calls[0] as unknown as [unknown, { wakeHint?: string }])[1].wakeHint).toBe('silent');
     // Nothing about the foreign contact leaves on the home socket.
     expect(JSON.stringify(mockFakeSocket.emit.mock.calls)).not.toContain(foreign.aegisId);
   });
