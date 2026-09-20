@@ -491,6 +491,7 @@
     "channels": "CANALES"
   },
   "profileSwitch": {
+    "onlyActiveNotifies": "Solo el perfil activo recibe notificaciones. Los mensajes a los otros perfiles esperan cifrados en el relay hasta que los actives (30 días).",
     "title": "Cambiar perfil",
     "newProfile": "Nuevo perfil",
     "activeLabel": "Perfil activo",

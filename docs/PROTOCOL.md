@@ -591,6 +591,17 @@ with a key derived from a user passphrase the relay never sees:
 
 - **Panic mode** performs an instant local wipe, with an optional **decoy
   profile** for coerced-unlock scenarios.
+- **Push wake-ups and multiple profiles.** Only the **active** profile is
+  bound to the device's push tokens. On a profile switch the outgoing identity
+  retracts its own bindings over its authenticated socket (`push:unregister`,
+  `voip:unregister`, `mailbox:push:token` with `expoToken: null`) before
+  disconnecting; the incoming identity registers on its `auth:ok` as usual.
+  Messages for inactive profiles wait encrypted in their relay queue (message
+  TTL) and produce no banner. Chosen over a per-profile push tag because a tag
+  would tell the push provider how many identities live on the device; drain-
+  all-profiles-on-wake is the long-term option (needs per-slot isolation work).
+  The relay only ever deletes a `(aegisId, token)` row for the authenticated
+  `aegisId` — one identity can never unbind another's.
 - **Multiple profiles** are cryptographically isolated: each has its own
   identity and its own SecureStore slot, and a non-primary profile never reads
   the primary's keys (`signSecretKeySlot` per-profile derivation).

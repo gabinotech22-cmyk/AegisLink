@@ -150,6 +150,11 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
             />
           )}
           ListFooterComponent={
+            <>
+            {/* Only the active profile notifies (decision B, 2026-09-20). */}
+            <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 17, paddingHorizontal: 18, paddingTop: 14 }}>
+              {i18nT('profileSwitch.onlyActiveNotifies')}
+            </Text>
             <Pressable
               onPress={onCreateProfile}
               accessibilityLabel={i18nT('profileSwitch.createNewA11y')}
@@ -179,6 +184,7 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
                 {i18nT('profileSwitch.newProfile')}
               </Text>
             </Pressable>
+            </>
           }
         />
       )}

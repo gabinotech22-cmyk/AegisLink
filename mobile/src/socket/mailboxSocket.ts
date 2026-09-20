@@ -445,6 +445,18 @@ async function rotateForNewEpoch(): Promise<void> {
 }
 
 /** Tear down the mailbox socket (e.g. on logout / profile switch / panic). */
+/** Retract the iOS wake-token binding of the current mailbox (profile switch). */
+export async function retractMailboxWakeToken(): Promise<void> {
+  if (!mboxSocket || !authed || !currentEpochMailbox) return;
+  const sock = mboxSocket;
+  const mailboxId = ownCurrentMailboxId();
+  if (!mailboxId) return;
+  await new Promise<void>((resolve) => {
+    sock.emit('mailbox:push:token', { mailboxId, expoToken: null }, () => resolve());
+    setTimeout(resolve, 2000);
+  });
+}
+
 export function disconnectMailboxSocket(): void {
   wantMailbox = false; // deliberate: stop the retry loop before touching the socket
   connecting = false;
