@@ -122,6 +122,12 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
 - [ ] **Paridad mobile↔desktop** continua: mantener los parity-tests de los dos `socket/client.ts` como
       lever (no refactor cosmético — decisión M4).
 - [ ] **F-2 — UnifiedPush**: transporte wake-up sin Google/Apple (ntfy/Gotify), FCM/APNs como fallback.
+- [x] **Sincronizar a mano ("tirar para refrescar")** — 1.0.7: en la lista de chats, chat 1:1, grupo
+      y feed de canal, tirar hacia abajo dispara lo mismo que volver del segundo plano (vaciar el
+      buzón por Tor, empujar el outbox, reconectar; el feed además se vuelve a pedir). Es la
+      mitigación visible a "Tor tarda en arrancar". `socket/client.ts` `syncNow`,
+      `hooks/useSyncRefresh.ts` (+ tests). No registra nada: un sync manual es indistinguible de
+      una vuelta a primer plano.
 
 ## Hito 5 — Vigilancia de deuda (continua) 🔵
 

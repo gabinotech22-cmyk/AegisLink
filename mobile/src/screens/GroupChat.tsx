@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Linking, Image, Animated, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Linking, Image, Animated, ActivityIndicator, Modal, RefreshControl } from 'react-native';
+import { useSyncRefresh } from '../hooks/useSyncRefresh';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SwipeableMessage } from '../components/SwipeableMessage';
 import { FormattedText } from '../components/FormattedText';
@@ -63,6 +64,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
+  const { refreshing, onRefresh } = useSyncRefresh(identity);
   const contacts = useContacts((s) => s.contacts);
   const hydrate = useContacts((s) => s.hydrate);
   // Read group reactively from the store so member add/remove is reflected live
@@ -619,6 +621,7 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
           ref={flatlistRef}
           data={filteredList}
           keyExtractor={(item) => item.id}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.accent} colors={[t.accent]} progressBackgroundColor={t.surface2} />}
           contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12, gap: 10 }}
           showsVerticalScrollIndicator={false}
           onScroll={({ nativeEvent: { layoutMeasurement, contentOffset, contentSize } }) => {

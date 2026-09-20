@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { logger } from '../utils/logger';
 import { useTranslation } from 'react-i18next';
-import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Keyboard, Platform, StyleSheet, Image, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, TextInput, Pressable, FlatList, KeyboardAvoidingView, Keyboard, Platform, StyleSheet, Image, ActivityIndicator, Modal, RefreshControl } from 'react-native';
+import { useSyncRefresh } from '../hooks/useSyncRefresh';
 import { MediaEditorModal } from '../components/MediaEditorModal';
 import { VoiceRecorderScreen } from './VoiceRecorder';
 import { GifPicker } from '../components/GifPicker';
@@ -53,6 +54,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
   const { t: i18nT } = useTranslation();
   const insets = useSafeAreaInsets();
   const { identity } = useIdentity();
+  const { refreshing, onRefresh } = useSyncRefresh(identity);
 
   // GAP 1 FIX: Read contact reactively from store so profile updates from peers
   // (name, photo, color, status) are reflected live without leaving the chat
@@ -1080,6 +1082,7 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
           ref={flatlistRef}
           data={filteredList}
           keyExtractor={(m) => m.id}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.accent} colors={[t.accent]} progressBackgroundColor={t.surface2} />}
           style={{ flex: 1, backgroundColor: chatWallpaper === 0 ? t.bg : 'transparent' }}
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 10 }}
           showsVerticalScrollIndicator={false}

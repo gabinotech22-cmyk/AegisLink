@@ -25,6 +25,7 @@
 // --- db/local outbox helpers -------------------------------------------------
 const mockEnqueueOutboxJob = jest.fn().mockResolvedValue(undefined);
 const mockLoadOutboxJobs = jest.fn().mockResolvedValue([]);
+const mockLoadDueOutboxJobs = jest.fn().mockResolvedValue([]);
 const mockDeleteOutboxJob = jest.fn().mockResolvedValue(undefined);
 const mockIncrementOutboxAttempts = jest.fn().mockResolvedValue(undefined);
 const mockGetGroup = jest.fn();
@@ -40,6 +41,7 @@ jest.mock('../../db/local', () => ({
   advanceMessageDelivery: (...args: unknown[]) => mockAdvanceMessageDelivery(...args),
   enqueueOutboxJob: (...args: unknown[]) => mockEnqueueOutboxJob(...args),
   loadOutboxJobs: (...args: unknown[]) => mockLoadOutboxJobs(...args),
+  loadDueOutboxJobs: (...args: unknown[]) => mockLoadDueOutboxJobs(...args),
   deleteOutboxJob: (...args: unknown[]) => mockDeleteOutboxJob(...args),
   incrementOutboxAttempts: (...args: unknown[]) => mockIncrementOutboxAttempts(...args),
   getGroup: (...args: unknown[]) => mockGetGroup(...args),
@@ -86,6 +88,18 @@ jest.mock('../../store/messages', () => ({
 jest.mock('../../store/groups', () => ({
   __esModule: true,
   useGroups: { getState: () => ({ groups: [] }) },
+}));
+
+// --- mailboxSocket (syncNow drains the mailbox statelessly) -----------------
+const mockFetchMailboxOverTor = jest.fn().mockResolvedValue(0);
+jest.mock('../mailboxSocket', () => ({
+  __esModule: true,
+  fetchMailboxOverTor: (...args: unknown[]) => mockFetchMailboxOverTor(...args),
+  connectMailboxSocket: jest.fn(),
+  disconnectMailboxSocket: jest.fn(),
+  sendViaMailbox: jest.fn(),
+  isMailboxAuthed: () => false,
+  mailboxAckConfirmsDelivery: () => false,
 }));
 
 // --- crypto/media (retry re-uploads media from the local copy) ---------------
@@ -208,11 +222,12 @@ jest.mock('../../config', () => ({
   SERVER_URL: 'http://localhost:3000',
   ONION_URL: null,
   RELAY_URL: 'http://localhost:3000',
+  MAILBOX_ENABLED: true,
 }));
 
 // ─── Actual imports ───────────────────────────────────────────────────────────
 
-import { sendMessage, sendGroupMessage, retryFailedMessage, settleOrphanedPendingOnce, ORPHANED_PENDING_MIN_AGE_MS } from '../client';
+import { sendMessage, sendGroupMessage, retryFailedMessage, settleOrphanedPendingOnce, ORPHANED_PENDING_MIN_AGE_MS, syncNow } from '../client';
 import type { Identity } from '../../crypto/identity';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -578,5 +593,19 @@ describe('settleOrphanedPendingOnce', () => {
 
     await settleOrphanedPendingOnce();
     expect(mockFindOrphanedPending).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── ❽  syncNow: the one call behind foreground resume and pull-to-refresh ──
+
+describe('syncNow', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('drains the mailbox over Tor and runs an outbox pass', async () => {
+    await expect(syncNow(BASE_IDENTITY)).resolves.toBeUndefined();
+    // fetchMailboxOverTor is itself fail-soft (resolves 0 on any error).
+    expect(mockFetchMailboxOverTor).toHaveBeenCalled();
+    // flushOutbox starts by loading the due jobs.
+    expect(mockLoadDueOutboxJobs).toHaveBeenCalled();
   });
 });
