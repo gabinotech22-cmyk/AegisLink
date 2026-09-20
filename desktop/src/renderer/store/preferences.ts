@@ -61,6 +61,8 @@ interface PrefsState extends Preferences {
   hydrate: () => Promise<void>;
   set: <K extends keyof Preferences>(key: K, value: Preferences[K]) => Promise<void>;
   reset: () => Promise<void>;
+  /** Restore from a backup payload: merges over DEFAULTS, then persists (parity with mobile). */
+  restoreFrom: (prefs: Partial<Preferences>) => Promise<void>;
 }
 
 function snapshot(get: () => PrefsState): Preferences {
@@ -134,6 +136,12 @@ export const usePreferences = create<PrefsState>((setState, get) => ({
     // Under duress a change lives in memory only (parity with mobile).
     if (get().duressActive) return;
     await persist(snapshot(get));
+  },
+
+  async restoreFrom(prefs) {
+    const merged = { ...DEFAULTS, ...prefs };
+    setState(merged);
+    await persist(merged);
   },
 
   async reset() {

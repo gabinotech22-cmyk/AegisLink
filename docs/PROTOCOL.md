@@ -578,7 +578,21 @@ with a key derived from a user passphrase the relay never sees:
 - Only salt, nonce and ciphertext are stored; the passphrase never touches disk.
   Minimum passphrase length 12.
 - Legacy envelopes (v1/v2, PBKDF2-HMAC-SHA256 at 100k/600k iterations) remain
-  *decryptable* for restore, but all new backups are written as v3.
+  *decryptable* for restore, but all new backups are written as v3 — on
+  **both** platforms (`desktop/src/renderer/crypto/backup.ts` mirrors the
+  mobile module; until 2026-09-20 desktop wrote v1 and its restore discarded
+  the decrypted payload).
+- **Payload** (`BackupPayload`): identity keys, profile, every persisted
+  contact field (`toBackupContact`: nickname, announced name, own relay, caps,
+  pinned/hidden/pending, profile slot…), the groups with their signed roster
+  and governance (`toBackupGroup`), and the data preferences
+  (`restorablePreferences`: lock settings are excluded on purpose — no PIN
+  hash travels, restoring `appLockEnabled` would lock the user out), and the
+  **text messages** of every chat (`toBackupMessage`: deleted rows without
+  text, expired ephemerals skipped, a media message as its caption plus an
+  `attachment: true` flag that restores as an "attachment not included" note).
+  Attachments themselves are **not** in the backup — their blobs expire on the
+  relay and the files would make it huge; the Backup screen says so.
 
 > **⚠ Disclosure — KDF parameters are implied by version, not stored.**
 > The v3 Argon2id parameters are fixed by the envelope version rather than
