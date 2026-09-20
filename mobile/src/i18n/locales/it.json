@@ -456,6 +456,18 @@
     "relayLabel": "Relay AegisLink",
     "unreachable": "irraggiungibile"
   },
+  "storageLocked": {
+    "status": "ARCHIVIO SICURO BLOCCATO",
+    "title": "Impossibile sbloccare i tuoi dati",
+    "desc": "Il database cifrato esiste su questo dispositivo, ma la chiave che lo apre non è più nell'archivio sicuro. Senza quella chiave non si può leggere nulla — né tu, né noi.",
+    "why": "Succede dopo un ripristino del telefono da un backup di sistema, un reset del keystore o un'installazione interrotta. La tua identità e i tuoi messaggi non sono recuperabili da questo dispositivo.",
+    "restore": "Ripristina da un backup AegisLink",
+    "reset": "Ricomincia con una nuova identità",
+    "confirmTitle": "Eliminare i dati bloccati?",
+    "confirmBody": "Il database illeggibile e le chiavi di questo profilo verranno eliminati da questo dispositivo. Non si può annullare. I tuoi contatti avranno bisogno del tuo nuovo link o QR.",
+    "confirmRestore": "Elimina e ripristina",
+    "confirmReset": "Elimina e ricomincia"
+  },
   "tabBar": {
     "chats": "CHAT",
     "groups": "COMUNITÀ",

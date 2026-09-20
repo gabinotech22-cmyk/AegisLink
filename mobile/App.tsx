@@ -80,7 +80,8 @@ import { useProfiles } from './src/store/profiles';
 
 import { useCall } from './src/store/call';
 import { connect as connectSocket, disconnect as disconnectSocket } from './src/socket/client';
-import { warmUpDb, dbReadyPromise } from './src/db/local';
+import { warmUpDb, dbReadyPromise, getDbFatalError, restartDb, DbKeyMismatchError } from './src/db/local';
+import { StorageLockedScreen } from './src/screens/StorageLocked';
 import { useConnection } from './src/store/connection';
 import { isPicking } from './src/utils/pickingGuard';
 import { attachCallHandlers, acceptCall, endCall } from './src/socket/calls';
@@ -232,6 +233,11 @@ function Shell() {
   const [onboardingRestore, setOnboardingRestore] = useState(false);
   // true once the SQLite DB connection has been confirmed open (cold-start gate)
   const [dbReady, setDbReady] = useState(false);
+  // The database file is SQLCipher data under a key SecureStore no longer has:
+  // nothing can be read and no retry will change that. Takes over the whole
+  // tree with an honest choice (restore backup / start over) instead of the
+  // old forever-spinner on "Initializing secure storage…".
+  const [dbLocked, setDbLocked] = useState(false);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -371,8 +377,12 @@ function Shell() {
     // the loading splash — BEFORE the user can tap "Generate my identity".
     // warmUpDb() is idempotent: subsequent calls on the same slot are no-ops.
     warmUpDb();
-    // Resolve the UI gate (dbReady) as soon as the DB is genuinely open.
-    void dbReadyPromise.then(() => setDbReady(true));
+    // Resolve the UI gate (dbReady) as soon as the DB is genuinely open — or
+    // route to recovery when it never will be (wrong key).
+    void dbReadyPromise.then(() => {
+      if (getDbFatalError() instanceof DbKeyMismatchError) setDbLocked(true);
+      else setDbReady(true);
+    });
 
     void hydrate();
     void hydratePrefs();
@@ -1246,6 +1256,27 @@ function Shell() {
           WIPING DATA
         </Text>
       </View>
+    );
+  }
+
+  if (dbLocked) {
+    // Both paths delete the unreadable file and this profile's keys (reset()
+    // works file-level, it never needs the DB open), then reopen a fresh DB.
+    const wipeLocked = async (): Promise<void> => {
+      try {
+        await useIdentity.getState().reset();
+      } catch { /* per-slot file/key deletes are idempotent; continue */ }
+      restartDb();
+      await dbReadyPromise;
+      setDbLocked(false);
+      setDbReady(true);
+      setShowOnboarding(true);
+    };
+    return (
+      <StorageLockedScreen
+        onReset={wipeLocked}
+        onRestore={async () => { await wipeLocked(); setOnboardingRestore(true); }}
+      />
     );
   }
 

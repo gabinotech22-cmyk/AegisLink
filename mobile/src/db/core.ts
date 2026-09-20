@@ -47,6 +47,30 @@ export function setActiveDbSlot(slot: string): void {
   warmUpDb();
 }
 
+/**
+ * The error that made the active slot's database unusable for this process
+ * (null while healthy). App.tsx reads it once `dbReadyPromise` settles: a
+ * DbKeyMismatchError takes the whole tree to the recovery screen.
+ */
+export function getDbFatalError(): Error | null {
+  return dbFatalError;
+}
+
+/**
+ * Forget the dead connection and its fatal state and open the slot's database
+ * again from scratch — after a reset deleted the unreadable file. Callers await
+ * the fresh `dbReadyPromise`.
+ */
+export function restartDb(): void {
+  dbPromise = null;
+  cachedDbKey = null;
+  dbFatalError = null;
+  dbReadyPromise = new Promise<void>((resolve) => {
+    _dbReadyResolve = resolve;
+  });
+  warmUpDb();
+}
+
 export async function closeActiveDatabase(): Promise<void> {
   if (!dbPromise) return;
   _closing = true;
@@ -164,6 +188,50 @@ class DbInitExhaustedError extends Error {
   }
 }
 
+/**
+ * The database file exists and is SQLCipher-encrypted, but not under the key
+ * SecureStore holds for this slot (the keystore was reset, the app data was
+ * restored from a device backup without its keystore entries, an install was
+ * interrupted between minting the key and the first write, …). Nothing in the
+ * file can be read without that key — and the app must say so instead of
+ * spinning on "Initializing secure storage…" forever. Fail-closed by
+ * construction: no fallback to a plaintext open, ever.
+ */
+export class DbKeyMismatchError extends Error {
+  constructor(detail: string) {
+    super(`database key mismatch: ${detail}`);
+    this.name = 'DbKeyMismatchError';
+  }
+}
+
+/** True for the SQLite/SQLCipher errors that mean "wrong key or not our file". */
+function isKeyMismatchMessage(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /not a database|SQLITE_NOTADB|file is encrypted/i.test(msg);
+}
+
+/** First 16 bytes of every PLAINTEXT SQLite file, base64 ("SQLite format 3 "). */
+const SQLITE_PLAINTEXT_MAGIC_B64 = 'U1FMaXRlIGZvcm1hdCAzAA==';
+
+/**
+ * 'plaintext' when the file carries the SQLite magic header, 'encrypted' when it
+ * does not (SQLCipher pages are indistinguishable from random), null when the
+ * header cannot be read here (test mocks / missing API).
+ */
+async function classifyDbFile(dbUri: string): Promise<'plaintext' | 'encrypted' | null> {
+  const fs = FileSystem as unknown as {
+    readAsStringAsync?: (uri: string, o: { encoding: string; position: number; length: number }) => Promise<string>;
+  };
+  if (typeof fs.readAsStringAsync !== 'function') return null;
+  try {
+    const head = await fs.readAsStringAsync(dbUri, { encoding: 'base64', position: 0, length: 16 });
+    if (typeof head !== 'string' || head.length === 0) return null;
+    return head === SQLITE_PLAINTEXT_MAGIC_B64 ? 'plaintext' : 'encrypted';
+  } catch {
+    return null;
+  }
+}
+
 
 /**
  * Opens the database file and runs the full schema initialisation.
@@ -237,9 +305,17 @@ async function migratePlaintextIfNeeded(dbName: string, keyHex: string): Promise
     await probe.getFirstAsync('SELECT count(*) FROM sqlite_master');
     return; // already encrypted — done
   } catch {
-    // Probe failed → the file is plaintext (or a foreign key). Re-encrypt below.
+    // Probe failed → the file is plaintext (legacy) or encrypted under a key we
+    // no longer have. Only the first is migratable; decide from the header.
   } finally {
     try { await probe?.closeAsync(); } catch { /* ignore */ }
+  }
+
+  // A file without the plaintext magic is SQLCipher data under another key.
+  // Running sqlcipher_export on it would fail (opaquely) or, worse, "migrate"
+  // garbage — surface the real situation instead so the UI can offer a reset.
+  if ((await classifyDbFile(dbUri)) === 'encrypted') {
+    throw new DbKeyMismatchError('encrypted file, key not in secure store');
   }
 
   // ── Re-encrypt via sqlcipher_export ─────────────────────────────────────────
@@ -256,6 +332,11 @@ async function migratePlaintextIfNeeded(dbName: string, keyHex: string): Promise
       `SELECT sqlcipher_export('encrypted');` +
       `DETACH DATABASE encrypted;`,
     );
+  } catch (e) {
+    // Header unreadable above and the export still says "not a database":
+    // same diagnosis, same error.
+    if (isKeyMismatchMessage(e)) throw new DbKeyMismatchError('export rejected the file');
+    throw e;
   } finally {
     try { await plain?.closeAsync(); } catch { /* ignore */ }
   }
@@ -291,6 +372,12 @@ async function openAndInit(dbName: string): Promise<SQLite.SQLiteDatabase> {
       return d;
     } catch (e) {
       lastErr = e;
+      // Wrong key: the first real read after `PRAGMA key` fails with
+      // "file is not a database". Not transient — name it and stop.
+      if (!(e instanceof DbKeyMismatchError) && isKeyMismatchMessage(e)) {
+        try { await d?.closeAsync(); } catch { /* ignore */ }
+        throw new DbKeyMismatchError('open rejected the key');
+      }
       const isNpe = e instanceof Error && e.message.includes('NullPointerException');
       // Only retry the known JSI/NPE pattern; let all other errors surface
       // immediately so they are not silently swallowed by retries.

@@ -504,6 +504,29 @@ Attachments (`mobile/src/crypto/media.ts`) never reach the relay in plaintext:
   `socket/__tests__/outbox.test.ts` (❺ ❻ ❼), `utils/__tests__/mediaWire.test.ts`,
   `db/__tests__/orphanedPending.db.test.ts`.
 
+### 7.4b Local database at rest (SQLCipher) and the lost-key case
+
+The whole SQLite file is SQLCipher-encrypted (`useSQLCipher: true`); the 256-bit
+key lives per profile slot in the OS secure store and never touches SQLite
+(`mobile/src/db/core.ts`). The open path applies `PRAGMA key` as the first
+statement on every handle and NaCl field encryption stays as defence in depth.
+
+**Lost key** (keystore reset, app data restored from a system backup without
+its keystore entries, install interrupted between minting the key and the
+first write): the file is unreadable and no retry changes that. The open path
+classifies it — a file without the SQLite plaintext magic in its header is
+SQLCipher data, so the legacy plaintext→SQLCipher migration is **never** run on
+it — and fails with `DbKeyMismatchError`, exposed through `getDbFatalError()`.
+`App.tsx` then shows `StorageLockedScreen`: what happened, that nothing in the
+file can be read, and two confirmed, destructive exits — restore from an
+AegisLink backup or start over — both of which delete the file and the slot's
+keys (`useIdentity.reset()` is file-level and needs no open DB) and reopen a
+fresh database (`restartDb()`). There is no plaintext fallback and no silent
+key regeneration (golden rules #1/#6). Desktop already refuses to regenerate a
+key it cannot decrypt (`main/ipc/database.ts`); it surfaces the error rather
+than a recovery screen. Tests: `db/__tests__/dbKeyMismatch.test.ts`,
+`screens/__tests__/StorageLocked.test.tsx`.
+
 ### 7.5 Encrypted backups
 
 Backups (`mobile/src/crypto/backup.ts`, `.aegisbak`) are encrypted client-side
