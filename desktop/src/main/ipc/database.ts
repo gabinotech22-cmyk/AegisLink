@@ -382,6 +382,9 @@ function ensureSchema(db: Database.Database): void {
   safeAddColumn('contacts', 'relay_onion', 'TEXT')
   // Capabilities announced in the contact's E2EE profile (renderer net/caps.ts), JSON array.
   safeAddColumn('contacts', 'caps', 'TEXT')
+  // Local nickname chosen by the user (never leaves the device); `name` keeps
+  // the display name the contact announces and the nickname wins on screen.
+  safeAddColumn('contacts', 'nickname', 'TEXT')
 
   safeAddColumn('groups', 'avatar_color', 'TEXT')
   safeAddColumn('groups', 'avatar_image', 'TEXT')
@@ -591,17 +594,21 @@ export function registerDatabaseHandlers(): void {
     // (parity with db:save-message) so a buggy/compromised renderer can't push a
     // pathological payload into SQLite.
     assertMaxLen(c?.name, MAX_METADATA_FIELD_BYTES, 'contact.name')
+    assertMaxLen(c?.profileName, MAX_METADATA_FIELD_BYTES, 'contact.profileName')
+    assertMaxLen(c?.nickname, MAX_METADATA_FIELD_BYTES, 'contact.nickname')
     assertMaxLen(c?.status, MAX_METADATA_FIELD_BYTES, 'contact.status')
     assertMaxLen(c?.color, MAX_METADATA_FIELD_BYTES, 'contact.color')
     assertMaxLen(c?.avatarImage, MAX_AVATAR_IMAGE_BYTES, 'contact.avatarImage')
     const sql = `INSERT OR REPLACE INTO contacts
-     (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion, caps)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion, caps, nickname)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     db.prepare(sql).run(
       c.aegisId,
       c.publicKeyB64,
       c.signingPublicKeyB64 || '',
-      c.name,
+      // Column `name` is the announced profile name; a contact built without
+      // one (legacy callers) has no nickname either, so its display name is it.
+      c.profileName ?? c.name,
       c.verified ? 1 : 0,
       c.addedAt,
       c.color || null,
@@ -614,7 +621,8 @@ export function registerDatabaseHandlers(): void {
       c.archived ? 1 : 0,
       c.profile ?? 'personal',
       c.relayOnion ?? null,
-      Array.isArray(c.caps) && c.caps.length > 0 ? JSON.stringify(c.caps) : null
+      Array.isArray(c.caps) && c.caps.length > 0 ? JSON.stringify(c.caps) : null,
+      typeof c.nickname === 'string' && c.nickname.trim() ? c.nickname.trim() : null
     )
   })
 
@@ -624,13 +632,13 @@ export function registerDatabaseHandlers(): void {
     if (profile) {
       rows = db
         .prepare<unknown[], ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion, caps FROM contacts WHERE profile = ? ORDER BY added_at DESC`
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion, caps, nickname FROM contacts WHERE profile = ? ORDER BY added_at DESC`
         )
         .all(profile)
     } else {
       rows = db
         .prepare<unknown[], ContactRow>(
-          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion, caps FROM contacts ORDER BY added_at DESC`
+          `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion, caps, nickname FROM contacts ORDER BY added_at DESC`
         )
         .all()
     }
@@ -638,7 +646,9 @@ export function registerDatabaseHandlers(): void {
       aegisId: r.aegis_id,
       publicKeyB64: r.public_key_b64,
       signingPublicKeyB64: r.signing_public_key_b64 || undefined,
-      name: r.name,
+      name: effectiveContactName(r),
+      profileName: r.name,
+      nickname: r.nickname ?? null,
       verified: r.verified === 1,
       addedAt: r.added_at,
       color: r.color || undefined,
@@ -659,7 +669,7 @@ export function registerDatabaseHandlers(): void {
     assertTrustedSender(event)
     const r = db
       .prepare<unknown[], ContactRow>(
-        `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion, caps FROM contacts WHERE aegis_id = ?`
+        `SELECT aegis_id, public_key_b64, signing_public_key_b64, name, verified, added_at, color, avatar_image, muted, zero_trust, status, muted_until, blocked, archived, profile, relay_onion, caps, nickname FROM contacts WHERE aegis_id = ?`
       )
       .get(aegisId)
     return r
@@ -667,7 +677,9 @@ export function registerDatabaseHandlers(): void {
           aegisId: r.aegis_id,
           publicKeyB64: r.public_key_b64,
           signingPublicKeyB64: r.signing_public_key_b64 || undefined,
-          name: r.name,
+          name: effectiveContactName(r),
+          profileName: r.name,
+          nickname: r.nickname ?? null,
           verified: r.verified === 1,
           addedAt: r.added_at,
           color: r.color || undefined,
@@ -1188,6 +1200,10 @@ export function closeDatabase(): void {
     db.close()
   }
 }
+
+/** Effective display name: local nickname → announced name → Aegis ID. */
+function effectiveContactName(r: { aegis_id: string; name: string; nickname: string | null }): string {
+  return r.nickname?.trim() || r.name?.trim() || r.aegis_id
 
 export const SEARCH_RESULT_LIMIT = 200
 export const SEARCH_SCAN_LIMIT = 5000

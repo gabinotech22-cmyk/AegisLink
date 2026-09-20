@@ -6,6 +6,9 @@ import { setContactMailboxRoot } from '../crypto/mailboxStore';
 import type { RelayRef } from '../net/relayRef';
 import { logger } from '../utils/logger';
 import { loadContacts, saveContact, getContact, deleteContact, deleteContactMessages, deleteContactRatchetSession, pinContact as dbPinContact, type StoredContact } from '../db/local';
+// Pure helper (no DB): imported from its module so test doubles of db/local
+// keep working.
+import { effectiveContactName } from '../db/contacts';
 import { lookupIdentity, lookupIdentityAt, ApiError } from '../api';
 import { keyMatchesAegisId, normalizeAegisId } from '../crypto/aegisId';
 
@@ -70,6 +73,11 @@ interface ContactsState {
   confirmKeyChange: (aegisId: string, newPublicKeyB64: string) => Promise<StoredContact | null>;
   get: (aegisId: string) => StoredContact | undefined;
   updateContactProfile: (aegisId: string, name: string, color?: string, avatarImage?: string | null, status?: string) => Promise<void>;
+  /**
+   * Local nickname for a contact (null/empty clears it). Wins over the name the
+   * contact announces; never leaves the device.
+   */
+  setNickname: (aegisId: string, nickname: string | null) => Promise<void>;
   /** F5b: the contact announced a new home relay (`profile_update.mailboxRelay`); null = official. */
   updateContactRelay: (aegisId: string, relayOnion: string | null) => Promise<void>;
   /** Pin the caps a contact announced (net/caps.ts); no-op when unchanged. */
@@ -165,7 +173,12 @@ export const useContacts = create<ContactsState>((set, get) => ({
       aegisId: record.aegisId,
       publicKeyB64: record.publicKey,
       signingPublicKeyB64: record.signingPublicKey || undefined,
+      // What the user typed in "nickname" is a local label, not the contact's
+      // profile name — keep it in its own slot so their first profile_update
+      // cannot overwrite it.
       name: displayName?.trim() || aegisId,
+      profileName: aegisId,
+      nickname: displayName?.trim() || null,
       verified: false,
       addedAt: Date.now(),
       profile: 'personal',
@@ -234,6 +247,8 @@ export const useContacts = create<ContactsState>((set, get) => ({
       aegisId,
       publicKeyB64,
       name: displayName?.trim() || aegisId,
+      profileName: aegisId,
+      nickname: displayName?.trim() || null,
       verified: true,
       addedAt: Date.now(),
       profile: 'personal',
@@ -315,7 +330,8 @@ export const useContacts = create<ContactsState>((set, get) => ({
       set({
         contacts: get().contacts.map((c) => (c.aegisId === aegisId ? {
           ...c,
-          name: name?.trim() || c.name,
+          profileName: name?.trim() || c.profileName || c.name,
+          name: effectiveContactName({ aegisId, nickname: c.nickname, profileName: name?.trim() || c.profileName || c.name }),
           color: color || c.color,
           avatarImage: avatarImage !== undefined ? avatarImage : c.avatarImage,
           status: status !== undefined ? status : c.status,
@@ -325,13 +341,34 @@ export const useContacts = create<ContactsState>((set, get) => ({
     }
     const existing = await getContact(aegisId);
     if (!existing) return;
-    const updated = {
+    const profileName = name?.trim() || existing.profileName || existing.name;
+    const updated: StoredContact = {
       ...existing,
-      name: name?.trim() || existing.name,
+      profileName,
+      // The announced name never displaces a local nickname.
+      name: effectiveContactName({ aegisId, nickname: existing.nickname, profileName }),
       color: color || existing.color,
       avatarImage: avatarImage !== undefined ? avatarImage : existing.avatarImage,
       status: status !== undefined ? status : existing.status,
     };
+    await saveContact(updated);
+    set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
+  },
+
+  async setNickname(aegisId, nickname) {
+    const trimmed = nickname?.trim() || null;
+    const apply = (c: StoredContact): StoredContact => ({
+      ...c,
+      nickname: trimmed,
+      name: effectiveContactName({ aegisId, nickname: trimmed, profileName: c.profileName ?? c.name }),
+    });
+    if (isDuressActive()) {
+      set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? apply(c) : c)) });
+      return;
+    }
+    const existing = await getContact(aegisId);
+    if (!existing) return;
+    const updated = apply(existing);
     await saveContact(updated);
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
   },

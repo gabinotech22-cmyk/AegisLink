@@ -105,6 +105,18 @@ export interface StoredContact {
   relayOnion?: string | null;
   /** Capabilities announced in the contact's E2EE profile (net/caps.ts); absent = pre-caps. */
   caps?: string[] | null;
+  /**
+   * Display name the contact announces in its E2EE profile. `name` is what we
+   * show: the local `nickname` when set, otherwise this, otherwise the id.
+   */
+  profileName?: string;
+  /** Nickname chosen locally by the user; null/empty = none. Never sent. */
+  nickname?: string | null;
+}
+
+/** Effective display name: nickname → announced profile name → Aegis ID. */
+export function effectiveContactName(c: { aegisId: string; profileName?: string; nickname?: string | null }): string {
+  return c.nickname?.trim() || c.profileName?.trim() || c.aegisId;
 }
 
 export async function saveContact(c: StoredContact): Promise<void> {

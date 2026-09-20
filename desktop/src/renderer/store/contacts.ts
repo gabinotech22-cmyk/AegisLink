@@ -11,6 +11,7 @@ import {
   deleteContact,
   deleteContactMessages,
   deleteContactRatchetSession,
+  effectiveContactName,
   type StoredContact,
 } from '../db/local';
 import { lookupIdentity, ApiError } from '../api';
@@ -55,6 +56,8 @@ interface ContactsState {
     avatarImage?: string | null,
     status?: string,
   ) => Promise<void>;
+  /** Local nickname for a contact (null/empty clears it). Wins over the announced name; never sent. */
+  setNickname: (aegisId: string, nickname: string | null) => Promise<void>;
   /** F5b: the contact announced a new home relay (`profile_update.mailboxRelay`); null = official. */
   updateContactRelay: (aegisId: string, relayOnion: string | null) => Promise<void>;
   /** Pin the caps a contact announced (net/caps.ts); no-op when unchanged. */
@@ -138,7 +141,12 @@ export const useContacts = create<ContactsState>((set, get) => ({
       aegisId: record.aegisId,
       publicKeyB64: record.publicKey,
       signingPublicKeyB64: record.signingPublicKey || undefined,
+      // What the user typed in "nickname" is a local label, not the contact's
+      // profile name — its own slot, so their first profile_update cannot
+      // overwrite it (parity with mobile).
       name: displayName?.trim() || aegisId,
+      profileName: aegisId,
+      nickname: displayName?.trim() || null,
       verified: false,
       addedAt: Date.now(),
       profile: 'personal',
@@ -172,6 +180,8 @@ export const useContacts = create<ContactsState>((set, get) => ({
       aegisId,
       publicKeyB64,
       name: displayName?.trim() || aegisId,
+      profileName: aegisId,
+      nickname: displayName?.trim() || null,
       verified: true,
       addedAt: Date.now(),
       profile: 'personal',
@@ -235,12 +245,28 @@ export const useContacts = create<ContactsState>((set, get) => ({
   async updateContactProfile(aegisId, name, color, avatarImage, status) {
     const existing = await getContact(aegisId);
     if (!existing) return;
-    const updated = {
+    const profileName = name?.trim() || existing.profileName || existing.name;
+    const updated: StoredContact = {
       ...existing,
-      name: name?.trim() || existing.name,
+      profileName,
+      // The announced name never displaces a local nickname.
+      name: effectiveContactName({ aegisId, nickname: existing.nickname, profileName }),
       color: color || existing.color,
       avatarImage: avatarImage !== undefined ? avatarImage : existing.avatarImage,
       status: status !== undefined ? status : existing.status,
+    };
+    await saveContact(updated);
+    set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
+  },
+
+  async setNickname(aegisId, nickname) {
+    const existing = await getContact(aegisId);
+    if (!existing) return;
+    const trimmed = nickname?.trim() || null;
+    const updated: StoredContact = {
+      ...existing,
+      nickname: trimmed,
+      name: effectiveContactName({ aegisId, nickname: trimmed, profileName: existing.profileName ?? existing.name }),
     };
     await saveContact(updated);
     set({ contacts: get().contacts.map((c) => (c.aegisId === aegisId ? updated : c)) });
