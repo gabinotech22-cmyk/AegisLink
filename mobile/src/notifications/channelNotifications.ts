@@ -57,7 +57,8 @@ export async function showChannelPostNotification(
     if (getActiveChatNotificationId() === channelId) return;
 
     const showContent = prefs.notifPreview;
-    const title = `AegisLink · ${channelName}`;
+    // The channel name identifies what you follow: only with previews on.
+    const title = showContent ? `AegisLink · ${channelName}` : 'AegisLink';
     // Background-safe: notifications can be built before React's useLocale ran,
     // so resolve the persisted locale and bind t to it (getFixedT) instead of
     // relying on i18n's current (possibly default-'en') global language.

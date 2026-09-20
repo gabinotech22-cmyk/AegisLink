@@ -1740,7 +1740,8 @@
     "processing": "PROCESANDO…",
     "fromFiles": "Desde archivos",
     "fromFiles2": "DESDE ARCHIVOS",
-    "anyType2": "CUALQUIER TIPO"
+    "anyType2": "CUALQUIER TIPO",
+    "attachments": "Adjuntos"
   },
   "groupAdmin": {
     "title": "Admin del grupo",

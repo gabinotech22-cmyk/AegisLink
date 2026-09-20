@@ -1222,7 +1222,8 @@
     "poll": "Sondaggio",
     "sticker": "Sticker",
     "video": "Video",
-    "videoGallery": "Galleria · E2EE"
+    "videoGallery": "Galleria · E2EE",
+    "attachments": "Allegati"
   },
   "groupAdmin": {
     "title": "Amministrazione gruppo",

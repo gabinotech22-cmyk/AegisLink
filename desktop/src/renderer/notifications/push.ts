@@ -18,6 +18,8 @@
  */
 import { logger } from '../utils/logger';
 import { usePreferences } from '../store/preferences';
+import i18n from '../i18n';
+import { previewLabel } from '../utils/messagePreview';
 
 const DEV = import.meta.env.DEV;
 
@@ -81,8 +83,10 @@ export function decideNotification(input: {
     preview: prefs.notifPreview,
     // With preview OFF the main process replaces both lines with generic text;
     // we still send nothing identifying, so a policy slip there leaks nothing.
+    // With preview ON the body is the HUMAN label, never the wire text: a
+    // media wire carries the blob key/nonce/token.
     title: prefs.notifPreview ? who : 'AegisLink',
-    body: prefs.notifPreview ? input.body : '',
+    body: prefs.notifPreview ? previewLabel(input.body, i18n.t) : '',
     silent: !prefs.notifSound,
   };
 }

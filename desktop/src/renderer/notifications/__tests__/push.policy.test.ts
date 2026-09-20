@@ -2,7 +2,8 @@
  * Desktop notification policy (notifications/push.ts decideNotification) —
  * every switch of the Notifications screen, honoured. Pure, no Electron.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+vi.mock('../../i18n', () => ({ default: { t: (_k: string, d?: string) => d ?? _k } }));
 import { decideNotification, matchesKeyword, totalUnreadFrom } from '../push';
 
 const prefs = { notifMaster: true, notifPreview: false, notifSound: true, notifKeywords: ['urgente'] };
@@ -35,7 +36,18 @@ describe('decideNotification', () => {
   it('previews ON → sender (or group · sender) and text; sound off → silent', () => {
     const p = { ...prefs, notifPreview: true, notifSound: false };
     expect(decideNotification({ ...base, prefs: p })).toEqual({ show: true, preview: true, title: 'Alice', body: 'hola', silent: true });
-    expect(decideNotification({ ...base, prefs: p, isGroup: true, groupName: 'Equipo' }).title).toBe('Equipo · Alice');
+    const g = decideNotification({ ...base, prefs: p, isGroup: true, groupName: 'Equipo' });
+    expect(g.show && g.title).toBe('Equipo · Alice');
+  });
+
+  it('previews ON → a media wire becomes its human label, the blob reference never leaves the renderer', () => {
+    const p = { ...prefs, notifPreview: true };
+    const d = decideNotification({ ...base, prefs: p, body: '[image:blob:9f1c:S3VrZXk=:bm9uY2U=:dG9rZW4=]mira' });
+    expect(d.show).toBe(true);
+    if (d.show) {
+      expect(d.body).not.toContain('blob:');
+      expect(d.body).not.toContain('S3VrZXk=');
+    }
   });
 });
 

@@ -5,7 +5,8 @@ import { REMOTE_PUSH_ENABLED } from '../config';
 import { homeRelayBaseUrl } from '../net/homeRelay';
 import { relayFetch } from '../net/relayHttp';
 import type { Identity } from '../crypto/identity';
-import { tAsync } from '../i18n';
+import i18n, { tAsync, resolveActiveLocale } from '../i18n';
+import { previewLabel } from '../utils/messagePreview';
 
 /** Language-neutral marker appended to message notifications. */
 const E2EE_MARK = ' ● E2EE';
@@ -612,31 +613,45 @@ export async function showIncomingNotification(
     if (isMuted && !keywordMatch) return;
 
     // Per-contact "mentions only": suppress unless a keyword/mention matched.
+    // "Mentions only": a keyword, or an actual @mention of our display name.
     const mentionsOnly = prefs.mentionsOnlyChats?.includes(targetChatId) ?? false;
-    if (mentionsOnly && !keywordMatch) return;
+    let mentioned = false;
+    if (mentionsOnly) {
+      try {
+        const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+        const myName = (useIdentity.getState().displayName ?? '').trim().toLowerCase();
+        mentioned = myName.length > 0 && lowerBody.includes(`@${myName}`);
+      } catch { /* identity store unavailable — keywords only */ }
+    }
+    if (mentionsOnly && !keywordMatch && !mentioned) return;
 
     // Avoid displaying alert if the user is already actively looking at the sender's chat
     if (activeChatId === targetChatId) return;
 
-    const showContent = prefs.notifPreview || keywordMatch;
+    // Content policy (audit 2026-09-20): "show content" governs EVERYTHING that
+    // could identify the conversation on the lock screen — sender, group name
+    // and text. A keyword match bypasses mute/master (the user asked to be
+    // alerted) but never the content switch; and the text shown is the human
+    // label (previewLabel), never the wire body — a media message's wire text
+    // carries the blob key/nonce/token, which used to land verbatim in the
+    // notification center (readable by notification-listener apps and kept in
+    // Android's notification history).
+    const showContent = prefs.notifPreview;
     let title = 'AegisLink';
     let notificationBody = '';
 
     if (showContent) {
+      const t = i18n.getFixedT(await resolveActiveLocale());
+      const humanBody = previewLabel(body, t);
       if (isGroup && groupName) {
         title = `AegisLink · ${groupName}`;
-        notificationBody = `${senderName}: ${body}${E2EE_MARK}`;
+        notificationBody = `${senderName}: ${humanBody}${E2EE_MARK}`;
       } else {
         title = `AegisLink · ${senderName}`;
-        notificationBody = `${body}${E2EE_MARK}`;
+        notificationBody = `${humanBody}${E2EE_MARK}`;
       }
     } else {
-      if (isGroup && groupName) {
-        title = `AegisLink · ${groupName}`;
-        notificationBody = (await tAsync('notif.groupNewMessage')) + E2EE_MARK;
-      } else {
-        notificationBody = (await tAsync('notif.newMessage')) + E2EE_MARK;
-      }
+      notificationBody = (await tAsync(isGroup ? 'notif.groupNewMessage' : 'notif.newMessage')) + E2EE_MARK;
     }
 
     await Notifications.scheduleNotificationAsync({
@@ -648,7 +663,9 @@ export async function showIncomingNotification(
         // groupId is REQUIRED for a group tap to open the right screen — without
         // it the tap handler can only see fromAegisId (the sender) and would open
         // a 1:1 chat with whoever sent the group message.
-        data: { fromAegisId: senderAegisId, isGroup, groupId, groupName },
+        // Routing only: the group NAME never rides in the payload (extras are
+        // readable by notification listeners and kept in the OS history).
+        data: { fromAegisId: senderAegisId, isGroup, groupId },
         // Android notification channel
         ...(Platform.OS === 'android' ? { channelId: 'aegislink-messages' } : {}),
       },
@@ -726,7 +743,7 @@ export async function showGroupCallChannelNotification(
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: `AegisLink · ${groupName}`,
+        title: prefs.notifPreview ? `AegisLink · ${groupName}` : 'AegisLink',
         body: await tAsync('notif.groupVoiceActive'),
         sound: prefs.notifSound ? 'call_incoming.mp3' : undefined,
         priority: Notifications.AndroidNotificationPriority.HIGH,
@@ -858,10 +875,22 @@ export async function showMissedCallNotification(
   callId: string,
 ): Promise<void> {
   try {
+    // A missed-call notice is a passive notification like a message: it obeys
+    // the master switch, a muted caller, and the content switch (no caller
+    // name on the lock screen when previews are off — the tap opens the chat).
+    const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
+    const prefs = usePreferences.getState();
+    if (!prefs.notifMaster) return;
+    if (prefs.mutedChats.includes(callerAegisId)) return;
+    try {
+      const { getContact } = require('../db/local') as typeof import('../db/local');
+      const c = await getContact(callerAegisId);
+      if (c?.mutedUntil && c.mutedUntil > Date.now()) return;
+    } catch { /* treat as not muted */ }
     await Notifications.scheduleNotificationAsync({
       identifier: `missed-call-${callId}`,
       content: {
-        title: `AegisLink · ${callerName}`,
+        title: prefs.notifPreview ? `AegisLink · ${callerName}` : 'AegisLink',
         body: await tAsync('notif.missedCall'),
         // Passive: no sound (the ring already played), no action category.
         priority: Notifications.AndroidNotificationPriority.DEFAULT,

@@ -1712,7 +1712,8 @@
     "processing": "ELABORAZIONE…",
     "fromFiles": "Da file",
     "fromFiles2": "DA FILE",
-    "anyType2": "QUALSIASI TIPO"
+    "anyType2": "QUALSIASI TIPO",
+    "attachments": "Allegati"
   },
   "groupAdmin": {
     "title": "Amministrazione gruppo",

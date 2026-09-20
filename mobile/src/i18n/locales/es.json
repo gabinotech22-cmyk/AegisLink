@@ -1240,7 +1240,8 @@
     "poll": "Encuesta",
     "sticker": "Sticker",
     "video": "Vídeo",
-    "videoGallery": "Galería · E2EE"
+    "videoGallery": "Galería · E2EE",
+    "attachments": "Adjuntos"
   },
   "groupAdmin": {
     "title": "Admin del grupo",
