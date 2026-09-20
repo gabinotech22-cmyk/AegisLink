@@ -1787,6 +1787,10 @@
     "deleteGroupForEveryone": "Eliminare il gruppo per tutti? Non è possibile annullare."
   },
   "contactDetail": {
+    "nicknameTitle": "Soprannome",
+    "nicknameNone": "Nessun soprannome · si mostra il nome che ha scelto",
+    "nicknameDesc": "Lo vedi solo tu; non viene mai inviato. Rimuovilo per tornare a vedere «{{name}}».",
+    "nicknameClear": "Rimuovi soprannome",
     "sendMessage": "Invia messaggio",
     "verified": "VERIFICATO",
     "notVerified": "NON VERIFICATO",

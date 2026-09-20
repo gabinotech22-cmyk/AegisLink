@@ -1815,6 +1815,10 @@
     "deleteGroupForEveryone": "¿Eliminar el grupo para todos? Esto no se puede deshacer."
   },
   "contactDetail": {
+    "nicknameTitle": "Apodo",
+    "nicknameNone": "Sin apodo · se muestra el nombre que él eligió",
+    "nicknameDesc": "Solo tú lo ves; no se envía a nadie. Si lo quitas, vuelve a verse «{{name}}».",
+    "nicknameClear": "Quitar apodo",
     "sendMessage": "Enviar mensaje",
     "verified": "VERIFICADO",
     "notVerified": "NO VERIFICADO",

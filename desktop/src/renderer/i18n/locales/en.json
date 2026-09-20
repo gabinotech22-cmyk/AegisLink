@@ -1815,6 +1815,10 @@
     "deleteGroupForEveryone": "Delete group for everyone? This cannot be undone."
   },
   "contactDetail": {
+    "nicknameTitle": "Nickname",
+    "nicknameNone": "No nickname · showing the name they chose",
+    "nicknameDesc": "Only you see it; it is never sent. Clear it to show “{{name}}” again.",
+    "nicknameClear": "Remove nickname",
     "sendMessage": "Send message",
     "verified": "VERIFIED",
     "notVerified": "NOT VERIFIED",

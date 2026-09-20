@@ -242,7 +242,7 @@
     "profilePhoto": "Profile photo",
     "appearanceSection": "APPEARANCE",
     "appIcon": "App icon",
-    "appIconSub": "Dark · Light · Tinted · Work",
+    "appIconSub": "Dark · Light · Tinted",
     "accountSection": "ACCOUNT",
     "identitiesAndKeys": "Identities & keys",
     "linkedDevices": "Linked devices",
@@ -1116,7 +1116,7 @@
     "tinted": "Tinted",
     "tintedDesc": "Monochrome",
     "variantsSection": "VARIANTS",
-    "requiresNative": "Requires native build (EAS Build). The selected icon is saved locally and applied upon app restart.\nAndroid 8+ · iOS 10.3+.",
+    "requiresNative": "Android: the launcher may take a few seconds to refresh the icon. iOS: applies instantly.\nAndroid 8+ · iOS 10.3+.",
     "nativeBuildRequired": "Native build required",
     "easBuildMessage": "Changing the icon requires an APK generated with EAS Build. It is not available in Expo Go.",
     "changeError": "Could not change the icon. Please try again."
@@ -1317,6 +1317,11 @@
     "addAdminBtn": "Add admin as contact"
   },
   "contactDetail": {
+    "nicknameTitle": "Nickname",
+    "nicknameNone": "No nickname · showing the name they chose",
+    "nicknameDesc": "Only you see it; it is never sent. Clear it to show “{{name}}” again.",
+    "nicknameClear": "Remove nickname",
+    "wallpaper": "Chat wallpaper",
     "sendMessage": "Send message",
     "verified": "VERIFIED",
     "notVerified": "NOT VERIFIED",

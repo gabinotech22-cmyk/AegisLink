@@ -242,7 +242,7 @@
     "profilePhoto": "Foto de perfil",
     "appearanceSection": "APARIENCIA",
     "appIcon": "Icono de la app",
-    "appIconSub": "Oscuro · Claro · Teñido · Trabajo",
+    "appIconSub": "Oscuro · Claro · Teñido",
     "accountSection": "CUENTA",
     "identitiesAndKeys": "Identidades y claves",
     "linkedDevices": "Dispositivos vinculados",
@@ -1116,7 +1116,7 @@
     "tinted": "Teñido",
     "tintedDesc": "Monocromático",
     "variantsSection": "VARIANTES",
-    "requiresNative": "Requiere compilación nativa (EAS Build). El icono seleccionado se guarda localmente y se aplica al reiniciar la app.\nAndroid 8+ · iOS 10.3+.",
+    "requiresNative": "Android: el launcher puede tardar unos segundos en actualizar el icono. iOS: se aplica al instante.\nAndroid 8+ · iOS 10.3+.",
     "nativeBuildRequired": "Compilación nativa requerida",
     "easBuildMessage": "Cambiar el icono requiere un APK generado con EAS Build. No está disponible en Expo Go.",
     "changeError": "No se pudo cambiar el icono. Por favor, inténtalo de nuevo."
@@ -1317,6 +1317,11 @@
     "addAdminBtn": "Añadir admin como contacto"
   },
   "contactDetail": {
+    "nicknameTitle": "Apodo",
+    "nicknameNone": "Sin apodo · se muestra el nombre que él eligió",
+    "nicknameDesc": "Solo tú lo ves; no se envía a nadie. Si lo quitas, vuelve a verse «{{name}}».",
+    "nicknameClear": "Quitar apodo",
+    "wallpaper": "Fondo del chat",
     "sendMessage": "Enviar mensaje",
     "verified": "VERIFICADO",
     "notVerified": "NO VERIFICADO",

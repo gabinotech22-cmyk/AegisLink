@@ -10,6 +10,8 @@ import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
 import { useContacts } from '../store/contacts';
+import { fingerprintHex } from '../crypto/fingerprint';
+import { decodeBase64 } from 'tweetnacl-util';
 
 // ---------------------------------------------------------------------------
 // Stub types
@@ -29,6 +31,8 @@ interface StoredContact {
   muted?: boolean;
   mutedUntil?: number | null;
   relayOnion?: string | null;
+  profileName?: string;
+  nickname?: string | null;
 }
 
 interface Props {
@@ -47,24 +51,45 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
   const [fp, setFp] = useState<string[]>([]);
   const [removing, setRemoving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [nicknameEditing, setNicknameEditing] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState('');
 
-  // Live contact state stubs
-  const [muted, setMuted] = useState(contactProp.muted ?? false);
-  const [zeroTrust, setZeroTrustState] = useState(contactProp.zeroTrust ?? false);
-  const [blocked, setBlockedState] = useState(contactProp.blocked ?? false);
+  // Live contact from the store so mute/zero-trust/block/nickname changes show
+  // at once (parity with mobile); the prop is only the initial value.
+  const live = useContacts((s) => s.contacts.find((x) => x.aegisId === contactProp.aegisId));
+  const contact: StoredContact = live ?? contactProp;
 
-  const contact = contactProp; // stub — in real impl wire to store
+  const [muted, setMuted] = useState(contact.muted ?? false);
+  const [zeroTrust, setZeroTrustState] = useState(contact.zeroTrust ?? false);
+  const [blocked, setBlockedState] = useState(contact.blocked ?? false);
+  useEffect(() => {
+    setMuted(contact.muted ?? false);
+    setZeroTrustState(contact.zeroTrust ?? false);
+    setBlockedState(contact.blocked ?? false);
+  }, [contact.muted, contact.zeroTrust, contact.blocked]);
 
   const now = Date.now();
   const effectiveMuted = muted && (contact.mutedUntil === 0 || contact.mutedUntil === null || (contact.mutedUntil ?? 0) > now);
 
   useEffect(() => {
-    // Stub fingerprint — in real impl: fingerprintHex(decodeBase64(contact.publicKeyB64))
-    const seed = contact.publicKeyB64.replace(/[^A-Za-z0-9]/g, '').slice(0, 32).padEnd(32, '0');
-    const chunks: string[] = [];
-    for (let i = 0; i < 8; i++) chunks.push(seed.slice(i * 4, i * 4 + 4).toUpperCase());
-    setFp(chunks);
+    // The real fingerprint (sha256 of the X25519 key, crypto/fingerprint.ts):
+    // it must match what the contact's phone shows or comparing it is pointless.
+    try {
+      setFp(fingerprintHex(decodeBase64(contact.publicKeyB64)));
+    } catch {
+      setFp([]);
+    }
   }, [contact.publicKeyB64]);
+
+  function openNicknameEditor() {
+    setNicknameDraft(contact.nickname?.trim() ?? '');
+    setNicknameEditing(true);
+  }
+  async function saveNickname(value: string | null) {
+    setNicknameEditing(false);
+    await useContacts.getState().setNickname(contact.aegisId, value);
+  }
+  const announcedName = contact.profileName && contact.profileName !== contact.aegisId ? contact.profileName : null;
 
   async function handleMute() {
     const next = !muted;
@@ -126,6 +151,12 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
           <span style={{ fontFamily: isAegisId ? t.fontMono : t.fontDisplay, fontSize: 24, fontWeight: '600', letterSpacing: -0.4, color: t.text, marginTop: 14, textAlign: 'center', display: 'block' }}>
             {contact.name}
           </span>
+          {contact.nickname?.trim() && announcedName && announcedName !== contact.name ? (
+            // Signal-style "~Name": what they call themselves, under our nickname.
+            <span data-testid="contact-profile-name" style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 2, display: 'block' }}>
+              ~{announcedName}
+            </span>
+          ) : null}
           <span style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, letterSpacing: 0.5, marginTop: 4, display: 'block' }}>
             {contact.aegisId} · added {daysSinceAdded}d ago
           </span>
@@ -212,6 +243,45 @@ export function ContactDetailScreen({ contact: contactProp, keyChanged = false, 
         </Section>
 
         <Section t={t} label={i18n.t('contactDetail.thisConversationSection')}>
+          {nicknameEditing ? (
+            <div data-testid="nickname-editor" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 16px', borderBottom: `1px solid ${t.divider}` }}>
+              <span style={{ fontFamily: t.font, fontSize: 14, color: t.text }}>{i18n.t('contactDetail.nicknameTitle')}</span>
+              <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim }}>{i18n.t('contactDetail.nicknameDesc', { name: announcedName ?? contact.aegisId })}</span>
+              <input
+                data-testid="nickname-input"
+                autoFocus
+                maxLength={40}
+                value={nicknameDraft}
+                placeholder={i18n.t('addContact.nicknamePlaceholder')}
+                onChange={(e) => setNicknameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void saveNickname(nicknameDraft.trim() || null);
+                  if (e.key === 'Escape') setNicknameEditing(false);
+                }}
+                style={{ fontFamily: t.font, fontSize: 14, color: t.text, backgroundColor: t.bg, border: `1px solid ${t.border}`, borderRadius: t.radiusS, padding: '10px 12px', outline: 'none' }}
+              />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+                {contact.nickname?.trim() ? (
+                  <button data-testid="nickname-clear" onClick={() => void saveNickname(null)} style={{ marginRight: 'auto', background: 'none', border: 'none', cursor: 'pointer', fontFamily: t.font, fontSize: 13, fontWeight: 600, color: t.danger, padding: '8px 4px' }}>
+                    {i18n.t('contactDetail.nicknameClear')}
+                  </button>
+                ) : null}
+                <button onClick={() => setNicknameEditing(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: t.font, fontSize: 13, fontWeight: 600, color: t.textDim, padding: '8px 10px' }}>
+                  {i18n.t('common.cancel')}
+                </button>
+                <button
+                  data-testid="nickname-save"
+                  disabled={nicknameDraft.trim() === (contact.nickname?.trim() ?? '')}
+                  onClick={() => void saveNickname(nicknameDraft.trim() || null)}
+                  style={{ backgroundColor: t.accent, border: 'none', cursor: 'pointer', fontFamily: t.font, fontSize: 13, fontWeight: 700, color: t.accentInk, padding: '8px 14px', borderRadius: t.radiusS }}
+                >
+                  {i18n.t('common.save')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <Row t={t} icon={<I.Person size={18} color={t.textDim} />} label={i18n.t('contactDetail.nicknameTitle')} sub={contact.nickname?.trim() || i18n.t('contactDetail.nicknameNone')} onPress={openNicknameEditor} />
+          )}
           <Row t={t} icon={<I.Timer size={18} color={t.textDim} />} label={i18n.t('contactDetail.burnMessages')} sub={i18n.t('contactDetail.setATimerFor')} onPress={onEphemeral} />
           <Toggle t={t} label={i18n.t('contactDetail.zeroTrust')} sub={zeroTrust ? i18n.t('contactDetail.blocksSendingIfKey') : i18n.t('contactDetail.trustOnFirstUse')} value={zeroTrust} onChange={handleZeroTrust} />
           <Row t={t} icon={<I.Bell size={18} color={t.textDim} />} label={i18n.t('contactDetail.notificationsLabel')} sub={i18n.t('contactDetail.manageAlertsForThis')} onPress={() => {}} />
