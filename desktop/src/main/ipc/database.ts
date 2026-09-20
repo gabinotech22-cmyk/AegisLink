@@ -784,6 +784,49 @@ export function registerDatabaseHandlers(): void {
     })
   })
 
+  // Search over message text. The body column is encrypted at rest, so SQL
+  // cannot see it: rows are read newest first (deleted / expired / media /
+  // view-once excluded in SQL — `type` also holds wire kinds like
+  // `direct_msg`, so it is an exclusion list), decrypted one by one and
+  // matched here, stopping at `limit` hits or after `scan` rows. Only the
+  // matched rows cross the IPC boundary. Parity: mobile db/messages.ts.
+  ipcMain.handle(
+    'db:search-messages',
+    (event, activeSlot: string, query: string, limit = SEARCH_RESULT_LIMIT, scan = SEARCH_SCAN_LIMIT) => {
+      assertTrustedSender(event)
+      const q = typeof query === 'string' ? query.trim().toLowerCase() : ''
+      if (!q) return []
+      const rows = db
+        .prepare<unknown[], MessageRow>(
+          `SELECT id, chat_id, direction, body, created_at, type, media_uri, reply_to_id, reactions, starred, deleted, pinned, delivery_status, expires_at
+         FROM messages
+         WHERE deleted = 0 AND (expires_at IS NULL OR expires_at > ?)
+           AND (type IS NULL OR type NOT IN ('image', 'video', 'audio', 'view_once'))
+         ORDER BY created_at DESC LIMIT ?`
+        )
+        .all(Date.now(), Math.max(1, Math.min(Number(scan) || SEARCH_SCAN_LIMIT, 50_000)))
+      const out: unknown[] = []
+      const max = Math.max(1, Math.min(Number(limit) || SEARCH_RESULT_LIMIT, 1000))
+      for (const r of rows) {
+        const body = decryptBody(r.body, activeSlot)
+        const text = searchableText(body)
+        if (!text || !text.toLowerCase().includes(q)) continue
+        out.push({
+          id: r.id,
+          chatId: r.chat_id,
+          direction: r.direction,
+          body,
+          createdAt: r.created_at,
+          type: r.type ?? 'text',
+          deleted: r.deleted === 1,
+          expiresAt: r.expires_at ?? null
+        })
+        if (out.length >= max) break
+      }
+      return out
+    }
+  )
+
   ipcMain.handle('db:get-message', (event, activeSlot: string, id: string) => {
     assertTrustedSender(event)
     const r = db
@@ -1161,6 +1204,27 @@ export function closeDatabase(): void {
 /** Effective display name: local nickname → announced name → Aegis ID. */
 function effectiveContactName(r: { aegis_id: string; name: string; nickname: string | null }): string {
   return r.nickname?.trim() || r.name?.trim() || r.aegis_id
+}
+
+export const SEARCH_RESULT_LIMIT = 200
+export const SEARCH_SCAN_LIMIT = 5000
+
+/**
+ * The part of a body that search may match and show: typed text as is, a file
+ * attachment (`[file:<name>:<blob…>]`) by its NAME only, any other wire tag
+ * (media reference, poll, call marker…) → null. A media wire carries the blob
+ * key/nonce/token; a "hit" on it would print that. Parity: mobile
+ * db/messages.ts searchableText.
+ */
+const NON_TEXT_BODY = /^\[(image|video|audio|gif|sticker|viewonce|location|poll|call|join_request|multi)[:\]]/
+export function searchableText(body: string): string | null {
+  if (body.startsWith('[file:')) {
+    const name = body.slice(6).split(':')[0]?.trim()
+    return name || null
+  }
+  if (NON_TEXT_BODY.test(body)) return null
+  const trimmed = body.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 /** contacts.caps (JSON array of short tokens) → string[] | null. */

@@ -7,20 +7,9 @@ import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
 import { TopBar } from '../components/TopBar';
+import { useContacts } from '../store/contacts';
+import type { StoredContact } from '../db/local';
 
-// ---------------------------------------------------------------------------
-// Stub types
-// ---------------------------------------------------------------------------
-
-interface StoredContact {
-  aegisId: string;
-  name: string;
-  publicKeyB64: string;
-  color?: string;
-  avatarImage?: string | null;
-  verified: boolean;
-  addedAt: number;
-}
 
 interface Props {
   onBack: () => void;
@@ -32,7 +21,9 @@ interface Props {
 export function ContactsScreen({ onBack, onAddContact, onOpenContact, onChat }: Props) {
   useTranslation(); // re-render on language change
   const { t } = useTheme();
-  const contacts: StoredContact[] = []; // stub
+  // Live store (parity with mobile). Blocked contacts stay listed so they can
+  // be unblocked from their card.
+  const contacts = useContacts((st) => st.contacts);
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {

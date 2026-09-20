@@ -464,6 +464,15 @@ function Shell() {
     return () => clearInterval(interval);
   }, []);
 
+  // Daily summary while the app is open: background fetch is the OS's call
+  // (rarely on iOS), so the foreground checks once a minute too. The task
+  // itself is idempotent per day (dailySummaryCore) — no double digests.
+  useEffect(() => {
+    const { runDailySummary } = require('./src/notifications/dailySummaryTask') as typeof import('./src/notifications/dailySummaryTask');
+    const interval = setInterval(() => { void runDailySummary(); }, 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Global Scheduled Messages Background Runner (Gap 4)
   useEffect(() => {
     if (!identity || status !== 'ready') return;

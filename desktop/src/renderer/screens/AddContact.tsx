@@ -6,6 +6,11 @@ import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { PrimaryButton } from '../components/Button';
 import { useContacts } from '../store/contacts';
+import { useIdentity } from '../store/identity';
+import { parseIdentityQR } from '../crypto/qr';
+import { FEDERATION } from '../config';
+import { isOfficialRelay } from '../net/officialRelay';
+import { decodeQrFromImage } from '../utils/qrImage';
 import type { StoredContact } from '../db/local';
 
 interface Props {
@@ -32,6 +37,52 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
       if (text) setAegisId(text.trim());
     } catch {
       setErrorMsg(i18n.t('addContact.clipboardAccessDeniedPaste'));
+    }
+  }
+
+  // "Upload a screenshot of a QR": decode locally, then add through the QR
+  // path (key from the QR = TOFU-verified; a v2 link keeps relay + mailbox
+  // root), with the nickname typed above.
+  async function handleQrImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const decoded = await decodeQrFromImage(file).catch(() => null);
+      const parsed = decoded ? parseIdentityQR(decoded) : null;
+      if (!parsed) {
+        setErrorMsg(i18n.t('scanQR.noQrInImage'));
+        return;
+      }
+      if (!FEDERATION && !isOfficialRelay(parsed.relay)) {
+        setErrorMsg(i18n.t('addContact.relayUnsupportedDesc'));
+        return;
+      }
+      const store = useContacts.getState();
+      const outcome = await store.addFromQR(parsed.aegisId, parsed.publicKeyB64, name.trim() || undefined, parsed.relay, parsed.mailboxRootB64);
+      if (outcome.kind === 'mitm_detected') {
+        const accept = window.confirm(
+          i18n.t('scanQR.keyChangedForThis', { v0: outcome.oldKey.slice(-8), v1: outcome.newKey.slice(-8) })
+        );
+        if (!accept) return;
+        const updated = await store.confirmKeyChange(outcome.contact.aegisId, outcome.newKey);
+        if (updated) onAdded(updated);
+        return;
+      }
+      const identity = useIdentity.getState().identity;
+      if (identity) {
+        try {
+          const { sendProfileTo } = await import('../socket/client');
+          void sendProfileTo(outcome.contact, identity);
+        } catch { /* best effort */ }
+      }
+      onAdded(outcome.contact);
+    } catch (e) {
+      setErrorMsg((e as Error).message);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -93,7 +144,7 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
 
         <p style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, marginTop: 22, lineHeight: '19px', marginBottom: 0 }}>{i18n.t('addContact.yourContactSAegislink')}</p>
 
-        {/* Scan QR stub */}
+        {/* QR from an image file (no camera on desktop) */}
         <div style={{ marginTop: 16, padding: 14, backgroundColor: t.surface2, borderRadius: t.radius, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <I.QR size={20} color={t.textDim} />
           <div style={{ flex: 1 }}>
@@ -101,7 +152,7 @@ export function AddContactScreen({ onCancel, onAdded }: Props) {
             <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, display: 'block', marginTop: 2 }}>{i18n.t('addContact.uploadAScreenshotOf')}</span>
           </div>
           <label style={{ cursor: 'pointer' }}>
-            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={() => {/* QR decode stub */}} />
+            <input data-testid="qr-image-input" type="file" accept="image/*" style={{ display: 'none' }} disabled={submitting} onChange={handleQrImage} />
             <span style={{ fontFamily: t.fontMono, fontSize: 10, color: t.accent, letterSpacing: 0.5 }}>{i18n.t('addContact.upload')}</span>
           </label>
         </div>

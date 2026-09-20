@@ -2023,6 +2023,7 @@ async function decryptAndAppendLocked(
           msgBody,
           true,
           trustedGroupName,
+          groupId,
         );
 
         return true;

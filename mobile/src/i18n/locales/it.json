@@ -14,8 +14,10 @@
     "incomingVoiceCall": "Chiamata vocale E2EE in arrivo",
     "missedCall": "Chiamata persa",
     "dailySummaryTitle": "Riepilogo giornaliero",
-    "dailySummaryBody_one": "Hai ricevuto {{count}} messaggio oggi da {{names}}.",
-    "dailySummaryBody_other": "Hai ricevuto {{count}} messaggi oggi da {{names}}."
+    "dailySummaryBody_one": "Hai {{count}} messaggio non letto.",
+    "dailySummaryBody_other": "Hai {{count}} messaggi non letti.",
+    "dailySummaryNamesBody_one": "Hai {{count}} messaggio non letto da {{names}}.",
+    "dailySummaryNamesBody_other": "Hai {{count}} messaggi non letti da {{names}}."
   },
   "common": {
     "cancel": "Annulla",
@@ -115,6 +117,7 @@
     "unpin": "Rimuovi fissaggio"
   },
   "chat": {
+    "emptyState": "Ancora nessun messaggio. Tutto è cifrato end-to-end.",
     "previewShowImage": "Mostra immagine",
     "previewImageHint": "Viene caricata dal sito del mittente e gli rivela il tuo IP",
     "gifProviderNotice": "Ricerca e anteprime GIF vengono caricate dal provider (vede il tuo IP). Le GIF inviate sono cifrate end-to-end.",
@@ -1220,7 +1223,8 @@
     "poll": "Sondaggio",
     "sticker": "Sticker",
     "video": "Video",
-    "videoGallery": "Galleria · E2EE"
+    "videoGallery": "Galleria · E2EE",
+    "attachments": "Allegati"
   },
   "groupAdmin": {
     "title": "Amministrazione gruppo",
