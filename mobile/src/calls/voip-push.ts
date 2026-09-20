@@ -135,3 +135,15 @@ export async function flushVoipToken(): Promise<void> {
     logger.warn('[voip] flush failed', e);
   }
 }
+
+/** The VoIP token this device last registered, for `voip:unregister` on a profile switch. */
+export async function getVoipTokenForUnregister(): Promise<string | null> {
+  if (!VOIP_ENABLED) return null;
+  try {
+    const sent = await SecureStore.getItemAsync(VOIP_TOKEN_SENT_KEY);
+    if (sent) await SecureStore.deleteItemAsync(VOIP_TOKEN_SENT_KEY).catch(() => {});
+    return sent || null;
+  } catch {
+    return null;
+  }
+}
