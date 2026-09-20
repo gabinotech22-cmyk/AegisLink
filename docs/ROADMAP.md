@@ -122,6 +122,10 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
 - [ ] **Paridad mobile↔desktop** continua: mantener los parity-tests de los dos `socket/client.ts` como
       lever (no refactor cosmético — decisión M4).
 - [ ] **F-2 — UnifiedPush**: transporte wake-up sin Google/Apple (ntfy/Gotify), FCM/APNs como fallback.
+- [x] **Badge del icono = no leídos reales** — 1.0.7: el contador del icono se recalcula en cada
+      cambio de contadores (`notifications/push.ts` `syncAppBadge`: al leer un chat, al recibir, al
+      cargar, al volver a primer plano, al cambiar el ajuste); antes solo se incrementaba al llegar
+      una notificación y nunca bajaba. Test `appBadge.test.ts`.
 - [x] **Sincronizar a mano ("tirar para refrescar")** — 1.0.7: en la lista de chats, chat 1:1, grupo
       y feed de canal, tirar hacia abajo dispara lo mismo que volver del segundo plano (vaciar el
       buzón por Tor, empujar el outbox, reconectar; el feed además se vuelve a pedir). Es la
