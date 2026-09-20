@@ -24,6 +24,12 @@ import { getOwnMailboxRootB64, setContactMailboxRoot, getContactCurrentMailboxId
 import { OWN_CAPS, sanitizeCaps } from '../net/caps';
 import { avatarFieldsFor, receivedAvatar, type PhotoVis } from '../utils/photoVisibility';
 
+/** Contact record for a recipient (list lookup; test doubles of the store may not expose `get`). */
+function contactRecord(aegisId: string): { pending?: boolean; blocked?: boolean } | null {
+  const list = useContacts.getState().contacts as { aegisId: string; pending?: boolean; blocked?: boolean }[] | undefined;
+  return list?.find((c) => c.aegisId === aegisId) ?? null;
+}
+
 /** preferences.photoVis at send time ("who sees my photo"). */
 async function photoVisNow(): Promise<PhotoVis> {
   const { usePreferences } = await import('../store/preferences');
@@ -2879,7 +2885,7 @@ export async function sendProfileTo(
       type: 'profile_update',
       senderName,
       senderColor,
-      ...avatarFieldsFor(await photoVisNow(), useContacts.getState().get(contact.aegisId) ?? null, senderImage),
+      ...avatarFieldsFor(await photoVisNow(), contactRecord(contact.aegisId), senderImage),
       senderStatus,
       ...(await ownDeliveryTokenField()),
       ...(await ownMailboxRootField()),
