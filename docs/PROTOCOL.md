@@ -854,6 +854,22 @@ socket and no request, never a clearnet attempt and never the official relay
 only the base URL changes. `previous` records the old home during a
 migration's grace window (F5b).
 
+**Profile photo (`senderImage`) and "who sees my photo".** The photo rides
+inside E2EE payloads only (`profile_update`, the first-contact hand-off, the
+first message per contact per session, group fan-out), never as a relay-visible
+field. Whether it is included is decided per recipient by
+`utils/photoVisibility.ts` (byte-identical on both platforms) from the
+`photoVis` preference: `all` → everyone; `contacts` → only recipients in the
+sender's own list that are accepted (not pending) and not blocked — a group
+member materialized just to reach the group is *not* a contact; `none` →
+nobody. Wire semantics: `senderImage: <data URI>` = set; `senderImage: null`
+= **no change** (the 1:1 paths repeat the photo only on the first message per
+session); `senderImageCleared: true` = **remove the photo you have of me** —
+sent when the sender removed their photo or the recipient is no longer allowed
+to see it. Changing `photoVis` re-announces the profile (it is part of the
+broadcast fingerprint). Older clients ignore `senderImageCleared` and keep the
+old photo until they update.
+
 **Changing home (F5b).** Every profile payload (`profile_update`, the profile
 hand-off on first contact) carries `mailboxRelay`: the onion of the sender's
 home relay, or `null` for the official one. A recipient honours only a valid

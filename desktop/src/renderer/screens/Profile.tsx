@@ -61,7 +61,19 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
   const lastSeen = usePreferences((s) => s.lastSeenVisible);
   const typing = usePreferences((s) => s.typingVisible);
   const setPref = usePreferences((s) => s.set);
-  function setPhotoVis(v: 'all' | 'contacts' | 'none') { void setPref('photoVis', v); }
+  // Changing "who sees my photo" re-announces the profile: contacts that lose
+  // access get an explicit clear, contacts that gain it get the photo.
+  function setPhotoVis(v: 'all' | 'contacts' | 'none') {
+    void (async () => {
+      await setPref('photoVis', v);
+      const id = useIdentity.getState().identity;
+      if (!id) return;
+      try {
+        const { broadcastProfileUpdate } = await import('../socket/client');
+        await broadcastProfileUpdate(id);
+      } catch { /* offline: the reconnect broadcast picks up the new fingerprint */ }
+    })();
+  }
   function setLastSeen(v: boolean) { void setPref('lastSeenVisible', v); }
   function setTyping(v: boolean) { void setPref('typingVisible', v); }
 
