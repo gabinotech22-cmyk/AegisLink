@@ -34,6 +34,7 @@ import { NotificationsScreen } from './src/screens/Notifications';
 import { BackupScreen } from './src/screens/Backup';
 import { DevicesScreen } from './src/screens/Devices';
 import { RelaySettingsScreen } from './src/screens/RelaySettings';
+import { BlockedContactsScreen } from './src/screens/BlockedContacts';
 import { LockScreen } from './src/screens/Lock';
 import { UpdateRequiredScreen } from './src/screens/UpdateRequired';
 import { useAppVersion, isUpdateRequired } from './src/store/appVersion';
@@ -143,6 +144,7 @@ type PushRoute =
   | { name: 'backup' }
   | { name: 'devices' }
   | { name: 'relay' }
+  | { name: 'blocked' }
   | { name: 'lockConfig' }
   | { name: 'lock' }
   | { name: 'panic' }
@@ -1533,6 +1535,8 @@ function Shell() {
         return <DevicesScreen onBack={pop} />;
       case 'relay':
         return <RelaySettingsScreen onBack={pop} />;
+      case 'blocked':
+        return <BlockedContactsScreen onBack={pop} />;
       case 'lockConfig':
         return <LockConfigScreen onBack={pop} onLockTest={() => push({ name: 'lock' })} onLockSettings={() => push({ name: 'lockSettings' })} />;
       case 'lockSettings':

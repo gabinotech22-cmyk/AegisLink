@@ -287,7 +287,18 @@
     "shareMyId": "Condividi il mio ID",
     "shareMyIdSub": "Condividi il tuo contatto AegisLink"
   },
+  "blocked": {
+    "title": "Contatti bloccati",
+    "intro": "Un contatto bloccato non può scriverti né chiamarti, e non lo sa. L'elenco vive solo su questo dispositivo.",
+    "emptyTitle": "Nessun bloccato",
+    "emptyDesc": "Blocca un contatto dalla sua scheda: comparirà qui per sbloccarlo quando vuoi.",
+    "countSub_one": "{{count}} contatto",
+    "countSub_other": "{{count}} contatti",
+    "unblockTitle": "Sbloccare {{name}}?",
+    "unblockDesc": "Potrà di nuovo scriverti e chiamarti."
+  },
   "privacy": {
+    "contactsSection": "CONTATTI",
     "title": "Privacy",
     "appearanceSection": "ASPETTO",
     "dataSharingSection": "CONDIVISIONE DATI",

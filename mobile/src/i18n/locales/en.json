@@ -287,7 +287,18 @@
     "shareMyId": "Share my ID",
     "shareMyIdSub": "Share your AegisLink contact"
   },
+  "blocked": {
+    "title": "Blocked contacts",
+    "intro": "A blocked contact cannot message or call you, and is not told. The list lives only on this device.",
+    "emptyTitle": "Nobody blocked",
+    "emptyDesc": "Block a contact from their card: they will show up here so you can unblock them whenever you want.",
+    "countSub_one": "{{count}} contact",
+    "countSub_other": "{{count}} contacts",
+    "unblockTitle": "Unblock {{name}}?",
+    "unblockDesc": "They will be able to message and call you again."
+  },
   "privacy": {
+    "contactsSection": "CONTACTS",
     "title": "Privacy",
     "appearanceSection": "APPEARANCE",
     "dataSharingSection": "DATA SHARING",
