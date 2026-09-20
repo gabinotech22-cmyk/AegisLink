@@ -401,6 +401,52 @@ describe('federation F3b — first contact across relays', () => {
     expect(mockFakeSocket.emit.mock.calls.map((c) => c[0])).not.toContain('envelope');
   });
 
+  it('receiver: a bootstrap from a contact we ALREADY hold without a signing key pins the TOFU key (bound to the pinned identity key) and keeps the root', async () => {
+    const me = buildIdentity();
+    const alice = buildIdentity();
+    client.connect(me);
+    bringOnline();
+    await flush();
+    mockIdentityState.identity = me;
+    // Added from her link before she ever wrote: identity key known, no signing key.
+    mockContactsState.contacts = [{ aegisId: alice.aegisId, publicKeyB64: alice.publicKeyB64, signingPublicKeyB64: '', relayOnion: ONION }];
+    const { wire, root } = strangerBootstrapWire(alice, me, 'ya nos conocíamos');
+
+    mockFakeSocket.emit.mockClear();
+    await mockFakeSocket.handlers.get('envelope:v2')!({ id: 'env-fc-known', to: me.aegisId, ciphertext: wire.ciphertext, nonce: wire.nonce, epk: wire.epk, createdAt: Date.now() });
+    await settle();
+
+    // No second contact row; the existing one now carries her signing key.
+    expect(mockContactsState.contacts).toHaveLength(1);
+    expect(mockContactsState.contacts[0].signingPublicKeyB64).toBe(alice.signingPublicKeyB64);
+    expect(mockContactsState.contacts[0].pending).toBeUndefined(); // not a message request: we added her
+    expect(mockSaveContact).toHaveBeenCalledWith(expect.objectContaining({ aegisId: alice.aegisId, signingPublicKeyB64: alice.signingPublicKeyB64 }));
+    expect(mockSetContactMailboxRoot).toHaveBeenCalledWith(alice.aegisId, root);
+    expect(mockAppend).toHaveBeenCalledTimes(1);
+    expect(mockFakeSocket.emit).toHaveBeenCalledWith('envelope:ack', { id: 'env-fc-known' });
+  });
+
+  it('receiver: a bootstrap from a known contact whose fc identity key differs from the one we pinned is dropped', async () => {
+    const me = buildIdentity();
+    const alice = buildIdentity();
+    const impostorKey = nacl.box.keyPair();
+    client.connect(me);
+    bringOnline();
+    await flush();
+    mockIdentityState.identity = me;
+    mockContactsState.contacts = [{ aegisId: alice.aegisId, publicKeyB64: encodeBase64(impostorKey.publicKey), signingPublicKeyB64: '', relayOnion: ONION }];
+    const { wire } = strangerBootstrapWire(alice, me, 'x');
+
+    mockFakeSocket.emit.mockClear();
+    await mockFakeSocket.handlers.get('envelope:v2')!({ id: 'env-fc-mismatch', to: me.aegisId, ciphertext: wire.ciphertext, nonce: wire.nonce, epk: wire.epk, createdAt: Date.now() });
+    await settle();
+
+    expect(mockContactsState.contacts[0].signingPublicKeyB64).toBe('');
+    expect(mockAppend).not.toHaveBeenCalled();
+    // Dropped for good (acked so the relay stops re-offering it), never persisted.
+    expect(mockFakeSocket.emit).toHaveBeenCalledWith('envelope:ack', { id: 'env-fc-mismatch' });
+  });
+
   it('receiver: a bootstrap whose identity key does not match the claimed id is dropped, no contact created', async () => {
     const me = buildIdentity();
     const alice = buildIdentity();

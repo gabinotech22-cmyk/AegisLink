@@ -1,12 +1,19 @@
 /**
- * Federation F5b — `profile_update.mailboxRelay`: how contacts learn where our
- * mailbox lives after a relay migration (docs/FEDERATION-DESIGN.md D4).
- *   - receive: a valid v3 onion (or explicit null = official) updates the
- *     contact's relay; a malformed value never does; the field is authenticated
- *     by the sealed sender + MAC like every other profile field;
- *   - send: every profile payload carries `mailboxRelay` (our home, null =
- *     official), and a forced broadcast reaches a foreign contact through THEIR
- *     relay and a local one on the home socket.
+ * Sealed transport for contacts on OUR relay (FEDERATION-DESIGN D6 + Fase 6
+ * client side), gated by announced capabilities (net/caps.ts):
+ *
+ *   - calls: a local contact that announced `sealed-calls` gets the same
+ *     transient sealed `call_signal` a foreign one gets — through OUR mailbox
+ *     socket, `wakeHint: 'call'` on invites — and the relay never sees a
+ *     `call:*` event with `to`. Without the cap, or with the mailbox down, the
+ *     relay-visible event goes out exactly as before (a call always rings).
+ *   - messages: holding a local contact's mailbox root (with our mailbox up)
+ *     means sealed v2 — first contact included (`fc` bootstrap) — and a
+ *     `queued` mailbox ack is terminal because a tokenless v2 has no aegisId
+ *     transport to fall through to. Without a root: v1 as before.
+ *
+ * Harness mirrors client.callSignal.test.ts with MAILBOX_ENABLED on and the
+ * mailbox socket mocked.
  */
 
 import nacl from 'tweetnacl';
@@ -66,11 +73,9 @@ jest.mock('../../api', () => ({
   ApiError: class ApiError extends Error {},
 }));
 
-const mockUpdateContactRelay = jest.fn(async (..._a: unknown[]) => undefined);
-const mockUpdateContactCaps = jest.fn(async (..._a: unknown[]) => undefined);
 type MockContact = {
   aegisId: string; publicKeyB64: string; signingPublicKeyB64: string; blocked?: boolean;
-  relayOnion?: string | null; pending?: boolean; name?: string; verified?: boolean;
+  relayOnion?: string | null; pending?: boolean; name?: string; verified?: boolean; caps?: string[] | null;
 };
 const mockContactsState: { contacts: MockContact[] } = { contacts: [] };
 jest.mock('../../store/contacts', () => ({
@@ -81,8 +86,6 @@ jest.mock('../../store/contacts', () => ({
       loading: false,
       addByAegisId: jest.fn(async () => null),
       updateContactProfile: jest.fn(async () => undefined),
-      updateContactRelay: (...a: unknown[]) => mockUpdateContactRelay(...a),
-      updateContactCaps: (...a: unknown[]) => mockUpdateContactCaps(...a),
     }),
     setState: (updater: unknown) => {
       const next = typeof updater === 'function'
@@ -139,7 +142,7 @@ jest.mock('expo-secure-store', () => ({
 }));
 jest.mock('expo-crypto', () => ({ __esModule: true, randomUUID: () => '00000000-0000-0000-0000-000000000000' }));
 // FEDERATION on: the receiver accepts a first-contact bootstrap from a stranger.
-jest.mock('../../config', () => ({ __esModule: true, SERVER_URL: 'http://localhost', SEALED_TRANSPORT_VERSION: 'v2', MAILBOX_ENABLED: false, ONION_URL: null, FEDERATION: true }));
+jest.mock('../../config', () => ({ __esModule: true, SERVER_URL: 'http://localhost', SEALED_TRANSPORT_VERSION: 'v2', MAILBOX_ENABLED: true, ONION_URL: null, FEDERATION: true }));
 jest.mock('../../crypto/deliveryToken', () => ({
   __esModule: true,
   getContactDeliveryToken: jest.fn(async () => null), // no token yet: a stranger
@@ -160,11 +163,25 @@ jest.mock('../../net/relayPool', () => ({
   closeForeignRelays: jest.fn(),
 }));
 const mockSetContactMailboxRoot = jest.fn(async (..._a: unknown[]) => undefined);
+/** Which local contacts we hold a mailbox root for (sealedLocal precondition). */
+const mockRoots = new Set<string>();
 jest.mock('../../crypto/mailboxStore', () => ({
   __esModule: true,
   getOwnMailboxRootB64: jest.fn(async () => MY_ROOT),
   setContactMailboxRoot: (...a: unknown[]) => mockSetContactMailboxRoot(...a),
-  getContactCurrentMailboxId: jest.fn(async () => 'their-mailbox-id'),
+  getContactMailboxRoot: jest.fn(async (id: string) => (mockRoots.has(id) ? new Uint8Array(32) : null)),
+  getContactCurrentMailboxId: jest.fn(async (id: string) => (mockRoots.has(id) ? `mbx-${id.slice(0, 6)}` : null)),
+}));
+const mockMailboxAuthed = { value: true };
+const mockSendViaMailbox = jest.fn(async (..._a: unknown[]) => ({ ok: true, queued: true } as { ok: boolean; queued?: boolean; delivered?: boolean }));
+jest.mock('../mailboxSocket', () => ({
+  __esModule: true,
+  isMailboxAuthed: () => mockMailboxAuthed.value,
+  sendViaMailbox: (...a: unknown[]) => mockSendViaMailbox(...a),
+  mailboxAckConfirmsDelivery: (ack: { ok?: boolean; delivered?: boolean } | null) => !!ack && ack.ok === true && ack.delivered === true,
+  connectMailboxSocket: jest.fn(),
+  disconnectMailboxSocket: jest.fn(),
+  fetchMailboxOverTor: jest.fn(async () => 0),
 }));
 jest.mock('../../crypto/channelKeyStore', () => ({
   __esModule: true,
@@ -290,6 +307,7 @@ function establishSyncedSession(peer: Identity): RatchetState {
   return sender;
 }
 
+/** Outgoing: `me` already holds an established session with `peer`. */
 function establishOutgoingSession(peer: Identity): void {
   const spk = nacl.box.keyPair();
   const sender = initRatchet(nacl.randomBytes(32), spk.publicKey, true);
@@ -298,102 +316,206 @@ function establishOutgoingSession(peer: Identity): void {
   persistSession(peer.aegisId, sender);
 }
 
-const MINE = 'm'.repeat(56) + '.onion';
+type OnSocket = { on: (e: string, cb: (...a: unknown[]) => void) => unknown };
 
-describe('federation F5b — profile_update.mailboxRelay', () => {
+describe('sealed transport to contacts on our relay (caps-gated)', () => {
   let client: typeof import('../client');
+  let router: typeof import('../callSignalRouter');
 
   beforeEach(() => {
     jest.resetModules();
     mockRatchetSessions.clear();
+    mockSpkSecrets.clear();
+    mockRoots.clear();
+    mockMailboxAuthed.value = true;
     mockContactsState.contacts = [];
     mockIdentityState.identity = null;
     mockAppend.mockClear();
-    mockUpdateContactRelay.mockClear();
-    mockUpdateContactCaps.mockClear();
+    mockSaveContact.mockClear();
+    mockEnqueueOutboxJob.mockClear();
+    mockSendViaMailbox.mockClear();
     mockSendViaForeignRelay.mockClear();
     mockForeignRelayHttp.mockReset();
     client = require('../client') as typeof import('../client');
+    router = require('../callSignalRouter') as typeof import('../callSignalRouter');
   });
 
-  afterEach(() => { client.disconnect(); });
+  afterEach(() => { router.clearCallSignalHandlers(); client.disconnect(); });
 
-  async function receiveProfile(me: Identity, peer: Identity, senderState: RatchetState, extra: Record<string, unknown>, id: string) {
-    const payload = JSON.stringify({ type: 'profile_update', senderName: 'Peer', senderColor: '#000', senderStatus: '', senderImage: null, ...extra });
-    const { envelope, newState } = encryptMessage(payload, peer.aegisId, me.publicKey, peer.secretKey, senderState);
-    await mockFakeSocket.handlers.get('envelope')!({ id, from: peer.aegisId, to: me.aegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 });
-    await settle();
-    return newState;
+  function online(me: Identity) {
+    client.connect(me);
+    bringOnline();
+    mockIdentityState.identity = me;
   }
 
-  it('receive: a valid onion moves the contact, null brings it back to official, garbage is ignored', async () => {
+  it('calls: local peer with `sealed-calls` + reachable mailbox → sealed call_signal via our mailbox, wakeHint on invite, never a call:* event', async () => {
     const me = buildIdentity();
     const peer = buildIdentity();
-    client.connect(me);
-    bringOnline();
+    online(me);
     await flush();
-    mockContactsState.contacts = [{ aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64 }];
-    let st = establishSyncedSession(peer);
-
-    st = await receiveProfile(me, peer, st, { mailboxRelay: MINE.toUpperCase() }, 'p1');
-    expect(mockUpdateContactRelay).toHaveBeenLastCalledWith(peer.aegisId, MINE); // normalised
-
-    st = await receiveProfile(me, peer, st, { mailboxRelay: 'evil.example.com' }, 'p2');
-    expect(mockUpdateContactRelay).toHaveBeenCalledTimes(1); // ignored
-
-    st = await receiveProfile(me, peer, st, { mailboxRelay: null }, 'p3');
-    expect(mockUpdateContactRelay).toHaveBeenLastCalledWith(peer.aegisId, null);
-
-    await receiveProfile(me, peer, st, {}, 'p4'); // no field → untouched
-    expect(mockUpdateContactRelay).toHaveBeenCalledTimes(2);
-    expect(mockAppend).not.toHaveBeenCalled(); // profile updates are never chat rows
-  });
-
-  it('receive: `caps` is sanitized and pinned; garbage or a missing field leaves it alone', async () => {
-    const me = buildIdentity();
-    const peer = buildIdentity();
-    client.connect(me);
-    bringOnline();
-    await flush();
-    mockContactsState.contacts = [{ aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64 }];
-    let st = establishSyncedSession(peer);
-
-    st = await receiveProfile(me, peer, st, { caps: ['sealed-calls', 'Sealed-Calls', 42, 'x'.repeat(40), 'future-cap', 'sealed-calls'] }, 'c1');
-    expect(mockUpdateContactCaps).toHaveBeenLastCalledWith(peer.aegisId, ['sealed-calls', 'future-cap']);
-
-    st = await receiveProfile(me, peer, st, { caps: 'sealed-calls' }, 'c2'); // not an array
-    expect(mockUpdateContactCaps).toHaveBeenCalledTimes(1);
-
-    await receiveProfile(me, peer, st, {}, 'c3'); // pre-caps peer
-    expect(mockUpdateContactCaps).toHaveBeenCalledTimes(1);
-  });
-
-  it('send: a forced broadcast carries mailboxRelay to every contact — local on the home socket, foreign through THEIR relay', async () => {
-    const me = buildIdentity();
-    const local = buildIdentity();
-    const foreign = buildIdentity();
-    client.connect(me);
-    bringOnline();
-    await flush();
-    mockIdentityState.identity = me;
     mockContactsState.contacts = [
-      { aegisId: local.aegisId, publicKeyB64: local.publicKeyB64, signingPublicKeyB64: local.signingPublicKeyB64 },
-      { aegisId: foreign.aegisId, publicKeyB64: foreign.publicKeyB64, signingPublicKeyB64: foreign.signingPublicKeyB64, relayOnion: ONION },
+      { aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64, caps: ['sealed-calls'] },
     ];
-    establishOutgoingSession(local);
-    establishOutgoingSession(foreign);
+    mockRoots.add(peer.aegisId);
+    establishOutgoingSession(peer);
     mockFakeSocket.emit.mockClear();
 
-    await client.broadcastProfileUpdate(me, { force: true });
+    expect(router.routeCallSignal(mockFakeSocket, 'call:invite:v2', peer.aegisId, { callId: 'c1', media: 'audio', ciphertext: 'x', nonce: 'y', epk: 'z' })).toBe(true);
+    expect(router.routeCallSignal(mockFakeSocket, 'call:ice:v2', peer.aegisId, { callId: 'c1', ciphertext: 'i', nonce: 'n' })).toBe(true);
     await settle();
 
-    const envelopes = mockFakeSocket.emit.mock.calls.filter((c) => c[0] === 'envelope');
-    expect(envelopes).toHaveLength(1);
-    expect((envelopes[0][1] as { to: string }).to).toBe(local.aegisId);
-    expect(mockSendViaForeignRelay).toHaveBeenCalledTimes(1);
-    expect((mockSendViaForeignRelay.mock.calls[0] as unknown as [{ onion: string }, { to: string }])[0].onion).toBe(ONION);
-    expect((mockSendViaForeignRelay.mock.calls[0] as unknown as [{ onion: string }, { to: string }])[1].to).toBe('their-mailbox-id');
-    // Nothing about the foreign contact leaves on the home socket.
-    expect(JSON.stringify(mockFakeSocket.emit.mock.calls)).not.toContain(foreign.aegisId);
+    const events = mockFakeSocket.emit.mock.calls.map((c) => c[0] as string);
+    expect(events.filter((e) => e.startsWith('call:'))).toEqual([]);
+    expect(events).not.toContain('envelope');
+    expect(events).not.toContain('envelope:v2');
+    expect(mockSendViaMailbox).toHaveBeenCalledTimes(2);
+    const [invite, ice] = mockSendViaMailbox.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    expect(invite.to).toBe(`mbx-${peer.aegisId.slice(0, 6)}`);
+    expect(invite.wakeHint).toBe('call');
+    expect(ice.wakeHint).toBeUndefined();
+    expect(JSON.stringify(invite)).not.toContain(me.aegisId);
+    expect(mockEnqueueOutboxJob).not.toHaveBeenCalled(); // transient
+  });
+
+  it('calls: no cap → the relay-visible event as before; cap but mailbox down → same legacy event (a call always rings)', async () => {
+    const me = buildIdentity();
+    const legacy = buildIdentity();
+    const capable = buildIdentity();
+    online(me);
+    await flush();
+    mockContactsState.contacts = [
+      { aegisId: legacy.aegisId, publicKeyB64: legacy.publicKeyB64, signingPublicKeyB64: legacy.signingPublicKeyB64 },
+      { aegisId: capable.aegisId, publicKeyB64: capable.publicKeyB64, signingPublicKeyB64: capable.signingPublicKeyB64, caps: ['sealed-calls'] },
+    ];
+    mockRoots.add(capable.aegisId);
+    mockFakeSocket.emit.mockClear();
+
+    router.routeCallSignal(mockFakeSocket, 'call:invite:v2', legacy.aegisId, { callId: 'c2', ciphertext: 'x', nonce: 'y' });
+    await settle();
+    expect(mockFakeSocket.emit).toHaveBeenCalledWith('call:invite:v2', { callId: 'c2', ciphertext: 'x', nonce: 'y', to: legacy.aegisId });
+
+    mockFakeSocket.emit.mockClear();
+    mockMailboxAuthed.value = false;
+    router.routeCallSignal(mockFakeSocket, 'call:invite:v2', capable.aegisId, { callId: 'c3', ciphertext: 'x', nonce: 'y' });
+    await settle();
+    expect(mockFakeSocket.emit).toHaveBeenCalledWith('call:invite:v2', { callId: 'c3', ciphertext: 'x', nonce: 'y', to: capable.aegisId });
+    expect(mockSendViaMailbox).not.toHaveBeenCalled();
+  });
+
+  it('calls: fan-out items — capable local member gets its own sealed copy, the rest stay in one emit; mailbox down → its item in fan-out shape', async () => {
+    const me = buildIdentity();
+    const a = buildIdentity();
+    const b = buildIdentity();
+    online(me);
+    await flush();
+    mockContactsState.contacts = [
+      { aegisId: a.aegisId, publicKeyB64: a.publicKeyB64, signingPublicKeyB64: a.signingPublicKeyB64, caps: ['sealed-calls'] },
+      { aegisId: b.aegisId, publicKeyB64: b.publicKeyB64, signingPublicKeyB64: b.signingPublicKeyB64 },
+    ];
+    mockRoots.add(a.aegisId);
+    establishOutgoingSession(a);
+    mockFakeSocket.emit.mockClear();
+
+    router.routeCallSignalItems(mockFakeSocket, 'group_call:channel', { callId: 'g1', groupId: 'grp' }, [
+      { to: a.aegisId, ciphertext: 'ca', nonce: 'na' },
+      { to: b.aegisId, ciphertext: 'cb', nonce: 'nb' },
+    ]);
+    await settle();
+    expect(mockFakeSocket.emit).toHaveBeenCalledWith('group_call:channel', { callId: 'g1', groupId: 'grp', items: [{ to: b.aegisId, ciphertext: 'cb', nonce: 'nb' }] });
+    expect(mockSendViaMailbox).toHaveBeenCalledTimes(1);
+
+    mockFakeSocket.emit.mockClear();
+    mockSendViaMailbox.mockClear();
+    mockMailboxAuthed.value = false;
+    router.routeCallSignalItems(mockFakeSocket, 'group_call:channel', { callId: 'g2', groupId: 'grp' }, [
+      { to: a.aegisId, ciphertext: 'ca', nonce: 'na' },
+    ]);
+    await settle();
+    expect(mockFakeSocket.emit).toHaveBeenCalledWith('group_call:channel', { callId: 'g2', groupId: 'grp', items: [{ to: a.aegisId, ciphertext: 'ca', nonce: 'na' }] });
+    expect(mockSendViaMailbox).not.toHaveBeenCalled();
+  });
+
+  it('messages: local contact with a known mailbox root → sealed v2 through our mailbox, no delivery token, `queued` is terminal', async () => {
+    const me = buildIdentity();
+    const peer = buildIdentity();
+    online(me);
+    await flush();
+    mockContactsState.contacts = [
+      { aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64 },
+    ];
+    mockRoots.add(peer.aegisId);
+    establishOutgoingSession(peer);
+    mockFakeSocket.emit.mockClear();
+
+    await client.sendMessage({ identity: me, recipientAegisId: peer.aegisId, recipientPublicKey: peer.publicKey, plaintext: 'hola' });
+    await settle();
+
+    const events = mockFakeSocket.emit.mock.calls.map((c) => c[0] as string);
+    expect(events).not.toContain('envelope');    // never v1 with a root on file
+    expect(events).not.toContain('envelope:v2'); // and no tokenless aegisId v2 either
+    expect(mockSendViaMailbox).toHaveBeenCalledTimes(1);
+    const env = mockSendViaMailbox.mock.calls[0][0] as Record<string, unknown>;
+    expect(env.to).toBe(`mbx-${peer.aegisId.slice(0, 6)}`);
+    expect(env.deliveryToken).toBeUndefined();
+    expect(JSON.stringify(env)).not.toContain(me.aegisId);
+    // queued ack accepted as terminal: the job is gone, no fall-through emit.
+    const { deleteOutboxJob } = require('../../db/local') as { deleteOutboxJob: jest.Mock };
+    expect(deleteOutboxJob).toHaveBeenCalled();
+  });
+
+  it('messages: first contact to a local peer with a root → v2 with the fc bootstrap (never v1)', async () => {
+    const me = buildIdentity();
+    const peer = buildIdentity();
+    online(me);
+    await flush();
+    mockContactsState.contacts = [
+      { aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: '' },
+    ];
+    mockRoots.add(peer.aegisId);
+    // Their prekey bundle from OUR relay (home socket) for the X3DH init.
+    const spk = nacl.box.keyPair();
+    const sig = nacl.sign.detached(spk.publicKey, peer.signingSecretKey);
+    mockFakeSocket.emit.mockImplementation((event: string, _p: unknown, ack?: (a: unknown) => void) => {
+      if (event === 'prekeys:fetch' && typeof ack === 'function') {
+        ack({ ok: true, bundle: {
+          identityKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64,
+          signedPreKey: { keyId: 1, publicKeyB64: encodeBase64(spk.publicKey), signatureB64: encodeBase64(sig) },
+          oneTimePreKey: null,
+        } });
+      }
+    });
+    mockFakeSocket.emit.mockClear();
+
+    await client.sendMessage({ identity: me, recipientAegisId: peer.aegisId, recipientPublicKey: peer.publicKey, plaintext: 'primer mensaje' });
+    await settle();
+
+    const events = mockFakeSocket.emit.mock.calls.map((c) => c[0] as string);
+    expect(events).not.toContain('envelope');
+    expect(mockSendViaMailbox).toHaveBeenCalledTimes(1);
+    const env = mockSendViaMailbox.mock.calls[0][0] as { ciphertext: string; nonce: string; epk: string };
+    // The peer can open it as a first contact: sealed to its key, fc block inside.
+    const { openEnvelopeV2 } = require('../../crypto/messaging') as typeof import('../../crypto/messaging');
+    const inner = openEnvelopeV2({ ciphertext: env.ciphertext, nonce: env.nonce, epk: env.epk }, peer.secretKey, () => null, Date.now(), { allowFirstContact: true });
+    expect(inner).not.toBeNull();
+    expect(inner!.fc).toEqual({ ik: me.publicKeyB64, relay: null, root: MY_ROOT });
+    expect(inner!.tofuSigningKeyB64).toBe(me.signingPublicKeyB64);
+  });
+
+  it('messages: local contact WITHOUT a root → v1 on the home socket, exactly as before', async () => {
+    const me = buildIdentity();
+    const peer = buildIdentity();
+    online(me);
+    await flush();
+    mockContactsState.contacts = [
+      { aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64 },
+    ];
+    establishOutgoingSession(peer);
+    mockFakeSocket.emit.mockClear();
+
+    await client.sendMessage({ identity: me, recipientAegisId: peer.aegisId, recipientPublicKey: peer.publicKey, plaintext: 'hola' });
+    await settle();
+    const events = mockFakeSocket.emit.mock.calls.map((c) => c[0] as string);
+    expect(events).toContain('envelope');
+    expect(mockSendViaMailbox).not.toHaveBeenCalled();
   });
 });
