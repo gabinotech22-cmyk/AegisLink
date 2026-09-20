@@ -5565,6 +5565,43 @@ export async function broadcastGroupMetadata(identity: Identity, groupId: string
  * Throws if the local identity is not the group's admin — callers must gate
  * on `group.adminId === identity.aegisId` before invoking (dissolveGroup does).
  */
+/**
+ * Profile switch (decision B, 2026-09-20): only the ACTIVE profile receives push
+ * wake-ups. Before the outgoing identity disconnects, it retracts its own push
+ * bindings on the relay (Expo token, iOS VoIP token, mailbox wake token) so the
+ * inactive profile produces no banner the active one cannot show. Messages wait
+ * in the relay queue until the profile is active again. Best effort with a
+ * short timeout — a switch must never hang on the network.
+ */
+export async function unregisterPushForActiveIdentity(): Promise<void> {
+  const sock = socket;
+  if (!sock || !connected || !authenticated) return;
+  const withTimeout = (p: Promise<unknown>): Promise<unknown> =>
+    Promise.race([p, new Promise((r) => setTimeout(r, 3000))]);
+  const emitAck = (event: string, payload: Record<string, unknown>): Promise<unknown> =>
+    new Promise((resolve) => sock.emit(event, payload, () => resolve(undefined)));
+  const jobs: Promise<unknown>[] = [];
+  try {
+    const token = await SecureStore.getItemAsync('aegis.pushToken');
+    if (token) {
+      const { Platform } = require('react-native') as typeof import('react-native');
+      jobs.push(emitAck('push:unregister', { token, platform: Platform.OS === 'ios' ? 'ios' : 'android' }));
+      // Forget the "confirmed" marker so the next activation re-registers.
+      await SecureStore.deleteItemAsync('aegis.pushToken.confirmed').catch(() => {});
+    }
+  } catch { /* nothing cached */ }
+  try {
+    const { getVoipTokenForUnregister } = require('../calls/voip-push') as { getVoipTokenForUnregister?: () => Promise<string | null> };
+    const voip = getVoipTokenForUnregister ? await getVoipTokenForUnregister() : null;
+    if (voip) jobs.push(emitAck('voip:unregister', { token: voip, platform: 'ios' }));
+  } catch { /* not iOS / module absent */ }
+  try {
+    const { retractMailboxWakeToken } = require('./mailboxSocket') as { retractMailboxWakeToken?: () => Promise<void> };
+    if (retractMailboxWakeToken) jobs.push(retractMailboxWakeToken());
+  } catch { /* mailbox socket absent */ }
+  await withTimeout(Promise.all(jobs));
+}
+
 export async function broadcastGroupDissolve(identity: Identity, groupId: string): Promise<void> {
   const { getGroup } = require('../db/local');
   const group = await getGroup(groupId);
