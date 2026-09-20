@@ -119,8 +119,8 @@ jest.mock('../../store/groups', () => ({
   __esModule: true,
   useGroups: { getState: () => ({ hydrate: mockHydrate, removeMember: mockRemoveMember }), setState: (...args: unknown[]) => mockGroupsSetState(...(args as [never])) },
 }));
-const mockPrefSet = jest.fn(async () => undefined);
-const mockPrefs = { requireGroupApproval: false, leftGroupIds: [] as string[], set: (...a: unknown[]) => mockPrefSet(...a) };
+const mockPrefSet = jest.fn(async (_k: unknown, _v: unknown) => undefined);
+const mockPrefs = { requireGroupApproval: false, leftGroupIds: [] as string[], set: (k: unknown, v: unknown) => mockPrefSet(k, v) };
 jest.mock('../../store/preferences', () => ({
   __esModule: true,
   usePreferences: { getState: () => mockPrefs },
