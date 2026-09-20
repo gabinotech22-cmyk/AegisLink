@@ -587,9 +587,12 @@ with a key derived from a user passphrase the relay never sees:
   pinned/hidden/pending, profile slot…), the groups with their signed roster
   and governance (`toBackupGroup`), and the data preferences
   (`restorablePreferences`: lock settings are excluded on purpose — no PIN
-  hash travels, restoring `appLockEnabled` would lock the user out). Messages
-  and attachments are **not** in the backup; the Backup screen says so instead
-  of counting them.
+  hash travels, restoring `appLockEnabled` would lock the user out), and the
+  **text messages** of every chat (`toBackupMessage`: deleted rows without
+  text, expired ephemerals skipped, a media message as its caption plus an
+  `attachment: true` flag that restores as an "attachment not included" note).
+  Attachments themselves are **not** in the backup — their blobs expire on the
+  relay and the files would make it huge; the Backup screen says so.
 
 > **⚠ Disclosure — KDF parameters are implied by version, not stored.**
 > The v3 Argon2id parameters are fixed by the envelope version rather than

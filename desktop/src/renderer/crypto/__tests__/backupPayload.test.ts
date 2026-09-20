@@ -6,8 +6,8 @@
  * never written nor read. Lock settings must never be restored (no PIN hash
  * travels in the file → lock-out).
  */
-import { describe, it, expect } from "vitest";
-import { toBackupContact, toBackupGroup, restorablePreferences, RESTORABLE_PREFERENCE_KEYS } from '../backup';
+import { describe, it, expect } from 'vitest';
+import { toBackupContact, toBackupGroup, restorablePreferences, RESTORABLE_PREFERENCE_KEYS, toBackupMessage } from '../backup';
 
 describe('toBackupContact', () => {
   it('copies every persisted field, including the ones a restore used to lose', () => {
@@ -51,5 +51,24 @@ describe('restorablePreferences', () => {
     expect(out).toEqual({ notifKeywords: ['x'], mutedChats: ['g1'], photoVis: 'none', themeDark: true, language: 'es' });
     expect(RESTORABLE_PREFERENCE_KEYS).not.toContain('appLockEnabled');
     expect(restorablePreferences(undefined)).toEqual({});
+  });
+});
+
+describe('toBackupMessage', () => {
+  const base = { id: 'm', chatId: 'c', direction: 'in' as const, createdAt: 1 };
+  it('keeps text messages with their metadata', () => {
+    const r = toBackupMessage({ ...base, body: 'hola', starred: true, senderId: 'S', replyToId: 'r', deliveryStatus: 'read' });
+    expect(r).toMatchObject({ body: 'hola', starred: true, senderId: 'S', replyToId: 'r', deliveryStatus: 'read', deleted: false });
+    expect(r?.attachment).toBeUndefined();
+  });
+  it('turns media into caption + attachment flag and never carries a wire tag', () => {
+    expect(toBackupMessage({ ...base, body: 'mira', type: 'image', mediaUri: 'blob:id:KEY:n' })).toMatchObject({ body: 'mira', attachment: true });
+    expect(toBackupMessage({ ...base, body: '[image:blob:id:KEY:n:t]' })).toMatchObject({ body: '', attachment: true });
+    expect(toBackupMessage({ ...base, body: 'x', attachments: [{ uri: 'blob:a:K' }] })).toMatchObject({ attachment: true });
+  });
+  it('deleted rows lose their text; expired ephemerals are not backed up', () => {
+    expect(toBackupMessage({ ...base, body: 'secret', deleted: true })).toMatchObject({ body: '', deleted: true });
+    expect(toBackupMessage({ ...base, body: 'x', expiresAt: 1 })).toBeNull();
+    expect(toBackupMessage({ ...base, body: 'x', expiresAt: Date.now() + 10 ** 9 })).not.toBeNull();
   });
 });

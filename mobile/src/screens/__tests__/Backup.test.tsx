@@ -119,6 +119,7 @@ jest.mock('../../crypto/backup', () => ({
   // Pure mappers: the real ones (the payload shape is what we assert on).
   toBackupContact: jest.requireActual('../../crypto/backup').toBackupContact,
   toBackupGroup: jest.requireActual('../../crypto/backup').toBackupGroup,
+  toBackupMessage: jest.requireActual('../../crypto/backup').toBackupMessage,
   restorablePreferences: jest.requireActual('../../crypto/backup').restorablePreferences,
 }));
 
@@ -127,7 +128,7 @@ jest.mock('../../crypto/wordlist', () => ({
   WORDLIST_256: Array.from({ length: 256 }, (_, i) => `w${i}`),
 }));
 jest.mock('../../crypto/identity', () => ({ identityFromStored: jest.fn() }));
-jest.mock('../../db/local', () => ({ saveIdentity: jest.fn(), saveContact: jest.fn() }));
+jest.mock('../../db/local', () => ({ saveIdentity: jest.fn(), saveContact: jest.fn(), saveGroup: jest.fn(), saveMessage: jest.fn(), loadMessagesByChat: jest.fn().mockResolvedValue([{ id: 'm1', chatId: 'c1', direction: 'in', body: 'hola', createdAt: 1 }]) }));
 
 // ── stores ──────────────────────────────────────────────────────────────────
 const mockIdentityValue: {
@@ -157,7 +158,7 @@ jest.mock('../../store/identity', () => ({
   useIdentity: () => mockIdentityValue,
 }));
 jest.mock('../../store/contacts', () => ({
-  useContacts: () => ({ contacts: [], hydrate: jest.fn().mockResolvedValue(undefined) }),
+  useContacts: () => ({ contacts: [{ aegisId: 'c1', publicKeyB64: 'k', name: 'C', verified: true, addedAt: 1 }], hydrate: jest.fn().mockResolvedValue(undefined) }),
 }));
 jest.mock('../../store/groups', () => ({ useGroups: () => ({ groups: [] }) }));
 jest.mock('../../store/messages', () => ({
@@ -239,6 +240,7 @@ describe('BackupScreen', () => {
     expect(Array.isArray(payload.groups)).toBe(true);
     expect(payload.preferences).toBeDefined();
     expect(payload.preferences).not.toHaveProperty('appLockEnabled');
+    expect((payload as { messages?: unknown[] }).messages).toEqual([expect.objectContaining({ id: 'm1', body: 'hola' })]);
     expect(mockFileWrite).toHaveBeenCalled();
     await waitFor(() => expect(mockShareAsync).toHaveBeenCalled());
     expect(mockSsSet).toHaveBeenCalledWith('aegis.backup.lastAt', expect.any(String));

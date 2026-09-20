@@ -19,11 +19,12 @@ import {
   BACKUP_VERSION,
   toBackupContact,
   toBackupGroup,
+  toBackupMessage,
   restorablePreferences,
   type BackupPayload,
   type PassphraseStrength,
 } from '../crypto/backup';
-import { saveContact, saveGroup, type StoredContact, type StoredGroup } from '../db/local';
+import { saveContact, saveGroup, saveMessage, loadMessagesByChat, type StoredContact, type StoredGroup, type StoredMessage } from '../db/local';
 import { usePreferences } from '../store/preferences';
 import { WORDLIST_256 } from '../crypto/wordlist';
 import nacl from 'tweetnacl';
@@ -96,8 +97,9 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     setError('');
   }
 
-  function buildPayload(): BackupPayload {
+  async function buildPayload(): Promise<BackupPayload> {
     if (!identity) throw new Error('No identity loaded');
+    const messages = await collectMessages();
     // Same payload as mobile (crypto/backup.ts): contacts with every persisted
     // field, groups with their signed governance, data preferences.
     return {
@@ -120,7 +122,21 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       contacts: contacts.map((ct) => toBackupContact(ct)),
       groups: groups.map((g) => toBackupGroup(g as never)),
       preferences: restorablePreferences(usePreferences.getState() as unknown as Record<string, unknown>),
+      messages,
     };
+  }
+
+  async function collectMessages(): Promise<BackupPayload['messages']> {
+    const out: NonNullable<BackupPayload['messages']> = [];
+    for (const id of [...contacts.map((ct) => ct.aegisId), ...groups.map((g) => g.id)]) {
+      let list: StoredMessage[] = [];
+      try { list = await loadMessagesByChat(id); } catch { /* skip */ }
+      for (const m of list) {
+        const row = toBackupMessage(m as never);
+        if (row) out.push(row);
+      }
+    }
+    return out;
   }
 
 
@@ -135,7 +151,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     }
     setBusy(true);
     try {
-      const payload = buildPayload();
+      const payload = await buildPayload();
       const envelope = await encryptBackup(payload, passphrase);
       const json = JSON.stringify(envelope, null, 2);
       const blob = new Blob([json], { type: 'application/octet-stream' });
@@ -209,6 +225,23 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       for (const g of payload.groups ?? []) await saveGroup(toBackupGroup(g) as unknown as StoredGroup);
       const prefs = restorablePreferences(payload.preferences);
       if (Object.keys(prefs).length > 0) await usePreferences.getState().restoreFrom(prefs as never);
+      for (const m of payload.messages ?? []) {
+        await saveMessage({
+          id: m.id,
+          chatId: m.chatId,
+          direction: m.direction,
+          body: m.attachment ? (m.body ? `${m.body}\n${i18n.t('backup.attachmentNotIncluded')}` : i18n.t('backup.attachmentNotIncluded')) : m.body,
+          createdAt: m.createdAt,
+          type: (m.attachment ? 'text' : (m.type ?? 'text')) as StoredMessage['type'],
+          replyToId: m.replyToId ?? null,
+          reactions: m.reactions as StoredMessage['reactions'],
+          starred: m.starred === true,
+          pinned: m.pinned === true,
+          deleted: m.deleted === true,
+          expiresAt: m.expiresAt ?? null,
+          deliveryStatus: (m.deliveryStatus ?? 'sent') as StoredMessage['deliveryStatus'],
+        } as StoredMessage);
+      }
       await hydrateIdentity();
       await hydrateContacts();
       await useGroups.getState().hydrate();
@@ -270,6 +303,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
             <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.groups')} val={String(totalGroups)} /></div>
             <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.identityStat')} val="1" /></div>
             <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.settingsStat')} val="✓" /></div>
+            <div style={{ width: 'calc(50% - 5px)' }}><Stat t={t} label={i18n.t('backup.messagesStat')} val="✓" /></div>
           </div>
           <span style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 12, lineHeight: '17px', display: 'block' }}>{i18n.t('backup.messagesNotIncluded')}</span>
         </div>

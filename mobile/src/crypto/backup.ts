@@ -196,6 +196,62 @@ export function restorablePreferences(prefs: Record<string, unknown> | undefined
   return out;
 }
 
+/**
+ * A text message in the backup. Attachments are NOT backed up (their blobs
+ * expire on the relay and their local files would make the file huge), so a
+ * media message travels as its caption with `attachment: true`; deleted
+ * rows travel as deleted (no text). Wire tags never appear.
+ */
+export interface BackupMessage {
+  id: string;
+  chatId: string;
+  direction: 'in' | 'out';
+  body: string;
+  createdAt: number;
+  type?: string | null;
+  senderId?: string | null;
+  replyToId?: string | null;
+  reactions?: unknown;
+  starred?: boolean;
+  pinned?: boolean;
+  deleted?: boolean;
+  expiresAt?: number | null;
+  deliveryStatus?: string | null;
+  /** True when the original carried media that is not in the backup. */
+  attachment?: true;
+}
+
+const MESSAGE_WIRE_TAG = /^\[(image|video|audio|gif|sticker|viewonce|location|file|poll|call|join_request|multi)[:\]]/;
+
+/** Message record → backup row (text only; null = not worth backing up). */
+export function toBackupMessage(m: {
+  id: string; chatId: string; direction: 'in' | 'out'; body: string; createdAt: number; type?: string | null;
+  mediaUri?: string | null; attachments?: unknown[] | null; senderId?: string | null; replyToId?: string | null;
+  reactions?: unknown; starred?: boolean; pinned?: boolean; deleted?: boolean; expiresAt?: number | null; deliveryStatus?: string | null;
+}): BackupMessage | null {
+  // An ephemeral that already expired must not be resurrected by a restore.
+  if (m.expiresAt && m.expiresAt <= Date.now()) return null;
+  const hasMedia = !!m.mediaUri || (Array.isArray(m.attachments) && m.attachments.length > 0) || MESSAGE_WIRE_TAG.test(m.body);
+  const out: BackupMessage = {
+    id: m.id,
+    chatId: m.chatId,
+    direction: m.direction,
+    body: m.deleted ? '' : hasMedia ? (MESSAGE_WIRE_TAG.test(m.body) ? '' : m.body) : m.body,
+    createdAt: m.createdAt,
+    type: m.type ?? 'text',
+    senderId: m.senderId ?? null,
+    replyToId: m.replyToId ?? null,
+    reactions: m.reactions,
+    starred: m.starred === true,
+    pinned: m.pinned === true,
+    deleted: m.deleted === true,
+    expiresAt: m.expiresAt ?? null,
+    deliveryStatus: m.deliveryStatus ?? null,
+  };
+  if (hasMedia && !m.deleted) out.attachment = true;
+  return out;
+}
+
 export interface BackupPayload {
   /** Schema version of the inner JSON. Same set as the envelope version. */
   v: BackupEnvelopeVersion;
@@ -223,6 +279,8 @@ export interface BackupPayload {
   preferences?: Record<string, unknown>;
   /** Groups the user was part of at backup time. Optional — absent in legacy backups. */
   groups?: BackupGroup[];
+  /** Text messages of every chat (contacts + groups), no attachments. Optional. */
+  messages?: BackupMessage[];
 }
 
 export type PassphraseStrength = 'too_short' | 'weak' | 'fair' | 'strong';

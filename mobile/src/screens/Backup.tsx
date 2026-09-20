@@ -17,7 +17,7 @@ import { useContacts } from '../store/contacts';
 import { useGroups } from '../store/groups';
 import { WORDLIST_256 } from '../crypto/wordlist';
 import { identityFromStored } from '../crypto/identity';
-import { saveIdentity, saveContact, saveGroup, type StoredContact, type StoredGroup } from '../db/local';
+import { saveIdentity, saveContact, saveGroup, saveMessage, loadMessagesByChat, type StoredContact, type StoredGroup, type StoredMessage } from '../db/local';
 import { encodeBase64 } from 'tweetnacl-util';
 import nacl from 'tweetnacl';
 import {
@@ -30,6 +30,7 @@ import {
   BACKUP_VERSION,
   toBackupContact,
   toBackupGroup,
+  toBackupMessage,
   restorablePreferences,
   type BackupPayload,
   type PassphraseStrength,
@@ -100,8 +101,9 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   }
 
   // ─── Build the in-memory backup payload ────────────────────────────────────
-  function buildPayload(): BackupPayload {
+  async function buildPayload(): Promise<BackupPayload> {
     if (!identity) throw new Error('No identity loaded');
+    const messages = await collectMessages();
     // Everything a restore needs to give the same account back: contacts with
     // every persisted field (nickname, own relay, caps, pinned/hidden…), the
     // groups with their signed governance, and the data preferences. The
@@ -126,7 +128,23 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       contacts: contacts.map((ct) => toBackupContact(ct)),
       groups: groups.map((g) => toBackupGroup(g as never)),
       preferences: restorablePreferences(usePreferences.getState() as unknown as Record<string, unknown>),
+      messages,
     };
+  }
+
+  /** Every chat's text messages (contacts + groups), attachments left out. */
+  async function collectMessages(): Promise<BackupPayload['messages']> {
+    const out: NonNullable<BackupPayload['messages']> = [];
+    const chatIds = [...contacts.map((ct) => ct.aegisId), ...groups.map((g) => g.id)];
+    for (const id of chatIds) {
+      let list: StoredMessage[] = [];
+      try { list = await loadMessagesByChat(id); } catch { /* skip */ }
+      for (const m of list) {
+        const row = toBackupMessage(m);
+        if (row) out.push(row);
+      }
+    }
+    return out;
   }
 
   // ─── Encrypted backup flow ────────────────────────────────────────────────
@@ -149,7 +167,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     }
     setBusy(true);
     try {
-      const payload = buildPayload();
+      const payload = await buildPayload();
       const envelope = await encryptBackup(payload, passphrase);
       const filename = `aegislink-backup-${Date.now()}.${BACKUP_FILE_EXTENSION}`;
       const file = new File(Paths.cache, filename);
@@ -267,6 +285,27 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       //    hash does not travel in the backup, so they would lock the user out).
       const prefs = restorablePreferences(payload.preferences);
       if (Object.keys(prefs).length > 0) await usePreferences.getState().restoreFrom(prefs as never);
+
+      // 6) Restore text messages (absent in older backups). A media message
+      //    comes back as its caption plus an "attachment not in backup" note.
+      for (const m of payload.messages ?? []) {
+        await saveMessage({
+          id: m.id,
+          chatId: m.chatId,
+          direction: m.direction,
+          body: m.attachment ? (m.body ? `${m.body}\n${i18nT('backup.attachmentNotIncluded')}` : i18nT('backup.attachmentNotIncluded')) : m.body,
+          createdAt: m.createdAt,
+          type: (m.attachment ? 'text' : (m.type ?? 'text')) as StoredMessage['type'],
+          senderId: m.senderId ?? null,
+          replyToId: m.replyToId ?? null,
+          reactions: m.reactions as StoredMessage['reactions'],
+          starred: m.starred === true,
+          pinned: m.pinned === true,
+          deleted: m.deleted === true,
+          expiresAt: m.expiresAt ?? null,
+          deliveryStatus: (m.deliveryStatus ?? 'sent') as StoredMessage['deliveryStatus'],
+        });
+      }
 
       await hydrateIdentity();
       await hydrateContacts();
@@ -395,6 +434,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
             <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.groups')} val={totalGroups.toString()} /></View>
             <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.identityStat')} val="1" /></View>
             <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.settingsStat')} val="✓" /></View>
+            <View style={{ width: '47%' }}><Stat t={t} label={i18nT('backup.messagesStat')} val="✓" /></View>
           </View>
           <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, marginTop: 12, lineHeight: 17 }}>
             {i18nT('backup.messagesNotIncluded')}
