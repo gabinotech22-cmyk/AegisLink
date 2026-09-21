@@ -484,7 +484,7 @@ export function attachRelay(io: SocketServer) {
           // v1). Flag-gated (PUSH_MAILBOX_ENABLED); never blocks the ack.
           // F4: `wakeHint: 'call'` selects the call-class wake (urgent priority,
           // ringing heads-up on a killed app) — the hint itself goes no further.
-          void notifyMailbox(d.to, d.wakeHint === 'call' ? 'call' : 'message');
+          if (d.wakeHint !== 'silent') void notifyMailbox(d.to, d.wakeHint === 'call' ? 'call' : 'message');
           ack?.({ ok: true, delivered: false, queued: true });
         }
       });
@@ -816,14 +816,17 @@ export function attachRelay(io: SocketServer) {
             return;
           }
           const delivered = recipientSockets ? deliver(env, recipientSockets) : false;
+          // Sender-declared silent traffic (receipts, typing, profile, key
+          // distribution…) is queued and drained but never raises a push.
+          const silent = parsed.data.wakeHint === 'silent';
           if (!delivered) {
             // Fire silent push wake-up so the recipient's app reconnects and drains.
-            void notifyRecipient(env.to);
+            if (!silent) void notifyRecipient(env.to);
             ack?.({ ok: true, queued: true });
             return;
           }
           // "Delivered" only means we emitted. If nobody acks it, wake them.
-          pushIfUnconfirmed(env.id, env.to);
+          if (!silent) pushIfUnconfirmed(env.id, env.to);
           ack?.({ ok: true, queued: false });
 
           // Echo sent-confirmation to other devices of the sender so they can
@@ -958,11 +961,11 @@ export function attachRelay(io: SocketServer) {
             // is the sender's own device, not a social-graph leak.
             socket.emit('msg:delivered', { msgId: env.id, to: env.to });
             // "Delivered" only means we emitted. If nobody acks it, wake them.
-            pushIfUnconfirmed(env.id, env.to);
+            if (parsed.data.wakeHint !== 'silent') pushIfUnconfirmed(env.id, env.to);
             ack?.({ ok: true, queued: false });
             return;
           }
-          void notifyRecipient(env.to);
+          if (parsed.data.wakeHint !== 'silent') void notifyRecipient(env.to);
           ack?.({ ok: true, queued: true });
         })();
       }

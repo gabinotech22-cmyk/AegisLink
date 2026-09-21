@@ -857,7 +857,21 @@ copy. Call signals are *transient*: never persisted to the outbox (a
 candidate replayed minutes later is noise), relay queue life bounded to 60 s.
 
 The outer mailbox wire (`envelope:mb`) gains one optional field,
-`wakeHint: 'call'` (the only value the schema accepts), set on invites only.
+`wakeHint: 'call'`, set on invites only. Since 2026-09-20 the same field also
+exists on `envelope` / `envelope:v2` and accepts a second value, `'silent'`:
+protocol traffic that renders nothing on the recipient — typing indicators,
+read receipts, profile updates, delete-for-everyone, sender-key distribution,
+group control carriers (`[group:…]`), self-copies to the sender's other
+devices — is queued and drained like any envelope but never raises the
+generic "new encrypted message" push. Before that, every such envelope woke a
+closed app to nothing (phantom notification). The sender sets it (only it
+knows the payload); the relay reads it once and never stores or forwards it.
+The hint travels on every transport the sender may pick — home socket,
+mailbox submit and a federated contact's relay (`deliverToForeignRelay`) —
+on live sends, outbox replays and profile broadcasts alike, on mobile and
+desktop (`desktop/src/renderer/socket/silentWake.ts`, mirror of the mobile
+table). The cost is one declared metadata bit ("this envelope is not a
+message") on the outer wire, the same class as `'call'`.
 It is the single declared metadata bit of `FEDERATION-DESIGN.md` D3: "this
 is a call for this mailbox", never who from. The recipient's home relay uses
 it solely to publish a *call-class* wake instead of the message-class one

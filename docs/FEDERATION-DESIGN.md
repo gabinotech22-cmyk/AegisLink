@@ -169,7 +169,10 @@ seguridad (#11); `Docs:` en la PR; nunca F(n+1) con F(n) sin mergear.
   No ve identidades, no puede relinkear el desechable entre sesiones ni épocas.
 - El relay **home** de cada usuario sigue viendo lo que ya ve hoy (`SEALED-SENDER-ARCHITECTURE.md §6`).
 - `wakeHint: 'call'` añade un bit de metadato en el wire exterior de las llamadas; se declara
-  y se acepta a cambio del wake de alta prioridad en iOS.
+  y se acepta a cambio del wake de alta prioridad en iOS. Desde 2026-09-20 también
+  `wakeHint: 'silent'` (recibos, typing, perfil, borrado, claves, carriers de grupo, copias a
+  otros dispositivos propios): el relay los encola pero no despierta — sin él cada uno
+  producía una notificación fantasma. Mismo tipo de bit declarado, en los tres wires.
 - Si el usuario migra y un contacto no abre la app en la ventana de gracia, ese contacto sigue
   entregando en el relay viejo hasta recibir el nuevo enlace. Es el mismo límite que SimpleX.
 

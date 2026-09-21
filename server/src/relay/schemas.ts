@@ -36,6 +36,18 @@ export const EnvelopeIn = z.object({
    * Bounded to (0, MESSAGE_TTL_MS]; a value over the default is meaningless.
    */
   ephemeralTtl: z.number().int().positive().max(MESSAGE_TTL_MS).optional(),
+  /**
+   * Wake class of this envelope, chosen by the SENDER because only it knows
+   * what the ciphertext is. `'silent'` = protocol traffic that renders nothing
+   * (typing, read receipt, profile update, delete-for-everyone, key
+   * distribution, group control carriers, a self-copy to the sender's other
+   * devices): queued as usual, drained on the next open, but NEVER a push —
+   * every such envelope used to raise the generic "new encrypted message"
+   * banner with nothing behind it (phantom notification). `'call'` = call
+   * class (urgent). Absent = ordinary message. The relay reads it once and
+   * never stores or forwards it.
+   */
+  wakeHint: z.enum(['call', 'silent']).optional(),
 });
 
 /**
@@ -59,6 +71,18 @@ export const EnvelopeV2In = z.object({
   deliveryToken: z.string().min(1).max(256),
   /** A-3: ephemeral TTL in ms — see EnvelopeIn.ephemeralTtl. Clamps queue life. */
   ephemeralTtl: z.number().int().positive().max(MESSAGE_TTL_MS).optional(),
+  /**
+   * Wake class of this envelope, chosen by the SENDER because only it knows
+   * what the ciphertext is. `'silent'` = protocol traffic that renders nothing
+   * (typing, read receipt, profile update, delete-for-everyone, key
+   * distribution, group control carriers, a self-copy to the sender's other
+   * devices): queued as usual, drained on the next open, but NEVER a push —
+   * every such envelope used to raise the generic "new encrypted message"
+   * banner with nothing behind it (phantom notification). `'call'` = call
+   * class (urgent). Absent = ordinary message. The relay reads it once and
+   * never stores or forwards it.
+   */
+  wakeHint: z.enum(['call', 'silent']).optional(),
 });
 
 /** Owner registers/rotates the hash of their own delivery token (authenticated). */
@@ -283,7 +307,9 @@ export const MailboxEnvelopeIn = z.object({
   // on the outer wire — "this is a call for this mailbox", never who from. Lets
   // the recipient's home relay publish a call-class (urgent) wake instead of the
   // message-class one. Never stored, never forwarded to the recipient.
-  wakeHint: z.literal('call').optional(),
+  // `'silent'` (2026-09-20): protocol traffic that must not wake anyone — see
+  // EnvelopeIn.wakeHint.
+  wakeHint: z.enum(['call', 'silent']).optional(),
   // Federation F6 (docs/FEDERATION-DESIGN.md D5): proof-of-work on submission,
   // required only when the relay runs with MAILBOX_SUBMIT_POW=on (a self-hosted
   // relay under spam pressure). Challenge from the `mailbox:pow:challenge` ack
