@@ -28,6 +28,8 @@ export interface Preferences {
   mutedChats: string[];
   /** Deadline (epoch ms) of a timed mute per chat id; absent/0 = always (utils/mute.ts). */
   mutedChatsUntil: Record<string, number>;
+  /** Groups we left; a straggler's message must not recreate them. */
+  leftGroupIds: string[];
   appLockEnabled: boolean;
   biometricsEnabled: boolean;
   lockTimeoutMin: number;
@@ -48,6 +50,7 @@ const DEFAULTS: Preferences = {
   notifKeywords: ['urgente', 'multisig', 'audit'],
   mutedChats: [],
   mutedChatsUntil: {},
+  leftGroupIds: [],
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
@@ -80,6 +83,7 @@ function snapshot(get: () => PrefsState): Preferences {
     notifKeywords: s.notifKeywords,
     mutedChats: s.mutedChats,
     mutedChatsUntil: s.mutedChatsUntil,
+    leftGroupIds: s.leftGroupIds,
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,

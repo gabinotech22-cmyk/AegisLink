@@ -144,6 +144,20 @@ export const useGroups = create<GroupsState>((set, get) => ({
   },
 
   async leaveGroup(id) {
+    // Tell the others first (parity with mobile); a failure must not keep us in.
+    try {
+      const { useIdentity } = await import('./identity');
+      const identity = useIdentity.getState().identity;
+      if (identity && get().groups.some((g) => g.id === id)) {
+        const { broadcastGroupLeave } = await import('../socket/client');
+        await broadcastGroupLeave(identity, id);
+      }
+    } catch { /* best effort */ }
+    try {
+      const { usePreferences } = await import('./preferences');
+      const prefs = usePreferences.getState();
+      if (!prefs.leftGroupIds.includes(id)) await prefs.set('leftGroupIds', [...prefs.leftGroupIds, id]);
+    } catch { /* preferences unavailable */ }
     await deleteContactMessages(id);
     await deleteGroup(id);
     set({ groups: get().groups.filter((g) => g.id !== id) });

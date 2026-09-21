@@ -401,6 +401,25 @@ whose `from` is not a string, or which lacks a `ratchet` field.
 
 ---
 
+### 6.1 Group control carriers
+
+A group message is an ordinary E2EE payload (`type: 'group_msg'`) sealed to
+each member; the roster is admin-signed (`adminSig`, `rosterVersion`). Three
+bodies are control carriers that render no bubble (`socket/client.ts`):
+
+| Body | Payload | Who | Receiver |
+|---|---|---|---|
+| `[group:meta]` | signed roster / name / avatar | admin | verify-then-apply |
+| `[group:dissolved]` | `dissolved`, `dissolveSig` (signed) | admin | verify-then-wipe |
+| `[group:left]` | `left: true` (no signature) | any member, about **itself** | admin → `removeMember` (re-sign, re-key, broadcast); others drop the sender locally |
+
+`[group:left]` needs no signature because the sealed-sender-authenticated
+sender can only ever remove itself. The leaver keeps the group id in
+`preferences.leftGroupIds` so a straggler's message cannot recreate the group;
+only the admin re-inviting them (a roster that includes them) clears it. Until
+2026-09-20 leaving was local-only: the others kept encrypting to the leaver
+and their next message recreated the group.
+
 ## 7. Metadata minimization and at-rest protection
 
 ### 7.1 Field allow-list

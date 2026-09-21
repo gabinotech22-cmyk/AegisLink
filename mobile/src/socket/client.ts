@@ -249,6 +249,17 @@ const GROUP_META_SYNC_BODY = '[group:meta]';
 const GROUP_DISSOLVE_BODY = '[group:dissolved]';
 
 /**
+ * Body of a member-left carrier: `{ left: true }` on the payload, sent by the
+ * member to every other member when they leave. No signature needed — the
+ * sealed-sender-authenticated senderId can only ever remove ITSELF. The admin
+ * answers with a re-signed, re-keyed roster (removeMember); other members drop
+ * the sender from their local list. Before this, leaving was local-only: the
+ * others kept the leaver in the roster (and kept encrypting to them), and the
+ * next group message recreated the group on the leaver's device.
+ */
+export const GROUP_LEFT_BODY = '[group:left]';
+
+/**
  * Forget that a group's avatar was already sent this session, so the next group
  * message re-includes the (updated) avatar data URI. Called after the admin
  * changes the group avatar so members pick up the change immediately.
@@ -3127,6 +3138,45 @@ async function decryptAndAppendLocked(
         const { getGroup, saveGroup } = require('../db/local');
         const existingGroup = await getGroup(groupId);
 
+        // ── Member left (GROUP_LEFT_BODY) ──────────────────────────────────────
+        // The authenticated sender removes ITSELF from our roster. If we are the
+        // admin we re-sign, re-key and broadcast the new roster (removeMember);
+        // otherwise we drop them locally and wait for the admin's carrier.
+        if (parsedPayload.left === true) {
+          if (existingGroup && existingGroup.members.includes(senderId)) {
+            const { useGroups } = require('../store/groups') as typeof import('../store/groups');
+            if (existingGroup.adminId === identity.aegisId) {
+              await useGroups.getState().removeMember(groupId, senderId);
+            } else {
+              await saveGroup({ ...existingGroup, members: existingGroup.members.filter((m: string) => m !== senderId) });
+              await useGroups.getState().hydrate();
+            }
+            // Their SenderKey is of no further use (and nothing they send later
+            // should decrypt as a member).
+            const { deleteSenderKey } = require('../crypto/channelKeyStore') as typeof import('../crypto/channelKeyStore');
+            await deleteSenderKey(groupId, senderId).catch(() => {});
+          }
+          await saveSessionState(contact.aegisId, ratchetState);
+          return true;
+        }
+
+        // ── A group WE left ────────────────────────────────────────────────────
+        // Members who have not processed our leave yet keep encrypting to us;
+        // without this gate the next message silently recreated the group. Only
+        // the admin can bring us back, with a roster that includes us.
+        if (!existingGroup) {
+          const { usePreferences } = require('../store/preferences') as typeof import('../store/preferences');
+          const prefs = usePreferences.getState();
+          if (prefs.leftGroupIds.includes(groupId)) {
+            const reinvite = claimedAdminId === senderId && claimedMembers.includes(identity.aegisId);
+            if (!reinvite) {
+              await saveSessionState(contact.aegisId, ratchetState);
+              return true;
+            }
+            await prefs.set('leftGroupIds', prefs.leftGroupIds.filter((id: string) => id !== groupId));
+          }
+        }
+
         // ── Group dissolution (admin only, signature-gated) ────────────────────
         // Wire shape: { dissolved: true, dissolveAdminId, dissolveSig } riding a
         // `[group:dissolved]` carrier body. Honored ONLY if:
@@ -5284,6 +5334,8 @@ export async function sendGroupMessage(opts: {
    * verify-then-wipe the group. Set only by broadcastGroupDissolve.
    */
   dissolve?: { adminId: string; dissolveSig: string };
+  /** Member-left marker (see GROUP_LEFT_BODY). Set only by broadcastGroupLeave. */
+  left?: true;
 }): Promise<void> {
   const { getGroup, saveGroup } = require('../db/local');
   const group = await getGroup(opts.groupId);
@@ -5438,6 +5490,7 @@ export async function sendGroupMessage(opts: {
       ...(opts.dissolve
         ? { dissolved: true, dissolveAdminId: opts.dissolve.adminId, dissolveSig: opts.dissolve.dissolveSig }
         : {}),
+      ...(opts.left ? { left: true } : {}),
       senderId: opts.identity.aegisId,
       senderName,
       senderColor,
@@ -5565,6 +5618,22 @@ export async function broadcastGroupMetadata(identity: Identity, groupId: string
  * Throws if the local identity is not the group's admin — callers must gate
  * on `group.adminId === identity.aegisId` before invoking (dissolveGroup does).
  */
+/**
+ * Tell every other member that we are leaving (GROUP_LEFT_BODY). Durable via
+ * the per-member outbox like any group message, so an offline leave still
+ * reaches them on reconnect. Called by useGroups.leaveGroup BEFORE the local
+ * wipe (sendGroupMessage needs the group row and the members' sessions).
+ */
+export async function broadcastGroupLeave(identity: Identity, groupId: string): Promise<void> {
+  await sendGroupMessage({
+    identity,
+    groupId,
+    plaintext: GROUP_LEFT_BODY,
+    skipLocalAppend: true,
+    left: true,
+  });
+}
+
 /**
  * Profile switch (decision B, 2026-09-20): only the ACTIVE profile receives push
  * wake-ups. Before the outgoing identity disconnects, it retracts its own push

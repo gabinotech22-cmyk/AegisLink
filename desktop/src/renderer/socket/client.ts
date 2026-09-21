@@ -275,6 +275,7 @@ interface QueuedGroupSend {
   groupId: string;
   plaintext: string;
   dissolve?: { adminId: string; dissolveSig: string };
+  left?: true;
 }
 const groupOfflineQueue: QueuedGroupSend[] = [];
 
@@ -372,6 +373,7 @@ async function flushGroupOfflineQueue(identity: Identity) {
         plaintext: item.plaintext,
         skipLocalAppend: true,
         dissolve: item.dissolve,
+        left: item.left,
       });
     } catch (e) {
       if (DEV) logger.warn('[socket] group offline queue flush error', e);
@@ -1882,6 +1884,36 @@ async function decryptAndAppendLocked(
         const { getGroup, saveGroup } = await import('../db/local');
         const existingGroup = await getGroup(groupId);
 
+        // ── Member left (GROUP_LEFT_BODY) — parity with mobile ─────────────────
+        if (parsedPayload.left === true) {
+          if (existingGroup && existingGroup.members.includes(senderId)) {
+            const { useGroups } = await import('../store/groups');
+            if (existingGroup.adminId === identity.aegisId) {
+              await useGroups.getState().removeMember(groupId, senderId);
+            } else {
+              await saveGroup({ ...existingGroup, members: existingGroup.members.filter((m: string) => m !== senderId) });
+              await useGroups.getState().hydrate();
+            }
+          }
+          await saveSessionState(contact.aegisId, ratchetState);
+          return true;
+        }
+
+        // ── A group WE left: stragglers must not recreate it; only the admin
+        //    re-inviting us (roster that includes us) clears the memory. ─────────
+        if (!existingGroup) {
+          const { usePreferences } = await import('../store/preferences');
+          const prefs = usePreferences.getState();
+          if (prefs.leftGroupIds.includes(groupId)) {
+            const reinvite = claimedAdminId === senderId && claimedMembers.includes(identity.aegisId);
+            if (!reinvite) {
+              await saveSessionState(contact.aegisId, ratchetState);
+              return true;
+            }
+            await prefs.set('leftGroupIds', prefs.leftGroupIds.filter((id: string) => id !== groupId));
+          }
+        }
+
         // ── Group dissolution (admin only, signature-gated) ────────────────────
         // Wire shape: { dissolved: true, dissolveAdminId, dissolveSig } riding a
         // `[group:dissolved]` carrier body. Honored ONLY if:
@@ -3040,6 +3072,8 @@ export async function sendGroupMessage(opts: {
    * broadcastGroupDissolve. Mirrors mobile/src/socket/client.ts.
    */
   dissolve?: { adminId: string; dissolveSig: string };
+  /** Member-left marker (GROUP_LEFT_BODY). Set only by broadcastGroupLeave. */
+  left?: true;
 }): Promise<void> {
   // Optimistic local append FIRST, before the online check, so the message
   // shows immediately whether or not we are connected. Own messages render
@@ -3057,7 +3091,7 @@ export async function sendGroupMessage(opts: {
   }
 
   if (!socket || !connected || !authenticated) {
-    groupOfflineQueue.push({ groupId: opts.groupId, plaintext: opts.plaintext, dissolve: opts.dissolve });
+    groupOfflineQueue.push({ groupId: opts.groupId, plaintext: opts.plaintext, dissolve: opts.dissolve, left: opts.left });
     return;
   }
 
@@ -3108,6 +3142,7 @@ export async function sendGroupMessage(opts: {
       ...(opts.dissolve
         ? { dissolved: true, dissolveAdminId: opts.dissolve.adminId, dissolveSig: opts.dissolve.dissolveSig }
         : {}),
+      ...(opts.left ? { left: true } : {}),
       senderId: opts.identity.aegisId,
       senderName,
       senderColor,
@@ -3164,6 +3199,17 @@ export async function sendGroupMessage(opts: {
  * carriers on mobile.
  */
 const GROUP_DISSOLVE_BODY = '[group:dissolved]';
+
+/**
+ * Member-left carrier (`{ left: true }`), sent by a member to everyone else
+ * when they leave. No signature: the sealed-sender-authenticated senderId can
+ * only remove itself. Mirrors mobile/src/socket/client.ts GROUP_LEFT_BODY.
+ */
+export const GROUP_LEFT_BODY = '[group:left]';
+
+export async function broadcastGroupLeave(identity: Identity, groupId: string): Promise<void> {
+  await sendGroupMessage({ identity, groupId, plaintext: GROUP_LEFT_BODY, skipLocalAppend: true, left: true });
+}
 
 /**
  * Admin-only: dissolve a group for every member. Signs a dedicated

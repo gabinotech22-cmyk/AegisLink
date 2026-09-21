@@ -459,6 +459,23 @@ export const useGroups = create<GroupsState>((set, get) => ({
   },
 
   async leaveGroup(id) {
+    // Tell the others first (needs the group row + member sessions). Durable
+    // through the outbox; a failure here must not keep the user in the group.
+    const { useIdentity } = require('./identity') as typeof import('./identity');
+    const identity = useIdentity.getState().identity;
+    if (identity && get().groups.some((g) => g.id === id)) {
+      try {
+        const { broadcastGroupLeave } = require('../socket/client') as typeof import('../socket/client');
+        await broadcastGroupLeave(identity, id);
+      } catch { /* best effort */ }
+    }
+    // Remember the group so a straggler's message cannot recreate it (only an
+    // admin re-invite clears this; see the receive path).
+    try {
+      const { usePreferences } = require('./preferences') as typeof import('./preferences');
+      const prefs = usePreferences.getState();
+      if (!prefs.leftGroupIds.includes(id)) await prefs.set('leftGroupIds', [...prefs.leftGroupIds, id]);
+    } catch { /* preferences unavailable */ }
     // Wipe all local messages for this group and delete the group record
     await deleteContactMessages(id);
     await deleteGroup(id);
