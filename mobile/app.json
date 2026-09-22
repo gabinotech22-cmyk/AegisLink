@@ -130,6 +130,7 @@
       "./plugins/withIosVoip.js",
       "./plugins/withIosBackupExclusion.js",
       "./plugins/withFossPush.js",
+      "./plugins/withMotionSensorLinked.js",
       "expo-secure-store",
       [
         "expo-sqlite",
