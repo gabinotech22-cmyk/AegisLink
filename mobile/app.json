@@ -130,6 +130,7 @@
       "./plugins/withIosVoip.js",
       "./plugins/withIosBackupExclusion.js",
       "./plugins/withFossPush.js",
+      "./plugins/withMotionSensorLinked.js",
       "expo-secure-store",
       [
         "expo-sqlite",
@@ -191,7 +192,7 @@
       [
         "expo-sensors",
         {
-          "motionPermission": "Allow AegisLink to access motion sensors for panic gesture detection."
+          "motionPermission": false
         }
       ],
       "expo-background-fetch",
