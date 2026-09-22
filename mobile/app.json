@@ -191,7 +191,7 @@
       [
         "expo-sensors",
         {
-          "motionPermission": false
+          "motionPermission": "Allow AegisLink to access motion sensors for panic gesture detection."
         }
       ],
       "expo-background-fetch",
