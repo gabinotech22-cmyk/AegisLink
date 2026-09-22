@@ -33,7 +33,7 @@
     "lead": "No phone number. No email. No metadata. Your identity is a key, generated and stored only on this device.",
     "generateBtn": "Generate my identity",
     "restoreBtn": "Restore from backup",
-    "footer": "v0.1.0 · OPEN SOURCE · AUDITED 2026 Q1",
+    "footer": "v0.1.0 · OPEN SOURCE · AUDIT PENDING",
     "generatingTitle": "Generating your keypair",
     "generatingSubtitle": "Curve25519 · 256-bit · on-device",
     "skipAnimation": "SKIP ANIMATION ▸",
