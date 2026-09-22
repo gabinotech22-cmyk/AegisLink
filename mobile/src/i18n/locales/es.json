@@ -53,7 +53,7 @@
     "lead": "Sin número de teléfono. Sin correo. Sin metadatos. Tu identidad es una clave, generada y guardada únicamente en este dispositivo.",
     "generateBtn": "Generar mi identidad",
     "restoreBtn": "Restaurar desde copia de seguridad",
-    "footer": "v0.1.0 · CÓDIGO ABIERTO · AUDITADO 2026 Q1",
+    "footer": "v0.1.0 · CÓDIGO ABIERTO · AUDITORÍA PENDIENTE",
     "generatingTitle": "Generando tu par de claves",
     "generatingSubtitle": "Curve25519 · 256-bit · en dispositivo",
     "skipAnimation": "SALTAR ANIMACIÓN ▸",
