@@ -33,17 +33,18 @@ server policy**.
 - **Anonymity against a global passive adversary / traffic analysis.** AegisLink
   reduces metadata; it does not defeat an adversary who can observe network
   flows in and out of the relay (timing/volume correlation). See §8.
-- **Hiding the sender↔recipient relationship from the relay operator in real
-  time.** Sealed sender (§7.3) removes the sender from the payload and from the
-  at-rest queue, but the authenticated live socket still reveals the sender to
-  an actively-correlating relay. This is the same limitation Signal documents
-  for its sealed-sender feature.
+- **Fully hiding the sender↔recipient relationship from the relay operator in
+  real time.** Sealed sender (§7.3) removes the sender from the payload and from
+  the at-rest queue, and on the default mailbox path (over the embedded Tor) the
+  relay sees neither sender, recipient Aegis ID nor IP. What remains is
+  timing correlation against the Aegis-ID-authenticated control-plane socket,
+  plus the non-mailbox fallback paths, where the authenticated live socket still
+  reveals the sender to an actively-correlating relay (§7.3).
 - **Post-quantum security against a fully PQ-only fleet.** A hybrid X25519 +
   ML-KEM-768 handshake (PQXDH-style) **is implemented** (§4.4, handshake v2) and
   provides store-now-decrypt-later resistance for v2↔v2 sessions. It is still
   rollout-gated: while not-yet-upgraded (v1) clients exist, sessions with them
-  fall back to classical X25519, and the desktop client is pending the same
-  wiring (§10).
+  fall back to classical X25519 (§10).
 
 ---
 
