@@ -527,9 +527,11 @@ carries root + token + caps) upgrades the pair.
 > **Does NOT protect:**
 > - **Control-plane socket.** It is authenticated by Aegis ID via
 >   challenge-response (§9) and carries prekeys, push token, profile and
->   presence. It uses clearnet TLS by default (`routeViaTor` is an opt-in that
->   needs Orbot), so the relay sees the user's IP next to the Aegis ID. A relay
->   that watches both sockets can attempt **timing** correlation between them.
+>   presence, so the relay learns *that* an Aegis ID is online. It rides the
+>   embedded Tor to the relay's onion (§9, "Tor always-on") on a circuit
+>   separate from the mailbox socket, so the relay sees no IP and cannot join
+>   the two by circuit. A relay that watches both sockets can still attempt
+>   **timing** correlation between them.
 > - **Every path in the table above that is not a mailbox path** (v1 envelope,
 >   and sealed v2 addressed by aegisId). The sender's authenticated live socket
 >   sits next to a `to: aegisId` there, so an actively-correlating relay can
@@ -702,8 +704,13 @@ with a key derived from a user passphrase the relay never sees:
 - **Traffic analysis / global passive adversary.** Timing and volume correlation
   across the relay are out of scope.
 - **Real-time sender↔recipient correlation by the relay** on the non-mailbox
-  paths, and timing correlation between the clearnet control-plane socket and
-  the Tor mailbox socket (§7.3).
+  paths, and timing correlation between the control-plane socket and the
+  mailbox socket (both over Tor on separate circuits, §7.3).
+- **Networks that block Tor.** The client never falls back to clearnet; where
+  Tor is blocked it cannot connect until bridges (pluggable transports) ship.
+- **Call media IP on mobile.** WebRTC media is UDP and cannot ride Tor; with
+  the default relay-only ICE (`hideCallIp`) the peer never sees the device IP,
+  but the TURN server does. Desktop forces TURN-over-TCP through Tor.
 - **Endpoint compromise.** Malware or a physically compromised, unlocked device
   with the keystore unsealed can read plaintext. Panic-wipe and decoy modes
   mitigate coercion scenarios but are not cryptographic defenses.
@@ -724,6 +731,32 @@ with a key derived from a user passphrase the relay never sees:
 ## 9. Transport and authentication (summary)
 
 - Clients connect to the relay over a Socket.IO channel.
+- **Tor always-on.** Every client connection to the relay rides the embedded Tor
+  to the relay's onion service: the Aegis-ID control socket, the mailbox socket
+  and every HTTP call (PoW, registration, prekeys, TURN credentials, blobs, push
+  bindings, proxies). There is no user toggle and no clearnet fallback.
+  - A production build without the onion refuses to start
+    (`mobile/src/config.ts`), and without native Tor it fails closed
+    (`socket/client.ts`, `net/relayHttp.ts` `mustUseTor`, `net/torMedia.ts`).
+  - The control and mailbox lanes use **separate Tor circuits**, so the relay
+    cannot join them at the onion service:
+    - Android: two SocksPort listeners;
+    - iOS: per-lane SOCKS credentials (`IsolateSOCKSAuth`);
+    - desktop: two listeners.
+    
+    Sources: `plugins/withTorEmbedded*.js`, `desktop/src/main/tor/torProcess.ts`.
+  - Remote images (GIF and link-preview thumbnails) are fetched over Tor into a
+    local cache, never by the OS image loader (`components/TorImage.tsx`).
+  - A peer's avatar must be an inline `data:image` or a short text/emoji
+    (`utils/photoVisibility.ts` `isAcceptableAvatar`), so a URL avatar cannot be
+    used as a tracking pixel.
+  - Relay-side, onion requests (no `X-Forwarded-For`, `.onion` Host) are rate
+    limited per verified identity on signed routes, counting only accepted
+    requests, plus a shared flood backstop; clearnet keeps per-IP buckets
+    (`server/src/http/relayLimiter.ts`).
+  - Tests: `net/__tests__/torBridge.test.ts`, `torMedia.test.ts`,
+    `relayHttp.test.ts`, `socket/__tests__/client.homeRelay.test.ts`,
+    `__tests__/torPlugin.regression.test.ts`, `server/src/__tests__/relayLimiter.test.ts`.
 - Sockets authenticate by **challenge-response over the identity key** (relay
   issues a challenge, client signs; see `server/src/auth/challenge.ts`), so the
   relay binds a live connection to an Aegis ID without the client ever
@@ -984,9 +1017,10 @@ current protocol:
    scalar (§3.1).
 3. **Stronger sender anonymity** against an actively-correlating relay.
    Decoupling message routing from the authenticated identity is **done** for
-   the mailbox path (§7.3; `SEALED-SENDER-ARCHITECTURE.md` Fase 4). Remaining:
-   route the control-plane socket over the embedded Tor by default, retire v1
-   relay-side (Fase 6), and add cover traffic (Fase 5).
+   the mailbox path (§7.3; `SEALED-SENDER-ARCHITECTURE.md` Fase 4), and the
+   control-plane socket rides Tor on its own circuit (§9, 2026-09-23).
+   Remaining: retire v1 relay-side (Fase 6), add cover traffic (Fase 5), and
+   ship Tor bridges for networks that block Tor.
 4. **Independent third-party cryptographic audit** of this protocol and its
    implementation, with full public disclosure of findings. **No independent
    audit has been performed.** This is the project's top funding priority.

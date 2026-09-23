@@ -4,7 +4,9 @@
 > está **habilitado por defecto**; ocultar `to` (Fase 4, mailbox IDs + Tor
 > embebido #171/#172) está implementado y, desde la federación F5b (#491), el
 > modo buzón va **activo por defecto** en mobile y desktop (`MAILBOX_MODE`
-> opt-out, fail-closed sin onion). Ver el detalle de fases en §5.
+> opt-out, fail-closed sin onion). Ver el detalle de fases en §5. Desde
+> 2026-09-23 el socket de control-plane y todo el HTTP del móvil también van por
+> Tor, en un circuito separado del buzón (Tor siempre activo, §6.2).
 > Origen: auditoría profunda 2026-06, hallazgo A-6 (el relay ve `from→to` en
 > signaling de llamadas). Al investigarlo se confirmó que el leak está **a la
 > par de los envelopes de chat** (handler.ts:572), así que el problema no es de
@@ -337,6 +339,69 @@ Regla operativa: cualquier señal nueva dirigida a un aegisId por el control-pla
 debe pasar por este mismo filtro antes de flipear `MAILBOX_ENABLED` a ON, o
 reintroduce la arista. Prueba: `client.deleteForEveryone.test.ts` (caso
 `read_receipt`).
+
+### 6.2 Control-plane por Tor, en circuito propio (Tor siempre activo) — ✅ HECHO (2026-09-23)
+
+**Hueco que cierra.** Hasta esta fecha, en el móvil solo el socket de buzón iba por
+Tor. El socket aegisId (control-plane) y todo el HTTP al relay (PoW, registro,
+prekeys, TURN, blobs, push) iban por clearnet, salvo que el usuario activara un
+interruptor que venía apagado y además dependía de Orbot. Resultado: el relay veía
+**la IP junto al aegisId**, y con esa IP podía volver a enlazar el socket de buzón
+con su dueño. El desktop ya iba todo por Tor (`desktop/src/main/tor/torProcess.ts`).
+
+**Qué hay ahora (mobile; desktop ya estaba):**
+
+1. **Todo por la onion.** El relay oficial se alcanza siempre en su onion
+   (`ONION_URL`) con el mismo puente nativo que usa un relay propio (F5):
+   - `homeRelayBaseUrl()` / `officialRelayBaseUrl()`, `socket/client.ts`,
+     `net/relayHttp.ts` (`mustUseTor`) y `net/torMedia.ts`.
+   - Sin interruptor y sin respaldo por clearnet: una build de producción sin
+     `ONION_URL` no arranca (`config.ts`), y sin Tor nativo falla cerrado.
+   - Solo las builds de desarrollo (Expo Go, jest) y un relay de desarrollo en
+     loopback quedan fuera.
+2. **Circuitos separados** para el carril de control y el de buzón. Sin esto, el
+   operador podría unirlos en el onion service (`HiddenServiceExportCircuitID`
+   le pasa el circuito al backend).
+   - Android abre dos `SocksPort` (`torrc`); iOS usa credenciales SOCKS
+     distintas por carril (`IsolateSOCKSAuth`).
+   - El carril va en el prefijo del id del puente (`ctl-`/`mbx-`) y en la ruta
+     HTTP (`/mailbox/*`), así que no cambia ninguna firma nativa y la OTA sigue
+     siendo compatible.
+   - Fuente: `plugins/withTorEmbedded*.js`.
+3. **El puente espera a Tor y reintenta.** Antes, un socket creado antes del
+   bootstrap se quedaba muerto toda la sesión (`TorSioSocket.dial`).
+4. **Eventos reenviados completos.** Los eventos en vivo de canales públicos
+   (`pubchannel:*`) faltaban en `IDENTITY_FORWARD_EVENTS`. Un test guardián
+   compara ahora lo que se escucha con lo que se reenvía.
+5. **Fugas de IP fuera del relay, cerradas:**
+   - miniaturas de GIF, imágenes de preview y GIFs a enviar se descargan por
+     Tor (`components/TorImage.tsx`);
+   - el avatar de un contacto solo puede ser `data:image` o emoji/texto corto,
+     así que ya no sirve como píxel de rastreo (`isAcceptableAvatar`, mobile +
+     desktop).
+6. **Rate limits del relay por cliente sobre Tor.** Todo lo que entra por la
+   onion comparte la IP del contenedor Tor (`server/src/http/relayLimiter.ts`):
+   - rutas firmadas: límite por identidad, contando solo peticiones aceptadas;
+   - rutas anónimas: se apoyan en la PoW, con un tope anti-inundación
+     compartido (`AEGIS_ONION_FLOOD_MULT`, `AEGIS_ONION_REG_FLOOD_MAX`).
+   
+   Arregla también a los relays propios, que solo funcionan por onion.
+
+**Lo que sigue abierto:**
+- La correlación temporal entre los dos sockets (§6).
+- Las redes que bloquean Tor: no hay respaldo por clearnet a propósito, y los
+  bridges son el siguiente trabajo.
+- El medio de las llamadas en móvil (UDP; el servidor TURN ve la IP).
+- `expo-updates` y el token de push de Expo en las versiones de tienda, que
+  contactan Expo directamente.
+
+Todo ello está listado en `README.md` → *Known limitations* y en PROTOCOL §8.3.
+
+Pruebas:
+- mobile: `net/__tests__/torBridge.test.ts`, `torMedia.test.ts`, `relayHttp.test.ts`,
+  `socket/__tests__/client.homeRelay.test.ts`, `__tests__/torPlugin.regression.test.ts`
+  y `utils/__tests__/photoVisibility.test.ts` (también en desktop);
+- server: `src/__tests__/relayLimiter.test.ts`.
 
 ## 7. Referencias
 - Signal sealed sender: <https://signal.org/blog/sealed-sender/>

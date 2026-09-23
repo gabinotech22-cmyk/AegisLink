@@ -4,6 +4,9 @@
 > El estado de abajo refleja el **CÓDIGO**, no el plan original. Varios ítems se
 > realizaron con una arquitectura distinta a la planeada; se anota la divergencia.
 > Cada ✅ lleva su evidencia (ruta/test) al lado.
+>
+> **Nota de vigencia (2026-09-23):** G6 ("Tor vía Orbot / `routeViaTor`") está superado: Tor va
+> embebido y siempre activo, sin Orbot ni interruptor — `SEALED-SENDER-ARCHITECTURE.md` §6.2.
 
 ## Fase 3 — Features grandes (sprints)
 - [x] **G1**: Votación anónima en polls — **HECHO (vía E2EE, no server-side)**. El
