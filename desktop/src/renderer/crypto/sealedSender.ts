@@ -16,6 +16,7 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import { verifyDetached } from './ed25519';
 
 /** Protocol version for the sealed inner payload. */
 export const SEALED_SENDER_VERSION = 1;
@@ -144,7 +145,7 @@ export function openEnvelope(
     tofu = inner.spk;
   }
   if (!signingPub || signingPub.length !== nacl.sign.publicKeyLength) return null;
-  if (!nacl.sign.detached.verify(innerBytes, sig, signingPub)) return null;
+  if (!verifyDetached(innerBytes, sig, signingPub)) return null;
 
   const opened: OpenedEnvelope = { from: inner.from, payload: inner.payload, ts: inner.ts };
   if (tofu) opened.tofuSigningKeyB64 = tofu;

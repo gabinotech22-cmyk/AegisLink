@@ -20,6 +20,7 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
+import { verifyDetached } from './ed25519';
 
 /**
  * Stable hash of a member set: sha256(utf8(JSON.stringify(sorted members))).
@@ -105,7 +106,7 @@ export function verifyGroupMetadata(
     const pub = decodeBase64(signingPublicKeyB64);
     if (sig.length !== nacl.sign.signatureLength) return false;
     if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupBytes(args), sig, pub);
+    return verifyDetached(canonicalGroupBytes(args), sig, pub);
   } catch {
     return false;
   }
@@ -204,7 +205,7 @@ export function verifyGroupGovernance(
     const pub = decodeBase64(signingPublicKeyB64);
     if (sig.length !== nacl.sign.signatureLength) return false;
     if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupGovBytes(args), sig, pub);
+    return verifyDetached(canonicalGroupGovBytes(args), sig, pub);
   } catch {
     return false;
   }
@@ -230,7 +231,7 @@ export function verifyGroupMetadataV2(
     const pub = decodeBase64(signingPublicKeyB64);
     if (sig.length !== nacl.sign.signatureLength) return false;
     if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupBytesV2(args), sig, pub);
+    return verifyDetached(canonicalGroupBytesV2(args), sig, pub);
   } catch {
     return false;
   }
@@ -286,7 +287,7 @@ export function verifyGroupDissolve(
     const pub = decodeBase64(signingPublicKeyB64);
     if (sig.length !== nacl.sign.signatureLength) return false;
     if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupDissolveBytes(args), sig, pub);
+    return verifyDetached(canonicalGroupDissolveBytes(args), sig, pub);
   } catch {
     return false;
   }

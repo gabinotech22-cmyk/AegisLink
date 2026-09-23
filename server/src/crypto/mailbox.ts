@@ -18,6 +18,7 @@
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 import { createHash } from 'node:crypto';
+import { verifyDetached } from './ed25519.js';
 
 const { encodeBase64 } = naclUtil;
 
@@ -46,5 +47,5 @@ export function verifyMailboxAuth(
 ): boolean {
   if (signPublicKey.length !== nacl.sign.publicKeyLength) return false;
   if (signature.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(challenge, signature, signPublicKey);
+  return verifyDetached(challenge, signature, signPublicKey);
 }

@@ -74,6 +74,7 @@ import { loadRatchetSession, saveRatchetSession, deleteContactRatchetSession, sa
 import { showIncomingNotification } from '../notifications/push';
 import { useTyping } from '../store/typing';
 import { useCall } from '../store/call';
+import { verifyDetached } from '../crypto/ed25519';
 
 const DEV = import.meta.env.DEV;
 
@@ -318,7 +319,7 @@ function verifyGroupMetadata(
     const pub = decodeBase64(signingPublicKeyB64);
     if (sig.length !== nacl.sign.signatureLength) return false;
     if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupBytes(args), sig, pub);
+    return verifyDetached(canonicalGroupBytes(args), sig, pub);
   } catch {
     return false;
   }
@@ -355,7 +356,7 @@ export function verifyGroupDissolve(
     const pub = decodeBase64(signingPublicKeyB64);
     if (sig.length !== nacl.sign.signatureLength) return false;
     if (pub.length !== nacl.sign.publicKeyLength) return false;
-    return nacl.sign.detached.verify(canonicalGroupDissolveBytes(args), sig, pub);
+    return verifyDetached(canonicalGroupDissolveBytes(args), sig, pub);
   } catch {
     return false;
   }

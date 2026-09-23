@@ -56,7 +56,7 @@ server policy**.
 | Post-quantum KEM (hybrid handshake, v2) | ML-KEM-768 (FIPS 203) | `@noble/post-quantum` |
 | Authenticated encryption (outer envelope) | `crypto_box` = X25519 + XSalsa20-Poly1305 (`nacl.box`) | TweetNaCl |
 | Authenticated encryption (message) | `crypto_secretbox` = XSalsa20-Poly1305 (`nacl.secretbox`) | TweetNaCl |
-| Signatures | Ed25519 (`nacl.sign`) | TweetNaCl |
+| Signatures | Ed25519 (`nacl.sign`); verification via `verifyDetached`, which rejects non-canonical S (S ≥ L, RFC 8032 §5.1.7) before calling TweetNaCl. TweetNaCl alone accepts the malleable (R, S + L) twin of a valid signature. That does not allow forgery, but the helper removes it anyway (`crypto/ed25519.ts` on mobile, desktop and relay; no direct `nacl.sign.detached.verify` is allowed, enforced by `ed25519.test.ts`) | TweetNaCl |
 | Key derivation | HKDF-SHA256 | `@noble/hashes` |
 | Chain KDF / MAC | HMAC-SHA256 | `@noble/hashes` |
 | Fingerprints | SHA-256 | `@noble/hashes` |

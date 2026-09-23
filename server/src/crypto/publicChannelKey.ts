@@ -23,6 +23,7 @@
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 import { createHash, hkdfSync, timingSafeEqual } from 'node:crypto';
+import { verifyDetached } from './ed25519.js';
 
 const { encodeBase64, decodeBase64 } = naclUtil;
 const encoder = new TextEncoder();
@@ -229,7 +230,7 @@ export function verifyManifest(
   if (sig.length !== nacl.sign.signatureLength) return false;
   const input = buildManifestSignedInput(manifest);
   const labeled = concat([MANIFEST_LABEL, input]);
-  return nacl.sign.detached.verify(labeled, sig, manifest.channelEd25519Pub);
+  return verifyDetached(labeled, sig, manifest.channelEd25519Pub);
 }
 
 /**
@@ -300,7 +301,7 @@ export function verifyAvatarSet(
   channelEd25519Pub: Uint8Array
 ): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(
+  return verifyDetached(
     avatarSetSignedInput(channelId, blobId),
     sig,
     channelEd25519Pub
@@ -328,7 +329,7 @@ export function verifyAvatarDelete(
   channelEd25519Pub: Uint8Array
 ): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(
+  return verifyDetached(
     avatarDeleteSignedInput(channelId),
     sig,
     channelEd25519Pub
@@ -354,7 +355,7 @@ export function signDelete(channelId: string, seqNum: number, channelEd25519Secr
 /** Verify a post-deletion signature against the channel's public key. */
 export function verifyDelete(channelId: string, seqNum: number, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(deleteSignedInput(channelId, seqNum), sig, channelEd25519Pub);
+  return verifyDetached(deleteSignedInput(channelId, seqNum), sig, channelEd25519Pub);
 }
 
 function banSignedInput(channelId: string, banRecord: string): Uint8Array {
@@ -369,7 +370,7 @@ export function signBan(channelId: string, banRecord: string, channelEd25519Secr
 /** Verify a ban-record signature against the channel's public key. */
 export function verifyBan(channelId: string, banRecord: string, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(banSignedInput(channelId, banRecord), sig, channelEd25519Pub);
+  return verifyDetached(banSignedInput(channelId, banRecord), sig, channelEd25519Pub);
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +392,7 @@ export function signPendingList(channelId: string, ts: number, channelEd25519Sec
 /** Verify a pending-joins listing request signature. */
 export function verifyPendingList(channelId: string, ts: number, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(pendingListSignedInput(channelId, ts), sig, channelEd25519Pub);
+  return verifyDetached(pendingListSignedInput(channelId, ts), sig, channelEd25519Pub);
 }
 
 function approveSignedInput(channelId: string, joinEpkB64: string, ts: number): Uint8Array {
@@ -406,7 +407,7 @@ export function signApprove(channelId: string, joinEpkB64: string, ts: number, c
 /** Verify an approve/reject decision signature. */
 export function verifyApprove(channelId: string, joinEpkB64: string, ts: number, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(approveSignedInput(channelId, joinEpkB64, ts), sig, channelEd25519Pub);
+  return verifyDetached(approveSignedInput(channelId, joinEpkB64, ts), sig, channelEd25519Pub);
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +462,7 @@ export function verifyPostSignature(
   if (sig.length !== nacl.sign.signatureLength) return false;
   const input = buildPostSignedInput(channelId, post);
   const labeled = concat([POST_LABEL, input]);
-  return nacl.sign.detached.verify(labeled, sig, signerEd25519Pub);
+  return verifyDetached(labeled, sig, signerEd25519Pub);
 }
 
 /** Compute the hash chain entry for a post (§6.3). Includes sig in hash. */
@@ -641,7 +642,7 @@ export function verifyDelegation(
   if (sig.length !== nacl.sign.signatureLength) return false;
   const input = buildDelegationSignedInput(cert);
   const labeled = concat([DELEGATION_LABEL, input]);
-  return nacl.sign.detached.verify(labeled, sig, channelEd25519Pub);
+  return verifyDetached(labeled, sig, channelEd25519Pub);
 }
 
 /** Validate a delegated post: cert is valid + post sig matches delegatee. */
@@ -686,7 +687,7 @@ export function verifyTombstone(
 ): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
   const input = concat([TOMBSTONE_LABEL, decodeBase64(channelId), u64be(ts)]);
-  return nacl.sign.detached.verify(input, sig, channelEd25519Pub);
+  return verifyDetached(input, sig, channelEd25519Pub);
 }
 
 // ---------------------------------------------------------------------------

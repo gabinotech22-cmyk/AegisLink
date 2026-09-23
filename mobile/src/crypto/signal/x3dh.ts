@@ -4,6 +4,7 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { hkdfSHA256 } from './kdf';
 import { type Identity } from '../identity';
+import { verifyDetached } from '../ed25519';
 
 /**
  * Diagnostic-only helper: re-throws any caught value as `[step] Name: message`
@@ -181,7 +182,7 @@ export function performX3DH(
   if (spkSig.length !== nacl.sign.signatureLength) {
     throw new Error('X3DH: Invalid SPK signature length');
   }
-  const validSig = nacl.sign.detached.verify(bobSPK, spkSig, bobSignK);
+  const validSig = verifyDetached(bobSPK, spkSig, bobSignK);
   if (!validSig) {
     throw new Error('X3DH: Invalid SPK signature — possible key compromise or MITM');
   }
@@ -244,7 +245,7 @@ export function performX3DH(
       if (pqSig.length !== nacl.sign.signatureLength) {
         throw new Error('PQXDH: Invalid PQ prekey signature length');
       }
-      const validPqSig = nacl.sign.detached.verify(bobPQPK, pqSig, bobSignK);
+      const validPqSig = verifyDetached(bobPQPK, pqSig, bobSignK);
       if (!validPqSig) {
         throw new Error('PQXDH: Invalid PQ prekey signature — possible key compromise or MITM');
       }

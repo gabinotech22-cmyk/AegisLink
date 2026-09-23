@@ -19,11 +19,11 @@
  * whose scheme is aegislink:// and host is "panic".
  */
 
-import nacl from 'tweetnacl';
 import { decodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { ss } from './secureStore';
 import { useIdentity } from '../store/identity';
 import { wipeDatabase } from '../db/local';
+import { verifyDetached } from '../crypto/ed25519';
 
 const PANIC_KEY = 'aegis.panic.v1';
 
@@ -79,7 +79,7 @@ export async function handlePanicDeepLink(url: string): Promise<boolean> {
   //    URL was forged after the user changed identity or someone tampered.
   let sigOk = false;
   try {
-    sigOk = nacl.sign.detached.verify(
+    sigOk = verifyDetached(
       decodeUTF8(q.token),
       decodeBase64(q.sig),
       identity.signingPublicKey,

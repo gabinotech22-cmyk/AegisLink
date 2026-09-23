@@ -30,6 +30,7 @@ import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { verifyDetached } from './ed25519';
 
 /** Opaque mailbox identifier length (128-bit — collision-safe routing handle). */
 export const MAILBOX_ID_BYTES = 16;
@@ -153,5 +154,5 @@ export function verifyMailboxAuth(
   signature: Uint8Array
 ): boolean {
   if (signPublicKey.length !== 32 || signature.length !== 64) return false;
-  return nacl.sign.detached.verify(challenge, signature, signPublicKey);
+  return verifyDetached(challenge, signature, signPublicKey);
 }
