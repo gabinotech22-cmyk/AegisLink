@@ -25,6 +25,7 @@
 
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
+import { verifyDetached } from './ed25519.js';
 
 const { encodeBase64, decodeBase64 } = naclUtil;
 
@@ -178,7 +179,7 @@ export function openEnvelope(
   // we already hold for the claimed `from`. Unknown sender → reject.
   const signingPub = resolveSigningKey(inner.from);
   if (!signingPub || signingPub.length !== nacl.sign.publicKeyLength) return null;
-  if (!nacl.sign.detached.verify(innerBytes, sig, signingPub)) return null;
+  if (!verifyDetached(innerBytes, sig, signingPub)) return null;
 
   return { from: inner.from, payload: inner.payload, ts: inner.ts };
 }

@@ -16,10 +16,10 @@
  *   - One-way hash prevents server from correlating hash → DID
  */
 
-import nacl from 'tweetnacl';
 import { sha256 } from '@noble/hashes/sha256';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { signWithProfileKey } from '../../crypto/identity';
+import { verifyDetached } from '../../crypto/ed25519';
 
 export interface RevocationPayload {
   /** SHA-256 hash of the DID being revoked, hex-encoded. Never the DID itself. */
@@ -92,7 +92,7 @@ export function verifyRevocationPayload(payload: RevocationPayload): boolean {
     const sigBytes = decodeBase64(payload.signature);
     const pubKeyBytes = decodeBase64(payload.signingPublicKeyB64);
     const message = buildSigningPayload(payload.didHash, payload.revokedAt);
-    return nacl.sign.detached.verify(message, sigBytes, pubKeyBytes);
+    return verifyDetached(message, sigBytes, pubKeyBytes);
   } catch {
     return false;
   }

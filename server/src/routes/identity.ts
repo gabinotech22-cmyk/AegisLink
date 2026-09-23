@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import nacl from 'tweetnacl';
 import tweetnaclUtil from 'tweetnacl-util';
 import { z } from 'zod';
 import { identityRepo } from '../db/client.js';
 import { issueChallenge, verifyPoW, REGISTRATION_POW_DIFFICULTY } from '../pow/challenge.js';
+import { verifyDetached } from '../crypto/ed25519.js';
 
 const { decodeBase64 } = tweetnaclUtil;
 
@@ -196,8 +196,8 @@ router.delete('/:id', deleteLimiter, async (req, res) => {
   const bucket = Math.floor(ts / 30_000);
   const encode = (b: number) => new TextEncoder().encode(`${id}:delete:${b}`);
   const valid =
-    nacl.sign.detached.verify(encode(bucket), sigBytes, pubKeyBytes) ||
-    nacl.sign.detached.verify(encode(bucket - 1), sigBytes, pubKeyBytes);
+    verifyDetached(encode(bucket), sigBytes, pubKeyBytes) ||
+    verifyDetached(encode(bucket - 1), sigBytes, pubKeyBytes);
   if (!valid) {
     res.status(403).json({ error: 'invalid_signature' });
     return;

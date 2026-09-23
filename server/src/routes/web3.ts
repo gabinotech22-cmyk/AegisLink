@@ -17,6 +17,7 @@ const { decodeBase64 } = tweetnaclUtil;
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import { web3Repo } from '../db/client.js';
+import { verifyDetached } from '../crypto/ed25519.js';
 
 const router = Router();
 
@@ -203,7 +204,7 @@ router.post('/device/revoke', revokeLimiter, async (req, res) => {
     return;
   }
 
-  const valid = nacl.sign.detached.verify(messageBytes, sigBytes, pubKeyBytes);
+  const valid = verifyDetached(messageBytes, sigBytes, pubKeyBytes);
   if (!valid) {
     res.status(403).json({ error: 'invalid_signature' });
     return;

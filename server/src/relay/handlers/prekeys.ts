@@ -1,9 +1,9 @@
 import type { Socket } from 'socket.io';
-import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 import { prekeysRepo, identityRepo } from '../../db/client.js';
 import { PreKeyUpload, PreKeyFetch, type PreKeyBundle } from '../schemas.js';
 import { checkPrekeysUploadRateLimit, checkPrekeysFetchRateLimit } from '../rateLimits.js';
+import { verifyDetached } from '../../crypto/ed25519.js';
 
 const { decodeBase64 } = naclUtil;
 
@@ -31,7 +31,7 @@ export function attachPrekeys(socket: Socket, { me, deviceId }: PrekeysDeps): vo
         const spkBytes = decodeBase64(parsed.data.signedPreKey.publicKeyB64);
         const sigBytes = decodeBase64(parsed.data.signedPreKey.signatureB64);
         const signingKey = decodeBase64(uploaderIdentity.signing_public_key_b64);
-        if (!nacl.sign.detached.verify(spkBytes, sigBytes, signingKey)) {
+        if (!verifyDetached(spkBytes, sigBytes, signingKey)) {
           ack?.({ ok: false, error: 'invalid_spk_signature' });
           return;
         }
@@ -44,7 +44,7 @@ export function attachPrekeys(socket: Socket, { me, deviceId }: PrekeysDeps): vo
         if (parsed.data.pqSignedPreKey) {
           const pqBytes = decodeBase64(parsed.data.pqSignedPreKey.publicKeyB64);
           const pqSigBytes = decodeBase64(parsed.data.pqSignedPreKey.signatureB64);
-          if (!nacl.sign.detached.verify(pqBytes, pqSigBytes, signingKey)) {
+          if (!verifyDetached(pqBytes, pqSigBytes, signingKey)) {
             ack?.({ ok: false, error: 'invalid_pq_spk_signature' });
             return;
           }

@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import nacl from 'tweetnacl';
 import tweetnaclUtil from 'tweetnacl-util';
 const { decodeBase64 } = tweetnaclUtil;
 import { z } from 'zod';
 import { identityRepo, prekeysRepo, type SignedPreKeyRow } from '../db/client.js';
+import { verifyDetached } from '../crypto/ed25519.js';
 
 const router = Router();
 
@@ -110,8 +110,8 @@ router.post('/', uploadLimiter, async (req, res) => {
     new TextEncoder().encode(`${aegisId}:prekeys:${bucket}`);
 
   const valid =
-    nacl.sign.detached.verify(encode(timeBucket), sigBytes, pubKeyBytes) ||
-    nacl.sign.detached.verify(encode(timeBucket - 1), sigBytes, pubKeyBytes);
+    verifyDetached(encode(timeBucket), sigBytes, pubKeyBytes) ||
+    verifyDetached(encode(timeBucket - 1), sigBytes, pubKeyBytes);
 
   if (!valid) {
     res.status(403).json({ error: 'invalid_signature' });
@@ -132,7 +132,7 @@ router.post('/', uploadLimiter, async (req, res) => {
       res.status(403).json({ error: 'invalid_pq_spk_signature' });
       return;
     }
-    if (!nacl.sign.detached.verify(pqPubKeyBytes, pqSigBytes, pubKeyBytes)) {
+    if (!verifyDetached(pqPubKeyBytes, pqSigBytes, pubKeyBytes)) {
       res.status(403).json({ error: 'invalid_pq_spk_signature' });
       return;
     }

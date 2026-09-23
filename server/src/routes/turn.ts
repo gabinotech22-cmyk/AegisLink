@@ -2,9 +2,9 @@ import { Router } from 'express';
 import { createHmac } from 'node:crypto';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
-import nacl from 'tweetnacl';
 import tweetnaclUtil from 'tweetnacl-util';
 import { identityRepo } from '../db/client.js';
+import { verifyDetached } from '../crypto/ed25519.js';
 
 const { decodeBase64 } = tweetnaclUtil;
 
@@ -91,8 +91,8 @@ router.get('/credentials', turnLimiter, async (req, res) => {
   // Accept the current and previous bucket to tolerate clock skew, exactly like
   // POST /prekeys.
   const validSig =
-    nacl.sign.detached.verify(encode(timeBucket), sigBytes, pubKeyBytes) ||
-    nacl.sign.detached.verify(encode(timeBucket - 1), sigBytes, pubKeyBytes);
+    verifyDetached(encode(timeBucket), sigBytes, pubKeyBytes) ||
+    verifyDetached(encode(timeBucket - 1), sigBytes, pubKeyBytes);
   if (!validSig) {
     res.status(403).json({ error: 'invalid_signature' });
     return;
