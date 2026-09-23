@@ -5,7 +5,6 @@ import {
   TextInput,
   Pressable,
   FlatList,
-  Image,
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
@@ -18,6 +17,7 @@ import { homeRelayBaseUrl } from '../net/homeRelay';
 import { relayFetch, type RelayResponse } from '../net/relayHttp';
 import { VAULT_PACK } from './stickers/VaultPack';
 import { ErrorBoundary } from './ErrorBoundary';
+import { TorImage } from './TorImage';
 
 // Tab type
 type GifTab = 'gifs' | 'stickers';
@@ -354,8 +354,8 @@ export function GifPicker({ visible, onSelectGif, onSelectSticker }: Props) {
                       opacity: pressed ? 0.8 : 1,
                     })}
                   >
-                    <Image
-                      source={{ uri: item.previewUrl }}
+                    <TorImage
+                      uri={item.previewUrl}
                       style={{ width: TILE_SIZE, height: tileH }}
                       resizeMode="cover"
                     />

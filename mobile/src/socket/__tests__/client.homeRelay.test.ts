@@ -1,11 +1,11 @@
 /**
- * Federation F5 — the identity socket on a SELF-HOSTED home relay.
+ * Tor always-on — the identity socket rides the embedded Tor.
  *
- * A custom home is .onion-only, so `connect()` must build the identity socket
- * on the native Tor bridge (TorSioSocket with the full identity event list)
- * at `http://<onion>` — never socket.io-client at a clearnet URL, never the
- * official relay "instead" — and fail closed without Tor. With the official
- * home nothing changes (socket.io-client at SERVER_URL).
+ * `connect()` must build the identity socket on the native Tor bridge
+ * (TorSioSocket with the full identity event list) at the home's onion — the
+ * official relay's ONION_URL, or a self-hosted home's `http://<onion>` (F5) —
+ * never socket.io-client at a clearnet URL, and fail closed without Tor.
+ * Only a dev build without an onion uses socket.io-client at SERVER_URL.
  */
 
 jest.mock('../../store/contacts', () => ({
@@ -59,7 +59,7 @@ jest.mock('../../store/identity', () => ({
 
 jest.mock('../../store/preferences', () => ({
   __esModule: true,
-  usePreferences: { getState: () => ({ routeViaTor: false }) },
+  usePreferences: { getState: () => ({}) },
 }));
 
 jest.mock('../../runtime', () => ({ __esModule: true, IS_EXPO_GO: true }));
@@ -85,7 +85,7 @@ jest.mock('../../config', () => ({
 }));
 
 // ── Federation seams: the home-relay setting and the native Tor bridge ───────
-const mockHome: { onion: string | null } = { onion: null };
+const mockHome: { onion: string | null; official: string | null } = { onion: null, official: null };
 jest.mock('../../net/homeRelay', () => {
   const real = jest.requireActual('../../net/homeRelay') as typeof import('../../net/homeRelay');
   return {
@@ -93,7 +93,7 @@ jest.mock('../../net/homeRelay', () => {
     ...real,
     getHomeRelay: () => (mockHome.onion ? { onion: mockHome.onion } : null),
     isCustomHome: () => mockHome.onion !== null,
-    homeRelayOnionUrl: () => (mockHome.onion ? `http://${mockHome.onion}` : null),
+    homeRelayOnionUrl: () => (mockHome.onion ? `http://${mockHome.onion}` : mockHome.official),
     homeRelayBaseUrl: () => (mockHome.onion ? `http://${mockHome.onion}` : 'http://localhost'),
   };
 });
@@ -249,12 +249,13 @@ function buildIdentity(): Identity {
   } as Identity;
 }
 
-describe('federation F5 — identity socket on a self-hosted home', () => {
+describe('Tor always-on — identity socket (official onion and self-hosted home)', () => {
   let client: typeof import('../client');
   beforeEach(() => {
     jest.resetModules();
     mockIdentityState = { publishStatus: 'published', publishError: null };
     mockHome.onion = null;
+    mockHome.official = null;
     mockTor.available = true;
     mockTorSockets.length = 0;
     mockIoCalls.length = 0;
@@ -262,7 +263,42 @@ describe('federation F5 — identity socket on a self-hosted home', () => {
   });
   afterEach(() => { client.disconnect(); });
 
-  it('official home: socket.io-client at SERVER_URL, no Tor bridge (as before F5)', () => {
+  it('official home: the Tor bridge at the relay onion — never socket.io-client at clearnet', () => {
+    const OFFICIAL = `http://${'o'.repeat(56)}.onion`;
+    mockHome.official = OFFICIAL;
+    const me = buildIdentity();
+    const sock = client.connect(me);
+    expect(mockIoCalls).toEqual([]);
+    expect(mockTorSockets).toHaveLength(1);
+    expect(mockTorSockets[0].url).toBe(OFFICIAL);
+    expect(mockTorSockets[0].auth).toEqual({ aegisId: me.aegisId, platform: 'mobile', ackDelivery: true });
+    expect(client.getSocket()).toBe(sock);
+  });
+
+  it('production build: official home without the embedded Tor fails closed — no clearnet socket', () => {
+    const g = globalThis as { __DEV__?: boolean };
+    const dev = g.__DEV__;
+    g.__DEV__ = false;
+    try {
+      mockHome.official = `http://${'o'.repeat(56)}.onion`;
+      mockTor.available = false;
+      expect(() => client.connect(buildIdentity())).toThrow(/Tor/);
+      expect(mockIoCalls).toEqual([]);
+      expect(mockTorSockets).toHaveLength(0);
+    } finally {
+      g.__DEV__ = dev;
+    }
+  });
+
+  it('dev build without the native Tor module (Expo Go / jest): socket.io-client at SERVER_URL', () => {
+    mockHome.official = `http://${'o'.repeat(56)}.onion`;
+    mockTor.available = false;
+    client.connect(buildIdentity());
+    expect(mockIoCalls).toEqual(['http://localhost']);
+    expect(mockTorSockets).toHaveLength(0);
+  });
+
+  it('dev build without an onion: socket.io-client at SERVER_URL', () => {
     client.connect(buildIdentity());
     expect(mockIoCalls).toEqual(['http://localhost']);
     expect(mockTorSockets).toHaveLength(0);

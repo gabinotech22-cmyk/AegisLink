@@ -60,6 +60,9 @@ describe('LinkPreview (AL-05: og:image only on explicit tap)', () => {
     const { Image } = jest.requireActual('react-native');
     await waitFor(() => expect(UNSAFE_queryAllByType(Image)).toHaveLength(1));
     const img = UNSAFE_queryAllByType(Image)[0]!;
-    expect(img.props.source).toEqual({ uri: OG.image });
+    // Tor always-on: the image is fetched over Tor into a local cache file; the
+    // OS image loader never gets the remote (tracker) URL.
+    expect(img.props.source.uri).toMatch(/^file:.*tor-media\/[0-9a-f]{32}$/);
+    expect(img.props.source.uri).not.toContain('tracker');
   });
 });

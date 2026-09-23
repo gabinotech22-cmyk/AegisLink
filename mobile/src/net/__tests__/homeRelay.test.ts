@@ -53,7 +53,8 @@ describe('homeRelay (F5)', () => {
     await hydrateHomeRelay();
     expect(getHomeRelay()).toBeNull();
     expect(isCustomHome()).toBe(false);
-    expect(homeRelayBaseUrl()).toBe('https://relay.example');
+    // Tor always-on: the official relay is reached at its onion, not SERVER_URL.
+    expect(homeRelayBaseUrl()).toBe(`http://${OFFICIAL}`);
     expect(homeRelayOnionUrl()).toBe(`http://${OFFICIAL}`);
     expect(isForeign({ relayOnion: null })).toBe(false);
     expect(isForeign({ relayOnion: OFFICIAL })).toBe(false);

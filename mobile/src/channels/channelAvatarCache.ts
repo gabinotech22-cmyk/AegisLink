@@ -24,6 +24,7 @@ import { decodeBase64 } from 'tweetnacl-util';
 import nacl from 'tweetnacl';
 import { channelAvatarUrl } from '../api/publicChannels';
 import { logger } from '../utils/logger';
+import { torDownloadTo } from '../net/torMedia';
 
 const AVATAR_DIR = (FileSystem.documentDirectory ?? '') + 'channel_avatars/';
 
@@ -98,8 +99,10 @@ async function downloadAndVerify(
   const tmp = `${dest}.tmp`;
 
   try {
-    const result = await FileSystem.downloadAsync(url, tmp);
-    if (result.status !== 200) {
+    // Over Tor (Tor always-on): the relay URL is an onion the OS downloader
+    // cannot reach, and a direct fetch would expose the device IP.
+    const status = await torDownloadTo(url, tmp);
+    if (status !== 200) {
       await FileSystem.deleteAsync(tmp, { idempotent: true }).catch(() => {});
       return null;
     }
