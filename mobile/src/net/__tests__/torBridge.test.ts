@@ -85,9 +85,26 @@ describe('TorSioSocket — cold-start dial', () => {
     expect(mockNative.sioConnect).toHaveBeenCalledTimes(1);
   });
 
+  it('circuit isolation: the control lane gets a ctl- bridge id, the mailbox (default) an mbx- one', async () => {
+    mockNative.sioConnect.mockResolvedValue(true);
+    const ctl = new TorSioSocket(ONION, { aegisId: 'X' }, IDENTITY_FORWARD_EVENTS, 'control');
+    const mbx = new TorSioSocket(ONION, { mailboxId: 'M' });
+    await flush();
+    const ids = mockNative.sioConnect.mock.calls.map((c) => c[0] as string);
+    expect(ids[0]).toMatch(/^ctl-\d+$/);
+    expect(ids[1]).toMatch(/^mbx-\d+$/);
+    // A reconnect after disconnect() keeps the lane.
+    ctl.disconnect();
+    ctl.connect();
+    await flush();
+    expect(mockNative.sioConnect.mock.calls[2]![0]).toMatch(/^ctl-\d+$/);
+    ctl.disconnect();
+    mbx.disconnect();
+  });
+
   it('passes the identity event list and string-only auth to native', async () => {
     mockNative.sioConnect.mockResolvedValue(true);
-    const sock = new TorSioSocket(ONION, { aegisId: 'X', ackDelivery: true }, IDENTITY_FORWARD_EVENTS);
+    const sock = new TorSioSocket(ONION, { aegisId: 'X', ackDelivery: true }, IDENTITY_FORWARD_EVENTS, 'control');
     await flush();
     const [, url, authJson, eventsJson] = mockNative.sioConnect.mock.calls[0] as [string, string, string, string];
     expect(url).toBe(ONION);

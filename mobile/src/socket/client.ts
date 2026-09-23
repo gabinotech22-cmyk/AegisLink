@@ -1293,7 +1293,7 @@ export function connect(identity: Identity): Socket {
 
   const socketAuth = { aegisId: identity.aegisId, platform: 'mobile', ackDelivery: true };
   socket = viaTor
-    ? (new TorSioSocket(relayUrl, socketAuth, IDENTITY_FORWARD_EVENTS) as unknown as Socket)
+    ? (new TorSioSocket(relayUrl, socketAuth, IDENTITY_FORWARD_EVENTS, 'control') as unknown as Socket)
     : io(relayUrl, {
     // WebSocket first (lowest latency), but fall back to HTTP long-polling within
     // the SAME connection attempt when the WS upgrade is blocked — the common case

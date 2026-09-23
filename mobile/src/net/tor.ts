@@ -367,14 +367,30 @@ export class TorSioSocket {
   private readonly url: string;
   private readonly authStr: Record<string, string>;
   private readonly forwardEvents: readonly string[];
+  /**
+   * Circuit-isolation lane. The native side reads it from the bridge id prefix
+   * (`ctl-` / `mbx-`) and dials a separate Tor circuit for each: a separate
+   * SocksPort on Android, separate SOCKS credentials on iOS
+   * (withTorEmbedded*.js). The control lane (aegisId identity socket) and the
+   * mailbox lane must never share a circuit, or the relay could relink the
+   * mailbox id to the aegisId. Kept in the id rather than as a new native
+   * argument, so JS and binaries of different versions stay compatible.
+   */
+  private readonly lane: 'control' | 'mailbox';
   /** Handshake auth as given (socket.io exposes the same; client.ts reads `auth.aegisId`). */
   public readonly auth: Record<string, unknown>;
   /** True between the native 'connect' and 'disconnect'/'connect_error' events. */
   public connected = false;
 
-  constructor(url: string, auth: Record<string, unknown>, forwardEvents: readonly string[] = MAILBOX_FORWARD_EVENTS) {
+  constructor(
+    url: string,
+    auth: Record<string, unknown>,
+    forwardEvents: readonly string[] = MAILBOX_FORWARD_EVENTS,
+    lane: 'control' | 'mailbox' = 'mailbox',
+  ) {
     if (!Native || !emitter) throw new Error('[tor] native module unavailable');
     this.url = url;
+    this.lane = lane;
     this.auth = auth;
     this.forwardEvents = forwardEvents;
     // socket.io-client-java handshake auth is Map<String,String>; non-string
@@ -391,7 +407,7 @@ export class TorSioSocket {
   /** Open (or re-open after disconnect()) the native socket under a fresh bridge id. */
   private open(): void {
     if (!Native || !emitter || this.unsub) return;
-    this.id = `mbx-${++_sioCounter}`;
+    this.id = `${this.lane === 'control' ? 'ctl' : 'mbx'}-${++_sioCounter}`;
     const id = this.id;
     const sub = emitter.addListener('AegisTorSio', (ev: SioForward) => {
       if (ev?.id === this.id) this.dispatch(ev.event, ev.args);

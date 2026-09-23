@@ -97,7 +97,7 @@ jest.mock('../../net/homeRelay', () => {
     homeRelayBaseUrl: () => (mockHome.onion ? `http://${mockHome.onion}` : 'http://localhost'),
   };
 });
-const mockTorSockets: Array<{ url: string; auth: Record<string, unknown>; events: readonly string[] }> = [];
+const mockTorSockets: Array<{ url: string; auth: Record<string, unknown>; events: readonly string[]; lane?: string }> = [];
 const mockTor = { available: true };
 jest.mock('../../net/tor', () => ({
   __esModule: true,
@@ -110,9 +110,9 @@ jest.mock('../../net/tor', () => ({
     handlers = new Map<string, (...a: unknown[]) => void>();
     connected = false;
     auth: Record<string, unknown>;
-    constructor(url: string, auth: Record<string, unknown>, events: readonly string[]) {
+    constructor(url: string, auth: Record<string, unknown>, events: readonly string[], lane?: string) {
       this.auth = auth;
-      mockTorSockets.push({ url, auth, events });
+      mockTorSockets.push({ url, auth, events, lane });
     }
     on(e: string, cb: (...a: unknown[]) => void) { this.handlers.set(e, cb); return this; }
     off() { return this; }
@@ -272,6 +272,8 @@ describe('Tor always-on — identity socket (official onion and self-hosted home
     expect(mockTorSockets).toHaveLength(1);
     expect(mockTorSockets[0].url).toBe(OFFICIAL);
     expect(mockTorSockets[0].auth).toEqual({ aegisId: me.aegisId, platform: 'mobile', ackDelivery: true });
+    // Circuit isolation: the identity socket is the CONTROL lane, never the mailbox's.
+    expect(mockTorSockets[0].lane).toBe('control');
     expect(client.getSocket()).toBe(sock);
   });
 

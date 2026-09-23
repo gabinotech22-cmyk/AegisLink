@@ -742,14 +742,36 @@ class AegisTorLogic: NSObject {
 
   // ── F2: socket.io-over-SOCKS dumb pipe ─────────────────────────────────
 
-  private func torSessionConfiguration() -> URLSessionConfiguration {
+  /// Circuit isolation (Tor always-on). The control lane (aegisId identity
+  /// socket, relay HTTP) and the mailbox lane (mailbox socket, /mailbox/* HTTP)
+  /// must never share a Tor circuit. Otherwise a relay operator can join them
+  /// through the onion service (HiddenServiceExportCircuitID) and relink the
+  /// opaque mailbox id to the aegisId. Tor's SocksPort isolates streams by SOCKS
+  /// credentials by default (IsolateSOCKSAuth), so each lane authenticates with
+  /// its own username/password. These are not secrets: Tor accepts any value and
+  /// uses them only to pick circuits. Desktop does the same with two listeners;
+  /// Android with two SocksPorts (withTorEmbedded.js).
+  private func torSessionConfiguration(lane: String) -> URLSessionConfiguration {
     let config = URLSessionConfiguration.ephemeral
     config.connectionProxyDictionary = [
       kCFStreamPropertySOCKSProxyHost as String: "127.0.0.1",
       kCFStreamPropertySOCKSProxyPort as String: socksPort,
       kCFStreamPropertySOCKSVersion as String: kCFStreamSocketSOCKSVersion5,
+      kCFStreamPropertySOCKSUser as String: "aegis-" + lane,
+      kCFStreamPropertySOCKSPassword as String: lane,
     ]
     return config
+  }
+
+  /// Socket lane from the JS bridge id: identity sockets are "ctl-…" (net/tor.ts).
+  private func laneForSocket(_ id: String) -> String {
+    return id.hasPrefix("ctl-") ? "control" : "mailbox"
+  }
+
+  /// HTTP lane from the URL: /mailbox/* (stateless drain, challenges) is the
+  /// mailbox lane; everything else the control lane.
+  private func laneForUrl(_ u: URL) -> String {
+    return u.path.hasPrefix("/mailbox/") ? "mailbox" : "control"
   }
 
   /// http(s):// base URL -> the engine.io v4 WebSocket endpoint socket.io
@@ -789,7 +811,7 @@ class AegisTorLogic: NSObject {
       eventNames = []
     }
 
-    let session = URLSession(configuration: torSessionConfiguration())
+    let session = URLSession(configuration: torSessionConfiguration(lane: laneForSocket(id)))
     let task = session.webSocketTask(with: wsUrl)
     sessions[id] = session
     tasks[id] = task
@@ -966,7 +988,7 @@ class AegisTorLogic: NSObject {
       if !hasContentType { req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type") }
       req.httpBody = body.data(using: .utf8)
     }
-    let session = URLSession(configuration: torSessionConfiguration())
+    let session = URLSession(configuration: torSessionConfiguration(lane: laneForUrl(u)))
     let task = session.dataTask(with: req) { data, response, error in
       defer { session.finishTasksAndInvalidate() }
       if let error = error {
@@ -1021,7 +1043,7 @@ class AegisTorLogic: NSObject {
       }
     }
     if !hasContentType { req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type") }
-    let session = URLSession(configuration: torSessionConfiguration())
+    let session = URLSession(configuration: torSessionConfiguration(lane: laneForUrl(u)))
     let task = session.uploadTask(with: req, fromFile: src) { data, response, error in
       defer { session.finishTasksAndInvalidate() }
       if let error = error {
@@ -1066,7 +1088,7 @@ class AegisTorLogic: NSObject {
       for (k, v) in dict { req.setValue(v, forHTTPHeaderField: k) }
     }
     let dest = URL(fileURLWithPath: destPath.hasPrefix("file://") ? String(destPath.dropFirst(7)) : destPath)
-    let session = URLSession(configuration: torSessionConfiguration())
+    let session = URLSession(configuration: torSessionConfiguration(lane: laneForUrl(u)))
     let task = session.downloadTask(with: req) { tmp, response, error in
       defer { session.finishTasksAndInvalidate() }
       if let error = error {
