@@ -31,18 +31,23 @@ keeps no logs of who talks to whom.
   address is a random Aegis ID — nothing personal.
 - **1:1 chat**: Double Ratchet with X3DH key agreement (hybrid post-quantum
   PQXDH). The relay routes opaque ciphertext and keeps no logs of who talks to
-  whom. Sender identity is never persisted (sealed-sender at rest); full
-  transport-level sealed-sender — hiding the sender from the relay process
-  itself — is in active development (see
-  [docs/SEALED-SENDER-ARCHITECTURE.md](docs/SEALED-SENDER-ARCHITECTURE.md)).
+  whom. **Sealed sender is on by default**: the envelope carries no `from`, on
+  the wire or at rest. Once you know a contact's mailbox (from their link or
+  their first reply), messages travel over a **separate mailbox connection
+  through the embedded Tor client**. The relay sees no sender, no recipient
+  Aegis ID and no IP for them (see
+  [docs/SEALED-SENDER-ARCHITECTURE.md](docs/SEALED-SENDER-ARCHITECTURE.md) and
+  the limits below).
 - **Calls (1:1 and group)**: WebRTC with DTLS-SRTP media encryption. SDP
   offers/answers and ICE candidates are sealed with NaCl `box` before they
   reach the relay, so the server never sees IPs, DTLS fingerprints or codecs
   inside signaling.
 - **Attachments**: encrypted client-side before upload; the server stores
   opaque blobs.
-- **Push notifications**: FCM/APNs are used as a wake-up signal only — the
-  payload is generic and never contains content or sender identity.
+- **Push notifications**: a wake-up signal only — the payload is generic and
+  never contains content or sender identity. Store builds use FCM/APNs; the
+  Android `foss` build contains no Google code and wakes through ntfy over Tor
+  plus a foreground service.
 - **Backups**: encrypted locally with a key derived from your passphrase
   (Argon2id); the key belongs to the user only.
 
@@ -56,16 +61,27 @@ short version:
 - **No independent audit yet.** The protocol and code are public so they *can* be
   reviewed, but no third party has formally audited them. Funding an audit is the
   project's top priority.
-- **The relay can still see your IP, and correlate sender↔recipient in real
-  time.** Message *content* is end-to-end encrypted and the sender is **not stored
-  at rest** (sealed-sender at rest; access logs omit IPs), but full
-  *transport-level* sealed sender — hiding the sender from the relay **process**
-  itself — is still in active development. Until it ships, a malicious or compelled
-  relay operator watching the live authenticated socket can observe who is talking
-  to whom. See
-  [docs/SEALED-SENDER-ARCHITECTURE.md](docs/SEALED-SENDER-ARCHITECTURE.md).
+- **The control connection still shows your IP and that you are online.** Each
+  client keeps two connections to the relay. The **mailbox** connection carries
+  messages over the embedded Tor client, with no sender, no recipient Aegis ID
+  and no IP. The **control** connection carries prekeys, the push token, your
+  profile and presence. It is authenticated with your Aegis ID and, by default,
+  uses TLS over the normal internet, so the relay sees your IP next to your Aegis
+  ID. Routing it through Tor is optional today (*Privacy → Network*, needs Orbot).
+  A relay that watches both connections could try to link them by **timing**.
+- **A few paths still show the sender→recipient edge to the relay:**
+  - a first message to a bare Aegis ID or a legacy (v1) link, until the other
+    person replies;
+  - any message sent while your mailbox connection is down;
+  - calls to contacts on app versions that do not announce sealed calls (≤ 1.0.6).
+
+  The relay still accepts the legacy v1 envelope for older clients. Removing it
+  is scheduled once `APP_MIN_VERSION=1.0.7` has been enforced for a while. See
+  [docs/PROTOCOL.md §7.3](docs/PROTOCOL.md) and
+  [docs/SEALED-SENDER-ARCHITECTURE.md](docs/SEALED-SENDER-ARCHITECTURE.md) §5.
 - **No defense against traffic analysis** by a global passive adversary who can
-  watch network flows in and out of the relay (timing/volume correlation).
+  watch network flows in and out of the relay (timing/volume correlation). Cover
+  traffic is not implemented.
 - **Post-quantum protection is gated.** The hybrid PQXDH handshake (X25519 +
   ML-KEM-768) protects sessions where *both* ends are upgraded; sessions with a
   not-yet-upgraded peer fall back to
@@ -75,10 +91,15 @@ short version:
   verified through the JS engine's JIT+GC. Practical exploitation would require an
   already-compromised device. Migration to a native libsodium binding is on the
   roadmap ([docs/PROTOCOL.md §2.1](docs/PROTOCOL.md)).
-- **Push still touches Google/Apple.** FCM/APNs deliver a generic wake-up with no
-  content or sender, but Google/Apple learn that *a* device received *a* push.
-  Migrating to [UnifiedPush](https://unifiedpush.org/) (ntfy/Gotify) to drop that
-  dependency is a roadmap goal.
+- **Store builds still touch Google/Apple for push.** On Play Store and App Store
+  builds, FCM/APNs deliver a generic wake-up with no content or sender, but
+  Google/Apple learn that *a* device received *a* push. The Android `foss` build
+  has no FCM at all: it wakes through the relay's ntfy over Tor, plus a
+  foreground service for calls. iOS has no alternative to APNs.
+- **One maintainer, one official relay.** The project is maintained by a single
+  developer, and the official relay runs in a single region, so expect occasional
+  downtime. You can self-host a relay (`.onion`-only) and still talk to contacts
+  on other relays — see [docs/SELF-HOSTING.md](docs/SELF-HOSTING.md).
 - **Endpoint compromise is out of scope.** Malware on an unlocked device with the
   keystore unsealed can read plaintext; panic-wipe and decoy modes mitigate
   coercion but are not cryptographic defenses.

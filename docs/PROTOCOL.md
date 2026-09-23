@@ -518,13 +518,24 @@ carries root + token + caps) upgrades the pair.
 > **⚠ Disclosure — what sealed sender does and does not protect.**
 > **Protects:** there is no plaintext sender field on the wire or in the at-rest
 > message queue; ciphertext size is normalized (§7.2).
-> **Does NOT protect:** the client socket is authenticated to the relay via
-> challenge-response (§9), so a malicious or compelled relay that correlates the
-> authenticated live connection with the `to` field can still observe the
-> sender→recipient relationship at send time. Sealed sender here primarily
-> protects metadata **at rest** and removes `from` from the payload; it is not a
-> defense against an actively-correlating relay or a network-level observer.
-> This matches the limitation Signal documents for its own sealed sender.
+> **Mailbox path (the default once a mailbox root is known):** the envelope
+> leaves through the mailbox socket, which runs over the embedded Tor client and
+> is authenticated by mailbox possession, not by Aegis ID. The relay therefore
+> sees neither the sender, nor the recipient's Aegis ID, nor the sender's IP for
+> that message.
+> **Does NOT protect:**
+> - **Control-plane socket.** It is authenticated by Aegis ID via
+>   challenge-response (§9) and carries prekeys, push token, profile and
+>   presence. It uses clearnet TLS by default (`routeViaTor` is an opt-in that
+>   needs Orbot), so the relay sees the user's IP next to the Aegis ID. A relay
+>   that watches both sockets can attempt **timing** correlation between them.
+> - **Every path in the table above that is not a mailbox path** (v1 envelope,
+>   and sealed v2 addressed by aegisId). The sender's authenticated live socket
+>   sits next to a `to: aegisId` there, so an actively-correlating relay can
+>   observe sender→recipient at send time. The same holds for relay-visible
+>   `call:*` signaling to peers without `sealed-calls`. This matches the
+>   limitation Signal documents for its own sealed sender.
+> - **Network-level observers**: cover traffic is not implemented.
 
 ### 7.4 Encrypted attachments
 
@@ -689,13 +700,15 @@ with a key derived from a user passphrase the relay never sees:
 
 - **Traffic analysis / global passive adversary.** Timing and volume correlation
   across the relay are out of scope.
-- **Real-time sender↔recipient correlation by the relay** (§7.3).
+- **Real-time sender↔recipient correlation by the relay** on the non-mailbox
+  paths, and timing correlation between the clearnet control-plane socket and
+  the Tor mailbox socket (§7.3).
 - **Endpoint compromise.** Malware or a physically compromised, unlocked device
   with the keystore unsealed can read plaintext. Panic-wipe and decoy modes
   mitigate coercion scenarios but are not cryptographic defenses.
 - **Post-quantum adversaries in mixed-version sessions.** v2↔v2 sessions are
-  hybrid-protected (§4.4); a session that falls back to v1 (peer not yet upgraded,
-  or desktop) is classical X25519 only and remains store-now-decrypt-later
+  hybrid-protected (§4.4); a session that falls back to v1 (peer not yet upgraded)
+  is classical X25519 only and remains store-now-decrypt-later
   exposed until both ends are v2 — see §10.
 - **Cross-domain key-separation concerns** from the shared X25519/Ed25519 secret
   (§3.1).
@@ -962,14 +975,17 @@ The following are **not implemented** and are honestly out of scope of the
 current protocol:
 
 1. **Post-quantum hybrid handshake** (PQXDH-style, X25519 + ML-KEM-768) —
-   **implemented** for the mobile client and relay (§4.4, handshake v2).
-   Remaining: (a) wire the **desktop** client to v2 (it is still v1), (b) extend
-   v2 to the multi-device self-copy path, and (c) flip the receiver gate to
-   strict "PQ-mandatory" once the whole fleet is v2.
+   **implemented** for mobile, desktop (`desktop/src/renderer/crypto/signal/x3dh.ts`)
+   and relay (§4.4, handshake v2).
+   Remaining: (a) extend v2 to the multi-device self-copy path, and (b) flip the
+   receiver gate to strict "PQ-mandatory" once the whole fleet is v2.
 2. **Domain-separated identity keys** to remove the shared X25519/Ed25519 secret
    scalar (§3.1).
-3. **Stronger sender anonymity** against an actively-correlating relay (e.g.
-   decoupling the authenticated transport identity from message routing).
+3. **Stronger sender anonymity** against an actively-correlating relay.
+   Decoupling message routing from the authenticated identity is **done** for
+   the mailbox path (§7.3; `SEALED-SENDER-ARCHITECTURE.md` Fase 4). Remaining:
+   route the control-plane socket over the embedded Tor by default, retire v1
+   relay-side (Fase 6), and add cover traffic (Fase 5).
 4. **Independent third-party cryptographic audit** of this protocol and its
    implementation, with full public disclosure of findings. **No independent
    audit has been performed.** This is the project's top funding priority.

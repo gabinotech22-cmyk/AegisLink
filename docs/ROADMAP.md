@@ -121,11 +121,15 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
 
 ## Hito 4 — Paridad de plataforma y alcance 🟡
 
-- [ ] **iOS**: no hay target iOS todavía; el pinning M-1 solo cubre Android. Definir si entra o no.
+- [x] **iOS**: publicado en App Store desde 1.0.x (release 1.0.6 live, iOS build 33); el pinning TLS
+      cubre ambas plataformas (`mobile/app.json` + `app.plugin.js`).
 - [ ] **Desktop media wiring**: cerrar `[[bug_desktop_media_not_wired]]` (UI de adjuntos desktop).
 - [ ] **Paridad mobile↔desktop** continua: mantener los parity-tests de los dos `socket/client.ts` como
       lever (no refactor cosmético — decisión M4).
 - [ ] **F-2 — UnifiedPush**: transporte wake-up sin Google/Apple (ntfy/Gotify), FCM/APNs como fallback.
+      Parcial: el build Android `foss` ya no lleva FCM (`plugins/withFossPush.js`, `config.ts`
+      `REMOTE_PUSH_ENABLED`) y despierta por ntfy sobre Tor + servicio en primer plano. Falta el
+      conector UnifiedPush (distribuidor externo) y en iOS no hay alternativa a APNs.
 - [x] **Badge del icono = no leídos reales** — 1.0.7: el contador del icono se recalcula en cada
       cambio de contadores (`notifications/push.ts` `syncAppBadge`: al leer un chat, al recibir, al
       cargar, al volver a primer plano, al cambiar el ajuste); antes solo se incrementaba al llegar
