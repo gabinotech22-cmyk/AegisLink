@@ -1,5 +1,8 @@
 // Initialise i18n before anything else renders
 import './src/i18n';
+// Tor bridges: registers the pre-start hook so tor's first bootstrap already
+// uses the chosen transport (src/net/torConnection.ts).
+import './src/net/torConnection';
 import { logger } from './src/utils/logger';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking } from 'react-native';
@@ -34,6 +37,7 @@ import { NotificationsScreen } from './src/screens/Notifications';
 import { BackupScreen } from './src/screens/Backup';
 import { DevicesScreen } from './src/screens/Devices';
 import { RelaySettingsScreen } from './src/screens/RelaySettings';
+import { TorConnectionScreen } from './src/screens/TorConnection';
 import { BlockedContactsScreen } from './src/screens/BlockedContacts';
 import { LockScreen } from './src/screens/Lock';
 import { UpdateRequiredScreen } from './src/screens/UpdateRequired';
@@ -144,6 +148,7 @@ type PushRoute =
   | { name: 'backup' }
   | { name: 'devices' }
   | { name: 'relay' }
+  | { name: 'torConnection' }
   | { name: 'blocked' }
   | { name: 'lockConfig' }
   | { name: 'lock' }
@@ -1544,6 +1549,8 @@ function Shell() {
         return <DevicesScreen onBack={pop} />;
       case 'relay':
         return <RelaySettingsScreen onBack={pop} />;
+      case 'torConnection':
+        return <TorConnectionScreen onBack={pop} />;
       case 'blocked':
         return <BlockedContactsScreen onBack={pop} />;
       case 'lockConfig':

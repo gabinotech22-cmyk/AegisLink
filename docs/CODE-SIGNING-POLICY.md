@@ -20,10 +20,12 @@ the portable executable (`AegisLink <version>.exe`), built from
 (`desktop/`) by the project's own GitHub Actions workflow from a tagged commit
 on `main`. Nothing built on a developer machine is ever submitted for signing.
 
-The embedded Tor binary shipped next to the app (`resources/tor/tor.exe`) is
-the unmodified Tor Expert Bundle from the Tor Project, fetched by
+The embedded Tor binary shipped next to the app (`resources/tor/tor.exe`), and
+its pluggable-transport client for bridges
+(`resources/tor/pluggable_transports/lyrebird.exe`), come
+unmodified from the Tor Expert Bundle of the Tor Project, fetched by
 `desktop/scripts/fetch-tor.mjs` and verified against a pinned SHA-256 taken from
-the Tor Project's signed checksum file; it is not re-signed by us.
+the Tor Project's signed checksum file; they are not re-signed by us.
 
 ## Team roles
 

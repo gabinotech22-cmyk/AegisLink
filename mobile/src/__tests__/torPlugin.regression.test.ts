@@ -96,3 +96,44 @@ describe('embedded Tor — control/mailbox circuit isolation', () => {
   });
 });
 
+
+/**
+ * Bridges (2026-09-24). Pluggable transports come from IPtProxy, and the torrc
+ * lines JS builds (net/torBridges.ts) are re-checked natively before they reach
+ * torrc / SETCONF. A live swap pauses the network (Tor Browser's pattern) and
+ * must never leave it paused.
+ */
+describe('embedded Tor — bridges (pluggable transports)', () => {
+  const IOS = SRC;
+  const ANDROID = fs.readFileSync(path.join(__dirname, '..', '..', 'plugins', 'withTorEmbedded.js'), 'utf8');
+
+  it('ships IPtProxy on both platforms, pinned', () => {
+    expect(ANDROID).toContain('implementation("com.netzarchitekten:IPtProxy:5.5.1")');
+    expect(IOS).toContain("pod 'IPtProxy', '5.5.1'");
+  });
+
+  it('Android: the Guardian Project repo only serves its own group (no lookalike packages)', () => {
+    expect(ANDROID).toContain("content { includeGroup 'info.guardianproject' }");
+  });
+
+  it('both natives accept only the three bridge keys and refuse break-out characters', () => {
+    expect(ANDROID).toContain('setOf("UseBridges", "Bridge", "ClientTransportPlugin")');
+    expect(ANDROID).toContain('ch.code == 0x5c');
+    expect(IOS).toContain('["UseBridges", "Bridge", "ClientTransportPlugin"]');
+    expect(IOS).toContain('u.value == 0x22 || u.value == 0x23 || u.value == 0x5c');
+    expect(ANDROID).toContain('setOf("obfs4", "webtunnel", "snowflake", "meek_lite")');
+  });
+
+  it('a live swap pauses the network and always re-enables it', () => {
+    expect(ANDROID).toContain('ctl.setConf("DisableNetwork", "1")');
+    expect(ANDROID).toContain('ctl.setConf(lines + listOf("DisableNetwork 0"))');
+    expect(ANDROID).toMatch(/catch \(e: Exception\) \{\s*ctl\.setConf\("DisableNetwork", "0"\)/);
+    expect(IOS).toContain('[confs addObject:@{@"key": @"DisableNetwork", @"value": @"0"}];');
+    expect(IOS).toContain('// Never leave the network paused.');
+  });
+
+  it('transport logs stay off (they would be connection metadata on disk)', () => {
+    expect(ANDROID).toContain('IPtProxy.Controller(dir.path, false, false, "ERROR"');
+    expect(IOS).toContain('enableLogging: false, unsafeLogging: false');
+  });
+});

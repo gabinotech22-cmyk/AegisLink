@@ -70,7 +70,15 @@ derivar raíz. Corregido + test de regresión. Tampoco estaban `pbh.*`, `spk.cre
 
 **Residuo honesto:** el relay ve "un circuito Tor conectó el mailbox X" y "alguien pidió
 el bundle de Y por Tor" (mismo residuo que Session, `FASE4-CONTROL-PLANE-DESIGN.md` §5).
-Bridges/pluggable transports (redes que bloquean Tor) no van en Beta 1.
+**Bridges (2026-09-24):** `lyrebird.exe` sale del mismo Tor Expert Bundle verificado por sha256
+(`scripts/fetch-tor.mjs` → `resources/tor/<plat>/pluggable_transports/`). `main/tor/torProcess.ts`
+arranca tor con el transporte elegido (Privacidad → Red → Conexión a Tor):
+
+- **Modo automático:** directo → Snowflake → obfs4 → meek cuando el arranque se atasca, y recuerda
+  el que funcionó.
+- **Ruta de lyrebird:** va *relativa* al directorio de tor, porque tor parte `ClientTransportPlugin`
+  por espacios.
+- **Verificado con tor 15.0.23 real:** Snowflake 100% en 51 s, obfs4 en 123 s.
 
 ## Cómo construir la beta
 
@@ -103,8 +111,8 @@ con Tor arrancado.
 > no aplica). No hay "ocultar en recientes" ni "última vez" — no existen en
 > escritorio ni en el producto (cero metadatos).
 
-1. ~~Sin Tor~~ → ✅ resuelto (sección Tor). Queda: sin bridges/PT para redes que
-   bloquean Tor; latencia de llamadas mayor (TURN-TCP por Tor).
+1. ~~Sin Tor~~ → ✅ resuelto (sección Tor), bridges incluidos (2026-09-24). Queda: latencia de
+   llamadas mayor (TURN-TCP por Tor).
 2. ~~UI solo en inglés~~ → ✅ resuelto (rama `feat/desktop-i18n`): las 44
    pantallas + componentes usan `i18n.t()`; EN/ES/IT completos (1.8k claves, los
    locales de mobile son el superset). Idioma inicial = elección guardada o el
