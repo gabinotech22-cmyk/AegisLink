@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import tweetnaclUtil from 'tweetnacl-util';
 import { z } from 'zod';
 import { identityRepo, web3Repo } from '../db/client.js';
 import { didHashHex, didKeyFromEd25519 } from '../crypto/didKey.js';
 import { issueChallenge, verifyPoW, REGISTRATION_POW_DIFFICULTY } from '../pow/challenge.js';
 import { verifyDetached } from '../crypto/ed25519.js';
+import { relayLimiter, paramField } from '../http/relayLimiter.js';
 
 const { decodeBase64 } = tweetnaclUtil;
 
@@ -14,32 +14,28 @@ const router = Router();
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
 // ── Rate limiter ──────────────────────────────────────────────────────────────
-// Uses IP internally via express-rate-limit; the IP is NEVER written to SQLite
-// or any application log. The store is in-memory and ephemeral.
-const registrationLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+// Per-IP on clearnet, flood backstop over the onion (http/relayLimiter.ts); the
+// IP is NEVER written to SQLite or any application log. The store is in-memory
+// and ephemeral.
+const registrationLimiter = relayLimiter({
   // Ops-tunable ceiling (default 5). Raise via AEGIS_REG_RATELIMIT_MAX for
   // local E2E testing where one machine re-registers many times; production
   // leaves it at the strict default.
+  windowMs: 15 * 60 * 1000,
   max: Number(process.env.AEGIS_REG_RATELIMIT_MAX ?? 5),
-  standardHeaders: true,
-  legacyHeaders: false,
-  // Return JSON instead of HTML on limit breach.
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
-  },
-  skip: () => false,
+  // Over Tor the real anti-abuse is the registration PoW (A-2); the shared
+  // backstop only caps CPU, so it is sized for onboarding bursts, not 5 × 50.
+  onion: { kind: 'shared' },
+  onionFloodMax: Number(process.env.AEGIS_ONION_REG_FLOOD_MAX ?? 1000),
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 },
 });
 
 // A lighter limiter for the challenge endpoint to prevent challenge-store flooding.
-const challengeLimiter = rateLimit({
+const challengeLimiter = relayLimiter({
   windowMs: 60 * 1000,
   max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
-  },
+  onion: { kind: 'shared' },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 60_000 },
 });
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
@@ -103,14 +99,11 @@ router.post('/', registrationLimiter, async (req, res) => {
   res.status(201).json({ aegisId, publicKey, signingPublicKey, createdAt });
 });
 
-const lookupLimiter = rateLimit({
+const lookupLimiter = relayLimiter({
   windowMs: 60 * 1000,
   max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
-  },
+  onion: { kind: 'shared' },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 60_000 },
 });
 
 // ── GET /identity/:id ─────────────────────────────────────────────────────────
@@ -152,14 +145,11 @@ const DeleteBody = z.object({
   ts: z.number().int().positive(),
 });
 
-const deleteLimiter = rateLimit({
+const deleteLimiter = relayLimiter({
   windowMs: 15 * 60 * 1000,
   max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
-  },
+  onion: { kind: 'identity', key: paramField('id') },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 },
 });
 
 router.delete('/:id', deleteLimiter, async (req, res) => {

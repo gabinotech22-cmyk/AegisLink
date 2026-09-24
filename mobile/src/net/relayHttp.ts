@@ -1,21 +1,23 @@
 /**
  * relayHttp — one `fetch` for relay HTTP that knows where `.onion` lives.
  *
- * Federation F5: with a self-hosted home relay every HTTP call the app makes to
- * ITS relay (PoW challenge, registration, prekeys, TURN credentials, blob
+ * Every HTTP call the app makes to its relay — official (at its onion, Tor
+ * always-on) or self-hosted (federation F5) (PoW challenge, registration, prekeys, TURN credentials, blob
  * challenge, push bindings, public channels, link/GIF proxies, health) targets
  * `http://<onion>` — which the OS network stack cannot reach. `relayFetch`
- * dispatches by URL: a `.onion` host rides the embedded Tor
- * (`torHttpRequest`, fail-closed: no Tor → a rejected promise, never a
- * clearnet fallback), anything else is the global `fetch` exactly as before
- * (clearnet HTTPS with certificate pinning for the official relay).
+ * dispatches by URL: a `.onion` host (and, in a production build, any
+ * non-loopback URL) rides the embedded Tor (`torHttpRequest`, fail-closed: no
+ * Tor → a rejected promise, never a clearnet fallback); only dev builds and a
+ * loopback dev relay use the global `fetch`.
  *
  * The Tor branch returns a minimal Response-shaped object (`ok`, `status`,
- * `statusText`, `json()`, `text()`) — the subset every caller uses. Bodies must
+ * `statusText`, `json()`, `text()`) — the subset every caller uses. The dispatch
+ * rule is `mustUseTor`: `.onion` always, and in a production build every
+ * non-loopback URL too. Bodies must
  * be strings (every relay call sends JSON); binary uploads go through
  * `torHttpUpload` (crypto/media.ts) instead.
  */
-import { torHttpRequest, isTorAvailable } from './tor';
+import { torHttpRequest, isTorAvailable, startTor } from './tor';
 
 export interface RelayResponse {
   ok: boolean;
@@ -41,6 +43,21 @@ export function isOnionUrl(url: string): boolean {
   return ONION_HOST_RE.test(url);
 }
 
+const LOOPBACK_RE = /^https?:\/\/(10\.0\.2\.2|localhost|127\.0\.0\.1)(:|\/|$)/i;
+
+/**
+ * Tor always-on: in a production build EVERY URL the app fetches — the relay's
+ * onion, and any clearnet host (GIF CDN, link-preview image) — goes through the
+ * embedded Tor, so the device's IP reaches nobody. Exceptions: a loopback dev
+ * relay (unreachable through Tor, and never contacted by a store build) and
+ * dev builds, which may lack the native Tor module.
+ */
+export function mustUseTor(url: string): boolean {
+  if (isOnionUrl(url)) return true;
+  if (LOOPBACK_RE.test(url)) return false;
+  return !__DEV__;
+}
+
 function torResponse(status: number, body: string): RelayResponse {
   return {
     ok: status >= 200 && status < 300,
@@ -57,10 +74,14 @@ function torResponse(status: number, body: string): RelayResponse {
  * (string) bodies the relay API uses; see the module doc for the dispatch rule.
  */
 export async function relayFetch(url: string, init: RelayFetchInit = {}): Promise<RelayResponse> {
-  if (!isOnionUrl(url)) {
+  if (!mustUseTor(url)) {
     return fetch(url, init as RequestInit) as unknown as Promise<RelayResponse>;
   }
   if (!isTorAvailable()) throw new Error('tor_unavailable');
+  // Resolves at once when Tor is up; on a cold start (first launch, onboarding)
+  // waits for the bootstrap instead of failing with E_TOR_NOT_READY. A timeout
+  // rejects: the caller's error path, never a clearnet retry.
+  await startTor();
   const res = await torHttpRequest(url, init.method ?? 'GET', init.body ?? '', init.headers ?? {});
   if (!res) throw new Error('relay_unreachable');
   return torResponse(res.status, res.body);

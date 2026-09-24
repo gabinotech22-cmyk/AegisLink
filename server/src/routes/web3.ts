@@ -17,7 +17,7 @@
  */
 
 import { Router, type Response } from 'express';
-import rateLimit from 'express-rate-limit';
+import { relayLimiter } from '../http/relayLimiter.js';
 import { web3Repo } from '../db/client.js';
 import { didHashHex, didKeyDocument, ed25519FromDidKey } from '../crypto/didKey.js';
 
@@ -41,14 +41,14 @@ const RESOLUTION_CONTENT_TYPE = 'application/ld+json;profile="https://w3id.org/d
 const DID_SYNTAX_RE = /^did:[a-z0-9]+:[A-Za-z0-9._:%-]+$/;
 const MAX_DID_LENGTH = 256;
 
-const resolveLimiter = rateLimit({
+// Public read-only lookup: over the onion every client shares the exit, so it
+// gets the shared bucket like the link-preview proxy (a per-DID key would let a
+// caller dodge the limit by varying the DID).
+const resolveLimiter = relayLimiter({
   windowMs: 60 * 1000,
   max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60 * 1000 });
-  },
+  onion: { kind: 'shared' },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 60 * 1000 },
 });
 
 function sendResolution(

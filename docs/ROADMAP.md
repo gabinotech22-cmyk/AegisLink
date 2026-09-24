@@ -99,16 +99,13 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 - [x] **Doc↔código**: `backlog_fases3_4.md` (P1/G2), `PROJECT-STRUCTURE.md`, informe de auditoría
       (AL-02/07/09 cerrados por extracción).
 
-## Hito 2 — Privacidad por defecto: sealed-sender activo 🔴 (diferenciador de mercado)
+## Hito 2 — Privacidad por defecto: sealed-sender activo 🟡 (diferenciador de mercado)
 
-Hallazgo de la revisión 2026-07-05: **sealed-sender está implementado y testeado pero `MAILBOX_MODE`
-está OFF por defecto** (`mobile/src/config.ts:97`, opt-in). Los builds enviados usan el `envelope`
-legacy autenticado que estampa `from: me` y ve `to` (`handler.ts:532`) → el relay aprende el par
-emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en TODO") **no activa**.
+> Nota de vigencia (2026-09-23): el hallazgo original de 2026-07-05 ("`MAILBOX_MODE` OFF por
+> defecto") ya no es cierto. Estado canónico en `docs/SEALED-SENDER-ARCHITECTURE.md` §5–§6.
 
-- [ ] Verificar en 2 dispositivos reales el transporte mailbox (latencia, drenaje multi-epoch, onion).
-- [ ] Plan de cutover a **mailbox por defecto** (o etiquetar explícitamente el modo actual como
-      experimental en README y no venderlo como cero-metadatos hasta el cutover).
+- [x] **Buzón por defecto:** `MAILBOX_MODE` es opt-out desde F5b (#491) y fail-closed sin onion
+      (`mobile/src/config.ts`); producción lo lleva ON desde 1.0.x.
 - [x] **Indicadores en tiempo real sellados siempre (2026-09-24):** `typing` y read receipts viajan
       solo como mensajes E2EE sellados en todos los transportes; los eventos en claro del relay
       (`messaging.ts`) y sus listeners en mobile/desktop, eliminados. `AUDIT-2026-09-24-WEB3-DID.md`
@@ -117,6 +114,17 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
       buzón conocida el cliente emite siempre v2 (primer contacto incluido); llamadas a contactos
       que anuncian `sealed-calls` por buzón. Gateado por `caps` en el perfil para convivir con
       1.0.6. `docs/PROTOCOL.md` §7.3. Pendiente: retirar v1 en el relay tras `APP_MIN_VERSION`.
+- [x] **Tor siempre activo en mobile (2026-09-23):**
+      - socket de control y todo el HTTP al relay por la onion, en un circuito separado del buzón;
+      - sin interruptor ni respaldo por clearnet;
+      - imágenes remotas por Tor y avatares-URL rechazados;
+      - rate limits del relay por identidad sobre Tor.
+
+      SEALED-SENDER §6.2; PROTOCOL §9.
+- [ ] **Bridges Tor (Snowflake/obfs4)** en mobile y desktop: hoy, donde se bloquea Tor, la app no
+      conecta (sin respaldo por clearnet a propósito). Siguiente trabajo.
+- [ ] Verificar en 2 dispositivos reales (Android + iOS) el control-plane por Tor con circuitos
+      aislados (build nativo nuevo: los plugins `withTorEmbedded*.js` cambiaron).
 
 ## Hito 3 — Terminar el endurecimiento cripto 🟠
 

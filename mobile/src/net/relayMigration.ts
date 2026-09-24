@@ -24,12 +24,11 @@
  */
 import { logger } from '../utils/logger';
 import type { Identity } from '../crypto/identity';
-import { SERVER_URL } from '../config';
 import { relayFetch } from './relayHttp';
 import { isTorAvailable } from './tor';
 import { canonicalRelay, isOfficialRelay } from './officialRelay';
 import { sameRelay, type RelayRef } from './relayRef';
-import { getHomeRelay, getHomeRelaySetting, setHomeRelay } from './homeRelay';
+import { getHomeRelay, getHomeRelaySetting, setHomeRelay, officialRelayBaseUrl } from './homeRelay';
 
 /** How long the old home keeps receiving for us after a migration (D4). */
 export const MIGRATION_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -52,7 +51,7 @@ export type VerifyRelayResult =
   | { ok: false; error: 'tor_unavailable' | 'unreachable' | 'not_a_relay' | 'missing_features' };
 
 export function relayBaseFor(ref: RelayRef | null): string {
-  return ref ? `http://${ref.onion}` : SERVER_URL;
+  return ref ? `http://${ref.onion}` : officialRelayBaseUrl();
 }
 
 /**
@@ -241,7 +240,7 @@ export async function runMigrationHousekeeping(
   if (prevOnionUrl) {
     try { await d.drainPrevious(prevOnionUrl); } catch { /* best effort */ }
   }
-  const base = prev.relay ? `http://${prev.relay.onion}` : SERVER_URL;
+  const base = relayBaseFor(prev.relay);
   let deleted = false;
   try { deleted = (await d.deleteAt(identity, base)).ok; } catch { deleted = false; }
   if (!deleted) return 'retire_failed';

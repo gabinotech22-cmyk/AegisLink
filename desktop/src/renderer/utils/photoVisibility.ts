@@ -58,8 +58,24 @@ export function avatarFieldsFor(
   return { senderImage: null, senderImageCleared: true };
 }
 
+/**
+ * A peer's photo is what every client sends (`toDataUri`): an INLINE image
+ * (`data:image/…;base64,`) or a short emoji/text avatar. Anything else — above
+ * all an `http(s)://` URL — would make our Avatar component fetch it outside
+ * Tor. That gives any contact a tracking pixel for our IP, so it is ignored.
+ */
+const INLINE_IMAGE_RE = /^data:image\/(?:jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+const TEXT_AVATAR_MAX = 32;
+
+export function isAcceptableAvatar(v: unknown): v is string {
+  if (typeof v !== 'string' || v.length === 0) return false;
+  if (INLINE_IMAGE_RE.test(v)) return true;
+  // Emoji / text avatar: short, and nothing a URL loader could resolve.
+  return v.length <= TEXT_AVATAR_MAX && !/[:/\\]/.test(v);
+}
+
 /** What a receiver should store: null = clear, string = set, undefined = keep. */
 export function receivedAvatar(payload: { senderImage?: string | null; senderImageCleared?: boolean }): string | null | undefined {
   if (payload.senderImageCleared === true) return null;
-  return typeof payload.senderImage === 'string' && payload.senderImage ? payload.senderImage : undefined;
+  return isAcceptableAvatar(payload.senderImage) ? payload.senderImage : undefined;
 }

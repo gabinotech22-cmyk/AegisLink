@@ -4,7 +4,7 @@ import { nacl } from '../crypto/sodium';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, REMOTE_PUSH_ENABLED, FEDERATION } from '../config';
+import { SERVER_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, REMOTE_PUSH_ENABLED, FEDERATION } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
@@ -25,7 +25,7 @@ function photoVisNow(): import('../utils/photoVisibility').PhotoVis {
 }
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery, fetchMailboxOverTor } from './mailboxSocket';
 import { isForeign, getHomeRelay, isCustomHome, homeRelayOnionUrl, resolveRelay } from '../net/homeRelay';
-import { TorSioSocket, IDENTITY_FORWARD_EVENTS, isTorAvailable, startTor } from '../net/tor';
+import { TorSioSocket, IDENTITY_FORWARD_EVENTS, isTorAvailable } from '../net/tor';
 import { canonicalRelay } from '../net/officialRelay';
 import { relayRefFromOnion, type RelayRef } from '../net/relayRef';
 import { keyMatchesAegisId } from '../crypto/aegisId';
@@ -1224,23 +1224,27 @@ export function connect(identity: Identity): Socket {
 
   authenticated = false;
 
-  // Read Tor preference synchronously from Zustand store (no hook needed outside React)
-  const { routeViaTor } = usePreferences.getState();
-  let relayUrl = routeViaTor && ONION_URL ? ONION_URL : SERVER_URL;
-
-  // ── Federation F5: a self-hosted home relay is .onion-only ─────────────────
-  // The identity socket then rides the embedded Tor bridge (the same native
-  // socket.io-over-SOCKS pipe the mailbox uses), forwarding every relay event
-  // the handlers below subscribe to (IDENTITY_FORWARD_EVENTS). Fail-closed: no
-  // Tor → no socket (never a clearnet attempt at an onion, never the official
-  // relay "instead"). Tor bootstrap is awaited in the background; the bridge
-  // itself is created immediately so the handlers wire up exactly as usual.
-  if (isCustomHome()) {
-    const homeUrl = homeRelayOnionUrl();
-    if (!homeUrl || !isTorAvailable()) {
-      throw new Error('AegisLink: self-hosted relay needs the embedded Tor');
+  // ── Tor always-on: the identity socket rides the embedded Tor ─────────────
+  // To the official relay's onion (ONION_URL) or to a self-hosted home (F5,
+  // .onion-only), through the same native socket.io-over-SOCKS bridge the
+  // mailbox uses, forwarding every relay event the handlers below subscribe to
+  // (IDENTITY_FORWARD_EVENTS). Fail-closed: no Tor → no socket, never a
+  // clearnet attempt. Tor bootstrap is awaited inside the bridge
+  // (TorSioSocket.dial); the bridge itself is created immediately so the
+  // handlers wire up exactly as usual. `viaTor` is false only in dev builds
+  // (no onion, or no native Tor module: Expo Go / jest) and in a release
+  // against a loopback dev relay; config.ts refuses a production build
+  // without ONION_URL, and a production build without native Tor throws here.
+  const homeOnion = homeRelayOnionUrl();
+  let viaTor = !!homeOnion;
+  let relayUrl = homeOnion || SERVER_URL;
+  if (viaTor && !isTorAvailable()) {
+    // A self-hosted home is .onion-only: unreachable without Tor, dev or not.
+    if (!__DEV__ || isCustomHome()) {
+      throw new Error('AegisLink: the relay is reached only over the embedded Tor, which is unavailable');
     }
-    relayUrl = homeUrl;
+    viaTor = false;
+    relayUrl = SERVER_URL;
   }
 
   // Hardened Transport: Enforce HTTPS/WSS in production. Exception: developer
@@ -1288,8 +1292,8 @@ export function connect(identity: Identity): Socket {
   })();
 
   const socketAuth = { aegisId: identity.aegisId, platform: 'mobile', ackDelivery: true };
-  socket = isCustomHome()
-    ? (new TorSioSocket(relayUrl, socketAuth, IDENTITY_FORWARD_EVENTS) as unknown as Socket)
+  socket = viaTor
+    ? (new TorSioSocket(relayUrl, socketAuth, IDENTITY_FORWARD_EVENTS, 'control') as unknown as Socket)
     : io(relayUrl, {
     // WebSocket first (lowest latency), but fall back to HTTP long-polling within
     // the SAME connection attempt when the WS upgrade is blocked — the common case
@@ -1309,11 +1313,6 @@ export function connect(identity: Identity): Socket {
     reconnectionAttempts: Infinity,
     timeout: 20000,
   });
-  if (isCustomHome()) {
-    // Make sure Tor is (still) bootstrapped; the native bridge reconnects on its
-    // own once the SOCKS port is up. Never blocks handler wiring below.
-    void startTor().catch((e: Error) => { if (__DEV__) logger.warn('[socket] tor bootstrap for home relay failed:', e.message); });
-  }
 
   socket.on('connect', () => {
     connected = true;
