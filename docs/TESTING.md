@@ -290,6 +290,17 @@ de humo), comprueba que **ningún** servicio publica un puerto (el relay propio
 es solo `.onion`) y hace `bash -n` de `up.sh`/`print-onion.sh`/
 `backup-onion-key.sh`. Ver `docs/SELF-HOSTING.md`.
 
+## Costura cripto F-1: `crypto-imports` + fixture dorado
+
+- `crypto-imports.test.ts` (mobile `src/crypto/__tests__`, desktop `src/renderer/crypto/__tests__`,
+  server `src/__tests__`): falla si código de producto importa `tweetnacl` o `@noble/hashes`
+  hmac/hkdf/sha2 fuera de la fachada `crypto/sodium` (excepción: PBKDF2 en `backup.ts`). Así el
+  cambio a libsodium nativo es un cambio en un solo directorio por plataforma.
+- `f1-golden.test.ts` (las 3 plataformas): reproduce `mobile/src/crypto/__tests__/fixtures/f1-golden.json`,
+  generado **una vez** con TweetNaCl/@noble: vectores de cada primitiva, un sobre sealed-sender y
+  sesiones de ratchet persistidas (clásica e híbrida PQ, con un mensaje fuera de orden). Si falla,
+  el backend no es compatible byte a byte. **Nunca** se regenera el fixture para que pase.
+
 ## Gate CI `docs-sync` (regla de oro "La doc no miente" #7)
 
 Job `docs-sync` en `.github/workflows/ci.yml`, solo en `pull_request`. Falla si el diff contra la

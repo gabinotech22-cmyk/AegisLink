@@ -1,19 +1,22 @@
 /**
  * DIDManager.ts
  *
- * Manages a user's optional DID (Decentralized Identifier).
+ * Caches the identity's DID: the did:key of its Ed25519 signing key.
  *
- * - DID is derived locally from the Ed25519 signing key — no network required.
- * - DID is cached in expo-secure-store so it survives app restarts.
- * - A user who never calls DIDManager has zero DID footprint.
- * - The DID is NOT sent to the AegisLink relay — it is the user's choice
- *   to share it.
+ * - Derived locally, no network (deriveDID.ts); cached in SecureStore under
+ *   `aegis.did.v1.<aegisId>` so the Profile screen can show it. Onboarding and
+ *   Profile derive it for every identity.
+ * - The client never sends the DID anywhere unless the user shares it.
  *
- * Privacy contract:
- *   - DID is pseudonymous (derived from public key, unlinkable to real identity
- *     unless user explicitly shares it).
- *   - The server never receives the DID unless the user opts in.
- *   - No correlation between DID and aegisId is made on the server.
+ * Privacy — what a DID does and does not hide:
+ *   - It reveals no real-world identity (no phone/email/name behind it).
+ *   - It is NOT unlinkable from the aegisId: it encodes the same signing public
+ *     key the relay stores for the identity and serves in the public prekey
+ *     bundle (GET /prekeys/bundle/:aegisId), so anyone who knows an aegisId can
+ *     compute its DID. Treat the DID as another public name of the identity.
+ *   - When the owner deletes the account, the relay deactivates this DID
+ *     (routes/identity.ts); the local cache is cleared by the wipe
+ *     (db/core.ts purgeGlobalAppState → clearDID).
  */
 
 import { ss } from '../../utils/secureStore';
@@ -78,8 +81,8 @@ export async function getDID(profileId: string): Promise<DIDRecord | null> {
 }
 
 /**
- * Clears the cached DID for a profile.
- * Call this on identity reset / panic wipe.
+ * Clears the cached DID for an identity. Called by the wipe
+ * (db/core.ts purgeGlobalAppState) on panic wipe / identity reset.
  */
 export async function clearDID(profileId: string): Promise<void> {
   const storeKey = `${DID_STORE_KEY_PREFIX}${profileId}`;

@@ -685,7 +685,7 @@ describe('Offline queue and drain', () => {
   }, 20_000);
 });
 
-describe('Typing indicators', () => {
+describe('Typing and read receipts', () => {
   let socketAlice: ClientSocket;
   let socketBob: ClientSocket;
 
@@ -698,48 +698,33 @@ describe('Typing indicators', () => {
     socketBob?.disconnect();
   });
 
-  it('Alice typing → Bob receives typing:from=Alice', async () => {
-    const [typingEvent] = await Promise.all([
-      once<{ from: string; isTyping: boolean }>(socketBob, 'typing'),
-      Promise.resolve(socketAlice.emit('typing', { to: bob.aegisId, isTyping: true })),
-    ]);
-    expect(typingEvent.from).toBe(alice.aegisId);
-    expect(typingEvent.isTyping).toBe(true);
+  // Regression (audit 2026-09-24 R-1): typing and read receipts travel sealed
+  // inside the E2EE ratchet. The relay must no longer forward the plaintext
+  // events — the receiver trusted a relay-stamped `from` a malicious relay could
+  // forge, the same reason plaintext msg:delete was removed.
+  const notForwarded = (target: ClientSocket, event: string, send: () => void) => {
+    const received = new Promise<'forwarded'>((resolve) => {
+      target.once(event, () => resolve('forwarded'));
+    });
+    const timedOut = new Promise<'no-event'>((resolve) => {
+      setTimeout(() => resolve('no-event'), 500);
+    });
+    send();
+    return Promise.race([received, timedOut]);
+  };
+
+  it('the legacy plaintext typing event is NOT forwarded (path removed)', async () => {
+    await expect(
+      notForwarded(socketBob, 'typing', () => socketAlice.emit('typing', { to: bob.aegisId, isTyping: true })),
+    ).resolves.toBe('no-event');
   });
 
-  it('Alice stops typing → Bob receives isTyping=false', async () => {
-    const [typingEvent] = await Promise.all([
-      once<{ from: string; isTyping: boolean }>(socketBob, 'typing'),
-      Promise.resolve(socketAlice.emit('typing', { to: bob.aegisId, isTyping: false })),
-    ]);
-    expect(typingEvent.from).toBe(alice.aegisId);
-    expect(typingEvent.isTyping).toBe(false);
-  });
-});
-
-describe('Read receipts', () => {
-  let socketAlice: ClientSocket;
-  let socketBob: ClientSocket;
-
-  beforeAll(async () => {
-    [socketAlice, socketBob] = await Promise.all([connectAgent(alice), connectAgent(bob)]);
-  }, 15_000);
-
-  afterAll(() => {
-    socketAlice?.disconnect();
-    socketBob?.disconnect();
-  });
-
-  it('Bob reads messages → Alice receives msg:read with correct msgIds', async () => {
-    const msgIds = ['msg-read-001', 'msg-read-002', 'msg-read-003'];
-
-    const [readEvent] = await Promise.all([
-      once<{ from: string; msgIds: string[] }>(socketAlice, 'msg:read'),
-      Promise.resolve(socketBob.emit('msg:read', { to: alice.aegisId, msgIds })),
-    ]);
-
-    expect(readEvent.from).toBe(bob.aegisId);
-    expect(readEvent.msgIds).toEqual(expect.arrayContaining(msgIds));
+  it('the legacy plaintext msg:read event is NOT forwarded (path removed)', async () => {
+    await expect(
+      notForwarded(socketAlice, 'msg:read', () =>
+        socketBob.emit('msg:read', { to: alice.aegisId, msgIds: ['msg-read-001'] }),
+      ),
+    ).resolves.toBe('no-event');
   });
 });
 

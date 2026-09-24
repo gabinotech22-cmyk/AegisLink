@@ -1,6 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import { argon2idAsync } from '@noble/hashes/argon2';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { KDF_ASYNC_TICK_MS } from '../crypto/nobleNextTickPatch';
 import { ss } from '../utils/secureStore';

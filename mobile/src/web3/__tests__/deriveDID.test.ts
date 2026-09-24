@@ -8,7 +8,18 @@
 import nacl from 'tweetnacl';
 import { deriveDIDFromPublicKey, publicKeyFromDID } from '../did/deriveDID';
 
+// Same vector as server/src/__tests__/didKey.test.ts: the relay derives the DID
+// it deactivates on account deletion, so both sides must agree byte-for-byte.
+const SEED = Uint8Array.from({ length: 32 }, (_, i) => i);
+const VECTOR_DID = 'did:key:z6MkehRgf7yJbgaGfYsdoAsKdBPE3dj2CYhowQdcjqSJgvVd';
+
 describe('deriveDIDFromPublicKey', () => {
+  it('matches the relay derivation for the shared vector', () => {
+    const { publicKey } = nacl.sign.keyPair.fromSeed(SEED);
+    expect(deriveDIDFromPublicKey(publicKey)).toBe(VECTOR_DID);
+    expect(publicKeyFromDID(VECTOR_DID)).toEqual(publicKey);
+  });
+
   it('produces a did:key:z... identifier', () => {
     const { publicKey } = nacl.sign.keyPair();
     const did = deriveDIDFromPublicKey(publicKey);
@@ -55,5 +66,17 @@ describe('publicKeyFromDID', () => {
     const encoded = base58.encode(fakePrefix);
     const fakeDID = `did:key:z${encoded}`;
     expect(() => publicKeyFromDID(fakeDID)).toThrow('Ed25519');
+  });
+
+  it('rejects a non-canonical spelling of a valid key (leading zero byte)', () => {
+    // Would hash differently from the canonical DID and so dodge a
+    // deactivation lookup on the relay.
+    expect(() => publicKeyFromDID(VECTOR_DID.replace('did:key:z', 'did:key:z1'))).toThrow();
+  });
+
+  it('rejects an Ed25519 did:key with the wrong key length', () => {
+    const { base58 } = require('@scure/base');
+    const short = `did:key:z${base58.encode(new Uint8Array([0xed, 0x01, ...new Uint8Array(31).fill(9)]))}`;
+    expect(() => publicKeyFromDID(short)).toThrow('32 key bytes');
   });
 });

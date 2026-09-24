@@ -15,7 +15,7 @@
  * See docs/SEALED-SENDER-ARCHITECTURE.md §3.4 / Fase 4.
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from './sodium/index.js';
 import naclUtil from 'tweetnacl-util';
 import { createHash } from 'node:crypto';
 import { verifyDetached } from './ed25519.js';

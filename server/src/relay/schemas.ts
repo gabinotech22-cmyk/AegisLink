@@ -90,16 +90,6 @@ export const DeliveryTokenRegister = z.object({
   tokenHashB64: z.string().min(1).max(128),
 });
 
-export const TypingEvent = z.object({
-  to: z.string().regex(AEGIS_ID_RE),
-  isTyping: z.boolean(),
-});
-
-export const MsgRead = z.object({
-  to: z.string().regex(AEGIS_ID_RE),
-  msgIds: z.array(z.string().min(1).max(64)).max(500),
-});
-
 export const PushRegister = z.object({
   token: z.string().min(1).max(256),
   platform: z.enum(['ios', 'android', 'unknown']).default('unknown'),

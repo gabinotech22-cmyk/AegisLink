@@ -17,7 +17,7 @@
  * Errors are returned (never thrown) so the UI can decide whether to wipe.
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from './sodium';
 import { encodeBase64 } from 'tweetnacl-util';
 import { utf8ToBytes } from '@noble/hashes/utils';
 import type { Identity } from './identity';

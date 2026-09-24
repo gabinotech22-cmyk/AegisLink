@@ -14,11 +14,10 @@
  */
 
 import { relayFetch, type RelayResponse } from '../net/relayHttp';
-import nacl from 'tweetnacl';
+import { nacl, sha256 } from './sodium';
 import { logger } from '../utils/logger';
 import * as SecureStore from 'expo-secure-store';
 import { encodeBase64 } from 'tweetnacl-util';
-import { sha256 } from '@noble/hashes/sha256';
 import { utf8ToBytes } from '@noble/hashes/utils';
 import type {
   Identity,

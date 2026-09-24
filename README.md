@@ -51,9 +51,11 @@ keeps no logs of who talks to whom.
 - **Attachments**: encrypted client-side before upload; the server stores
   opaque blobs.
 - **Push notifications**: a wake-up signal only — the payload is generic and
-  never contains content or sender identity. Store builds use FCM/APNs; the
-  Android `foss` build contains no Google code and wakes through ntfy over Tor
-  plus a foreground service.
+  never contains content or sender identity. On iOS the relay sends it straight
+  to Apple (APNs); there is no Expo or other intermediary in the chain. Android
+  does not register with Google's FCM: it wakes through the relay's ntfy over
+  Tor plus a foreground service (the `foss` build contains no Google code at
+  all).
 - **Backups**: encrypted locally with a key derived from your passphrase
   (Argon2id); the key belongs to the user only.
 
@@ -105,20 +107,18 @@ short version:
   verified through the JS engine's JIT+GC. Practical exploitation would require an
   already-compromised device. Migration to a native libsodium binding is on the
   roadmap ([docs/PROTOCOL.md §2.1](docs/PROTOCOL.md)).
-- **Store builds still touch Google/Apple for push.** On Play Store and App Store
-  builds, FCM/APNs deliver a generic wake-up with no content or sender, but
-  Google/Apple learn that *a* device received *a* push. The Android `foss` build
-  has no FCM at all: it wakes through the relay's ntfy over Tor, plus a
-  foreground service for calls. iOS has no alternative to APNs.
+- **iOS push goes through Apple.** On iPhone the only way to wake a closed app
+  is Apple's APNs: the relay sends a generic wake-up with no content or sender,
+  but Apple learns that *a* device received *a* push. There is no alternative to
+  APNs on iOS. Android uses no Google push service: wake-ups come from the
+  relay's ntfy over Tor plus a foreground service.
 - **Calls on mobile expose your IP to our TURN server.** Call media is UDP,
   which Tor cannot carry. By default, 1:1 calls relay all media through our
   TURN server (*Hide IP in calls*), so the other person does not see your IP,
   but the TURN server does. The desktop client sends TURN over TCP through Tor.
-- **Two Expo services are contacted directly, outside Tor.** The app checks
-  Expo's update server (`u.expo.dev`) for over-the-air fixes on launch. Store
-  builds also fetch an Expo push token from `exp.host`. Expo therefore sees your
-  IP and that the app is installed. Neither call carries messages, contacts or
-  your Aegis ID.
+- **Expo's update server is contacted directly, outside Tor.** The app checks
+  `u.expo.dev` for over-the-air fixes on launch, so Expo sees your IP and that
+  the app is installed. The check carries no messages, contacts or Aegis ID.
 - **One maintainer, one official relay.** The project is maintained by a single
   developer, and the official relay runs in a single region, so expect occasional
   downtime. You can self-host a relay (`.onion`-only) and still talk to contacts

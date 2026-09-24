@@ -20,7 +20,7 @@
 
 import * as Crypto from 'expo-crypto';
 import { logger } from '../utils/logger';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import type { MediaStream } from 'react-native-webrtc';
 import { getSocket, isConnected } from './client';

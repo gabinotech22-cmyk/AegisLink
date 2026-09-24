@@ -16,9 +16,8 @@
  * BREAK: previously-stored admin signatures will stop verifying. Version the
  * format instead of mutating an existing one.
  */
-import nacl from 'tweetnacl';
+import { nacl, sha256 } from './sodium';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
-import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { verifyDetached } from './ed25519';
 

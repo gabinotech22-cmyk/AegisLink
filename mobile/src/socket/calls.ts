@@ -1,6 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import { logger } from '../utils/logger';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { decodeBase64 } from 'tweetnacl-util';
 ;
 import { getSocket, isConnected } from './client';

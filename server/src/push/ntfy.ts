@@ -15,6 +15,7 @@
  */
 
 import { pushEndpointRepo, pushMailboxTokenRepo } from '../db/client.js';
+import { sendApnsWakeToToken } from './apns-alert.js';
 
 // ntfy topics only allow [-_A-Za-z0-9]. Our mailbox ids are standard base64
 // (mailboxIdForSignPublicKey/mailboxId(epoch) — see crypto/mailbox.ts), so
@@ -72,6 +73,9 @@ export function isTokenWakeEnabled(): boolean {
   return (process.env['PUSH_MAILBOX_TOKEN_WAKE'] ?? 'off').toLowerCase() === 'on';
 }
 
+/** Stored mailbox binding for a raw APNs token (vs a legacy bare Expo token). */
+export const APNS_BINDING_PREFIX = 'apns:';
+
 /** Expo push token shape: ExponentPushToken[...] / ExpoPushToken[...]. */
 export function isExpoWakeToken(raw: string): boolean {
   return typeof raw === 'string' && raw.length <= 128 && /^Expo(nent)?PushToken\[[^\]\s]+\]$/.test(raw);
@@ -89,7 +93,15 @@ export function isExpoWakeToken(raw: string): boolean {
  * binding); 'failed' for everything else (non-2xx, malformed body, timeout) so
  * the caller can fall back to the ntfy topic instead of losing the wake.
  */
-async function sendTokenWake(expoToken: string, kind: WakeKind): Promise<'ok' | 'gone' | 'failed'> {
+async function sendTokenWake(token: string, kind: WakeKind): Promise<'ok' | 'gone' | 'failed'> {
+  // Clients since 2026-09-24 bind a RAW APNs token (stored "apns:<hex>") and are
+  // woken straight through APNs: no Expo hop, Expo never learns the wake
+  // pattern. Legacy clients still bind an Expo token, served below until
+  // APP_MIN_VERSION retires them.
+  if (token.startsWith(APNS_BINDING_PREFIX)) {
+    return sendApnsWakeToToken(token.slice(APNS_BINDING_PREFIX.length), kind === 'call' ? 'call' : 'message');
+  }
+  const expoToken = token;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PUBLISH_TIMEOUT_MS);
   try {

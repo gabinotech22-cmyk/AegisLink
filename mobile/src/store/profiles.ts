@@ -28,7 +28,7 @@ import {
   saveIdentity,
   deleteIdentitySlot,
 } from '../db/local';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { encodeBase64 } from 'tweetnacl-util';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
