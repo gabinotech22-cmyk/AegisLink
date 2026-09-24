@@ -149,6 +149,25 @@ function appLockIsOn(keystore: Record<string, string>): boolean {
   return false
 }
 
+/**
+ * Store a DB key that is not under the app-lock PIN: sealed by the OS
+ * (safeStorage) or, in a packaged build without it, not at all — fail closed.
+ * The one place both key creation and "disable app lock" persist an unwrapped key.
+ */
+function storeDbKeyWithoutPin(keystore: Record<string, string>, slotKey: string, rawVal: string): void {
+  if (safeStorage.isEncryptionAvailable()) {
+    keystore[slotKey] = 'enc:' + safeStorage.encryptString(rawVal).toString('base64')
+  } else if (app.isPackaged) {
+    throw new Error('AegisLink: OS secure storage unavailable. Cannot store DB key securely.')
+  } else {
+    // Dev-only fallback (NOT encrypted) for local development. Unreachable
+    // in production: the `!isEncryptionAvailable && isPackaged` guard above
+    // already threw, so this branch only runs when !app.isPackaged.
+    // nosemgrep: aegislink-no-plain-prefix-persist
+    keystore[slotKey] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
+  }
+}
+
 function getDbKey(slot = 'self'): Uint8Array {
   const cached = cachedDbKeys.get(slot)
   if (cached) return cached
@@ -193,14 +212,8 @@ function getDbKey(slot = 'self'): Uint8Array {
       // the profiles that existed when it was set and quietly skips every one
       // created afterwards.
       keystore[slotKey] = wrapDbKeyUnderPin(keyBytes, cachedKek)
-    } else if (safeStorage.isEncryptionAvailable()) {
-      keystore[slotKey] = 'enc:' + safeStorage.encryptString(rawVal).toString('base64')
     } else {
-      // Dev-only fallback (NOT encrypted) for local development. Unreachable
-      // in production: the `!isEncryptionAvailable && isPackaged` guard above
-      // already threw, so this branch only runs when !app.isPackaged.
-      // nosemgrep: aegislink-no-plain-prefix-persist
-      keystore[slotKey] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
+      storeDbKeyWithoutPin(keystore, slotKey, rawVal)
     }
     writeKeystore(keystore)
     cachedDbKeys.set(slot, keyBytes)
@@ -689,17 +702,7 @@ export function registerDatabaseHandlers(): void {
     slots.add(currentSlot)
     for (const slot of slots) {
       const dbKey = getDbKey(slot) // unwraps via cachedKek; throws if still locked
-      const rawVal = encodeBase64(dbKey)
-      if (safeStorage.isEncryptionAvailable()) {
-        keystore[getDbEncKeySlot(slot)] =
-          'enc:' + safeStorage.encryptString(rawVal).toString('base64')
-      } else if (app.isPackaged) {
-        throw new Error('AegisLink: OS secure storage unavailable. Cannot rewrap DB key.')
-      } else {
-        // Dev-only (the isPackaged branch above fails closed in production).
-        // nosemgrep: aegislink-no-plain-prefix-persist
-        keystore[getDbEncKeySlot(slot)] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
-      }
+      storeDbKeyWithoutPin(keystore, getDbEncKeySlot(slot), encodeBase64(dbKey))
     }
     writeKeystore(keystore)
     cachedKek?.fill(0)
