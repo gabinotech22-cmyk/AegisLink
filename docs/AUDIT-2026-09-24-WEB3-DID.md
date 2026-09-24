@@ -4,7 +4,7 @@
 > proxies SSRF, CORS, señalización) y, al tirar del hilo, del módulo web3/DID completo en
 > mobile, desktop y relay. Código y tests como única fuente de verdad (regla de oro doc #6).
 >
-> **Rama:** `fix/web3-did-binding` (W-1 … W-6). Los puntos **abiertos** (R-1, P-1) son
+> **Rama:** `fix/web3-did-binding`, PR #525 (W-1 … W-6). Los puntos **abiertos** (R-1, P-1) son
 > decisiones de producto pendientes y no se tocan en esa rama. Estado vivo en las tablas.
 
 ## 0. Superficie revisada sin hallazgos
