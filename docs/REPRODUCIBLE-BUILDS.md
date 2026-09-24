@@ -35,6 +35,12 @@ artifact, exactly as F-Droid does.
 - **No Gradle daemon** (`--no-daemon`) so stale daemon state can't leak in.
 - **Disable lintVital** (in the same injected block). Android's release lint
   never touches the packaged bytes; it was only slowing/failing the build.
+- **Native crypto from source, not binaries.** libsodium is vendored as source
+  in `mobile/modules/aegis-sodium/vendor/` (minisign-verified release, every file
+  hash-pinned by `vendor-manifest.test.ts`) and compiled inside the build by
+  CMake with a sorted source list and the NDK's content-hash build-id
+  (`modules/aegis-sodium/cmake/libsodium.cmake`). No prebuilt `.so`/`.a` enters
+  the APK from this module, so it is reproducible and F-Droid-buildable.
 
 CI runs the [`Reproducible build`](../.github/workflows/reproducible-build.yml)
 workflow in two modes:

@@ -10,6 +10,13 @@
   precompilados son solo glibc — **no carga en Alpine/musl** (por eso `server/Dockerfile` usa
   `node:26-bookworm-slim`). Es N-API: el mismo binario sirve para Node y Electron, sin recompilar.
 - npm **10** para regenerar `mobile/package-lock.json` (npm 11 borra una entrada anidada y rompe el CI).
+- **Mobile no corre en Expo Go**: el cripto es libsodium nativo compilado dentro de la app
+  (`mobile/modules/aegis-sodium`, F-1 B2) y sin él la app no arranca su cripto (no hay fallback JS).
+  Hace falta un dev client/build propio (`npx expo run:android` / `run:ios`, o EAS). Android compila
+  libsodium con el CMake/NDK que ya trae el SDK; iOS lo compila CocoaPods. Tras cambiar algo en
+  `modules/aegis-sodium` hay que **reconstruir el binario** (no llega por recarga de JS).
+- Para el test del núcleo C en host (`modules/aegis-sodium/test`): `cmake` ≥ 3.22, `ninja` y un
+  compilador C (ver `docs/TESTING.md`).
 
 Flags (federación, `docs/FEDERATION-DESIGN.md`): `EXPO_PUBLIC_FEDERATION` (mobile) /
 `VITE_FEDERATION` (desktop) van **ON por defecto** desde F7 (1.0.7) — pantalla "Mi relay" y enlaces
@@ -49,7 +56,8 @@ cd desktop && npm run dev
 
 ### 3. Mobile (Android emulator)
 ```bash
-cd mobile && npx expo start
+cd mobile && npx expo run:android   # primera vez / tras tocar código nativo (dev client)
+npx expo start --dev-client          # después, solo el bundler
 # EXPO_PUBLIC_SERVER_URL=http://10.0.2.2:3001 (Android emulator)
 # EXPO_PUBLIC_SERVER_URL=http://localhost:3001 (iOS simulator)
 ```

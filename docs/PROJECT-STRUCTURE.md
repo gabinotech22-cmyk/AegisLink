@@ -78,6 +78,12 @@ No inventes carpetas nuevas en la raíz de un paquete sin actualizar esta tabla.
 | `web3/` | DID `did:key` de la identidad (derivación, caché, resolución local) — opcional, la app funciona sin esto. Los pagos salieron del repo con Work. |
 | `__tests__/` · `__mocks__/` | Tests Jest + RNTL y sus mocks (ver convención de tests). |
 
+### `mobile/modules/`
+Módulos Expo **locales** con código nativo (autolinkados por Expo desde `modules/`).
+| Subcarpeta | Qué contiene |
+|------------|--------------|
+| `aegis-sodium/` | libsodium nativo (F-1 B2): `cpp/` núcleo C, `android/` (CMake + JNI + Kotlin), `ios/` (podspec + Swift), `vendor/` libsodium vendorizado y fijado (se regenera solo con `mobile/scripts/vendor-libsodium.mjs`, nunca a mano), `cmake/` build compartido, `test/` diferencial del núcleo C, `jest/` backend Node para Jest. Solo `src/crypto/sodium` lo importa. |
+
 ### `server/src/`
 | Subcarpeta | Qué contiene |
 |------------|--------------|

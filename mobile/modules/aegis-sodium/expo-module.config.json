@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["AegisSodiumModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.aegissodium.AegisSodiumModule"]
+  }
+}

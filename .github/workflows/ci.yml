@@ -276,6 +276,48 @@ jobs:
       - name: Run parser fuzz campaign
         run: npm run fuzz
 
+  # ─── Mobile — native libsodium core (F-1 B2) ─────────────────────────────
+  # The app compiles modules/aegis-sodium (C core + vendored libsodium) into its
+  # binary; Jest cannot load it. This job builds the SAME sources for the host
+  # (modules/aegis-sodium/cmake/libsodium.cmake, shared with the Android build)
+  # and checks them byte-for-byte against TweetNaCl/@noble on random inputs and
+  # RFC vectors, plus the core's length validation and fail-closed paths — once
+  # optimized, once under AddressSanitizer + UndefinedBehaviorSanitizer (the C
+  # core is the memory-safety boundary between JS arrays and libsodium).
+  aegis-sodium-native:
+    name: Mobile native crypto core
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies (TweetNaCl/@noble oracle)
+        run: npm ci
+
+      - name: Build and diff the C core (release)
+        run: |
+          cmake -S modules/aegis-sodium/test -B build/aegis-sodium -G Ninja -DCMAKE_BUILD_TYPE=Release
+          ninja -C build/aegis-sodium
+          node modules/aegis-sodium/test/differential.mjs build/aegis-sodium/aegis_sodium_cli
+
+      - name: Build and diff the C core (ASan + UBSan)
+        env:
+          AEGIS_DIFF_ITER: '50'
+        run: |
+          cmake -S modules/aegis-sodium/test -B build/aegis-sodium-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
+          ninja -C build/aegis-sodium-asan
+          node modules/aegis-sodium/test/differential.mjs build/aegis-sodium-asan/aegis_sodium_cli
+
   # ─── Desktop — typecheck + tests (Electron main/renderer, vitest) ─────────
   # Golden rule #11: the desktop client MUST have a CI test suite covering IPC,
   # ratchet serialization and DB encryption. The native cipher module

@@ -136,7 +136,7 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 
 - [ ] **H3 — unificar `@noble/hashes`** mobile v1 ↔ desktop v2 (hoy mitigado por KAT cross-platform;
       falta unificar mayor + verificación Metro on-device).
-- [ ] **F-1 — núcleo cripto nativo** 🟡: portar hot-path (X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC)
+- [x] **F-1 — núcleo cripto nativo** ✅ (en mobile, efectivo desde el primer build nativo que lo incluya): portar hot-path (X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC)
       a libsodium, conservando la capa TS. Cierra el gap constant-time a través del JIT. Sustitución de
       implementación, **no** cambio de protocolo (bytes idénticos, sin forzar actualización; sí exige
       build nativo nuevo, no OTA).
@@ -158,15 +158,29 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
         `sodium-facade.test.ts`, `f1-golden.test.ts`, firma universal de orden pequeño rechazada
         (`ed25519.test.ts`). Relay en imagen Debian slim (uid/gid 100/101 conservados) y `deploy.yml`
         aborta sin reiniciar si `sodium-native` no carga en el host. `tweetnacl` pasa a devDependency.
-  - [ ] **B2 — mobile**: módulo JSI `aegis-sodium` que compila libsodium desde fuente verificada;
-        los 12 tests que hacen `jest.mock('tweetnacl')` pasan a mockear `crypto/sodium`.
+  - [x] **B2 — mobile en libsodium nativo**: módulo Expo local `mobile/modules/aegis-sodium` que
+        compila libsodium **1.0.22 desde fuente** (vendorizado; firma minisign + SHA-256 del tarball
+        verificados por `mobile/scripts/vendor-libsodium.mjs`, cada fichero fijado por
+        `vendor-manifest.test.ts`) y un núcleo C (`cpp/aegis_sodium.c`) que valida toda longitud antes
+        de llamar a libsodium. Android: CMake + JNI (`android/`, 16 KB page-aligned); iOS: podspec +
+        Swift (`ios/`). La fachada `mobile/src/crypto/sodium` llama por JSI síncrono; HMAC/HKDF
+        (`crypto_kdf_hkdf_sha256`) y el CSPRNG (`randombytes_buf`, también detrás del shim
+        `getRandomValues` de @noble) pasan a nativo; SHA-2 sin clave sigue en JS, como en desktop. Sin
+        fallback JS: sin el módulo en el binario, el cripto no arranca. Pruebas: job de CI
+        `aegis-sodium-native` (núcleo C compilado para host vs TweetNaCl/@noble, optimizado y con
+        ASan/UBSan: `modules/aegis-sodium/test/differential.mjs`), `sodium-facade.test.ts`,
+        `f1-golden.test.ts` y toda la suite de Jest sobre libsodium real (`jest/nodeBackend.ts`,
+        sodium-native). `tweetnacl` pasa a devDependency (oráculo de tests). Pendiente de verificar
+        en dispositivo con el primer build EAS (Android e iOS).
 - [ ] **F-1b — claves en memoria nativa (handles opacos)**: tras F-1, las claves privadas viven solo
       en memoria nativa (módulo en mobile, proceso main en desktop) y JS recibe un handle, como
       libsignal. Un XSS en el renderer ya no podría leer claves. F-1 cierra el timing del JIT pero no
       saca las claves del heap de JS.
 - [ ] **Argon2id nativo + formato de backup nuevo**: `crypto_pwhash` (mucho más rápido: desbloqueo por
       PIN y restauración de backup) con salt de 16 B; el formato actual (salt 32 B) se sigue leyendo
-      con @noble. ML-KEM-768 también sigue en @noble hasta que libsodium lo exponga estable.
+      con @noble. ML-KEM-768 sigue en @noble: libsodium 1.0.22 (ya vendorizado) trae
+      `crypto_kem_mlkem768`; moverlo exige probar compatibilidad byte a byte con @noble/post-quantum
+      (claves de prekeys PQ ya publicadas) antes de cambiar.
 - [ ] Cerrar los "partial coverage" de la auditoría: zeroización en intermedios X3DH/PQXDH,
       `assertNonZero` ML-KEM, barrido constant-time de comparaciones restantes.
 

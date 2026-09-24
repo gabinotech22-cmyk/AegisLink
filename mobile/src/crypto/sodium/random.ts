@@ -1,12 +1,15 @@
 /**
- * CSPRNG installation, split out of `./index.ts` on purpose: `cryptoSetup.ts`
- * imports this BEFORE any @noble module is evaluated (noble captures
- * `globalThis.crypto` at module-load time, and cryptoSetup is what installs it).
- * Keep this file free of @noble imports.
+ * The process CSPRNG: libsodium's randombytes_buf in the native module
+ * (Android: /dev/urandom, iOS: arc4random_buf — the OS generator).
+ *
+ * Split out of `./index.ts` on purpose: `cryptoSetup.ts` imports this BEFORE any
+ * @noble module is evaluated (noble captures `globalThis.crypto` at module-load
+ * time, and cryptoSetup is what installs it). Keep this file free of @noble
+ * imports.
  */
-import tweetnacl from 'tweetnacl';
+import AegisSodium, { AEGIS_OK } from '../../../modules/aegis-sodium';
 
-/** Install the process CSPRNG. Called once from `cryptoSetup.ts`. */
-export function setRandomSource(fill: (out: Uint8Array, n: number) => void): void {
-  tweetnacl.setPRNG(fill);
+/** Fill `out` with CSPRNG bytes, in place. Throws rather than leave it unfilled. */
+export function fillRandom(out: Uint8Array): void {
+  if (AegisSodium.randombytes(out) !== AEGIS_OK) throw new Error('aegis-sodium: randombytes failed');
 }

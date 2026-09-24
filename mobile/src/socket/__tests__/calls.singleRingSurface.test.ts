@@ -38,19 +38,24 @@ jest.mock('react-native-webrtc', () => ({
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn().mockReturnValue('test-call-uuid') }));
 jest.mock('expo-av', () => ({ Audio: { setAudioModeAsync: jest.fn().mockResolvedValue(undefined) } }));
 
-jest.mock('tweetnacl', () => ({
-  randomBytes: jest.fn().mockReturnValue(new Uint8Array(32)),
-  box: Object.assign(jest.fn().mockReturnValue(new Uint8Array(32)), {
-    open: jest.fn().mockReturnValue(null),
-    publicKeyLength: 32,
-    secretKeyLength: 32,
-    nonceLength: 24,
-  }),
-  secretbox: Object.assign(jest.fn().mockReturnValue(new Uint8Array(32)), {
-    keyLength: 32,
-    nonceLength: 24,
-  }),
-  sign: { publicKeyLength: 32 },
+// The crypto facade (native libsodium) with a stubbed `nacl`: these tests
+// only need the calls to succeed, not real cryptography.
+jest.mock('../../crypto/sodium', () => ({
+  ...jest.requireActual('../../crypto/sodium'),
+  nacl: {
+    randomBytes: jest.fn().mockReturnValue(new Uint8Array(32)),
+    box: Object.assign(jest.fn().mockReturnValue(new Uint8Array(32)), {
+      open: jest.fn().mockReturnValue(null),
+      publicKeyLength: 32,
+      secretKeyLength: 32,
+      nonceLength: 24,
+    }),
+    secretbox: Object.assign(jest.fn().mockReturnValue(new Uint8Array(32)), {
+      keyLength: 32,
+      nonceLength: 24,
+    }),
+    sign: { publicKeyLength: 32 },
+  },
 }));
 jest.mock('tweetnacl-util', () => ({
   encodeBase64: jest.fn().mockReturnValue('base64string=='),

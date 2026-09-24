@@ -27,6 +27,9 @@ module.exports = {
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   moduleNameMapper: {
+    // F-1 B2: the native libsodium module cannot load under Node; its stand-in
+    // runs real libsodium (sodium-native) with the C core's contract.
+    '^(\\.{1,2}/)+modules/aegis-sodium$': '<rootDir>/modules/aegis-sodium/jest/nodeBackend.ts',
     '^expo-asset$': '<rootDir>/__mocks__/expo-asset.js',
     '^expo-file-system/legacy$': '<rootDir>/__mocks__/expo-file-system-legacy.js',
     '^expo-secure-store$': '<rootDir>/__mocks__/expo-secure-store.js',

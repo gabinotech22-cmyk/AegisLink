@@ -31,6 +31,10 @@ module.exports = {
     '^(\\.{1,2}/.*)\\.js$': '$1',
     // Replace the native-ESM expo-server-sdk with a CJS-compatible stub
     '^expo-server-sdk$': '<rootDir>/src/__mocks__/expo-server-sdk.ts',
+    // The e2e harness loads mobile's crypto facade, which calls the app's native
+    // libsodium module; under Node it gets the module's stand-in (real libsodium
+    // via sodium-native, resolved from server/node_modules through modulePaths).
+    '^(\\.{1,2}/)+modules/aegis-sodium$': '<rootDir>/../mobile/modules/aegis-sodium/jest/nodeBackend.ts',
   },
   transform: {
     '^.+\\.ts$': [

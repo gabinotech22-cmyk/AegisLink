@@ -45,8 +45,13 @@ jest.mock('../messages', () => ({
 
 // ── tweetnacl / tweetnacl-util (signAsAdmin, unrelated to dissolve but
 //    imported at module load by the store) ─────────────────────────────────
-jest.mock('tweetnacl', () => ({
-  sign: { detached: jest.fn().mockReturnValue(new Uint8Array(64)) },
+// The crypto facade (native libsodium) with a stubbed `nacl`: these tests
+// only need the calls to succeed, not real cryptography.
+jest.mock('../../crypto/sodium', () => ({
+  ...jest.requireActual('../../crypto/sodium'),
+  nacl: {
+    sign: { detached: jest.fn().mockReturnValue(new Uint8Array(64)) },
+  },
 }));
 jest.mock('tweetnacl-util', () => ({
   encodeBase64: jest.fn().mockReturnValue('sig=='),
