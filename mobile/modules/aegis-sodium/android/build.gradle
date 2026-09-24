@@ -1,0 +1,36 @@
+// F-1 B2: native libsodium for the mobile crypto facade. Compiles the vendored,
+// signature-verified libsodium sources (../vendor) and the aegis_sodium C core
+// (../cpp) into libaegis_sodium.so — no prebuilt binaries (reproducible builds,
+// F-Droid). See ../cmake/libsodium.cmake.
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+def reactNativeArchitectures() {
+  def value = project.getProperties().get("reactNativeArchitectures")
+  return value ? value.split(",") : ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
+}
+
+group = 'org.aegislink'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.aegissodium"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+    externalNativeBuild {
+      cmake {
+        abiFilters (*reactNativeArchitectures())
+        // 16 KB page alignment (required for Android 15+ devices / Play).
+        arguments "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+      }
+    }
+  }
+  externalNativeBuild {
+    cmake {
+      path "CMakeLists.txt"
+    }
+  }
+}

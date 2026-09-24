@@ -56,3 +56,8 @@ keys/
 emu-*.png
 d2-home.png
 testimg/
+
+# Native crypto core (modules/aegis-sodium): host test builds and Gradle/CMake outputs
+/build/
+/modules/aegis-sodium/android/build/
+/modules/aegis-sodium/android/.cxx/

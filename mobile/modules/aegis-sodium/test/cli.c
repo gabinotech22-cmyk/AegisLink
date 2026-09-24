@@ -1,0 +1,109 @@
+/*
+ * Line-oriented driver for the aegis_sodium C core (host test harness only).
+ *
+ * Input, one call per line:  <op> <arg>...
+ *   <arg> is lowercase hex bytes, "_" (empty buffer), "NULL" (NULL pointer,
+ *   length 0), "NULL:<n>" (NULL pointer claiming <n> bytes) or "#<n>" (an
+ *   output buffer of <n> bytes).
+ * Output, one line per call:  <return code> <hex of each output buffer>...
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "aegis_sodium.h"
+
+#define MAX_ARGS 8
+#define MAX_LINE (1 << 22)
+
+typedef struct {
+  uint8_t *p;
+  size_t len;
+  int out;
+} arg_t;
+
+static int parse_arg(const char *tok, arg_t *a) {
+  size_t n, i;
+  memset(a, 0, sizeof *a);
+  if (strcmp(tok, "NULL") == 0) return 0;
+  if (strncmp(tok, "NULL:", 5) == 0) {
+    a->len = (size_t) strtoull(tok + 5, NULL, 10);
+    return 0;
+  }
+  if (tok[0] == '#') {
+    a->len = (size_t) strtoull(tok + 1, NULL, 10);
+    a->p = calloc(a->len ? a->len : 1, 1);
+    a->out = 1;
+    return a->p ? 0 : -1;
+  }
+  if (strcmp(tok, "_") == 0) {
+    a->p = calloc(1, 1);
+    return a->p ? 0 : -1;
+  }
+  n = strlen(tok);
+  if (n % 2) return -1;
+  a->len = n / 2;
+  a->p = malloc(a->len ? a->len : 1);
+  if (!a->p) return -1;
+  for (i = 0; i < a->len; i++) {
+    unsigned int byte;
+    if (sscanf(tok + 2 * i, "%2x", &byte) != 1) return -1;
+    a->p[i] = (uint8_t) byte;
+  }
+  return 0;
+}
+
+#define A(i) args[i].p, args[i].len
+
+static int dispatch(const char *op, arg_t *args, int n) {
+#define OP(name, nargs, call)                                                                                        \
+  if (strcmp(op, name) == 0) return n == (nargs) ? (call) : -100;
+  OP("init", 0, aegis_init())
+  OP("randombytes", 1, aegis_randombytes(A(0)))
+  OP("memcmp", 2, aegis_memcmp(A(0), A(1)))
+  OP("box_keypair", 2, aegis_box_keypair(A(0), A(1)))
+  OP("box_easy", 5, aegis_box_easy(A(0), A(1), A(2), A(3), A(4)))
+  OP("box_open_easy", 5, aegis_box_open_easy(A(0), A(1), A(2), A(3), A(4)))
+  OP("box_beforenm", 3, aegis_box_beforenm(A(0), A(1), A(2)))
+  OP("secretbox_easy", 4, aegis_secretbox_easy(A(0), A(1), A(2), A(3)))
+  OP("secretbox_open_easy", 4, aegis_secretbox_open_easy(A(0), A(1), A(2), A(3)))
+  OP("scalarmult", 3, aegis_scalarmult(A(0), A(1), A(2)))
+  OP("scalarmult_base", 2, aegis_scalarmult_base(A(0), A(1)))
+  OP("sign_keypair", 2, aegis_sign_keypair(A(0), A(1)))
+  OP("sign_seed_keypair", 3, aegis_sign_seed_keypair(A(0), A(1), A(2)))
+  OP("sign_detached", 3, aegis_sign_detached(A(0), A(1), A(2)))
+  OP("sign_verify_detached", 3, aegis_sign_verify_detached(A(0), A(1), A(2)))
+  OP("hmacsha256", 3, aegis_hmacsha256(A(0), A(1), A(2)))
+  OP("hkdf_sha256", 4, aegis_hkdf_sha256(A(0), A(1), A(2), A(3)))
+#undef OP
+  return -101;
+}
+
+int main(void) {
+  static char line[MAX_LINE];
+  if (aegis_init() != AEGIS_OK) return 1;
+  while (fgets(line, sizeof line, stdin)) {
+    arg_t args[MAX_ARGS];
+    int n = 0, rc, i;
+    char *op = strtok(line, " \r\n"), *tok;
+    if (!op) continue;
+    while ((tok = strtok(NULL, " \r\n")) != NULL) {
+      if (n == MAX_ARGS || parse_arg(tok, &args[n]) != 0) return 2;
+      n++;
+    }
+    rc = dispatch(op, args, n);
+    printf("%d", rc);
+    for (i = 0; i < n; i++) {
+      if (args[i].out) {
+        size_t j;
+        putchar(' ');
+        if (args[i].len == 0) putchar('_');
+        for (j = 0; j < args[i].len; j++) printf("%02x", args[i].p[j]);
+      }
+      free(args[i].p);
+    }
+    putchar('\n');
+    fflush(stdout);
+  }
+  return 0;
+}
