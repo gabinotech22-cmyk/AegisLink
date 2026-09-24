@@ -48,6 +48,9 @@ keeps no logs of who talks to whom.
   never contains content or sender identity. Store builds use FCM/APNs; the
   Android `foss` build contains no Google code and wakes through ntfy over Tor
   plus a foreground service.
+- **No over-the-air code updates**: the app never downloads new code outside
+  the stores, so it never contacts Expo's update server and no one can push code
+  to phones without store review. Every change ships as a store build.
 - **Backups**: encrypted locally with a key derived from your passphrase
   (Argon2id); the key belongs to the user only.
 
