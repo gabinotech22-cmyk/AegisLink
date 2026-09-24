@@ -57,6 +57,9 @@ keeps no logs of who talks to whom.
   does not register with Google's FCM: it wakes through the relay's ntfy over
   Tor plus a foreground service (the `foss` build contains no Google code at
   all).
+- **No over-the-air code updates**: the app never downloads new code outside
+  the stores, so it never contacts Expo's update server and no one can push code
+  to phones without store review. Every change ships as a store build.
 - **Backups**: encrypted locally with a key derived from your passphrase
   (Argon2id); the key belongs to the user only.
 
