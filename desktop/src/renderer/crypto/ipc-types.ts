@@ -88,6 +88,10 @@ export interface AegisIPC {
     sioEmit(id: string, event: string, payloadJson: string, ackId: string | null): Promise<boolean>;
     sioDisconnect(id: string): Promise<boolean>;
     onSioEvent(cb: (msg: unknown) => void): () => void;
+    /** Bridges (main/tor/bridges.ts): current mode, custom lines and live transport. */
+    getConnection(): Promise<unknown>;
+    /** Change mode; `customText` is the raw pasted bridge list (validated in main). */
+    setConnection(mode: string, customText: string | null): Promise<unknown>;
   };
 }
 
