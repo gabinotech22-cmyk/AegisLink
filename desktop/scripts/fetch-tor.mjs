@@ -6,7 +6,10 @@
  * GPG-signed by the Tor Browser team) before anything is extracted, so a
  * tampered mirror/CDN cannot ship us a fake tor.exe.
  *
- * Output (gitignored): resources/tor/<platform>-<arch>/tor(.exe) + docs.
+ * Output (gitignored): resources/tor/<platform>-<arch>/tor(.exe) + docs, and the
+ * pluggable-transport client pluggable_transports/lyrebird(.exe) (obfs4,
+ * webtunnel, meek_lite and snowflake — the bridges of main/tor/bridges.ts) from
+ * the same verified tarball.
  * Bump TOR_VERSION + TOR_SHA256 together; never one without the other.
  */
 import { createHash } from 'node:crypto'
@@ -22,6 +25,8 @@ const PINNED = {
     sha256: '231dad6b9cb401a54c260db7046965ef04e4f72ff071b140d423fb5da281ab1e',
     bin: 'tor/tor.exe',
     out: 'tor.exe',
+    pt: 'tor/pluggable_transports/lyrebird.exe',
+    ptOut: 'pluggable_transports/lyrebird.exe',
   },
 }
 
@@ -35,7 +40,8 @@ if (!pin) {
 
 const outDir = join(here, '..', 'resources', 'tor', key)
 const outBin = join(outDir, pin.out)
-if (existsSync(outBin) && process.argv[2] !== '--force') {
+const outPt = join(outDir, pin.ptOut)
+if (existsSync(outBin) && existsSync(outPt) && process.argv[2] !== '--force') {
   console.log(`fetch-tor: ${outBin} already present (use --force to refetch)`)
   process.exit(0)
 }
@@ -72,11 +78,13 @@ execFileSync('tar', ['-xzf', pin.file], { cwd: tmp, stdio: 'inherit' })
 
 mkdirSync(outDir, { recursive: true })
 copyFileSync(join(tmp, pin.bin), outBin)
-for (const doc of ['docs/tor.txt', 'docs/libevent.txt', 'docs/openssl.txt', 'docs/zlib.txt']) {
+mkdirSync(dirname(outPt), { recursive: true })
+copyFileSync(join(tmp, pin.pt), outPt)
+for (const doc of ['docs/tor.txt', 'docs/libevent.txt', 'docs/openssl.txt', 'docs/zlib.txt', 'docs/lyrebird.txt']) {
   const src = join(tmp, doc)
   if (existsSync(src)) copyFileSync(src, join(outDir, `LICENSE.${doc.split('/').pop()}`))
 }
 writeFileSync(join(outDir, 'VERSION'), `${TOR_VERSION}\n${pin.file}\n${sha}\n`)
 rmSync(tmp, { recursive: true, force: true })
-console.log(`fetch-tor: installed ${outBin} (Tor Expert Bundle ${TOR_VERSION})`)
+console.log(`fetch-tor: installed ${outBin} + ${outPt} (Tor Expert Bundle ${TOR_VERSION})`)
 console.log(readFileSync(join(outDir, 'VERSION'), 'utf8'))

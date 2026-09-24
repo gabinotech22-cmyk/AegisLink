@@ -888,11 +888,15 @@ export async function purgeGlobalAppState(opts: {
     await deleteAllChannels();
   } catch { /* non-fatal */ }
 
-  // Optional Web3 DIDs for the wiped identity (personal + work scopes).
+  // Cached did:key of the wiped identity. It is the public signing key in
+  // another encoding, so a survivor links the device to the erased identity.
+  // Cleared under the SAME key DIDManager writes (`aegis.did.v1.<aegisId>`) —
+  // the old code purged `<aegisId>::personal/work` scopes nothing ever wrote,
+  // so the real entry outlived every panic wipe (web3 audit 2026-09-24).
   if (opts.aegisId) {
     try {
-      const { clearAllProfileDIDs } = require('../web3/did/ProfileIsolation') as typeof import('../web3/did/ProfileIsolation');
-      await clearAllProfileDIDs(opts.aegisId);
+      const { clearDID } = require('../web3/did/DIDManager') as typeof import('../web3/did/DIDManager');
+      await clearDID(opts.aegisId);
     } catch { /* non-fatal */ }
   }
 

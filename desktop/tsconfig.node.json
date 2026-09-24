@@ -9,12 +9,14 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "skipLibCheck": true,
+    "resolveJsonModule": true,
     "types": ["node", "better-sqlite3"],
     "outDir": "out"
   },
   "include": [
     "electron.vite.config.ts",
     "src/main/**/*.ts",
+    "src/main/**/*.json",
     "src/preload/**/*.ts"
   ]
 }

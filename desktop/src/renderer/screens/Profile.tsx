@@ -21,7 +21,6 @@ interface Props {
   onDevices: () => void;
   onPanic: () => void;
   onAppIcon: () => void;
-  onSubscription?: () => void;
   onKeys: () => void;
 }
 
@@ -39,7 +38,7 @@ const PROFILE_EMOJIS = [
   { get label() { return i18n.t('groups.robot'); }, val: '🤖' },
 ];
 
-export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscription, onKeys }: Props) {
+export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys }: Props) {
   useTranslation(); // re-render on language change
   const { t } = useTheme();
 
@@ -190,9 +189,6 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onSubscri
           <Row t={t} icon={<I.Key size={18} color={t.textDim} />} label={i18n.t('profile.identitiesAndKeys')} sub={i18n.t('profile.viewYourPublicKeys')} onPress={onKeys} />
           <Row t={t} icon={<I.Phone size={18} color={t.textDim} />} label={i18n.t('profile.linkedDevices')} onPress={onDevices} />
           <Row t={t} icon={<I.Shield size={18} color={t.accent} />} label={i18n.t('profile.panicMode')} sub={i18n.t('profile.instantlyWipeAllData')} onPress={onPanic} />
-          {onSubscription && (
-            <Row t={t} icon={<I.Zap size={18} color={t.textDim} />} label={i18n.t('profile.anonSubscription')} sub={i18n.t('profile.payWithCryptoNo')} onPress={onSubscription} />
-          )}
           <Row t={t} icon={<I.Trash size={18} color={t.danger} />} label={i18n.t('profile.deleteIdentityTitle')} danger noBorder onPress={handleDeleteIdentity} />
         </Section>
       </div>

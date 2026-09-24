@@ -307,3 +307,89 @@ describe('Slice 2b.4 — flag-gated Expo token wake on the mailbox path', () => 
     await new Promise((r) => setTimeout(r, 50));
   }, 30_000);
 });
+
+// ── 2026-09-24: raw APNs token binding (no Expo hop) ─────────────────────────
+// Clients now bind their RAW APNs device token for the mailbox wake, so Expo
+// never learns the wake pattern. Expo tokens from older clients still work.
+describe('APNs token binding on the mailbox path (no Expo hop)', () => {
+  const APNS_TOKEN = 'a1'.repeat(32);
+  let fetchSpy: FetchSpy;
+  const prevEnv: Record<string, string | undefined> = {};
+  function setApns(socket: ClientSocket, mailboxId: string, apnsToken: unknown): Promise<Ack> {
+    return new Promise((resolve) => {
+      socket.emit('mailbox:push:token', { mailboxId, apnsToken }, (res: Ack) => resolve(res));
+    });
+  }
+
+  beforeEach(() => {
+    for (const k of ['PUSH_MAILBOX_ENABLED', 'NTFY_URL', 'PUSH_MAILBOX_TOKEN_WAKE']) prevEnv[k] = process.env[k];
+    process.env['PUSH_MAILBOX_ENABLED'] = 'on';
+    process.env['NTFY_URL'] = NTFY_URL;
+    fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+  });
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  });
+
+  test('isApnsDeviceToken: hex 64-200 only', async () => {
+    const { isApnsDeviceToken } = await import('../push/apns-alert.js');
+    expect(isApnsDeviceToken(APNS_TOKEN)).toBe(true);
+    expect(isApnsDeviceToken('ab'.repeat(20))).toBe(false);
+    expect(isApnsDeviceToken(TOKEN)).toBe(false);
+    expect(isApnsDeviceToken(`${APNS_TOKEN}\n`)).toBe(false);
+    expect(isApnsDeviceToken(null)).toBe(false);
+  });
+
+  test('an APNs binding is accepted and its wake NEVER goes through Expo', async () => {
+    process.env['PUSH_MAILBOX_TOKEN_WAKE'] = 'on';
+    const sender = makeMailbox(93101);
+    const recipient = makeMailbox(93102);
+    const recSock = await connectMailbox(recipient);
+    expect(await setApns(recSock, recipient.mailboxId, APNS_TOKEN)).toEqual({ ok: true });
+    recSock.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const senderSock = await connectMailbox(sender);
+    await sendMb(senderSock, makeMbWire(recipient.mailboxId, 'apns-w1'));
+    await new Promise((r) => setTimeout(r, 100));
+    const calls = publishCalls(fetchSpy);
+    expect(calls).not.toContain(EXPO_API);
+    // APNs is not configured in tests → the direct send fails → the wake is not
+    // lost: it falls back to the ntfy topic (same rule as an Expo failure).
+    expect(calls).toContain(`${NTFY_URL}/${mailboxTopic(recipient.mailboxId)}`);
+    senderSock.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+  }, 30_000);
+
+  test('malformed APNs token rejected; flag off rejected; null retracts', async () => {
+    const keys = makeMailbox(93111);
+    const sock = await connectMailbox(keys);
+    process.env['PUSH_MAILBOX_TOKEN_WAKE'] = 'on';
+    expect(await setApns(sock, keys.mailboxId, 'not-hex')).toEqual({ ok: false, error: 'invalid_token' });
+    expect(await setApns(sock, keys.mailboxId, `${APNS_TOKEN}"x`)).toEqual({ ok: false, error: 'invalid_token' });
+    delete process.env['PUSH_MAILBOX_TOKEN_WAKE'];
+    expect(await setApns(sock, keys.mailboxId, APNS_TOKEN)).toEqual({ ok: false, error: 'feature_disabled' });
+    expect(await setApns(sock, keys.mailboxId, null)).toEqual({ ok: true });
+    sock.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+  }, 30_000);
+
+  test('sendApnsWakeToToken fails (never throws) when APNs is unconfigured', async () => {
+    const { sendApnsWakeToToken } = await import('../push/apns-alert.js');
+    await expect(sendApnsWakeToToken(APNS_TOKEN, 'message')).resolves.toBe('failed');
+    await expect(sendApnsWakeToToken('junk', 'call')).resolves.toBe('failed');
+  });
+
+  test('apnsTokenRepo.deleteFor only drops the OWNER’s token (apns:unregister)', async () => {
+    const { apnsTokenRepo } = await import('../db/client.js');
+    const shared = 'c3'.repeat(32);
+    await apnsTokenRepo.upsert({ aegis_id: 'AAA-AAAA-AAAA', apns_token: shared, updated_at: 1 });
+    await apnsTokenRepo.upsert({ aegis_id: 'BBB-BBBB-BBBB', apns_token: shared, updated_at: 1 });
+    await apnsTokenRepo.deleteFor('AAA-AAAA-AAAA', shared);
+    expect(await apnsTokenRepo.forRecipient('AAA-AAAA-AAAA')).toHaveLength(0);
+    expect(await apnsTokenRepo.forRecipient('BBB-BBBB-BBBB')).toHaveLength(1);
+  });
+});
