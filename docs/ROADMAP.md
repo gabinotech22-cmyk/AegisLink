@@ -77,11 +77,16 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 | Server tests | `__tests__/workSenderKeyTrust.relay.test.ts`, `workspace.auth.test.ts`, partes de `ola8.relay.test.ts` |
 | Mobile | iconos `assets/icon-work.*`, `android-icon-assets/work/**`, strings i18n `work.*` |
 | Pagos (muerto) | `mobile/src/_unused/screens/Subscription.tsx`, `mobile/src/_unused/web3/payments/LightningPayment.ts` |
-| Pagos (**aún vivo**, pendiente) | `server/src/routes/web3.ts` (`/subscription/invoice`, `/subscription/activate`), tablas `lightning_invoices`/`subscriptions`, `desktop/src/renderer/screens/Subscription.tsx` (accesible desde Perfil). Factura simulada imposible de pagar + escritura sin auth/límite: ver `AUDIT-2026-09-24-WEB3-DID.md` P-1 |
+| Pagos (restos que se escaparon) | `server/src/routes/web3.ts` (`/subscription/invoice`, `/subscription/activate`), DDL `lightning_invoices`/`subscriptions`, `desktop/src/renderer/screens/Subscription.tsx` (accesible desde Perfil) — eliminados después, ver abajo |
 
 **Hecho (PR `chore/extract-work`):**
 - [x] **Preservado en historia git** (`976c09f`); sin branch de archivo.
 - [x] **Prototipos de pagos** `mobile/src/_unused/**` borrados; `tsconfig` ya no los excluye.
+- [x] **Restos de pagos en relay y desktop** (se escaparon de este hito): endpoints
+      `/web3/subscription/*`, su DDL y la pantalla `Subscription.tsx` del desktop, que ofrecía
+      una factura simulada imposible de pagar. Eliminados en #525 (`AUDIT-2026-09-24-WEB3-DID.md`
+      P-1). Las tablas huérfanas `lightning_invoices`/`subscriptions` siguen la misma regla que las
+      de Work: el `DROP` es operador-local.
 - [x] **Server**: router `/work`, `repos/work`, tipos Work, schemas Work, rate-limit de `channel:msg`,
       rama Work del `typing`, presencia de org y el cron `pruneExpiredWorkMessages` eliminados.
       Los handlers `group:rekey`/`group:rekey_drain_ack` de grupos normales, que convivían en

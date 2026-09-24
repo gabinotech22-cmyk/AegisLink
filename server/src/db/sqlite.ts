@@ -158,23 +158,6 @@ export function initSqliteSchema(db: DatabaseSync) {
       did_hash        TEXT PRIMARY KEY
     );
 
-    CREATE TABLE IF NOT EXISTS lightning_invoices (
-      payment_hash  TEXT PRIMARY KEY,
-      bolt11        TEXT NOT NULL,
-      amount_sats   INTEGER NOT NULL,
-      plan_days     INTEGER NOT NULL,
-      created_at    INTEGER NOT NULL,
-      expires_at    INTEGER NOT NULL,
-      paid          INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS subscriptions (
-      payment_hash  TEXT PRIMARY KEY,
-      plan_days     INTEGER NOT NULL,
-      activated_at  INTEGER NOT NULL,
-      expires_at    INTEGER NOT NULL
-    );
-
     CREATE TABLE IF NOT EXISTS linked_devices (
       device_id      TEXT PRIMARY KEY,
       aegis_id       TEXT NOT NULL,
@@ -308,7 +291,9 @@ export function initSqliteSchema(db: DatabaseSync) {
       `);
     }
   } catch { /* table absent or already migrated */ }
-  // DID revocations (web3 audit 2026-09-24): the legacy table also kept
+  // DID revocations (web3 audit 2026-09-24): a security purge, same class as
+  // C-3's DROP COLUMN chain_key_b64 above (not an orphan-table cleanup, which
+  // stays operator-local — ROADMAP Hito 1). The legacy table also kept
   // signing_pub_key — which IS the did:key in another encoding, defeating the
   // hash-only storage — plus a signature and timestamp, and every row came from
   // an endpoint that never bound the signer to the DID (anyone could revoke any

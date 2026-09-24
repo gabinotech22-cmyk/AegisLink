@@ -248,6 +248,10 @@ revocation is `device:revoke` on the authenticated socket (§9).
   `keyAgreement`** (AegisLink never encrypts to a key derived from the signing
   key). Clients resolve `did:key` locally (`resolveDID.ts`); calling the relay
   tells it which DID is being looked up, so it is only for deactivation status.
+- **`/web3` is always mounted and read-only.** It used to sit behind
+  `WEB3_ENDPOINTS=off` because of the unbound revocation write (audit 2026-07
+  H3); with that endpoint and the mock Lightning subscriptions gone, the only
+  route is the resolver above (`web3Did.test.ts` guards the wiring).
 
 ---
 

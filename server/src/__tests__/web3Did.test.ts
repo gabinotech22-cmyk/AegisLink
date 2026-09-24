@@ -11,6 +11,10 @@
  *     501 methodNotSupported
  *   - the legacy table (which kept the signing key = the DID) is purged and
  *     rebuilt hash-only
+ *   - P-1: the mock Lightning subscription endpoints are gone and their tables
+ *     are no longer created (existing orphans are operator-local to drop, like
+ *     Work's); with no write left on /web3 the router is mounted unconditionally
+ *     (the WEB3_ENDPOINTS=off gate from audit 2026-07 H3 kept it dark in prod)
  */
 
 import express from 'express';
@@ -18,6 +22,9 @@ import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import request from 'supertest';
 import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 process.env['AEGIS_DB_PATH'] = ':memory:';
 
@@ -62,6 +69,23 @@ describe('forgeable revocation endpoints are gone', () => {
   it('GET /web3/device/revocation/:didHash no longer exists', async () => {
     const res = await request(app).get(`/web3/device/revocation/${'a'.repeat(64)}`);
     expect(res.status).toBe(404);
+  });
+});
+
+describe('mock Lightning subscriptions are gone (P-1)', () => {
+  it('POST /web3/subscription/invoice and /activate answer 404', async () => {
+    expect((await request(app).post('/web3/subscription/invoice').send({ planDays: 30 })).status).toBe(404);
+    expect(
+      (await request(app).post('/web3/subscription/activate').send({ preimage: 'a'.repeat(64), paymentHash: 'b'.repeat(64) })).status,
+    ).toBe(404);
+  });
+
+  it('index.ts mounts /web3 with no WEB3_ENDPOINTS gate', () => {
+    // index.ts starts the server on import, so guard its wiring at source level.
+    const testDir = dirname(fileURLToPath(import.meta.url));
+    const src = readFileSync(join(testDir, '..', 'index.ts'), 'utf8');
+    expect(src).toMatch(/^app\.use\('\/web3', web3Routes\);\r?$/m);
+    expect(src).not.toMatch(/process\.env\[?\.?['"]?WEB3_ENDPOINTS/);
   });
 });
 
@@ -142,6 +166,17 @@ describe('revoked_did_hashes migration', () => {
     db.exec(`INSERT INTO revoked_did_hashes (did_hash) VALUES ('${'c'.repeat(64)}')`);
     initSqliteSchema(db);
     expect({ ...(db.prepare(`SELECT COUNT(*) AS n FROM revoked_did_hashes`).get() as object) }).toEqual({ n: 1 });
+    db.close();
+  });
+
+  it('no longer creates the mock Lightning tables on a fresh database', async () => {
+    const { initSqliteSchema } = await import('../db/sqlite.js');
+    const db = new DatabaseSync(':memory:');
+    initSqliteSchema(db);
+    const tables = (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as Array<{ name: string }>)
+      .map((t) => t.name);
+    expect(tables).not.toContain('lightning_invoices');
+    expect(tables).not.toContain('subscriptions');
     db.close();
   });
 });

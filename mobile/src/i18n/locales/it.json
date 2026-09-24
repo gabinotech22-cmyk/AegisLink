@@ -249,8 +249,6 @@
     "linkedDevices": "Dispositivi collegati",
     "isolatedProfiles": "Profili isolati",
     "isolatedProfilesSub": "Gestisci identità E2EE indipendenti",
-    "anonSubscription": "Abbonamento anonimo",
-    "anonSubscriptionSub": "Lightning · senza identità",
     "createIdentity": "Crea nuova identità",
     "createIdentitySub": "Identità isolata aggiuntiva",
     "deleteIdentity": "Elimina questa identità",
