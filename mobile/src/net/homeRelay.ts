@@ -10,11 +10,14 @@
  * socket connects, so the very first connection already targets the right
  * relay. `setHomeRelay()` (migration, F5b) updates both.
  *
- * A custom home is `.onion`-only (D1): the identity socket, every HTTP call
- * (PoW, registration, prekeys, TURN credentials, blobs, push bindings) and the
- * mailbox all target `http://<onion>` over the embedded Tor — see
- * `homeRelayBaseUrl()` / `net/relayHttp.ts` / `socket/client.ts`. With the
- * official home the clearnet HTTPS (pinned) transport of today is kept.
+ * Every home is reached over Tor (Tor always-on): a custom home is `.onion`-only
+ * (D1), and the official home is reached at its onion (`ONION_URL`) too — the
+ * identity socket, every HTTP call (PoW, registration, prekeys, TURN
+ * credentials, blobs, push bindings) and the mailbox all target
+ * `http://<onion>` over the embedded Tor — see `homeRelayBaseUrl()` /
+ * `net/relayHttp.ts` / `socket/client.ts`. The clearnet `SERVER_URL` is used
+ * only by dev builds without an onion (config.ts refuses a production build
+ * without one).
  *
  * `previousRelay` is the grace-period record of a migration (D4): the old
  * home keeps receiving until `until` so contacts that have not yet learnt the
@@ -122,12 +125,21 @@ export function isCustomHome(): boolean {
 }
 
 /**
- * Base URL for HTTP against OUR relay. Custom home → `http://<onion>` (rides
- * the embedded Tor via net/relayHttp); official → the clearnet HTTPS relay
- * exactly as before F5.
+ * Base URL for HTTP against the OFFICIAL relay: its onion over the embedded Tor.
+ * `SERVER_URL` (clearnet) only when no onion is configured — dev builds and a
+ * release against a loopback dev relay (config.ts guards production).
+ */
+export function officialRelayBaseUrl(): string {
+  return ONION_URL || SERVER_URL;
+}
+
+/**
+ * Base URL for HTTP against OUR relay. Custom home → `http://<onion>`; official
+ * → its onion (`officialRelayBaseUrl`). Both ride the embedded Tor via
+ * net/relayHttp.
  */
 export function homeRelayBaseUrl(): string {
-  return current.relay ? `http://${current.relay.onion}` : SERVER_URL;
+  return current.relay ? `http://${current.relay.onion}` : officialRelayBaseUrl();
 }
 
 /**
@@ -137,7 +149,7 @@ export function homeRelayBaseUrl(): string {
  * as today).
  */
 export function homeRelayOnionUrl(): string | null {
-  return current.relay ? `http://${current.relay.onion}` : ONION_URL;
+  return current.relay ? `http://${current.relay.onion}` : ONION_URL || null;
 }
 
 /** Where a contact's mailbox lives. null = official relay. */

@@ -14,12 +14,13 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, Image, Pressable, Linking } from 'react-native';
+import { View, Text, Pressable, Linking } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { Theme } from '../theme/vault';
 import { isSecureUrl } from '../config';
 import { homeRelayBaseUrl } from '../net/homeRelay';
 import { relayFetch } from '../net/relayHttp';
+import { TorImage } from './TorImage';
 
 interface Props {
   url: string;
@@ -140,12 +141,13 @@ export function LinkPreview({ url, t }: Props) {
       {/* Thumbnail — remote bytes only after an explicit tap (AL-05). */}
       {data.image ? (
         showImage ? (
-          <Image
-            source={{ uri: data.image }}
-            style={{ width: 80, height: 80, backgroundColor: t.surface3 }}
-            resizeMode="cover"
-            accessibilityLabel={data.title ?? 'Preview image'}
-          />
+          <View accessibilityLabel={data.title ?? 'Preview image'}>
+            <TorImage
+              uri={data.image}
+              style={{ width: 80, height: 80, backgroundColor: t.surface3 }}
+              resizeMode="cover"
+            />
+          </View>
         ) : (
           <Pressable
             onPress={() => setShowImage(true)}

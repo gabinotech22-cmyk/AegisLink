@@ -14,7 +14,7 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
-import nacl from 'tweetnacl';
+import { nacl } from './sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { currentMailbox, deriveMailbox, type Mailbox } from './mailbox';
 

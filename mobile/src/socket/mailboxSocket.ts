@@ -29,7 +29,7 @@
  * brief dual-bind overlap) is Slice 5 — noted, not handled here.
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { solvePoW } from '../crypto/registration';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -219,7 +219,7 @@ export function isMailboxAuthed(): boolean {
  * incoming pipeline. Idempotent: a live socket is reused.
  */
 /**
- * Slice 2b.4: emit the Expo/APNs wake-token binding for `mailboxIdB64` over an
+ * Slice 2b.4: emit the APNs wake-token binding for `mailboxIdB64` over an
  * already-authenticated mailbox socket. iOS + client flag only (Android has
  * reduct-free app-killed coverage); best-effort — a miss just means no
  * app-killed wake until the next connect. Exported for tests.
@@ -230,10 +230,12 @@ export function registerIosWakeBinding(
 ): void {
   if (!MAILBOX_IOS_WAKE || Platform.OS !== 'ios') return;
   try {
-    const { getLastExpoToken } = require('../notifications/push') as typeof import('../notifications/push');
-    const token = getLastExpoToken();
+    // Raw APNs token: the relay wakes the phone straight through APNs, no Expo
+    // hop (server push/ntfy.ts sendTokenWake).
+    const { getLastApnsToken } = require('../notifications/push') as typeof import('../notifications/push');
+    const token = getLastApnsToken();
     if (!token) return;
-    sock.emit('mailbox:push:token', { mailboxId: mailboxIdB64, expoToken: token });
+    sock.emit('mailbox:push:token', { mailboxId: mailboxIdB64, apnsToken: token });
   } catch (e) {
     if (__DEV__) logger.warn('[mailbox] wake-token binding failed:', (e as Error).message);
   }

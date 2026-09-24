@@ -17,7 +17,7 @@
  *   call:ice     → secretbox(candidate, callKey)          (symmetric)
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from './sodium';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { sealEnvelope, openEnvelope, type SealedWire } from './sealedSender';
 

@@ -50,6 +50,14 @@ interface AegisTorNative {
   // on a contact's relay). Resolves a JSON string `{"status":<int>}`; the file
   // exists only on 200.
   httpDownload(url: string, destPath: string, headersJson: string): Promise<string>;
+  // Bridges (net/torBridges.ts, net/torConnection.ts). Optional: binaries built
+  // before bridges lack them, and JS must still run there (OTA) — direct only.
+  /** Start pluggable transports; resolves { pt: localSocksPort }. */
+  startTransports?(ptsJson: string): Promise<Record<string, number>>;
+  /** Bridge torrc lines: persisted for the next start, applied live if running. */
+  setTorConfig?(linesJson: string): Promise<boolean>;
+  /** Android: tor's own bootstrap phase (iOS emits AegisTorBootstrapProgress instead). */
+  getBootstrap?(): Promise<{ progress: number; summary: string }>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -86,8 +94,21 @@ const BOOTSTRAP_TIMEOUT_MS = 90_000;
  * No-op-safe: throws a typed error when the native module is absent so callers
  * can fall back.
  */
+/**
+ * Runs once, before the first native start (net/torConnection.ts registers it):
+ * applies the chosen bridge transport so tor's very first bootstrap already
+ * uses it, whichever caller happens to start tor first.
+ */
+let beforeStartHook: (() => Promise<void>) | null = null;
+let beforeStartOnce: Promise<void> | null = null;
+export function registerTorBeforeStart(hook: () => Promise<void>): void {
+  beforeStartHook = hook;
+}
+
 export async function startTor(): Promise<TorStatus> {
   if (!Native) throw new Error('[tor] native module unavailable (Expo Go or non-prebuilt build)');
+  if (beforeStartHook && !beforeStartOnce) beforeStartOnce = beforeStartHook().catch(() => undefined);
+  if (beforeStartOnce) await beforeStartOnce;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('[tor] bootstrap timed out')), BOOTSTRAP_TIMEOUT_MS);
@@ -151,6 +172,31 @@ export function onTorBootstrapProgress(cb: (p: TorBootstrapProgress) => void): (
   if (!emitter) return () => {};
   const sub: EmitterSubscription = emitter.addListener('AegisTorBootstrapProgress', cb);
   return () => sub.remove();
+}
+
+// ─── Bridges: native pluggable transports (net/torConnection.ts) ─────────────
+
+/** True when this binary ships the bridge methods (IPtProxy + setTorConfig). */
+export function bridgesSupported(): boolean {
+  return !!Native?.startTransports && !!Native?.setTorConfig;
+}
+
+/** Start pluggable transports; { pt: port }. Throws when unsupported or a transport fails. */
+export async function startTransports(pts: readonly string[]): Promise<Record<string, number>> {
+  if (!Native?.startTransports) throw new Error('[tor] bridges unsupported by this build');
+  return Native.startTransports(JSON.stringify(pts));
+}
+
+/** Apply bridge torrc lines (validated again natively). Throws when unsupported/rejected. */
+export async function setTorConfig(lines: readonly string[]): Promise<void> {
+  if (!Native?.setTorConfig) throw new Error('[tor] bridges unsupported by this build');
+  await Native.setTorConfig(JSON.stringify(lines));
+}
+
+/** Android bootstrap phase by polling; null where the platform reports it by events (iOS). */
+export async function getBootstrap(): Promise<TorBootstrapProgress | null> {
+  if (!Native?.getBootstrap) return null;
+  try { return await Native.getBootstrap(); } catch { return null; }
 }
 
 // ─── Slice 2b.2: ntfy topic subscription over Tor ─────────────────────────────
@@ -323,22 +369,30 @@ interface SioForward { id: string; event: string; args: string }
 const MAILBOX_FORWARD_EVENTS = ['mailbox:challenge', 'auth:ok', 'error_msg', 'envelope:mb'];
 
 /**
- * Federation F5: the aegisId (identity) socket to a SELF-HOSTED home relay also
- * rides this bridge — a custom home is .onion-only. These are every server →
+ * The aegisId (identity) socket rides this bridge too — to the official relay's
+ * onion (Tor always-on) or to a self-hosted home (federation F5). These are every server →
  * client event the identity socket handles (socket/client.ts, calls.ts,
  * groupCalls.ts); the native side forwards only what is listed, so a new relay
  * event must be added here too or a Tor-homed client never sees it.
  */
 export const IDENTITY_FORWARD_EVENTS = [
   'auth:challenge', 'auth:ok', 'error_msg',
-  'envelope', 'envelope:v2', 'msg:delivered', 'msg:read', 'typing',
+  'envelope', 'envelope:v2', 'msg:delivered',
   'group:rekey_dist', 'push:register',
   'call:invite:v2', 'call:answer:v2', 'call:ice:v2', 'call:hangup:v2',
   'group_call:accept', 'group_call:decline', 'group_call:offer', 'group_call:answer',
   'group_call:ice', 'group_call:channel', 'group_call:hangup',
+  // Public channels (socket/publicChannels.ts `subscribe`). Missing until
+  // 2026-09-23: over the bridge, live channel posts, bans, deletes and
+  // tombstones never arrived. Guarded by net/__tests__/identityForwardEvents.test.ts.
+  'pubchannel:msg', 'pubchannel:ban', 'pubchannel:delete', 'pubchannel:tombstone',
 ];
 
 let _sioCounter = 0;
+
+/** Backoff for a bridge that could not be handed to native yet (Tor not up). */
+const SIO_RETRY_BASE_MS = 2_000;
+const SIO_RETRY_MAX_MS = 60_000;
 
 /**
  * A minimal socket.io-client-shaped transport backed by the native
@@ -359,14 +413,30 @@ export class TorSioSocket {
   private readonly url: string;
   private readonly authStr: Record<string, string>;
   private readonly forwardEvents: readonly string[];
+  /**
+   * Circuit-isolation lane. The native side reads it from the bridge id prefix
+   * (`ctl-` / `mbx-`) and dials a separate Tor circuit for each: a separate
+   * SocksPort on Android, separate SOCKS credentials on iOS
+   * (withTorEmbedded*.js). The control lane (aegisId identity socket) and the
+   * mailbox lane must never share a circuit, or the relay could relink the
+   * mailbox id to the aegisId. Kept in the id rather than as a new native
+   * argument, so JS and binaries of different versions stay compatible.
+   */
+  private readonly lane: 'control' | 'mailbox';
   /** Handshake auth as given (socket.io exposes the same; client.ts reads `auth.aegisId`). */
   public readonly auth: Record<string, unknown>;
   /** True between the native 'connect' and 'disconnect'/'connect_error' events. */
   public connected = false;
 
-  constructor(url: string, auth: Record<string, unknown>, forwardEvents: readonly string[] = MAILBOX_FORWARD_EVENTS) {
+  constructor(
+    url: string,
+    auth: Record<string, unknown>,
+    forwardEvents: readonly string[] = MAILBOX_FORWARD_EVENTS,
+    lane: 'control' | 'mailbox' = 'mailbox',
+  ) {
     if (!Native || !emitter) throw new Error('[tor] native module unavailable');
     this.url = url;
+    this.lane = lane;
     this.auth = auth;
     this.forwardEvents = forwardEvents;
     // socket.io-client-java handshake auth is Map<String,String>; non-string
@@ -383,13 +453,36 @@ export class TorSioSocket {
   /** Open (or re-open after disconnect()) the native socket under a fresh bridge id. */
   private open(): void {
     if (!Native || !emitter || this.unsub) return;
-    this.id = `mbx-${++_sioCounter}`;
+    this.id = `${this.lane === 'control' ? 'ctl' : 'mbx'}-${++_sioCounter}`;
+    const id = this.id;
     const sub = emitter.addListener('AegisTorSio', (ev: SioForward) => {
       if (ev?.id === this.id) this.dispatch(ev.event, ev.args);
     });
     this.unsub = () => sub.remove();
-    void Native.sioConnect(this.id, this.url, JSON.stringify(this.authStr), JSON.stringify(this.forwardEvents))
-      .catch((e: Error) => { if (__DEV__) logger.warn('[tor] sioConnect failed:', e.message); });
+    void this.dial(id, 0);
+  }
+
+  /**
+   * Wait for Tor, then hand the socket to the native bridge. Once native
+   * `sioConnect` succeeds, socket.io's own reconnection takes over. Before that,
+   * a cold start (Tor still bootstrapping → E_TOR_NOT_READY, or the bootstrap
+   * timeout) used to leave the socket dead for the whole session. That was
+   * tolerable for the mailbox, which has its own backoff, but not for the
+   * identity socket every user now depends on (Tor always-on). So we retry with
+   * backoff until it succeeds or `disconnect()` retires this bridge id.
+   */
+  private async dial(id: string, attempt: number): Promise<void> {
+    if (!Native) return;
+    try { await startTor(); } catch { /* bootstrap still running natively — sioConnect decides */ }
+    if (this.id !== id || !this.unsub) return; // disconnected while waiting
+    try {
+      await Native.sioConnect(id, this.url, JSON.stringify(this.authStr), JSON.stringify(this.forwardEvents));
+    } catch (e) {
+      if (__DEV__) logger.warn('[tor] sioConnect failed:', (e as Error).message);
+      if (this.id !== id || !this.unsub) return;
+      const delay = Math.min(SIO_RETRY_MAX_MS, SIO_RETRY_BASE_MS * 2 ** attempt);
+      setTimeout(() => { void this.dial(id, attempt + 1); }, delay);
+    }
   }
 
   private dispatch(event: string, argsJson: string): void {

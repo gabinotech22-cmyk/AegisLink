@@ -1,24 +1,21 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import tweetnaclUtil from 'tweetnacl-util';
 const { decodeBase64 } = tweetnaclUtil;
 import { z } from 'zod';
 import { identityRepo, prekeysRepo, type SignedPreKeyRow } from '../db/client.js';
 import { verifyDetached } from '../crypto/ed25519.js';
+import { relayLimiter, bodyField } from '../http/relayLimiter.js';
 
 const router = Router();
 
 const AEGIS_ID_RE = /^[0-9A-HJKMNP-TV-Z]{3}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
 
 // ── Rate limiter (20 requests per 10 minutes per IP) ──────────────────────────
-const uploadLimiter = rateLimit({
+const uploadLimiter = relayLimiter({
   windowMs: 10 * 60 * 1000,
   max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 10 * 60 * 1000 });
-  },
+  onion: { kind: 'identity', key: bodyField('aegisId') },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 10 * 60 * 1000 },
 });
 
 // ── Schemas ───────────────────────────────────────────────────────────────────

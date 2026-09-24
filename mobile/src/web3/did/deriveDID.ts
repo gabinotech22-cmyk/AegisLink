@@ -39,7 +39,11 @@ export function deriveDIDFromPublicKey(publicKey: Uint8Array): string {
 
 /**
  * Extracts the raw 32-byte Ed25519 public key from a did:key DID.
- * Throws if the DID is not a valid did:key with an Ed25519 key.
+ * Throws if the DID is not a CANONICAL did:key with an Ed25519 key: a
+ * non-canonical spelling of the same key (e.g. an extra leading '1', i.e. a zero
+ * byte) hashes differently and would read as active on the relay's resolver
+ * even after the canonical DID is deactivated. Mirrors
+ * server/src/crypto/didKey.ts `ed25519FromDidKey`.
  */
 export function publicKeyFromDID(did: string): Uint8Array {
   if (!did.startsWith('did:key:z')) {
@@ -50,5 +54,12 @@ export function publicKeyFromDID(did: string): Uint8Array {
   if (prefixed[0] !== 0xed || prefixed[1] !== 0x01) {
     throw new Error('DID key is not an Ed25519 key (expected multicodec prefix 0xed01)');
   }
-  return prefixed.slice(2);
+  if (prefixed.length !== ED25519_MULTICODEC_PREFIX.length + 32) {
+    throw new Error(`Ed25519 did:key must carry 32 key bytes, got ${prefixed.length - 2}`);
+  }
+  const publicKey = prefixed.slice(2);
+  if (deriveDIDFromPublicKey(publicKey) !== did) {
+    throw new Error('DID is not the canonical did:key encoding of its key');
+  }
+  return publicKey;
 }

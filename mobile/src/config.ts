@@ -55,13 +55,19 @@ export const TURN_SERVER_URL: string =
   (__DEV__ ? '' : RELAY_IP ? `turn:${RELAY_IP}:3478` : '');
 
 /**
- * ONION_URL — relay Tor hidden service address.
- * Set EXPO_PUBLIC_ONION_URL in .env.production or EAS secrets.
- * Only used when routeViaTor=true in user preferences.
- * null means onion URL not configured (still benefits from Orbot VPN mode).
+ * ONION_URL — the official relay's Tor onion service (docs/RELAY-ONION-SERVICE.md).
+ * Set EXPO_PUBLIC_ONION_URL in eas.json / EAS env (inline for `eas update`).
+ *
+ * Tor always-on: when set, EVERY connection to the official relay — the aegisId
+ * control socket, all HTTP (PoW, registration, prekeys, TURN credentials, blobs,
+ * push bindings, proxies) and the mailbox — rides the embedded Tor to this onion.
+ * There is no clearnet fallback and no user toggle. null only in dev builds and
+ * in a release pointed at a loopback dev relay (guarded below).
  */
 export const ONION_URL: string | null =
-  (process.env.EXPO_PUBLIC_ONION_URL as string | undefined) ?? null;
+  // An empty value is "not configured", never a relay URL (a blank EAS/OTA env
+  // var must trip the production guard below, not route to '').
+  ((process.env.EXPO_PUBLIC_ONION_URL as string | undefined) ?? '').trim() || null;
 
 /**
  * FEDERATION — "choose your relay" (docs/FEDERATION-DESIGN.md). ON by default
@@ -129,7 +135,9 @@ export const MAILBOX_IOS_WAKE: boolean =
 /**
  * DISTRIBUTION — which channel this binary was built for.
  *
- * 'play' (default) is the Google Play build and keeps FCM for push wake-ups.
+ * 'play' (default) is the store build: on iOS it registers a raw APNs token
+ * (the relay sends wake-ups straight to APNs; no Expo push token since
+ * 2026-09-24). No Firebase config ships, so Android never gets an FCM token.
  * 'foss' is the build for F-Droid, our own F-Droid repo, Obtainium and plain
  * sideloads: it must reach a device with NO Google Play Services on it, so it
  * cannot acquire an FCM/Expo push token at all.
@@ -176,6 +184,12 @@ if (!__DEV__) {
     if (!/^https:\/\//i.test(url) && !isLoopbackUrl(url)) {
       throw new Error(`[config] insecure ${name} in a production build: ${url}`);
     }
+  }
+  // Tor always-on: a production build without the relay onion would talk to the
+  // relay over clearnet — IP next to aegisId. Refuse to run instead. (A release
+  // pointed at a loopback dev relay for E2E is exempt, as above.)
+  if (ONION_URL === null && !isLoopbackUrl(SERVER_URL)) {
+    throw new Error('[config] production build without EXPO_PUBLIC_ONION_URL — the relay must be reached over Tor');
   }
 }
 

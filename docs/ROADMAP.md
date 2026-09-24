@@ -77,10 +77,16 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 | Server tests | `__tests__/workSenderKeyTrust.relay.test.ts`, `workspace.auth.test.ts`, partes de `ola8.relay.test.ts` |
 | Mobile | iconos `assets/icon-work.*`, `android-icon-assets/work/**`, strings i18n `work.*` |
 | Pagos (muerto) | `mobile/src/_unused/screens/Subscription.tsx`, `mobile/src/_unused/web3/payments/LightningPayment.ts` |
+| Pagos (restos que se escaparon) | `server/src/routes/web3.ts` (`/subscription/invoice`, `/subscription/activate`), DDL `lightning_invoices`/`subscriptions`, `desktop/src/renderer/screens/Subscription.tsx` (accesible desde Perfil) — eliminados después, ver abajo |
 
 **Hecho (PR `chore/extract-work`):**
 - [x] **Preservado en historia git** (`976c09f`); sin branch de archivo.
 - [x] **Prototipos de pagos** `mobile/src/_unused/**` borrados; `tsconfig` ya no los excluye.
+- [x] **Restos de pagos en relay y desktop** (se escaparon de este hito): endpoints
+      `/web3/subscription/*`, su DDL y la pantalla `Subscription.tsx` del desktop, que ofrecía
+      una factura simulada imposible de pagar. Eliminados en #525 (`AUDIT-2026-09-24-WEB3-DID.md`
+      P-1). Las tablas huérfanas `lightning_invoices`/`subscriptions` siguen la misma regla que las
+      de Work: el `DROP` es operador-local.
 - [x] **Server**: router `/work`, `repos/work`, tipos Work, schemas Work, rate-limit de `channel:msg`,
       rama Work del `typing`, presencia de org y el cron `pruneExpiredWorkMessages` eliminados.
       Los handlers `group:rekey`/`group:rekey_drain_ack` de grupos normales, que convivían en
@@ -93,29 +99,65 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 - [x] **Doc↔código**: `backlog_fases3_4.md` (P1/G2), `PROJECT-STRUCTURE.md`, informe de auditoría
       (AL-02/07/09 cerrados por extracción).
 
-## Hito 2 — Privacidad por defecto: sealed-sender activo 🔴 (diferenciador de mercado)
+## Hito 2 — Privacidad por defecto: sealed-sender activo 🟡 (diferenciador de mercado)
 
-Hallazgo de la revisión 2026-07-05: **sealed-sender está implementado y testeado pero `MAILBOX_MODE`
-está OFF por defecto** (`mobile/src/config.ts:97`, opt-in). Los builds enviados usan el `envelope`
-legacy autenticado que estampa `from: me` y ve `to` (`handler.ts:532`) → el relay aprende el par
-emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en TODO") **no activa**.
+> Nota de vigencia (2026-09-23): el hallazgo original de 2026-07-05 ("`MAILBOX_MODE` OFF por
+> defecto") ya no es cierto. Estado canónico en `docs/SEALED-SENDER-ARCHITECTURE.md` §5–§6.
 
-- [ ] Verificar en 2 dispositivos reales el transporte mailbox (latencia, drenaje multi-epoch, onion).
-- [ ] Plan de cutover a **mailbox por defecto** (o etiquetar explícitamente el modo actual como
-      experimental en README y no venderlo como cero-metadatos hasta el cutover).
-- [ ] Sellar o documentar como limitación los indicadores en tiempo real que hoy exponen el par al
-      relay: `typing` (`messaging.ts:28`) y read-receipts `msg:read` (`messaging.ts:52`).
+- [x] **Buzón por defecto:** `MAILBOX_MODE` es opt-out desde F5b (#491) y fail-closed sin onion
+      (`mobile/src/config.ts`); producción lo lleva ON desde 1.0.x.
+- [x] **Indicadores en tiempo real sellados siempre (2026-09-24):** `typing` y read receipts viajan
+      solo como mensajes E2EE sellados en todos los transportes; los eventos en claro del relay
+      (`messaging.ts`) y sus listeners en mobile/desktop, eliminados. `AUDIT-2026-09-24-WEB3-DID.md`
+      R-1; `docs/SEALED-SENDER-ARCHITECTURE.md` §6.1.
 - [x] **v1 solo como último recurso + llamadas selladas en el oficial (2026-09-20):** con raíz de
       buzón conocida el cliente emite siempre v2 (primer contacto incluido); llamadas a contactos
       que anuncian `sealed-calls` por buzón. Gateado por `caps` en el perfil para convivir con
       1.0.6. `docs/PROTOCOL.md` §7.3. Pendiente: retirar v1 en el relay tras `APP_MIN_VERSION`.
+- [x] **Tor siempre activo en mobile (2026-09-23):**
+      - socket de control y todo el HTTP al relay por la onion, en un circuito separado del buzón;
+      - sin interruptor ni respaldo por clearnet;
+      - imágenes remotas por Tor y avatares-URL rechazados;
+      - rate limits del relay por identidad sobre Tor.
+
+      SEALED-SENDER §6.2; PROTOCOL §9.
+- [x] **Bridges Tor (Snowflake/obfs4/meek + propios)** en mobile y desktop (2026-09-24):
+      - modo automático que escala solo cuando el arranque se atasca;
+      - bridges integrados de Tor Browser;
+      - líneas propias validadas;
+      - pantalla Privacidad → Red → Conexión a Tor.
+
+      Desktop verificado con Tor real (Snowflake 100% en 51 s, obfs4 en 123 s). PROTOCOL §9.
+- [ ] Verificar bridges en Android + iOS con build nativo (IPtProxy nuevo en los plugins).
+- [ ] Verificar en 2 dispositivos reales (Android + iOS) el control-plane por Tor con circuitos
+      aislados (build nativo nuevo: los plugins `withTorEmbedded*.js` cambiaron).
 
 ## Hito 3 — Terminar el endurecimiento cripto 🟠
 
 - [ ] **H3 — unificar `@noble/hashes`** mobile v1 ↔ desktop v2 (hoy mitigado por KAT cross-platform;
       falta unificar mayor + verificación Metro on-device).
-- [ ] **F-1 — núcleo cripto nativo**: portar hot-path (X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC)
-      a binding libsodium, conservando la capa TS. Cierra el gap constant-time a través del JIT.
+- [ ] **F-1 — núcleo cripto nativo** 🟡: portar hot-path (X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC)
+      a libsodium, conservando la capa TS. Cierra el gap constant-time a través del JIT. Sustitución de
+      implementación, **no** cambio de protocolo (bytes idénticos, sin forzar actualización; sí exige
+      build nativo nuevo, no OTA).
+  - [x] **Spike (2026-09-24)**: libsodium 1.0.21 compilado desde fuente (firma minisign verificada)
+        da bytes idénticos a TweetNaCl/@noble. `react-native-libsodium` se descarta (trae binarios
+        precompilados: rompe builds reproducibles y F-Droid) → módulo JSI propio. Desktop:
+        `sodium-native` en el proceso main, renderer vía `ipcRenderer.sendSync` (0,20 ms/X25519).
+        Server: `sodium-native` no carga en Alpine (solo glibc) → imagen Debian slim.
+  - [x] **Costura única** (PR A): todo el código de producto obtiene NaCl/hash/HMAC/HKDF solo de
+        `crypto/sodium` (mobile, desktop renderer y main, server), con guarda
+        `crypto-imports.test.ts` y fixture dorado pre-libsodium `f1-golden.json` (`f1-golden.test.ts`
+        en las 3 plataformas).
+  - [ ] **Cambio de backend** (PR B): módulo `aegis-sodium` (mobile), `sodium-native` en main
+        (desktop) y en el relay, test diferencial, Dockerfile Debian slim.
+- [ ] **F-1b — claves en memoria nativa (handles opacos)**: tras F-1, las claves privadas viven solo
+      en memoria nativa (módulo en mobile, proceso main en desktop) y JS recibe un handle, como
+      libsignal. Un XSS en el renderer ya no podría leer claves. F-1 cierra el timing del JIT pero no
+      saca las claves del heap de JS.
+- [ ] **Argon2id nativo + formato de backup nuevo**: `crypto_pwhash` (mucho más rápido: desbloqueo por
+      PIN y restauración de backup) con salt de 16 B; el formato actual (salt 32 B) se sigue leyendo
+      con @noble. ML-KEM-768 también sigue en @noble hasta que libsodium lo exponga estable.
 - [ ] Cerrar los "partial coverage" de la auditoría: zeroización en intermedios X3DH/PQXDH,
       `assertNonZero` ML-KEM, barrido constant-time de comparaciones restantes.
 

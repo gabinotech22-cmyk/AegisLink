@@ -105,7 +105,7 @@ jest.mock('../../store/identity', () => ({
 }));
 jest.mock('../../store/preferences', () => ({
   __esModule: true,
-  usePreferences: { getState: () => ({ routeViaTor: false }) },
+  usePreferences: { getState: () => ({}) },
 }));
 jest.mock('../../runtime', () => ({ __esModule: true, IS_EXPO_GO: true }));
 

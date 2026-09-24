@@ -23,8 +23,8 @@ export interface Preferences {
    */
   requireGroupApproval: boolean;
 
-  // Network
-  routeViaTor: boolean;
+  // Network — Tor is not a preference: always on (config.ts, socket/client.ts).
+  // The old `routeViaTor` key in stored prefs is ignored.
 
   /**
    * Hide your real IP address from the peer during 1:1 calls by forcing all
@@ -87,7 +87,6 @@ const DEFAULTS: Preferences = {
   typingIndicator: false,
   blockScreenshots: true,
   requireGroupApproval: false,
-  routeViaTor: false,
   hideCallIp: true,
   callWakeService: true,
   notifMaster: true,
@@ -132,7 +131,6 @@ function snapshot(get: () => PrefsState): Preferences {
     typingIndicator: s.typingIndicator,
     blockScreenshots: s.blockScreenshots,
     requireGroupApproval: s.requireGroupApproval,
-    routeViaTor: s.routeViaTor,
     hideCallIp: s.hideCallIp,
     callWakeService: s.callWakeService,
     notifMaster: s.notifMaster,

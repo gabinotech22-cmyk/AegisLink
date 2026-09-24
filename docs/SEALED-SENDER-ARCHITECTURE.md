@@ -4,7 +4,9 @@
 > está **habilitado por defecto**; ocultar `to` (Fase 4, mailbox IDs + Tor
 > embebido #171/#172) está implementado y, desde la federación F5b (#491), el
 > modo buzón va **activo por defecto** en mobile y desktop (`MAILBOX_MODE`
-> opt-out, fail-closed sin onion). Ver el detalle de fases en §5.
+> opt-out, fail-closed sin onion). Ver el detalle de fases en §5. Desde
+> 2026-09-23 el socket de control-plane y todo el HTTP del móvil también van por
+> Tor, en un circuito separado del buzón (Tor siempre activo, §6.2).
 > Origen: auditoría profunda 2026-06, hallazgo A-6 (el relay ve `from→to` en
 > signaling de llamadas). Al investigarlo se confirmó que el leak está **a la
 > par de los envelopes de chat** (handler.ts:572), así que el problema no es de
@@ -312,31 +314,95 @@ con ese mismo límite; cerrarlo del todo requiere cover traffic (Fase 4) u onion
 routing (Session, fuera de alcance). Es una mejora enorme sobre el estado actual
 (arista explícita en cada mensaje) sin sacrificar la marca.
 
-### 6.1 Señales efímeras en el socket de control-plane (receipts / typing)
+### 6.1 Señales efímeras (receipts / typing): siempre selladas
 
-Los acuses de lectura (`msg:read`) y el indicador de "escribiendo…" (`typing`)
-viajan por el socket aegisId (control-plane), NO por el transporte de mensajes.
-Con Fase 4 (mailbox) **off** esto es inocuo: el propio transporte v2 enruta por
-el aegisId `to`, así que estos eventos no revelan nada que un mensaje normal no
-revele ya (el "límite temporal" de §6). Con Fase 4 **on**, en cambio, `envelope:mb`
-oculta la arista me↔to, pero un `msg:read`/`typing` en claro con el aegisId del
-destinatario la **re-expondría** — relinkando justo las dos identidades que el
-modo mailbox separa (ni Tor lo evita: anonimiza la IP, no el payload).
+Los acuses de lectura y el indicador de "escribiendo…" viajan **siempre sellados**
+dentro del canal E2EE (`{type:'read_receipt'}` / `{type:'typing'}` vía `sendMessage`,
+con throttle `socket/typingThrottle.ts` para el typing), en **todos** los transportes:
+mailbox, v2 por aegisId y relay ajeno (federación F3). El relay solo ve un sobre
+opaco con `wakeHint: 'silent'` (nunca despierta con un push).
 
-Por eso, **bajo `MAILBOX_ENABLED`**:
-- El **read receipt** se envía **sellado** por el canal E2EE (`{type:'read_receipt'}`
-  vía `sendMessage`), igual que delete-for-everyone — el relay solo ve un blob
-  opaco. Fuera de mailbox mode se mantiene el evento plaintext ligero (no expone
-  más que el propio mensaje v2).
-- El **typing** viaja también **sellado** (`{type:'typing'}`, con throttle
-  `socket/typingThrottle.ts`) en mailbox mode y hacia contactos de otro relay
-  (federación F3, #487); llega con la latencia del buzón/Tor, aceptable para una
-  señal best-effort. Fuera de mailbox mode, sin cambios. (Antes se suprimía.)
+Los eventos en claro `typing` / `msg:read` del socket aegisId **ya no existen** en
+ninguna dirección (auditoría 2026-09-24 R-1; mobile, desktop y relay). Antes se
+mantenían fuera de mailbox mode con el argumento de que no exponían más que el
+propio mensaje v2, lo cual era cierto para la privacidad. Pero el receptor confiaba
+en un `from` estampado por el relay, que un relay malicioso podía falsificar para
+marcar mensajes como leídos o simular que alguien escribe. Es la misma razón por la
+que se retiró `msg:delete` en claro (regla de oro de seguridad #3). En producción,
+mailbox mode está activo por defecto desde 1.0.x, así que el camino sellado ya era
+el habitual. Pruebas: `simulation.test.ts` (el relay no reenvía ninguno de los
+dos), `client.federationControlPlane.test.ts` (contacto local con mailbox off →
+sobre sellado, sin listeners en claro), `sealedReceiptsTyping.test.ts` (desktop).
 
-Regla operativa: cualquier señal nueva dirigida a un aegisId por el control-plane
-debe pasar por este mismo filtro antes de flipear `MAILBOX_ENABLED` a ON, o
-reintroduce la arista. Prueba: `client.deleteForEveryone.test.ts` (caso
+Regla operativa: cualquier señal nueva entre dos contactos viaja sellada por el
+canal E2EE, nunca como evento del control-plane dirigido a un aegisId, o
+reintroduce la arista (y un `from` falsificable por el relay). Prueba: `client.deleteForEveryone.test.ts` (caso
 `read_receipt`).
+
+### 6.2 Control-plane por Tor, en circuito propio (Tor siempre activo) — ✅ HECHO (2026-09-23)
+
+**Hueco que cierra.** Hasta esta fecha, en el móvil solo el socket de buzón iba por
+Tor. El socket aegisId (control-plane) y todo el HTTP al relay (PoW, registro,
+prekeys, TURN, blobs, push) iban por clearnet, salvo que el usuario activara un
+interruptor que venía apagado y además dependía de Orbot. Resultado: el relay veía
+**la IP junto al aegisId**, y con esa IP podía volver a enlazar el socket de buzón
+con su dueño. El desktop ya iba todo por Tor (`desktop/src/main/tor/torProcess.ts`).
+
+**Qué hay ahora (mobile; desktop ya estaba):**
+
+1. **Todo por la onion.** El relay oficial se alcanza siempre en su onion
+   (`ONION_URL`) con el mismo puente nativo que usa un relay propio (F5):
+   - `homeRelayBaseUrl()` / `officialRelayBaseUrl()`, `socket/client.ts`,
+     `net/relayHttp.ts` (`mustUseTor`) y `net/torMedia.ts`.
+   - Sin interruptor y sin respaldo por clearnet: una build de producción sin
+     `ONION_URL` no arranca (`config.ts`), y sin Tor nativo falla cerrado.
+   - Solo las builds de desarrollo (Expo Go, jest) y un relay de desarrollo en
+     loopback quedan fuera.
+2. **Circuitos separados** para el carril de control y el de buzón. Sin esto, el
+   operador podría unirlos en el onion service (`HiddenServiceExportCircuitID`
+   le pasa el circuito al backend).
+   - Android abre dos `SocksPort` (`torrc`); iOS usa credenciales SOCKS
+     distintas por carril (`IsolateSOCKSAuth`).
+   - El carril va en el prefijo del id del puente (`ctl-`/`mbx-`) y en la ruta
+     HTTP (`/mailbox/*`), así que no cambia ninguna firma nativa y la OTA sigue
+     siendo compatible.
+   - Fuente: `plugins/withTorEmbedded*.js`.
+3. **El puente espera a Tor y reintenta.** Antes, un socket creado antes del
+   bootstrap se quedaba muerto toda la sesión (`TorSioSocket.dial`).
+4. **Eventos reenviados completos.** Los eventos en vivo de canales públicos
+   (`pubchannel:*`) faltaban en `IDENTITY_FORWARD_EVENTS`. Un test guardián
+   compara ahora lo que se escucha con lo que se reenvía.
+5. **Fugas de IP fuera del relay, cerradas:**
+   - miniaturas de GIF, imágenes de preview y GIFs a enviar se descargan por
+     Tor (`components/TorImage.tsx`);
+   - el avatar de un contacto solo puede ser `data:image` o emoji/texto corto,
+     así que ya no sirve como píxel de rastreo (`isAcceptableAvatar`, mobile +
+     desktop).
+6. **Rate limits del relay por cliente sobre Tor.** Todo lo que entra por la
+   onion comparte la IP del contenedor Tor (`server/src/http/relayLimiter.ts`):
+   - rutas firmadas: límite por identidad, contando solo peticiones aceptadas;
+   - rutas anónimas: se apoyan en la PoW, con un tope anti-inundación
+     compartido (`AEGIS_ONION_FLOOD_MULT`, `AEGIS_ONION_REG_FLOOD_MAX`).
+   
+   Arregla también a los relays propios, que solo funcionan por onion.
+
+**Lo que sigue abierto:**
+- La correlación temporal entre los dos sockets (§6).
+- Las redes que bloquean Tor: no hay respaldo por clearnet a propósito.
+  - **Resuelto con bridges (2026-09-24, PROTOCOL §9):** Snowflake/obfs4/meek
+    en modo automático, o bridges propios.
+  - Queda una red que bloquee *todos* los bridges.
+- El medio de las llamadas en móvil (UDP; el servidor TURN ve la IP).
+- `expo-updates` y el token de push de Expo en las versiones de tienda, que
+  contactan Expo directamente.
+
+Todo ello está listado en `README.md` → *Known limitations* y en PROTOCOL §8.3.
+
+Pruebas:
+- mobile: `net/__tests__/torBridge.test.ts`, `torMedia.test.ts`, `relayHttp.test.ts`,
+  `socket/__tests__/client.homeRelay.test.ts`, `__tests__/torPlugin.regression.test.ts`
+  y `utils/__tests__/photoVisibility.test.ts` (también en desktop);
+- server: `src/__tests__/relayLimiter.test.ts`.
 
 ## 7. Referencias
 - Signal sealed sender: <https://signal.org/blog/sealed-sender/>

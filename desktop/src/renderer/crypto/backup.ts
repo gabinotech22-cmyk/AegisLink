@@ -3,7 +3,7 @@
  * (v3 Argon2id written, v1/v2 PBKDF2 still readable), so a backup made on
  * either platform restores on the other.
  */
-import nacl from 'tweetnacl';
+import { nacl } from './sodium';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
 import { pbkdf2Async } from '@noble/hashes/pbkdf2.js';
 import { sha256 } from '@noble/hashes/sha2.js';

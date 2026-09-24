@@ -413,14 +413,22 @@ function attachLocalNotificationHandlers(): void {
   ]);
 }
 
-// Last Expo push token acquired this session, for consumers that need it after
-// the fact (Slice 2b.4: the mailbox socket registers it as an iOS wake binding
-// once authenticated — see socket/mailboxSocket.ts). Never persisted here.
-let lastExpoToken: string | null = null;
+// Last raw APNs device token acquired this session (iOS), for consumers that
+// need it after the fact: the aegisId socket registers it (apns:register) and
+// the mailbox socket binds it as the app-killed wake (Slice 2b.4). Never
+// persisted here.
+//
+// No Expo push token any more (2026-09-24): asking for one contacted exp.host
+// outside Tor, and every wake then went through Expo's servers, so Expo learned
+// the device IP and the rhythm of incoming messages. The relay talks to APNs
+// directly instead (push/apns-alert.ts). Android store builds have no Firebase
+// config, so they never had a remote token: their wake-ups are ntfy over Tor
+// plus the call-wake foreground service.
+let lastApnsToken: string | null = null;
 
-/** The Expo push token obtained by registerForPush this session, or null. */
-export function getLastExpoToken(): string | null {
-  return lastExpoToken;
+/** The raw APNs device token obtained by registerForPush this session (iOS), or null. */
+export function getLastApnsToken(): string | null {
+  return lastApnsToken;
 }
 
 /**
@@ -514,19 +522,20 @@ export async function registerForPush(identity: Identity): Promise<{ token: stri
       return { token: null };
     }
 
-    const tokenResponse = await Notifications.getExpoPushTokenAsync();
-    const expoToken = tokenResponse.data;
-    lastExpoToken = expoToken;
-
-    // The actual token→aegisId association happens over the AUTHENTICATED
-    // Socket.IO path (socket.on('push:register') after the Ed25519
-    // challenge-response). The old unauthenticated POST /push/register was
-    // removed server-side (H-4 security fix); calling it here only 404'd and
-    // forced this function to report failure. We just acquire the token; the
-    // socket layer (socket/client.ts) emits push:register once authenticated.
+    // iOS: the raw APNs device token (a request to Apple only, the push
+    // provider itself). The token→aegisId association happens over the
+    // AUTHENTICATED socket (apns:register after the Ed25519 challenge-response,
+    // socket/client.ts). Android: no remote token (see lastApnsToken above).
+    const { Platform } = require('react-native') as typeof import('react-native');
+    let apnsToken: string | null = null;
+    if (Platform.OS === 'ios') {
+      const dev = await Notifications.getDevicePushTokenAsync();
+      apnsToken = typeof dev?.data === 'string' && dev.data ? dev.data : null;
+    }
+    lastApnsToken = apnsToken;
     registered = true;
-    if (__DEV__) logger.debug('[push] registered for wake-ups, token:', expoToken);
-    return { token: expoToken };
+    if (__DEV__) logger.debug('[push] registered for wake-ups');
+    return { token: apnsToken };
   } catch (e) {
     // Token acquisition/registration failed (e.g. emulator without FCM). Local
     // notifications + tap routing already work via attachLocalNotificationHandlers().
@@ -548,7 +557,7 @@ export async function unregisterPush(aegisId: string): Promise<void> {
   registered = false;
   // Drop the cached token so a later mailbox auth (new profile / next login)
   // can never re-emit the previous session's wake binding.
-  lastExpoToken = null;
+  lastApnsToken = null;
 }
 
 let activeChatId: string | null = null;

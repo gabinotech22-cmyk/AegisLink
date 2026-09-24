@@ -19,6 +19,9 @@ import { create } from 'zustand';
 export type TorState = 'off' | 'starting' | 'on' | 'error';
 
 export interface TorStatus {
+  /** Bridges (main/tor/bridges.ts): how the user asked tor to connect, and the transport in use. */
+  mode?: string;
+  transport?: string;
   state: TorState;
   progress: number;
   summary: string;

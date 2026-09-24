@@ -14,7 +14,7 @@
  * that contact (unknown sender → reject; first contact bootstraps over v1 X3DH).
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from './sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { verifyDetached } from './ed25519';
 

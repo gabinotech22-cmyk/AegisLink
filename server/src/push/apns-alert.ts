@@ -119,6 +119,35 @@ function postAlert(deviceToken: string, body: string): Promise<ApnsResult> {
   });
 }
 
+/** Same zero-metadata shape as buildAlertPayload, for an incoming-call wake. */
+export function buildCallAlertPayload(): string {
+  return JSON.stringify({
+    aps: {
+      alert: { title: 'AegisLink', body: 'Llamada entrante · E2EE' },
+      sound: 'default',
+    },
+  });
+}
+
+/** A raw APNs device token as iOS hands it to the app: hex, 64+ chars. */
+export function isApnsDeviceToken(raw: unknown): raw is string {
+  return typeof raw === 'string' && /^[0-9a-fA-F]{64,200}$/.test(raw);
+}
+
+/**
+ * Direct-APNs wake to ONE token (the mailbox token binding, push/ntfy.ts):
+ * 'ok' when APNs accepted it, 'gone' when the token is dead (the caller drops
+ * the binding), 'failed' otherwise (the caller falls back to the ntfy topic).
+ * No Expo hop.
+ */
+export async function sendApnsWakeToToken(deviceToken: string, kind: 'message' | 'call'): Promise<'ok' | 'gone' | 'failed'> {
+  if (!isApnsConfigured() || !isApnsDeviceToken(deviceToken)) return 'failed';
+  const { status, reason } = await postAlert(deviceToken, kind === 'call' ? buildCallAlertPayload() : buildAlertPayload());
+  if (status === 200) return 'ok';
+  if (status === 410 || reason === 'BadDeviceToken' || reason === 'Unregistered') return 'gone';
+  return 'failed';
+}
+
 async function sendOne(deviceToken: string): Promise<boolean> {
   const { status, reason } = await postAlert(deviceToken, buildAlertPayload());
   if (status === 200) return true;

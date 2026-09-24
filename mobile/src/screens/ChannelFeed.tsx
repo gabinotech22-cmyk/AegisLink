@@ -249,8 +249,10 @@ export function ChannelFeedScreen({ channelId, onBack, onOpenInfo }: Props) {
     const FS = await import('expo-file-system/legacy');
     const localPath = `${FS.cacheDirectory ?? ''}chgif_${Crypto.randomUUID()}.gif`;
     try {
-      const dl = await FS.downloadAsync(url, localPath);
-      if (!dl.uri) throw new Error('gif_download_failed');
+      // Over Tor (Tor always-on): the GIF CDN never sees the device IP.
+      const { torDownloadTo } = await import('../net/torMedia');
+      if ((await torDownloadTo(url, localPath)) !== 200) throw new Error('gif_download_failed');
+      const dl = { uri: localPath };
       const info = await FS.getInfoAsync(dl.uri);
       if (((info as { size?: number }).size ?? 0) > 10 * 1024 * 1024) {
         await FS.deleteAsync(localPath, { idempotent: true }).catch(() => {});

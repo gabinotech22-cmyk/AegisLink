@@ -54,7 +54,18 @@ function withTorPod(config) {
     // always sets geoipFile/geoip6File; our first attempt omitted both the
     // subspec and the config properties, and Tor's thread never opened its
     // control port at all.
-    if (config.modResults.contents.includes("pod 'Tor/GeoIP'")) return config;
+    // IPtProxy (Tor Browser's lyrebird + snowflake, the pluggable transports
+    // Onion Browser uses) rides along: bridges, mobile/src/net/torBridges.ts.
+    // A Podfile from an older prebuild already has Tor but not IPtProxy.
+    if (config.modResults.contents.includes("pod 'Tor/GeoIP'")) {
+      if (!config.modResults.contents.includes("pod 'IPtProxy'")) {
+        config.modResults.contents = config.modResults.contents.replace(
+          "pod 'Tor/GeoIP'",
+          "pod 'Tor/GeoIP'\n  pod 'IPtProxy', '5.5.1'",
+        );
+      }
+      return config;
+    }
     // Insert right after the first `target '<name>' do` line (the app
     // target), matching the common community pattern for config-plugin
     // Podfile edits since @expo/config-plugins has no addPod() helper.
@@ -64,7 +75,7 @@ function withTorPod(config) {
     }
     config.modResults.contents = config.modResults.contents.replace(
       targetRe,
-      (match) => `${match}  # AegisLink: embedded Tor (injected by withTorEmbeddedIOS.js)\n  pod 'Tor/GeoIP'\n`,
+      (match) => `${match}  # AegisLink: embedded Tor (injected by withTorEmbeddedIOS.js)\n  pod 'Tor/GeoIP'\n  pod 'IPtProxy', '5.5.1'\n`,
     );
     return config;
   });
@@ -182,6 +193,18 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)stopWithCompletion:(void (^)(void))completion
     NS_SWIFT_NAME(stop(completion:));
 
+/**
+ * Bridge torrc lines ("Key value", built by torBridges.ts torrcFor and
+ * re-checked in Swift). Applied live when the control connection is
+ * authenticated, or right after it authenticates on a cold start, with Tor
+ * Browser's pattern: DisableNetwork 1, swap the bridge config, DisableNetwork 0.
+ * That restarts a bootstrap stuck on the old transport. The network is always
+ * re-enabled.
+ */
+- (void)applyConfLines:(NSArray<NSString *> *)lines
+            completion:(void (^)(BOOL success, NSError * _Nullable error))completion
+    NS_SWIFT_NAME(applyConf(lines:completion:));
+
 @end
 
 NS_ASSUME_NONNULL_END
@@ -210,6 +233,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 // re-attach attempt must NOT re-AUTHENTICATE (tor rejects a second one on the
 // same connection) and skips straight to waiting on the circuit observer.
 @property (nonatomic, assign) BOOL controllerAuthed;
+@property (nonatomic, copy, nullable) NSArray<NSString *> *pendingConfLines;
 // SETEVENTS observers are per control connection and must be registered once.
 @property (nonatomic, assign) BOOL observersAdded;
 @property (nonatomic, assign) NSInteger boundSocksPort;
@@ -535,6 +559,7 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
     // the next start() must take the re-attach fast path instead of sending
     // a second AUTHENTICATE (which tor rejects).
     strongSelf.controllerAuthed = YES;
+    [strongSelf sendPendingConfWithCompletion:nil];
     [strongSelf registerControlObservers];
     [strongSelf armCircuitWatchdogForGeneration:gen];
   }];
@@ -595,6 +620,47 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
   });
 }
 
+- (void)applyConfLines:(NSArray<NSString *> *)lines
+            completion:(void (^)(BOOL, NSError * _Nullable))completion
+{
+  self.pendingConfLines = lines;
+  if (!self.controllerAuthed || !self.torController) {
+    completion(YES, nil); // applied right after AUTHENTICATE (connectAndAuthenticate)
+    return;
+  }
+  [self sendPendingConfWithCompletion:completion];
+}
+
+- (void)sendPendingConfWithCompletion:(nullable void (^)(BOOL, NSError * _Nullable))completion
+{
+  NSArray<NSString *> *lines = self.pendingConfLines;
+  TORController *ctl = self.torController;
+  if (lines.count == 0 || !ctl) {
+    if (completion) completion(YES, nil);
+    return;
+  }
+  // Tor.framework's setConfs sends values verbatim: the caller quotes them. The
+  // lines were validated to contain no quote/backslash/control character, so
+  // wrapping them in quotes (0x22) is safe.
+  NSMutableArray<NSDictionary<NSString *, NSString *> *> *confs = [NSMutableArray array];
+  for (NSString *line in lines) {
+    NSRange sp = [line rangeOfString:@" "];
+    if (sp.location == NSNotFound) continue;
+    NSString *value = [NSString stringWithFormat:@"%C%@%C", (unichar)0x22, [line substringFromIndex:sp.location + 1], (unichar)0x22];
+    [confs addObject:@{@"key": [line substringToIndex:sp.location], @"value": value}];
+  }
+  [confs addObject:@{@"key": @"DisableNetwork", @"value": @"0"}];
+  [ctl setConfs:@[@{@"key": @"DisableNetwork", @"value": @"1"}] completion:^(BOOL pausedOk, NSError * _Nullable pauseError) {
+    [ctl setConfs:confs completion:^(BOOL ok, NSError * _Nullable error) {
+      if (!ok) {
+        // Never leave the network paused.
+        [ctl setConfs:@[@{@"key": @"DisableNetwork", @"value": @"0"}] completion:nil];
+      }
+      if (completion) completion(ok, error ?: pauseError);
+    }];
+  }];
+}
+
 - (void)stopWithCompletion:(void (^)(void))completion
 {
   // Abandon any in-flight attempt: bump the generation so its async
@@ -619,6 +685,15 @@ const BRIDGE_M = `#import "AegisTorBridge.h"
 
 const SWIFT_SOURCE = `import Foundation
 import CFNetwork
+import IPtProxy
+
+/// Pluggable-transport events (IPtProxy). Nothing is logged: transport logs
+/// would be connection metadata.
+final class AegisPtEvents: NSObject, IPtProxyOnTransportEventsProtocol {
+  func stopped(_ name: String?, error: (any Error)?) {}
+  func connected(_ name: String?) {}
+  func error(_ name: String?, error: (any Error)?) {}
+}
 
 /**
  * ObjC-visible sink AegisTor.m (the real RCTEventEmitter subclass) conforms
@@ -688,6 +763,69 @@ class AegisTorLogic: NSObject {
     return ["state": state, "socksPort": state == "on" ? socksPort : 0]
   }
 
+  // ── Bridges / pluggable transports (mobile/src/net/torBridges.ts) ──────
+  private let ptEvents = AegisPtEvents()
+  private lazy var ptController: IPtProxyController? = {
+    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+      .first!.appendingPathComponent("pt_state")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return IPtProxyController(dir.path, enableLogging: false, unsafeLogging: false,
+                              logLevel: "ERROR", transportEvents: ptEvents)
+  }()
+  private let allowedPts: Set<String> = ["obfs4", "webtunnel", "snowflake", "meek_lite"]
+  private let allowedConfKeys: Set<String> = ["UseBridges", "Bridge", "ClientTransportPlugin"]
+
+  /// Start the listed transports (idempotent); resolves {pt: localSocksPort}.
+  @objc(startTransports:resolver:rejecter:)
+  func startTransports(_ ptsJson: String, resolver resolve: @escaping RCTPromiseResolveBlock,
+                       rejecter reject: @escaping RCTPromiseRejectBlock) {
+    guard let data = ptsJson.data(using: .utf8),
+          let names = (try? JSONSerialization.jsonObject(with: data)) as? [String] else {
+      reject("E_PT", "invalid transport list", nil)
+      return
+    }
+    guard let c = ptController else {
+      reject("E_PT", "pluggable transports unavailable", nil)
+      return
+    }
+    var out: [String: Int] = [:]
+    for name in names {
+      guard allowedPts.contains(name) else { reject("E_PT", "unsupported transport", nil); return }
+      do { try c.start(name, proxy: nil) } catch { reject("E_PT", error.localizedDescription, error); return }
+      let port = c.port(name)
+      guard port > 0 else { reject("E_PT", "transport did not start", nil); return }
+      out[name] = port
+    }
+    resolve(out)
+  }
+
+  /// A line is applied only if it is one of the three bridge keys and cannot
+  /// break out of a torrc value (same allow-list as Android).
+  private func isSafeConfLine(_ l: String) -> Bool {
+    if l.count > 1600 { return false }
+    for u in l.unicodeScalars where u.value < 0x20 || u.value == 0x7f || u.value == 0x22 || u.value == 0x23 || u.value == 0x5c {
+      return false
+    }
+    guard let sp = l.firstIndex(of: " ") else { return false }
+    return allowedConfKeys.contains(String(l[l.startIndex..<sp]))
+  }
+
+  /// Use these torrc lines for bridges (applied live, or right after the
+  /// control connection authenticates on a cold start).
+  @objc(setTorConfig:resolver:rejecter:)
+  func setTorConfig(_ linesJson: String, resolver resolve: @escaping RCTPromiseResolveBlock,
+                    rejecter reject: @escaping RCTPromiseRejectBlock) {
+    guard let data = linesJson.data(using: .utf8),
+          let lines = (try? JSONSerialization.jsonObject(with: data)) as? [String],
+          lines.allSatisfy({ isSafeConfLine($0) }) else {
+      reject("E_TOR_CONFIG", "rejected torrc line", nil)
+      return
+    }
+    bridge.applyConf(lines: lines) { ok, error in
+      if ok { resolve(true) } else { reject("E_TOR_CONFIG", error?.localizedDescription ?? "setconf failed", error) }
+    }
+  }
+
   // ── F1: lifecycle ──────────────────────────────────────────────────────
 
   @objc(start:rejecter:)
@@ -742,14 +880,36 @@ class AegisTorLogic: NSObject {
 
   // ── F2: socket.io-over-SOCKS dumb pipe ─────────────────────────────────
 
-  private func torSessionConfiguration() -> URLSessionConfiguration {
+  /// Circuit isolation (Tor always-on). The control lane (aegisId identity
+  /// socket, relay HTTP) and the mailbox lane (mailbox socket, /mailbox/* HTTP)
+  /// must never share a Tor circuit. Otherwise a relay operator can join them
+  /// through the onion service (HiddenServiceExportCircuitID) and relink the
+  /// opaque mailbox id to the aegisId. Tor's SocksPort isolates streams by SOCKS
+  /// credentials by default (IsolateSOCKSAuth), so each lane authenticates with
+  /// its own username/password. These are not secrets: Tor accepts any value and
+  /// uses them only to pick circuits. Desktop does the same with two listeners;
+  /// Android with two SocksPorts (withTorEmbedded.js).
+  private func torSessionConfiguration(lane: String) -> URLSessionConfiguration {
     let config = URLSessionConfiguration.ephemeral
     config.connectionProxyDictionary = [
       kCFStreamPropertySOCKSProxyHost as String: "127.0.0.1",
       kCFStreamPropertySOCKSProxyPort as String: socksPort,
       kCFStreamPropertySOCKSVersion as String: kCFStreamSocketSOCKSVersion5,
+      kCFStreamPropertySOCKSUser as String: "aegis-" + lane,
+      kCFStreamPropertySOCKSPassword as String: lane,
     ]
     return config
+  }
+
+  /// Socket lane from the JS bridge id: identity sockets are "ctl-…" (net/tor.ts).
+  private func laneForSocket(_ id: String) -> String {
+    return id.hasPrefix("ctl-") ? "control" : "mailbox"
+  }
+
+  /// HTTP lane from the URL: /mailbox/* (stateless drain, challenges) is the
+  /// mailbox lane; everything else the control lane.
+  private func laneForUrl(_ u: URL) -> String {
+    return u.path.hasPrefix("/mailbox/") ? "mailbox" : "control"
   }
 
   /// http(s):// base URL -> the engine.io v4 WebSocket endpoint socket.io
@@ -789,7 +949,7 @@ class AegisTorLogic: NSObject {
       eventNames = []
     }
 
-    let session = URLSession(configuration: torSessionConfiguration())
+    let session = URLSession(configuration: torSessionConfiguration(lane: laneForSocket(id)))
     let task = session.webSocketTask(with: wsUrl)
     sessions[id] = session
     tasks[id] = task
@@ -966,7 +1126,7 @@ class AegisTorLogic: NSObject {
       if !hasContentType { req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type") }
       req.httpBody = body.data(using: .utf8)
     }
-    let session = URLSession(configuration: torSessionConfiguration())
+    let session = URLSession(configuration: torSessionConfiguration(lane: laneForUrl(u)))
     let task = session.dataTask(with: req) { data, response, error in
       defer { session.finishTasksAndInvalidate() }
       if let error = error {
@@ -1021,7 +1181,7 @@ class AegisTorLogic: NSObject {
       }
     }
     if !hasContentType { req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type") }
-    let session = URLSession(configuration: torSessionConfiguration())
+    let session = URLSession(configuration: torSessionConfiguration(lane: laneForUrl(u)))
     let task = session.uploadTask(with: req, fromFile: src) { data, response, error in
       defer { session.finishTasksAndInvalidate() }
       if let error = error {
@@ -1066,7 +1226,7 @@ class AegisTorLogic: NSObject {
       for (k, v) in dict { req.setValue(v, forHTTPHeaderField: k) }
     }
     let dest = URL(fileURLWithPath: destPath.hasPrefix("file://") ? String(destPath.dropFirst(7)) : destPath)
-    let session = URLSession(configuration: torSessionConfiguration())
+    let session = URLSession(configuration: torSessionConfiguration(lane: laneForUrl(u)))
     let task = session.downloadTask(with: req) { tmp, response, error in
       defer { session.finishTasksAndInvalidate() }
       if let error = error {
@@ -1187,6 +1347,20 @@ RCT_EXPORT_METHOD(sioEmit:(NSString *)identifier
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
   [self.logic sioEmit:identifier event:event payloadJson:payloadJson ackId:ackId resolver:resolve rejecter:reject];
+}
+
+RCT_EXPORT_METHOD(startTransports:(NSString *)ptsJson
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic startTransports:ptsJson resolver:resolve rejecter:reject];
+}
+
+RCT_EXPORT_METHOD(setTorConfig:(NSString *)linesJson
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  [self.logic setTorConfig:linesJson resolver:resolve rejecter:reject];
 }
 
 RCT_EXPORT_METHOD(sioDisconnect:(NSString *)identifier

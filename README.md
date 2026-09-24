@@ -33,11 +33,17 @@ keeps no logs of who talks to whom.
   PQXDH). The relay routes opaque ciphertext and keeps no logs of who talks to
   whom. **Sealed sender is on by default**: the envelope carries no `from`, on
   the wire or at rest. Once you know a contact's mailbox (from their link or
-  their first reply), messages travel over a **separate mailbox connection
-  through the embedded Tor client**. The relay sees no sender, no recipient
-  Aegis ID and no IP for them (see
+  their first reply), messages travel over a **separate mailbox connection**.
+  The relay sees no sender and no recipient Aegis ID for them (see
   [docs/SEALED-SENDER-ARCHITECTURE.md](docs/SEALED-SENDER-ARCHITECTURE.md) and
   the limits below).
+- **Tor, always on**: every connection to the relay — messages, the control
+  connection, uploads, downloads — goes through the Tor client built into the
+  app, to the relay's onion address. There is no switch and no fallback to the
+  normal internet, so the relay never sees your IP. The control and mailbox
+  connections use separate Tor circuits, so the relay cannot link them by
+  circuit. GIF thumbnails, link-preview images and GIFs you send are
+  downloaded over Tor too.
 - **Calls (1:1 and group)**: WebRTC with DTLS-SRTP media encryption. SDP
   offers/answers and ICE candidates are sealed with NaCl `box` before they
   reach the relay, so the server never sees IPs, DTLS fingerprints or codecs
@@ -45,9 +51,11 @@ keeps no logs of who talks to whom.
 - **Attachments**: encrypted client-side before upload; the server stores
   opaque blobs.
 - **Push notifications**: a wake-up signal only — the payload is generic and
-  never contains content or sender identity. Store builds use FCM/APNs; the
-  Android `foss` build contains no Google code and wakes through ntfy over Tor
-  plus a foreground service.
+  never contains content or sender identity. On iOS the relay sends it straight
+  to Apple (APNs); there is no Expo or other intermediary in the chain. Android
+  does not register with Google's FCM: it wakes through the relay's ntfy over
+  Tor plus a foreground service (the `foss` build contains no Google code at
+  all).
 - **No over-the-air code updates**: the app never downloads new code outside
   the stores, so it never contacts Expo's update server and no one can push code
   to phones without store review. Every change ships as a store build.
@@ -64,14 +72,22 @@ short version:
 - **No independent audit yet.** The protocol and code are public so they *can* be
   reviewed, but no third party has formally audited them. Funding an audit is the
   project's top priority.
-- **The control connection still shows your IP and that you are online.** Each
-  client keeps two connections to the relay. The **mailbox** connection carries
-  messages over the embedded Tor client, with no sender, no recipient Aegis ID
-  and no IP. The **control** connection carries prekeys, the push token, your
-  profile and presence. It is authenticated with your Aegis ID and, by default,
-  uses TLS over the normal internet, so the relay sees your IP next to your Aegis
-  ID. Routing it through Tor is optional today (*Privacy → Network*, needs Orbot).
-  A relay that watches both connections could try to link them by **timing**.
+- **The relay knows when your Aegis ID is online.** Each client keeps two
+  connections to the relay, both over Tor on separate circuits, so the relay
+  never sees your IP. The **mailbox** connection carries messages, with no sender
+  and no recipient Aegis ID. The **control** connection carries prekeys, the push
+  token, your profile and presence, and it is authenticated with your Aegis ID.
+  So the relay learns *that* your Aegis ID is connected (not from where). A relay
+  that watches both connections could try to link them by **timing**.
+- **Tor can be blocked, and bridges are the only way around it.** There is no
+  fallback to the normal internet by design. Where a network blocks Tor, the app
+  uses Tor bridges:
+  - **Automatic mode** (the default) moves on to Snowflake, obfs4 and meek by
+    itself when the connection stalls.
+  - You can also paste your own bridges (*Privacy → Network → Tor connection*).
+
+  Bridges get through most censorship, but not every network. A censor can still
+  see that you use a bridge, even though it cannot see AegisLink.
 - **A few paths still show the sender→recipient edge to the relay:**
   - a first message to a bare Aegis ID or a legacy (v1) link, until the other
     person replies;
@@ -94,11 +110,18 @@ short version:
   verified through the JS engine's JIT+GC. Practical exploitation would require an
   already-compromised device. Migration to a native libsodium binding is on the
   roadmap ([docs/PROTOCOL.md §2.1](docs/PROTOCOL.md)).
-- **Store builds still touch Google/Apple for push.** On Play Store and App Store
-  builds, FCM/APNs deliver a generic wake-up with no content or sender, but
-  Google/Apple learn that *a* device received *a* push. The Android `foss` build
-  has no FCM at all: it wakes through the relay's ntfy over Tor, plus a
-  foreground service for calls. iOS has no alternative to APNs.
+- **iOS push goes through Apple.** On iPhone the only way to wake a closed app
+  is Apple's APNs: the relay sends a generic wake-up with no content or sender,
+  but Apple learns that *a* device received *a* push. There is no alternative to
+  APNs on iOS. Android uses no Google push service: wake-ups come from the
+  relay's ntfy over Tor plus a foreground service.
+- **Calls on mobile expose your IP to our TURN server.** Call media is UDP,
+  which Tor cannot carry. By default, 1:1 calls relay all media through our
+  TURN server (*Hide IP in calls*), so the other person does not see your IP,
+  but the TURN server does. The desktop client sends TURN over TCP through Tor.
+- **Expo's update server is contacted directly, outside Tor.** The app checks
+  `u.expo.dev` for over-the-air fixes on launch, so Expo sees your IP and that
+  the app is installed. The check carries no messages, contacts or Aegis ID.
 - **One maintainer, one official relay.** The project is maintained by a single
   developer, and the official relay runs in a single region, so expect occasional
   downtime. You can self-host a relay (`.onion`-only) and still talk to contacts

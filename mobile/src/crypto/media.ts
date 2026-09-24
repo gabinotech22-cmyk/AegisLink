@@ -1,12 +1,13 @@
-import nacl from 'tweetnacl';
+import { nacl } from './sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import * as FileSystem from 'expo-file-system/legacy';
 import { normalizeOnion } from '../net/relayRef';
 import { relayBaseUrl } from '../net/relayPoolCore';
 import { getHomeRelay, homeRelayBaseUrl } from '../net/homeRelay';
-import { isOnionUrl } from '../net/relayHttp';
-import { isTorAvailable, startTor, torHttpDownload, torHttpUpload } from '../net/tor';
+import { mustUseTor } from '../net/relayHttp';
+import { isTorAvailable, startTor, torHttpUpload } from '../net/tor';
 import { fetchPowChallengeAt, solvePoW } from './registration';
+import { torDownloadTo } from '../net/torMedia';
 
 const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
 
@@ -90,30 +91,22 @@ function downloadUrlFor(id: string, token: string, host: string | null): string 
 }
 
 /**
- * Fetch the ciphertext to `dest`. Official relay → the OS downloader (clearnet +
- * pins, or Orbot). A blob on a .onion — another relay (F2) or our own
- * self-hosted home (F5) — is only reachable through embedded Tor, so it goes
- * through the native SOCKS download. Both resolve to an HTTP status (null =
- * transport failure).
+ * Fetch the ciphertext to `dest` over the embedded Tor (Tor always-on: the
+ * official relay's onion, another relay (F2), our self-hosted home (F5)) —
+ * net/torMedia.ts. Resolves an HTTP status (null = transport failure).
  */
 async function fetchBlobTo(url: string, dest: string): Promise<number | null> {
-  if (isOnionUrl(url)) {
-    if (!isTorAvailable()) return null;
-    try { await startTor(); } catch { return null; }
-    return torHttpDownload(url, dest);
-  }
-  const result = await FileSystem.downloadAsync(url, dest);
-  return result.status;
+  return torDownloadTo(url, dest);
 }
 
 /**
  * POST a local file as `application/octet-stream` to a relay blob endpoint.
- * Official relay → FileSystem.uploadAsync (clearnet + pins). A self-hosted
- * .onion home (F5) → the native Tor upload; fail-closed (no Tor → status null).
+ * Over the embedded Tor (Tor always-on — `mustUseTor`), fail-closed (no Tor →
+ * status null); the OS uploader only in dev builds / to a loopback dev relay.
  * Shared by E2EE media and public-channel avatars.
  */
 export async function uploadFileToRelay(uploadUrl: string, fileUri: string): Promise<{ status: number; body: string } | null> {
-  if (isOnionUrl(uploadUrl)) {
+  if (mustUseTor(uploadUrl)) {
     if (!isTorAvailable()) return null;
     try { await startTor(); } catch { return null; }
     return torHttpUpload(uploadUrl, fileUri, { 'Content-Type': 'application/octet-stream' });

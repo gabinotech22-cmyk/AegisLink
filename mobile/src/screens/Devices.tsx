@@ -3,7 +3,7 @@ import { View, Text, Pressable, ScrollView, Modal, ActivityIndicator, Platform, 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { ss } from '../utils/secureStore';
-import nacl from 'tweetnacl';
+import { nacl, type BoxKeyPair } from '../crypto/sodium';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -12,7 +12,6 @@ import { TopBar } from '../components/TopBar';
 import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { getSocket } from '../socket/client';
-import { buildRevocationPayload } from '../web3/deviceRevocation/RevokeDevice';
 import { themedAlert } from '../components/AlertHost';
 
 const DEVICES_CACHE_KEY = 'aegis.linked_devices.json';
@@ -169,7 +168,7 @@ export function DevicesScreen({ onBack }: Props) {
     setLinking(true);
     setLinkError(null);
 
-    let myKeypair: nacl.BoxKeyPair | null = null;
+    let myKeypair: BoxKeyPair | null = null;
     // Hoisted so the `finally` below can zeroize it on EVERY exit path (timeout,
     // link_failed, socket-not-connected) — not only on success. This buffer
     // carries the raw secretKeyB64/signingSecretKeyB64/spkSecretB64 plaintext.
@@ -281,27 +280,9 @@ export function DevicesScreen({ onBack }: Props) {
         });
       }
 
-      // Also submit a Web3 DID revocation if the device had a DID.
-      // We derive a pseudo-DID from the device id for the hash — the real
-      // implementation would use the actual DID stored alongside the device.
-      try {
-        const pseudoDID = `did:aegis:${device.id}`;
-        const payload = await buildRevocationPayload(
-          pseudoDID,
-          identity.aegisId,
-          identity.signingPublicKeyB64,
-        );
-        // POST the revocation to the relay's web3 endpoint (best-effort).
-        const { homeRelayBaseUrl } = await import('../net/homeRelay');
-        const { relayFetch } = await import('../net/relayHttp');
-        void relayFetch(`${homeRelayBaseUrl()}/web3/device/revoke`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        // Web3 revocation is best-effort — do not block the UI.
-      }
+      // No DID step here: a linked device clones the identity and has no DID of
+      // its own. The identity's did:key is deactivated only by the owner-signed
+      // account deletion on the relay (web3 audit 2026-09-24).
 
       // Update local state and cache immediately.
       const updated = linkedDevices.filter((d) => d.id !== device.id);

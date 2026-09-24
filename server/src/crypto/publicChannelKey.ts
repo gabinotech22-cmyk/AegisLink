@@ -20,7 +20,7 @@
  *    revealing identity.
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from './sodium/index.js';
 import naclUtil from 'tweetnacl-util';
 import { createHash, hkdfSync, timingSafeEqual } from 'node:crypto';
 import { verifyDetached } from './ed25519.js';

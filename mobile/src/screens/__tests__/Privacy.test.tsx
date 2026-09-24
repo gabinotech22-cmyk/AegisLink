@@ -71,14 +71,19 @@ jest.mock('../../components/Section', () => {
   return {
     Section: ({ label, children }: { label?: string; children?: import('react').ReactNode }) =>
       React.createElement(View, null, label ? React.createElement(Text, null, label) : null, children),
-    Row: ({ label, onPress }: { label: string; onPress?: () => void }) =>
-      React.createElement(Pressable, { onPress }, React.createElement(Text, null, label)),
+    Row: ({ label, sub, onPress }: { label: string; sub?: string; onPress?: () => void }) =>
+      React.createElement(
+        Pressable,
+        { onPress },
+        React.createElement(Text, null, label),
+        sub ? React.createElement(Text, null, sub) : null,
+      ),
     Toggle: ({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) =>
       React.createElement(Pressable, { onPress: () => onChange(!value) }, React.createElement(Text, null, label)),
   };
 });
 
-// ── socket client (tor toggle reconnect) ────────────────────────────────────
+// ── socket client (must never be touched by the Tor row) ────────────────────────────────────
 const mockDisconnect = jest.fn();
 const mockConnect = jest.fn();
 jest.mock('../../socket/client', () => ({
@@ -106,7 +111,6 @@ const mockPrefs: Record<string, unknown> = {
   readReceipts: true,
   typingIndicator: true,
   blockScreenshots: false,
-  routeViaTor: false,
   hideCallIp: true,
   requireGroupApproval: false,
   set: mockSetPref,
@@ -138,7 +142,6 @@ describe('PrivacyScreen', () => {
     mockPrefs.readReceipts = true;
     mockPrefs.typingIndicator = true;
     mockPrefs.blockScreenshots = false;
-    mockPrefs.routeViaTor = false;
     mockPrefs.requireGroupApproval = false;
   });
 
@@ -190,12 +193,16 @@ describe('PrivacyScreen', () => {
     expect(mockSetPref).toHaveBeenCalledWith('requireGroupApproval', true);
   });
 
-  it('persists the Tor toggle and reconnects the socket', () => {
-    const { getByText } = render(<PrivacyScreen {...makeProps()} />);
+  it('Tor is always on: shown as a fact, not a toggle — pressing it changes nothing', () => {
+    const { getByText, queryByText } = render(<PrivacyScreen {...makeProps()} />);
+    expect(getByText('privacy.torLabel')).toBeTruthy();
+    expect(getByText('privacy.torSub')).toBeTruthy();
     fireEvent.press(getByText('privacy.torLabel'));
-    expect(mockSetPref).toHaveBeenCalledWith('routeViaTor', true);
-    expect(mockDisconnect).toHaveBeenCalledTimes(1);
-    expect(mockConnect).toHaveBeenCalledTimes(1);
+    expect(mockSetPref).not.toHaveBeenCalled();
+    expect(mockDisconnect).not.toHaveBeenCalled();
+    expect(mockConnect).not.toHaveBeenCalled();
+    // No Orbot hand-off any more.
+    expect(queryByText('privacy.openOrbot')).toBeNull();
   });
 
   it('changes theme mode via the mode picker', () => {
