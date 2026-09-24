@@ -2,6 +2,16 @@
 
 > **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. **Estado actual:** 2b.0–2b.4 desplegados (ntfy sobre onion co-hospedado con el relay; token wake iOS tras flag); 2b.3c (UnifiedPush) sigue en backlog. Desde F4 el wake tiene clase (`wakeHint: 'call'` → prioridad urgente, `server/src/push/ntfy.ts`) y desde F6 el mismo ntfy forma parte del paquete de relay propio (`infra/selfhost/`, `docs/SELF-HOSTING.md`). Estado canónico: `docs/SEALED-SENDER-ARCHITECTURE.md` §5 y `docs/ROADMAP.md`.
 
+> **Actualización 2026-09-24:** el binding de 2b.4 ya no usa token Expo:
+> - el cliente registra su token **APNs crudo** (`mailbox:push:token` con `apnsToken`);
+> - el relay despierta por APNs directo (`push/apns-alert.ts` `sendApnsWakeToToken`), sin
+>   pasar por Expo.
+>
+> La app ya no pide token de Expo en ningún sitio (antes contactaba `exp.host` fuera de
+> Tor). Los tokens Expo de clientes viejos se siguen atendiendo hasta `APP_MIN_VERSION`.
+> Pruebas: `server/src/__tests__/mailboxTokenWake.relay.test.ts` y
+> `mobile/src/socket/__tests__/mailboxIosWakeBinding.test.ts`.
+
 > Estado: **decisión resuelta; 2b.0, 2b.1 y 2b.2 (app viva) implementados**
 > (server + infra desplegados en el VM 2026-07-12; suscripción móvil sobre onion
 > con validación en dispositivo pendiente). 2b.3a/2b.3b-relay y 2b.4 (iOS APNs,
