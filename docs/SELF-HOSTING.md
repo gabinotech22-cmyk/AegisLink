@@ -140,6 +140,10 @@ docker compose down -v         # BORRAR todo, incluida la dirección .onion
   adjuntos quedó propiedad de root y el relay (usuario `aegis`) no podía
   escribir. `git pull && ./up.sh` lo corrige en el sitio (la imagen nueva crea
   el directorio con el dueño correcto y `up.sh` repara los volúmenes viejos).
+- **Tras actualizar, la imagen del relay pasa de Alpine a Debian slim** (F-1: el cripto del relay
+  es libsodium nativo, que no carga en Alpine/musl). Es transparente: el usuario `aegis` conserva el
+  mismo uid/gid (100/101), así que los volúmenes existentes siguen siendo escribibles, y el
+  healthcheck usa `node` en vez de `wget`. `git pull && ./up.sh` reconstruye la imagen.
 - **`tor` reinicia en bucle tras cambiar `ONION_TORRC`**: Tor no reutiliza el
   directorio de claves entre el modo oculto y el single-onion. Es deliberado
   (protege contra errores de config): `docker compose down && docker volume

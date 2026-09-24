@@ -49,7 +49,7 @@ The following data is **never** collected, stored, or transmitted to our servers
 
 ## 4. End-to-End Encryption
 
-All messages, attachments, voice calls, and video calls are encrypted end-to-end using the Double Ratchet Algorithm (forward-secret session keys) with X3DH key agreement, implemented using the TweetNaCl library (auditable open-source cryptography).
+All messages, attachments, voice calls, and video calls are encrypted end-to-end using the Double Ratchet Algorithm (forward-secret session keys) with X3DH key agreement, implemented with the NaCl primitives of the libsodium and TweetNaCl libraries (auditable open-source cryptography).
 
 **Your private keys never leave your device.** They are generated on your device at setup, stored in the operating system's protected credential storage (iOS Keychain Services / Android Keystore, via `expo-secure-store`), and are never transmitted anywhere.
 

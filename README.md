@@ -27,7 +27,8 @@ keeps no logs of who talks to whom.
 
 ## How it works (short version)
 
-- **Identity**: generated on-device (Ed25519 + X25519 via TweetNaCl). Your
+- **Identity**: generated on-device (Ed25519 + X25519; native libsodium on
+  desktop, TweetNaCl on mobile until its native module ships). Your
   address is a random Aegis ID — nothing personal.
 - **1:1 chat**: Double Ratchet with X3DH key agreement (hybrid post-quantum
   PQXDH). The relay routes opaque ciphertext and keeps no logs of who talks to
@@ -102,11 +103,12 @@ short version:
   ML-KEM-768) protects sessions where *both* ends are upgraded; sessions with a
   not-yet-upgraded peer fall back to
   classical X25519.
-- **The crypto core runs in JavaScript.** It uses constant-time libraries
-  (TweetNaCl / `@noble`), but the constant-time guarantee is source-level, not
-  verified through the JS engine's JIT+GC. Practical exploitation would require an
-  already-compromised device. Migration to a native libsodium binding is on the
-  roadmap ([docs/PROTOCOL.md §2.1](docs/PROTOCOL.md)).
+- **On mobile the crypto core still runs in JavaScript.** The relay and the
+  desktop app already run native libsodium; mobile still uses constant-time JS
+  libraries (TweetNaCl / `@noble`), whose guarantee is source-level, not verified
+  through the JS engine's JIT+GC. Practical exploitation would require an
+  already-compromised device. The mobile native module is in progress
+  ([docs/PROTOCOL.md §2.1](docs/PROTOCOL.md)).
 - **iOS push goes through Apple.** On iPhone the only way to wake a closed app
   is Apple's APNs: the relay sends a generic wake-up with no content or sender,
   but Apple learns that *a* device received *a* push. There is no alternative to
