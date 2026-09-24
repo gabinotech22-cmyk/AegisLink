@@ -23,11 +23,11 @@
  */
 
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { lookup } from 'node:dns/promises';
 import { fetch as undiciFetch, Agent, type Dispatcher } from 'undici';
 import type { LookupOptions } from 'node:dns';
+import { relayLimiter } from '../http/relayLimiter.js';
 
 /** Hard cap on bytes read from an upstream body. */
 export const MAX_PREVIEW_BYTES = 8192;
@@ -66,14 +66,11 @@ export const __deps = {
 const router = Router();
 
 // ── Rate limiter — 60 req/min per IP, in-memory only ─────────────────────────
-const previewLimiter = rateLimit({
+const previewLimiter = relayLimiter({
   windowMs: 60 * 1000,
   max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
-  },
+  onion: { kind: 'shared' },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 60_000 },
 });
 
 // ── Input schema ──────────────────────────────────────────────────────────────

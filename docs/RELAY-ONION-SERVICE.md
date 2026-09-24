@@ -113,6 +113,13 @@ privada.
   usuarios Tor en un solo bucket. Revisar los buckets de rutas HTTP
   (blob/prekeys/turn) antes de mandar tráfico HTTP masivo por onion; hoy el
   path mailbox es solo socket.
+  **→ Resuelto 2026-09-23** (todo el HTTP de mobile va ya por esta onion):
+  `server/src/http/relayLimiter.ts` detecta la petición onion (sin
+  `X-Forwarded-For` + Host `.onion`). En rutas firmadas limita por identidad
+  verificada; en las anónimas se apoya en la PoW más un tope anti-inundación
+  (`AEGIS_ONION_FLOOD_MULT`, por defecto 50; registro
+  `AEGIS_ONION_REG_FLOOD_MAX`, por defecto 1000). Ver
+  `SEALED-SENDER-ARCHITECTURE.md` §6.2.
 - **Restart de tor en cada deploy**: tor resuelve `relay` al arrancar; si el
   contenedor relay se recrea con otra IP, tor quedaría marcando la vieja. Por
   eso `deploy.sh` reinicia tor DESPUÉS del health check del relay. Corte del

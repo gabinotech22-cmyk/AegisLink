@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { createHmac } from 'node:crypto';
 import { z } from 'zod';
-import rateLimit from 'express-rate-limit';
 import tweetnaclUtil from 'tweetnacl-util';
 import { identityRepo } from '../db/client.js';
 import { verifyDetached } from '../crypto/ed25519.js';
+import { relayLimiter, queryField } from '../http/relayLimiter.js';
 
 const { decodeBase64 } = tweetnaclUtil;
 
@@ -41,14 +41,11 @@ const CredentialsQuery = z.object({
  * the aegisId — it is used only for username uniqueness within the TTL window
  * and to look up the signing key for verification.
  */
-const turnLimiter = rateLimit({
+const turnLimiter = relayLimiter({
   windowMs: 60 * 1000,
-  max: 20, // 20 credential refreshes per minute is generous for real usage
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
-  },
+  max: 20,
+  onion: { kind: 'identity', key: queryField('aegisId') },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 60_000 },
 });
 
 router.get('/credentials', turnLimiter, async (req, res) => {

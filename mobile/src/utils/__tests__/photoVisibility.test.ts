@@ -8,7 +8,7 @@
  * and removal is the explicit `senderImageCleared` (removing your photo never
  * reached anyone).
  */
-import { mayShareAvatar, avatarFieldsFor, receivedAvatar } from '../photoVisibility';
+import { mayShareAvatar, avatarFieldsFor, receivedAvatar, isAcceptableAvatar } from '../photoVisibility';
 
 const IMG = 'data:image/jpeg;base64,AAAA';
 
@@ -54,5 +54,32 @@ describe('receivedAvatar', () => {
     expect(receivedAvatar({ senderImage: IMG })).toBe(IMG);
     expect(receivedAvatar({ senderImage: null, senderImageCleared: true })).toBeNull();
     expect(receivedAvatar({ senderImage: IMG, senderImageCleared: true })).toBeNull();
+  });
+});
+
+describe('receivedAvatar — a peer cannot plant a remote URL (tracking pixel)', () => {
+  it('ignores http(s) and other URL schemes: keep what we have', () => {
+    for (const bad of [
+      'https://tracker.example/p.png',
+      'http://tracker.example/p.png',
+      'HTTPS://TRACKER.EXAMPLE/P.PNG',
+      '//tracker.example/p.png',
+      'file:///data/secret.jpg',
+      'content://media/1',
+      'data:text/html;base64,PHNjcmlwdD4=',
+      'data:image/svg+xml;base64,PHN2Zz4=',
+      'data:image/jpeg;base64,AAAA"onerror',
+    ]) {
+      expect(isAcceptableAvatar(bad)).toBe(false);
+      expect(receivedAvatar({ senderImage: bad })).toBeUndefined();
+    }
+  });
+  it('accepts inline images and emoji/text avatars', () => {
+    expect(receivedAvatar({ senderImage: 'data:image/png;base64,iVBORw0KGgo=' })).toBe('data:image/png;base64,iVBORw0KGgo=');
+    expect(receivedAvatar({ senderImage: '🦊' })).toBe('🦊');
+    expect(receivedAvatar({ senderImage: 'AB' })).toBe('AB');
+  });
+  it('rejects an over-long text avatar', () => {
+    expect(isAcceptableAvatar('x'.repeat(33))).toBe(false);
   });
 });
