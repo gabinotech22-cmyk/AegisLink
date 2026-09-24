@@ -54,3 +54,45 @@ describe('embedded Tor iOS bridge — single-instance invariants', () => {
     expect(block).not.toMatch(/self\.torThread\s*=\s*nil/);
   });
 });
+
+/**
+ * Circuit isolation (Tor always-on, 2026-09-23). The control lane (aegisId
+ * identity socket, relay HTTP) and the mailbox lane (mailbox socket,
+ * /mailbox/* HTTP, ntfy) must never share a Tor circuit. Otherwise the relay
+ * operator can join them through the onion service and relink the opaque
+ * mailbox id to the aegisId. The lane rides the bridge id prefix
+ * (ctl-/mbx-, net/tor.ts) and the URL path, so no native signature changes.
+ */
+describe('embedded Tor — control/mailbox circuit isolation', () => {
+  const IOS = SRC;
+  const ANDROID = fs.readFileSync(path.join(__dirname, '..', '..', 'plugins', 'withTorEmbedded.js'), 'utf8');
+
+  it('iOS: every Tor URLSession picks a lane, each lane has its own SOCKS credentials', () => {
+    expect(IOS).not.toContain('torSessionConfiguration()');
+    expect(IOS).toContain('kCFStreamPropertySOCKSUser as String: "aegis-" + lane');
+    expect(IOS).toContain('kCFStreamPropertySOCKSPassword as String: lane');
+    expect(IOS).toContain('torSessionConfiguration(lane: laneForSocket(id))');
+    expect((IOS.match(/torSessionConfiguration\(lane: laneForUrl\(u\)\)/g) ?? []).length).toBe(3);
+    expect(IOS).toContain('id.hasPrefix("ctl-") ? "control" : "mailbox"');
+    expect(IOS).toContain('u.path.hasPrefix("/mailbox/") ? "mailbox" : "control"');
+  });
+
+  it('Android: torrc opens two SocksPort listeners before TorService starts', () => {
+    // The call site (the definition reads `writeIsolationTorrc(ctx: Context)`).
+    const write = ANDROID.indexOf('writeIsolationTorrc(ctx)');
+    const bind = ANDROID.indexOf('ctx.bindService(Intent(ctx, TorService::class.java)');
+    expect(write).toBeGreaterThan(-1);
+    expect(write).toBeLessThan(bind);
+    expect((ANDROID.match(/appendLine\("SocksPort auto"\)/g) ?? []).length).toBe(2);
+  });
+
+  it('Android: no bridge dials the lane-less SOCKS port; the mailbox lane fails closed', () => {
+    expect(ANDROID).not.toMatch(/val port = socksPort\(\)/);
+    expect(ANDROID).toContain('val port = lanePort(isMailboxSocket(id))');
+    expect((ANDROID.match(/val port = lanePort\(isMailboxUrl\(url\)\)/g) ?? []).length).toBe(3);
+    expect(ANDROID).toContain('private fun isMailboxSocket(id: String): Boolean = !id.startsWith("ctl-")');
+    // No second listener → the mailbox lane gets 0 (rejected), never the control port.
+    expect(ANDROID).toContain('return if (mailbox) (if (ports.size > 1) ports[1] else 0) else ports[0]');
+  });
+});
+

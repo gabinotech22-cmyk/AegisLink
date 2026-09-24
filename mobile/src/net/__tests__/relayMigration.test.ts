@@ -92,7 +92,8 @@ describe('migrateHomeRelay (F5b)', () => {
     await setHomeRelay({ relay: { onion: MINE }, since: 1, previous: null });
     const { d, calls } = deps();
     expect(await migrateHomeRelay(null, identity, d)).toEqual({ ok: true });
-    expect(calls).toEqual(['register:https://relay.example', 'announce', 'reconnect']);
+    // Tor always-on: the official relay is addressed at its onion.
+    expect(calls).toEqual([`register:http://${'o'.repeat(56)}.onion`, 'announce', 'reconnect']);
     expect(getHomeRelaySetting()).toEqual({ relay: null, since: T0, previous: { relay: { onion: MINE }, until: T0 + MIGRATION_GRACE_MS } });
 
     const again = deps();
@@ -104,7 +105,7 @@ describe('migrateHomeRelay (F5b)', () => {
     await setHomeRelay({ relay: { onion: MINE }, since: 1, previous: { relay: null, until: T0 + 1000 } });
     const { d, calls } = deps();
     expect(await migrateHomeRelay({ onion: OTHER }, identity, d)).toEqual({ ok: true });
-    expect(calls).toEqual(['verify', `register:http://${OTHER}`, 'announce', 'delete:https://relay.example', 'reconnect']);
+    expect(calls).toEqual(['verify', `register:http://${OTHER}`, 'announce', `delete:http://${'o'.repeat(56)}.onion`, 'reconnect']);
     expect(getHomeRelaySetting().previous).toEqual({ relay: { onion: MINE }, until: T0 + MIGRATION_GRACE_MS });
   });
 });

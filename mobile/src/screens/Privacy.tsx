@@ -62,7 +62,6 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
   const typing = usePreferences((s) => s.typingIndicator);
   const screenshot = usePreferences((s) => s.blockScreenshots);
   const blockedCount = useContacts((s) => s.contacts.filter((c) => c.blocked).length);
-  const routeViaTor = usePreferences((s) => s.routeViaTor);
   const hideCallIp = usePreferences((s) => s.hideCallIp);
   const callWakeService = usePreferences((s) => s.callWakeService);
   const requireGroupApproval = usePreferences((s) => s.requireGroupApproval);
@@ -184,51 +183,14 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
         </Section>
 
         <Section t={t} label={i18nT('privacy.networkSection')}>
-          <Toggle
+          {/* Tor always-on: not a setting. The relay is reached only over the
+              embedded Tor (config.ts / socket/client.ts); this row states it. */}
+          <Row
             t={t}
+            icon={<I.Shield size={20} color={t.accent} />}
             label={i18nT('privacy.torLabel')}
             sub={i18nT('privacy.torSub')}
-            value={routeViaTor}
-            onChange={(v) => {
-              void setPref('routeViaTor', v);
-              // Reconnect socket with new URL preference
-              if (identity) {
-                const { disconnect: sockDisconnect, connect: sockConnect } = require('../socket/client') as typeof import('../socket/client');
-                sockDisconnect();
-                sockConnect(identity);
-              }
-            }}
           />
-          {routeViaTor && (
-            <View style={{ paddingHorizontal: 16, paddingBottom: 12, gap: 10 }}>
-              <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.textDim, lineHeight: 16 }}>
-                {i18nT('privacy.torOrbot')}
-              </Text>
-              <Pressable
-                accessibilityLabel={i18nT('privacy.openOrbot')}
-                onPress={() => {
-                  void Linking.openURL('orbot://request/vpn').catch(() =>
-                    Linking.openURL('https://orbot.app')
-                  );
-                }}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 8,
-                  backgroundColor: t.surface2,
-                  borderRadius: t.radiusS,
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                  alignSelf: 'flex-start',
-                }}
-              >
-                <I.Shield size={14} color={t.accent} />
-                <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent, letterSpacing: 0.4 }}>
-                  {i18nT('privacy.openOrbot')}
-                </Text>
-              </Pressable>
-            </View>
-          )}
           {FEDERATION && (
             <Row
               t={t}

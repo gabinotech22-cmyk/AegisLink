@@ -37,6 +37,7 @@ import type { StoredGroup, StoredMessage } from '../db/local';
 import { parseLocationMessage } from '../utils/parseLocationMessage';
 import { VoiceRecorderScreen } from './VoiceRecorder';
 import { themedAlert } from '../components/AlertHost';
+import { TorImage } from '../components/TorImage';
 
 const EMPTY_MSGS: StoredMessage[] = [];
 
@@ -317,8 +318,10 @@ export function GroupChatScreen({ group: initialGroup, onBack, onGroupDetail, on
     const localPath = `${cacheDir}gif_${gifId}.gif`;
 
     try {
-      const downloadResult = await FS.downloadAsync(url, localPath);
-      if (!downloadResult.uri) throw new Error('GIF download failed');
+      // Over Tor (Tor always-on): the GIF CDN never sees the device IP.
+      const { torDownloadTo } = require('../net/torMedia') as typeof import('../net/torMedia');
+      if ((await torDownloadTo(url, localPath)) !== 200) throw new Error('GIF download failed');
+      const downloadResult = { uri: localPath };
 
       const info = await FS.getInfoAsync(downloadResult.uri);
       const fileSize = (info as { size?: number }).size ?? 0;
@@ -1535,8 +1538,8 @@ function GroupBubble({
             opacity: pressed ? 0.9 : 1,
           })}
         >
-          <Image
-            source={{ uri: gifUrl }}
+          <TorImage
+            uri={gifUrl}
             style={{ width: 200, height: 150, backgroundColor: t.surface2 }}
             resizeMode="cover"
           />

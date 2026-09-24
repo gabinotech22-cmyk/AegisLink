@@ -4,10 +4,12 @@
  *     shaped like a Response for the callers; fail-closed without Tor;
  *   - anything else is the global fetch, untouched (clearnet HTTPS + pins).
  */
+const mockStartTor = jest.fn(async () => ({ state: 'on', socksPort: 9050 }));
 const mockTor = { available: true, request: jest.fn(async (..._a: unknown[]): Promise<{ status: number; body: string } | null> => ({ status: 200, body: '{"ok":true}' })) };
 jest.mock('../tor', () => ({
   __esModule: true,
   isTorAvailable: () => mockTor.available,
+  startTor: () => mockStartTor(),
   torHttpRequest: (...a: unknown[]) => mockTor.request(...a),
 }));
 
@@ -17,7 +19,7 @@ const ONION = 'http://' + 'a'.repeat(56) + '.onion';
 
 describe('relayHttp (F5)', () => {
   const realFetch = global.fetch;
-  beforeEach(() => { mockTor.available = true; mockTor.request.mockClear(); });
+  beforeEach(() => { mockTor.available = true; mockTor.request.mockClear(); mockStartTor.mockClear(); });
   afterEach(() => { global.fetch = realFetch; });
 
   it('recognises v3 onion hosts only', () => {
@@ -54,6 +56,29 @@ describe('relayHttp (F5)', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('waits for the Tor bootstrap before a .onion request (cold start / onboarding)', async () => {
+    let release: () => void = () => undefined;
+    mockStartTor.mockImplementationOnce(
+      () => new Promise((r) => { release = () => r({ state: 'on', socksPort: 9050 }); }),
+    );
+    const p = relayFetch(`${ONION}/identity/challenge`);
+    await Promise.resolve();
+    expect(mockTor.request).not.toHaveBeenCalled();
+    release();
+    await p;
+    expect(mockStartTor).toHaveBeenCalledTimes(1);
+    expect(mockTor.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('a bootstrap failure rejects — never a clearnet retry', async () => {
+    const fetchSpy = jest.fn();
+    global.fetch = fetchSpy as unknown as typeof fetch;
+    mockStartTor.mockRejectedValueOnce(new Error('[tor] bootstrap timed out'));
+    await expect(relayFetch(`${ONION}/prekeys`)).rejects.toThrow(/bootstrap/);
+    expect(mockTor.request).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('a clearnet URL is the global fetch, untouched', async () => {
     const fake = { ok: true, status: 200 };
     const fetchSpy = jest.fn(async () => fake);
@@ -63,5 +88,26 @@ describe('relayHttp (F5)', () => {
     expect(fetchSpy).toHaveBeenCalledWith('https://relay.example/identity', init);
     expect(res).toBe(fake);
     expect(mockTor.request).not.toHaveBeenCalled();
+  });
+
+  it('production build: a clearnet URL rides Tor too (Tor always-on); a loopback dev relay does not', async () => {
+    const g = globalThis as { __DEV__?: boolean };
+    const dev = g.__DEV__;
+    g.__DEV__ = false;
+    try {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as unknown as typeof fetch;
+      await relayFetch('https://relay.example/identity/challenge');
+      expect(mockTor.request).toHaveBeenCalledWith('https://relay.example/identity/challenge', 'GET', '', {});
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      const fake = { ok: true, status: 200 };
+      global.fetch = jest.fn(async () => fake) as unknown as typeof fetch;
+      mockTor.request.mockClear();
+      expect(await relayFetch('http://10.0.2.2:3001/health')).toBe(fake);
+      expect(mockTor.request).not.toHaveBeenCalled();
+    } finally {
+      g.__DEV__ = dev;
+    }
   });
 });

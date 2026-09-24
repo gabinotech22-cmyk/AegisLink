@@ -127,7 +127,7 @@ jest.mock('../../store/identity', () => ({
 // --- store/preferences -------------------------------------------------------
 jest.mock('../../store/preferences', () => ({
   __esModule: true,
-  usePreferences: { getState: () => ({ routeViaTor: false, onionRouting: false }) },
+  usePreferences: { getState: () => ({ onionRouting: false }) },
 }));
 
 // --- store/connection ---------------------------------------------------------

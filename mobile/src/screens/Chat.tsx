@@ -652,8 +652,10 @@ export function ChatScreen({ contact: initialContact, onBack, onContactDetail, o
 
     try {
       // Enforce a 10 MB size guard by checking after download
-      const downloadResult = await FS.downloadAsync(url, localPath);
-      if (!downloadResult.uri) throw new Error('GIF download failed');
+      // Over Tor (Tor always-on): the GIF CDN never sees the device IP.
+      const { torDownloadTo } = require('../net/torMedia') as typeof import('../net/torMedia');
+      if ((await torDownloadTo(url, localPath)) !== 200) throw new Error('GIF download failed');
+      const downloadResult = { uri: localPath };
 
       const info = await FS.getInfoAsync(downloadResult.uri);
       const fileSize = (info as { size?: number }).size ?? 0;

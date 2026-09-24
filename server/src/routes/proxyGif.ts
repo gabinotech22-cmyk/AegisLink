@@ -29,20 +29,17 @@
  */
 
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+import { relayLimiter } from '../http/relayLimiter.js';
 
 const router = Router();
 
 // ── Rate limiter — 30 req/min per IP, in-memory only ─────────────────────────
-const gifLimiter = rateLimit({
+const gifLimiter = relayLimiter({
   windowMs: 60 * 1000,
   max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
-  },
+  onion: { kind: 'shared' },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 60_000 },
 });
 
 // ── Input schema ──────────────────────────────────────────────────────────────
