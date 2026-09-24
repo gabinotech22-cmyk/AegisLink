@@ -3,7 +3,6 @@
  "source": "https://github.com/jedisct1/libsodium/releases/download/1.0.22-RELEASE/libsodium-1.0.22.tar.gz",
  "tarballSha256": "adbdd8f16149e81ac6078a03aca6fc03b592b89ef7b5ed83841c086191be3349",
  "minisignPublicKey": "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3",
- "minisignTrustedComment": "timestamp:1775774745\tfile:libsodium-1.0.22.tar.gz\thashed",
  "files": {
   "LICENSE": "508a76d186356c0dd807a670ef510964f8724557024796a2c426c6c0e19ab683",
   "src/libsodium/crypto_aead/aegis128l/aead_aegis128l.c": "96b73322fa01edd4c0eb8eb6105a49bf1603154f998745c49a4b9aa2e56ea092",

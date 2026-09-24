@@ -7,6 +7,7 @@
  *   output buffer of <n> bytes).
  * Output, one line per call:  <return code> <hex of each output buffer>...
  */
+#define _POSIX_C_SOURCE 200809L /* strtok_r */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,9 +86,10 @@ int main(void) {
   while (fgets(line, sizeof line, stdin)) {
     arg_t args[MAX_ARGS];
     int n = 0, rc, i;
-    char *op = strtok(line, " \r\n"), *tok;
+    char *save = NULL;
+    char *op = strtok_r(line, " \r\n", &save), *tok;
     if (!op) continue;
-    while ((tok = strtok(NULL, " \r\n")) != NULL) {
+    while ((tok = strtok_r(NULL, " \r\n", &save)) != NULL) {
       if (n == MAX_ARGS || parse_arg(tok, &args[n]) != 0) return 2;
       n++;
     }

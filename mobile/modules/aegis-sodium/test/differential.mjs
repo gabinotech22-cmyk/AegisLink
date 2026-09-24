@@ -215,4 +215,4 @@ if (failures.length) {
   console.error(`aegis-sodium differential: ${failures.length}/${cases.length} FAILED\n  ${failures.slice(0, 20).join('\n  ')}`);
   process.exit(1);
 }
-console.log(`aegis-sodium differential: ${cases.length} checks passed (C core + vendored libsodium vs TweetNaCl/@noble).`);
+process.stdout.write(`aegis-sodium differential: ${cases.length} checks passed (C core + vendored libsodium vs TweetNaCl/@noble).\n`);

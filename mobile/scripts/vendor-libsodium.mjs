@@ -83,13 +83,13 @@ function listFiles(dir, base = dir) {
 async function buildTree(outDir) {
   const tarball = await download(`${BASE_URL}/${TARBALL}`);
   const minisig = await download(`${BASE_URL}/${TARBALL}.minisig`);
-  const trusted = verifyMinisign(tarball, minisig);
+  verifyMinisign(tarball, minisig);
   if (sha256(tarball) !== TARBALL_SHA256) throw new Error(`tarball sha256 mismatch: ${sha256(tarball)}`);
 
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'aegis-libsodium-'));
   try {
-    fs.writeFileSync(path.join(work, TARBALL), tarball);
-    execFileSync('tar', ['-xzf', TARBALL], { cwd: work });
+    // Only the verified bytes are extracted (piped, never written as-is to disk first).
+    execFileSync('tar', ['-xzf', '-'], { cwd: work, input: tarball });
     const root = path.join(work, `libsodium-${VERSION}`);
     fs.rmSync(outDir, { recursive: true, force: true });
     fs.mkdirSync(outDir, { recursive: true });
@@ -114,7 +114,6 @@ async function buildTree(outDir) {
     source: `${BASE_URL}/${TARBALL}`,
     tarballSha256: TARBALL_SHA256,
     minisignPublicKey: MINISIGN_PUBKEY,
-    minisignTrustedComment: trusted,
     files,
   };
 }
