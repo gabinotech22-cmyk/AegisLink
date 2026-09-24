@@ -77,6 +77,7 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 | Server tests | `__tests__/workSenderKeyTrust.relay.test.ts`, `workspace.auth.test.ts`, partes de `ola8.relay.test.ts` |
 | Mobile | iconos `assets/icon-work.*`, `android-icon-assets/work/**`, strings i18n `work.*` |
 | Pagos (muerto) | `mobile/src/_unused/screens/Subscription.tsx`, `mobile/src/_unused/web3/payments/LightningPayment.ts` |
+| Pagos (**aún vivo**, pendiente) | `server/src/routes/web3.ts` (`/subscription/invoice`, `/subscription/activate`), tablas `lightning_invoices`/`subscriptions`, `desktop/src/renderer/screens/Subscription.tsx` (accesible desde Perfil). Factura simulada imposible de pagar + escritura sin auth/límite: ver `AUDIT-2026-09-24-WEB3-DID.md` P-1 |
 
 **Hecho (PR `chore/extract-work`):**
 - [x] **Preservado en historia git** (`976c09f`); sin branch de archivo.

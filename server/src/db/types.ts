@@ -112,13 +112,6 @@ export interface LinkedDeviceRow {
   revoked: number;
 }
 
-export interface RevokedDIDHashRow {
-  did_hash: string;
-  revoked_at: number;
-  signature_b64: string;
-  signing_pub_key: string;
-}
-
 export interface LightningInvoiceRow {
   payment_hash: string;
   bolt11: string;

@@ -6,6 +6,8 @@
  *  2.  Empty state when the relay returns no linked devices
  *  3.  Renders linked devices returned by the relay
  *  4.  Revoke is confirm-gated; confirming emits device:revoke and drops the row
+ *  4b. Revoking sends no web3 request (the old pseudo-DID `did:aegis:<deviceId>`
+ *      revocation — a linked device has no DID; web3 audit 2026-09-24)
  *  5.  Back button invokes onBack()
  */
 
@@ -66,10 +68,8 @@ jest.mock('../../utils/secureStore', () => ({
   ss: { get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(undefined) },
 }));
 
-// ── web3 revocation (best-effort) ───────────────────────────────────────────
-jest.mock('../../web3/deviceRevocation/RevokeDevice', () => ({
-  buildRevocationPayload: jest.fn().mockResolvedValue({ did: 'did:aegis:x' }),
-}));
+// ── relay HTTP (must stay untouched by a device revoke) ─────────────────────
+jest.mock('../../net/relayHttp', () => ({ relayFetch: jest.fn() }));
 
 jest.mock('../../config', () => ({ SERVER_URL: 'http://relay.test' }));
 
@@ -141,6 +141,21 @@ describe('DevicesScreen', () => {
       expect(mockEmit).toHaveBeenCalledWith('device:revoke', { deviceId: 'd1' }, expect.any(Function));
     });
     await waitFor(() => expect(queryByText('MacBook Pro')).toBeNull());
+  });
+
+  it('revoking a device sends no web3 DID revocation', async () => {
+    const { relayFetch } = jest.requireMock('../../net/relayHttp') as { relayFetch: jest.Mock };
+    mockDeviceList = [{ id: 'd1', name: 'MacBook Pro', platform: 'desktop', linkedAt: 1_700_000_000_000 }];
+    const alertSpy = themedAlert as jest.Mock;
+    const { findByText, getByText, queryByText } = render(<DevicesScreen onBack={jest.fn()} />);
+    await findByText('MacBook Pro');
+
+    fireEvent.press(getByText('Revoke'));
+    const buttons = alertSpy.mock.calls.at(-1)?.[2] as Array<{ style?: string; onPress?: () => void }>;
+    buttons.find((b) => b.style === 'destructive')?.onPress?.();
+
+    await waitFor(() => expect(queryByText('MacBook Pro')).toBeNull());
+    expect(relayFetch).not.toHaveBeenCalled();
   });
 
   it('calls onBack() when the back button is pressed', () => {

@@ -55,7 +55,7 @@ import { USE_PG, dbRun, dbAll, dbGet, pgPopOpk } from './driver';
 export * from './types';
 import {
   IdentityRow, MessageRow, PushTokenRow, VoipTokenRow, ApnsTokenRow, SignedPreKeyRow, OneTimePreKeyRow,
-  PqSignedPreKeyRow, LinkedDeviceRow, RevokedDIDHashRow, LightningInvoiceRow,
+  PqSignedPreKeyRow, LinkedDeviceRow, LightningInvoiceRow,
   SubscriptionRow, MESSAGE_TTL_MS, MAX_DELIVERY_ATTEMPTS,
 } from './types';
 
@@ -856,18 +856,19 @@ export const devicesRepo = {
 // ── web3Repo ──────────────────────────────────────────────────────────────────
 
 export const web3Repo = {
-  async insertRevocation(row: RevokedDIDHashRow): Promise<void> {
+  /**
+   * Mark a DID deactivated. Only SHA-256(DID) is kept — no key, signature or
+   * timestamp — and the ONLY caller is the owner-signed account deletion
+   * (routes/identity.ts), so every row is bound to proof of key possession.
+   */
+  async insertRevocation(didHash: string): Promise<void> {
     if (USE_PG) {
       await dbRun(
-        `INSERT INTO revoked_did_hashes (did_hash, revoked_at, signature_b64, signing_pub_key) VALUES (?, ?, ?, ?)
-         ON CONFLICT(did_hash) DO NOTHING`,
-        [row.did_hash, row.revoked_at, row.signature_b64, row.signing_pub_key]
+        `INSERT INTO revoked_did_hashes (did_hash) VALUES (?) ON CONFLICT(did_hash) DO NOTHING`,
+        [didHash]
       );
     } else {
-      await dbRun(
-        `INSERT OR IGNORE INTO revoked_did_hashes (did_hash, revoked_at, signature_b64, signing_pub_key) VALUES (?, ?, ?, ?)`,
-        [row.did_hash, row.revoked_at, row.signature_b64, row.signing_pub_key]
-      );
+      await dbRun(`INSERT OR IGNORE INTO revoked_did_hashes (did_hash) VALUES (?)`, [didHash]);
     }
   },
   async isRevoked(didHash: string): Promise<boolean> {

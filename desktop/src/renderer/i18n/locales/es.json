@@ -1413,7 +1413,7 @@
     "exportPhotosVideos": "Exportar fotos/vídeos",
     "generateExportFile": "Generar archivo de exportación",
     "generating": "Generando…",
-    "deletingYourAccountWipes": "Eliminar tu cuenta borra tus claves locales y envía una señal de revocación a todos los relays. Los mensajes que tus contactos ya recibieron permanecen en sus dispositivos, pero nadie podrá volver a descifrar mensajes dirigidos a ti."
+    "deletingYourAccountWipes": "Eliminar tu cuenta borra tus claves locales, elimina tu identidad de tu relay y marca allí tu clave de identidad como revocada. Los mensajes que tus contactos ya recibieron permanecen en sus dispositivos, pero nadie podrá volver a descifrar mensajes dirigidos a ti."
   },
   "call": {
     "connecting": "Conectando…",

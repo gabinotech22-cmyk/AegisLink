@@ -1413,7 +1413,7 @@
     "exportPhotosVideos": "Export photos/videos",
     "generateExportFile": "Generate export file",
     "generating": "Generating…",
-    "deletingYourAccountWipes": "Deleting your account wipes your local keys and sends a revocation signal to all relays. Messages already received by your contacts remain on their devices — but no one will ever be able to decrypt messages to you again."
+    "deletingYourAccountWipes": "Deleting your account wipes your local keys, erases your identity from your relay and marks your identity key as revoked there. Messages already received by your contacts remain on their devices — but no one will ever be able to decrypt messages to you again."
   },
   "call": {
     "connecting": "Connecting…",
