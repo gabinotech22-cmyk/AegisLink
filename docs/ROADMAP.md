@@ -123,12 +123,21 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
         precompilados: rompe builds reproducibles y F-Droid) → módulo JSI propio. Desktop:
         `sodium-native` en el proceso main, renderer vía `ipcRenderer.sendSync` (0,20 ms/X25519).
         Server: `sodium-native` no carga en Alpine (solo glibc) → imagen Debian slim.
-  - [x] **Costura única** (PR A): todo el código de producto obtiene NaCl/hash/HMAC/HKDF solo de
+  - [x] **Costura única** (#528): todo el código de producto obtiene NaCl/hash/HMAC/HKDF solo de
         `crypto/sodium` (mobile, desktop renderer y main, server), con guarda
         `crypto-imports.test.ts` y fixture dorado pre-libsodium `f1-golden.json` (`f1-golden.test.ts`
         en las 3 plataformas).
-  - [ ] **Cambio de backend** (PR B): módulo `aegis-sodium` (mobile), `sodium-native` en main
-        (desktop) y en el relay, test diferencial, Dockerfile Debian slim.
+  - [x] **B1 — relay y desktop en libsodium nativo**: `sodium-native` 5.1.0 (libsodium 1.0.21) en el
+        relay (`server/src/crypto/sodium/native.ts`) y en el proceso main de desktop (gemelo byte a
+        byte); el renderer lo usa por IPC síncrona (`desktop/src/main/ipc/sodium.ts`, tabla validada en
+        `ops.ts`), adjuntos por IPC asíncrona; HMAC/HKDF en `node:crypto` (SHA-2 sin clave sigue en el
+        renderer: el PoW de registro son ~260k hashes). Pruebas:
+        `sodium-native.differential.test.ts` (server y desktop), `sodium-ops.test.ts`,
+        `sodium-facade.test.ts`, `f1-golden.test.ts`, firma universal de orden pequeño rechazada
+        (`ed25519.test.ts`). Relay en imagen Debian slim (uid/gid 100/101 conservados) y `deploy.yml`
+        aborta sin reiniciar si `sodium-native` no carga en el host. `tweetnacl` pasa a devDependency.
+  - [ ] **B2 — mobile**: módulo JSI `aegis-sodium` que compila libsodium desde fuente verificada;
+        los 12 tests que hacen `jest.mock('tweetnacl')` pasan a mockear `crypto/sodium`.
 - [ ] **F-1b — claves en memoria nativa (handles opacos)**: tras F-1, las claves privadas viven solo
       en memoria nativa (módulo en mobile, proceso main en desktop) y JS recibe un handle, como
       libsignal. Un XSS en el renderer ya no podría leer claves. F-1 cierra el timing del JIT pero no

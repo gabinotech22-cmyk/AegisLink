@@ -6,6 +6,7 @@ import { registerSecureStorageHandlers } from './ipc/secureStorage'
 import { registerDatabaseHandlers, openMainDbIfUnwrapped, closeDatabase } from './ipc/database'
 import { registerNotificationHandlers } from './ipc/notifications'
 import { registerWindowHandlers } from './ipc/window'
+import { registerSodiumHandlers } from './ipc/sodium'
 import { startTor, stopTor, getTorStatus } from './tor/torProcess'
 import { registerTorSioHandlers, disconnectAllTorSockets } from './tor/sioBridge'
 
@@ -98,6 +99,7 @@ function createWindow(): void {
 }
 
 // Register all IPC handlers before any window is created
+registerSodiumHandlers()
 registerSecureStorageHandlers()
 registerDatabaseHandlers()
 registerNotificationHandlers()

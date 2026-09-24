@@ -27,7 +27,7 @@
     "react-i18next": "^17.0.11",
     "socket.io-client": "^4.7.5",
     "socks-proxy-agent": "^8.0.5",
-    "tweetnacl": "^1.0.3",
+    "sodium-native": "5.1.0",
     "tweetnacl-util": "^0.15.1",
     "zustand": "^5.0.14"
   },
@@ -41,7 +41,12 @@
       "out/preload/**",
       "out/renderer/**",
       "assets/**",
-      "package.json"
+      "package.json",
+      "!**/node_modules/sodium-native/prebuilds/{android,ios}-*/**",
+      "!**/node_modules/sodium-native/prebuilds/**/*.bare"
+    ],
+    "asarUnpack": [
+      "**/node_modules/sodium-native/prebuilds/**"
     ],
     "extraResources": [
       {
@@ -99,6 +104,7 @@
     "electron": "^42.7.1",
     "electron-builder": "^26.0.16",
     "electron-vite": "^5.0.0",
+    "tweetnacl": "^1.0.3",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
     "vitest": "^4.1.10"

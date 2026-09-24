@@ -6,6 +6,13 @@ contextBridge.exposeInMainWorld('electron', electronAPI)
 
 // Expose AegisLink IPC surface — no raw ipcRenderer access in renderer
 contextBridge.exposeInMainWorld('aegis', {
+  // ── F-1: native libsodium in the main process (ipc/sodium.ts). `call` is
+  // synchronous on purpose: the renderer's ratchet/X3DH API stays synchronous.
+  sodium: {
+    call: (op: string, args: unknown[]): unknown => ipcRenderer.sendSync('sodium:call', op, args),
+    callAsync: (op: string, args: unknown[]): Promise<unknown> =>
+      ipcRenderer.invoke('sodium:call-async', op, args)
+  },
   secureStorage: {
     set: (key: string, value: string): Promise<void> =>
       ipcRenderer.invoke('secureStorage:set', key, value),

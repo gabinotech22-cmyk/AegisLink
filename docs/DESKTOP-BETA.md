@@ -40,6 +40,17 @@ Y el paso `@electron/rebuild` de electron-builder **tampoco es fiable** (report�
 dejando el binario de Node): por eso `npm run package` fuerza el ABI explícitamente con
 `scripts/native-abi.mjs` (prebuild-install oficial, sin compilador).
 
+### libsodium nativo (F-1)
+
+El cripto del renderer corre en **libsodium nativo** (`sodium-native`) dentro del proceso
+**main**: el renderer está en sandbox y no puede cargar addons, así que llama por IPC síncrona
+(`window.aegis.sodium` → `src/main/ipc/sodium.ts`). `sodium-native` es **N-API**: el mismo binario
+vale para Node (tests) y Electron, así que **no** pasa por `native-abi.mjs`. Empaquetado:
+`asarUnpack` saca `node_modules/sodium-native/prebuilds/**` del `.asar` (un `.node` no se carga desde
+dentro) y `files` excluye los prebuilds de Android/iOS y los `.bare`. Verificado con el binario
+empaquetado: el preload expone el puente, el main carga el addon desde `app.asar.unpacked` y la
+clave pública derivada coincide byte a byte con TweetNaCl.
+
 ## Tor — siempre activo, sin toggle (✅ HECHO, rama `feat/desktop-tor`)
 
 Paridad con el Tor embebido de mobile (`docs/FASE4-TOR-EMBEDDED-IMPL.md`), pero

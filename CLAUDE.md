@@ -36,7 +36,7 @@ del usuario, UX que rompe el producto.
 
 ## Stack técnico global
 - **Mobile**: Expo SDK 54 + React Native + TypeScript
-- **Crypto**: TweetNaCl, @noble/hashes, expo-secure-store, expo-sqlite
+- **Crypto**: libsodium nativo (`sodium-native`) en relay y desktop; TweetNaCl + @noble/hashes en mobile hasta F-1 B2 — siempre tras la fachada `crypto/sodium`; expo-secure-store, expo-sqlite
 - **Backend**: Relay propio (Node.js/Bun) — sin Firebase, sin Supabase
 - **Notificaciones**: FCM/APNs solo para wake-up, payload siempre cifrado
 - **TURN**: coturn self-hosted para llamadas WebRTC
