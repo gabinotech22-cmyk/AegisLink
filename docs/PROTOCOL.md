@@ -141,7 +141,9 @@ fixture generated with the JS primitives (`f1-golden.json`) must keep replaying
 byte-for-byte after the swap. Argon2id/PBKDF2 and ML-KEM-768 stay on `@noble`
 for now. ML-KEM runs only on the clients (`@noble/post-quantum` 0.7.1 on mobile
 and desktop); the relay never encapsulates or decapsulates — it only checks the
-PQSPK signature — and has no PQ dependency. The library moves on both clients
+PQSPK signature — so its production image carries no PQ code. It stays a server
+`devDependency` only because the e2e test drives the real mobile client against
+the relay. The library moves on both clients
 together and must keep replaying `f1-golden`, whose hybrid ratchet sessions were
 persisted with 0.6.1; 0.6.1 ↔ 0.7.1 was also checked for identical keygen and
 deterministic encapsulation, mutual decapsulation and implicit rejection. Tracked in
