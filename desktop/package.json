@@ -18,7 +18,7 @@
   "dependencies": {
     "@noble/hashes": "^2.2.0",
     "@noble/post-quantum": "^0.7.1",
-    "better-sqlite3-multiple-ciphers": "^12.11.1",
+    "better-sqlite3-multiple-ciphers": "^13.0.3",
     "i18next": "^26.3.6",
     "jsqr": "^1.4.0",
     "qrcode": "^1.5.4",
