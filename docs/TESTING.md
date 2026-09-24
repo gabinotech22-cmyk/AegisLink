@@ -294,8 +294,29 @@ es solo `.onion`) y hace `bash -n` de `up.sh`/`print-onion.sh`/
 
 - `crypto-imports.test.ts` (mobile `src/crypto/__tests__`, desktop `src/renderer/crypto/__tests__`,
   server `src/__tests__`): falla si código de producto importa `tweetnacl` o `@noble/hashes`
-  hmac/hkdf/sha2 fuera de la fachada `crypto/sodium` (excepción: PBKDF2 en `backup.ts`). Así el
-  cambio a libsodium nativo es un cambio en un solo directorio por plataforma.
+  hmac/hkdf/sha2 fuera de la fachada `crypto/sodium` (excepción: PBKDF2 en `backup.ts`). En mobile
+  además: `tweetnacl` prohibido en todo el código de producto (fachada incluida) y solo la fachada
+  puede importar el módulo nativo `modules/aegis-sodium`.
+- **Mobile en Jest (F-1 B2)**: el módulo nativo no carga en Node. `moduleNameMapper` (en
+  `mobile/jest.config.js` y `server/jest.config.cjs`, por el e2e que usa el cripto de mobile) lo
+  sustituye por `modules/aegis-sodium/jest/nodeBackend.ts`: **libsodium real** (`sodium-native`,
+  devDependency) con el mismo contrato que el núcleo C (validación de longitudes y códigos de
+  retorno). Los tests que solo necesitan que las llamadas "funcionen" mockean `nacl` de
+  `crypto/sodium` (`jest.mock('<ruta>/crypto/sodium', () => ({ ...jest.requireActual(...), nacl: {...} }))`),
+  nunca `tweetnacl`. `sodium-facade.test.ts` fija la fachada contra TweetNaCl/@noble (bytes, errores,
+  semántica estricta) y que un código de retorno nativo inesperado lanza.
+- **Job CI `aegis-sodium-native`**: compila para host **las mismas fuentes** que la app (núcleo C +
+  libsodium vendorizado, `modules/aegis-sodium/cmake/libsodium.cmake`, compartido con Android) y
+  corre `modules/aegis-sodium/test/differential.mjs`: bytes idénticos a TweetNaCl/@noble en entradas
+  aleatorias y vectores RFC 7748/8032/4231/5869, `EBADLEN` en toda longitud errónea, `NULL` solo con
+  longitud 0, fallo cerrado con puntos de orden bajo y la firma universal de orden pequeño. Dos
+  pasadas: `-O2` y ASan+UBSan. En local:
+  `cmake -S modules/aegis-sodium/test -B build/aegis-sodium -G Ninja && ninja -C build/aegis-sodium && node modules/aegis-sodium/test/differential.mjs build/aegis-sodium/aegis_sodium_cli`
+  (desde `mobile/`). Android arm64 lo compila el job de build smoke.
+- `vendor-manifest.test.ts` (`mobile/modules/aegis-sodium/__tests__`): cada fichero de
+  `vendor/libsodium` coincide con el manifiesto (SHA-256) que escribió `scripts/vendor-libsodium.mjs`
+  tras verificar la firma minisign del release; nada añadido ni quitado. Re-verificar contra la red:
+  `node scripts/vendor-libsodium.mjs --check`.
 - `f1-golden.test.ts` (las 3 plataformas): reproduce `mobile/src/crypto/__tests__/fixtures/f1-golden.json`,
   generado **una vez** con TweetNaCl/@noble: vectores de cada primitiva, un sobre sealed-sender y
   sesiones de ratchet persistidas (clásica e híbrida PQ, con un mensaje fuera de orden). Si falla,

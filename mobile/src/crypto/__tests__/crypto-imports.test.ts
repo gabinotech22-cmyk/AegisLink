@@ -1,7 +1,9 @@
 /**
  * F-1 seam guard: production code gets NaCl and hash/MAC/KDF primitives ONLY
- * from `src/crypto/sodium`, so swapping the implementation for a native
- * libsodium binding is a change to that one directory.
+ * from `src/crypto/sodium`, which runs them on native libsodium
+ * (`modules/aegis-sodium`, F-1 B2). TweetNaCl is gone from production code
+ * entirely (a devDependency, kept as the test oracle), and only the facade may
+ * touch the native module.
  *
  * Allowed exceptions:
  *   - `tweetnacl-util` (base64/utf8 codecs, no key material).
@@ -19,6 +21,7 @@ const SRC_ROOT = path.join(MOBILE_ROOT, 'src');
 const FACADE_DIR = path.join(SRC_ROOT, 'crypto', 'sodium') + path.sep;
 
 const TWEETNACL = /(?:from\s+'tweetnacl'|require\('tweetnacl'\))/;
+const NATIVE_MODULE = /(?:from\s+|require\()'[^']*modules\/aegis-sodium[^']*'/;
 const NOBLE_MAC_KDF = /from\s+'@noble\/hashes\/(?:hmac|hkdf)(?:\.js)?'/;
 const NOBLE_HASH = /from\s+'@noble\/hashes\/(?:sha2|sha256|sha512)(?:\.js)?'/;
 const NOBLE_HASH_ALLOWED = [path.join('crypto', 'backup.ts')];
@@ -42,9 +45,14 @@ describe('crypto primitives come only from src/crypto/sodium', () => {
     expect(files.length).toBeGreaterThan(100);
   });
 
-  it('no direct tweetnacl import outside the facade', () => {
+  it('no tweetnacl import anywhere in production code, the facade included', () => {
+    const offenders = files.filter((p) => TWEETNACL.test(fs.readFileSync(p, 'utf8')));
+    expect(offenders).toEqual([]);
+  });
+
+  it('only the facade reaches the native libsodium module', () => {
     const offenders = files.filter(
-      (p) => !p.startsWith(FACADE_DIR) && TWEETNACL.test(fs.readFileSync(p, 'utf8')),
+      (p) => !p.startsWith(FACADE_DIR) && NATIVE_MODULE.test(fs.readFileSync(p, 'utf8')),
     );
     expect(offenders).toEqual([]);
   });

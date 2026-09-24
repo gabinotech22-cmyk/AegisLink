@@ -23,12 +23,17 @@ jest.mock('../../config', () => ({
 
 // ── tweetnacl ─────────────────────────────────────────────────────────────────
 // Deterministic bytes for key/nonce — makes the returned blob URI predictable
-jest.mock('tweetnacl', () => ({
-  randomBytes: jest.fn((n: number) => new Uint8Array(n).fill(1)),
-  secretbox: Object.assign(
-    jest.fn((_m: Uint8Array) => new Uint8Array(8).fill(2)),
-    { keyLength: 32, nonceLength: 24 },
-  ),
+// The crypto facade (native libsodium) with a stubbed `nacl`: these tests
+// only need the calls to succeed, not real cryptography.
+jest.mock('../sodium', () => ({
+  ...jest.requireActual('../sodium'),
+  nacl: {
+    randomBytes: jest.fn((n: number) => new Uint8Array(n).fill(1)),
+    secretbox: Object.assign(
+      jest.fn((_m: Uint8Array) => new Uint8Array(8).fill(2)),
+      { keyLength: 32, nonceLength: 24 },
+    ),
+  },
 }));
 
 jest.mock('tweetnacl-util', () => ({

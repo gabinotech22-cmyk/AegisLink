@@ -177,29 +177,34 @@ jest.mock('expo-secure-store', () => ({
 }));
 
 // --- tweetnacl ---------------------------------------------------------------
-jest.mock('tweetnacl', () => ({
-  randomBytes: jest.fn((n: number) => new Uint8Array(n)),
-  box: Object.assign(jest.fn().mockReturnValue(new Uint8Array(32)), {
-    open: jest.fn().mockReturnValue(null),
-    publicKeyLength: 32,
-    secretKeyLength: 32,
-    nonceLength: 24,
-  }),
-  secretbox: Object.assign(jest.fn().mockReturnValue(new Uint8Array(8)), {
-    keyLength: 32,
-    nonceLength: 24,
-    open: jest.fn().mockReturnValue(null),
-  }),
-  sign: Object.assign(jest.fn(), {
-    detached: Object.assign(jest.fn().mockReturnValue(new Uint8Array(64)), {
-      verify: jest.fn().mockReturnValue(true),
+// The crypto facade (native libsodium) with a stubbed `nacl`: these tests
+// only need the calls to succeed, not real cryptography.
+jest.mock('../../crypto/sodium', () => ({
+  ...jest.requireActual('../../crypto/sodium'),
+  nacl: {
+    randomBytes: jest.fn((n: number) => new Uint8Array(n)),
+    box: Object.assign(jest.fn().mockReturnValue(new Uint8Array(32)), {
+      open: jest.fn().mockReturnValue(null),
+      publicKeyLength: 32,
+      secretKeyLength: 32,
+      nonceLength: 24,
     }),
-    signatureLength: 64,
-    publicKeyLength: 32,
-    secretKeyLength: 64,
-  }),
-  scalarMult: {
-    base: jest.fn().mockReturnValue(new Uint8Array(32)),
+    secretbox: Object.assign(jest.fn().mockReturnValue(new Uint8Array(8)), {
+      keyLength: 32,
+      nonceLength: 24,
+      open: jest.fn().mockReturnValue(null),
+    }),
+    sign: Object.assign(jest.fn(), {
+      detached: Object.assign(jest.fn().mockReturnValue(new Uint8Array(64)), {
+        verify: jest.fn().mockReturnValue(true),
+      }),
+      signatureLength: 64,
+      publicKeyLength: 32,
+      secretKeyLength: 64,
+    }),
+    scalarMult: {
+      base: jest.fn().mockReturnValue(new Uint8Array(32)),
+    },
   },
 }));
 

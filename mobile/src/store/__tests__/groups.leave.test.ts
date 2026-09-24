@@ -33,7 +33,13 @@ jest.mock('../messages', () => ({ __esModule: true, useMessages: { getState: () 
 const mockPrefSet = jest.fn().mockResolvedValue(undefined);
 const mockPrefs = { leftGroupIds: [] as string[], duressActive: false, set: (...a: unknown[]) => mockPrefSet(...a) };
 jest.mock('../preferences', () => ({ __esModule: true, usePreferences: { getState: () => mockPrefs } }));
-jest.mock('tweetnacl', () => ({ sign: { detached: jest.fn().mockReturnValue(new Uint8Array(64)) } }));
+// The crypto facade (native libsodium) with a stubbed `nacl`: these tests
+// only need the calls to succeed, not real cryptography.
+jest.mock('../../crypto/sodium', () => ({
+  ...jest.requireActual('../../crypto/sodium'),
+  nacl: {   sign: { detached: jest.fn().mockReturnValue(new Uint8Array(64)) }
+  },
+}));
 jest.mock('tweetnacl-util', () => ({ encodeBase64: jest.fn().mockReturnValue('sig=='), decodeBase64: jest.fn().mockReturnValue(new Uint8Array(32)) }));
 
 import { useGroups } from '../groups';

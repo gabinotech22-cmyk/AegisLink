@@ -3,25 +3,35 @@
  *
  * Production code never imports `tweetnacl` or the `@noble/hashes` MAC/KDF/hash
  * modules directly — it imports `nacl` and the hash helpers from here
- * (enforced by `../__tests__/crypto-imports.test.ts`). That makes this file the
- * one seam where the implementation is swapped for a native libsodium binding
- * without touching the protocol code: libsodium's crypto_box / crypto_secretbox /
- * crypto_scalarmult / crypto_sign are byte-compatible with NaCl, so sessions,
- * ratchet state, backups and the wire format stay unchanged.
+ * (enforced by `../__tests__/crypto-imports.test.ts`).
  *
- * `nacl` deliberately exposes only the subset of the TweetNaCl API the codebase
- * uses: that list is exactly what the native backend has to provide.
+ * Backend: NATIVE libsodium, compiled into the app from the vendored sources
+ * (`modules/aegis-sodium`, F-1 B2) and called synchronously over JSI. Every
+ * KEYED primitive runs there: NaCl box/secretbox, X25519, Ed25519, HMAC-SHA256,
+ * HKDF-SHA256, constant-time comparison and the CSPRNG. libsodium's
+ * crypto_box / crypto_secretbox / crypto_scalarmult / crypto_sign are
+ * byte-compatible with the TweetNaCl this replaced (pinned by `f1-golden.test.ts`),
+ * so sessions, ratchet state, backups and the wire format are unchanged.
  *
- * Out of scope here (stay on @noble for now, see docs/ROADMAP.md): Argon2id /
- * PBKDF2 (the backup format pins a 32-byte salt that crypto_pwhash cannot take)
- * and ML-KEM-768.
+ * This wrapper keeps TweetNaCl's contract at the edges, so callers see no
+ * change: wrong-length keys/nonces/signatures THROW with TweetNaCl's messages
+ * in the same check order, a non-Uint8Array argument throws
+ * `TypeError('unexpected type, use Uint8Array')`, and `open` returns null on a
+ * bad MAC or a too-short box. Deliberate, stricter differences (libsodium's,
+ * kept — fail closed): `scalarMult` / `box.before` / `box` THROW on a low-order
+ * public key, and Ed25519 verification rejects small-order public keys.
  *
- * Same file, same API: `desktop/src/renderer/crypto/sodium/index.ts`.
+ * Unkeyed SHA-256/512 stay on @noble (no secret-dependent branches or table
+ * lookups to leak through timing), as on desktop. Out of scope (stay on @noble,
+ * see docs/ROADMAP.md): Argon2id / PBKDF2 and ML-KEM-768.
+ *
+ * If the native module is missing from the binary (Expo Go, a stale dev
+ * client), importing this file THROWS: there is no JavaScript fallback.
+ *
+ * Same API: `desktop/src/renderer/crypto/sodium/index.ts`.
  */
-import tweetnacl from 'tweetnacl';
 import { sha256 as nobleSha256, sha512 as nobleSha512 } from '@noble/hashes/sha2';
-import { hmac } from '@noble/hashes/hmac';
-import { hkdf } from '@noble/hashes/hkdf';
+import AegisSodium, { AEGIS_OK, AEGIS_EVERIFY, AEGIS_EFAIL } from '../../../modules/aegis-sodium';
 
 export interface BoxKeyPair {
   publicKey: Uint8Array;
@@ -78,9 +88,202 @@ export interface NaclPrimitives {
   };
 }
 
-export const nacl: NaclPrimitives = tweetnacl;
+const MAC = 16;
+const NONCE = 24;
+const KEY = 32;
+const SIGN_PUBLIC = 32;
+const SIGN_SECRET = 64;
+const SIGN_SEED = 32;
+const SIGNATURE = 64;
+const HKDF_MAX = 255 * 32;
 
-export { setRandomSource } from './random';
+if (AegisSodium.init() !== AEGIS_OK) {
+  throw new Error('aegis-sodium: libsodium failed to initialize');
+}
+
+/**
+ * A native call that must succeed. Every length was checked here first, so a
+ * non-OK code is a broken invariant (or a low-order point, handled by callers)
+ * — never silently ignored.
+ */
+function must(rc: number, what: string): void {
+  if (rc !== AEGIS_OK) throw new Error(`aegis-sodium: ${what} failed (${rc})`);
+}
+
+function checkArrayTypes(...args: unknown[]): void {
+  for (const a of args) {
+    if (!(a instanceof Uint8Array)) throw new TypeError('unexpected type, use Uint8Array');
+  }
+}
+
+function checkSecretboxLengths(key: Uint8Array, nonce: Uint8Array): void {
+  if (key.length !== KEY) throw new Error('bad key size');
+  if (nonce.length !== NONCE) throw new Error('bad nonce size');
+}
+
+function checkBoxLengths(publicKey: Uint8Array, secretKey: Uint8Array): void {
+  if (publicKey.length !== KEY) throw new Error('bad public key size');
+  if (secretKey.length !== KEY) throw new Error('bad secret key size');
+}
+
+function randomBytes(n: number): Uint8Array {
+  const out = new Uint8Array(n);
+  must(AegisSodium.randombytes(out), 'randombytes');
+  return out;
+}
+
+function verify(x: Uint8Array, y: Uint8Array): boolean {
+  checkArrayTypes(x, y);
+  if (x.length === 0 || y.length === 0 || x.length !== y.length) return false;
+  return AegisSodium.memcmp(x, y) === AEGIS_OK;
+}
+
+const box = Object.assign(
+  (msg: Uint8Array, nonce: Uint8Array, publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array => {
+    checkArrayTypes(msg, nonce, publicKey, secretKey);
+    checkBoxLengths(publicKey, secretKey);
+    if (nonce.length !== NONCE) throw new Error('bad nonce size');
+    const c = new Uint8Array(msg.length + MAC);
+    const rc = AegisSodium.boxEasy(c, msg, nonce, publicKey, secretKey);
+    if (rc === AEGIS_EFAIL) throw new Error('box: low-order public key');
+    must(rc, 'box');
+    return c;
+  },
+  {
+    before: (publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array => {
+      checkArrayTypes(publicKey, secretKey);
+      checkBoxLengths(publicKey, secretKey);
+      const k = new Uint8Array(KEY);
+      const rc = AegisSodium.boxBeforenm(k, publicKey, secretKey);
+      if (rc === AEGIS_EFAIL) throw new Error('scalarMult: low-order point (all-zero shared secret)');
+      must(rc, 'box.before');
+      return k;
+    },
+    open: (b: Uint8Array, nonce: Uint8Array, publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array | null => {
+      checkArrayTypes(b, nonce, publicKey, secretKey);
+      checkBoxLengths(publicKey, secretKey);
+      if (nonce.length !== NONCE) throw new Error('bad nonce size');
+      if (b.length < MAC) return null;
+      const m = new Uint8Array(b.length - MAC);
+      const rc = AegisSodium.boxOpenEasy(m, b, nonce, publicKey, secretKey);
+      if (rc === AEGIS_EVERIFY) return null;
+      must(rc, 'box.open');
+      return m;
+    },
+    keyPair: Object.assign(
+      (): BoxKeyPair => {
+        const publicKey = new Uint8Array(KEY);
+        const secretKey = new Uint8Array(KEY);
+        must(AegisSodium.boxKeypair(publicKey, secretKey), 'box.keyPair');
+        return { publicKey, secretKey };
+      },
+      {
+        fromSecretKey: (secretKey: Uint8Array): BoxKeyPair => {
+          checkArrayTypes(secretKey);
+          if (secretKey.length !== KEY) throw new Error('bad secret key size');
+          const publicKey = new Uint8Array(KEY);
+          must(AegisSodium.scalarmultBase(publicKey, secretKey), 'box.keyPair.fromSecretKey');
+          return { publicKey, secretKey: new Uint8Array(secretKey) };
+        },
+      },
+    ),
+    publicKeyLength: KEY,
+    secretKeyLength: KEY,
+    nonceLength: NONCE,
+    overheadLength: MAC,
+  },
+);
+
+const secretbox = Object.assign(
+  (msg: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array => {
+    checkArrayTypes(msg, nonce, key);
+    checkSecretboxLengths(key, nonce);
+    const c = new Uint8Array(msg.length + MAC);
+    must(AegisSodium.secretboxEasy(c, msg, nonce, key), 'secretbox');
+    return c;
+  },
+  {
+    open: (b: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array | null => {
+      checkArrayTypes(b, nonce, key);
+      checkSecretboxLengths(key, nonce);
+      if (b.length < MAC) return null;
+      const m = new Uint8Array(b.length - MAC);
+      const rc = AegisSodium.secretboxOpenEasy(m, b, nonce, key);
+      if (rc === AEGIS_EVERIFY) return null;
+      must(rc, 'secretbox.open');
+      return m;
+    },
+    keyLength: KEY,
+    nonceLength: NONCE,
+    overheadLength: MAC,
+  },
+);
+
+const scalarMult = Object.assign(
+  (n: Uint8Array, p: Uint8Array): Uint8Array => {
+    checkArrayTypes(n, p);
+    if (n.length !== KEY) throw new Error('bad n size');
+    if (p.length !== KEY) throw new Error('bad p size');
+    const q = new Uint8Array(KEY);
+    const rc = AegisSodium.scalarmult(q, n, p);
+    if (rc === AEGIS_EFAIL) throw new Error('scalarMult: low-order point (all-zero shared secret)');
+    must(rc, 'scalarMult');
+    return q;
+  },
+  {
+    base: (n: Uint8Array): Uint8Array => {
+      checkArrayTypes(n);
+      if (n.length !== KEY) throw new Error('bad n size');
+      const q = new Uint8Array(KEY);
+      must(AegisSodium.scalarmultBase(q, n), 'scalarMult.base');
+      return q;
+    },
+  },
+);
+
+const sign = {
+  detached: Object.assign(
+    (msg: Uint8Array, secretKey: Uint8Array): Uint8Array => {
+      checkArrayTypes(msg, secretKey);
+      if (secretKey.length !== SIGN_SECRET) throw new Error('bad secret key size');
+      const sig = new Uint8Array(SIGNATURE);
+      must(AegisSodium.signDetached(sig, msg, secretKey), 'sign.detached');
+      return sig;
+    },
+    {
+      verify: (msg: Uint8Array, sig: Uint8Array, publicKey: Uint8Array): boolean => {
+        checkArrayTypes(msg, sig, publicKey);
+        if (sig.length !== SIGNATURE) throw new Error('bad signature size');
+        if (publicKey.length !== SIGN_PUBLIC) throw new Error('bad public key size');
+        return AegisSodium.signVerifyDetached(sig, msg, publicKey) === AEGIS_OK;
+      },
+    },
+  ),
+  keyPair: Object.assign(
+    (): SignKeyPair => {
+      const publicKey = new Uint8Array(SIGN_PUBLIC);
+      const secretKey = new Uint8Array(SIGN_SECRET);
+      must(AegisSodium.signKeypair(publicKey, secretKey), 'sign.keyPair');
+      return { publicKey, secretKey };
+    },
+    {
+      fromSeed: (seed: Uint8Array): SignKeyPair => {
+        checkArrayTypes(seed);
+        if (seed.length !== SIGN_SEED) throw new Error('bad seed size');
+        const publicKey = new Uint8Array(SIGN_PUBLIC);
+        const secretKey = new Uint8Array(SIGN_SECRET);
+        must(AegisSodium.signSeedKeypair(publicKey, secretKey, seed), 'sign.keyPair.fromSeed');
+        return { publicKey, secretKey };
+      },
+    },
+  ),
+  publicKeyLength: SIGN_PUBLIC,
+  secretKeyLength: SIGN_SECRET,
+  seedLength: SIGN_SEED,
+  signatureLength: SIGNATURE,
+};
+
+export const nacl: NaclPrimitives = { randomBytes, verify, box, secretbox, scalarMult, sign };
 
 export function sha256(data: Uint8Array): Uint8Array {
   return nobleSha256(data);
@@ -91,7 +294,10 @@ export function sha512(data: Uint8Array): Uint8Array {
 }
 
 export function hmacSha256(key: Uint8Array, data: Uint8Array): Uint8Array {
-  return hmac(nobleSha256, key, data);
+  checkArrayTypes(key, data);
+  const out = new Uint8Array(32);
+  must(AegisSodium.hmacsha256(out, data, key), 'hmacSha256');
+  return out;
 }
 
 /** RFC 5869 HKDF-SHA256. An undefined salt means HashLen zero bytes (per the RFC). */
@@ -101,5 +307,14 @@ export function hkdfSha256(
   info: Uint8Array | undefined,
   length: number,
 ): Uint8Array {
-  return hkdf(nobleSha256, ikm, salt, info, length);
+  checkArrayTypes(ikm, salt ?? new Uint8Array(0), info ?? new Uint8Array(0));
+  if (!Number.isSafeInteger(length) || length < 1 || length > HKDF_MAX) {
+    throw new Error('hkdfSha256: length must be 1..8160');
+  }
+  const out = new Uint8Array(length);
+  must(
+    AegisSodium.hkdfSha256(out, ikm, salt ?? new Uint8Array(0), info ?? new Uint8Array(0)),
+    'hkdfSha256',
+  );
+  return out;
 }

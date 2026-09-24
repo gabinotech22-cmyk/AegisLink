@@ -52,18 +52,20 @@ server policy**.
 
 | Purpose | Primitive | Library |
 |---|---|---|
-| DH key agreement | X25519 (`nacl.scalarMult` / `nacl.box`) | libsodium¹ / TweetNaCl² |
+| DH key agreement | X25519 (`nacl.scalarMult` / `nacl.box`) | libsodium (native) |
 | Post-quantum KEM (hybrid handshake, v2) | ML-KEM-768 (FIPS 203) | `@noble/post-quantum` |
-| Authenticated encryption (outer envelope) | `crypto_box` = X25519 + XSalsa20-Poly1305 (`nacl.box`) | libsodium¹ / TweetNaCl² |
-| Authenticated encryption (message) | `crypto_secretbox` = XSalsa20-Poly1305 (`nacl.secretbox`) | libsodium¹ / TweetNaCl² |
-| Signatures | Ed25519 (`nacl.sign`); verification via `verifyDetached`, which rejects non-canonical S (S ≥ L, RFC 8032 §5.1.7) before calling the primitive. TweetNaCl alone accepts the malleable (R, S + L) twin of a valid signature. That does not allow forgery, but the helper removes it anyway (`crypto/ed25519.ts` on mobile, desktop and relay; no direct `nacl.sign.detached.verify` is allowed, enforced by `ed25519.test.ts`). libsodium additionally rejects small-order public keys | libsodium¹ / TweetNaCl² |
-| Key derivation | HKDF-SHA256 | `node:crypto`¹ / `@noble/hashes`² |
-| Chain KDF / MAC | HMAC-SHA256 | `node:crypto`¹ / `@noble/hashes`² |
+| Authenticated encryption (outer envelope) | `crypto_box` = X25519 + XSalsa20-Poly1305 (`nacl.box`) | libsodium (native) |
+| Authenticated encryption (message) | `crypto_secretbox` = XSalsa20-Poly1305 (`nacl.secretbox`) | libsodium (native) |
+| Signatures | Ed25519 (`nacl.sign`); verification via `verifyDetached`, which rejects non-canonical S (S ≥ L, RFC 8032 §5.1.7) before calling the primitive. TweetNaCl alone accepts the malleable (R, S + L) twin of a valid signature. That does not allow forgery, but the helper removes it anyway (`crypto/ed25519.ts` on mobile, desktop and relay; no direct `nacl.sign.detached.verify` is allowed, enforced by `ed25519.test.ts`). libsodium additionally rejects small-order public keys | libsodium (native) |
+| Key derivation | HKDF-SHA256 | libsodium (mobile) · `node:crypto`¹ |
+| Chain KDF / MAC | HMAC-SHA256 | libsodium (mobile) · `node:crypto`¹ |
 | Fingerprints | SHA-256 (unkeyed) | `@noble/hashes` (mobile, desktop renderer) · `node:crypto` (relay) |
 
-¹ Relay and desktop (native libsodium via `sodium-native`; on desktop in the main
-process, reached from the renderer over IPC). ² Mobile, until F-1 part B2 ships its
-native module (§2.1). Both backends are byte-compatible (`f1-golden.test.ts`).
+Mobile compiles libsodium from the vendored, signature-verified sources into
+the app (`mobile/modules/aegis-sodium`); relay and desktop use `sodium-native`
+(on desktop in the main process, reached from the renderer over IPC).
+¹ Relay and desktop main process (OpenSSL). All backends are byte-compatible
+with the TweetNaCl/@noble implementation they replaced (`f1-golden.test.ts`).
 
 No primitive is hand-rolled; all symmetric/asymmetric operations route through
 libsodium / TweetNaCl and `node:crypto` / `@noble/hashes`, behind one
@@ -78,9 +80,9 @@ A reviewer's first and most legitimate question about a React Native messenger i
 side-channels?"* This section answers it without hand-waving, and states plainly
 what we do and do not claim.
 
-**What actually runs (F-1 in progress, stated per platform).** Every platform
-gets its primitives from a single facade (`crypto/sodium`); the backend behind it
-differs today:
+**What actually runs (F-1, stated per platform).** Every platform gets its
+primitives from a single facade (`crypto/sodium`); the backend behind it is
+native libsodium everywhere:
 
 - **Relay and desktop: native libsodium.** The relay calls `sodium-native`
   (libsodium's N-API binding). Desktop runs the same binding in the Electron
@@ -89,8 +91,20 @@ differs today:
   ~0.2 ms per X25519). HMAC and HKDF (keyed) run on `node:crypto` (OpenSSL);
   unkeyed SHA-2 stays in-process — it has no secret-dependent branches or table
   lookups, and the registration proof-of-work hashes ~260k times.
-- **Mobile: still pure JavaScript** — `tweetnacl` and `@noble/hashes` on Hermes —
-  until the native module lands (F-1 part B2, `docs/ROADMAP.md`).
+- **Mobile: native libsodium in the app binary** (F-1 B2). An Expo module
+  (`mobile/modules/aegis-sodium`) compiles libsodium 1.0.22 **from source** —
+  vendored, its minisign signature and tarball SHA-256 verified by
+  `mobile/scripts/vendor-libsodium.mjs`, every file pinned by
+  `vendor-manifest.test.ts` — plus a small C core (`cpp/aegis_sodium.c`) that
+  validates every buffer length before libsodium touches memory. JS calls it
+  synchronously over JSI (Kotlin/JNI on Android, Swift on iOS) with pointers to
+  the JS arrays' own memory. Box/secretbox, X25519, Ed25519, HMAC-SHA256,
+  HKDF-SHA256 (`crypto_kdf_hkdf_sha256`), constant-time comparison and the
+  CSPRNG (`randombytes_buf`, which also backs the `getRandomValues` shim @noble
+  uses) run there; unkeyed SHA-2 stays in JS, as on desktop. There is no
+  JavaScript fallback: a binary without the module fails to start its crypto.
+  The C core is diffed against TweetNaCl/@noble in CI, optimized and under
+  ASan/UBSan (`modules/aegis-sodium/test/differential.mjs`).
 - **Everywhere:** Argon2id/PBKDF2 and ML-KEM-768 (`@noble/post-quantum`) stay in
   JavaScript for now.
 
@@ -98,7 +112,8 @@ We state this per platform, with the manifests to check (`server/package.json`,
 `desktop/package.json`, `mobile/package.json`), because a blanket "constant-time
 native bindings" claim would be trivially falsifiable, and a falsifiable security
 claim is worse than an honest limitation. The rest of this section describes the
-JavaScript path, i.e. mobile today.
+JavaScript path the clients ran before F-1, and what still runs in JS
+(Argon2id/PBKDF2, ML-KEM-768, the protocol composition itself).
 
 **Constant-time posture (what is in our favor).**
 
@@ -153,18 +168,16 @@ protocol-composition layer in TypeScript behind the same facade
 `crypto-imports.test.ts`). It is an implementation substitution, **not a protocol
 change**: libsodium is byte-compatible with NaCl, and a golden fixture generated
 with the JS primitives (`f1-golden.json`) must replay byte-for-byte on the native
-backend. Relay and desktop are done; mobile (a native module compiling libsodium
-from verified source) is next. Two deliberate, stricter behaviors come with
-libsodium on those platforms: X25519 with a low-order peer key now throws in the
+backend. Relay, desktop and mobile are done (mobile takes effect with the first
+native build that includes it; the wire is unchanged, so old and new clients
+interoperate). Two deliberate, stricter behaviors come with libsodium: X25519 with a low-order peer key now throws in the
 primitive (callers already rejected the all-zero output), and Ed25519
 verification rejects small-order public keys (TweetNaCl accepted a "universal"
 signature under the identity point). What F-1 does **not** do: keys are still
-held in JavaScript memory (desktop moves them over IPC to the main process of the
-same app — they never leave the device); keeping them only in native memory
-behind opaque handles is follow-up **F-1b**. Status:
-[`docs/ROADMAP.md`](ROADMAP.md) Hito 3. On mobile, until B2 ships, the
-constant-time guarantee is **source-level, not runtime-verified**, as stated
-above.
+held in JavaScript memory (mobile hands JS arrays to native code by pointer;
+desktop moves them over IPC to the main process of the same app — they never
+leave the device); keeping them only in native memory behind opaque handles is
+follow-up **F-1b**. Status: [`docs/ROADMAP.md`](ROADMAP.md) Hito 3.
 ML-KEM-768 stays on `@noble/post-quantum` and runs only on the clients (0.7.1 on
 mobile and desktop); the relay never encapsulates or decapsulates — it only
 checks the PQSPK signature — so its production image carries no PQ code. It
@@ -801,12 +814,13 @@ with a key derived from a user passphrase the relay never sees:
   exposed until both ends are v2 — see §10.
 - **Cross-domain key-separation concerns** from the shared X25519/Ed25519 secret
   (§3.1).
-- **Runtime-level timing side-channels in the JS crypto core (mobile).**
-  Constant-time is guaranteed at the source level (TweetNaCl/`@noble`) but not
-  machine-verified through the Hermes JIT+GC (§2.1). Practical exploitation
-  requires a local co-resident oracle, which already implies endpoint
-  compromise. Relay and desktop already run native libsodium; the mobile native
-  module is in progress (§10, F-1).
+- **Runtime-level timing side-channels in the remaining JS crypto.** The NaCl,
+  HMAC and HKDF primitives run on native libsodium on every platform (§2.1,
+  F-1). What still runs in JavaScript — Argon2id/PBKDF2 (PIN, backup) and
+  ML-KEM-768 — is constant-time at the source level only, not through the JIT
+  and GC. Practical exploitation requires a local co-resident oracle, which
+  already implies endpoint compromise. Key material still passes through the JS
+  heap (follow-up F-1b, §10).
 
 ---
 
@@ -1126,12 +1140,12 @@ current protocol:
 4. **Independent third-party cryptographic audit** of this protocol and its
    implementation, with full public disclosure of findings. **No independent
    audit has been performed.** This is the project's top funding priority.
-5. **Native crypto core** (post-audit follow-up **F-1**, in progress). Hot-path
-   primitives on native libsodium so the constant-time guarantee is enforced in
-   native code rather than source-level JS (§2.1). Done on the relay and desktop;
-   mobile next. Implementation substitution behind a stable TypeScript interface,
-   not a protocol change. Follow-up **F-1b**: private keys only in native memory
-   behind opaque handles.
+5. **Native crypto core** (post-audit follow-up **F-1**, done). Hot-path
+   primitives run on native libsodium on the relay, desktop and mobile, so the
+   constant-time guarantee is enforced in native code rather than source-level JS
+   (§2.1). Implementation substitution behind a stable TypeScript interface, not a
+   protocol change. Next: **F-1b**, private keys only in native memory behind
+   opaque handles, and native Argon2id with a new backup format.
 6. **Per-device identity keys for linked desktops** (§9.2) so that revoking a
    device revokes cryptographic access instead of relying on the relay's
    `linked_devices` gate.

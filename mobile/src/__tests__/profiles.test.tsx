@@ -99,8 +99,13 @@ jest.mock('../crypto/identity', () => ({
 }));
 
 // Mock tweetnacl
-jest.mock('tweetnacl', () => ({
-  randomBytes: jest.fn(() => new Uint8Array(32)),
+// The crypto facade (native libsodium) with a stubbed `nacl`: these tests
+// only need the calls to succeed, not real cryptography.
+jest.mock('../crypto/sodium', () => ({
+  ...jest.requireActual('../crypto/sodium'),
+  nacl: {
+    randomBytes: jest.fn(() => new Uint8Array(32)),
+  },
 }));
 
 // Mock tweetnacl-util
