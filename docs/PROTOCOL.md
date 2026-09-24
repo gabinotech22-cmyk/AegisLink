@@ -165,6 +165,14 @@ behind opaque handles is follow-up **F-1b**. Status:
 [`docs/ROADMAP.md`](ROADMAP.md) Hito 3. On mobile, until B2 ships, the
 constant-time guarantee is **source-level, not runtime-verified**, as stated
 above.
+ML-KEM-768 stays on `@noble/post-quantum` and runs only on the clients (0.7.1 on
+mobile and desktop); the relay never encapsulates or decapsulates — it only
+checks the PQSPK signature — so its production image carries no PQ code. It
+stays a server `devDependency` only because the e2e test drives the real mobile
+client against the relay. The library moves on both clients together and must
+keep replaying `f1-golden`, whose hybrid ratchet sessions were persisted with
+0.6.1; 0.6.1 ↔ 0.7.1 was also checked for identical keygen and deterministic
+encapsulation, mutual decapsulation and implicit rejection.
 
 ---
 
