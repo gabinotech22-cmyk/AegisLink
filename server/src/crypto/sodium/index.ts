@@ -1,11 +1,11 @@
 /**
  * The relay's single entry point for NaCl primitives (post-audit follow-up F-1).
  *
- * Production code never imports `tweetnacl` directly — it imports `nacl` from
- * here (enforced by `src/__tests__/crypto-imports.test.ts`), so the switch to
- * native libsodium (sodium-native) is a change to this one directory.
- * libsodium's crypto_box / crypto_secretbox / crypto_sign are byte-compatible
- * with NaCl: nothing on the wire changes.
+ * Production code never imports a crypto library directly — it imports `nacl`
+ * from here (enforced by `src/__tests__/crypto-imports.test.ts`). The backend is
+ * native libsodium (`./native.ts`, sodium-native), byte-compatible with the
+ * TweetNaCl implementation it replaced: nothing on the wire changes
+ * (`f1-golden.test.ts`).
  *
  * Hashing, HMAC, HKDF and constant-time comparison already go through
  * `node:crypto` (OpenSSL, native) and stay there.
@@ -13,7 +13,7 @@
  * Client twins: `mobile/src/crypto/sodium/index.ts`,
  * `desktop/src/renderer/crypto/sodium/index.ts`.
  */
-import tweetnacl from 'tweetnacl';
+import * as native from './native.js';
 
 export interface BoxKeyPair {
   publicKey: Uint8Array;
@@ -52,4 +52,40 @@ export interface NaclPrimitives {
   };
 }
 
-export const nacl: NaclPrimitives = tweetnacl;
+// Fresh wrapper functions: never decorate the native module's own exports.
+const box = Object.assign(
+  (msg: Uint8Array, nonce: Uint8Array, publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array =>
+    native.box(msg, nonce, publicKey, secretKey),
+  {
+    open: native.boxOpen,
+    keyPair: native.boxKeyPair,
+    publicKeyLength: native.LENGTHS.boxPublicKey,
+    nonceLength: native.LENGTHS.nonce,
+  },
+);
+
+const secretbox = Object.assign(
+  (msg: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array => native.secretbox(msg, nonce, key),
+  {
+    open: native.secretboxOpen,
+    keyLength: native.LENGTHS.secretboxKey,
+    nonceLength: native.LENGTHS.nonce,
+  },
+);
+
+const sign = {
+  detached: Object.assign(
+    (msg: Uint8Array, secretKey: Uint8Array): Uint8Array => native.signDetached(msg, secretKey),
+    { verify: native.signVerifyDetached },
+  ),
+  keyPair: native.signKeyPair,
+  publicKeyLength: native.LENGTHS.signPublicKey,
+  signatureLength: native.LENGTHS.signature,
+};
+
+export const nacl: NaclPrimitives = {
+  randomBytes: native.randomBytes,
+  box,
+  secretbox,
+  sign,
+};

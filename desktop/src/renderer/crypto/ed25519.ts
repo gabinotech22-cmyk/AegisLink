@@ -7,7 +7,9 @@
  * and key: signatures are malleable. This does NOT allow forging a signature
  * over a new message, but it breaks any code that treats signature bytes as
  * unique (dedup, replay caches, content ids). libsodium and @noble reject
- * S >= L (RFC 8032 §5.1.7); we do the same, then defer to TweetNaCl.
+ * S >= L (RFC 8032 §5.1.7); we check it explicitly, then defer to the native
+ * libsodium verify (F-1), which additionally rejects small-order public keys
+ * (TweetNaCl accepted a "universal" signature under the identity point).
  *
  * Every Ed25519 verification in the client goes through this function — never
  * call `nacl.sign.detached.verify` directly. The same file lives, byte-identical

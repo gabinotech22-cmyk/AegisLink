@@ -29,6 +29,25 @@ const L_LE = [
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
 ];
 
+describe('verifyDetached — rejects the small-order "universal" signature (F-1, libsodium)', () => {
+  // A = identity point (0x01, 0…), R = identity, S = 0 satisfies the verify
+  // equation for EVERY message under TweetNaCl. libsodium rejects small-order A.
+  const A = new Uint8Array(32);
+  A[0] = 1;
+  const sig = new Uint8Array(64);
+  sig[0] = 1;
+
+  it('TweetNaCl alone accepts it for any message (the bug)', () => {
+    expect(nacl.sign.detached.verify(new TextEncoder().encode('anything'), sig, A)).toBe(true);
+    expect(nacl.sign.detached.verify(new TextEncoder().encode('anything else'), sig, A)).toBe(true);
+  });
+
+  it('the relay rejects it', () => {
+    expect(isCanonicalScalar(sig)).toBe(true); // S = 0 < L: only the key check stops it
+    expect(verifyDetached(new TextEncoder().encode('anything'), sig, A)).toBe(false);
+  });
+});
+
 describe('verifyDetached — rejects malleable (non-canonical S) Ed25519 signatures', () => {
   const kp = nacl.sign.keyPair();
   const msg = new TextEncoder().encode('aegislink ed25519 canonical-S regression');

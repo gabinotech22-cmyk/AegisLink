@@ -242,6 +242,8 @@
       "policy": "appVersion"
     },
     "updates": {
+      "enabled": false,
+      "checkAutomatically": "NEVER",
       "url": "https://u.expo.dev/599be334-3b85-4ecb-b954-a194b0ab303f"
     },
     "owner": "aegislinkspejo3"
