@@ -16,13 +16,19 @@ appId: com.aegislink.app
     timeout: 60000
 - tapOn: "Generate my identity"
 # Onboarding: identity card ("Continue") → optional nickname ("Skip for now") → Home.
+# The CI emulator screen is small (320×640 dp): the buttons can sit below the
+# fold, so scroll to them (the onboarding steps are ScrollViews).
 - extendedWaitUntil:
-    visible: "Continue"
+    visible: "YOUR IDENTITY"
     timeout: 90000
+- scrollUntilVisible:
+    element: "Continue"
 - tapOn: "Continue"
 - extendedWaitUntil:
-    visible: "Skip for now"
+    visible: "ALMOST DONE"
     timeout: 15000
+- scrollUntilVisible:
+    element: "Skip for now"
 - tapOn: "Skip for now"
 - extendedWaitUntil:
     visible: "PRIVACY"

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated, Easing, Pressable, ActivityIndicator, TextInput } from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, Pressable, ActivityIndicator, TextInput, ScrollView } from 'react-native';
 import { copySensitiveText } from '../utils/secureClipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -242,7 +242,11 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
   // ── Step 3: Nickname (optional) ─────────────────────────────────────────────
   if (step === 'nickname') {
     return (
-      <View style={[styles.frame, { backgroundColor: t.bg, paddingHorizontal: 24 }, containerPad]}>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: t.bg }}
+        contentContainerStyle={[styles.scrollFrame, { paddingHorizontal: 24 }, containerPad]}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 18 }}>
           <AegisMark t={t} size={28} />
           <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 1.1 }}>
@@ -336,13 +340,18 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
             onPress={handleSkipNickname}
           />
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
   // ── Step 2: Show identity ───────────────────────────────────────────────────
+  // Scrollable, like the nickname step: on a small screen (320×640 dp) the
+  // cards push "Continue" below the fold, and a plain View left the user stuck.
   return (
-    <View style={[styles.frame, { backgroundColor: t.bg, paddingHorizontal: 24 }, containerPad]}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: t.bg }}
+      contentContainerStyle={[styles.scrollFrame, { paddingHorizontal: 24 }, containerPad]}
+    >
       <Text style={{ fontFamily: t.fontMono, fontSize: 11, color: t.accent, letterSpacing: 1.1, marginBottom: 14 }}>
         {i18nT('onboarding.yourIdentityLabel')}
       </Text>
@@ -406,7 +415,7 @@ export function OnboardingScreen({ onDone, onRestore, dbReady = true }: Props) {
         label={i18nT('onboarding.continueBtn')}
         onPress={() => setStep('nickname')}
       />
-    </View>
+    </ScrollView>
   );
 }
 
@@ -470,6 +479,9 @@ function ProgressBar({ t }: { t: Theme }) {
 
 const styles = StyleSheet.create({
   frame: { flex: 1, paddingHorizontal: 28 },
+  // ScrollView content: grows to the screen so `marginBottom: 'auto'` still pins
+  // the buttons to the bottom when everything fits.
+  scrollFrame: { flexGrow: 1 },
   h1: { fontSize: 40, lineHeight: 41, fontWeight: '600', letterSpacing: -1.2, marginBottom: 16 },
   lead: { fontSize: 16, lineHeight: 23 },
 });
