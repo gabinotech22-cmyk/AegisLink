@@ -18,15 +18,9 @@
  *  - Delivery token derived from capability — proves CEK possession anonymously.
  */
 
-import nacl from 'tweetnacl';
+import { nacl, sha256, hkdfSha256, type BoxKeyPair } from './sodium';
 import naclUtil from 'tweetnacl-util';
-// Desktop is on @noble/hashes 2.x, which requires the explicit .js specifier;
-// mobile is still on 1.x, where the bare path resolves. The ONLY difference
-// between this file and mobile/src/crypto/publicChannelKey.ts. Keep it that way:
-// this is channel key derivation, and it has to agree byte-for-byte with the
-// other platform or a channel created on one is unreadable on the other.
-import { sha256 } from '@noble/hashes/sha2.js';
-import { hkdf } from '@noble/hashes/hkdf.js';
+import { verifyDetached } from './ed25519';
 
 const { encodeBase64, decodeBase64 } = naclUtil;
 const encoder = new TextEncoder();
@@ -79,9 +73,8 @@ export function generateCEK(): Uint8Array {
 export function deriveWrapKey(capability: Uint8Array, channelId: string): Uint8Array {
   if (capability.length !== 32) throw new Error('deriveWrapKey: capability must be 32 bytes');
   const channelIdBytes = decodeBase64(channelId);
-  // noble hkdf(hash, ikm, salt, info, length) — same (ikm, salt, info) semantics
-  // as node hkdfSync('sha256', ikm, salt, info, len).
-  return hkdf(sha256, capability, channelIdBytes, encoder.encode(CONTENT_KEY_WRAP_LABEL), 32);
+  // Same (ikm, salt, info) semantics as node hkdfSync('sha256', ikm, salt, info, len).
+  return hkdfSha256(capability, channelIdBytes, encoder.encode(CONTENT_KEY_WRAP_LABEL), 32);
 }
 
 /**
@@ -132,7 +125,7 @@ export function unwrapCEK(
 /** Derive channel delivery token from capability + channelId (base64url, no pad). */
 export function deriveChannelDeliveryToken(capability: Uint8Array, channelId: string): string {
   const channelIdBytes = decodeBase64(channelId);
-  const token = hkdf(sha256, capability, channelIdBytes, encoder.encode(DELIVERY_TOKEN_LABEL), 16);
+  const token = hkdfSha256(capability, channelIdBytes, encoder.encode(DELIVERY_TOKEN_LABEL), 16);
   return base64url(token);
 }
 
@@ -232,7 +225,7 @@ export function verifyManifest(
   if (sig.length !== nacl.sign.signatureLength) return false;
   const input = buildManifestSignedInput(manifest);
   const labeled = concat([MANIFEST_LABEL, input]);
-  return nacl.sign.detached.verify(labeled, sig, manifest.channelEd25519Pub);
+  return verifyDetached(labeled, sig, manifest.channelEd25519Pub);
 }
 
 /**
@@ -288,7 +281,7 @@ export function signDelete(channelId: string, seqNum: number, channelEd25519Secr
 /** Verify a post-deletion signature against the channel's public key. */
 export function verifyDelete(channelId: string, seqNum: number, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(deleteSignedInput(channelId, seqNum), sig, channelEd25519Pub);
+  return verifyDetached(deleteSignedInput(channelId, seqNum), sig, channelEd25519Pub);
 }
 
 function banSignedInput(channelId: string, banRecord: string): Uint8Array {
@@ -303,7 +296,7 @@ export function signBan(channelId: string, banRecord: string, channelEd25519Secr
 /** Verify a ban-record signature against the channel's public key. */
 export function verifyBan(channelId: string, banRecord: string, sig: Uint8Array, channelEd25519Pub: Uint8Array): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(banSignedInput(channelId, banRecord), sig, channelEd25519Pub);
+  return verifyDetached(banSignedInput(channelId, banRecord), sig, channelEd25519Pub);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,7 +332,7 @@ export function signApprove(channelId: string, joinEpkB64: string, ts: number, c
 }
 
 /** Applicant side: fresh ephemeral X25519 keypair for one join request. */
-export function generateJoinEphemeral(): nacl.BoxKeyPair {
+export function generateJoinEphemeral(): BoxKeyPair {
   return nacl.box.keyPair();
 }
 
@@ -351,7 +344,7 @@ export interface ApprovalEnvelope {
 
 /** Derive the approval wrap key from an X25519 shared secret (zeroize after). */
 function deriveApprovalWrapKey(shared: Uint8Array, channelId: string): Uint8Array {
-  return hkdf(sha256, shared, decodeBase64(channelId), encoder.encode(APPROVAL_WRAP_LABEL), 32);
+  return hkdfSha256(shared, decodeBase64(channelId), encoder.encode(APPROVAL_WRAP_LABEL), 32);
 }
 
 /** Owner: seal the capability to the applicant's joinEpk (docs §10.2 step 6). */
@@ -454,7 +447,7 @@ export function verifyPostSignature(
   if (sig.length !== nacl.sign.signatureLength) return false;
   const input = buildPostSignedInput(channelId, post);
   const labeled = concat([POST_LABEL, input]);
-  return nacl.sign.detached.verify(labeled, sig, signerEd25519Pub);
+  return verifyDetached(labeled, sig, signerEd25519Pub);
 }
 
 /** Compute the hash chain entry for a post (§6.3). Includes sig in hash. */
@@ -634,7 +627,7 @@ export function verifyDelegation(
   if (sig.length !== nacl.sign.signatureLength) return false;
   const input = buildDelegationSignedInput(cert);
   const labeled = concat([DELEGATION_LABEL, input]);
-  return nacl.sign.detached.verify(labeled, sig, channelEd25519Pub);
+  return verifyDetached(labeled, sig, channelEd25519Pub);
 }
 
 /** Validate a delegated post: cert is valid + post sig matches delegatee. */
@@ -679,7 +672,7 @@ export function verifyTombstone(
 ): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
   const input = concat([TOMBSTONE_LABEL, decodeBase64(channelId), u64be(ts)]);
-  return nacl.sign.detached.verify(input, sig, channelEd25519Pub);
+  return verifyDetached(input, sig, channelEd25519Pub);
 }
 
 // ---------------------------------------------------------------------------
@@ -710,7 +703,7 @@ export function verifyAvatarSet(
   channelEd25519Pub: Uint8Array
 ): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(
+  return verifyDetached(
     avatarSetSignedInput(channelId, blobId),
     sig,
     channelEd25519Pub
@@ -736,7 +729,7 @@ export function verifyAvatarDelete(
   channelEd25519Pub: Uint8Array
 ): boolean {
   if (sig.length !== nacl.sign.signatureLength) return false;
-  return nacl.sign.detached.verify(
+  return verifyDetached(
     avatarDeleteSignedInput(channelId),
     sig,
     channelEd25519Pub

@@ -24,6 +24,9 @@ declare module 'sodium-native' {
     crypto_scalarmult(q: Bytes, n: Bytes, p: Bytes): void;
     crypto_scalarmult_base(q: Bytes, n: Bytes): void;
 
+    /** Salsa20 keystream (desktop: HSalsa20 for `boxBefore.ts`). */
+    crypto_stream_salsa20(c: Bytes, n: Bytes, k: Bytes): void;
+
     crypto_sign_keypair(pk: Bytes, sk: Bytes): void;
     crypto_sign_seed_keypair(pk: Bytes, sk: Bytes, seed: Bytes): void;
     crypto_sign_detached(sig: Bytes, m: Bytes, sk: Bytes): void;

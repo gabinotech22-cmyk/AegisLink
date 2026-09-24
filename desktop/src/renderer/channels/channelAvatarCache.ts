@@ -15,8 +15,7 @@
  * The cost of an in-memory cache is a re-download after a restart. That is a
  * fair trade against writing image files next to the encrypted database.
  */
-import { sha256 } from '@noble/hashes/sha2.js';
-import nacl from 'tweetnacl';
+import { nacl, sha256 } from '../crypto/sodium';
 import { channelAvatarUrl } from '../api/publicChannels';
 import { logger } from '../utils/logger';
 

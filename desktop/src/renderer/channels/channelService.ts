@@ -22,7 +22,7 @@
  * trusted. CEK rotation + delete-aware chains are Phase 4.
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import {
   openChannelPost,
