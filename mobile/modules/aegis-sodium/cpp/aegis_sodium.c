@@ -11,6 +11,9 @@
 
 #include <sodium.h>
 
+/* libsodium's internal Argon2 API (not part of <sodium.h>), compiled from the same vendored sources. */
+#include "../vendor/libsodium/src/libsodium/crypto_pwhash/argon2/argon2.h"
+
 /* A buffer of `len` bytes: NULL only when empty. */
 #define NEED(p, len)                                                                                                 \
   do {                                                                                                               \
@@ -171,4 +174,24 @@ int aegis_hkdf_sha256(uint8_t *out, size_t outlen, const uint8_t *ikm, size_t ik
            : AEGIS_EFAIL;
   sodium_memzero(prk, sizeof prk);
   return rc;
+}
+
+int aegis_argon2id(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdlen, const uint8_t *salt,
+                   size_t saltlen, uint32_t t_cost, uint32_t m_kib) {
+  int rc;
+  if (outlen < AEGIS_ARGON2_OUT_MIN || outlen > AEGIS_ARGON2_OUT_MAX || out == NULL) return AEGIS_EBADLEN;
+  if (saltlen < AEGIS_ARGON2_SALT_MIN || saltlen > AEGIS_ARGON2_SALT_MAX || salt == NULL) return AEGIS_EBADLEN;
+  if (pwdlen > AEGIS_ARGON2_PWD_MAX) return AEGIS_EBADLEN;
+  NEED(pwd, pwdlen);
+  /* Cost bounds: the callers' parameters are constants, but a stray value must
+   * not turn into a multi-GiB allocation or a minutes-long stall. */
+  if (t_cost < 1 || t_cost > AEGIS_ARGON2_T_MAX || m_kib < AEGIS_ARGON2_M_MIN_KIB || m_kib > AEGIS_ARGON2_M_MAX_KIB)
+    return AEGIS_EBADLEN;
+  rc = argon2id_hash_raw(t_cost, m_kib, 1, pwd, pwdlen, salt, saltlen, out, outlen);
+  if (rc != ARGON2_OK) {
+    /* argon2_hash leaves random bytes in `out` on failure: never hand them back. */
+    sodium_memzero(out, outlen);
+    return AEGIS_EFAIL;
+  }
+  return AEGIS_OK;
 }

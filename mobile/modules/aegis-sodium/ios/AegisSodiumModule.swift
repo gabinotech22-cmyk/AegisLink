@@ -1,13 +1,15 @@
 import AegisSodiumC
 import ExpoModulesCore
+import Foundation
 
 /// F-1 B2: native libsodium for `src/crypto/sodium` (see ../index.ts).
 ///
-/// Every function is synchronous (JSI) and writes into caller-allocated output
-/// arrays, returning the C core's code: 0 ok, 1 verification failed,
-/// -1 bad length, -2 libsodium failure. The pointers are the JS arrays' own
-/// memory (expo-modules-core `rawPointer`, byteOffset already applied); no key
-/// material is copied. aegis_sodium.c validates every length.
+/// Every function but argon2id is synchronous (JSI) and writes into
+/// caller-allocated output arrays, returning the C core's code: 0 ok,
+/// 1 verification failed, -1 bad length, -2 libsodium failure. The pointers
+/// are the JS arrays' own memory (expo-modules-core `rawPointer`, byteOffset
+/// already applied); no key material is copied. aegis_sodium.c validates every
+/// length. argon2id is the exception (async; see below).
 public class AegisSodiumModule: Module {
   public func definition() -> ModuleDefinition {
     Name("AegisSodium")
@@ -61,6 +63,32 @@ public class AegisSodiumModule: Module {
     Function("hkdfSha256") { (out: Uint8Array, ikm: Uint8Array, salt: Uint8Array, info: Uint8Array) -> Int in
       Int(aegis_hkdf_sha256(mp(out), n(out), p(ikm), n(ikm), p(salt), n(salt), p(info), n(info)))
     }
+    // Hundreds of milliseconds of work: async (off the JS thread), so it cannot
+    // touch JS memory. Expo copies the password and salt into `Data` on the JS
+    // thread; the key comes back as an int array. Copies made here are zeroed.
+    AsyncFunction("argon2id") { (pwd: Data, salt: Data, t: Int, mKib: Int, outLen: Int) throws -> [Int] in
+      // Zero the password copy in place (resetBytes on a `var` copy would only
+      // zero a fresh copy-on-write buffer, not this one).
+      defer { wipe(pwd) }
+      guard (1...64).contains(outLen), t >= 0, t <= Int(UInt32.max), mKib >= 0, mKib <= Int(UInt32.max) else {
+        throw Exception(name: "ERR_AEGIS_ARGON2", description: "aegis_argon2id: bad parameters")
+      }
+      var out = [UInt8](repeating: 0, count: outLen)
+      defer { out.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) } }
+      let rc = pwd.withUnsafeBytes { (pw: UnsafeRawBufferPointer) -> Int32 in
+        salt.withUnsafeBytes { (sa: UnsafeRawBufferPointer) -> Int32 in
+          aegis_argon2id(
+            &out, outLen,
+            pw.count == 0 ? nil : pw.bindMemory(to: UInt8.self).baseAddress, pw.count,
+            sa.count == 0 ? nil : sa.bindMemory(to: UInt8.self).baseAddress, sa.count,
+            UInt32(t), UInt32(mKib))
+        }
+      }
+      guard rc == 0 else {
+        throw Exception(name: "ERR_AEGIS_ARGON2", description: "aegis_argon2id failed: \(rc)")
+      }
+      return out.map { Int($0) }
+    }
   }
 }
 
@@ -75,4 +103,13 @@ private func mp(_ a: Uint8Array) -> UnsafeMutablePointer<UInt8>? {
 
 private func p(_ a: Uint8Array) -> UnsafePointer<UInt8>? {
   mp(a).map { UnsafePointer($0) }
+}
+
+/// Zeroes the bytes backing `data` (memset_s is never optimized away).
+private func wipe(_ data: Data) {
+  data.withUnsafeBytes { (buf: UnsafeRawBufferPointer) in
+    if let base = buf.baseAddress, buf.count > 0 {
+      _ = memset_s(UnsafeMutableRawPointer(mutating: base), buf.count, 0, buf.count)
+    }
+  }
 }
