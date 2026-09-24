@@ -753,6 +753,13 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     // This pins channelEd25519PubB64, which the ban handler later trusts: an
     // unbound manifest here would let a relay pin an attacker's key.
     const manifest = ack.manifest ? verifiedManifestFor(ack.manifest, channelId) : null;
+    if (ack.manifest && !manifest) {
+      // The relay served a manifest that fails its signature or its channelId
+      // binding. Subscribing anyway would hide the tampering behind a generic
+      // entry; refuse the join and drop the secrets saved above.
+      await deleteChannelSecrets(channelId);
+      return { ok: false, error: 'bad_manifest' };
+    }
     const summary: ChannelSummary = {
       channelId,
       name: manifest?.name ?? channelId,

@@ -227,6 +227,17 @@ describe('deleting a profile', () => {
     expect(mockKeystore['aegis.dbEncKey.b64']).toBeTruthy();
   });
 
+  it('reports a file it could not remove instead of claiming success', () => {
+    const otherPath = seedOtherProfile();
+    // A directory where the WAL file should be: rmSync without `recursive` throws.
+    fs.mkdirSync(`${otherPath}-wal`);
+
+    expect(() => call('db:delete-slot', OTHER)).toThrow(/could not remove 1 database file/i);
+    // Every other step still ran: the main file and all of the profile's keys are gone.
+    expect(fs.existsSync(otherPath)).toBe(false);
+    expect(Object.keys(mockKeystore).filter((k) => k.startsWith(`aegis.${OTHER}.`))).toEqual([]);
+  });
+
   it('refuses the primary profile and the open one', () => {
     seedOtherProfile();
     expect(() => call('db:delete-slot', 'self')).toThrow(/primary profile/i);

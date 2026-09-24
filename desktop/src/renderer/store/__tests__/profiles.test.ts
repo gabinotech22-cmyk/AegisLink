@@ -195,6 +195,22 @@ describe('createProfile', () => {
     await expect(useProfiles.getState().createProfile('scratch', '#8b5cf6')).rejects.toThrow('disk full');
   });
 
+  it('says so when the half-created profile cannot be erased, and keeps it findable', async () => {
+    mockSaveIdentity.mockRejectedValueOnce(new Error('disk full'));
+    mockSwitchDbSlot
+      .mockResolvedValueOnce(undefined) // into the new slot
+      .mockRejectedValueOnce(new Error('cannot reopen')); // back: the new slot stays open
+    mockDeleteDbSlot.mockRejectedValueOnce(new Error('switch away from a profile before deleting it'));
+    const useProfiles = await freshStore();
+
+    const err = await useProfiles.getState().createProfile('scratch', '#8b5cf6').catch((e: Error) => e);
+    expect((err as Error).message).toMatch(/disk full/);
+    expect((err as Error).message).toMatch(/could not be erased: switch away/);
+    // Its database is still on disk: it stays on the panic wipe's inventory.
+    expect(JSON.parse(store['aegis.slotsList'])).toContain('NEW-PROF-0001');
+    expect(mockDeleteIdentitySlot).toHaveBeenCalledWith('NEW-PROF-0001');
+  });
+
   it('registers the slot so a panic wipe can find its key material', async () => {
     const useProfiles = await freshStore();
     await useProfiles.getState().createProfile('scratch', '#8b5cf6');

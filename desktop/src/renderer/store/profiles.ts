@@ -225,9 +225,24 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
       // Half-created profile: it never reaches the roster, so nothing could
       // clean it up later. Erase its database and key material now, and take
       // it off slotsList.
-      await deleteDbSlot(slotId).catch(() => {});
+      let cleanupError: unknown = null;
+      try {
+        await deleteDbSlot(slotId);
+      } catch (e) {
+        // Main refuses while the slot is still open (the way back failed) or
+        // when a file would not go. Its database stays on disk, so keep it on
+        // slotsList — the panic wipe's inventory — and say so instead of
+        // reporting a clean rollback.
+        cleanupError = e;
+      }
       await deleteIdentitySlot(slotId);
-      await dropFromSlotsList(slotId);
+      if (cleanupError === null) await dropFromSlotsList(slotId);
+      if (cleanupError !== null) {
+        const why = (x: unknown): string => (x instanceof Error ? x.message : String(x));
+        throw new Error(
+          `${why(failure)} (the half-created profile could not be erased: ${why(cleanupError)})`
+        );
+      }
       throw failure;
     }
 

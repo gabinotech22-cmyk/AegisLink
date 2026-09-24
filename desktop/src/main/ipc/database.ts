@@ -201,20 +201,29 @@ function purgeProfileKeys(keystore: Record<string, string>, slot: string): void 
   }
 }
 
-/** A profile's database file(s) AND every keystore entry it owns. Not for the open slot. */
-function purgeProfileSlot(keystore: Record<string, string>, slot: string): void {
+/**
+ * A profile's database file(s) AND every keystore entry it owns. Not for the open
+ * slot. Every step is attempted even when one fails (a panic wipe must run to the
+ * end); the paths that could not be removed are returned so a caller that reports
+ * success to the user (db:delete-slot) can refuse to.
+ */
+function purgeProfileSlot(keystore: Record<string, string>, slot: string): string[] {
   let victimPath = ''
   try {
     victimPath = dbPathForSlot(slot)
   } catch {
-    return // unparseable slot id: no file or key of ours
+    return [] // unparseable slot id: no file or key of ours
   }
+  const failed: string[] = []
   for (const suffix of ['', '-wal', '-shm']) {
     try {
       if (fs.existsSync(victimPath + suffix)) fs.rmSync(victimPath + suffix)
-    } catch { /* best-effort */ }
+    } catch {
+      failed.push(victimPath + suffix)
+    }
   }
   purgeProfileKeys(keystore, slot)
+  return failed
 }
 
 /** True when ANY profile's key is PIN-wrapped, i.e. the app lock is enabled. */
@@ -747,8 +756,13 @@ export function registerDatabaseHandlers(): void {
     if (slot === 'self') throw new Error('AegisLink: the primary profile is not deleted through db:delete-slot')
     if (slot === currentSlot) throw new Error('AegisLink: switch away from a profile before deleting it')
     const keystore = readKeystore()
-    purgeProfileSlot(keystore, slot)
+    const failed = purgeProfileSlot(keystore, slot)
+    // The keys go regardless: without its DB key a leftover file is unreadable
+    // ciphertext. But the caller must not tell the user the profile is gone.
     writeKeystore(keystore)
+    if (failed.length > 0) {
+      throw new Error(`AegisLink: could not remove ${failed.length} database file(s) of the deleted profile`)
+    }
   })
 
   ipcMain.handle('db:unlock', (event, kekB64: string): void => {

@@ -551,7 +551,9 @@ las claves de canal de los miembros (`store/channels.ts` → `attachLive`; tests
 firma, el id se re-deriva de `(channelEd25519Pub, salt)`. Una firma válida solo
 prueba que esa clave firmó el blob, no que el blob sea del canal pedido. Se aplica
 en directorio, hidratación, `joinChannel`, sondeo de aprobaciones y
-`updateChannelInfo`.
+`updateChannelInfo`. Si el relay devuelve en `joinChannel` un manifest que no pasa
+esa verificación, el join se rechaza (`bad_manifest`) y se borran los secretos del
+canal; no se suscribe con la clave sin fijar.
 
 **Otras invariantes del cliente (review de #442):** `openChannelPost` descarta (no
 lanza) posts con números fuera de u64 seguro o hashes que no miden 32 B; `sendPost`

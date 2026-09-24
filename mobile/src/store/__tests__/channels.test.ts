@@ -849,14 +849,14 @@ describe('manifests are bound to their channelId on every path', () => {
     expect(useChannels.getState().directory.map((d) => d.name)).toEqual(['Good']);
   });
 
-  it('joinChannel does not pin the key of a substituted manifest', async () => {
+  it('joinChannel refuses a substituted manifest instead of subscribing', async () => {
     (socket.pubchannelJoin as jest.Mock).mockResolvedValue({ ok: true, manifest: unboundManifestBlob(CHANNEL_ID) });
     const res = await useChannels.getState().joinChannel(CHANNEL_ID, new Uint8Array(32), cek);
-    expect(res.ok).toBe(true);
-    const sub = useChannels.getState().subscribed.find((c) => c.channelId === CHANNEL_ID);
-    // The ban handler trusts this pin; an attacker's key must never land here.
-    expect(sub?.channelEd25519PubB64).toBeNull();
-    expect(sub?.name).not.toBe('Substituted');
+    expect(res).toEqual({ ok: false, error: 'bad_manifest' });
+    // The ban handler trusts the pinned key; an attacker's must never land, and a
+    // silent unpinned subscription would hide the tampering.
+    expect(useChannels.getState().subscribed.find((c) => c.channelId === CHANNEL_ID)).toBeUndefined();
+    expect(store.deleteChannel).toHaveBeenCalledWith(CHANNEL_ID);
   });
 
   it('updateChannelInfo refuses to re-sign a substituted manifest', async () => {
