@@ -24,6 +24,7 @@ import { ScanQRScreen } from './screens/ScanQR';
 import { BackupScreen } from './screens/Backup';
 import { DevicesScreen } from './screens/Devices';
 import { RelaySettingsScreen } from './screens/RelaySettings';
+import { TorConnectionScreen } from './screens/TorConnection';
 import { LockConfigScreen } from './screens/LockConfig';
 import { LockSettingsScreen } from './screens/LockSettings';
 import { LockScreen } from './screens/Lock';
@@ -74,6 +75,7 @@ type PushRoute =
   | { name: 'backup' }
   | { name: 'devices' }
   | { name: 'relay' }
+  | { name: 'torConnection' }
   | { name: 'lockConfig' }
   | { name: 'lock' }
   | { name: 'panic' }
@@ -511,6 +513,8 @@ function Shell() {
           return <DevicesScreen onBack={pop} />;
         case 'relay':
           return <RelaySettingsScreen onBack={pop} />;
+        case 'torConnection':
+          return <TorConnectionScreen onBack={pop} />;
         case 'lockConfig':
           return <LockConfigScreen onBack={pop} onLockTest={() => push({ name: 'lock' })} />;
         case 'lockSettings':

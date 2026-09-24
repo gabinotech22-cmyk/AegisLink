@@ -121,8 +121,14 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
       - rate limits del relay por identidad sobre Tor.
 
       SEALED-SENDER §6.2; PROTOCOL §9.
-- [ ] **Bridges Tor (Snowflake/obfs4)** en mobile y desktop: hoy, donde se bloquea Tor, la app no
-      conecta (sin respaldo por clearnet a propósito). Siguiente trabajo.
+- [x] **Bridges Tor (Snowflake/obfs4/meek + propios)** en mobile y desktop (2026-09-24):
+      - modo automático que escala solo cuando el arranque se atasca;
+      - bridges integrados de Tor Browser;
+      - líneas propias validadas;
+      - pantalla Privacidad → Red → Conexión a Tor.
+
+      Desktop verificado con Tor real (Snowflake 100% en 51 s, obfs4 en 123 s). PROTOCOL §9.
+- [ ] Verificar bridges en Android + iOS con build nativo (IPtProxy nuevo en los plugins).
 - [ ] Verificar en 2 dispositivos reales (Android + iOS) el control-plane por Tor con circuitos
       aislados (build nativo nuevo: los plugins `withTorEmbedded*.js` cambiaron).
 

@@ -134,6 +134,10 @@ contextBridge.exposeInMainWorld('aegis', {
       const listener = (_e: unknown, msg: unknown): void => cb(msg)
       ipcRenderer.on('tor:sio-event', listener)
       return () => ipcRenderer.removeListener('tor:sio-event', listener)
-    }
+    },
+    // Bridges: how tor connects (main/tor/bridges.ts). Validation lives in main.
+    getConnection: (): Promise<unknown> => ipcRenderer.invoke('tor:get-connection'),
+    setConnection: (mode: string, customText: string | null): Promise<unknown> =>
+      ipcRenderer.invoke('tor:set-connection', mode, customText)
   }
 })

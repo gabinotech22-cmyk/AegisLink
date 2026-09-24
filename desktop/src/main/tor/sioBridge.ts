@@ -18,7 +18,7 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { io, type Socket } from 'socket.io-client'
 import { SocksProxyAgent } from 'socks-proxy-agent'
-import { getTorStatus, whenTorReady } from './torProcess'
+import { getTorStatus, whenTorReady, getTorConnection, setTorConnection } from './torProcess'
 import { isOnionUrl } from './pure'
 
 interface Forward {
@@ -117,6 +117,17 @@ export function registerTorSioHandlers(): void {
   ipcMain.handle('tor:status', (event) => {
     assertTrustedSender(event)
     return getTorStatus()
+  })
+
+  // Bridges (main/tor/bridges.ts). The renderer only proposes; main validates
+  // the mode and every pasted line before anything reaches tor's arguments.
+  ipcMain.handle('tor:get-connection', (event) => {
+    assertTrustedSender(event)
+    return getTorConnection()
+  })
+  ipcMain.handle('tor:set-connection', (event, mode: unknown, customText: unknown) => {
+    assertTrustedSender(event)
+    return setTorConnection(mode, customText === null ? undefined : customText)
   })
 }
 

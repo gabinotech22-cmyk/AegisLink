@@ -457,7 +457,7 @@
     "retryBtn": "Riprova ora",
     "emergencyRelay": "PERCHÉ NON SI CONNETTE? · TOR ▸",
     "emergencyRelayTitle": "Connessione via Tor",
-    "emergencyRelayDesc": "AegisLink si connette sempre tramite il Tor integrato, così il tuo IP non arriva mai al relay. La prima connessione può richiedere fino a un minuto. Se la tua rete blocca Tor, l'app non potrà connettersi da quella rete: prova un'altra (Wi-Fi o dati mobili).",
+    "emergencyRelayDesc": "AegisLink si connette sempre tramite il Tor integrato, così il tuo IP non arriva mai al relay. La prima connessione può richiedere fino a un minuto. Se la tua rete blocca Tor, la modalità automatica prova da sola i bridge (Snowflake, obfs4, meek); puoi anche sceglierne uno o incollare i tuoi in Privacy → Rete → Connessione a Tor.",
     "understood": "Capito",
     "probing": "sondaggio in corso…",
     "reachable": "raggiungibile",
@@ -1808,5 +1808,43 @@
     "usePin": "Usa il PIN",
     "wrongPin": "PIN errato.",
     "confirm": "Conferma"
+  },
+  "torConnection": {
+    "title": "Connessione a Tor",
+    "intro": "AegisLink si connette sempre tramite Tor e mai tramite la normale rete internet. Qui scegli come Tor raggiunge la sua rete. Se la tua rete blocca Tor, un bridge lo camuffa da traffico ordinario.",
+    "nowSection": "ORA",
+    "connected": "Connesso alla rete Tor",
+    "modeSection": "COME CONNETTERSI",
+    "mode": {
+      "auto": "Automatico (consigliato)",
+      "direct": "Tor diretto",
+      "snowflake": "Snowflake",
+      "obfs4": "obfs4",
+      "meek": "meek",
+      "custom": "I miei bridge"
+    },
+    "modeSub": {
+      "auto": "Prova Tor diretto e, se la rete lo blocca, passa da solo a Snowflake, obfs4 e meek. Ricorda quello che ha funzionato.",
+      "direct": "L’opzione più veloce quando la rete non blocca Tor.",
+      "snowflake": "Si connette tramite volontari. Funziona su molte reti censurate.",
+      "obfs4": "Fa sembrare il traffico casuale. Usa i bridge pubblici di Tor Browser.",
+      "meek": "Si camuffa da traffico verso una grande CDN. Lento, ma supera reti molto restrittive.",
+      "custom": "Incolla bridge che hai ottenuto tu. Sono più difficili da bloccare di quelli pubblici."
+    },
+    "customSection": "I TUOI BRIDGE",
+    "customHelp": "Uno per riga. Li trovi su bridges.torproject.org o con il bot Telegram @GetBridgesBot. Sono accettati obfs4, webtunnel, snowflake e meek_lite.",
+    "apply": "Applica",
+    "applying": "Applicazione…",
+    "applied": "Fatto. Tor si sta riconnettendo.",
+    "someRejected": "Sono state ignorate {{n}} righe che non sono bridge validi.",
+    "noValidBridges": "Non c’è nessuna riga di bridge valida. Controlla ciò che hai incollato.",
+    "invalid": "Impossibile applicare le impostazioni.",
+    "transport": {
+      "direct": "Tor diretto",
+      "snowflake": "Snowflake",
+      "obfs4": "obfs4",
+      "meek": "meek",
+      "custom": "I tuoi bridge"
+    }
   }
 }
