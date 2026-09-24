@@ -24,6 +24,7 @@ import { ScanQRScreen } from './screens/ScanQR';
 import { BackupScreen } from './screens/Backup';
 import { DevicesScreen } from './screens/Devices';
 import { RelaySettingsScreen } from './screens/RelaySettings';
+import { TorConnectionScreen } from './screens/TorConnection';
 import { LockConfigScreen } from './screens/LockConfig';
 import { LockSettingsScreen } from './screens/LockSettings';
 import { LockScreen } from './screens/Lock';
@@ -44,7 +45,6 @@ import type { DistributionList } from './store/distribution';
 import { PollScreen } from './screens/Poll';
 import { FirstContactScreen } from './screens/FirstContact';
 import { AppIconScreen } from './screens/AppIcon';
-import { SubscriptionScreen } from './screens/Subscription';
 import { CallScreen } from './screens/Call';
 import { IncomingCallScreen } from './screens/IncomingCall';
 import { NetworkErrorScreen } from './screens/NetworkError';
@@ -75,6 +75,7 @@ type PushRoute =
   | { name: 'backup' }
   | { name: 'devices' }
   | { name: 'relay' }
+  | { name: 'torConnection' }
   | { name: 'lockConfig' }
   | { name: 'lock' }
   | { name: 'panic' }
@@ -94,7 +95,6 @@ type PushRoute =
   | { name: 'firstContact'; contact: StoredContact }
   | { name: 'contacts' }
   | { name: 'appIcon' }
-  | { name: 'subscription' }
   | { name: 'keys' }
   | { name: 'lockSettings' }
   | { name: 'distributionLists' }
@@ -502,7 +502,6 @@ function Shell() {
               onDevices={() => push({ name: 'devices' })}
               onPanic={() => push({ name: 'panic' })}
               onAppIcon={() => push({ name: 'appIcon' })}
-              onSubscription={() => push({ name: 'subscription' })}
               onKeys={() => push({ name: 'keys' })}
             />
           );
@@ -514,6 +513,8 @@ function Shell() {
           return <DevicesScreen onBack={pop} />;
         case 'relay':
           return <RelaySettingsScreen onBack={pop} />;
+        case 'torConnection':
+          return <TorConnectionScreen onBack={pop} />;
         case 'lockConfig':
           return <LockConfigScreen onBack={pop} onLockTest={() => push({ name: 'lock' })} />;
         case 'lockSettings':
@@ -586,8 +587,6 @@ function Shell() {
           );
         case 'appIcon':
           return <AppIconScreen onBack={pop} />;
-        case 'subscription':
-          return <SubscriptionScreen onBack={pop} />;
         case 'keys':
           return <KeysScreen onBack={pop} />;
         case 'distributionLists':

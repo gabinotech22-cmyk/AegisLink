@@ -131,27 +131,7 @@ export async function initPgSchema(): Promise<void> {
     );
 
     CREATE TABLE IF NOT EXISTS revoked_did_hashes (
-      did_hash        TEXT PRIMARY KEY,
-      revoked_at      BIGINT NOT NULL,
-      signature_b64   TEXT NOT NULL,
-      signing_pub_key TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS lightning_invoices (
-      payment_hash  TEXT PRIMARY KEY,
-      bolt11        TEXT NOT NULL,
-      amount_sats   BIGINT NOT NULL,
-      plan_days     INTEGER NOT NULL,
-      created_at    BIGINT NOT NULL,
-      expires_at    BIGINT NOT NULL,
-      paid          INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS subscriptions (
-      payment_hash  TEXT PRIMARY KEY,
-      plan_days     INTEGER NOT NULL,
-      activated_at  BIGINT NOT NULL,
-      expires_at    BIGINT NOT NULL
+      did_hash        TEXT PRIMARY KEY
     );
 
     CREATE TABLE IF NOT EXISTS linked_devices (
@@ -261,6 +241,25 @@ export async function initPgSchema(): Promise<void> {
     await pool.query(`ALTER TABLE prekeys_signed DROP CONSTRAINT IF EXISTS prekeys_signed_pkey`);
     await pool.query(`ALTER TABLE prekeys_signed ADD PRIMARY KEY (aegis_id, device_id)`);
   } catch { /* already correct or concurrent migration — safe to ignore */ }
+
+  // DID revocations (web3 audit 2026-09-24): a security purge, same class as
+  // C-3's DROP COLUMN chain_key_b64 (not an orphan-table cleanup, which stays
+  // operator-local — ROADMAP Hito 1). The legacy table also kept
+  // signing_pub_key — which IS the did:key in another encoding, defeating the
+  // hash-only storage — plus a signature and timestamp, and every row came from
+  // an endpoint that never bound the signer to the DID (anyone could revoke any
+  // DID). None of those rows is trustworthy, so on the legacy shape the table is
+  // dropped and recreated hash-only. Guarded by the column check: runs once.
+  try {
+    const legacy = await pool.query(
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'revoked_did_hashes' AND column_name = 'signing_pub_key'`
+    );
+    if ((legacy.rowCount ?? 0) > 0) {
+      await pool.query(`DROP TABLE revoked_did_hashes`);
+      await pool.query(`CREATE TABLE revoked_did_hashes (did_hash TEXT PRIMARY KEY)`);
+    }
+  } catch { /* concurrent migration — the next boot re-checks */ }
 
   // M-2: same PK fix for prekeys_onetime. Old PK was (aegis_id, key_id); the new
   // PK is (aegis_id, device_id, key_id). Existing rows keep device_id='default'

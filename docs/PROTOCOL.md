@@ -139,7 +139,14 @@ SHA-2, HMAC and HKDF primitives from a single facade (`mobile/src/crypto/sodium`
 `server/src/crypto/sodium`), enforced by `crypto-imports.test.ts`, and a golden
 fixture generated with the JS primitives (`f1-golden.json`) must keep replaying
 byte-for-byte after the swap. Argon2id/PBKDF2 and ML-KEM-768 stay on `@noble`
-for now. Tracked in
+for now. ML-KEM runs only on the clients (`@noble/post-quantum` 0.7.1 on mobile
+and desktop); the relay never encapsulates or decapsulates — it only checks the
+PQSPK signature — so its production image carries no PQ code. It stays a server
+`devDependency` only because the e2e test drives the real mobile client against
+the relay. The library moves on both clients
+together and must keep replaying `f1-golden`, whose hybrid ratchet sessions were
+persisted with 0.6.1; 0.6.1 ↔ 0.7.1 was also checked for identical keygen and
+deterministic encapsulation, mutual decapsulation and implicit rejection. Tracked in
 [`SECURITY-ROADMAP-2026-06.md`](SECURITY-ROADMAP-2026-06.md) (post-audit
 follow-up F-1). Until then, the constant-time guarantee is **source-level, not
 runtime-verified**, as stated above.
@@ -219,6 +226,45 @@ deriveAegisId(publicKey) → e.g.  "K3M-7QPA-9WZX"
 >    fingerprint), unlike Signal's "safety number" which hashes the *pair* of
 >    identity keys. Mutual verification therefore requires each side to confirm
 >    the other's fingerprint, rather than comparing a single shared number.
+
+### 3.4 Decentralized identifier (did:key) — resolution and deactivation
+
+Every identity has one DID: the `did:key` of its **Ed25519 signing key**
+(`did:key:z` + base58btc(`0xed01` ‖ key)), derived locally
+(`mobile/src/web3/did/deriveDID.ts`, cached by `DIDManager.ts`) and mirrored
+byte-for-byte on the relay (`server/src/crypto/didKey.ts`; shared vector in
+`server/src/__tests__/didKey.test.ts` and `mobile/src/web3/__tests__/deriveDID.test.ts`).
+A linked device clones the identity, so it has **no DID of its own**; device
+revocation is `device:revoke` on the authenticated socket (§9).
+
+- **Not unlinkable from the Aegis ID.** The DID encodes the same signing key
+  the relay stores and serves in the prekey bundle, so anyone who knows an
+  Aegis ID can compute its DID. It reveals no real-world identity, nothing more.
+- **Only canonical Ed25519 `did:key` is accepted** (client `publicKeyFromDID`,
+  relay `ed25519FromDidKey`): a non-canonical spelling of the same key would
+  hash differently and read as active after deactivation.
+- **Deactivation is derived by the relay, never requested by a client.** The
+  owner-signed account deletion (`DELETE /identity/:id`, signature verified
+  against the *stored* signing key) inserts `SHA-256(did)` into
+  `revoked_did_hashes` before deleting the account. There is no revocation
+  endpoint: the former `POST /web3/device/revoke` verified a signature against a
+  key the *client* supplied and never tied it to the DID, so anyone could
+  deactivate any DID (web3 audit 2026-09-24, `AUDIT-2026-09-24-WEB3-DID.md`).
+  Tests: `identityDeleteRevokesDid.test.ts`, `web3Did.test.ts`.
+- **At rest the relay keeps only `did_hash`** — no key (which *is* the DID),
+  signature or timestamp. The legacy table is purged and rebuilt once on boot.
+- **`GET /web3/did/resolve/:did`** implements W3C DID Resolution for `did:key`:
+  `200` document · `410` + `didDocumentMetadata.deactivated` · `400 invalidDid`
+  · `501 methodNotSupported` (any other method; `did:ethr` is out by design,
+  `ROADMAP.md`). The document lists the key under `authentication`,
+  `assertionMethod`, `capabilityInvocation`, `capabilityDelegation` and has **no
+  `keyAgreement`** (AegisLink never encrypts to a key derived from the signing
+  key). Clients resolve `did:key` locally (`resolveDID.ts`); calling the relay
+  tells it which DID is being looked up, so it is only for deactivation status.
+- **`/web3` is always mounted and read-only.** It used to sit behind
+  `WEB3_ENDPOINTS=off` because of the unbound revocation write (audit 2026-07
+  H3); with that endpoint and the mock Lightning subscriptions gone, the only
+  route is the resolver above (`web3Did.test.ts` guards the wiring).
 
 ---
 
@@ -712,8 +758,14 @@ with a key derived from a user passphrase the relay never sees:
 - **Real-time sender↔recipient correlation by the relay** on the non-mailbox
   paths, and timing correlation between the control-plane socket and the
   mailbox socket (both over Tor on separate circuits, §7.3).
-- **Networks that block Tor.** The client never falls back to clearnet; where
-  Tor is blocked it cannot connect until bridges (pluggable transports) ship.
+- **Networks that block Tor.** The client never falls back to clearnet. It
+  reaches Tor through bridges:
+  - Tor Browser's built-in Snowflake/obfs4/meek, escalated automatically when
+    the bootstrap stalls, or the user's own lines;
+  - `net/torBridges.ts`, `net/torConnection.ts`, `desktop/src/main/tor/bridges.ts`.
+
+  A network that blocks every bridge still blocks the app, and bridge use is
+  itself visible to the network observer.
 - **Call media IP on mobile.** WebRTC media is UDP and cannot ride Tor; with
   the default relay-only ICE (`hideCallIp`) the peer never sees the device IP,
   but the TURN server does. Desktop forces TURN-over-TCP through Tor.
@@ -760,6 +812,24 @@ with a key derived from a user passphrase the relay never sees:
     limited per verified identity on signed routes, counting only accepted
     requests, plus a shared flood backstop; clearnet keeps per-IP buckets
     (`server/src/http/relayLimiter.ts`).
+  - **Bridges** (networks that block Tor):
+    - Transports and bridge lines:
+      - transports: IPtProxy (lyrebird + snowflake) on mobile, the Tor Expert
+        Bundle's `lyrebird` on desktop;
+      - built-in lines: Tor Browser's `pt_config.json` from the pinned bundle
+        (`scripts/sync-tor-bridges.mjs`).
+    - Mode "auto" escalates direct → snowflake → obfs4 → meek when the bootstrap
+      watchdog trips. Silence counts as blocked only before the first hop. The
+      watchdog is calibrated on real bootstraps: obfs4 ~100s silent at 50%.
+    - User-pasted lines are validated strictly and re-checked natively, since
+      they become torrc/SETCONF input. Only `UseBridges`/`Bridge`/
+      `ClientTransportPlugin`, and no quote, backslash, `#` or control
+      character.
+    - A live swap pauses the network (`DisableNetwork 1`, swap,
+      `DisableNetwork 0`), as Tor Browser does.
+    - Tests: `net/__tests__/torBridges.test.ts`, `torConnection.test.ts`;
+      desktop `main/tor/__tests__/bridges.test.ts` (with parity guard) and
+      `transportArgs.test.ts`.
   - Tests: `net/__tests__/torBridge.test.ts`, `torMedia.test.ts`,
     `relayHttp.test.ts`, `socket/__tests__/client.homeRelay.test.ts`,
     `__tests__/torPlugin.regression.test.ts`, `server/src/__tests__/relayLimiter.test.ts`.
@@ -853,8 +923,10 @@ relay's static capabilities (`protocol`, `features`, `minClient`,
 `maxBlobBytes`) so a client can vet a relay before using it.
 
 **Control plane and groups across relays (F3).** Typing indicators and read
-receipts to a contact on another relay are sealed E2EE messages
-(`type: 'typing'` / `'read_receipt'`), never relay-local events. A group
+receipts are sealed E2EE messages (`type: 'typing'` / `'read_receipt'`) to
+**every** contact, local or on another relay; the relay has no `typing` /
+`msg:read` events any more (audit 2026-09-24 R-1: they handed the receiver a
+relay-stamped `from` a malicious relay could forge). A group
 SenderKey distribution to such a member is a sealed `sender_key_dist` message
 carrying the same per-recipient box `group:rekey` would queue; the recipient
 opens it only against the authenticated sealed-sender's key and requires the
@@ -1025,8 +1097,8 @@ current protocol:
    Decoupling message routing from the authenticated identity is **done** for
    the mailbox path (§7.3; `SEALED-SENDER-ARCHITECTURE.md` Fase 4), and the
    control-plane socket rides Tor on its own circuit (§9, 2026-09-23).
-   Remaining: retire v1 relay-side (Fase 6), add cover traffic (Fase 5), and
-   ship Tor bridges for networks that block Tor.
+   Remaining: retire v1 relay-side (Fase 6) and add cover traffic (Fase 5).
+   Bridges for networks that block Tor shipped on 2026-09-24 (§9).
 4. **Independent third-party cryptographic audit** of this protocol and its
    implementation, with full public disclosure of findings. **No independent
    audit has been performed.** This is the project's top funding priority.
@@ -1063,6 +1135,7 @@ File references below are to the mobile client.
 | Desktop client crypto (parity) | `desktop/src/renderer/crypto/` |
 | Relay envelope / sealed-sender wire format | `server/src/relay/handler.ts` |
 | Challenge-response auth | `server/src/auth/challenge.ts` |
+| DID (`did:key`) derivation, resolution, deactivation | `mobile/src/web3/did/`, `server/src/crypto/didKey.ts`, `server/src/routes/web3.ts` |
 
 ---
 

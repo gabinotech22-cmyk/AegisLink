@@ -21,7 +21,7 @@ import { useContacts } from '../store/contacts';
 // Types
 // ---------------------------------------------------------------------------
 
-type NavTarget = 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'relay';
+type NavTarget = 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'relay' | 'torConnection';
 
 interface Props {
   onTab: (tab: Tab) => void;
@@ -139,6 +139,7 @@ export function PrivacyScreen({ onTab, onNav }: Props) {
                 : i18n.t('tor.connecting', { v0: torStatus.progress })}
             trailing={<span style={{ fontFamily: t.fontMono, fontSize: 10, color: torStatus.state === 'on' ? t.accent : t.textDim, letterSpacing: 1 }}>{torStatus.state === 'on' ? i18n.t('privacy.torOn') : `${torStatus.progress}%`}</span>}
           />
+          <Row t={t} icon={<I.ShieldCheck size={20} color={t.textDim} />} label={i18n.t('torConnection.title')} sub={i18n.t(`torConnection.transport.${torStatus.transport ?? 'direct'}`)} onPress={() => onNav('torConnection')} />
           {FEDERATION && (
             <Row t={t} icon={<I.Globe size={20} color={t.textDim} />} label={i18n.t('privacy.myRelay')} sub={i18n.t('privacy.myRelaySub')} onPress={() => onNav('relay')} />
           )}

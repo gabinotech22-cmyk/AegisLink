@@ -135,7 +135,9 @@ export const MAILBOX_IOS_WAKE: boolean =
 /**
  * DISTRIBUTION — which channel this binary was built for.
  *
- * 'play' (default) is the Google Play build and keeps FCM for push wake-ups.
+ * 'play' (default) is the store build: on iOS it registers a raw APNs token
+ * (the relay sends wake-ups straight to APNs; no Expo push token since
+ * 2026-09-24). No Firebase config ships, so Android never gets an FCM token.
  * 'foss' is the build for F-Droid, our own F-Droid repo, Obtainium and plain
  * sideloads: it must reach a device with NO Google Play Services on it, so it
  * cannot acquire an FCM/Expo push token at all.
