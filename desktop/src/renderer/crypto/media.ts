@@ -1,4 +1,4 @@
-import { nacl } from './sodium';
+import { nacl, secretboxAsync, secretboxOpenAsync } from './sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { normalizeOnion } from '../net/relayRef';
 import { relayBaseUrl } from '../net/relayPoolCore';
@@ -56,7 +56,7 @@ export async function encryptAndUploadMedia(file: Blob): Promise<string> {
   const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
 
   // 3. Encrypt via XSalsa20-Poly1305
-  const ciphertext = nacl.secretbox(fileBytes, nonce, key);
+  const ciphertext = await secretboxAsync(fileBytes, nonce, key);
 
   // 4. Fetch PoW challenge from relay
   const challengeRes = await fetch(`${homeRelayBaseUrl()}/blob/challenge`);
@@ -158,7 +158,7 @@ export async function downloadAndDecryptMedia(
   }
   const ciphertext = new Uint8Array(await res.arrayBuffer());
 
-  const plaintext = nacl.secretbox.open(ciphertext, nonce, key);
+  const plaintext = await secretboxOpenAsync(ciphertext, nonce, key);
   key.fill(0);
   if (!plaintext) {
     throw new Error('Media decryption failed (MAC mismatch or invalid key)');

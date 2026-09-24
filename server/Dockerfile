@@ -1,5 +1,9 @@
+# Debian slim (glibc), not Alpine: the relay's crypto runs on native libsodium
+# (sodium-native, F-1), whose prebuilt binaries are glibc-only (>= 2.33) and do
+# not load on musl. bookworm ships glibc 2.36.
+
 # ── Build stage ────────────────────────────────────────────────────────────
-FROM node:26-alpine AS builder
+FROM node:26-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -16,10 +20,14 @@ COPY . .
 RUN npx tsc --noEmit
 
 # ── Runtime stage ──────────────────────────────────────────────────────────
-FROM node:26-alpine AS runtime
+FROM node:26-bookworm-slim AS runtime
 
-# Non-root user for least-privilege operation
-RUN addgroup -S aegis && adduser -S aegis -G aegis
+# Non-root user for least-privilege operation. uid 100 / gid 101 are EXACTLY what
+# the former Alpine image's `adduser -S` produced: existing self-hosted volumes
+# (/data, /app/uploads) are owned by them, so a different uid would leave the
+# relay unable to write its own DB after the image switch.
+RUN groupadd --system --gid 101 aegis \
+ && useradd --system --uid 100 --gid 101 --no-create-home --shell /usr/sbin/nologin aegis
 
 WORKDIR /app
 
@@ -48,8 +56,9 @@ ENV NODE_ENV=production \
 
 EXPOSE 3001
 
-# Health check — no user data, just liveness
+# Health check — no user data, just liveness. Uses node's fetch: the slim image
+# has no wget/curl.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:${PORT}/health | grep -q '"ok"'
+  CMD node -e "fetch('http://localhost:'+process.env.PORT+'/health').then(r=>r.json()).then(j=>process.exit(j.ok===true?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "--import", "tsx", "src/index.ts"]
