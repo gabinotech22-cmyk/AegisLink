@@ -15,9 +15,15 @@ appId: com.aegislink.app
     visible: "Generate my identity"
     timeout: 60000
 - tapOn: "Generate my identity"
+# Onboarding: identity card ("Continue") → optional nickname ("Skip for now") → Home.
 - extendedWaitUntil:
-    notVisible: "Generate my identity"
+    visible: "Continue"
     timeout: 90000
+- tapOn: "Continue"
+- extendedWaitUntil:
+    visible: "Skip for now"
+    timeout: 15000
+- tapOn: "Skip for now"
 - extendedWaitUntil:
     visible: "PRIVACY"
     timeout: 60000

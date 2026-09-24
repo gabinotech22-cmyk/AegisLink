@@ -32,6 +32,11 @@ declare module 'sodium-native' {
     crypto_sign_seed_keypair(pk: Bytes, sk: Bytes, seed: Bytes): void;
     crypto_sign_detached(sig: Bytes, m: Bytes, sk: Bytes): void;
     crypto_sign_verify_detached(sig: Bytes, m: Bytes, pk: Bytes): boolean;
+
+    /** Argon2 with a 16-byte salt only (mobile Jest stand-in: `jest/nodeBackend.ts`). */
+    crypto_pwhash(out: Bytes, pwd: Bytes, salt: Bytes, opslimit: number, memlimit: number, alg: number): void;
+    readonly crypto_pwhash_ALG_ARGON2ID13: number;
+    readonly crypto_pwhash_SALTBYTES: number;
   };
 
   export default sodium;

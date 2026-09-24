@@ -9,8 +9,9 @@
  * exercised as on a device. `crypto_box_beforenm` and HMAC/HKDF, which
  * sodium-native does not expose, come from X25519 + Salsa20 (HSalsa20, as in
  * `desktop/src/main/crypto/sodium/boxBefore.ts`) and node:crypto HMAC.
- * Argon2id comes from @noble/hashes: sodium-native's crypto_pwhash only takes
- * 16-byte salts, and node:crypto has no Argon2 before Node 24.7.
+ * Argon2id: libsodium's crypto_pwhash for 16-byte salts; @noble/hashes for the
+ * rest (sodium-native exposes no other salt length, and node:crypto has no
+ * Argon2 before Node 24.7).
  *
  * The shipped C core itself is tested against TweetNaCl/@noble by
  * `../test/differential.mjs` (CI job `aegis-sodium-native`).
@@ -174,8 +175,16 @@ const nodeBackend: AegisSodiumNative = {
       Number.isInteger(outLen) && outLen >= 16 && outLen <= 64 &&
       Number.isInteger(t) && t >= 1 && t <= 16 && Number.isInteger(mKib) && mKib >= 8 && mKib <= 262144;
     if (!ok) throw new Error(`aegis_argon2id failed: ${EBADLEN}`);
-    // Sync: argon2idAsync would pick up the app's setTimeout-yield patch (crypto/nobleNextTickPatch)
-    // and crawl; there is no UI to keep responsive here.
+    // A 16-byte salt (the app-lock PIN's per-install salt) goes to real libsodium:
+    // crypto_pwhash with Argon2id v1.3, one lane, is the same function as the C
+    // core's argon2id_hash_raw. Other salt lengths (backup: 32 B, duress: a domain
+    // string) fall back to @noble, sync: argon2idAsync would pick up the app's
+    // setTimeout-yield patch (crypto/nobleNextTickPatch) and crawl.
+    if (salt.length === sodium.crypto_pwhash_SALTBYTES) {
+      const out = new Uint8Array(outLen);
+      sodium.crypto_pwhash(out, pwd, salt, t, mKib * 1024, sodium.crypto_pwhash_ALG_ARGON2ID13);
+      return Array.from(out);
+    }
     return Array.from(argon2id(pwd, salt, { t, m: mKib, p: 1, dkLen: outLen }));
   },
 };
