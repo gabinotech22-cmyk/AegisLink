@@ -89,6 +89,12 @@ differs today:
   ~0.2 ms per X25519). HMAC and HKDF (keyed) run on `node:crypto` (OpenSSL);
   unkeyed SHA-2 stays in-process — it has no secret-dependent branches or table
   lookups, and the registration proof-of-work hashes ~260k times.
+  `sodium-native` exposes neither `crypto_box_beforenm` nor HSalsa20, so the
+  desktop's `nacl.box.before` (public-channel join approvals, wire-identical to
+  mobile) is composed natively in main: X25519, then one zero-nonce Salsa20
+  block minus the feed-forward, which is HSalsa20 by definition
+  (`desktop/src/main/crypto/sodium/boxBefore.ts`, pinned against TweetNaCl in
+  `boxBefore.test.ts`; a low-order peer key throws, as in libsodium).
 - **Mobile: still pure JavaScript** — `tweetnacl` and `@noble/hashes` on Hermes —
   until the native module lands (F-1 part B2, `docs/ROADMAP.md`).
 - **Everywhere:** Argon2id/PBKDF2 and ML-KEM-768 (`@noble/post-quantum`) stay in

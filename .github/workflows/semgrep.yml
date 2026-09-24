@@ -52,6 +52,31 @@ jobs:
             --sarif --output semgrep.sarif \
             --error || true
 
+      # Semgrep keeps `// nosemgrep: <rule>` findings in the SARIF, marked
+      # `suppressions: [{kind: inSource}]`, and code scanning still opens them
+      # as new alerts. So a PR that only moves a reviewed, justified line (the
+      # rules themselves ask for nosemgrep on e.g. dev-only fallbacks gated by
+      # app.isPackaged) went red. Drop exactly those results; anything without
+      # an in-source justification is uploaded unchanged.
+      - name: Drop nosemgrep-justified results from the SARIF
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os
+          path = 'semgrep.sarif'
+          if os.path.exists(path):
+              with open(path) as f:
+                  sarif = json.load(f)
+              for run in sarif.get('runs', []):
+                  results = run.get('results', [])
+                  kept = [r for r in results
+                          if not any(s.get('kind') == 'inSource' for s in r.get('suppressions', []))]
+                  print(f"semgrep: {len(results) - len(kept)} nosemgrep-justified result(s) dropped, {len(kept)} kept")
+                  run['results'] = kept
+              with open(path, 'w') as f:
+                  json.dump(sarif, f)
+          PY
+
       - name: Upload SARIF to code scanning
         if: always()
         uses: github/codeql-action/upload-sarif@v4

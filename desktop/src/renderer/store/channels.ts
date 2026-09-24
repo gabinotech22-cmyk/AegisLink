@@ -79,6 +79,14 @@ import {
   type ChannelManifestData,
 } from '../crypto/publicChannelKey';
 import { buildInviteLink, parseInviteLink } from '../channels/inviteLink';
+// Desktop is an ESM bundle: require() does not exist at runtime, and every
+// call below sat inside a try/catch, so a ReferenceError would have been
+// swallowed as "notification failed" / "cache cleanup failed" and the feed
+// would simply never persist. Static imports; the cycle mobile was avoiding
+// does not exist here (db/channelFeed imports FeedPost as a TYPE only).
+import { saveChannelFeed, loadChannelFeed, deleteChannelFeed } from '../db/local';
+import { showChannelPostNotification } from '../notifications/channelNotifications';
+import { usePreferences } from './preferences';
 import {
   saveChannelSecrets,
   saveChannelSigningKey,
@@ -335,7 +343,6 @@ function mergeFeedPosts(existing: FeedPost[], incoming: FeedPost[]): FeedPost[] 
 function persistFeed(channelId: string, get: () => { feeds: Record<string, FeedPost[]> }): void {
   const posts = get().feeds[channelId];
   if (!posts) return;
-  const { saveChannelFeed } = require('../db/local') as typeof import('../db/local');
   void saveChannelFeed(channelId, posts).catch(() => {});
 }
 
@@ -353,10 +360,6 @@ function notifyNewPosts(
   const fresh = posts.filter((p) => p.from !== ownAegisId);
   if (fresh.length === 0) return;
   try {
-    // Lazy require (same pattern as socket/client → notifications/push): keeps
-    // expo-notifications out of this store's static import graph.
-    const { showChannelPostNotification } =
-      require('../notifications/channelNotifications') as typeof import('../notifications/channelNotifications');
     for (const p of fresh) {
       void showChannelPostNotification(channelId, channelName, p.body);
     }
@@ -390,7 +393,6 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     // account simply follows no channels (plausible; the public directory
     // itself stays browsable, it's public data). Mirrors groups/contacts.
     {
-      const { usePreferences } = require('./preferences') as typeof import('./preferences');
       if (usePreferences.getState().duressActive) {
         // Clear EVERY slice holding real channel state — pending join
         // applications and ban lists included, both loaded at cold start.
@@ -781,7 +783,6 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   async loadFeed(channelId, identity) {
     const cek = await getChannelCEK(channelId);
     if (!cek) return; // not subscribed / no key
-    const { saveChannelFeed, loadChannelFeed } = require('../db/local') as typeof import('../db/local');
 
     // Restore the persisted feed once per session BEFORE the delta pull. The
     // verified head is persisted, so a cold restart delta-pulls (since = head)
@@ -1000,7 +1001,6 @@ export const useChannels = create<ChannelsState>((set, get) => ({
   async removeChannel(channelId) {
     await deleteChannelSecrets(channelId);
     try {
-      const { deleteChannelFeed } = require('../db/local') as typeof import('../db/local');
       await deleteChannelFeed(channelId);
     } catch { /* best-effort cache cleanup */ }
     set((s) => {

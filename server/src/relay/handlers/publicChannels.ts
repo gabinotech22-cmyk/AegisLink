@@ -307,8 +307,10 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
       }
 
       await publicChannelPostRepo.deleteBySeq(channelId, seqNum);
-      // Fan-out delete notification to room members
-      io.to(`pubchannel:${channelId}`).emit('pubchannel:delete', { channelId, seqNum });
+      // Fan-out delete notification to room members WITH the owner signature:
+      // each client re-verifies it against the channel key it pinned from the
+      // verified manifest, so a relay alone cannot censor posts.
+      io.to(`pubchannel:${channelId}`).emit('pubchannel:delete', { channelId, seqNum, sig: sigB64 });
       ack?.({ ok: true });
     })();
   });
@@ -462,7 +464,8 @@ export function attachPublicChannelEvents(socket: Socket, io: SocketServer) {
       await publicChannelRepo.delete(channelId);
 
       // Fan-out tombstone to room members, then clear the room
-      io.to(`pubchannel:${channelId}`).emit('pubchannel:tombstone', { channelId, ts });
+      // With the owner signature: clients re-verify before erasing their keys.
+      io.to(`pubchannel:${channelId}`).emit('pubchannel:tombstone', { channelId, ts, sig: sigB64 });
       // Disconnect all sockets from the room
       const roomSockets = await io.in(`pubchannel:${channelId}`).fetchSockets();
       for (const s of roomSockets) s.leave(`pubchannel:${channelId}`);
