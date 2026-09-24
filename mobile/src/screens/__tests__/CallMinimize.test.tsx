@@ -17,8 +17,8 @@ jest.mock('react-native-webrtc', () => ({ RTCView: null }));
 // ── runtime ────────────────────────────────────────────────────────────────
 jest.mock('../../runtime', () => ({ WEBRTC_AVAILABLE: false }));
 
-// ── @noble/hashes/sha256 ───────────────────────────────────────────────────
-jest.mock('@noble/hashes/sha256', () => ({
+// ── crypto/sodium (sha256 for the safety number) ──────────────────────────
+jest.mock('../../crypto/sodium', () => ({
   sha256: jest.fn(() => new Uint8Array(32)),
 }));
 

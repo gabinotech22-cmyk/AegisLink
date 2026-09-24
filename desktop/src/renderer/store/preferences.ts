@@ -18,7 +18,6 @@ export interface Preferences {
   readReceipts: boolean;
   typingIndicator: boolean;
   blockScreenshots: boolean;
-  routeViaTor: boolean;
   notifMaster: boolean;
   notifPreview: boolean;
   notifSound: boolean;
@@ -41,7 +40,6 @@ const DEFAULTS: Preferences = {
   readReceipts: false,
   typingIndicator: false,
   blockScreenshots: true,
-  routeViaTor: true,
   notifMaster: true,
   notifPreview: false,
   notifSound: true,
@@ -74,7 +72,6 @@ function snapshot(get: () => PrefsState): Preferences {
     readReceipts: s.readReceipts,
     typingIndicator: s.typingIndicator,
     blockScreenshots: s.blockScreenshots,
-    routeViaTor: s.routeViaTor,
     notifMaster: s.notifMaster,
     notifPreview: s.notifPreview,
     notifSound: s.notifSound,

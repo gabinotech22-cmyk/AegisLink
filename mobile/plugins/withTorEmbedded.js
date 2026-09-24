@@ -171,6 +171,56 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
     return if (live > 0) live else cachedSocksPort
   }
 
+  // ── Circuit isolation (Tor always-on) ──────────────────────────────────────
+  // The control lane (aegisId identity socket, relay HTTP) and the mailbox lane
+  // (mailbox socket, /mailbox/* HTTP, ntfy wake-up) must never share a Tor
+  // circuit. Otherwise a relay operator can join them through the onion service
+  // (HiddenServiceExportCircuitID) and relink the opaque mailbox id to the
+  // aegisId. Tor never puts streams from different SocksPort listeners on one
+  // circuit, so torrc opens TWO listeners (writeIsolationTorrc) and each lane
+  // dials its own. Desktop does the same (desktop/src/main/tor/torProcess.ts);
+  // iOS isolates by SOCKS credentials (withTorEmbeddedIOS.js).
+  private var cachedLanePorts: List<Int> = emptyList()
+
+  private fun writeIsolationTorrc(ctx: Context) {
+    // TorService runs tor with \`-f <getTorrc>\` over its generated
+    // \`--defaults-torrc\` (SOCKSPort auto): these two lines replace that single
+    // listener with two. Rewritten on every start so the file never drifts.
+    TorService.getTorrc(ctx).writeText(buildString {
+      appendLine("SocksPort auto")
+      appendLine("SocksPort auto")
+    })
+  }
+
+  /** Both SOCKS listeners, in torrc order, from tor's own control port. */
+  private fun lanePorts(): List<Int> {
+    val info = try { torService?.getInfo("net/listeners/socks") } catch (_: Exception) { null }
+    if (info != null) {
+      val ports = Regex(":([0-9]+)").findAll(info).map { it.groupValues[1].toInt() }.filter { it > 0 }.toList()
+      if (ports.isNotEmpty()) cachedLanePorts = ports
+    }
+    return cachedLanePorts
+  }
+
+  /**
+   * SOCKS port for a lane: control = first listener, mailbox = second. 0 while
+   * Tor is not up. The mailbox lane fails CLOSED (0) if the second listener is
+   * missing: sharing the control circuit would silently undo the isolation.
+   */
+  private fun lanePort(mailbox: Boolean): Int {
+    val ports = lanePorts()
+    if (ports.isEmpty()) return if (mailbox) 0 else socksPort()
+    return if (mailbox) (if (ports.size > 1) ports[1] else 0) else ports[0]
+  }
+
+  /** Identity sockets are "ctl-…" (net/tor.ts); every other bridge id is mailbox. */
+  private fun isMailboxSocket(id: String): Boolean = !id.startsWith("ctl-")
+
+  // Paths under /mailbox/ (stateless drain, challenges) are the mailbox lane.
+  // (No slash-star in block comments: Kotlin nests them. CI build 2026-09-23.)
+  private fun isMailboxUrl(url: String): Boolean =
+    try { (java.net.URI(url).path ?: "").startsWith("/mailbox/") } catch (_: Exception) { false }
+
   private val statusReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
       when (intent?.getStringExtra(TorService.EXTRA_STATUS)) {
@@ -214,6 +264,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
       }
       // Resolve once STATUS_ON arrives via the broadcast receiver.
       startPromise = promise
+      writeIsolationTorrc(ctx)
       ctx.bindService(Intent(ctx, TorService::class.java), connection, Context.BIND_AUTO_CREATE)
     } catch (e: Exception) {
       startPromise = null
@@ -284,7 +335,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun sioConnect(id: String, url: String, authJson: String, eventsJson: String, promise: Promise) {
     try {
-      val port = socksPort()
+      val port = lanePort(isMailboxSocket(id))
       if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
       val client = torOkHttp(port)
       val opts = IO.Options()
@@ -373,7 +424,8 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun httpSubscribe(id: String, url: String, promise: Promise) {
     try {
-      val port = socksPort()
+      // ntfy wake-up for OUR mailbox topic: mailbox lane.
+      val port = lanePort(true)
       if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
       // Clone the SOCKS-bound client but disable the read timeout for streaming.
       val client = torOkHttp(port).newBuilder()
@@ -442,7 +494,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun httpRequest(url: String, method: String, headersJson: String, body: String, promise: Promise) {
     try {
-      val port = socksPort()
+      val port = lanePort(isMailboxUrl(url))
       if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
       val client = torOkHttp(port).newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -492,7 +544,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun httpDownload(url: String, destPath: String, headersJson: String, promise: Promise) {
     try {
-      val port = socksPort()
+      val port = lanePort(isMailboxUrl(url))
       if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
       val client = torOkHttp(port).newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -533,7 +585,7 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun httpUpload(url: String, filePath: String, headersJson: String, promise: Promise) {
     try {
-      val port = socksPort()
+      val port = lanePort(isMailboxUrl(url))
       if (port <= 0) { promise.reject("E_TOR_NOT_READY", "Tor SOCKS port unavailable"); return }
       val client = torOkHttp(port).newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)

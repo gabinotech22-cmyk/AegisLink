@@ -17,7 +17,7 @@
  * The comparison is not constant-time on purpose: S is public (it travels on
  * the wire), so its value leaks nothing.
  */
-import nacl from 'tweetnacl';
+import { nacl } from './sodium/index.js';
 
 /** L = 2^252 + 27742317777372353535851937790883648493, little-endian. */
 const L = new Uint8Array([

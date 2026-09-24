@@ -3,10 +3,10 @@ import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import rateLimit from 'express-rate-limit';
 import { issueChallenge, verifyPoW } from '../pow/challenge.js';
 import { publicChannelRepo } from '../db/client.js';
 import { z } from 'zod';
+import { relayLimiter } from '../http/relayLimiter.js';
 
 const router = Router();
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
@@ -104,25 +104,19 @@ export function __currentTotalBytes(): number { return currentTotalBytes; }
 // rate limit only needs to bound bulk-bot floods. 200/15 min (~13/min sustained)
 // comfortably covers sharing a photo album while still capping automated abuse.
 const UPLOAD_WINDOW_MS = 15 * 60 * 1000;
-const uploadLimiter = rateLimit({
+const uploadLimiter = relayLimiter({
   windowMs: UPLOAD_WINDOW_MS,
   max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: UPLOAD_WINDOW_MS });
-  },
+  onion: { kind: 'shared' },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: UPLOAD_WINDOW_MS },
 });
 
 // A lighter limiter for the challenge endpoint.
-const challengeLimiter = rateLimit({
+const challengeLimiter = relayLimiter({
   windowMs: 60 * 1000,
   max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
-  },
+  onion: { kind: 'shared' },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 60_000 },
 });
 
 // ── PoW upload body schema ────────────────────────────────────────────────────
@@ -199,14 +193,11 @@ router.post('/upload', uploadLimiter, requireUploadPoW, express.raw({ type: '*/*
 // UUID v4 strict validation.
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const downloadLimiter = rateLimit({
+const downloadLimiter = relayLimiter({
   windowMs: 15 * 60 * 1000,
   max: 1000,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
-  },
+  onion: { kind: 'shared' },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 },
 });
 
 router.get('/download/:id', downloadLimiter, (req, res) => {

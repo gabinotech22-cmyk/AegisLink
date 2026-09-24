@@ -38,10 +38,8 @@
  * the same residual Signal/SimpleX live with.
  */
 
-import nacl from 'tweetnacl';
+import { nacl, sha256, hkdfSha256 } from './sodium';
 import { encodeBase64 } from 'tweetnacl-util';
-import { hkdf } from '@noble/hashes/hkdf';
-import { sha256 } from '@noble/hashes/sha256';
 import { verifyDetached } from './ed25519';
 
 /** Opaque mailbox identifier length (128-bit — collision-safe routing handle). */
@@ -130,7 +128,7 @@ export function mailboxIdForSignPublicKey(
  * any per-epoch coordination. The intermediate KDF seed is zeroized.
  */
 export function deriveMailbox(root: Uint8Array, epoch: number): Mailbox {
-  const seed = hkdf(sha256, root, undefined, mailboxInfo(epoch), SEED_LEN);
+  const seed = hkdfSha256(root, undefined, mailboxInfo(epoch), SEED_LEN);
   try {
     const kp = nacl.sign.keyPair.fromSeed(seed);
     const { mailboxId, mailboxIdB64 } = mailboxIdForSignPublicKey(kp.publicKey);

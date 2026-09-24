@@ -9,8 +9,8 @@
  * The relay never learns who asked (Tor) and stores nothing.
  */
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import { appVersionInfo } from '../relay/appVersion.js';
+import { relayLimiter } from '../http/relayLimiter.js';
 
 const router = Router();
 
@@ -19,12 +19,11 @@ export const RELAY_PROTOCOL = 1;
 /** Mirrors routes/blob.ts (express.raw limit). */
 export const MAX_BLOB_BYTES = 50 * 1024 * 1024;
 
-const infoLimiter = rateLimit({
+const infoLimiter = relayLimiter({
   windowMs: 60 * 1000,
   max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => { res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 }); },
+  onion: { kind: 'shared' },
+  body: { error: 'rate_limit_exceeded', retryAfterMs: 60_000 },
 });
 
 export interface RelayInfo {

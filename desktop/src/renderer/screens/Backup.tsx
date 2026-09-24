@@ -27,7 +27,7 @@ import {
 import { saveContact, saveGroup, saveMessage, loadMessagesByChat, type StoredContact, type StoredGroup, type StoredMessage } from '../db/local';
 import { usePreferences } from '../store/preferences';
 import { WORDLIST_256 } from '../crypto/wordlist';
-import nacl from 'tweetnacl';
+import { nacl, type BoxKeyPair, type SignKeyPair } from '../crypto/sodium';
 import { encodeBase64 } from 'tweetnacl-util';
 import { identityFromStored } from '../crypto/identity';
 
@@ -357,8 +357,8 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                     }
                   }
                   let secretKeyBytes: Uint8Array | null = null;
-                  let keypair: nacl.BoxKeyPair | null = null;
-                  let signKeys: nacl.SignKeyPair | null = null;
+                  let keypair: BoxKeyPair | null = null;
+                  let signKeys: SignKeyPair | null = null;
                   try {
                     const bytes = words.map((w) => {
                       const idx = WORDLIST_256.indexOf(w);

@@ -1,10 +1,10 @@
 import { io, type Socket } from 'socket.io-client';
 import { logger } from '../utils/logger';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { SERVER_URL, ONION_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, REMOTE_PUSH_ENABLED, FEDERATION } from '../config';
+import { SERVER_URL, SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, REMOTE_PUSH_ENABLED, FEDERATION } from '../config';
 import { usePreferences } from '../store/preferences';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';
@@ -25,7 +25,7 @@ function photoVisNow(): import('../utils/photoVisibility').PhotoVis {
 }
 import { connectMailboxSocket, disconnectMailboxSocket, sendViaMailbox, isMailboxAuthed, mailboxAckConfirmsDelivery, fetchMailboxOverTor } from './mailboxSocket';
 import { isForeign, getHomeRelay, isCustomHome, homeRelayOnionUrl, resolveRelay } from '../net/homeRelay';
-import { TorSioSocket, IDENTITY_FORWARD_EVENTS, isTorAvailable, startTor } from '../net/tor';
+import { TorSioSocket, IDENTITY_FORWARD_EVENTS, isTorAvailable } from '../net/tor';
 import { canonicalRelay } from '../net/officialRelay';
 import { relayRefFromOnion, type RelayRef } from '../net/relayRef';
 import { keyMatchesAegisId } from '../crypto/aegisId';
@@ -1224,23 +1224,27 @@ export function connect(identity: Identity): Socket {
 
   authenticated = false;
 
-  // Read Tor preference synchronously from Zustand store (no hook needed outside React)
-  const { routeViaTor } = usePreferences.getState();
-  let relayUrl = routeViaTor && ONION_URL ? ONION_URL : SERVER_URL;
-
-  // ── Federation F5: a self-hosted home relay is .onion-only ─────────────────
-  // The identity socket then rides the embedded Tor bridge (the same native
-  // socket.io-over-SOCKS pipe the mailbox uses), forwarding every relay event
-  // the handlers below subscribe to (IDENTITY_FORWARD_EVENTS). Fail-closed: no
-  // Tor → no socket (never a clearnet attempt at an onion, never the official
-  // relay "instead"). Tor bootstrap is awaited in the background; the bridge
-  // itself is created immediately so the handlers wire up exactly as usual.
-  if (isCustomHome()) {
-    const homeUrl = homeRelayOnionUrl();
-    if (!homeUrl || !isTorAvailable()) {
-      throw new Error('AegisLink: self-hosted relay needs the embedded Tor');
+  // ── Tor always-on: the identity socket rides the embedded Tor ─────────────
+  // To the official relay's onion (ONION_URL) or to a self-hosted home (F5,
+  // .onion-only), through the same native socket.io-over-SOCKS bridge the
+  // mailbox uses, forwarding every relay event the handlers below subscribe to
+  // (IDENTITY_FORWARD_EVENTS). Fail-closed: no Tor → no socket, never a
+  // clearnet attempt. Tor bootstrap is awaited inside the bridge
+  // (TorSioSocket.dial); the bridge itself is created immediately so the
+  // handlers wire up exactly as usual. `viaTor` is false only in dev builds
+  // (no onion, or no native Tor module: Expo Go / jest) and in a release
+  // against a loopback dev relay; config.ts refuses a production build
+  // without ONION_URL, and a production build without native Tor throws here.
+  const homeOnion = homeRelayOnionUrl();
+  let viaTor = !!homeOnion;
+  let relayUrl = homeOnion || SERVER_URL;
+  if (viaTor && !isTorAvailable()) {
+    // A self-hosted home is .onion-only: unreachable without Tor, dev or not.
+    if (!__DEV__ || isCustomHome()) {
+      throw new Error('AegisLink: the relay is reached only over the embedded Tor, which is unavailable');
     }
-    relayUrl = homeUrl;
+    viaTor = false;
+    relayUrl = SERVER_URL;
   }
 
   // Hardened Transport: Enforce HTTPS/WSS in production. Exception: developer
@@ -1288,8 +1292,8 @@ export function connect(identity: Identity): Socket {
   })();
 
   const socketAuth = { aegisId: identity.aegisId, platform: 'mobile', ackDelivery: true };
-  socket = isCustomHome()
-    ? (new TorSioSocket(relayUrl, socketAuth, IDENTITY_FORWARD_EVENTS) as unknown as Socket)
+  socket = viaTor
+    ? (new TorSioSocket(relayUrl, socketAuth, IDENTITY_FORWARD_EVENTS, 'control') as unknown as Socket)
     : io(relayUrl, {
     // WebSocket first (lowest latency), but fall back to HTTP long-polling within
     // the SAME connection attempt when the WS upgrade is blocked — the common case
@@ -1309,11 +1313,6 @@ export function connect(identity: Identity): Socket {
     reconnectionAttempts: Infinity,
     timeout: 20000,
   });
-  if (isCustomHome()) {
-    // Make sure Tor is (still) bootstrapped; the native bridge reconnects on its
-    // own once the SOCKS port is up. Never blocks handler wiring below.
-    void startTor().catch((e: Error) => { if (__DEV__) logger.warn('[socket] tor bootstrap for home relay failed:', e.message); });
-  }
 
   socket.on('connect', () => {
     connected = true;
@@ -1508,60 +1507,48 @@ export function connect(identity: Identity): Socket {
         const { registerForPush } = require('../notifications/push') as typeof import('../notifications/push');
         await registerForPush(identity);
 
-        // After registerForPush succeeds, check if token changed and emit to relay
-        const Notifications = require('expo-notifications');
-        const perm = await Notifications.getPermissionsAsync();
-        if (!perm.granted && perm.status !== 'granted') return;
-
-        const tokenData = await Notifications.getExpoPushTokenAsync();
-        const freshToken: string = tokenData.data;
-        // Re-register until the relay CONFIRMS the write via ack. The old code
-        // emitted fire-and-forget and cached the token as "done" immediately, so
-        // a lost frame or a rate-limited emit was never retried — the relay kept
-        // ZERO tokens for the identity and a killed iOS app never woke
-        // (notifyRecipient had nothing to send to). We now gate the cache on the
-        // ack and re-emit on every auth until 'aegis.pushToken.confirmed' matches
-        // the live token. Keying on a *confirmed* marker also self-heals installs
-        // already stuck by the old bug (their stale 'aegis.pushToken' never
-        // re-emitted). Idempotent server-side (pushRepo.upsert).
-        const confirmedToken = await SecureStore.getItemAsync('aegis.pushToken.confirmed');
-        if (confirmedToken !== freshToken) {
+        // No Expo push token (2026-09-24): it was fetched from exp.host outside
+        // Tor, and every wake went through Expo, which then saw the device IP
+        // and the rhythm of incoming messages. iOS registers its RAW APNs token
+        // and the relay talks to APNs directly (push/apns-alert.ts). Android
+        // store builds have no Firebase config, so no remote token there.
+        //
+        // One-time cleanup for installs from before: tell the relay to drop the
+        // Expo token it still holds, so it stops sending through Expo.
+        const legacyExpo = await SecureStore.getItemAsync('aegis.pushToken');
+        if (legacyExpo) {
           const { Platform } = require('react-native');
-          const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'unknown';
+          const platform = Platform.OS === 'ios' ? 'ios' : 'android';
           try {
             await new Promise<void>((resolve, reject) => {
               socket!
                 .timeout(EMIT_ACK_TIMEOUT_MS)
-                .emit('push:register', { token: freshToken, platform }, (err: Error | null, ack?: { ok?: boolean }) => {
+                .emit('push:unregister', { token: legacyExpo, platform }, (err: Error | null, ack?: { ok?: boolean }) => {
                   if (err) { reject(err); return; }
-                  if (!ack?.ok) { reject(new Error('push_register_rejected')); return; }
+                  if (!ack?.ok) { reject(new Error('push_unregister_rejected')); return; }
                   resolve();
                 });
             });
-            await SecureStore.setItemAsync('aegis.pushToken.confirmed', freshToken);
-            await SecureStore.setItemAsync('aegis.pushToken', freshToken);
+            await SecureStore.deleteItemAsync('aegis.pushToken').catch(() => {});
+            await SecureStore.deleteItemAsync('aegis.pushToken.confirmed').catch(() => {});
           } catch (e) {
-            // Not confirmed (lost frame / rate-limited / timeout) → leave the
-            // marker unset so the next auth retries. Never fatal to the connect.
-            if (__DEV__) logger.warn('[socket] push:register not confirmed, will retry next auth:', e);
+            // Not confirmed: retried on the next auth. Never fatal to the connect.
+            if (__DEV__) logger.warn('[socket] legacy Expo token cleanup not confirmed:', e);
           }
         }
 
-        // ── iOS: also register the RAW APNs token (direct-APNs message wake) ────
-        // getDevicePushTokenAsync returns the standard APNs device token (hex),
-        // DISTINCT from the Expo token above and the VoIP token below. It lets the
-        // relay wake a killed iPhone straight through APNs — no Expo hop, the way
-        // Session's push server does. Fail-safe: if this never registers, the
-        // relay falls back to the Expo push, so nothing regresses. Same ack-gated
-        // confirmed-marker dedup so a lost frame retries on the next auth.
+        // ── iOS: register the RAW APNs token (direct-APNs wake, no Expo) ─────
+        // Re-register until the relay CONFIRMS the write via ack: a lost frame or
+        // a rate-limited emit must not leave the relay with zero tokens (a killed
+        // iPhone would then never wake). The confirmed marker dedups re-emits.
+        // The token is also kept for apns:unregister on a profile switch.
         {
-          const { Platform } = require('react-native');
-          if (Platform.OS === 'ios') {
+          const { getLastApnsToken } = require('../notifications/push') as typeof import('../notifications/push');
+          const apnsToken = getLastApnsToken();
+          if (apnsToken) {
             try {
-              const dev = await Notifications.getDevicePushTokenAsync();
-              const apnsToken: string = typeof dev?.data === 'string' ? dev.data : '';
               const confirmedApns = await SecureStore.getItemAsync('aegis.apnsToken.confirmed');
-              if (apnsToken && confirmedApns !== apnsToken) {
+              if (confirmedApns !== apnsToken) {
                 await new Promise<void>((resolve, reject) => {
                   socket!
                     .timeout(EMIT_ACK_TIMEOUT_MS)
@@ -1573,6 +1560,7 @@ export function connect(identity: Identity): Socket {
                 });
                 await SecureStore.setItemAsync('aegis.apnsToken.confirmed', apnsToken);
               }
+              await SecureStore.setItemAsync('aegis.apnsToken', apnsToken);
             } catch (e) {
               if (__DEV__) logger.warn('[socket] apns:register not confirmed, will retry next auth:', e);
             }
@@ -1670,31 +1658,14 @@ export function connect(identity: Identity): Socket {
     }
   });
 
-  socket.on('msg:read', ({ from, msgIds }: { from: string; msgIds: string[] }) => {
-    const msgs = useMessages.getState();
-    for (const msgId of msgIds) {
-      const chatMsgs = msgs.byChat[from];
-      if (chatMsgs?.find((m) => m.id === msgId)) {
-        void msgs.updateDelivery(from, msgId, 'read');
-      }
-    }
-  });
-
-  // NOTE: the legacy plaintext `msg:delete` relay event is intentionally NOT
-  // handled. Delete-for-everyone now travels inside the sealed E2EE ratchet
-  // channel (`{type:'msg_delete'}`), which authenticates the sender. Honoring
-  // an unauthenticated wire event would let a malicious relay erase arbitrary
-  // messages by supplying {from, msgId} (golden rule #3: sensitive actions
-  // require proof-of-key-possession, not just knowing an id).
-
-  socket.on('typing', ({ from, isTyping }: { from: string; isTyping: boolean }) => {
-    const { useTyping } = require('../store/typing');
-    useTyping.getState().setTyping(from, isTyping);
-    // Auto-clear after 5 s in case the stop signal is lost
-    if (isTyping) {
-      setTimeout(() => useTyping.getState().setTyping(from, false), 5000);
-    }
-  });
+  // NOTE: the legacy plaintext `msg:delete`, `msg:read` and `typing` relay
+  // events are intentionally NOT handled. Delete-for-everyone, read receipts and
+  // typing travel inside the sealed E2EE ratchet channel (`{type:'msg_delete'|
+  // 'read_receipt'|'typing'}`), which authenticates the sender. Honoring an
+  // unauthenticated wire event would let a malicious relay erase messages, mark
+  // them read or fake "typing" by supplying a `from` (golden rule #3: sensitive
+  // actions require proof-of-key-possession, not just knowing an id; audit
+  // 2026-09-24 R-1).
 
   socket.on('envelope', async (env: WireSealedEnvelope) => {
     rdiag(`[RDIAG] envelope RECV from=${env.from ?? '(none)'} hasSenderPub=${!!env.senderPublicKeyB64} self=${!!env.selfCopy}`);
@@ -2940,12 +2911,12 @@ async function decryptAndAppendLocked(
         return true;
       }
 
-      // E2EE read receipt (mailbox mode): the peer reports having read some of
-      // our messages. payload.text = JSON array of msgIds. Rides the sealed
-      // channel so the relay never sees the me↔to aegisId edge (which the old
-      // plaintext `msg:read` event handed over on the control-plane socket,
-      // relinking the two identities mailbox mode exists to separate). Apply
-      // silently; do NOT append a chat row. Still persist ratchet state.
+      // E2EE read receipt: the peer reports having read some of our messages.
+      // payload.text = JSON array of msgIds. The ONLY receipt path (audit
+      // 2026-09-24 R-1): the sealed channel authenticates the sender, unlike the
+      // removed plaintext `msg:read` event whose relay-stamped `from` a relay
+      // could forge. Apply silently; do NOT append a chat row. Still persist
+      // ratchet state.
       if (parsedPayload.type === 'read_receipt') {
         if (typeof parsedPayload.text === 'string' && parsedPayload.text) {
           try {
@@ -5257,71 +5228,55 @@ export async function sendProfileTo(contact: { aegisId: string; publicKeyB64: st
   }
 }
 
-// Per-peer record of the last sealed typing signal sent (mailbox mode), used by
+// Per-peer record of the last sealed typing signal sent, used by
 // shouldSendSealedTyping to throttle keystroke-rate refreshes. Keyed by aegisId.
 const sealedTypingState = new Map<string, { isTyping: boolean; at: number }>();
 
+// Typing indicators and read receipts ALWAYS travel sealed inside the E2EE
+// ratchet (`{type:'typing'|'read_receipt'}` via sendMessage) on every transport:
+// mailbox, aegisId v2 and a foreign relay alike. The relay-routed plaintext
+// `typing` / `msg:read` events are gone (audit 2026-09-24 R-1): outside mailbox
+// mode they handed the receiver a relay-stamped `from` that a malicious relay
+// could forge — the same reason plaintext `msg:delete` was retired.
 export function emitTyping(to: string, isTyping: boolean): void {
   if (!socket || !authenticated) return;
-  // Federation F3: a contact on another relay has no relay-local `typing`
-  // event — the sealed message (below) is the only path, and F2 already routes
-  // it through their relay. Same for read receipts.
-  const typingContact = useContacts.getState().contacts.find((c) => c.aegisId === to);
-  if (MAILBOX_ENABLED || (typingContact && isForeign(typingContact))) {
-    // The plaintext `typing` event carries the peer's aegisId on the control-
-    // plane socket, relinking the me↔to edge mailbox mode just sealed. Send it
-    // SEALED through the E2EE channel instead (same pattern as read receipts).
-    // It arrives with mailbox/Tor latency — acceptable for a best-effort signal.
-    const now = Date.now();
-    if (!shouldSendSealedTyping(sealedTypingState.get(to), isTyping, now)) return;
-    sealedTypingState.set(to, { isTyping, at: now });
-    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
-    const identity = useIdentity.getState().identity;
-    const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
-    if (!identity || !contact?.publicKeyB64) return;
-    void sendMessage({
-      identity,
-      recipientAegisId: to,
-      recipientPublicKey: decodeBase64(contact.publicKeyB64),
-      plaintext: JSON.stringify({ isTyping }),
-      type: 'typing',
-      expiresAt: null,
-      skipLocalAppend: true,
-    }).catch((e) => {
-      if (__DEV__) logger.warn('[socket] sealed typing failed:', (e as Error).message);
-    });
-    return;
-  }
-  socket.emit('typing', { to, isTyping });
+  const now = Date.now();
+  if (!shouldSendSealedTyping(sealedTypingState.get(to), isTyping, now)) return;
+  sealedTypingState.set(to, { isTyping, at: now });
+  const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+  const identity = useIdentity.getState().identity;
+  const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+  if (!identity || !contact?.publicKeyB64) return;
+  void sendMessage({
+    identity,
+    recipientAegisId: to,
+    recipientPublicKey: decodeBase64(contact.publicKeyB64),
+    plaintext: JSON.stringify({ isTyping }),
+    type: 'typing',
+    expiresAt: null,
+    skipLocalAppend: true,
+  }).catch((e) => {
+    if (__DEV__) logger.warn('[socket] sealed typing failed:', (e as Error).message);
+  });
 }
 
 export function sendReadReceipts(to: string, msgIds: string[]): void {
   if (!socket || !authenticated || msgIds.length === 0) return;
-  // Mailbox mode: send the receipt sealed through the E2EE channel so the relay
-  // never sees the me↔to aegisId edge on the plaintext control-plane socket.
-  // Outside mailbox mode, keep the lightweight plaintext event — it exposes no
-  // more than the v2 message transport already does (same aegisId routing).
-  // Federation F3: a foreign contact only has the sealed path.
-  const receiptContact = useContacts.getState().contacts.find((c) => c.aegisId === to);
-  if (MAILBOX_ENABLED || (receiptContact && isForeign(receiptContact))) {
-    const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
-    const identity = useIdentity.getState().identity;
-    const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
-    if (!identity || !contact?.publicKeyB64) return;
-    void sendMessage({
-      identity,
-      recipientAegisId: to,
-      recipientPublicKey: decodeBase64(contact.publicKeyB64),
-      plaintext: JSON.stringify(msgIds),
-      type: 'read_receipt',
-      expiresAt: null,
-      skipLocalAppend: true,
-    }).catch((e) => {
-      if (__DEV__) logger.warn('[socket] sealed read receipt failed:', (e as Error).message);
-    });
-    return;
-  }
-  socket.emit('msg:read', { to, msgIds });
+  const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+  const identity = useIdentity.getState().identity;
+  const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+  if (!identity || !contact?.publicKeyB64) return;
+  void sendMessage({
+    identity,
+    recipientAegisId: to,
+    recipientPublicKey: decodeBase64(contact.publicKeyB64),
+    plaintext: JSON.stringify(msgIds),
+    type: 'read_receipt',
+    expiresAt: null,
+    skipLocalAppend: true,
+  }).catch((e) => {
+    if (__DEV__) logger.warn('[socket] sealed read receipt failed:', (e as Error).message);
+  });
 }
 
 export function sendDeleteForEveryone(to: string, msgId: string): void {
@@ -5698,10 +5653,16 @@ export async function unregisterPushForActiveIdentity(): Promise<void> {
   try {
     const token = await SecureStore.getItemAsync('aegis.pushToken');
     if (token) {
+      // Legacy Expo token (installs from before 2026-09-24).
       const { Platform } = require('react-native') as typeof import('react-native');
       jobs.push(emitAck('push:unregister', { token, platform: Platform.OS === 'ios' ? 'ios' : 'android' }));
-      // Forget the "confirmed" marker so the next activation re-registers.
       await SecureStore.deleteItemAsync('aegis.pushToken.confirmed').catch(() => {});
+    }
+    const apns = await SecureStore.getItemAsync('aegis.apnsToken');
+    if (apns) {
+      jobs.push(emitAck('apns:unregister', { token: apns, platform: 'ios' }));
+      // Forget the "confirmed" marker so the next activation re-registers.
+      await SecureStore.deleteItemAsync('aegis.apnsToken.confirmed').catch(() => {});
     }
   } catch { /* nothing cached */ }
   try {

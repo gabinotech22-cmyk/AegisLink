@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { encodeBase64, decodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';

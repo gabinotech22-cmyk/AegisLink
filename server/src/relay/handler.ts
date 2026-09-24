@@ -1,5 +1,5 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium/index.js';
 import naclUtil from 'tweetnacl-util';
 
 const { decodeBase64, encodeBase64 } = naclUtil;
@@ -9,7 +9,8 @@ import { issueChallenge as issuePowChallenge, verifyPoW, MAILBOX_SUBMIT_POW_DIFF
 import { verifyDeliveryToken } from '../crypto/deliveryToken.js';
 import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';
 import { notifyRecipient } from '../push/expo.js';
-import { notifyMailbox, isSafeUpEndpoint, isExpoWakeToken, isTokenWakeEnabled } from '../push/ntfy.js';
+import { notifyMailbox, isSafeUpEndpoint, isExpoWakeToken, isTokenWakeEnabled, APNS_BINDING_PREFIX } from '../push/ntfy.js';
+import { isApnsDeviceToken } from '../push/apns-alert.js';
 import {
   AEGIS_ID_RE,
   EnvelopeIn,
@@ -531,11 +532,20 @@ export function attachRelay(io: SocketServer) {
         if (!limiter.consume()) { ack?.({ ok: false, error: 'rate_limited' }); return; }
         const mailboxId = (raw as { mailboxId?: unknown })?.mailboxId;
         const expoToken = (raw as { expoToken?: unknown })?.expoToken;
+        // Since 2026-09-24 clients bind their RAW APNs token (direct APNs, no
+        // Expo hop); a bare Expo token is still accepted from older clients.
+        const apnsToken = (raw as { apnsToken?: unknown })?.apnsToken;
         if (typeof mailboxId !== 'string' || !boundIds.includes(mailboxId)) {
           ack?.({ ok: false, error: 'not_authenticated_for_mailbox' }); return;
         }
         try {
-          if (expoToken === null) {
+          if (apnsToken !== undefined && apnsToken !== null) {
+            if (!isTokenWakeEnabled()) { ack?.({ ok: false, error: 'feature_disabled' }); return; }
+            if (!isApnsDeviceToken(apnsToken)) { ack?.({ ok: false, error: 'invalid_token' }); return; }
+            await pushMailboxTokenRepo.set(mailboxId, `${APNS_BINDING_PREFIX}${apnsToken}`, Date.now());
+            ack?.({ ok: true }); return;
+          }
+          if (expoToken === null || apnsToken === null) {
             // Deletion is ALWAYS allowed, flag or no flag — a client must be
             // able to retract its binding even after the operator disables
             // the feature.
@@ -975,7 +985,7 @@ export function attachRelay(io: SocketServer) {
     attachPrekeys(socket, { me, deviceId });
 
     // ─── Typing / read receipts / remote delete / push registration ─────────
-    attachMessagingEphemeral(socket, { me, sockets });
+    attachMessagingEphemeral(socket, { me });
 
     // ─── Device linking (approve / list / revoke) ────────────────────────────
     attachDevices(socket, { me, sockets, linkingSockets, socketMeta });

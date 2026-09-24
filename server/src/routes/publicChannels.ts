@@ -12,12 +12,12 @@
  */
 
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import naclUtil from 'tweetnacl-util';
 import fs from 'node:fs';
 import path from 'node:path';
 import { publicChannelRepo } from '../db/client.js';
+import { relayLimiter, paramField } from '../http/relayLimiter.js';
 import {
   verifyManifest,
   extractChannelSignerPub,
@@ -144,32 +144,23 @@ export function createPublicChannelsRouter(): Router {
   // ephemeral, so zero-metadata holds. Maxes are ops-tunable via env; defaults
   // are strict-but-CI-safe. Defined per factory call so counters are isolated
   // per router instance (test isolation) and pick up env overrides at call time.
-  const createLimiter = rateLimit({
+  const createLimiter = relayLimiter({
     windowMs: 15 * 60 * 1000, // 15 minutes — anti-squatting on channel creation
     max: Number(process.env['AEGIS_PUBCHANNEL_CREATE_RATELIMIT_MAX'] ?? 50),
-    standardHeaders: true,
-    legacyHeaders: false,
-    handler: (_req, res) => {
-      res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
-    },
+    onion: { kind: 'shared' },
+    body: { error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 },
   });
-  const avatarWriteLimiter = rateLimit({
+  const avatarWriteLimiter = relayLimiter({
     windowMs: 15 * 60 * 1000, // owner-authed avatar set/delete
     max: Number(process.env['AEGIS_PUBCHANNEL_AVATAR_RATELIMIT_MAX'] ?? 100),
-    standardHeaders: true,
-    legacyHeaders: false,
-    handler: (_req, res) => {
-      res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 });
-    },
+    onion: { kind: 'identity', key: paramField('channelId') },
+    body: { error: 'rate_limit_exceeded', retryAfterMs: 15 * 60 * 1000 },
   });
-  const readLimiter = rateLimit({
+  const readLimiter = relayLimiter({
     windowMs: 60 * 1000, // directory / manifest / avatar reads — flood guard
     max: Number(process.env['AEGIS_PUBCHANNEL_READ_RATELIMIT_MAX'] ?? 200),
-    standardHeaders: true,
-    legacyHeaders: false,
-    handler: (_req, res) => {
-      res.status(429).json({ error: 'rate_limit_exceeded', retryAfterMs: 60_000 });
-    },
+    onion: { kind: 'shared' },
+    body: { error: 'rate_limit_exceeded', retryAfterMs: 60_000 },
   });
 
   // Flag gate middleware — all routes return 404 when disabled.

@@ -133,7 +133,20 @@ and the honest gap. The planned hardening is to move the hot-path primitives
 binding** (e.g. an Expo module wrapping libsodium, or `react-native-quick-crypto`)
 while keeping the protocol-composition layer in TypeScript and the same public
 interface. This is implementation-substitution behind a stable API, not a
-protocol change. Tracked in
+protocol change. The seam already exists: every production file gets its NaCl,
+SHA-2, HMAC and HKDF primitives from a single facade (`mobile/src/crypto/sodium`,
+`desktop/src/renderer/crypto/sodium`, `desktop/src/main/crypto/sodium`,
+`server/src/crypto/sodium`), enforced by `crypto-imports.test.ts`, and a golden
+fixture generated with the JS primitives (`f1-golden.json`) must keep replaying
+byte-for-byte after the swap. Argon2id/PBKDF2 and ML-KEM-768 stay on `@noble`
+for now. ML-KEM runs only on the clients (`@noble/post-quantum` 0.7.1 on mobile
+and desktop); the relay never encapsulates or decapsulates — it only checks the
+PQSPK signature — so its production image carries no PQ code. It stays a server
+`devDependency` only because the e2e test drives the real mobile client against
+the relay. The library moves on both clients
+together and must keep replaying `f1-golden`, whose hybrid ratchet sessions were
+persisted with 0.6.1; 0.6.1 ↔ 0.7.1 was also checked for identical keygen and
+deterministic encapsulation, mutual decapsulation and implicit rejection. Tracked in
 [`SECURITY-ROADMAP-2026-06.md`](SECURITY-ROADMAP-2026-06.md) (post-audit
 follow-up F-1). Until then, the constant-time guarantee is **source-level, not
 runtime-verified**, as stated above.
@@ -213,6 +226,45 @@ deriveAegisId(publicKey) → e.g.  "K3M-7QPA-9WZX"
 >    fingerprint), unlike Signal's "safety number" which hashes the *pair* of
 >    identity keys. Mutual verification therefore requires each side to confirm
 >    the other's fingerprint, rather than comparing a single shared number.
+
+### 3.4 Decentralized identifier (did:key) — resolution and deactivation
+
+Every identity has one DID: the `did:key` of its **Ed25519 signing key**
+(`did:key:z` + base58btc(`0xed01` ‖ key)), derived locally
+(`mobile/src/web3/did/deriveDID.ts`, cached by `DIDManager.ts`) and mirrored
+byte-for-byte on the relay (`server/src/crypto/didKey.ts`; shared vector in
+`server/src/__tests__/didKey.test.ts` and `mobile/src/web3/__tests__/deriveDID.test.ts`).
+A linked device clones the identity, so it has **no DID of its own**; device
+revocation is `device:revoke` on the authenticated socket (§9).
+
+- **Not unlinkable from the Aegis ID.** The DID encodes the same signing key
+  the relay stores and serves in the prekey bundle, so anyone who knows an
+  Aegis ID can compute its DID. It reveals no real-world identity, nothing more.
+- **Only canonical Ed25519 `did:key` is accepted** (client `publicKeyFromDID`,
+  relay `ed25519FromDidKey`): a non-canonical spelling of the same key would
+  hash differently and read as active after deactivation.
+- **Deactivation is derived by the relay, never requested by a client.** The
+  owner-signed account deletion (`DELETE /identity/:id`, signature verified
+  against the *stored* signing key) inserts `SHA-256(did)` into
+  `revoked_did_hashes` before deleting the account. There is no revocation
+  endpoint: the former `POST /web3/device/revoke` verified a signature against a
+  key the *client* supplied and never tied it to the DID, so anyone could
+  deactivate any DID (web3 audit 2026-09-24, `AUDIT-2026-09-24-WEB3-DID.md`).
+  Tests: `identityDeleteRevokesDid.test.ts`, `web3Did.test.ts`.
+- **At rest the relay keeps only `did_hash`** — no key (which *is* the DID),
+  signature or timestamp. The legacy table is purged and rebuilt once on boot.
+- **`GET /web3/did/resolve/:did`** implements W3C DID Resolution for `did:key`:
+  `200` document · `410` + `didDocumentMetadata.deactivated` · `400 invalidDid`
+  · `501 methodNotSupported` (any other method; `did:ethr` is out by design,
+  `ROADMAP.md`). The document lists the key under `authentication`,
+  `assertionMethod`, `capabilityInvocation`, `capabilityDelegation` and has **no
+  `keyAgreement`** (AegisLink never encrypts to a key derived from the signing
+  key). Clients resolve `did:key` locally (`resolveDID.ts`); calling the relay
+  tells it which DID is being looked up, so it is only for deactivation status.
+- **`/web3` is always mounted and read-only.** It used to sit behind
+  `WEB3_ENDPOINTS=off` because of the unbound revocation write (audit 2026-07
+  H3); with that endpoint and the mock Lightning subscriptions gone, the only
+  route is the resolver above (`web3Did.test.ts` guards the wiring).
 
 ---
 
@@ -527,9 +579,11 @@ carries root + token + caps) upgrades the pair.
 > **Does NOT protect:**
 > - **Control-plane socket.** It is authenticated by Aegis ID via
 >   challenge-response (§9) and carries prekeys, push token, profile and
->   presence. It uses clearnet TLS by default (`routeViaTor` is an opt-in that
->   needs Orbot), so the relay sees the user's IP next to the Aegis ID. A relay
->   that watches both sockets can attempt **timing** correlation between them.
+>   presence, so the relay learns *that* an Aegis ID is online. It rides the
+>   embedded Tor to the relay's onion (§9, "Tor always-on") on a circuit
+>   separate from the mailbox socket, so the relay sees no IP and cannot join
+>   the two by circuit. A relay that watches both sockets can still attempt
+>   **timing** correlation between them.
 > - **Every path in the table above that is not a mailbox path** (v1 envelope,
 >   and sealed v2 addressed by aegisId). The sender's authenticated live socket
 >   sits next to a `to: aegisId` there, so an actively-correlating relay can
@@ -702,8 +756,13 @@ with a key derived from a user passphrase the relay never sees:
 - **Traffic analysis / global passive adversary.** Timing and volume correlation
   across the relay are out of scope.
 - **Real-time sender↔recipient correlation by the relay** on the non-mailbox
-  paths, and timing correlation between the clearnet control-plane socket and
-  the Tor mailbox socket (§7.3).
+  paths, and timing correlation between the control-plane socket and the
+  mailbox socket (both over Tor on separate circuits, §7.3).
+- **Networks that block Tor.** The client never falls back to clearnet; where
+  Tor is blocked it cannot connect until bridges (pluggable transports) ship.
+- **Call media IP on mobile.** WebRTC media is UDP and cannot ride Tor; with
+  the default relay-only ICE (`hideCallIp`) the peer never sees the device IP,
+  but the TURN server does. Desktop forces TURN-over-TCP through Tor.
 - **Endpoint compromise.** Malware or a physically compromised, unlocked device
   with the keystore unsealed can read plaintext. Panic-wipe and decoy modes
   mitigate coercion scenarios but are not cryptographic defenses.
@@ -724,6 +783,32 @@ with a key derived from a user passphrase the relay never sees:
 ## 9. Transport and authentication (summary)
 
 - Clients connect to the relay over a Socket.IO channel.
+- **Tor always-on.** Every client connection to the relay rides the embedded Tor
+  to the relay's onion service: the Aegis-ID control socket, the mailbox socket
+  and every HTTP call (PoW, registration, prekeys, TURN credentials, blobs, push
+  bindings, proxies). There is no user toggle and no clearnet fallback.
+  - A production build without the onion refuses to start
+    (`mobile/src/config.ts`), and without native Tor it fails closed
+    (`socket/client.ts`, `net/relayHttp.ts` `mustUseTor`, `net/torMedia.ts`).
+  - The control and mailbox lanes use **separate Tor circuits**, so the relay
+    cannot join them at the onion service:
+    - Android: two SocksPort listeners;
+    - iOS: per-lane SOCKS credentials (`IsolateSOCKSAuth`);
+    - desktop: two listeners.
+    
+    Sources: `plugins/withTorEmbedded*.js`, `desktop/src/main/tor/torProcess.ts`.
+  - Remote images (GIF and link-preview thumbnails) are fetched over Tor into a
+    local cache, never by the OS image loader (`components/TorImage.tsx`).
+  - A peer's avatar must be an inline `data:image` or a short text/emoji
+    (`utils/photoVisibility.ts` `isAcceptableAvatar`), so a URL avatar cannot be
+    used as a tracking pixel.
+  - Relay-side, onion requests (no `X-Forwarded-For`, `.onion` Host) are rate
+    limited per verified identity on signed routes, counting only accepted
+    requests, plus a shared flood backstop; clearnet keeps per-IP buckets
+    (`server/src/http/relayLimiter.ts`).
+  - Tests: `net/__tests__/torBridge.test.ts`, `torMedia.test.ts`,
+    `relayHttp.test.ts`, `socket/__tests__/client.homeRelay.test.ts`,
+    `__tests__/torPlugin.regression.test.ts`, `server/src/__tests__/relayLimiter.test.ts`.
 - Sockets authenticate by **challenge-response over the identity key** (relay
   issues a challenge, client signs; see `server/src/auth/challenge.ts`), so the
   relay binds a live connection to an Aegis ID without the client ever
@@ -814,8 +899,10 @@ relay's static capabilities (`protocol`, `features`, `minClient`,
 `maxBlobBytes`) so a client can vet a relay before using it.
 
 **Control plane and groups across relays (F3).** Typing indicators and read
-receipts to a contact on another relay are sealed E2EE messages
-(`type: 'typing'` / `'read_receipt'`), never relay-local events. A group
+receipts are sealed E2EE messages (`type: 'typing'` / `'read_receipt'`) to
+**every** contact, local or on another relay; the relay has no `typing` /
+`msg:read` events any more (audit 2026-09-24 R-1: they handed the receiver a
+relay-stamped `from` a malicious relay could forge). A group
 SenderKey distribution to such a member is a sealed `sender_key_dist` message
 carrying the same per-recipient box `group:rekey` would queue; the recipient
 opens it only against the authenticated sealed-sender's key and requires the
@@ -984,9 +1071,10 @@ current protocol:
    scalar (§3.1).
 3. **Stronger sender anonymity** against an actively-correlating relay.
    Decoupling message routing from the authenticated identity is **done** for
-   the mailbox path (§7.3; `SEALED-SENDER-ARCHITECTURE.md` Fase 4). Remaining:
-   route the control-plane socket over the embedded Tor by default, retire v1
-   relay-side (Fase 6), and add cover traffic (Fase 5).
+   the mailbox path (§7.3; `SEALED-SENDER-ARCHITECTURE.md` Fase 4), and the
+   control-plane socket rides Tor on its own circuit (§9, 2026-09-23).
+   Remaining: retire v1 relay-side (Fase 6), add cover traffic (Fase 5), and
+   ship Tor bridges for networks that block Tor.
 4. **Independent third-party cryptographic audit** of this protocol and its
    implementation, with full public disclosure of findings. **No independent
    audit has been performed.** This is the project's top funding priority.
@@ -1023,6 +1111,7 @@ File references below are to the mobile client.
 | Desktop client crypto (parity) | `desktop/src/renderer/crypto/` |
 | Relay envelope / sealed-sender wire format | `server/src/relay/handler.ts` |
 | Challenge-response auth | `server/src/auth/challenge.ts` |
+| DID (`did:key`) derivation, resolution, deactivation | `mobile/src/web3/did/`, `server/src/crypto/didKey.ts`, `server/src/routes/web3.ts` |
 
 ---
 

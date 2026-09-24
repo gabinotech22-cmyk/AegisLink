@@ -23,7 +23,7 @@
  * in Phase 1.
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from './sodium/index.js';
 import naclUtil from 'tweetnacl-util';
 import { verifyDetached } from './ed25519.js';
 

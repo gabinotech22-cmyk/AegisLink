@@ -31,10 +31,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { createHash, randomUUID } from 'node:crypto';
-import rateLimit from 'express-rate-limit';
 import { backupRepo } from '../db/client.js';
 import { issueChallenge, verifyResponse, challengeWire, type Challenge } from '../auth/challenge.js';
 import { backupJsonParser } from '../http/jsonBody.js';
+import { relayLimiter } from '../http/relayLimiter.js';
 
 const router = Router();
 
@@ -114,14 +114,11 @@ function checkRateLimit(
 }
 
 // IP-based rate limiter for the unauthenticated challenge endpoint only.
-const challengeLimiter = rateLimit({
+const challengeLimiter = relayLimiter({
   windowMs: 60_000,
   max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (_req, res) => {
-    res.status(429).json({ error: 'RATE_LIMITED' });
-  },
+  onion: { kind: 'shared' },
+  body: { error: 'RATE_LIMITED' },
 });
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
