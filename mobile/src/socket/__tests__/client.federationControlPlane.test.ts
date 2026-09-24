@@ -1,10 +1,12 @@
 /**
  * Federation F3 — control plane and group re-key for contacts on ANOTHER relay
  * (docs/FEDERATION-DESIGN.md D3). A foreign contact has no relay-local events
- * (`typing`, `msg:read`, `group:rekey` are queues keyed by aegisId on OUR
- * relay), so:
+ * (`group:rekey` is a queue keyed by aegisId on OUR relay), so:
  *   - typing / read receipts ride the sealed E2EE channel and leave through the
- *     relay pool (their relay), never as a plaintext event on our socket;
+ *     relay pool (their relay), never as a plaintext event on our socket. Since
+ *     audit 2026-09-24 R-1 that holds for LOCAL contacts too, even with the
+ *     mailbox off (this file mocks MAILBOX_ENABLED: false): the plaintext
+ *     `typing` / `msg:read` relay events no longer exist in either direction;
  *   - a group SenderKey distribution to a foreign member travels as a
  *     `sender_key_dist` sealed message; local members keep `group:rekey`;
  *   - an incoming `sender_key_dist` is opened against the authenticated sender
@@ -379,6 +381,38 @@ describe('federation F3 — foreign contacts: sealed control plane + group re-ke
 
     expect(mockFakeSocket.emit.mock.calls.map((c) => c[0])).not.toContain('msg:read');
     expect(mockSendViaForeignRelay).toHaveBeenCalledTimes(1);
+  });
+
+  it('typing and read receipts to a LOCAL contact go sealed too, even with the mailbox off (R-1)', async () => {
+    const me = buildIdentity();
+    const peer = buildIdentity();
+    client.connect(me);
+    bringOnline();
+    await flush();
+    mockIdentityState.identity = me;
+    mockContactsState.contacts = [{ aegisId: peer.aegisId, publicKeyB64: peer.publicKeyB64, signingPublicKeyB64: peer.signingPublicKeyB64 }];
+    establishOutgoingSession(me, peer);
+
+    mockFakeSocket.emit.mockClear();
+    client.emitTyping(peer.aegisId, true);
+    client.sendReadReceipts(peer.aegisId, ['m1', 'm2']);
+    for (let i = 0; i < 20; i++) await flush();
+
+    const events = mockFakeSocket.emit.mock.calls.map((c) => c[0] as string);
+    expect(events).not.toContain('typing');
+    expect(events).not.toContain('msg:read');
+    // Both left as ratchet-encrypted envelopes on our own relay.
+    expect(events.filter((e) => e === 'envelope' || e === 'envelope:v2').length).toBe(2);
+    expect(mockSendViaForeignRelay).not.toHaveBeenCalled();
+  });
+
+  it('never listens for relay-stamped plaintext typing / msg:read (a relay could forge them)', async () => {
+    client.connect(buildIdentity());
+    bringOnline();
+    await flush();
+    expect(mockFakeSocket.handlers.has('typing')).toBe(false);
+    expect(mockFakeSocket.handlers.has('msg:read')).toBe(false);
+    expect(mockFakeSocket.handlers.has('msg:delete')).toBe(false);
   });
 
   it('group re-key: local member via group:rekey, foreign member via a sealed sender_key_dist', async () => {

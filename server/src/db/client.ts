@@ -55,8 +55,7 @@ import { USE_PG, dbRun, dbAll, dbGet, pgPopOpk } from './driver';
 export * from './types';
 import {
   IdentityRow, MessageRow, PushTokenRow, VoipTokenRow, ApnsTokenRow, SignedPreKeyRow, OneTimePreKeyRow,
-  PqSignedPreKeyRow, LinkedDeviceRow, RevokedDIDHashRow, LightningInvoiceRow,
-  SubscriptionRow, MESSAGE_TTL_MS, MAX_DELIVERY_ATTEMPTS,
+  PqSignedPreKeyRow, LinkedDeviceRow, MESSAGE_TTL_MS, MAX_DELIVERY_ATTEMPTS,
 } from './types';
 
 // ── identityRepo ──────────────────────────────────────────────────────────────
@@ -856,18 +855,19 @@ export const devicesRepo = {
 // ── web3Repo ──────────────────────────────────────────────────────────────────
 
 export const web3Repo = {
-  async insertRevocation(row: RevokedDIDHashRow): Promise<void> {
+  /**
+   * Mark a DID deactivated. Only SHA-256(DID) is kept — no key, signature or
+   * timestamp — and the ONLY caller is the owner-signed account deletion
+   * (routes/identity.ts), so every row is bound to proof of key possession.
+   */
+  async insertRevocation(didHash: string): Promise<void> {
     if (USE_PG) {
       await dbRun(
-        `INSERT INTO revoked_did_hashes (did_hash, revoked_at, signature_b64, signing_pub_key) VALUES (?, ?, ?, ?)
-         ON CONFLICT(did_hash) DO NOTHING`,
-        [row.did_hash, row.revoked_at, row.signature_b64, row.signing_pub_key]
+        `INSERT INTO revoked_did_hashes (did_hash) VALUES (?) ON CONFLICT(did_hash) DO NOTHING`,
+        [didHash]
       );
     } else {
-      await dbRun(
-        `INSERT OR IGNORE INTO revoked_did_hashes (did_hash, revoked_at, signature_b64, signing_pub_key) VALUES (?, ?, ?, ?)`,
-        [row.did_hash, row.revoked_at, row.signature_b64, row.signing_pub_key]
-      );
+      await dbRun(`INSERT OR IGNORE INTO revoked_did_hashes (did_hash) VALUES (?)`, [didHash]);
     }
   },
   async isRevoked(didHash: string): Promise<boolean> {
@@ -876,49 +876,6 @@ export const web3Repo = {
       [didHash]
     );
     return row !== undefined;
-  },
-  async insertInvoice(row: Omit<LightningInvoiceRow, 'paid'>): Promise<void> {
-    if (USE_PG) {
-      await dbRun(
-        `INSERT INTO lightning_invoices (payment_hash, bolt11, amount_sats, plan_days, created_at, expires_at, paid) VALUES (?, ?, ?, ?, ?, ?, 0)
-         ON CONFLICT(payment_hash) DO NOTHING`,
-        [row.payment_hash, row.bolt11, row.amount_sats, row.plan_days, row.created_at, row.expires_at]
-      );
-    } else {
-      await dbRun(
-        `INSERT OR IGNORE INTO lightning_invoices (payment_hash, bolt11, amount_sats, plan_days, created_at, expires_at, paid) VALUES (?, ?, ?, ?, ?, ?, 0)`,
-        [row.payment_hash, row.bolt11, row.amount_sats, row.plan_days, row.created_at, row.expires_at]
-      );
-    }
-  },
-  async getInvoice(paymentHash: string): Promise<LightningInvoiceRow | undefined> {
-    return dbGet<LightningInvoiceRow>(
-      `SELECT payment_hash, bolt11, amount_sats, plan_days, created_at, expires_at, paid FROM lightning_invoices WHERE payment_hash = ?`,
-      [paymentHash]
-    );
-  },
-  async markInvoicePaid(paymentHash: string): Promise<void> {
-    await dbRun(`UPDATE lightning_invoices SET paid = 1 WHERE payment_hash = ?`, [paymentHash]);
-  },
-  async insertSubscription(row: SubscriptionRow): Promise<void> {
-    if (USE_PG) {
-      await dbRun(
-        `INSERT INTO subscriptions (payment_hash, plan_days, activated_at, expires_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(payment_hash) DO UPDATE SET plan_days = EXCLUDED.plan_days, activated_at = EXCLUDED.activated_at, expires_at = EXCLUDED.expires_at`,
-        [row.payment_hash, row.plan_days, row.activated_at, row.expires_at]
-      );
-    } else {
-      await dbRun(
-        `INSERT OR REPLACE INTO subscriptions (payment_hash, plan_days, activated_at, expires_at) VALUES (?, ?, ?, ?)`,
-        [row.payment_hash, row.plan_days, row.activated_at, row.expires_at]
-      );
-    }
-  },
-  async getSubscription(paymentHash: string): Promise<SubscriptionRow | undefined> {
-    return dbGet<SubscriptionRow>(
-      `SELECT payment_hash, plan_days, activated_at, expires_at FROM subscriptions WHERE payment_hash = ?`,
-      [paymentHash]
-    );
   },
 };
 

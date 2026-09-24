@@ -331,7 +331,7 @@ const MAILBOX_FORWARD_EVENTS = ['mailbox:challenge', 'auth:ok', 'error_msg', 'en
  */
 export const IDENTITY_FORWARD_EVENTS = [
   'auth:challenge', 'auth:ok', 'error_msg',
-  'envelope', 'envelope:v2', 'msg:delivered', 'msg:read', 'typing',
+  'envelope', 'envelope:v2', 'msg:delivered',
   'group:rekey_dist', 'push:register',
   'call:invite:v2', 'call:answer:v2', 'call:ice:v2', 'call:hangup:v2',
   'group_call:accept', 'group_call:decline', 'group_call:offer', 'group_call:answer',

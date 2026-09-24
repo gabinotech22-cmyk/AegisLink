@@ -112,30 +112,6 @@ export interface LinkedDeviceRow {
   revoked: number;
 }
 
-export interface RevokedDIDHashRow {
-  did_hash: string;
-  revoked_at: number;
-  signature_b64: string;
-  signing_pub_key: string;
-}
-
-export interface LightningInvoiceRow {
-  payment_hash: string;
-  bolt11: string;
-  amount_sats: number;
-  plan_days: number;
-  created_at: number;
-  expires_at: number;
-  paid: number;
-}
-
-export interface SubscriptionRow {
-  payment_hash: string;
-  plan_days: number;
-  activated_at: number;
-  expires_at: number;
-}
-
 // TTL for queued messages: 30 days in ms
 export const MESSAGE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
