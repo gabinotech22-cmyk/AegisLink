@@ -37,3 +37,7 @@ weeks old.
 - `bank-002.md` — Android Closed Testing launch: 3 queue posts + one-shot
   community posts (Reddit ×4, Show HN) with their own posting ground rules
   (written 2026-07-06)
+- `bank-003.md` — 12 evergreen posts (pillars 2/3/5/6). Written 2026-08-02,
+  deployed 2026-09-13 (cadence 2026-09-14 → 2026-10-06).
+- `bank-004.md` — 12 evergreen posts (pillars 2/3/5/6), deduped against
+  001–003. Written + deployed 2026-09-13 (cadence 2026-10-08 → 2026-10-30).

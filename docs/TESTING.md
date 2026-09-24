@@ -311,6 +311,10 @@ es solo `.onion`) y hace `bash -n` de `up.sh`/`print-onion.sh`/
   resultados como la IPC de Electron. `sodium-ops.test.ts` cubre la validación de esa frontera.
 - Tras empaquetar desktop en local (`electron-builder`), `better-sqlite3` queda con el ABI de
   Electron: `node scripts/native-abi.mjs node` antes de `npm test`.
+- **Dependencias cripto** (`@noble/*`, `@scure/*`, `tweetnacl*`, `sodium-native`): se suben **a la vez en las tres
+  plataformas**, en una sola rama, y con `f1-golden` en verde en todas (regla de oro #5). Por eso
+  `.github/dependabot.yml` las excluye de los grupos de parches: las #451/#462/#476 subían
+  `@noble/post-quantum` 0.6 → 0.7 (rompedor en 0.x) en una sola plataforma.
 
 ## Gate CI `docs-sync` (regla de oro "La doc no miente" #7)
 
