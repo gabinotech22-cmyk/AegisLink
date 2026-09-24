@@ -11,7 +11,7 @@
 
 import { Router } from 'express';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium/index.js';
 import tweetnaclUtil from 'tweetnacl-util';
 const { decodeBase64 } = tweetnaclUtil;
 import { z } from 'zod';

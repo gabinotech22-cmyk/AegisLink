@@ -45,7 +45,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import rateLimit from 'express-rate-limit';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium/index.js';
 import naclUtil from 'tweetnacl-util';
 import { messageRepo } from '../db/client.js';
 import { mailboxIdForSignPublicKey, verifyMailboxAuth } from '../crypto/mailbox.js';

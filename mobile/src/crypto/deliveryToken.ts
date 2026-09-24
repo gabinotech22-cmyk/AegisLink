@@ -18,9 +18,8 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
-import nacl from 'tweetnacl';
+import { nacl, sha256 } from './sodium';
 import { encodeBase64 } from 'tweetnacl-util';
-import { sha256 } from '@noble/hashes/sha2';
 
 const OWN_TOKEN_SLOT = 'aegis.deliveryToken.self';
 const CONTACT_SLOT_PREFIX = 'aegis.deliveryToken.peer.';

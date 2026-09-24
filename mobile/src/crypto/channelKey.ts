@@ -1,4 +1,4 @@
-import nacl from 'tweetnacl';
+import { nacl } from './sodium';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
 import { hmacSHA256, hkdfSHA256 } from './signal/kdf';
 

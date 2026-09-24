@@ -17,7 +17,7 @@
  * all (host candidates only) rather than falling back to a public server.
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { TURN_SERVER_URL } from '../config';
 import { homeRelayBaseUrl } from '../net/homeRelay';

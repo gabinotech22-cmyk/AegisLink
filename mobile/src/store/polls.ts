@@ -1,6 +1,5 @@
 import { create } from 'zustand';
-import { sha256 } from '@noble/hashes/sha256';
-import nacl from 'tweetnacl';
+import { nacl, sha256 } from '../crypto/sodium';
 import { encodeBase64 } from 'tweetnacl-util';
 import { loadPolls, updatePollVotes } from '../db/local';
 

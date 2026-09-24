@@ -133,7 +133,13 @@ and the honest gap. The planned hardening is to move the hot-path primitives
 binding** (e.g. an Expo module wrapping libsodium, or `react-native-quick-crypto`)
 while keeping the protocol-composition layer in TypeScript and the same public
 interface. This is implementation-substitution behind a stable API, not a
-protocol change. Tracked in
+protocol change. The seam already exists: every production file gets its NaCl,
+SHA-2, HMAC and HKDF primitives from a single facade (`mobile/src/crypto/sodium`,
+`desktop/src/renderer/crypto/sodium`, `desktop/src/main/crypto/sodium`,
+`server/src/crypto/sodium`), enforced by `crypto-imports.test.ts`, and a golden
+fixture generated with the JS primitives (`f1-golden.json`) must keep replaying
+byte-for-byte after the swap. Argon2id/PBKDF2 and ML-KEM-768 stay on `@noble`
+for now. Tracked in
 [`SECURITY-ROADMAP-2026-06.md`](SECURITY-ROADMAP-2026-06.md) (post-audit
 follow-up F-1). Until then, the constant-time guarantee is **source-level, not
 runtime-verified**, as stated above.

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import {
   computeRosterHash,

@@ -16,7 +16,7 @@
  *   - One-way hash prevents server from correlating hash → DID
  */
 
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '../../crypto/sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { signWithProfileKey } from '../../crypto/identity';
 import { verifyDetached } from '../../crypto/ed25519';

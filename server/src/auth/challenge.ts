@@ -1,4 +1,4 @@
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium/index.js';
 import naclUtil from 'tweetnacl-util';
 import { identityRepo } from '../db/client.js';
 

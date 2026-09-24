@@ -3,7 +3,8 @@
 // React Native exposes no Web Crypto, so two independent random sources must be
 // wired up before anything touches them:
 //
-//   1. TweetNaCl  → via nacl.setPRNG (call-time, used by identity/secretbox).
+//   1. The NaCl primitives (src/crypto/sodium) → via setRandomSource (call-time,
+//      used by identity/secretbox).
 //   2. @noble/*   → via globalThis.crypto.getRandomValues, which @noble/hashes
 //      captures AT MODULE-LOAD time. ml_kem768.keygen() (PQXDH prekeys) calls it
 //      during registration; without it the relay registration throws
@@ -14,7 +15,9 @@
 //
 // Both sources are backed by the SAME expo-crypto hardware RNG; we deliberately
 // avoid the react-native-get-random-values package.
-import nacl from 'tweetnacl';
+// `sodium/random` (not the `sodium` index): it must not pull in @noble before
+// the getRandomValues shim below is installed.
+import { setRandomSource } from './src/crypto/sodium/random';
 import { getRandomBytes } from 'expo-crypto';
 
 // expo-crypto's getRandomBytes REJECTS requests larger than 1024 bytes
@@ -28,7 +31,7 @@ function fillRandom(out: Uint8Array, n: number): void {
   }
 }
 
-nacl.setPRNG((out, n) => fillRandom(out, n));
+setRandomSource((out, n) => fillRandom(out, n));
 
 // Minimal Web Crypto getRandomValues shim for @noble/* (ml-kem PQXDH, hashes).
 const g = globalThis as unknown as { crypto?: { getRandomValues?: unknown } };

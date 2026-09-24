@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import { logger } from '../utils/logger';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';

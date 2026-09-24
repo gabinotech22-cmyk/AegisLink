@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
 import { ss } from '../utils/secureStore';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { secretKeySlot, signSecretKeySlot, dbEncKeySlot } from '../crypto/types';
 import { initSchema } from './schema';

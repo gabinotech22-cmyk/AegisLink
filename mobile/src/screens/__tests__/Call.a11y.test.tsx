@@ -9,7 +9,7 @@ import React from 'react';
 import { render } from '@testing-library/react-native';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
-jest.mock('@noble/hashes/sha256', () => ({
+jest.mock('../../crypto/sodium', () => ({
   sha256: jest.fn(() => new Uint8Array(32)),
 }));
 
