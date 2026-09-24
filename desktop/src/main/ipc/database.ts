@@ -698,8 +698,7 @@ export function registerDatabaseHandlers(): void {
       } else {
         // Dev-only (the isPackaged branch above fails closed in production).
         // nosemgrep: aegislink-no-plain-prefix-persist
-        keystore[getDbEncKeySlot(slot)] =
-          'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
+        keystore[getDbEncKeySlot(slot)] = 'plain:' + Buffer.from(rawVal, 'utf-8').toString('base64')
       }
     }
     writeKeystore(keystore)
