@@ -970,29 +970,14 @@ export function connect(identity: Identity): Socket {
     }
   });
 
-  socket.on('msg:read', ({ from, msgIds }: { from: string; msgIds: string[] }) => {
-    const msgs = useMessages.getState();
-    for (const msgId of msgIds) {
-      const chatMsgs = msgs.byChat[from];
-      if (chatMsgs?.find((m) => m.id === msgId)) {
-        void msgs.updateDelivery(from, msgId, 'read');
-      }
-    }
-  });
-
-  // NOTE: the legacy plaintext `msg:delete` relay event is intentionally NOT
-  // handled. Delete-for-everyone now travels inside the sealed E2EE ratchet
-  // channel (`{type:'msg_delete'}`), which authenticates the sender. Honoring
-  // an unauthenticated wire event would let a malicious relay erase arbitrary
-  // messages by supplying {from, msgId} (golden rule #3: sensitive actions
-  // require proof-of-key-possession, not just knowing an id).
-
-  socket.on('typing', ({ from, isTyping }: { from: string; isTyping: boolean; channelId?: string }) => {
-    useTyping.getState().setTyping(from, isTyping);
-    if (isTyping) {
-      setTimeout(() => useTyping.getState().setTyping(from, false), 5000);
-    }
-  });
+  // NOTE: the legacy plaintext `msg:delete`, `msg:read` and `typing` relay
+  // events are intentionally NOT handled. Delete-for-everyone, read receipts and
+  // typing travel inside the sealed E2EE ratchet channel (`{type:'msg_delete'|
+  // 'read_receipt'|'typing'}`), which authenticates the sender. Honoring an
+  // unauthenticated wire event would let a malicious relay erase messages, mark
+  // them read or fake "typing" by supplying a `from` (golden rule #3: sensitive
+  // actions require proof-of-key-possession, not just knowing an id; audit
+  // 2026-09-24 R-1).
 
   socket.on('envelope', async (env: WireSealedEnvelope) => {
     await handleIncoming(env, identity);
@@ -1797,11 +1782,12 @@ async function decryptAndAppendLocked(
         return true;
       }
 
-      // E2EE read receipt (mailbox mode): the peer reports having read some of
-      // our messages. payload.text = JSON array of msgIds. Rides the sealed
-      // channel so the relay never sees the me↔to aegisId edge (which the old
-      // plaintext `msg:read` event handed over on the control-plane socket).
-      // Apply silently; do NOT append a chat row. Still persist ratchet state.
+      // E2EE read receipt: the peer reports having read some of our messages.
+      // payload.text = JSON array of msgIds. The ONLY receipt path (audit
+      // 2026-09-24 R-1): the sealed channel authenticates the sender, unlike the
+      // removed plaintext `msg:read` event whose relay-stamped `from` a relay
+      // could forge. Apply silently; do NOT append a chat row. Still persist
+      // ratchet state.
       if (parsedPayload.type === 'read_receipt') {
         if (typeof parsedPayload.text === 'string' && parsedPayload.text) {
           try {
@@ -2974,74 +2960,59 @@ export async function sendProfileTo(
   }
 }
 
-// Per-peer record of the last sealed typing signal sent (mailbox mode), used by
+// Per-peer record of the last sealed typing signal sent, used by
 // shouldSendSealedTyping to throttle keystroke-rate refreshes. Keyed by aegisId.
 const sealedTypingState = new Map<string, { isTyping: boolean; at: number }>();
 
+// Typing indicators and read receipts ALWAYS travel sealed inside the E2EE
+// ratchet (`{type:'typing'|'read_receipt'}` via sendMessage) on every transport:
+// mailbox, aegisId v2 and a foreign relay alike. The relay-routed plaintext
+// `typing` / `msg:read` events are gone (audit 2026-09-24 R-1): outside mailbox
+// mode they handed the receiver a relay-stamped `from` that a malicious relay
+// could forge — the same reason plaintext `msg:delete` was retired.
 export function emitTyping(to: string, isTyping: boolean): void {
   if (!socket || !authenticated) return;
-  // Federation F3 (parity with mobile): a contact on another relay has no
-  // relay-local `typing` event — the sealed message is the only path.
-  const typingContact = useContacts.getState().contacts.find((c) => c.aegisId === to);
-  if (MAILBOX_ENABLED || (typingContact && isForeign(typingContact))) {
-    // The plaintext `typing` event would relink the me↔to edge on the control-
-    // plane socket. Send it SEALED through the E2EE channel instead (same pattern
-    // as read receipts). It arrives with mailbox/Tor latency — acceptable for a
-    // best-effort UX signal.
-    const now = Date.now();
-    if (!shouldSendSealedTyping(sealedTypingState.get(to), isTyping, now)) return;
-    sealedTypingState.set(to, { isTyping, at: now });
-    void (async () => {
-      const { useIdentity } = await import('../store/identity');
-      const identity = useIdentity.getState().identity;
-      const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
-      if (!identity || !contact?.publicKeyB64) return;
-      await sendMessage({
-        identity,
-        recipientAegisId: to,
-        recipientPublicKey: decodeBase64(contact.publicKeyB64),
-        plaintext: JSON.stringify({ isTyping }),
-        type: 'typing',
-        expiresAt: null,
-        skipLocalAppend: true,
-      });
-    })().catch((e) => {
-      if (DEV) logger.warn('[socket] sealed typing failed:', (e as Error).message);
+  const now = Date.now();
+  if (!shouldSendSealedTyping(sealedTypingState.get(to), isTyping, now)) return;
+  sealedTypingState.set(to, { isTyping, at: now });
+  void (async () => {
+    const { useIdentity } = await import('../store/identity');
+    const identity = useIdentity.getState().identity;
+    const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+    if (!identity || !contact?.publicKeyB64) return;
+    await sendMessage({
+      identity,
+      recipientAegisId: to,
+      recipientPublicKey: decodeBase64(contact.publicKeyB64),
+      plaintext: JSON.stringify({ isTyping }),
+      type: 'typing',
+      expiresAt: null,
+      skipLocalAppend: true,
     });
-    return;
-  }
-  socket.emit('typing', { to, isTyping });
+  })().catch((e) => {
+    if (DEV) logger.warn('[socket] sealed typing failed:', (e as Error).message);
+  });
 }
 
 export function sendReadReceipts(to: string, msgIds: string[]): void {
   if (!socket || !authenticated || msgIds.length === 0) return;
-  // Mailbox mode: send the receipt sealed through the E2EE channel so the relay
-  // never sees the me↔to aegisId edge on the plaintext control-plane socket.
-  // Outside mailbox mode, keep the lightweight plaintext event — it exposes no
-  // more than the v2 message transport already does (same aegisId routing).
-  // Federation F3: a foreign contact only has the sealed path.
-  const receiptContact = useContacts.getState().contacts.find((c) => c.aegisId === to);
-  if (MAILBOX_ENABLED || (receiptContact && isForeign(receiptContact))) {
-    void (async () => {
-      const { useIdentity } = await import('../store/identity');
-      const identity = useIdentity.getState().identity;
-      const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
-      if (!identity || !contact?.publicKeyB64) return;
-      await sendMessage({
-        identity,
-        recipientAegisId: to,
-        recipientPublicKey: decodeBase64(contact.publicKeyB64),
-        plaintext: JSON.stringify(msgIds),
-        type: 'read_receipt',
-        expiresAt: null,
-        skipLocalAppend: true,
-      });
-    })().catch((e) => {
-      if (DEV) logger.warn('[socket] sealed read receipt failed:', (e as Error).message);
+  void (async () => {
+    const { useIdentity } = await import('../store/identity');
+    const identity = useIdentity.getState().identity;
+    const contact = useContacts.getState().contacts.find((c) => c.aegisId === to);
+    if (!identity || !contact?.publicKeyB64) return;
+    await sendMessage({
+      identity,
+      recipientAegisId: to,
+      recipientPublicKey: decodeBase64(contact.publicKeyB64),
+      plaintext: JSON.stringify(msgIds),
+      type: 'read_receipt',
+      expiresAt: null,
+      skipLocalAppend: true,
     });
-    return;
-  }
-  socket.emit('msg:read', { to, msgIds });
+  })().catch((e) => {
+    if (DEV) logger.warn('[socket] sealed read receipt failed:', (e as Error).message);
+  });
 }
 
 export function sendDeleteForEveryone(to: string, msgId: string): void {

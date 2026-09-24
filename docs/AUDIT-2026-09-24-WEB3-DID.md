@@ -4,13 +4,15 @@
 > proxies SSRF, CORS, señalización) y, al tirar del hilo, del módulo web3/DID completo en
 > mobile, desktop y relay. Código y tests como única fuente de verdad (regla de oro doc #6).
 >
-> **Ramas:** `fix/web3-did-binding`, PR #525 (W-1 … W-8, P-1); `fix/deps-postcss-advisory`, PR #526
-> (D-1). R-1 va en su propia rama. Estado vivo en las tablas.
+> **Ramas:** `fix/web3-did-binding`, PR #525 (W-1 … W-8, P-1, R-1); `fix/deps-postcss-advisory`,
+> PR #526 (D-1). Estado vivo en las tablas.
 >
 > **Corrección de alcance:** todo `/web3` estaba **apagado en producción** (`WEB3_ENDPOINTS=off`,
 > puesto en la auditoría 2026-07 H3 precisamente por la revocación sin binding). W-1 y P-1 eran
 > fallos reales en el código, pero su explotación en producción era nula mientras el interruptor
 > siguiera apagado. La primera versión de este informe no lo mencionaba y sobreestimaba el impacto.
+> Lo mismo con R-1: se leyó el handler del relay sin mirar el cliente, que en producción (mailbox
+> activo por defecto) ya sellaba typing y receipts.
 
 ## 0. Superficie revisada sin hallazgos
 
@@ -31,14 +33,14 @@ handshake (no suplantable).
 | W-4 | MEDIA | ✅ HECHO | El wipe/pánico borraba la caché del DID con claves `aegis.did.v1.<id>::personal/work` que nada escribía; la real (`aegis.did.v1.<id>`) **sobrevivía a todo wipe**, y es la clave pública de firma → enlaza el dispositivo con la identidad borrada. | `purgeGlobalAppState` llama a `clearDID(aegisId)` (`mobile/src/db/core.ts`). Test en `db/__tests__/wipeDatabase.test.ts`. |
 | W-5 | BAJA | ✅ HECHO | Código muerto con garantías falsas: `ProfileIsolation.ts` (`assertProfilesIsolated` exige DIDs distintos, pero misma clave ⇒ mismo DID), `RevokeDevice.ts`, comentarios de `DIDManager.ts` ("sin correlación DID↔aegisId"), documento DID con `keyAgreement` = clave Ed25519. | Módulos eliminados; resolver local en paridad exacta con el relay y sin `keyAgreement` (`resolveDID.test.ts`); comentarios corregidos; `Devices.tsx` ya no manda nada a web3 (`Devices.test.tsx`). |
 | W-6 | BAJA | ✅ HECHO | El desktop prometía al borrar la cuenta "una señal de revocación a todos los relays" — no existía. | Ahora es cierto para el relay propio (W-1); texto ajustado en en/es/it. |
+| R-1 | BAJA | ✅ HECHO | Los eventos en claro `typing` / `msg:read` del relay (`handlers/messaging.ts`) reenviaban `{from: me}`. **Corregido el análisis:** en producción el mailbox está activo por defecto y los clientes ya los mandaban sellados; el camino en claro solo corría sin mailbox, donde el relay ve la arista igualmente por el socket autenticado. El problema real era de **integridad**: los clientes seguían escuchando esos eventos y confiaban en un `from` estampado por el relay, así que un relay malicioso podía marcar mensajes como leídos o simular "escribiendo" (la razón por la que se retiró `msg:delete` en claro). | Sellados **siempre**, en todos los transportes; eventos, schemas y handlers retirados del relay; envío en claro y listeners retirados en mobile y desktop; `IDENTITY_FORWARD_EVENTS` (Tor) sin ellos. Tests: `simulation.test.ts` (no se reenvían), `client.federationControlPlane.test.ts` (contacto local con mailbox off → sellado; sin listeners), `sealedReceiptsTyping.test.ts` (desktop). SEALED-SENDER §6.1, PROTOCOL F3. |
 | W-8 | MEDIA | ✅ HECHO | Con `/web3` apagado, el resolver de W-2 no habría sido accesible y la desactivación de W-1 no se podría consultar: un arreglo a medias. | El interruptor se elimina (`server/src/index.ts`): `/web3` ya solo expone el resolver, de solo lectura y con rate-limit. Guarda en `web3Did.test.ts`. |
 
 ## 2. Decisiones de producto abiertas
 
 | # | Sev. | Estado | Hueco | Recomendación |
 |---|---|---|---|---|
-| W-7 | INFO | 🟡 DOCUMENTADO | El DID es enlazable con el Aegis ID: codifica la misma clave de firma que el relay sirve en el bundle público de prekeys. No revela identidad real, pero no es un seudónimo independiente. | Si se quiere un DID no enlazable, derivarlo de una clave Ed25519 **aparte**; si no, dejar documentado (PROTOCOL §3.4) y no prometer más en la UI. |
-| R-1 | MEDIA | 🔴 ABIERTO | `typing` y `msg:read` (`server/src/relay/handlers/messaging.ts`) reenvían `{from: me}` por el socket autenticado: el relay ve la arista emisor→receptor con timing, lo mismo que motivó retirar `msg:delete` en claro. | Mover los recibos de lectura dentro del ratchet (como `msg_delete`); decidir explícitamente typing (sellar o documentar que la presencia en vivo expone metadatos al relay). |
+| W-7 | INFO | ✅ DECIDIDO | El DID es enlazable con el Aegis ID: codifica la misma clave de firma que el relay sirve en el bundle público de prekeys. No revela identidad real, pero no es un seudónimo independiente. Además, el onboarding (mobile y desktop, en/es/it) prometía "verificabilidad en la cadena", cuando un `did:key` no está en ninguna. | **Se mantiene** derivado de la clave de identidad: hoy solo se muestra y se comparte, y una clave aparte cambiaría el DID que cada usuario ya ha visto y exigiría un camino de revocación nuevo firmado por el cliente, sin beneficio concreto. Documentado en PROTOCOL §3.4 y `DIDManager.ts`; el texto del onboarding ahora dice la verdad (se calcula a partir del Aegis ID y no revela quién eres). Reabrir si algún día el DID se usa para algo que deba ser independiente del Aegis ID. |
 | P-1 | MEDIA | ✅ HECHO | `/web3/subscription/invoice` aceptaba escrituras sin autenticación, sin rate-limit y sin purga, y emitía facturas simuladas (`lnbc…mock_`) imposibles de pagar. Con `/web3` apagado en producción, el síntoma real era otro: el perfil del **desktop** mostraba "Suscripción anónima", que fallaba siempre. Los pagos habían salido del repo con Work (ROADMAP Hito 1), pero estos restos se escaparon. | Endpoints, repo, tipos y DDL retirados; pantalla, ruta, fila del Perfil y claves i18n del desktop retiradas (más dos claves muertas en mobile). Las tablas huérfanas no se borran desde código (operador-local, como las de Work). PR #525; guardas en `web3Did.test.ts`. |
 
 ## 3. Dependencias (alertas Dependabot abiertas el 2026-09-24)

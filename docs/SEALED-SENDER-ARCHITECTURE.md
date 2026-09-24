@@ -312,30 +312,29 @@ con ese mismo límite; cerrarlo del todo requiere cover traffic (Fase 4) u onion
 routing (Session, fuera de alcance). Es una mejora enorme sobre el estado actual
 (arista explícita en cada mensaje) sin sacrificar la marca.
 
-### 6.1 Señales efímeras en el socket de control-plane (receipts / typing)
+### 6.1 Señales efímeras (receipts / typing): siempre selladas
 
-Los acuses de lectura (`msg:read`) y el indicador de "escribiendo…" (`typing`)
-viajan por el socket aegisId (control-plane), NO por el transporte de mensajes.
-Con Fase 4 (mailbox) **off** esto es inocuo: el propio transporte v2 enruta por
-el aegisId `to`, así que estos eventos no revelan nada que un mensaje normal no
-revele ya (el "límite temporal" de §6). Con Fase 4 **on**, en cambio, `envelope:mb`
-oculta la arista me↔to, pero un `msg:read`/`typing` en claro con el aegisId del
-destinatario la **re-expondría** — relinkando justo las dos identidades que el
-modo mailbox separa (ni Tor lo evita: anonimiza la IP, no el payload).
+Los acuses de lectura y el indicador de "escribiendo…" viajan **siempre sellados**
+dentro del canal E2EE (`{type:'read_receipt'}` / `{type:'typing'}` vía `sendMessage`,
+con throttle `socket/typingThrottle.ts` para el typing), en **todos** los transportes:
+mailbox, v2 por aegisId y relay ajeno (federación F3). El relay solo ve un sobre
+opaco con `wakeHint: 'silent'` (nunca despierta con un push).
 
-Por eso, **bajo `MAILBOX_ENABLED`**:
-- El **read receipt** se envía **sellado** por el canal E2EE (`{type:'read_receipt'}`
-  vía `sendMessage`), igual que delete-for-everyone — el relay solo ve un blob
-  opaco. Fuera de mailbox mode se mantiene el evento plaintext ligero (no expone
-  más que el propio mensaje v2).
-- El **typing** viaja también **sellado** (`{type:'typing'}`, con throttle
-  `socket/typingThrottle.ts`) en mailbox mode y hacia contactos de otro relay
-  (federación F3, #487); llega con la latencia del buzón/Tor, aceptable para una
-  señal best-effort. Fuera de mailbox mode, sin cambios. (Antes se suprimía.)
+Los eventos en claro `typing` / `msg:read` del socket aegisId **ya no existen** en
+ninguna dirección (auditoría 2026-09-24 R-1; mobile, desktop y relay). Antes se
+mantenían fuera de mailbox mode con el argumento de que no exponían más que el
+propio mensaje v2, lo cual era cierto para la privacidad. Pero el receptor confiaba
+en un `from` estampado por el relay, que un relay malicioso podía falsificar para
+marcar mensajes como leídos o simular que alguien escribe. Es la misma razón por la
+que se retiró `msg:delete` en claro (regla de oro de seguridad #3). En producción,
+mailbox mode está activo por defecto desde 1.0.x, así que el camino sellado ya era
+el habitual. Pruebas: `simulation.test.ts` (el relay no reenvía ninguno de los
+dos), `client.federationControlPlane.test.ts` (contacto local con mailbox off →
+sobre sellado, sin listeners en claro), `sealedReceiptsTyping.test.ts` (desktop).
 
-Regla operativa: cualquier señal nueva dirigida a un aegisId por el control-plane
-debe pasar por este mismo filtro antes de flipear `MAILBOX_ENABLED` a ON, o
-reintroduce la arista. Prueba: `client.deleteForEveryone.test.ts` (caso
+Regla operativa: cualquier señal nueva entre dos contactos viaja sellada por el
+canal E2EE, nunca como evento del control-plane dirigido a un aegisId, o
+reintroduce la arista (y un `from` falsificable por el relay). Prueba: `client.deleteForEveryone.test.ts` (caso
 `read_receipt`).
 
 ## 7. Referencias

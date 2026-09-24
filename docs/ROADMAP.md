@@ -109,8 +109,10 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
 - [ ] Verificar en 2 dispositivos reales el transporte mailbox (latencia, drenaje multi-epoch, onion).
 - [ ] Plan de cutover a **mailbox por defecto** (o etiquetar explícitamente el modo actual como
       experimental en README y no venderlo como cero-metadatos hasta el cutover).
-- [ ] Sellar o documentar como limitación los indicadores en tiempo real que hoy exponen el par al
-      relay: `typing` (`messaging.ts:28`) y read-receipts `msg:read` (`messaging.ts:52`).
+- [x] **Indicadores en tiempo real sellados siempre (2026-09-24):** `typing` y read receipts viajan
+      solo como mensajes E2EE sellados en todos los transportes; los eventos en claro del relay
+      (`messaging.ts`) y sus listeners en mobile/desktop, eliminados. `AUDIT-2026-09-24-WEB3-DID.md`
+      R-1; `docs/SEALED-SENDER-ARCHITECTURE.md` §6.1.
 - [x] **v1 solo como último recurso + llamadas selladas en el oficial (2026-09-20):** con raíz de
       buzón conocida el cliente emite siempre v2 (primer contacto incluido); llamadas a contactos
       que anuncian `sealed-calls` por buzón. Gateado por `caps` en el perfil para convivir con

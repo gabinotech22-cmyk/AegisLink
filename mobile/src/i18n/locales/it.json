@@ -62,7 +62,7 @@
     "aegisIdLabel": "AEGIS ID",
     "fingerprintLabel": "IMPRONTA DELLA CHIAVE PUBBLICA",
     "decentralizedIdLabel": "ID DECENTRALIZZATO (OPZIONALE)",
-    "didDescription": "Il tuo DID è derivato dalla tua chiave pubblica. È pseudonimo — condividilo solo se vuoi la verificabilità on-chain.",
+    "didDescription": "Il tuo DID è derivato dalla tua chiave pubblica di firma, quindi chiunque conosca il tuo Aegis ID può calcolarlo. Non rivela chi sei; condividilo solo se vuoi.",
     "identityWarning": "Scrivila o eseguine un backup cifrato. Se la perdi, nessuno — nemmeno noi — può recuperarla.",
     "enterBtn": "Entra in AegisLink",
     "securingBtn": "Protezione identità in corso...",

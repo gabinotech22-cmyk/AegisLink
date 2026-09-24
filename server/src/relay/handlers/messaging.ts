@@ -1,54 +1,32 @@
 import type { Socket } from 'socket.io';
-import { TypingEvent, MsgRead, PushRegister, VoipRegister, ApnsRegister } from '../schemas.js';
+import { PushRegister, VoipRegister, ApnsRegister } from '../schemas.js';
 import { checkLowFreqRateLimit } from '../rateLimits.js';
 import { pushRepo, voipTokenRepo, apnsTokenRepo } from '../../db/client.js';
 
 export interface MessagingEphemeralDeps {
   me: string;
-  sockets: Map<string, Set<Socket>>;
 }
 
 /**
  * Attach short-lived messaging event handlers to an authenticated socket:
- * typing indicators, read receipts, remote deletes, and push-token registration.
+ * push-token registration. Typing indicators, read receipts and remote deletes
+ * are NOT relay events — they travel sealed inside the E2EE ratchet (see below).
  * None of these persist sender/recipient pairs (zero metadata principle).
  */
-export function attachMessagingEphemeral(socket: Socket, { me, sockets }: MessagingEphemeralDeps): void {
-  // ─── Typing indicators ──────────────────────────────────────────────────────
-  socket.on('typing', async (raw) => {
-    if (!(await checkLowFreqRateLimit(me))) {
-      socket.emit('error_msg', { code: 'rate_limited', for: 'typing' });
-      return;
-    }
-    const parsed = TypingEvent.safeParse(raw);
-    if (!parsed.success) return;
-    // 1:1 DM path — forward directly to the target user's sockets
-    const target = sockets.get(parsed.data.to);
-    if (target) {
-      for (const s of target) s.emit('typing', { from: me, isTyping: parsed.data.isTyping });
-    }
-  });
-
-  // ─── Read receipts ──────────────────────────────────────────────────────────
-  socket.on('msg:read', async (raw) => {
-    if (!(await checkLowFreqRateLimit(me))) {
-      socket.emit('error_msg', { code: 'rate_limited', for: 'msg:read' });
-      return;
-    }
-    const parsed = MsgRead.safeParse(raw);
-    if (!parsed.success) return;
-    const target = sockets.get(parsed.data.to);
-    if (!target) return;
-    for (const s of target) s.emit('msg:read', { from: me, msgIds: parsed.data.msgIds });
-  });
-
-  // ─── Remote delete ──────────────────────────────────────────────────────────
+export function attachMessagingEphemeral(socket: Socket, { me }: MessagingEphemeralDeps): void {
+  // ─── Remote delete, typing, read receipts ──────────────────────────────────
   // The legacy plaintext `msg:delete` relay event was REMOVED. It leaked the
   // sender↔recipient pair to the relay (violating sealed-sender / zero-metadata)
   // and carried no proof-of-key-possession, so anyone able to emit it could
   // erase a peer's messages. Delete-for-everyone now travels sealed inside the
   // E2EE ratchet channel (`{type:'msg_delete'}`); the relay only ever sees an
   // opaque envelope. Do NOT reintroduce a plaintext delete event.
+  //
+  // `typing` and `msg:read` went the same way (audit 2026-09-24 R-1): clients
+  // already sealed them in mailbox mode (the production default); the plaintext
+  // fallback only ran without a mailbox and gave the receiver a relay-stamped
+  // `from` a malicious relay could forge. Both now ride `{type:'typing'}` /
+  // `{type:'read_receipt'}` inside the ratchet on every transport.
 
   // ─── Push token registration ─────────────────────────────────────────────
   // ACK after the write resolves (mirrors voip:register). Previously this was

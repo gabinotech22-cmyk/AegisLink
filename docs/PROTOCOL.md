@@ -853,8 +853,10 @@ relay's static capabilities (`protocol`, `features`, `minClient`,
 `maxBlobBytes`) so a client can vet a relay before using it.
 
 **Control plane and groups across relays (F3).** Typing indicators and read
-receipts to a contact on another relay are sealed E2EE messages
-(`type: 'typing'` / `'read_receipt'`), never relay-local events. A group
+receipts are sealed E2EE messages (`type: 'typing'` / `'read_receipt'`) to
+**every** contact, local or on another relay; the relay has no `typing` /
+`msg:read` events any more (audit 2026-09-24 R-1: they handed the receiver a
+relay-stamped `from` a malicious relay could forge). A group
 SenderKey distribution to such a member is a sealed `sender_key_dist` message
 carrying the same per-recipient box `group:rekey` would queue; the recipient
 opens it only against the authenticated sealed-sender's key and requires the

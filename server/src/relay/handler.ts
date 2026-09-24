@@ -975,7 +975,7 @@ export function attachRelay(io: SocketServer) {
     attachPrekeys(socket, { me, deviceId });
 
     // ─── Typing / read receipts / remote delete / push registration ─────────
-    attachMessagingEphemeral(socket, { me, sockets });
+    attachMessagingEphemeral(socket, { me });
 
     // ─── Device linking (approve / list / revoke) ────────────────────────────
     attachDevices(socket, { me, sockets, linkingSockets, socketMeta });
