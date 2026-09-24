@@ -139,7 +139,14 @@ SHA-2, HMAC and HKDF primitives from a single facade (`mobile/src/crypto/sodium`
 `server/src/crypto/sodium`), enforced by `crypto-imports.test.ts`, and a golden
 fixture generated with the JS primitives (`f1-golden.json`) must keep replaying
 byte-for-byte after the swap. Argon2id/PBKDF2 and ML-KEM-768 stay on `@noble`
-for now. Tracked in
+for now. ML-KEM runs only on the clients (`@noble/post-quantum` 0.7.1 on mobile
+and desktop); the relay never encapsulates or decapsulates — it only checks the
+PQSPK signature — so its production image carries no PQ code. It stays a server
+`devDependency` only because the e2e test drives the real mobile client against
+the relay. The library moves on both clients
+together and must keep replaying `f1-golden`, whose hybrid ratchet sessions were
+persisted with 0.6.1; 0.6.1 ↔ 0.7.1 was also checked for identical keygen and
+deterministic encapsulation, mutual decapsulation and implicit rejection. Tracked in
 [`SECURITY-ROADMAP-2026-06.md`](SECURITY-ROADMAP-2026-06.md) (post-audit
 follow-up F-1). Until then, the constant-time guarantee is **source-level, not
 runtime-verified**, as stated above.
