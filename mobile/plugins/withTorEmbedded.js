@@ -216,7 +216,8 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
   /** Identity sockets are "ctl-…" (net/tor.ts); every other bridge id is mailbox. */
   private fun isMailboxSocket(id: String): Boolean = !id.startsWith("ctl-")
 
-  /** /mailbox/* (stateless drain, challenges) is the mailbox lane. */
+  // Paths under /mailbox/ (stateless drain, challenges) are the mailbox lane.
+  // (No slash-star in block comments: Kotlin nests them. CI build 2026-09-23.)
   private fun isMailboxUrl(url: String): Boolean =
     try { (java.net.URI(url).path ?: "").startsWith("/mailbox/") } catch (_: Exception) { false }
 
