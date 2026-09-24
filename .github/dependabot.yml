@@ -26,6 +26,15 @@ updates:
         update-types:
           - minor
           - patch
+        # Crypto libraries never ride a routine group (PRs #451/#462/#476 bumped
+        # @noble/post-quantum 0.6 -> 0.7, breaking in 0.x, on ONE platform only).
+        # They must move on mobile + server + desktop in a single branch and pass
+        # the byte-for-byte f1-golden fixture (#528; docs/TESTING.md). Excluded
+        # here, each still arrives as its own visible PR.
+        exclude-patterns:
+          - "@noble/*"
+          - "@scure/*"
+          - "tweetnacl*"
     # Expo/RN native modules are pinned to the SDK; never auto-bump them here.
     # `expo-*` covers every Expo module (expo-status-bar, expo-sqlite,
     # expo-file-system, …): their majors track the SDK line, so a bump to the
@@ -95,6 +104,15 @@ updates:
         update-types:
           - minor
           - patch
+        # Crypto libraries never ride a routine group (PRs #451/#462/#476 bumped
+        # @noble/post-quantum 0.6 -> 0.7, breaking in 0.x, on ONE platform only).
+        # They must move on mobile + server + desktop in a single branch and pass
+        # the byte-for-byte f1-golden fixture (#528; docs/TESTING.md). Excluded
+        # here, each still arrives as its own visible PR.
+        exclude-patterns:
+          - "@noble/*"
+          - "@scure/*"
+          - "tweetnacl*"
     ignore:
       # ts-jest@29 pins typescript >=4.3 <7 (PR #317): a TS major alone can
       # never npm-ci. Bump together with ts-jest once it supports TS 7, then
@@ -117,6 +135,15 @@ updates:
         update-types:
           - minor
           - patch
+        # Crypto libraries never ride a routine group (PRs #451/#462/#476 bumped
+        # @noble/post-quantum 0.6 -> 0.7, breaking in 0.x, on ONE platform only).
+        # They must move on mobile + server + desktop in a single branch and pass
+        # the byte-for-byte f1-golden fixture (#528; docs/TESTING.md). Excluded
+        # here, each still arrives as its own visible PR.
+        exclude-patterns:
+          - "@noble/*"
+          - "@scure/*"
+          - "tweetnacl*"
     # Electron majors carry security-relevant Chromium/Node changes and need a
     # packaged smoke-test before merge — keep them as separate, visible PRs.
     ignore:
@@ -125,6 +152,10 @@ updates:
       # electron-vite@5 pins vite ^4–^7 (PR #320): vite 8 can't install until
       # electron-vite ships support. Bump both together, then drop this rule.
       - dependency-name: vite
+        update-types: [version-update:semver-major]
+      # @vitejs/plugin-react@6 peers vite ^8 (PR #400), which is blocked above:
+      # its major can never install alone. Move it in the same Vite 8 upgrade.
+      - dependency-name: "@vitejs/plugin-react"
         update-types: [version-update:semver-major]
 
   # ── GitHub Actions (pin and keep CI actions current) ─────────────────────
