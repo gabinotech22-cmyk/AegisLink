@@ -318,6 +318,7 @@ export function LockConfigScreen({ onBack, onLockTest, onLockSettings }: Props) 
             sub={appLockEnabled ? i18nT('lockConfig.appLockActive', 'Active · Authentication required to open') : i18nT('lockConfig.appLockDisabled', 'Disabled')}
             value={appLockEnabled}
             onChange={handleToggleAppLock}
+            testID="lockConfig-appLock"
           />
 
           {appLockEnabled && (

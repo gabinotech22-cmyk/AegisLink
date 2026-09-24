@@ -36,7 +36,7 @@ del usuario, UX que rompe el producto.
 
 ## Stack técnico global
 - **Mobile**: Expo SDK 54 + React Native + TypeScript
-- **Crypto**: libsodium nativo en todo: `sodium-native` en relay y desktop, libsodium compilado desde fuente verificada en mobile (`mobile/modules/aegis-sodium`) — siempre tras la fachada `crypto/sodium`; Argon2/PBKDF2 y ML-KEM-768 siguen en @noble; expo-secure-store, expo-sqlite
+- **Crypto**: libsodium nativo en todo: `sodium-native` en relay y desktop, libsodium compilado desde fuente verificada en mobile (`mobile/modules/aegis-sodium`) — siempre tras la fachada `crypto/sodium`; Argon2id nativo en mobile (PIN y backup); ML-KEM-768, PBKDF2 legacy y el Argon2 de desktop siguen en @noble; expo-secure-store, expo-sqlite
 - **Backend**: Relay propio (Node.js/Bun) — sin Firebase, sin Supabase
 - **Notificaciones**: FCM/APNs solo para wake-up, payload siempre cifrado
 - **TURN**: coturn self-hosted para llamadas WebRTC

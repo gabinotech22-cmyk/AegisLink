@@ -11,6 +11,7 @@ exercise the actual APK: native modules, storage, navigation, the works.
 |------|----------------|----------------|
 | `01-launch-smoke.yaml` | App builds, installs, boots, renders onboarding | No |
 | `02-onboarding.yaml` | Real identity generation → reaches main app | No (relay optional) |
+| `03-app-lock-pin.yaml` | Set a PIN, cold restart, wrong PIN refused, right PIN unlocks (native Argon2id) | No |
 
 ## Run locally (against an emulator or a plugged-in phone)
 

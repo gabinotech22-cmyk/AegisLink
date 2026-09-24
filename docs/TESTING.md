@@ -318,11 +318,18 @@ hallazgo sube tal cual.
 - **Job CI `aegis-sodium-native`**: compila para host **las mismas fuentes** que la app (núcleo C +
   libsodium vendorizado, `modules/aegis-sodium/cmake/libsodium.cmake`, compartido con Android) y
   corre `modules/aegis-sodium/test/differential.mjs`: bytes idénticos a TweetNaCl/@noble en entradas
-  aleatorias y vectores RFC 7748/8032/4231/5869, `EBADLEN` en toda longitud errónea, `NULL` solo con
+  aleatorias y vectores RFC 7748/8032/4231/5869, Argon2id idéntico a @noble (aleatorio, con los
+  parámetros exactos del PIN `a4`/`a3` y del backup v3, y un vector de referencia) y sus límites de
+  parámetros, `EBADLEN` en toda longitud errónea, `NULL` solo con
   longitud 0, fallo cerrado con puntos de orden bajo y la firma universal de orden pequeño. Dos
   pasadas: `-O2` y ASan+UBSan. En local:
   `cmake -S modules/aegis-sodium/test -B build/aegis-sodium -G Ninja && ninja -C build/aegis-sodium && node modules/aegis-sodium/test/differential.mjs build/aegis-sodium/aegis_sodium_cli`
   (desde `mobile/`). Android arm64 lo compila el job de build smoke.
+- **Argon2id en dispositivo**: el flujo Maestro `mobile/.maestro/03-app-lock-pin.yaml` (job
+  *Mobile E2E (Maestro)*, emulador Android con el APK real) pone un PIN, reinicia la app, comprueba
+  que un PIN erróneo se rechaza y que el correcto desbloquea. Cada paso deriva el PIN con el
+  Argon2id nativo (llamada asíncrona fuera del hilo de JS), así que un binding roto falla ahí. En
+  Jest, `nodeBackend.ts` calcula Argon2id con @noble (sodium-native solo expone salts de 16 B).
 - `vendor-manifest.test.ts` (`mobile/modules/aegis-sodium/__tests__`): cada fichero de
   `vendor/libsodium` coincide con el manifiesto (SHA-256) que escribió `scripts/vendor-libsodium.mjs`
   tras verificar la firma minisign del release; nada añadido ni quitado. Re-verificar contra la red:

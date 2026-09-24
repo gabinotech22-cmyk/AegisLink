@@ -110,9 +110,11 @@ interface ToggleProps {
   onChange: (v: boolean) => void;
   noBorder?: boolean;
   disabled?: boolean;
+  /** For E2E flows (mobile/.maestro): only the switch itself is tappable, not the label. */
+  testID?: string;
 }
 
-export function Toggle({ t, icon, label, sub, value, onChange, noBorder, disabled }: ToggleProps) {
+export function Toggle({ t, icon, label, sub, value, onChange, noBorder, disabled, testID }: ToggleProps) {
   return (
     <View
       style={{
@@ -134,6 +136,7 @@ export function Toggle({ t, icon, label, sub, value, onChange, noBorder, disable
         ) : null}
       </View>
       <Pressable
+        testID={testID}
         onPress={() => !disabled && onChange(!value)}
         style={{
           width: 44,

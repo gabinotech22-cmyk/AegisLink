@@ -1,0 +1,80 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# App lock PIN on the real device build: native Argon2id (libsodium, off the JS
+# thread — modules/aegis-sodium `argon2id`, lock/pin.ts 'a4:' format).
+#
+# Sets a 6-digit PIN from Privacy → Lock screen, cold-restarts the app, checks
+# that a wrong PIN is refused and the right one unlocks. Each step hashes the
+# PIN natively, so a broken binding (JNI, async result conversion, a missing
+# symbol) fails here instead of on a user's phone. Offline, like 02.
+# ─────────────────────────────────────────────────────────────────────────────
+appId: com.aegislink.app
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Generate my identity"
+    timeout: 60000
+- tapOn: "Generate my identity"
+- extendedWaitUntil:
+    notVisible: "Generate my identity"
+    timeout: 90000
+- extendedWaitUntil:
+    visible: "PRIVACY"
+    timeout: 60000
+- tapOn: "PRIVACY"
+- scrollUntilVisible:
+    element: "Lock screen"
+- tapOn: "Lock screen"
+- tapOn:
+    id: "lockConfig-appLock"
+- extendedWaitUntil:
+    visible: "Enter a 6-digit PIN"
+    timeout: 15000
+- tapOn: "1"
+- tapOn: "4"
+- tapOn: "7"
+- tapOn: "2"
+- tapOn: "5"
+- tapOn: "8"
+- extendedWaitUntil:
+    visible: "Confirm your PIN"
+    timeout: 15000
+- tapOn: "1"
+- tapOn: "4"
+- tapOn: "7"
+- tapOn: "2"
+- tapOn: "5"
+- tapOn: "8"
+# setPIN hashes natively; the modal closes when the hash is stored.
+- extendedWaitUntil:
+    visible: "Active · Authentication required to open"
+    timeout: 30000
+- takeScreenshot: 03-lock-enabled
+# Cold start with the lock on → lock screen.
+- stopApp
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "Enter your PIN"
+    timeout: 60000
+- tapOn: "0"
+- tapOn: "0"
+- tapOn: "0"
+- tapOn: "0"
+- tapOn: "0"
+- tapOn: "0"
+- extendedWaitUntil:
+    visible: "Wrong PIN.*"
+    timeout: 30000
+# Let the shake finish and the entry reset before typing the right PIN.
+- waitForAnimationToEnd
+- tapOn: "1"
+- tapOn: "4"
+- tapOn: "7"
+- tapOn: "2"
+- tapOn: "5"
+- tapOn: "8"
+- extendedWaitUntil:
+    visible: "PRIVACY"
+    timeout: 30000
+- takeScreenshot: 03-unlocked
