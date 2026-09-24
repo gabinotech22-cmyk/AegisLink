@@ -5,6 +5,10 @@
   el runtime necesita `--experimental-sqlite` y **Jest no arranca**: las 55 suites fallan con
   `ENOENT ... open 'sqlite'`). El CI fija Node 24 para el server (`.github/workflows/ci.yml`).
 - Node.js 22+ para `mobile/` y `desktop/`.
+- **Linux con glibc ≥ 2.33 para el relay** (Ubuntu 22.04+, Debian 12+): el cripto del relay y del
+  proceso main de desktop es libsodium nativo vía `sodium-native` (F-1), cuyos binarios
+  precompilados son solo glibc — **no carga en Alpine/musl** (por eso `server/Dockerfile` usa
+  `node:26-bookworm-slim`). Es N-API: el mismo binario sirve para Node y Electron, sin recompilar.
 - npm **10** para regenerar `mobile/package-lock.json` (npm 11 borra una entrada anidada y rompe el CI).
 
 Flags (federación, `docs/FEDERATION-DESIGN.md`): `EXPO_PUBLIC_FEDERATION` (mobile) /

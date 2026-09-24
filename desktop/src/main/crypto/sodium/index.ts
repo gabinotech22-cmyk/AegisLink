@@ -1,13 +1,13 @@
 /**
- * Main-process twin of `src/renderer/crypto/sodium` (post-audit follow-up F-1):
- * the one place the Electron main process gets NaCl primitives from. Today it
- * only backs the at-rest DB encryption in `ipc/database.ts`; it is also where
- * the native libsodium binding (sodium-native) lands, which the sandboxed
- * renderer reaches over IPC.
+ * Main-process NaCl entry point (post-audit follow-up F-1): native libsodium
+ * (sodium-native) via `./native.ts`, byte-compatible with the TweetNaCl it
+ * replaced. It backs the at-rest DB encryption in `ipc/database.ts`; the
+ * sandboxed renderer reaches the same native code over IPC (`ipc/sodium.ts`,
+ * operation table in `./ops.ts`).
  *
  * Enforced by `src/renderer/crypto/__tests__/crypto-imports.test.ts`.
  */
-import tweetnacl from 'tweetnacl'
+import * as native from './native'
 
 export interface MainNaclPrimitives {
   randomBytes(n: number): Uint8Array
@@ -20,4 +20,14 @@ export interface MainNaclPrimitives {
   }
 }
 
-export const nacl: MainNaclPrimitives = tweetnacl
+export const nacl: MainNaclPrimitives = {
+  randomBytes: native.randomBytes,
+  // A fresh wrapper: never decorate the native module's own export (ops.ts uses it too).
+  secretbox: Object.assign((msg: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array =>
+    native.secretbox(msg, nonce, key), {
+    open: native.secretboxOpen,
+    keyLength: native.LENGTHS.secretboxKey,
+    nonceLength: native.LENGTHS.nonce,
+    overheadLength: native.LENGTHS.overhead,
+  }),
+}
