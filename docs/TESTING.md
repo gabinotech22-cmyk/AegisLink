@@ -290,6 +290,16 @@ de humo), comprueba que **ningún** servicio publica un puerto (el relay propio
 es solo `.onion`) y hace `bash -n` de `up.sh`/`print-onion.sh`/
 `backup-onion-key.sh`. Ver `docs/SELF-HOSTING.md`.
 
+## Semgrep (`.github/workflows/semgrep.yml`)
+
+Packs `p/secrets`, `p/security-audit`, `p/typescript` y las reglas de oro de `.semgrep/`; el
+resultado sube como SARIF a Security → Code scanning, cuyo check "Semgrep OSS" falla si una PR
+añade alertas en las líneas que toca. Una línea revisada y justificada con
+`// nosemgrep: <regla>` (p. ej. el fallback `plain:` solo-dev, tras `app.isPackaged`) sale del
+SARIF antes de subirlo: Semgrep la marca `suppressions: inSource` pero code scanning la abría igual,
+y cualquier PR que moviera esa línea quedaba en rojo. Sin comentario de justificación, el
+hallazgo sube tal cual.
+
 ## Costura cripto F-1: `crypto-imports` + fixture dorado
 
 - `crypto-imports.test.ts` (mobile `src/crypto/__tests__`, desktop `src/renderer/crypto/__tests__`,

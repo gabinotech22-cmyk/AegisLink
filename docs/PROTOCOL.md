@@ -91,6 +91,12 @@ native libsodium everywhere:
   ~0.2 ms per X25519). HMAC and HKDF (keyed) run on `node:crypto` (OpenSSL);
   unkeyed SHA-2 stays in-process — it has no secret-dependent branches or table
   lookups, and the registration proof-of-work hashes ~260k times.
+  `sodium-native` exposes neither `crypto_box_beforenm` nor HSalsa20, so the
+  desktop's `nacl.box.before` (public-channel join approvals, wire-identical to
+  mobile) is composed natively in main: X25519, then one zero-nonce Salsa20
+  block minus the feed-forward, which is HSalsa20 by definition
+  (`desktop/src/main/crypto/sodium/boxBefore.ts`, pinned against TweetNaCl in
+  `boxBefore.test.ts`; a low-order peer key throws, as in libsodium).
 - **Mobile: native libsodium in the app binary** (F-1 B2). An Expo module
   (`mobile/modules/aegis-sodium`) compiles libsodium 1.0.22 **from source** —
   vendored, its minisign signature and tarball SHA-256 verified by

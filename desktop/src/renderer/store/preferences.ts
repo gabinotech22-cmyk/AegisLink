@@ -29,6 +29,8 @@ export interface Preferences {
   mutedChatsUntil: Record<string, number>;
   /** Groups we left; a straggler's message must not recreate them. */
   leftGroupIds: string[];
+  /** Public channels the user muted locally. Never leaves the device. */
+  mutedChannels: string[];
   appLockEnabled: boolean;
   biometricsEnabled: boolean;
   lockTimeoutMin: number;
@@ -49,6 +51,7 @@ const DEFAULTS: Preferences = {
   mutedChats: [],
   mutedChatsUntil: {},
   leftGroupIds: [],
+  mutedChannels: [],
   appLockEnabled: false,
   biometricsEnabled: true,
   lockTimeoutMin: 0,
@@ -81,6 +84,7 @@ function snapshot(get: () => PrefsState): Preferences {
     mutedChats: s.mutedChats,
     mutedChatsUntil: s.mutedChatsUntil,
     leftGroupIds: s.leftGroupIds,
+    mutedChannels: s.mutedChannels,
     appLockEnabled: s.appLockEnabled,
     biometricsEnabled: s.biometricsEnabled,
     lockTimeoutMin: s.lockTimeoutMin,

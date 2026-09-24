@@ -39,6 +39,8 @@ import {
   hashChannelDeliveryToken,
   signTombstone,
   signDelete,
+  verifyDelete,
+  verifyTombstone,
   signBan,
   wrapCEK,
   unwrapCEK,
@@ -642,5 +644,71 @@ describe('pubchannel:delete — signed post deletion', () => {
     expect(ack.error).toBe('invalid_signature');
 
     sock.disconnect();
+  });
+});
+
+describe('owner-action fan-out carries the owner signature (review finding, PR #442)', () => {
+  // Clients re-verify delete/tombstone events against the channel key they
+  // pinned from the verified manifest. Without the signature on the fan-out they
+  // could only trust the relay, and a relay could censor posts or destroy
+  // members' channel keys.
+  async function twoMembers(seedA: number, seedB: number) {
+    const alice = makeAgentKeys(seedA);
+    const bob = makeAgentKeys(seedB);
+    await registerAgent(alice);
+    await registerAgent(bob);
+    const identity = generateChannelIdentity();
+    const { deliveryToken } = await seedChannel(identity, generateCEK(), nacl.randomBytes(32));
+    const aliceSock = await connectAgent(alice);
+    const bobSock = await connectAgent(bob);
+    for (const sock of [aliceSock, bobSock]) {
+      await new Promise<void>((resolve) => {
+        sock.emit('pubchannel:join', { channelId: identity.channelId, deliveryToken }, () => resolve());
+      });
+    }
+    return { identity, aliceSock, bobSock };
+  }
+
+  test('pubchannel:delete reaches members with a signature they can verify', async () => {
+    const { identity, aliceSock, bobSock } = await twoMembers(97001, 97002);
+    await publicChannelPostRepo.append({
+      id: 'fan-del-0', channel_id: identity.channelId, seq_num: 0,
+      ciphertext_b64: encodeBase64(nacl.randomBytes(32)), nonce_b64: encodeBase64(nacl.randomBytes(24)),
+      post_hash_b64: encodeBase64(nacl.randomBytes(32)), created_at: Date.now(), expires_at: 0,
+    });
+    const received: Array<{ channelId: string; seqNum: number; sig?: string }> = [];
+    bobSock.on('pubchannel:delete', (e: { channelId: string; seqNum: number; sig?: string }) => received.push(e));
+
+    const sig = signDelete(identity.channelId, 0, identity.channelEd25519Secret);
+    const ack = await new Promise<{ ok: boolean }>((resolve) => {
+      aliceSock.emit('pubchannel:delete', { channelId: identity.channelId, seqNum: 0, sig: encodeBase64(sig) }, resolve);
+    });
+    expect(ack.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.sig).toBe(encodeBase64(sig));
+    expect(verifyDelete(identity.channelId, 0, decodeBase64(received[0]!.sig!), identity.channelEd25519Pub)).toBe(true);
+    aliceSock.disconnect();
+    bobSock.disconnect();
+  });
+
+  test('pubchannel:tombstone reaches members with a signature they can verify', async () => {
+    const { identity, aliceSock, bobSock } = await twoMembers(97003, 97004);
+    const received: Array<{ channelId: string; ts: number; sig?: string }> = [];
+    bobSock.on('pubchannel:tombstone', (e: { channelId: string; ts: number; sig?: string }) => received.push(e));
+
+    const ts = Date.now();
+    const sig = signTombstone(identity.channelId, ts, identity.channelEd25519Secret);
+    const ack = await new Promise<{ ok: boolean }>((resolve) => {
+      aliceSock.emit('pubchannel:tombstone', { channelId: identity.channelId, ts, sig: encodeBase64(sig) }, resolve);
+    });
+    expect(ack.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(received).toHaveLength(1);
+    expect(verifyTombstone(identity.channelId, received[0]!.ts, decodeBase64(received[0]!.sig!), identity.channelEd25519Pub)).toBe(true);
+    aliceSock.disconnect();
+    bobSock.disconnect();
   });
 });

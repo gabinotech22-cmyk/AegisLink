@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
-import { useProfiles, AVATAR_PALETTE } from '../store/profiles';
+import { useProfiles, AVATAR_PALETTE, DISPLAY_NAME_MAX_LEN } from '../store/profiles';
 import { Avatar } from '../components/Avatar';
 import type { Identity } from '../crypto/identity';
 import { themedAlert } from '../components/AlertHost';
@@ -178,7 +178,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
             onChangeText={setDisplayName}
             placeholder={i18nT('createProfile.namePlaceholder')}
             placeholderTextColor={t.textFaint}
-            maxLength={32}
+            maxLength={DISPLAY_NAME_MAX_LEN}
             autoFocus
             style={{
               backgroundColor: t.surface,

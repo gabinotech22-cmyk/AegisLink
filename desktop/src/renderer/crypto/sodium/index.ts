@@ -45,9 +45,13 @@ export interface SignKeyPair {
 
 export interface NaclPrimitives {
   randomBytes(n: number): Uint8Array;
+  /** Constant-time equality (sodium_memcmp); false for empty or different-length inputs. */
+  verify(x: Uint8Array, y: Uint8Array): boolean;
   box: {
     (msg: Uint8Array, nonce: Uint8Array, publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array;
     open(box: Uint8Array, nonce: Uint8Array, publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array | null;
+    /** Precomputed shared key (crypto_box_beforenm); throws on a low-order public key. */
+    before(publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array;
     keyPair: {
       (): BoxKeyPair;
       fromSecretKey(secretKey: Uint8Array): BoxKeyPair;
@@ -108,6 +112,7 @@ const box = Object.assign(
   {
     open: (b: Uint8Array, nonce: Uint8Array, publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array | null =>
       call('boxOpen', b, nonce, publicKey, secretKey),
+    before: (publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array => call('boxBefore', publicKey, secretKey),
     keyPair: Object.assign((): BoxKeyPair => call('boxKeyPair'), {
       fromSecretKey: (secretKey: Uint8Array): BoxKeyPair => call('boxKeyPairFromSecretKey', secretKey),
     }),
@@ -152,6 +157,7 @@ const sign = {
 
 export const nacl: NaclPrimitives = {
   randomBytes: (n: number): Uint8Array => call('randomBytes', n),
+  verify: (x: Uint8Array, y: Uint8Array): boolean => call('verify', x, y),
   box,
   secretbox,
   scalarMult,

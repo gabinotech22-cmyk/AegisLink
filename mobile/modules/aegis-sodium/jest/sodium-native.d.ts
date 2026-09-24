@@ -3,7 +3,8 @@
  * used by `crypto/sodium/native.ts`. sodium-native ships no types, and
  * `@types/sodium-native` tracks an older API; declaring exactly what we call
  * keeps the native surface auditable. Byte-identical twins:
- * `server/src/types/sodium-native.d.ts`, `desktop/src/main/types/sodium-native.d.ts`.
+ * `server/src/types/sodium-native.d.ts`, `desktop/src/main/types/sodium-native.d.ts`,
+ * `mobile/modules/aegis-sodium/jest/sodium-native.d.ts`.
  */
 declare module 'sodium-native' {
   type Bytes = Uint8Array;

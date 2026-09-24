@@ -20,6 +20,7 @@ import { withPickingGuard } from '../utils/pickingGuard';
 import { themedAlert } from '../components/AlertHost';
 import { copySensitiveText } from '../utils/secureClipboard';
 import { getOrCreateDID } from '../web3/did/DIDManager';
+import { DISPLAY_NAME_MAX_LEN } from '../store/profiles';
 
 
 
@@ -583,7 +584,7 @@ export function ProfileScreen({ onBack, onDevices, onAppIcon, onKeys, onExport, 
                 placeholderTextColor={t.textDim}
                 value={editName}
                 onChangeText={setEditName}
-                maxLength={20}
+                maxLength={DISPLAY_NAME_MAX_LEN}
                 style={{
                   color: t.text,
                   backgroundColor: t.bg,

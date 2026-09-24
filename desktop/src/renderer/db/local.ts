@@ -7,6 +7,10 @@
 
 import '../crypto/ipc-types';
 
+// Public-channel feed cache, re-exported here so callers import it from the same
+// place as everything else (mobile/src/db/local.ts does the same).
+export * from './channelFeed';
+
 const db = () => window.aegis.db;
 const secureStorage = () => window.aegis.secureStorage;
 
@@ -24,12 +28,42 @@ export function getSignSecretKeySlot(slot = activeSlot): string {
   return slot === 'self' ? 'aegis.signSecretKey.b64' : `aegis.${slot}.signSecretKey.b64`;
 }
 
+/**
+ * Point the renderer at a profile. Local bookkeeping ONLY — it does not move the
+ * database. To actually change profile use switchDbSlot(), which is async
+ * because the real work (closing one encrypted file, opening another) happens in
+ * the main process.
+ *
+ * Kept separate and side-effect-free because most call sites use it to label a
+ * keystore lookup, not to change profile.
+ */
 export function setActiveDbSlot(slot: string): void {
   activeSlot = slot;
 }
 
+/**
+ * Section 11: actually switch profile. Closes the current database in main and
+ * opens the one belonging to `slot` — a different file under a different key.
+ *
+ * Awaited on purpose: main rejects any db.* call whose slot is not the open one,
+ * so racing a read against the switch surfaces as a loud error instead of a
+ * silent read of the wrong profile.
+ */
+export async function switchDbSlot(slot: string): Promise<void> {
+  await window.aegis.db.switchSlot(slot);
+  activeSlot = slot;
+}
+
+/**
+ * Section 11: erase a profile that is not open — its encrypted database and all
+ * of its key material. Main refuses the primary profile and the open slot.
+ */
+export async function deleteDbSlot(slot: string): Promise<void> {
+  await window.aegis.db.deleteSlot(slot);
+}
+
 export async function closeActiveDatabase(): Promise<void> {
-  // Owned by the main process
+  // Owned by the main process; switchDbSlot() closes and reopens it.
 }
 
 export async function deleteIdentitySlot(slot: string): Promise<void> {
@@ -304,6 +338,13 @@ export async function wipeDatabase(): Promise<void> {
   // the keystore, NOT the SQL DB — the table wipe below would leave them intact.
   // Panic must leave nothing recoverable.
   await secureStorage().wipePrekeys().catch(() => {});
+  // Public-channel secrets (CEK/capability/signing keys, ban lists, join
+  // requests) keep their own index in the keystore, not in the SQL DB. Mirrors
+  // mobile/src/db/core.ts. Best effort: the rest of the wipe must still run.
+  try {
+    const { deleteAllChannels } = await import('../crypto/publicChannelStore');
+    await deleteAllChannels();
+  } catch { /* non-fatal */ }
   await db().wipeDatabase(activeSlot);
   // App-lock + duress/panic + PIN material and the in-memory preferences reset.
   // Shared with useIdentity.reset() so a panic wipe and a delete-identity clear

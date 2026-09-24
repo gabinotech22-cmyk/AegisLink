@@ -11,14 +11,17 @@
  */
 import * as native from './native'
 import * as hashes from './hashes'
+import { boxBefore } from './boxBefore'
 
 type Arg = Uint8Array | number | undefined
 type OpFn = (...args: never[]) => unknown
 
 const OPS = {
   randomBytes: native.randomBytes,
+  verify: native.verify,
   box: native.box,
   boxOpen: native.boxOpen,
+  boxBefore,
   boxKeyPair: native.boxKeyPair,
   boxKeyPairFromSecretKey: native.boxKeyPairFromSecretKey,
   secretbox: native.secretbox,

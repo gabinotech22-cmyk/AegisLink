@@ -2,7 +2,7 @@
 
 > Estado (2026-07-02): **EN CURSO.** Phase 0 (crypto), Phase 1 (server), Phase 2
 > (mobile) y Phase 4 core (moderación + approval-gated joins) ✅ hechas; Phase 3
-> (paridad desktop), delegations/rekey (resto de Phase 4), Phase 5
+> (paridad desktop) 🟡 motor portado sin pantallas (PR #442), delegations/rekey (resto de Phase 4), Phase 5
 > (comments/reactions/attachments) y Phase 6 (Tor) ⏳ pendientes.
 > Estado verificable por fase en §18. Flag `PUBLIC_CHANNELS=on` en prod (PR #198).
 > Origen: feature request — canales públicos descubribles manteniendo sealed-sender.
@@ -534,10 +534,31 @@ Si válido, elimina el canal localmente. El relay limpia room + storage.
 | Acción | Wire event | Firmado por | Relay involvement |
 |---|---|---|---|
 | Ban | `pubchannel:ban` | Channel key | Revoca token, expulsa de room |
-| Delete post | `pubchannel:delete { seqNum, sig }` | Channel key | Tombstone en storage |
+| Delete post | `pubchannel:delete { seqNum, sig }` | Channel key | Tombstone en storage; fan-out `{ channelId, seqNum, sig }` |
 | Mute | Client-side (dentro del canal cifrado) | Channel key (mute record) | Ninguno |
-| Delete channel | `pubchannel:tombstone` | Channel key | Distribuye, limpia |
+| Delete channel | `pubchannel:tombstone { ts, sig }` | Channel key | Distribuye `{ channelId, ts, sig }`, limpia |
 | Revoke delegation | Manifest update con `revokedDelegationSeqs` | Channel key | Sirve manifest nuevo |
+
+**Los clientes re-verifican todo fan-out del owner** (ban, delete, tombstone) contra
+la channel key fijada del manifest verificado al unirse o hidratar; la verificación
+del relay nunca la sustituye. Un delete o tombstone sin `sig` (relays anteriores a
+2026-09) se **ignora**: el post sigue visible hasta el siguiente pull y el canal no
+se borra localmente. Así un relay por sí solo no puede censurar posts ni destruir
+las claves de canal de los miembros (`store/channels.ts` → `attachLive`; tests en
+`mobile/src/store/__tests__/channels.test.ts` y `publicChannels.relay.test.ts`).
+
+**Todo manifest se vincula a su channelId** (`verifiedManifestFor`): además de la
+firma, el id se re-deriva de `(channelEd25519Pub, salt)`. Una firma válida solo
+prueba que esa clave firmó el blob, no que el blob sea del canal pedido. Se aplica
+en directorio, hidratación, `joinChannel`, sondeo de aprobaciones y
+`updateChannelInfo`. Si el relay devuelve en `joinChannel` un manifest que no pasa
+esa verificación, el join se rechaza (`bad_manifest`) y se borran los secretos del
+canal; no se suscribe con la clave sin fijar.
+
+**Otras invariantes del cliente (review de #442):** `openChannelPost` descarta (no
+lanza) posts con números fuera de u64 seguro o hashes que no miden 32 B; `sendPost`
+se serializa por canal (dos envíos solapados sellaban el mismo `seqNum`);
+`deleteAllChannels` intenta todos los borrados aunque falle uno.
 
 ---
 
@@ -631,10 +652,12 @@ esté online.
 - UI: discovery, channel view, join/apply flow, post composition.
 - Hash chain verification, manifest validation.
 
-### Phase 3 — Desktop parity (1 semana) — ⏳ PENDIENTE
-> Sin empezar (cero archivos `pubchannel` en `desktop/`). Bloquea la regla de oro #5
-> (paridad mobile↔desktop) para activar el flag, aunque con `PUBLIC_CHANNELS=off` la
-> feature está dormida y el resto es mergeable.
+### Phase 3 — Desktop parity (1 semana) — 🟡 MOTOR PORTADO, SIN UI
+> PR #442: store, servicio, socket y cripto portados a `desktop/src/renderer/`
+> (`publicChannelKey.ts`, `channelKey.ts` y `publicChannelStore.ts` son copias
+> byte a byte de mobile, fijadas por `channelKeyParity.test.ts`). **Ninguna pantalla
+> los usa todavía**: en desktop no se pueden ver ni crear canales. El pánico de
+> desktop ya borra los secretos de canal (`db/local.ts` → `deleteAllChannels`).
 
 - Port verbatim de `channelKey.ts` (known-answer vectors).
 - Socket events desktop.

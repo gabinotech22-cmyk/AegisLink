@@ -137,10 +137,16 @@ con Tor arrancado.
    decodificado sigue el mismo camino que el pegado (clave TOFU del QR, relay +
    raíz de mailbox de un enlace v2). Test `utils/__tests__/qrImage.test.ts`.
    Queda: sin cámara (no tiene sentido en escritorio).
-4. **Sin canales públicos, sin llamadas de grupo, sin múltiples perfiles**
-   (sección 11). El API multi-slot de `secureStorage`/`db` existe pero main
-   **no aísla por slot** (PAR-1b del audit de agosto) — no cablear
-   `ProfileSwitcher` hasta resolverlo con un fichero de DB por slot.
+4. ~~Sin múltiples perfiles~~ → ✅ resuelto (sección 11, PR #442): un fichero
+   de DB por slot en main (PAR-1b del audit de agosto), claves, bloqueo por PIN y
+   modo pánico cubren todos los perfiles; `ProfileSwitcher` + `CreateProfile`
+   cableados desde Perfil (ocultos en modo coacción). Tests
+   `main/ipc/__tests__/database.profileIsolation.test.ts`,
+   `store/__tests__/profiles.test.ts`.
+   **Canales públicos: solo el motor.** Store, servicio, socket y cripto están
+   portados (cripto byte-idéntico a mobile, `channelKeyParity.test.ts`), pero
+   **ninguna pantalla los usa todavía**: en desktop no se pueden ver ni crear
+   canales. **Sin llamadas de grupo.**
 5. **Sin auto-update ni firma.** Cada beta se distribuye como `.exe` manual;
    Windows SmartScreen mostrará "editor desconocido".
 6. **Solo Windows x64.** `mac`/`linux` están en la config de electron-builder
