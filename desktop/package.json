@@ -26,7 +26,7 @@
     "react-dom": "^19.2.8",
     "react-i18next": "^17.0.11",
     "socket.io-client": "^4.7.5",
-    "socks-proxy-agent": "^8.0.5",
+    "socks-proxy-agent": "^10.1.0",
     "sodium-native": "5.1.0",
     "tweetnacl-util": "^0.15.1",
     "zustand": "^5.0.14"
