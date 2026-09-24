@@ -45,7 +45,9 @@ export function evictExpired(map: Map<string, { count: number; reset: number }>)
 }
 
 // ── Shared low-frequency rate-limit (FIX D) ───────────────────────────────────
-// typing + msg:read share a single bucket: 30 ops / 10 s per socket.
+// One bucket for the low-frequency control events (push / VoIP / APNs token
+// registration — typing and msg:read left the relay in audit 2026-09-24 R-1):
+// 30 ops / 10 s per aegisId.
 // group:rekey has its own stricter bucket: 10 ops / 60 s per aegisId.
 // Keyed by aegisId — no IP involved.
 const lowFreqRateLimit = new Map<string, { count: number; reset: number }>();

@@ -71,8 +71,10 @@ jest.mock('../../store/preferences', () => ({
 // purgeGlobalAppState lazy-requires the identity store only to resolve the
 // aegisId for the DID purge — stub it so the test never drags in the real
 // store graph (socket client, crypto, …).
+// `mockIdentity` lets the DID-purge test give the wiped identity an aegisId.
+let mockIdentity: { aegisId: string } | null = null;
 jest.mock('../../store/identity', () => ({
-  useIdentity: { getState: () => ({ identity: null }) },
+  useIdentity: { getState: () => ({ identity: mockIdentity }) },
 }));
 
 function makeMockDb() {
@@ -253,6 +255,22 @@ describe('wipeDatabase — factory reset (device-global remnants, 2026-07-19 reg
     const { fsDeleted } = await runWipe();
     expect(fsDeleted).toContain('file:///test/media');
     expect(fsDeleted).toContain('file:///test/avatars');
+  });
+});
+
+describe('wipeDatabase — cached DID (web3 audit 2026-09-24)', () => {
+  afterEach(() => {
+    mockIdentity = null;
+  });
+
+  it('purges the DID cache under the key DIDManager actually writes', async () => {
+    mockIdentity = { aegisId: 'ABC-2345-6789' };
+    const { ssDeleted } = await runWipe();
+    // DIDManager.getOrCreateDID(aegisId, …) stores `aegis.did.v1.<aegisId>`;
+    // the old purge targeted `<aegisId>::personal/work`, which nothing wrote,
+    // so the real entry (the signing key as a DID) survived every panic wipe.
+    expect(ssDeleted).toContain('aegis.did.v1.ABC-2345-6789');
+    expect(ssDeleted.filter((k) => k.includes('::'))).toEqual([]);
   });
 });
 
