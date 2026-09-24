@@ -809,3 +809,140 @@ describe('member ban (issue #207 — owner moderation, docs §10.4)', () => {
     expect(useChannels.getState().heads[CHANNEL_ID]!.seqNum).toBe(1); // head past the filtered post
   });
 });
+
+// ── Review findings on PR #442 (desktop port), fixed on both platforms ─────────
+
+/** A manifest validly signed by an ATTACKER's key but claiming the victim's id. */
+function unboundManifestBlob(claimedChannelId: string): string {
+  const { encodeBase64 } = require('tweetnacl-util') as typeof import('tweetnacl-util');
+  const attacker = generateChannelIdentity();
+  const manifest: ChannelManifestData = {
+    channelId: claimedChannelId, salt: attacker.salt, channelEd25519Pub: attacker.channelEd25519Pub,
+    name: 'Substituted', description: 'd', avatarHash: null, channelType: 0, createdAtHourMs: 1750000000000,
+    manifestSeq: 9, contentKeyHash: null, delegationsHash: new Uint8Array(32),
+    revokedHash: new Uint8Array(32), pinnedPostSeq: -1, discussionsEnabled: true,
+  };
+  const sig = signManifest(manifest, attacker.channelEd25519Secret);
+  return JSON.stringify({
+    channelId: claimedChannelId, salt: encodeBase64(attacker.salt), channelEd25519Pub: encodeBase64(attacker.channelEd25519Pub),
+    sig: encodeBase64(sig), name: 'Substituted', description: 'd', avatarHash: null,
+    channelType: 0, createdAtHourMs: 1750000000000, manifestSeq: 9, contentKeyHash: null,
+    delegationsHash: encodeBase64(new Uint8Array(32)), revokedHash: encodeBase64(new Uint8Array(32)),
+    pinnedPostSeq: -1, discussionsEnabled: true,
+  });
+}
+
+describe('manifests are bound to their channelId on every path', () => {
+  it('the attacker manifest does verify its signature (so the binding is what stops it)', () => {
+    const { parseAndVerifyManifest } = require('../../channels/channelService') as typeof import('../../channels/channelService');
+    expect(parseAndVerifyManifest(unboundManifestBlob(CHANNEL_ID))).not.toBeNull();
+  });
+
+  it('loadDirectory drops a row whose channelId does not derive from (pub, salt)', async () => {
+    (api.listPublicChannels as jest.Mock).mockResolvedValue({
+      channels: [
+        { signed_manifest_blob: signedManifestBlob('Good') },
+        { signed_manifest_blob: unboundManifestBlob(CHANNEL_ID) },
+      ],
+    });
+    await useChannels.getState().loadDirectory();
+    expect(useChannels.getState().directory.map((d) => d.name)).toEqual(['Good']);
+  });
+
+  it('joinChannel does not pin the key of a substituted manifest', async () => {
+    (socket.pubchannelJoin as jest.Mock).mockResolvedValue({ ok: true, manifest: unboundManifestBlob(CHANNEL_ID) });
+    const res = await useChannels.getState().joinChannel(CHANNEL_ID, new Uint8Array(32), cek);
+    expect(res.ok).toBe(true);
+    const sub = useChannels.getState().subscribed.find((c) => c.channelId === CHANNEL_ID);
+    // The ban handler trusts this pin; an attacker's key must never land here.
+    expect(sub?.channelEd25519PubB64).toBeNull();
+    expect(sub?.name).not.toBe('Substituted');
+  });
+
+  it('updateChannelInfo refuses to re-sign a substituted manifest', async () => {
+    (store.getChannelSigningKey as jest.Mock).mockResolvedValue(new Uint8Array(64));
+    (api.getPublicChannelManifest as jest.Mock).mockResolvedValue({ signed_manifest_blob: unboundManifestBlob(CHANNEL_ID) });
+    const res = await useChannels.getState().updateChannelInfo(CHANNEL_ID, { name: 'Renamed' });
+    expect(res).toEqual({ ok: false, error: 'bad_manifest' });
+  });
+});
+
+describe('sendPost is serialized per channel', () => {
+  it('two overlapping sends seal consecutive posts, not the same seqNum twice', async () => {
+    const releases: Array<() => void> = [];
+    (socket.pubchannelPost as jest.Mock).mockImplementation(
+      () => new Promise((resolve) => releases.push(() => resolve({ ok: true }))),
+    );
+
+    const a = useChannels.getState().sendPost(CHANNEL_ID, 'first', identity);
+    const b = useChannels.getState().sendPost(CHANNEL_ID, 'second', identity);
+    // Let the first send reach the relay; the second must still be waiting.
+    for (let i = 0; i < 20 && releases.length === 0; i++) await flush();
+    expect(releases).toHaveLength(1);
+    releases[0]();
+    for (let i = 0; i < 20 && releases.length < 2; i++) await flush();
+    releases[1]();
+    expect(await a).toEqual({ ok: true });
+    expect(await b).toEqual({ ok: true });
+
+    const feed = useChannels.getState().feeds[CHANNEL_ID];
+    expect(feed.map((p) => p.seqNum)).toEqual([0, 1]);
+    expect(useChannels.getState().heads[CHANNEL_ID]!.seqNum).toBe(1);
+  });
+});
+
+describe('relay fan-out of owner actions is verified on-device', () => {
+  const { encodeBase64 } = require('tweetnacl-util') as typeof import('tweetnacl-util');
+  const { signDelete, signTombstone } = require('../../crypto/publicChannelKey') as typeof import('../../crypto/publicChannelKey');
+  const owner = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(21));
+
+  function attachWithPinnedKey() {
+    useChannels.setState({
+      subscribed: [{
+        channelId: CHANNEL_ID, name: 'Pinned', description: '', channelType: 'open',
+        owned: false, avatarHash: null, channelEd25519PubB64: encodeBase64(owner.publicKey),
+      }],
+      feeds: {
+        [CHANNEL_ID]: [
+          { id: `${CHANNEL_ID}:0`, from: 'A', body: 'keep', senderName: null, media: null, ts: 1, seqNum: 0 },
+          { id: `${CHANNEL_ID}:1`, from: 'B', body: 'target', senderName: null, media: null, ts: 2, seqNum: 1 },
+        ],
+      },
+    });
+    const cbs: { del?: (e: unknown) => void; tomb?: (e: unknown) => void } = {};
+    (socket.onPubchannelDelete as jest.Mock).mockImplementation((cb) => { cbs.del = cb; return () => {}; });
+    (socket.onPubchannelTombstone as jest.Mock).mockImplementation((cb) => { cbs.tomb = cb; return () => {}; });
+    const off = useChannels.getState().attachLive(identity);
+    return { cbs, off };
+  }
+
+  it('drops a post only on the owner-signed delete', async () => {
+    const { cbs, off } = attachWithPinnedKey();
+    const bodies = () => useChannels.getState().feeds[CHANNEL_ID].map((p) => p.body);
+
+    cbs.del!({ channelId: CHANNEL_ID, seqNum: 1 }); // old relay / censoring relay: no sig
+    cbs.del!({ channelId: CHANNEL_ID, seqNum: 1, sig: encodeBase64(nacl.sign.detached(new Uint8Array(8), nacl.sign.keyPair().secretKey)) });
+    await flush();
+    expect(bodies()).toEqual(['keep', 'target']);
+
+    cbs.del!({ channelId: CHANNEL_ID, seqNum: 1, sig: encodeBase64(signDelete(CHANNEL_ID, 1, owner.secretKey)) });
+    await flush();
+    expect(bodies()).toEqual(['keep']);
+    off();
+  });
+
+  it('erases the channel only on the owner-signed tombstone', async () => {
+    const { cbs, off } = attachWithPinnedKey();
+    const ts = 1750000000000;
+
+    cbs.tomb!({ channelId: CHANNEL_ID, ts });
+    await flush();
+    expect(store.deleteChannel).not.toHaveBeenCalled();
+    expect(useChannels.getState().subscribed).toHaveLength(1);
+
+    cbs.tomb!({ channelId: CHANNEL_ID, ts, sig: encodeBase64(signTombstone(CHANNEL_ID, ts, owner.secretKey)) });
+    await flush();
+    expect(useChannels.getState().subscribed).toHaveLength(0);
+    off();
+  });
+});

@@ -10,7 +10,7 @@ import path from 'node:path';
 const MOBILE_CRYPTO = path.resolve(__dirname, '../../../../../mobile/src/crypto');
 
 describe('public-channel crypto is identical to mobile', () => {
-  for (const file of ['publicChannelKey.ts', 'channelKey.ts']) {
+  for (const file of ['publicChannelKey.ts', 'channelKey.ts', 'publicChannelStore.ts']) {
     it(`${file} is byte-identical to mobile/src/crypto/${file}`, () => {
       const here = fs.readFileSync(path.resolve(__dirname, '..', file), 'utf8');
       const mobile = fs.readFileSync(path.join(MOBILE_CRYPTO, file), 'utf8');

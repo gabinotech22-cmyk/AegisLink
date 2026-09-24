@@ -53,9 +53,11 @@ export interface PubChannelMsgEvent {
   createdAt: number;
 }
 
-export interface PubChannelDeleteEvent { channelId: string; seqNum: number; }
+/** `sig` is the owner's signature (verifyDelete); relays before 2026-09 omit it and the event is ignored. */
+export interface PubChannelDeleteEvent { channelId: string; seqNum: number; sig?: string; }
 export interface PubChannelBanEvent { channelId: string; banRecord: string; banSig: string; }
-export interface PubChannelTombstoneEvent { channelId: string; ts: number; }
+/** `sig` is the owner's signature (verifyTombstone); without it the event is ignored. */
+export interface PubChannelTombstoneEvent { channelId: string; ts: number; sig?: string; }
 
 /** Emit an event and await its ack, rejecting if the socket is down or it times out. */
 function emitWithAck<T extends PubChannelAck>(event: string, payload: unknown): Promise<T> {

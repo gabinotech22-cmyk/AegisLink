@@ -536,6 +536,7 @@ export function openChannelPost(
   // nonce/key (checkLengths), which a malicious relay could exploit to crash the
   // live-message handler. Guard so a bad blob is dropped (null), not thrown.
   if (nonce.length !== nacl.secretbox.nonceLength) return null;
+  if (cek.length !== nacl.secretbox.keyLength) return null;
   const plaintext = nacl.secretbox.open(ciphertext, nonce, cek);
   if (!plaintext) return null;
 
@@ -555,7 +556,12 @@ export function openChannelPost(
   };
 
   if (typeof raw.from !== 'string' || typeof raw.body !== 'string') return null;
-  if (typeof raw.ts !== 'number' || typeof raw.seqNum !== 'number') return null;
+  // Every number below is encoded as a u64 (u64be) for the signature and the
+  // hash chain, which THROWS on a non-integer or out-of-range value. A member
+  // holding the CEK could otherwise seal `ttlMs: "x"` or `seqNum: 1e30` and
+  // crash the live-message handler instead of having the post dropped.
+  if (!isWireU64(raw.ts) || !isWireU64(raw.seqNum)) return null;
+  if (raw.ttlMs !== undefined && !isWireU64(raw.ttlMs)) return null;
 
   let prevHash: Uint8Array;
   let attachmentsHash: Uint8Array;
@@ -563,6 +569,8 @@ export function openChannelPost(
     prevHash = decodeBase64(raw.prevHash);
     attachmentsHash = decodeBase64(raw.attachmentsHash);
   } catch { return null; }
+  // Both are SHA-256 outputs (or the 32-byte genesis/empty value) when sealed.
+  if (prevHash.length !== 32 || attachmentsHash.length !== 32) return null;
 
   const post: ChannelPostInner = {
     from: raw.from,
@@ -751,6 +759,11 @@ function base64url(bytes: Uint8Array): string {
 
 function u8(n: number): Uint8Array {
   return new Uint8Array([n & 0xff]);
+}
+
+/** A number that encodes as a u64 without loss: a non-negative safe integer. */
+function isWireU64(n: unknown): n is number {
+  return typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 }
 
 function u64be(n: number): Uint8Array {

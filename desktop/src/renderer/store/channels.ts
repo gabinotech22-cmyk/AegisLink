@@ -63,6 +63,8 @@ import {
   signDelete,
   signBan,
   verifyBan,
+  verifyDelete,
+  verifyTombstone,
   signPendingList,
   signApprove,
   generateJoinEphemeral,
@@ -129,6 +131,34 @@ export interface DirectoryEntry {
 }
 
 /** A channel we hold secrets for (appears in the subscribed list). */
+/** Per-channel queue so `sendPost` never overlaps itself for the same channel. */
+const sendLocks = new Map<string, Promise<void>>();
+function withChannelSendLock<T>(channelId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = sendLocks.get(channelId) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  const tail = run.then(() => undefined, () => undefined);
+  sendLocks.set(channelId, tail);
+  void tail.then(() => {
+    if (sendLocks.get(channelId) === tail) sendLocks.delete(channelId);
+  });
+  return run;
+}
+
+/**
+ * The ONLY way this store trusts a signed manifest. A valid signature proves
+ * the embedded `channelEd25519Pub` signed the blob, not that the blob belongs to
+ * the channel we asked about: a relay could hand over a manifest an attacker
+ * signed for their own channel. So the id is also re-derived from
+ * (channelEd25519Pub, salt), and must match `expectedChannelId` when given.
+ */
+function verifiedManifestFor(blob: string, expectedChannelId?: string): ChannelManifestData | null {
+  const manifest = parseAndVerifyManifest(blob);
+  if (!manifest) return null;
+  if (expectedChannelId !== undefined && manifest.channelId !== expectedChannelId) return null;
+  if (deriveChannelId(manifest.channelEd25519Pub, manifest.salt) !== manifest.channelId) return null;
+  return manifest;
+}
+
 export interface ChannelSummary {
   channelId: string;
   name: string;
@@ -406,9 +436,8 @@ export const useChannels = create<ChannelsState>((set, get) => ({
           }
           continue;
         }
-        const manifest = parseAndVerifyManifest(blob);
-        if (!manifest || manifest.channelId !== channelId) continue; // forged/corrupt → never trust
-        if (deriveChannelId(manifest.channelEd25519Pub, manifest.salt) !== channelId) continue;
+        const manifest = verifiedManifestFor(blob, channelId);
+        if (!manifest) continue; // forged/corrupt/unbound → never trust
         const summary: ChannelSummary = {
           channelId,
           name: manifest.name,
@@ -462,8 +491,9 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       const { channels } = await listPublicChannels();
       const verified: DirectoryEntry[] = [];
       for (const row of channels) {
-        // Trust a directory row only if its manifest signature verifies on-device.
-        const manifest = parseAndVerifyManifest(row.signed_manifest_blob);
+        // Trust a directory row only if its manifest verifies on-device AND its
+        // channelId re-derives from (pub, salt).
+        const manifest = verifiedManifestFor(row.signed_manifest_blob);
         if (!manifest) continue;
         verified.push({
           channelId: manifest.channelId,
@@ -617,8 +647,8 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       let name = parsed.channelId;
       try {
         const { signed_manifest_blob } = await getPublicChannelManifest(parsed.channelId);
-        const m = parseAndVerifyManifest(signed_manifest_blob);
-        if (!m || m.channelId !== parsed.channelId) return { ok: false, error: 'bad_manifest' };
+        const m = verifiedManifestFor(signed_manifest_blob, parsed.channelId);
+        if (!m) return { ok: false, error: 'bad_manifest' };
         if (!bytesEqual(m.channelEd25519Pub, parsed.channelEd25519Pub)) return { ok: false, error: 'pubkey_mismatch' };
         name = m.name;
       } catch (e) {
@@ -655,6 +685,7 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     const manifest = parseAndVerifyManifest(blob);
     if (!manifest) return { ok: false, error: 'bad_manifest' };
     if (manifest.channelId !== parsed.channelId) return { ok: false, error: 'channel_id_mismatch' };
+    // (the (pub, salt) binding is checked just below with its own error code)
     if (!bytesEqual(manifest.channelEd25519Pub, parsed.channelEd25519Pub)) return { ok: false, error: 'pubkey_mismatch' };
     // The id must bind to (pub, salt) — a forged manifest claiming someone's id fails here.
     if (deriveChannelId(manifest.channelEd25519Pub, manifest.salt) !== parsed.channelId) {
@@ -721,7 +752,9 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       return { ok: false, error: ack.error };
     }
 
-    const manifest = ack.manifest ? parseAndVerifyManifest(ack.manifest) : null;
+    // This pins channelEd25519PubB64, which the ban handler later trusts: an
+    // unbound manifest here would let a relay pin an attacker's key.
+    const manifest = ack.manifest ? verifiedManifestFor(ack.manifest, channelId) : null;
     const summary: ChannelSummary = {
       channelId,
       name: manifest?.name ?? channelId,
@@ -807,44 +840,60 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     return fresh;
   },
 
-  async sendPost(channelId, body, identity, senderName, media) {
-    const cek = await getChannelCEK(channelId);
-    if (!cek) return { ok: false, error: 'not_subscribed' };
-    const deliveryToken = await getChannelDeliveryToken(channelId);
-    if (!deliveryToken) return { ok: false, error: 'no_delivery_token' };
+  sendPost(channelId, body, identity, senderName, media) {
+    // One post at a time per channel: read head → seal → relay ack → advance
+    // head. Two overlapping sends would seal the same seqNum/prevHash, and
+    // every other member drops the second (its prevHash no longer matches)
+    // while this device reported ok.
+    return withChannelSendLock(channelId, async () => {
+      const cek = await getChannelCEK(channelId);
+      if (!cek) return { ok: false, error: 'not_subscribed' };
+      const deliveryToken = await getChannelDeliveryToken(channelId);
+      if (!deliveryToken) return { ok: false, error: 'no_delivery_token' };
 
-    const head = get().heads[channelId] ?? null;
-    const wireBody = encodePostBody(body, senderName, media);
-    const sealed = buildAndSealPost(
-      channelId,
-      { from: identity.aegisId, body: wireBody, ts: Date.now() },
-      head,
-      identity.signingSecretKey,
-      cek,
-    );
+      const head = get().heads[channelId] ?? null;
+      const wireBody = encodePostBody(body, senderName, media);
+      const sealed = buildAndSealPost(
+        channelId,
+        { from: identity.aegisId, body: wireBody, ts: Date.now() },
+        head,
+        identity.signingSecretKey,
+        cek,
+      );
 
-    const ack = await pubchannelPost(channelId, sealed.wire.ciphertext, sealed.wire.nonce, deliveryToken);
-    if (!ack.ok) return { ok: false, error: ack.error };
+      const ack = await pubchannelPost(channelId, sealed.wire.ciphertext, sealed.wire.nonce, deliveryToken);
+      if (!ack.ok) return { ok: false, error: ack.error };
 
-    const optimistic: FeedPost = {
-      id: `${channelId}:${sealed.seqNum}`,
-      from: identity.aegisId,
-      body,
-      senderName: senderName ?? null,
-      media: media ?? null,
-      ts: Date.now(),
-      seqNum: sealed.seqNum,
-    };
-    set((s) => ({
-      feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), optimistic] },
-      heads: { ...s.heads, [channelId]: sealed.newHead },
-    }));
-    void saveChannelHead(channelId, sealed.newHead).catch(() => {});
-    void persistFeed(channelId, get);
-    return { ok: true };
+      const optimistic: FeedPost = {
+        id: `${channelId}:${sealed.seqNum}`,
+        from: identity.aegisId,
+        body,
+        senderName: senderName ?? null,
+        media: media ?? null,
+        ts: Date.now(),
+        seqNum: sealed.seqNum,
+      };
+      set((s) => ({
+        feeds: { ...s.feeds, [channelId]: [...(s.feeds[channelId] ?? []), optimistic] },
+        heads: { ...s.heads, [channelId]: sealed.newHead },
+      }));
+      void saveChannelHead(channelId, sealed.newHead).catch(() => {});
+      void persistFeed(channelId, get);
+      return { ok: true };
+    });
   },
 
   attachLive(identity) {
+    /** The channel key pinned from the verified manifest at join/hydrate time. */
+    const pinnedChannelPub = (channelId: string): Uint8Array | null => {
+      const b64 = get().subscribed.find((c) => c.channelId === channelId)?.channelEd25519PubB64;
+      if (!b64) return null;
+      try { return decodeBase64(b64); } catch { return null; }
+    };
+    const decodeSigOrNull = (b64: string | undefined): Uint8Array | null => {
+      if (typeof b64 !== 'string') return null;
+      try { return decodeBase64(b64); } catch { return null; }
+    };
     const resolver = makeSignerResolver(identity);
     const offMsg = onPubchannelMsg((e) => {
       void (async () => {
@@ -874,8 +923,14 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       })();
     });
     const offDelete = onPubchannelDelete((e) => {
-      // Owner-signed deletion (relay-verified). Drop the post locally; the
-      // chain head is NOT rewound — later posts still link past the gap.
+      // Owner-signed deletion. The relay checked it, but that is never a
+      // substitute: re-verify against the channel key pinned from the VERIFIED
+      // manifest, or a relay alone could censor any post. Drop the post
+      // locally; the chain head is NOT rewound — later posts link past the gap.
+      const channelPub = pinnedChannelPub(e.channelId);
+      const sig = decodeSigOrNull(e.sig);
+      if (!channelPub || !sig || !Number.isSafeInteger(e.seqNum) || e.seqNum < 0) return;
+      if (!verifyDelete(e.channelId, e.seqNum, sig, channelPub)) return;
       set((s) => ({
         feeds: {
           ...s.feeds,
@@ -925,6 +980,12 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       })();
     });
     const offTomb = onPubchannelTombstone((e) => {
+      // removeChannel erases the CEK, the capability and (for an owner) the
+      // signing secret, irreversibly: only on the owner's verified signature.
+      const channelPub = pinnedChannelPub(e.channelId);
+      const sig = decodeSigOrNull(e.sig);
+      if (!channelPub || !sig || !Number.isSafeInteger(e.ts) || e.ts < 0) return;
+      if (!verifyTombstone(e.channelId, e.ts, sig, channelPub)) return;
       void get().removeChannel(e.channelId);
     });
     return () => { offMsg(); offDelete(); offBan(); offTomb(); };
@@ -962,8 +1023,10 @@ export const useChannels = create<ChannelsState>((set, get) => ({
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : 'manifest_fetch_failed' };
     }
-    const current = parseAndVerifyManifest(blob);
-    if (!current || current.channelId !== channelId) return { ok: false, error: 'bad_manifest' };
+    // Never re-sign a substituted manifest: that would publish an attacker's
+    // content under our key and invalidate the channel.
+    const current = verifiedManifestFor(blob, channelId);
+    if (!current) return { ok: false, error: 'bad_manifest' };
 
     const name = (updates.name ?? current.name).trim();
     const description = (updates.description ?? current.description).trim();
@@ -1129,8 +1192,8 @@ export const useChannels = create<ChannelsState>((set, get) => ({
       } catch { continue; }
       const cek = unwrapCEK(env.ivB64, env.wrappedB64, capability, app.channelId);
       if (!cek) continue;
-      const manifest = ack.manifest ? parseAndVerifyManifest(ack.manifest) : null;
-      if (!manifest || manifest.channelId !== app.channelId) continue;
+      const manifest = ack.manifest ? verifiedManifestFor(ack.manifest, app.channelId) : null;
+      if (!manifest) continue;
       if (manifest.contentKeyHash && !bytesEqual(sha256(cek), manifest.contentKeyHash)) continue;
 
       await saveChannelSecrets(app.channelId, { cek, capability });

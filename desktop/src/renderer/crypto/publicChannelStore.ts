@@ -322,22 +322,35 @@ export async function deleteChannel(channelId: string): Promise<void> {
   await removeFromIndex(channelId);
 }
 
-/** Wipe every channel secret we hold (panic mode / full reset). */
+/**
+ * Wipe every channel secret we hold (panic mode / full reset).
+ *
+ * Every deletion is attempted even if an earlier one fails: a panic wipe that
+ * stops at the first locked item leaves the remaining channels' CEK,
+ * capability and signing secret behind. Failures are reported at the end.
+ */
 export async function deleteAllChannels(): Promise<void> {
-  const index = await loadIndex();
+  const keys: string[] = [];
+  let index: string[] = [];
+  try { index = await loadIndex(); } catch { /* unreadable index: still drop it below */ }
   for (const channelId of index) {
-    await ss.delete(cekKey(channelId));
-    await ss.delete(capKey(channelId));
-    await ss.delete(signKey(channelId));
-    await ss.delete(banKey(channelId));
-    await ss.delete(headKey(channelId));
-    await ss.delete(metaKey(channelId));
+    keys.push(cekKey(channelId), capKey(channelId), signKey(channelId),
+      banKey(channelId), headKey(channelId), metaKey(channelId));
   }
-  await ss.delete(INDEX_KEY);
+  keys.push(INDEX_KEY);
   // Panic also drops any in-flight approval join requests.
-  const applyIndex = await loadApplyIndex();
-  for (const channelId of applyIndex) {
-    await ss.delete(APPLY_PREFIX + safeId(channelId));
+  let applyIndex: string[] = [];
+  try { applyIndex = await loadApplyIndex(); } catch { /* same */ }
+  for (const channelId of applyIndex) keys.push(APPLY_PREFIX + safeId(channelId));
+  keys.push(APPLY_INDEX_KEY);
+
+  let failed = 0;
+  for (const key of keys) {
+    try {
+      await ss.delete(key);
+    } catch {
+      failed++;
+    }
   }
-  await ss.delete(APPLY_INDEX_KEY);
+  if (failed > 0) throw new Error(`deleteAllChannels: ${failed} of ${keys.length} deletions failed`);
 }

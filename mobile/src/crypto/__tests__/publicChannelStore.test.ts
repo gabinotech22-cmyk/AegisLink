@@ -183,6 +183,22 @@ describe('index + lifecycle', () => {
     expect(await getChannelCEK(CHANNEL_B)).toBeNull();
     expect(mockStore.size).toBe(0);
   });
+
+  it('deleteAllChannels keeps going when one deletion fails, then reports it', async () => {
+    await saveChannelSecrets(CHANNEL_A, { cek: fixedKey(1), capability: fixedKey(2) });
+    await saveChannelSecrets(CHANNEL_B, { cek: fixedKey(3), capability: fixedKey(4) });
+    const SecureStore = jest.requireMock('expo-secure-store') as { deleteItemAsync: jest.Mock };
+    // The first deletion (channel A's CEK) hits a locked item.
+    SecureStore.deleteItemAsync.mockImplementationOnce(() => Promise.reject(new Error('locked')));
+
+    await expect(deleteAllChannels()).rejects.toThrow(/1 of \d+ deletions failed/);
+
+    // The review finding: the wipe used to stop at that first failure, leaving
+    // every other channel's secrets and the index behind.
+    expect(await getChannelCEK(CHANNEL_B)).toBeNull();
+    expect(await getChannelCapability(CHANNEL_A)).toBeNull();
+    expect(await listChannelIds()).toEqual([]);
+  });
 });
 
 describe('channel chain head (delta-detection cache for background sync)', () => {

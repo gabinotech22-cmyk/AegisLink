@@ -338,6 +338,13 @@ export async function wipeDatabase(): Promise<void> {
   // the keystore, NOT the SQL DB — the table wipe below would leave them intact.
   // Panic must leave nothing recoverable.
   await secureStorage().wipePrekeys().catch(() => {});
+  // Public-channel secrets (CEK/capability/signing keys, ban lists, join
+  // requests) keep their own index in the keystore, not in the SQL DB. Mirrors
+  // mobile/src/db/core.ts. Best effort: the rest of the wipe must still run.
+  try {
+    const { deleteAllChannels } = await import('../crypto/publicChannelStore');
+    await deleteAllChannels();
+  } catch { /* non-fatal */ }
   await db().wipeDatabase(activeSlot);
   // App-lock + duress/panic + PIN material and the in-memory preferences reset.
   // Shared with useIdentity.reset() so a panic wipe and a delete-identity clear
