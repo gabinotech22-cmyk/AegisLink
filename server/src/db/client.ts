@@ -632,6 +632,10 @@ export const apnsTokenRepo = {
   async delete(token: string): Promise<void> {
     await dbRun(`DELETE FROM apns_tokens WHERE apns_token = ?`, [token]);
   },
+  /** Owner-scoped delete (apns:unregister): a socket can only drop ITS OWN token. */
+  async deleteFor(aegisId: string, token: string): Promise<void> {
+    await dbRun(`DELETE FROM apns_tokens WHERE aegis_id = ? AND apns_token = ?`, [aegisId, token]);
+  },
 };
 
 // ── prekeysRepo ───────────────────────────────────────────────────────────────

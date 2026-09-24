@@ -1507,60 +1507,48 @@ export function connect(identity: Identity): Socket {
         const { registerForPush } = require('../notifications/push') as typeof import('../notifications/push');
         await registerForPush(identity);
 
-        // After registerForPush succeeds, check if token changed and emit to relay
-        const Notifications = require('expo-notifications');
-        const perm = await Notifications.getPermissionsAsync();
-        if (!perm.granted && perm.status !== 'granted') return;
-
-        const tokenData = await Notifications.getExpoPushTokenAsync();
-        const freshToken: string = tokenData.data;
-        // Re-register until the relay CONFIRMS the write via ack. The old code
-        // emitted fire-and-forget and cached the token as "done" immediately, so
-        // a lost frame or a rate-limited emit was never retried — the relay kept
-        // ZERO tokens for the identity and a killed iOS app never woke
-        // (notifyRecipient had nothing to send to). We now gate the cache on the
-        // ack and re-emit on every auth until 'aegis.pushToken.confirmed' matches
-        // the live token. Keying on a *confirmed* marker also self-heals installs
-        // already stuck by the old bug (their stale 'aegis.pushToken' never
-        // re-emitted). Idempotent server-side (pushRepo.upsert).
-        const confirmedToken = await SecureStore.getItemAsync('aegis.pushToken.confirmed');
-        if (confirmedToken !== freshToken) {
+        // No Expo push token (2026-09-24): it was fetched from exp.host outside
+        // Tor, and every wake went through Expo, which then saw the device IP
+        // and the rhythm of incoming messages. iOS registers its RAW APNs token
+        // and the relay talks to APNs directly (push/apns-alert.ts). Android
+        // store builds have no Firebase config, so no remote token there.
+        //
+        // One-time cleanup for installs from before: tell the relay to drop the
+        // Expo token it still holds, so it stops sending through Expo.
+        const legacyExpo = await SecureStore.getItemAsync('aegis.pushToken');
+        if (legacyExpo) {
           const { Platform } = require('react-native');
-          const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'unknown';
+          const platform = Platform.OS === 'ios' ? 'ios' : 'android';
           try {
             await new Promise<void>((resolve, reject) => {
               socket!
                 .timeout(EMIT_ACK_TIMEOUT_MS)
-                .emit('push:register', { token: freshToken, platform }, (err: Error | null, ack?: { ok?: boolean }) => {
+                .emit('push:unregister', { token: legacyExpo, platform }, (err: Error | null, ack?: { ok?: boolean }) => {
                   if (err) { reject(err); return; }
-                  if (!ack?.ok) { reject(new Error('push_register_rejected')); return; }
+                  if (!ack?.ok) { reject(new Error('push_unregister_rejected')); return; }
                   resolve();
                 });
             });
-            await SecureStore.setItemAsync('aegis.pushToken.confirmed', freshToken);
-            await SecureStore.setItemAsync('aegis.pushToken', freshToken);
+            await SecureStore.deleteItemAsync('aegis.pushToken').catch(() => {});
+            await SecureStore.deleteItemAsync('aegis.pushToken.confirmed').catch(() => {});
           } catch (e) {
-            // Not confirmed (lost frame / rate-limited / timeout) → leave the
-            // marker unset so the next auth retries. Never fatal to the connect.
-            if (__DEV__) logger.warn('[socket] push:register not confirmed, will retry next auth:', e);
+            // Not confirmed: retried on the next auth. Never fatal to the connect.
+            if (__DEV__) logger.warn('[socket] legacy Expo token cleanup not confirmed:', e);
           }
         }
 
-        // ── iOS: also register the RAW APNs token (direct-APNs message wake) ────
-        // getDevicePushTokenAsync returns the standard APNs device token (hex),
-        // DISTINCT from the Expo token above and the VoIP token below. It lets the
-        // relay wake a killed iPhone straight through APNs — no Expo hop, the way
-        // Session's push server does. Fail-safe: if this never registers, the
-        // relay falls back to the Expo push, so nothing regresses. Same ack-gated
-        // confirmed-marker dedup so a lost frame retries on the next auth.
+        // ── iOS: register the RAW APNs token (direct-APNs wake, no Expo) ─────
+        // Re-register until the relay CONFIRMS the write via ack: a lost frame or
+        // a rate-limited emit must not leave the relay with zero tokens (a killed
+        // iPhone would then never wake). The confirmed marker dedups re-emits.
+        // The token is also kept for apns:unregister on a profile switch.
         {
-          const { Platform } = require('react-native');
-          if (Platform.OS === 'ios') {
+          const { getLastApnsToken } = require('../notifications/push') as typeof import('../notifications/push');
+          const apnsToken = getLastApnsToken();
+          if (apnsToken) {
             try {
-              const dev = await Notifications.getDevicePushTokenAsync();
-              const apnsToken: string = typeof dev?.data === 'string' ? dev.data : '';
               const confirmedApns = await SecureStore.getItemAsync('aegis.apnsToken.confirmed');
-              if (apnsToken && confirmedApns !== apnsToken) {
+              if (confirmedApns !== apnsToken) {
                 await new Promise<void>((resolve, reject) => {
                   socket!
                     .timeout(EMIT_ACK_TIMEOUT_MS)
@@ -1572,6 +1560,7 @@ export function connect(identity: Identity): Socket {
                 });
                 await SecureStore.setItemAsync('aegis.apnsToken.confirmed', apnsToken);
               }
+              await SecureStore.setItemAsync('aegis.apnsToken', apnsToken);
             } catch (e) {
               if (__DEV__) logger.warn('[socket] apns:register not confirmed, will retry next auth:', e);
             }
@@ -5697,10 +5686,16 @@ export async function unregisterPushForActiveIdentity(): Promise<void> {
   try {
     const token = await SecureStore.getItemAsync('aegis.pushToken');
     if (token) {
+      // Legacy Expo token (installs from before 2026-09-24).
       const { Platform } = require('react-native') as typeof import('react-native');
       jobs.push(emitAck('push:unregister', { token, platform: Platform.OS === 'ios' ? 'ios' : 'android' }));
-      // Forget the "confirmed" marker so the next activation re-registers.
       await SecureStore.deleteItemAsync('aegis.pushToken.confirmed').catch(() => {});
+    }
+    const apns = await SecureStore.getItemAsync('aegis.apnsToken');
+    if (apns) {
+      jobs.push(emitAck('apns:unregister', { token: apns, platform: 'ios' }));
+      // Forget the "confirmed" marker so the next activation re-registers.
+      await SecureStore.deleteItemAsync('aegis.apnsToken.confirmed').catch(() => {});
     }
   } catch { /* nothing cached */ }
   try {

@@ -92,6 +92,15 @@ export function attachMessagingEphemeral(socket: Socket, { me, sockets }: Messag
     if (!parsed.success) { sendAck(false); return; }
     try { await pushRepo.deleteFor(me, parsed.data.token); sendAck(true); } catch { sendAck(false); }
   });
+  // Profile switch (same rationale as push:unregister): drop THIS identity's
+  // raw APNs token so an inactive profile is never woken. Owner-scoped.
+  socket.on('apns:unregister', async (raw, ack) => {
+    const sendAck = (ok: boolean): void => { if (typeof ack === 'function') ack({ ok }); };
+    if (!(await checkLowFreqRateLimit(me))) { sendAck(false); return; }
+    const parsed = ApnsRegister.safeParse(raw);
+    if (!parsed.success) { sendAck(false); return; }
+    try { await apnsTokenRepo.deleteFor(me, parsed.data.token); sendAck(true); } catch { sendAck(false); }
+  });
   socket.on('voip:unregister', async (raw, ack) => {
     const sendAck = (ok: boolean): void => { if (typeof ack === 'function') ack({ ok }); };
     if (!(await checkLowFreqRateLimit(me))) { sendAck(false); return; }
