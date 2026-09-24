@@ -300,6 +300,17 @@ es solo `.onion`) y hace `bash -n` de `up.sh`/`print-onion.sh`/
   generado **una vez** con TweetNaCl/@noble: vectores de cada primitiva, un sobre sealed-sender y
   sesiones de ratchet persistidas (clásica e híbrida PQ, con un mensaje fuera de orden). Si falla,
   el backend no es compatible byte a byte. **Nunca** se regenera el fixture para que pase.
+- `sodium-native.differential.test.ts` (server `src/__tests__`, desktop `src/main/crypto/__tests__`):
+  el backend nativo (`crypto/sodium/native.ts`) contra TweetNaCl como oráculo (solo devDependency):
+  bytes idénticos en entradas aleatorias, mismos mensajes de error, `null` al fallar el MAC, siempre
+  `Uint8Array` (nunca `Buffer`), y las dos diferencias deliberadas (X25519 de orden bajo lanza).
+  El de desktop además exige que su `native.ts` sea idéntico byte a byte al del relay.
+- Desktop: los tests del renderer corren en Node sin preload. `vitest.config.ts` sustituye
+  `./sodiumIpcBridge` por `src/main/crypto/sodium/__tests__/directBridge.ts`, que ejecuta **la misma
+  tabla de operaciones** que el handler IPC (`ops.ts`, `sodium-native` real) clonando argumentos y
+  resultados como la IPC de Electron. `sodium-ops.test.ts` cubre la validación de esa frontera.
+- Tras empaquetar desktop en local (`electron-builder`), `better-sqlite3` queda con el ABI de
+  Electron: `node scripts/native-abi.mjs node` antes de `npm test`.
 - **Dependencias cripto** (`@noble/*`, `@scure/*`, `tweetnacl*`): se suben **a la vez en las tres
   plataformas**, en una sola rama, y con `f1-golden` en verde en todas (regla de oro #5). Por eso
   `.github/dependabot.yml` las excluye de los grupos de parches: las #451/#462/#476 subían

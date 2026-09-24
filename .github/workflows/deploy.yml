@@ -75,6 +75,20 @@ jobs:
           cd "$APP"
           npm ci --omit=dev --silent
 
+          # F-1: the relay's crypto is native libsodium (sodium-native, glibc
+          # >= 2.33 prebuilds). Prove it loads on THIS host before restarting:
+          # on failure restore the backup and abort WITHOUT a restart, so the
+          # running process keeps serving.
+          echo "==> Native crypto smoke test (sodium-native)"
+          if ! node -e "const s=require('sodium-native');const b=new Uint8Array(32);s.randombytes_buf(b)"; then
+            echo "==> sodium-native does not load on this host ($(ldd --version | head -1)) — restoring $BACKUP, relay NOT restarted"
+            rm -rf "$APP/src"
+            cp -r "$BACKUP/src" "$APP/src"
+            cp "$BACKUP/package.json" "$BACKUP/package-lock.json" "$APP/"
+            npm ci --omit=dev --silent
+            exit 1
+          fi
+
           echo "==> Restarting systemd service"
           sudo systemctl restart aegislink
 

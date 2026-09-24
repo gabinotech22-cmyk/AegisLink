@@ -56,7 +56,7 @@ function computeVectors(): Vectors {
   v.bPk = b64(bPk);
   v.boxKeyPairFromSecret = b64(nacl.box.keyPair.fromSecretKey(A_SK).publicKey);
   v.dh = b64(nacl.scalarMult(A_SK, bPk));
-  v.boxBefore = b64(nacl.box.before(bPk, A_SK));
+  // `boxBefore` is mobile-only (public-channel approvals); desktop never uses box.before.
   const sign = nacl.sign.keyPair.fromSeed(SEED);
   v.signPk = b64(sign.publicKey);
   v.signSk = b64(sign.secretKey);
@@ -95,7 +95,9 @@ describe('F-1 golden fixtures (pre-libsodium output must stay valid)', () => {
   const golden = JSON.parse(fs.readFileSync(FIXTURE, 'utf8')) as Golden;
 
   it('every facade primitive reproduces the frozen bytes', () => {
-    expect(computeVectors()).toEqual(golden.vectors);
+    const { boxBefore: _mobileOnly, ...expected } = golden.vectors;
+    void _mobileOnly;
+    expect(computeVectors()).toEqual(expected);
   });
 
   it('frozen ciphertexts open and frozen signatures verify', () => {

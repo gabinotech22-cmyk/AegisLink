@@ -6,7 +6,21 @@
  * operation goes through these typed IPC channels.
  */
 
+/** Envelope returned by the main process for every `sodium:*` call (see main/crypto/sodium/ops.ts). */
+export type SodiumResult =
+  | { ok: true; value: unknown }
+  | { ok: false; errorName: 'TypeError' | 'Error'; message: string };
+
+export interface SodiumBridge {
+  /** Synchronous (ipcRenderer.sendSync): keys, ratchet frames, message bodies. */
+  call(op: string, args: unknown[]): unknown;
+  /** Asynchronous (invoke): whole attachments. */
+  callAsync(op: string, args: unknown[]): Promise<unknown>;
+}
+
 export interface AegisIPC {
+  /** F-1: native libsodium running in the main process. */
+  sodium: SodiumBridge;
   secureStorage: {
     set(key: string, value: string): Promise<void>;
     get(key: string): Promise<string | null>;

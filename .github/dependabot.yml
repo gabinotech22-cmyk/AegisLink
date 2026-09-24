@@ -35,6 +35,7 @@ updates:
           - "@noble/*"
           - "@scure/*"
           - "tweetnacl*"
+          - "sodium-native"
     # Expo/RN native modules are pinned to the SDK; never auto-bump them here.
     # `expo-*` covers every Expo module (expo-status-bar, expo-sqlite,
     # expo-file-system, …): their majors track the SDK line, so a bump to the
@@ -113,6 +114,7 @@ updates:
           - "@noble/*"
           - "@scure/*"
           - "tweetnacl*"
+          - "sodium-native"
     ignore:
       # ts-jest@29 pins typescript >=4.3 <7 (PR #317): a TS major alone can
       # never npm-ci. Bump together with ts-jest once it supports TS 7, then
@@ -144,6 +146,7 @@ updates:
           - "@noble/*"
           - "@scure/*"
           - "tweetnacl*"
+          - "sodium-native"
     # Electron majors carry security-relevant Chromium/Node changes and need a
     # packaged smoke-test before merge — keep them as separate, visible PRs.
     ignore:
