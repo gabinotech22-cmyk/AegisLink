@@ -29,7 +29,7 @@
  * brief dual-bind overlap) is Slice 5 — noted, not handled here.
  */
 
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { solvePoW } from '../crypto/registration';
 import { AppState, type AppStateStatus } from 'react-native';

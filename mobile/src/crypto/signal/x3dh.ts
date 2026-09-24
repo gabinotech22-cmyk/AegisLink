@@ -1,4 +1,4 @@
-import nacl from 'tweetnacl';
+import { nacl } from '../sodium';
 import { logger } from '../../utils/logger';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';

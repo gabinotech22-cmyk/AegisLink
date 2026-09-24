@@ -1,5 +1,5 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium/index.js';
 import naclUtil from 'tweetnacl-util';
 
 const { decodeBase64, encodeBase64 } = naclUtil;

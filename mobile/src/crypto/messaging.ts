@@ -1,4 +1,4 @@
-import nacl from 'tweetnacl';
+import { nacl } from './sodium';
 import { decodeUTF8, encodeUTF8, decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { ratchetEncrypt, ratchetDecrypt, type RatchetState } from './signal/ratchet';
 import { stripAndPad, unpad } from './metadata';

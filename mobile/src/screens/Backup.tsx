@@ -19,7 +19,7 @@ import { WORDLIST_256 } from '../crypto/wordlist';
 import { identityFromStored } from '../crypto/identity';
 import { saveIdentity, saveContact, saveGroup, saveMessage, loadMessagesByChat, type StoredContact, type StoredGroup, type StoredMessage } from '../db/local';
 import { encodeBase64 } from 'tweetnacl-util';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import {
   encryptBackup,
   decryptBackup,

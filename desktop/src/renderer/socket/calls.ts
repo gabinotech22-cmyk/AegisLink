@@ -23,7 +23,7 @@ import { useIdentity } from '../store/identity';
 import { useContacts } from '../store/contacts';
 import { TOR_RELAY } from '../config';
 import { homeRelayBaseUrl } from '../net/homeRelay';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import {
   sealCallInvite,

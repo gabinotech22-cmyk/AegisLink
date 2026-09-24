@@ -1,4 +1,4 @@
-import nacl from 'tweetnacl';
+import { nacl } from './sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import * as FileSystem from 'expo-file-system/legacy';
 import { normalizeOnion } from '../net/relayRef';

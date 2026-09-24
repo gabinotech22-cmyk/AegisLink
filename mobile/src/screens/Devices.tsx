@@ -3,7 +3,7 @@ import { View, Text, Pressable, ScrollView, Modal, ActivityIndicator, Platform, 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { ss } from '../utils/secureStore';
-import nacl from 'tweetnacl';
+import { nacl, type BoxKeyPair } from '../crypto/sodium';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -169,7 +169,7 @@ export function DevicesScreen({ onBack }: Props) {
     setLinking(true);
     setLinkError(null);
 
-    let myKeypair: nacl.BoxKeyPair | null = null;
+    let myKeypair: BoxKeyPair | null = null;
     // Hoisted so the `finally` below can zeroize it on EVERY exit path (timeout,
     // link_failed, socket-not-connected) — not only on success. This buffer
     // carries the raw secretKeyB64/signingSecretKeyB64/spkSecretB64 plaintext.
