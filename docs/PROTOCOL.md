@@ -242,6 +242,45 @@ deriveAegisId(publicKey) → e.g.  "K3M-7QPA-9WZX"
 >    identity keys. Mutual verification therefore requires each side to confirm
 >    the other's fingerprint, rather than comparing a single shared number.
 
+### 3.4 Decentralized identifier (did:key) — resolution and deactivation
+
+Every identity has one DID: the `did:key` of its **Ed25519 signing key**
+(`did:key:z` + base58btc(`0xed01` ‖ key)), derived locally
+(`mobile/src/web3/did/deriveDID.ts`, cached by `DIDManager.ts`) and mirrored
+byte-for-byte on the relay (`server/src/crypto/didKey.ts`; shared vector in
+`server/src/__tests__/didKey.test.ts` and `mobile/src/web3/__tests__/deriveDID.test.ts`).
+A linked device clones the identity, so it has **no DID of its own**; device
+revocation is `device:revoke` on the authenticated socket (§9).
+
+- **Not unlinkable from the Aegis ID.** The DID encodes the same signing key
+  the relay stores and serves in the prekey bundle, so anyone who knows an
+  Aegis ID can compute its DID. It reveals no real-world identity, nothing more.
+- **Only canonical Ed25519 `did:key` is accepted** (client `publicKeyFromDID`,
+  relay `ed25519FromDidKey`): a non-canonical spelling of the same key would
+  hash differently and read as active after deactivation.
+- **Deactivation is derived by the relay, never requested by a client.** The
+  owner-signed account deletion (`DELETE /identity/:id`, signature verified
+  against the *stored* signing key) inserts `SHA-256(did)` into
+  `revoked_did_hashes` before deleting the account. There is no revocation
+  endpoint: the former `POST /web3/device/revoke` verified a signature against a
+  key the *client* supplied and never tied it to the DID, so anyone could
+  deactivate any DID (web3 audit 2026-09-24, `AUDIT-2026-09-24-WEB3-DID.md`).
+  Tests: `identityDeleteRevokesDid.test.ts`, `web3Did.test.ts`.
+- **At rest the relay keeps only `did_hash`** — no key (which *is* the DID),
+  signature or timestamp. The legacy table is purged and rebuilt once on boot.
+- **`GET /web3/did/resolve/:did`** implements W3C DID Resolution for `did:key`:
+  `200` document · `410` + `didDocumentMetadata.deactivated` · `400 invalidDid`
+  · `501 methodNotSupported` (any other method; `did:ethr` is out by design,
+  `ROADMAP.md`). The document lists the key under `authentication`,
+  `assertionMethod`, `capabilityInvocation`, `capabilityDelegation` and has **no
+  `keyAgreement`** (AegisLink never encrypts to a key derived from the signing
+  key). Clients resolve `did:key` locally (`resolveDID.ts`); calling the relay
+  tells it which DID is being looked up, so it is only for deactivation status.
+- **`/web3` is always mounted and read-only.** It used to sit behind
+  `WEB3_ENDPOINTS=off` because of the unbound revocation write (audit 2026-07
+  H3); with that endpoint and the mock Lightning subscriptions gone, the only
+  route is the resolver above (`web3Did.test.ts` guards the wiring).
+
 ---
 
 ## 4. Session establishment — X3DH
@@ -876,8 +915,10 @@ relay's static capabilities (`protocol`, `features`, `minClient`,
 `maxBlobBytes`) so a client can vet a relay before using it.
 
 **Control plane and groups across relays (F3).** Typing indicators and read
-receipts to a contact on another relay are sealed E2EE messages
-(`type: 'typing'` / `'read_receipt'`), never relay-local events. A group
+receipts are sealed E2EE messages (`type: 'typing'` / `'read_receipt'`) to
+**every** contact, local or on another relay; the relay has no `typing` /
+`msg:read` events any more (audit 2026-09-24 R-1: they handed the receiver a
+relay-stamped `from` a malicious relay could forge). A group
 SenderKey distribution to such a member is a sealed `sender_key_dist` message
 carrying the same per-recipient box `group:rekey` would queue; the recipient
 opens it only against the authenticated sealed-sender's key and requires the
@@ -1087,6 +1128,7 @@ File references below are to the mobile client.
 | Desktop client crypto (parity) | `desktop/src/renderer/crypto/` |
 | Relay envelope / sealed-sender wire format | `server/src/relay/handler.ts` |
 | Challenge-response auth | `server/src/auth/challenge.ts` |
+| DID (`did:key`) derivation, resolution, deactivation | `mobile/src/web3/did/`, `server/src/crypto/didKey.ts`, `server/src/routes/web3.ts` |
 
 ---
 

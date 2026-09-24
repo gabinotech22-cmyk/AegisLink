@@ -44,7 +44,6 @@ import type { DistributionList } from './store/distribution';
 import { PollScreen } from './screens/Poll';
 import { FirstContactScreen } from './screens/FirstContact';
 import { AppIconScreen } from './screens/AppIcon';
-import { SubscriptionScreen } from './screens/Subscription';
 import { CallScreen } from './screens/Call';
 import { IncomingCallScreen } from './screens/IncomingCall';
 import { NetworkErrorScreen } from './screens/NetworkError';
@@ -94,7 +93,6 @@ type PushRoute =
   | { name: 'firstContact'; contact: StoredContact }
   | { name: 'contacts' }
   | { name: 'appIcon' }
-  | { name: 'subscription' }
   | { name: 'keys' }
   | { name: 'lockSettings' }
   | { name: 'distributionLists' }
@@ -502,7 +500,6 @@ function Shell() {
               onDevices={() => push({ name: 'devices' })}
               onPanic={() => push({ name: 'panic' })}
               onAppIcon={() => push({ name: 'appIcon' })}
-              onSubscription={() => push({ name: 'subscription' })}
               onKeys={() => push({ name: 'keys' })}
             />
           );
@@ -586,8 +583,6 @@ function Shell() {
           );
         case 'appIcon':
           return <AppIconScreen onBack={pop} />;
-        case 'subscription':
-          return <SubscriptionScreen onBack={pop} />;
         case 'keys':
           return <KeysScreen onBack={pop} />;
         case 'distributionLists':

@@ -75,7 +75,7 @@ No inventes carpetas nuevas en la raíz de un paquete sin actualizar esta tabla.
 | `security/` · `lock/` | Modo pánico, biometría, app-lock. |
 | `notifications/` | Push wake-up (payload siempre cifrado). |
 | `hooks/` · `utils/` · `theme/` · `i18n/` | Helpers transversales. |
-| `web3/` | DIDs y pagos — opcional, la app funciona sin esto. |
+| `web3/` | DID `did:key` de la identidad (derivación, caché, resolución local) — opcional, la app funciona sin esto. Los pagos salieron del repo con Work. |
 | `__tests__/` · `__mocks__/` | Tests Jest + RNTL y sus mocks (ver convención de tests). |
 
 ### `server/src/`

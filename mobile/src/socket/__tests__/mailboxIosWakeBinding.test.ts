@@ -10,9 +10,10 @@
 
 const ORIG_ENV = process.env.EXPO_PUBLIC_MAILBOX_IOS_WAKE;
 
-let mockToken: string | null = 'ExponentPushToken[test-token]';
+// Raw APNs device token (2026-09-24: no Expo token any more).
+let mockToken: string | null = 'a1'.repeat(32);
 jest.mock('../../notifications/push', () => ({
-  getLastExpoToken: () => mockToken,
+  getLastApnsToken: () => mockToken,
 }));
 
 // Minimal RN surface: Platform.OS mutable per test; AppState listener no-op.
@@ -50,7 +51,7 @@ afterAll(() => {
 describe('registerIosWakeBinding — double opt-in gating', () => {
   beforeEach(() => {
     mockOS = 'ios';
-    mockToken = 'ExponentPushToken[test-token]';
+    mockToken = 'a1'.repeat(32);
   });
 
   it('emits the binding when flag=on + iOS + token present', () => {
@@ -59,7 +60,7 @@ describe('registerIosWakeBinding — double opt-in gating', () => {
     registerIosWakeBinding({ emit }, 'mb-epoch-1');
     expect(emit).toHaveBeenCalledWith('mailbox:push:token', {
       mailboxId: 'mb-epoch-1',
-      expoToken: 'ExponentPushToken[test-token]',
+      apnsToken: 'a1'.repeat(32),
     });
   });
 
@@ -84,5 +85,25 @@ describe('registerIosWakeBinding — double opt-in gating', () => {
     const emit = jest.fn();
     registerIosWakeBinding({ emit }, 'mb-epoch-1');
     expect(emit).not.toHaveBeenCalled();
+  });
+});
+
+describe('no Expo push token anywhere (2026-09-24)', () => {
+  it('production code never asks Expo for a push token (exp.host, outside Tor)', () => {
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const root = path.resolve(__dirname, '../..');
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== '__tests__') walk(p); continue; }
+        if (!/\.tsx?$/.test(e.name)) continue;
+        const code = fs.readFileSync(p, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+        if (/getExpoPushTokenAsync\s*\(/.test(code)) offenders.push(path.relative(root, p));
+      }
+    };
+    walk(root);
+    expect(offenders).toEqual([]);
   });
 });

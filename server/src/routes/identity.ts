@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import tweetnaclUtil from 'tweetnacl-util';
 import { z } from 'zod';
-import { identityRepo } from '../db/client.js';
+import { identityRepo, web3Repo } from '../db/client.js';
+import { didHashHex, didKeyFromEd25519 } from '../crypto/didKey.js';
 import { issueChallenge, verifyPoW, REGISTRATION_POW_DIFFICULTY } from '../pow/challenge.js';
 import { verifyDetached } from '../crypto/ed25519.js';
 import { relayLimiter, paramField } from '../http/relayLimiter.js';
@@ -128,7 +129,9 @@ router.get('/:id', lookupLimiter, async (req, res) => {
 
 // ── DELETE /identity/:id ──────────────────────────────────────────────────────
 /**
- * B-2: account deletion. Wipes every relay-side trace of the identity.
+ * B-2: account deletion. Wipes every relay-side trace of the identity except
+ * one: SHA-256 of the identity's did:key, kept so GET /web3/did/resolve reports
+ * the DID as deactivated (see the revocation step below).
  *
  * Auth: a valid Ed25519 signature over `${aegisId}:delete:${timeBucket}` where
  * timeBucket = Math.floor(ts / 30_000), verified against the stored signing key —
@@ -193,6 +196,14 @@ router.delete('/:id', deleteLimiter, async (req, res) => {
     return;
   }
 
+  // Retire the identity's DID (did:key of this very signing key) BEFORE the
+  // account row goes: the revocation is derived server-side from the owner's
+  // signature just verified, never taken from the client (golden rules #3/#7),
+  // so nobody can deactivate a DID they do not hold the key for. It is what lets
+  // a verifier stop trusting a key a thief may still hold after the owner wipes
+  // it. Idempotent, so a retried delete after a partial failure is safe; the
+  // reverse order could leave the account gone and the DID forever active.
+  await web3Repo.insertRevocation(didHashHex(didKeyFromEd25519(pubKeyBytes)));
   await identityRepo.deleteAccount(id);
   res.status(200).json({ deleted: true });
 });

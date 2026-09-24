@@ -9,23 +9,17 @@
 // DID derivation & resolution
 export { deriveDIDFromPublicKey, publicKeyFromDID } from './did/deriveDID';
 export { getOrCreateDID, getDID, clearDID, type DIDRecord } from './did/DIDManager';
-export { resolveKeyDID, resolveDID, type DIDDocument, type VerificationMethod } from './did/resolveDID';
 export {
-  profileScopedId,
-  getOrCreateProfileDID,
-  getProfileDID,
-  clearProfileDID,
-  clearAllProfileDIDs,
-  assertProfilesIsolated,
-  type ProfileType,
-} from './did/ProfileIsolation';
+  resolveKeyDID,
+  resolveDID,
+  DIDResolutionError,
+  type DIDResolutionErrorCode,
+  type DIDDocument,
+  type VerificationMethod,
+} from './did/resolveDID';
 
-// Device revocation
-export {
-  hashDID,
-  buildRevocationPayload,
-  verifyRevocationPayload,
-  type RevocationPayload,
-} from './deviceRevocation/RevokeDevice';
+// DID revocation has no client API: the relay deactivates the identity's
+// did:key itself when the owner deletes the account (signed DELETE /identity),
+// and GET /web3/did/resolve reports it. See docs/PROTOCOL.md §3.
 
 // Lightning payments (section 14) left this repo with AegisLink Work (ROADMAP Hito 1).
