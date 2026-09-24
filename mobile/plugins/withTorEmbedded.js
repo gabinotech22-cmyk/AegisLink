@@ -36,7 +36,12 @@ const GPMAVEN_BLOCK = `
 // ─── AegisLink: Guardian Project maven (embedded Tor — injected by withTorEmbedded.js) ───
 allprojects {
     repositories {
-        maven { url 'https://raw.githubusercontent.com/guardianproject/gpmaven/master' }
+        // Only Guardian Project's own artifacts may resolve from this repo (IPtProxy
+        // README: pin repos to groups so a lookalike package cannot be injected).
+        maven {
+            url 'https://raw.githubusercontent.com/guardianproject/gpmaven/master'
+            content { includeGroup 'info.guardianproject' }
+        }
     }
 }
 `;
@@ -72,6 +77,10 @@ dependencies {
     }
     // Tor status broadcasts arrive via LocalBroadcastManager.
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+    // Pluggable transports for bridges (obfs4, webtunnel, meek_lite, snowflake):
+    // Tor Browser's lyrebird + snowflake packaged by the IPtProxy project (Orbot,
+    // Onion Browser). Maven Central. See mobile/src/net/torBridges.ts.
+    implementation("com.netzarchitekten:IPtProxy:5.5.1")
 }
 `;
 
@@ -186,10 +195,122 @@ class AegisTorModule(reactContext: ReactApplicationContext) :
     // TorService runs tor with \`-f <getTorrc>\` over its generated
     // \`--defaults-torrc\` (SOCKSPort auto): these two lines replace that single
     // listener with two. Rewritten on every start so the file never drifts.
+    // The bridge lines (setTorConfig) ride along so a cold start already uses
+    // the transport JS chose.
     TorService.getTorrc(ctx).writeText(buildString {
       appendLine("SocksPort auto")
       appendLine("SocksPort auto")
+      for (l in bridgeTorrc) appendLine(l)
     })
+  }
+
+  // ── Bridges / pluggable transports (mobile/src/net/torBridges.ts) ──────────
+  // IPtProxy (Guardian Project / Tor Browser's lyrebird + snowflake) runs the
+  // transport as a local SOCKS5 listener. tor reaches it with
+  // "ClientTransportPlugin <pt> socks5 127.0.0.1:<port>". JS decides the
+  // transport and builds the lines (torrcFor). Native re-checks them against a
+  // strict allow-list before they touch torrc or SETCONF.
+  private var bridgeTorrc: List<String> = emptyList()
+  private var ptController: IPtProxy.Controller? = null
+  private val ALLOWED_PTS = setOf("obfs4", "webtunnel", "snowflake", "meek_lite")
+  private val ALLOWED_KEYS = setOf("UseBridges", "Bridge", "ClientTransportPlugin")
+
+  private fun ptController(): IPtProxy.Controller {
+    ptController?.let { return it }
+    val dir = java.io.File(reactApplicationContext.noBackupFilesDir, "pt_state")
+    dir.mkdirs()
+    // Logging off: transport logs would be connection metadata on disk.
+    val c = IPtProxy.Controller(dir.path, false, false, "ERROR", object : IPtProxy.OnTransportEvents {
+      override fun connected(name: String?) {}
+      override fun error(name: String?, error: java.lang.Exception?) { dwarn("pt error " + name) }
+      override fun stopped(name: String?, error: java.lang.Exception?) { dwarn("pt stopped " + name) }
+    })
+    ptController = c
+    return c
+  }
+
+  /** Start the listed transports (idempotent); resolves {pt: localSocksPort}. */
+  @ReactMethod
+  fun startTransports(ptsJson: String, promise: Promise) {
+    try {
+      val arr = JSONArray(ptsJson)
+      val out = Arguments.createMap()
+      val c = ptController()
+      for (i in 0 until arr.length()) {
+        val name = arr.getString(i)
+        if (name !in ALLOWED_PTS) { promise.reject("E_PT", "unsupported transport"); return }
+        c.start(name, "")
+        val port = c.port(name).toInt()
+        if (port <= 0) { promise.reject("E_PT", "transport did not start"); return }
+        out.putInt(name, port)
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject("E_PT", e)
+    }
+  }
+
+  /** A line JS sent is applied only if it is one of the three bridge keys and cannot break out of a value. */
+  private fun isSafeTorrcLine(l: String): Boolean {
+    if (l.length > 1600) return false
+    for (ch in l) if (ch.code < 0x20 || ch.code == 0x7f || ch == '"' || ch == '#' || ch.code == 0x5c) return false
+    val key = l.substringBefore(' ')
+    return key in ALLOWED_KEYS && l.length > key.length + 1
+  }
+
+  /**
+   * Use these torrc lines (from torrcFor) for bridges: persisted in torrc for
+   * the next start and, if tor is running, applied live with one SETCONF so a
+   * stalled bootstrap switches transport without restarting tor.
+   */
+  @ReactMethod
+  fun setTorConfig(linesJson: String, promise: Promise) {
+    try {
+      val arr = JSONArray(linesJson)
+      val lines = ArrayList<String>()
+      for (i in 0 until arr.length()) {
+        val l = arr.getString(i)
+        if (!isSafeTorrcLine(l)) { promise.reject("E_TOR_CONFIG", "rejected torrc line"); return }
+        lines.add(l)
+      }
+      bridgeTorrc = lines
+      writeIsolationTorrc(reactApplicationContext)
+      val ctl = try { torService?.torControlConnection } catch (_: Exception) { null }
+      if (ctl != null) {
+        // Tor Browser's pattern: pause the network, swap the bridge config,
+        // resume. That restarts a bootstrap stuck on the old transport. The
+        // network is re-enabled even when the swap fails. Never left paused.
+        ctl.setConf("DisableNetwork", "1")
+        try {
+          ctl.setConf(lines + listOf("DisableNetwork 0"))
+        } catch (e: Exception) {
+          ctl.setConf("DisableNetwork", "0")
+          throw e
+        }
+        dlog("bridge config applied live (" + lines.size + " lines)")
+      }
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("E_TOR_CONFIG", e)
+    }
+  }
+
+  /** Tor's own bootstrap phase (GETINFO status/bootstrap-phase): {progress, summary}. */
+  @ReactMethod
+  fun getBootstrap(promise: Promise) {
+    val map = Arguments.createMap()
+    try {
+      val info = torService?.getInfo("status/bootstrap-phase") ?: ""
+      val p = Regex("PROGRESS=([0-9]+)").find(info)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+      val s = info.indexOf("SUMMARY=")
+      val summary = if (s >= 0) info.substring(s + 8).trim().trim('"').substringBefore('"') else ""
+      map.putInt("progress", p)
+      map.putString("summary", summary)
+    } catch (_: Exception) {
+      map.putInt("progress", 0)
+      map.putString("summary", "")
+    }
+    promise.resolve(map)
   }
 
   /** Both SOCKS listeners, in torrc order, from tor's own control port. */
@@ -704,6 +825,8 @@ const TOR_PROGUARD_RULES = `
 # ─── AegisLink: embedded Tor JNI keep rules (injected by withTorEmbedded.js) ───
 -keep class org.torproject.jni.** { *; }
 -keep class IPtProxy.** { *; }
+# gomobile runtime used by IPtProxy (Go pluggable transports).
+-keep class go.** { *; }
 -keepclasseswithmembernames class * {
     native <methods>;
 }

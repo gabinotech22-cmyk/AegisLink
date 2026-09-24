@@ -706,8 +706,14 @@ with a key derived from a user passphrase the relay never sees:
 - **Real-time sender↔recipient correlation by the relay** on the non-mailbox
   paths, and timing correlation between the control-plane socket and the
   mailbox socket (both over Tor on separate circuits, §7.3).
-- **Networks that block Tor.** The client never falls back to clearnet; where
-  Tor is blocked it cannot connect until bridges (pluggable transports) ship.
+- **Networks that block Tor.** The client never falls back to clearnet. It
+  reaches Tor through bridges:
+  - Tor Browser's built-in Snowflake/obfs4/meek, escalated automatically when
+    the bootstrap stalls, or the user's own lines;
+  - `net/torBridges.ts`, `net/torConnection.ts`, `desktop/src/main/tor/bridges.ts`.
+
+  A network that blocks every bridge still blocks the app, and bridge use is
+  itself visible to the network observer.
 - **Call media IP on mobile.** WebRTC media is UDP and cannot ride Tor; with
   the default relay-only ICE (`hideCallIp`) the peer never sees the device IP,
   but the TURN server does. Desktop forces TURN-over-TCP through Tor.
@@ -754,6 +760,24 @@ with a key derived from a user passphrase the relay never sees:
     limited per verified identity on signed routes, counting only accepted
     requests, plus a shared flood backstop; clearnet keeps per-IP buckets
     (`server/src/http/relayLimiter.ts`).
+  - **Bridges** (networks that block Tor):
+    - Transports and bridge lines:
+      - transports: IPtProxy (lyrebird + snowflake) on mobile, the Tor Expert
+        Bundle's `lyrebird` on desktop;
+      - built-in lines: Tor Browser's `pt_config.json` from the pinned bundle
+        (`scripts/sync-tor-bridges.mjs`).
+    - Mode "auto" escalates direct → snowflake → obfs4 → meek when the bootstrap
+      watchdog trips. Silence counts as blocked only before the first hop. The
+      watchdog is calibrated on real bootstraps: obfs4 ~100s silent at 50%.
+    - User-pasted lines are validated strictly and re-checked natively, since
+      they become torrc/SETCONF input. Only `UseBridges`/`Bridge`/
+      `ClientTransportPlugin`, and no quote, backslash, `#` or control
+      character.
+    - A live swap pauses the network (`DisableNetwork 1`, swap,
+      `DisableNetwork 0`), as Tor Browser does.
+    - Tests: `net/__tests__/torBridges.test.ts`, `torConnection.test.ts`;
+      desktop `main/tor/__tests__/bridges.test.ts` (with parity guard) and
+      `transportArgs.test.ts`.
   - Tests: `net/__tests__/torBridge.test.ts`, `torMedia.test.ts`,
     `relayHttp.test.ts`, `socket/__tests__/client.homeRelay.test.ts`,
     `__tests__/torPlugin.regression.test.ts`, `server/src/__tests__/relayLimiter.test.ts`.
@@ -1019,8 +1043,8 @@ current protocol:
    Decoupling message routing from the authenticated identity is **done** for
    the mailbox path (§7.3; `SEALED-SENDER-ARCHITECTURE.md` Fase 4), and the
    control-plane socket rides Tor on its own circuit (§9, 2026-09-23).
-   Remaining: retire v1 relay-side (Fase 6), add cover traffic (Fase 5), and
-   ship Tor bridges for networks that block Tor.
+   Remaining: retire v1 relay-side (Fase 6) and add cover traffic (Fase 5).
+   Bridges for networks that block Tor shipped on 2026-09-24 (§9).
 4. **Independent third-party cryptographic audit** of this protocol and its
    implementation, with full public disclosure of findings. **No independent
    audit has been performed.** This is the project's top funding priority.

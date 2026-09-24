@@ -459,7 +459,7 @@
     "retryBtn": "Reintentar ahora",
     "emergencyRelay": "¿POR QUÉ NO CONECTA? · TOR ▸",
     "emergencyRelayTitle": "Conexión por Tor",
-    "emergencyRelayDesc": "AegisLink se conecta siempre a través del Tor integrado, así tu IP nunca llega al relay. La primera conexión puede tardar hasta un minuto. Si tu red bloquea Tor, la app no podrá conectar desde esa red: prueba con otra (Wi-Fi o datos móviles).",
+    "emergencyRelayDesc": "AegisLink se conecta siempre a través del Tor integrado, así tu IP nunca llega al relay. La primera conexión puede tardar hasta un minuto. Si tu red bloquea Tor, el modo automático prueba solo los bridges (Snowflake, obfs4, meek); también puedes elegirlos o pegar los tuyos en Privacidad → Red → Conexión a Tor.",
     "understood": "Entendido",
     "probing": "sondeando…",
     "reachable": "accesible",

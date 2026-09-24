@@ -74,9 +74,15 @@ short version:
   token, your profile and presence, and it is authenticated with your Aegis ID.
   So the relay learns *that* your Aegis ID is connected (not from where). A relay
   that watches both connections could try to link them by **timing**.
-- **Tor can be blocked.** Where the network blocks Tor, the app cannot connect
-  from that network: there is no fallback to the normal internet by design.
-  Bridge support (Snowflake/obfs4) is the next piece of work.
+- **Tor can be blocked, and bridges are the only way around it.** There is no
+  fallback to the normal internet by design. Where a network blocks Tor, the app
+  uses Tor bridges:
+  - **Automatic mode** (the default) moves on to Snowflake, obfs4 and meek by
+    itself when the connection stalls.
+  - You can also paste your own bridges (*Privacy → Network → Tor connection*).
+
+  Bridges get through most censorship, but not every network. A censor can still
+  see that you use a bridge, even though it cannot see AegisLink.
 - **A few paths still show the sender→recipient edge to the relay:**
   - a first message to a bare Aegis ID or a legacy (v1) link, until the other
     person replies;

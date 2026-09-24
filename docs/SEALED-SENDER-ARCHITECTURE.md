@@ -389,8 +389,10 @@ con su dueño. El desktop ya iba todo por Tor (`desktop/src/main/tor/torProcess.
 
 **Lo que sigue abierto:**
 - La correlación temporal entre los dos sockets (§6).
-- Las redes que bloquean Tor: no hay respaldo por clearnet a propósito, y los
-  bridges son el siguiente trabajo.
+- Las redes que bloquean Tor: no hay respaldo por clearnet a propósito.
+  - **Resuelto con bridges (2026-09-24, PROTOCOL §9):** Snowflake/obfs4/meek
+    en modo automático, o bridges propios.
+  - Queda una red que bloquee *todos* los bridges.
 - El medio de las llamadas en móvil (UDP; el servidor TURN ve la IP).
 - `expo-updates` y el token de push de Expo en las versiones de tienda, que
   contactan Expo directamente.

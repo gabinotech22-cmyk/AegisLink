@@ -581,7 +581,7 @@
     "relayUnreachable": "RELAY NON RAGGIUNGIBILE",
     "connectionLost": "Connessione persa",
     "aegislinkCouldNotReach": "AegisLink non è riuscito a raggiungere il relay. I tuoi messaggi sono in coda e verranno consegnati automaticamente al ripristino della connessione.",
-    "emergencyRelayAnEmergency": "Connessione via Tor\n\nAegisLink si connette sempre tramite il Tor integrato, così il tuo IP non arriva mai al relay. La prima connessione può richiedere fino a un minuto. Se la tua rete blocca Tor, l'app non potrà connettersi da quella rete: provane un'altra.",
+    "emergencyRelayAnEmergency": "Connessione via Tor\n\nAegisLink si connette sempre tramite il Tor integrato, così il tuo IP non arriva mai al relay. La prima connessione può richiedere fino a un minuto. Se la tua rete blocca Tor, la modalità automatica prova da sola i bridge (Snowflake, obfs4, meek); puoi anche sceglierne uno o incollare i tuoi in Privacy → Rete → Connessione a Tor.",
     "emergencyRelayInfo": "Connessione via Tor",
     "useEmergencyRelay": "PERCHÉ NON SI CONNETTE? · TOR ▸"
   },

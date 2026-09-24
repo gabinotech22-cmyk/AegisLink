@@ -18,6 +18,7 @@ import { usePreferences } from '../store/preferences';
 import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import type { Theme } from '../theme/vault';
 import { themedAlert } from '../components/AlertHost';
+import { useTorConnection } from '../net/torConnection';
 
 // Public legal documents, on the product site. These used to point at raw
 // GitHub blobs, which sent users of a shipped app to a source-code host showing
@@ -43,7 +44,7 @@ const SOURCE_URL = 'https://github.com/gabinotech22-cmyk/AegisLink';
 
 interface Props {
   onTab: (tab: Tab) => void;
-  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'relay' | 'blocked') => void;
+  onNav: (name: 'profile' | 'notifs' | 'export' | 'lockConfig' | 'backup' | 'ephemeral' | 'panic' | 'devices' | 'relay' | 'blocked' | 'torConnection') => void;
   onCreateProfile?: () => void;
 }
 
@@ -67,6 +68,7 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
   const requireGroupApproval = usePreferences((s) => s.requireGroupApproval);
   const duressActive = usePreferences((s) => s.duressActive);
   const setPref = usePreferences((s) => s.set);
+  const torTransport = useTorConnection((s) => s.transport);
   const pqDowngradeFallbacks = useSecurityDiagnostics((s) => s.pqDowngradeFallbacks);
   const lastPqDowngradeAt = useSecurityDiagnostics((s) => s.lastPqDowngradeAt);
   const secDiagHydrate = useSecurityDiagnostics((s) => s.hydrate);
@@ -190,6 +192,13 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
             icon={<I.Shield size={20} color={t.accent} />}
             label={i18nT('privacy.torLabel')}
             sub={i18nT('privacy.torSub')}
+          />
+          <Row
+            t={t}
+            icon={<I.Globe size={20} color={t.textDim} />}
+            label={i18nT('torConnection.title')}
+            sub={i18nT(`torConnection.transport.${torTransport}`)}
+            onPress={() => onNav('torConnection')}
           />
           {FEDERATION && (
             <Row

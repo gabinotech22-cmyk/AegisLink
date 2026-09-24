@@ -50,6 +50,14 @@ interface AegisTorNative {
   // on a contact's relay). Resolves a JSON string `{"status":<int>}`; the file
   // exists only on 200.
   httpDownload(url: string, destPath: string, headersJson: string): Promise<string>;
+  // Bridges (net/torBridges.ts, net/torConnection.ts). Optional: binaries built
+  // before bridges lack them, and JS must still run there (OTA) — direct only.
+  /** Start pluggable transports; resolves { pt: localSocksPort }. */
+  startTransports?(ptsJson: string): Promise<Record<string, number>>;
+  /** Bridge torrc lines: persisted for the next start, applied live if running. */
+  setTorConfig?(linesJson: string): Promise<boolean>;
+  /** Android: tor's own bootstrap phase (iOS emits AegisTorBootstrapProgress instead). */
+  getBootstrap?(): Promise<{ progress: number; summary: string }>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -86,8 +94,21 @@ const BOOTSTRAP_TIMEOUT_MS = 90_000;
  * No-op-safe: throws a typed error when the native module is absent so callers
  * can fall back.
  */
+/**
+ * Runs once, before the first native start (net/torConnection.ts registers it):
+ * applies the chosen bridge transport so tor's very first bootstrap already
+ * uses it, whichever caller happens to start tor first.
+ */
+let beforeStartHook: (() => Promise<void>) | null = null;
+let beforeStartOnce: Promise<void> | null = null;
+export function registerTorBeforeStart(hook: () => Promise<void>): void {
+  beforeStartHook = hook;
+}
+
 export async function startTor(): Promise<TorStatus> {
   if (!Native) throw new Error('[tor] native module unavailable (Expo Go or non-prebuilt build)');
+  if (beforeStartHook && !beforeStartOnce) beforeStartOnce = beforeStartHook().catch(() => undefined);
+  if (beforeStartOnce) await beforeStartOnce;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('[tor] bootstrap timed out')), BOOTSTRAP_TIMEOUT_MS);
@@ -151,6 +172,31 @@ export function onTorBootstrapProgress(cb: (p: TorBootstrapProgress) => void): (
   if (!emitter) return () => {};
   const sub: EmitterSubscription = emitter.addListener('AegisTorBootstrapProgress', cb);
   return () => sub.remove();
+}
+
+// ─── Bridges: native pluggable transports (net/torConnection.ts) ─────────────
+
+/** True when this binary ships the bridge methods (IPtProxy + setTorConfig). */
+export function bridgesSupported(): boolean {
+  return !!Native?.startTransports && !!Native?.setTorConfig;
+}
+
+/** Start pluggable transports; { pt: port }. Throws when unsupported or a transport fails. */
+export async function startTransports(pts: readonly string[]): Promise<Record<string, number>> {
+  if (!Native?.startTransports) throw new Error('[tor] bridges unsupported by this build');
+  return Native.startTransports(JSON.stringify(pts));
+}
+
+/** Apply bridge torrc lines (validated again natively). Throws when unsupported/rejected. */
+export async function setTorConfig(lines: readonly string[]): Promise<void> {
+  if (!Native?.setTorConfig) throw new Error('[tor] bridges unsupported by this build');
+  await Native.setTorConfig(JSON.stringify(lines));
+}
+
+/** Android bootstrap phase by polling; null where the platform reports it by events (iOS). */
+export async function getBootstrap(): Promise<TorBootstrapProgress | null> {
+  if (!Native?.getBootstrap) return null;
+  try { return await Native.getBootstrap(); } catch { return null; }
 }
 
 // ─── Slice 2b.2: ntfy topic subscription over Tor ─────────────────────────────
