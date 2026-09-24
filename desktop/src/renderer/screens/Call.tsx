@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import type { CSSProperties } from 'react';
-import { sha256 } from '@noble/hashes/sha2.js';
+import { sha256 } from '../crypto/sodium';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';

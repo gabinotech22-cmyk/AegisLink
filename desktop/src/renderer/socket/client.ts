@@ -14,9 +14,8 @@
 
 import { logger } from '../utils/logger';
 import { io, type Socket } from 'socket.io-client';
-import nacl from 'tweetnacl';
+import { nacl, sha256 } from '../crypto/sodium';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
-import { sha256 } from '@noble/hashes/sha2.js';
 import { SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, FEDERATION } from '../config';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
 import { getOwnDeliveryToken, hashDeliveryToken, setContactDeliveryToken, getContactDeliveryToken } from '../crypto/deliveryToken';

@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 import { ss } from '../utils/secureStore';
 import * as Sharing from 'expo-sharing';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import {
   encryptBackup,

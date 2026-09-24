@@ -122,8 +122,28 @@ emisor↔receptor. Es la promesa estrella (regla seguridad #4, "sealed-sender en
 
 - [ ] **H3 — unificar `@noble/hashes`** mobile v1 ↔ desktop v2 (hoy mitigado por KAT cross-platform;
       falta unificar mayor + verificación Metro on-device).
-- [ ] **F-1 — núcleo cripto nativo**: portar hot-path (X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC)
-      a binding libsodium, conservando la capa TS. Cierra el gap constant-time a través del JIT.
+- [ ] **F-1 — núcleo cripto nativo** 🟡: portar hot-path (X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC)
+      a libsodium, conservando la capa TS. Cierra el gap constant-time a través del JIT. Sustitución de
+      implementación, **no** cambio de protocolo (bytes idénticos, sin forzar actualización; sí exige
+      build nativo nuevo, no OTA).
+  - [x] **Spike (2026-09-24)**: libsodium 1.0.21 compilado desde fuente (firma minisign verificada)
+        da bytes idénticos a TweetNaCl/@noble. `react-native-libsodium` se descarta (trae binarios
+        precompilados: rompe builds reproducibles y F-Droid) → módulo JSI propio. Desktop:
+        `sodium-native` en el proceso main, renderer vía `ipcRenderer.sendSync` (0,20 ms/X25519).
+        Server: `sodium-native` no carga en Alpine (solo glibc) → imagen Debian slim.
+  - [x] **Costura única** (PR A): todo el código de producto obtiene NaCl/hash/HMAC/HKDF solo de
+        `crypto/sodium` (mobile, desktop renderer y main, server), con guarda
+        `crypto-imports.test.ts` y fixture dorado pre-libsodium `f1-golden.json` (`f1-golden.test.ts`
+        en las 3 plataformas).
+  - [ ] **Cambio de backend** (PR B): módulo `aegis-sodium` (mobile), `sodium-native` en main
+        (desktop) y en el relay, test diferencial, Dockerfile Debian slim.
+- [ ] **F-1b — claves en memoria nativa (handles opacos)**: tras F-1, las claves privadas viven solo
+      en memoria nativa (módulo en mobile, proceso main en desktop) y JS recibe un handle, como
+      libsignal. Un XSS en el renderer ya no podría leer claves. F-1 cierra el timing del JIT pero no
+      saca las claves del heap de JS.
+- [ ] **Argon2id nativo + formato de backup nuevo**: `crypto_pwhash` (mucho más rápido: desbloqueo por
+      PIN y restauración de backup) con salt de 16 B; el formato actual (salt 32 B) se sigue leyendo
+      con @noble. ML-KEM-768 también sigue en @noble hasta que libsodium lo exponga estable.
 - [ ] Cerrar los "partial coverage" de la auditoría: zeroización en intermedios X3DH/PQXDH,
       `assertNonZero` ML-KEM, barrido constant-time de comparaciones restantes.
 

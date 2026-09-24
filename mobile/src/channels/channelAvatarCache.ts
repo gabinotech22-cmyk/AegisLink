@@ -19,9 +19,8 @@
  */
 
 import * as FileSystem from 'expo-file-system/legacy';
-import { sha256 } from '@noble/hashes/sha2';
+import { nacl, sha256 } from '../crypto/sodium';
 import { decodeBase64 } from 'tweetnacl-util';
-import nacl from 'tweetnacl';
 import { channelAvatarUrl } from '../api/publicChannels';
 import { logger } from '../utils/logger';
 

@@ -4,7 +4,7 @@ import { View, Text, Pressable, ScrollView, Modal, TextInput, StyleSheet } from 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ss } from '../utils/secureStore';
 import { copySensitiveText } from '../utils/secureClipboard';
-import nacl from 'tweetnacl';
+import { nacl } from '../crypto/sodium';
 import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
