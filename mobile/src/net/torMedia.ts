@@ -14,7 +14,7 @@
  * Otherwise (dev build, loopback dev relay) → the OS downloader.
  */
 import * as FileSystem from 'expo-file-system/legacy';
-import { sha256 } from '@noble/hashes/sha2';
+import { sha256 } from '../crypto/sodium';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
 import { mustUseTor } from './relayHttp';
 import { isTorAvailable, startTor, torHttpDownload } from './tor';
