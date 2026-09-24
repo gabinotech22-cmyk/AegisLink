@@ -11,6 +11,7 @@ import { Section, Row } from '../components/Section';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
 import { fileToDownscaledDataUrl } from '../utils/image';
+import { DISPLAY_NAME_MAX_LEN } from '../store/profiles';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -235,7 +236,7 @@ export function ProfileScreen({ onBack, onDevices, onPanic, onAppIcon, onKeys, o
             <input
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              maxLength={20}
+              maxLength={DISPLAY_NAME_MAX_LEN}
               placeholder={i18n.t('profile.yourName')}
               style={{ color: t.text, backgroundColor: t.bg, border: `1px solid ${t.borderStrong}`, borderRadius: t.radiusS, padding: 12, fontSize: 15, marginBottom: 16, fontFamily: t.font, width: '100%', boxSizing: 'border-box', outline: 'none' }}
             />

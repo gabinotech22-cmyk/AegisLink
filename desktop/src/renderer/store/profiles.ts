@@ -18,11 +18,18 @@
 
 import { create } from 'zustand';
 import { createIdentity, type Identity } from '../crypto/identity';
-import { switchDbSlot, saveIdentity, deleteIdentitySlot } from '../db/local';
+import { switchDbSlot, saveIdentity, deleteIdentitySlot, deleteDbSlot } from '../db/local';
 
 const secureStorage = () => window.aegis.secureStorage;
 
 const PROFILES_STORE_KEY = 'aegis.profiles.v1';
+
+/**
+ * One limit for a profile's display name, used by both the create wizard and
+ * the Profile edit form. Two limits meant a name created at the longer one could
+ * not be re-saved from the edit form without being cut.
+ */
+export const DISPLAY_NAME_MAX_LEN = 20;
 
 export const AVATAR_PALETTE: string[] = [
   '#05b875', // Emerald (primary default)
@@ -65,6 +72,19 @@ async function persistProfiles(profiles: Profile[]): Promise<void> {
   // with aegis.activeSlotId.
   const toStore = profiles.map(({ isActive: _ia, ...rest }) => rest);
   await secureStorage().set(PROFILES_STORE_KEY, JSON.stringify(toStore));
+}
+
+/** Take a slot off `aegis.slotsList` (best effort: its key material is already gone). */
+async function dropFromSlotsList(slotId: string): Promise<void> {
+  try {
+    const raw = await secureStorage().get('aegis.slotsList');
+    if (raw) {
+      const slotsList = (JSON.parse(raw) as string[]).filter((s) => s !== slotId);
+      await secureStorage().set('aegis.slotsList', JSON.stringify(slotsList));
+    }
+  } catch {
+    /* non-fatal */
+  }
 }
 
 function attachActive(profiles: Profile[], activeSlotId: string): Profile[] {
@@ -181,6 +201,7 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     // Open the new profile's database (main mints its key and schema), write the
     // identity row, then come back. Unlike mobile this is a real file open, so
     // failing here must not leave us pointed at the new slot.
+    let failure: unknown = null;
     try {
       await switchDbSlot(slotId);
       await saveIdentity({
@@ -191,8 +212,23 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
         signingSecretKeyB64: identity.signingSecretKeyB64,
         createdAt: identity.createdAt,
       });
-    } finally {
+    } catch (e) {
+      failure = e;
+    }
+    try {
       await switchDbSlot(prevSlot);
+    } catch (e) {
+      // Never let the way back mask the original failure.
+      failure ??= e;
+    }
+    if (failure !== null) {
+      // Half-created profile: it never reaches the roster, so nothing could
+      // clean it up later. Erase its database and key material now, and take
+      // it off slotsList.
+      await deleteDbSlot(slotId).catch(() => {});
+      await deleteIdentitySlot(slotId);
+      await dropFromSlotsList(slotId);
+      throw failure;
     }
 
     // Relay registration is deliberately NOT done here. It runs through the one
@@ -266,20 +302,16 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
       await get().switchProfile('self');
     }
 
+    // The encrypted database, its DB key and every `aegis.<slot>.*` entry
+    // (identity secrets included). Awaited and allowed to throw: reporting
+    // "deleted" while the profile is still on disk would be the worst outcome.
+    await deleteDbSlot(slotId);
     await deleteIdentitySlot(slotId);
 
     // Drop it from slotsList too. A stale entry would make a later panic wipe
     // hunt for a profile that is already gone, and leaves the two views of
     // "which profiles exist" disagreeing.
-    try {
-      const raw = await secureStorage().get('aegis.slotsList');
-      if (raw) {
-        const slotsList = (JSON.parse(raw) as string[]).filter((s) => s !== slotId);
-        await secureStorage().set('aegis.slotsList', JSON.stringify(slotsList));
-      }
-    } catch {
-      /* non-fatal: the key material is already deleted */
-    }
+    await dropFromSlotsList(slotId);
 
     const updated = profiles.filter((p) => p.slotId !== slotId);
     await persistProfiles(updated);

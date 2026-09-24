@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockSwitchDbSlot = vi.fn().mockResolvedValue(undefined);
 const mockSaveIdentity = vi.fn().mockResolvedValue(undefined);
 const mockDeleteIdentitySlot = vi.fn().mockResolvedValue(undefined);
+const mockDeleteDbSlot = vi.fn().mockResolvedValue(undefined);
 
 /** Ordered log of the calls whose sequence matters. */
 let callOrder: string[] = [];
@@ -27,6 +28,7 @@ vi.mock('../../db/local', () => ({
   switchDbSlot: (...a: unknown[]) => { callOrder.push('switchDbSlot'); return mockSwitchDbSlot(...a); },
   saveIdentity: (...a: unknown[]) => mockSaveIdentity(...a),
   deleteIdentitySlot: (...a: unknown[]) => mockDeleteIdentitySlot(...a),
+  deleteDbSlot: (...a: unknown[]) => mockDeleteDbSlot(...a),
 }));
 
 vi.mock('../contacts', () => ({
@@ -171,6 +173,28 @@ describe('createProfile', () => {
     expect(mockSwitchDbSlot).toHaveBeenLastCalledWith('self');
   });
 
+  it('erases a half-created profile instead of leaving its keys behind', async () => {
+    mockSaveIdentity.mockRejectedValueOnce(new Error('disk full'));
+    const useProfiles = await freshStore();
+
+    await expect(useProfiles.getState().createProfile('scratch', '#8b5cf6')).rejects.toThrow('disk full');
+
+    // It never reaches the roster, so nothing could clean it up later.
+    expect(mockDeleteDbSlot).toHaveBeenCalledWith('NEW-PROF-0001');
+    expect(mockDeleteIdentitySlot).toHaveBeenCalledWith('NEW-PROF-0001');
+    expect(JSON.parse(store['aegis.slotsList'])).not.toContain('NEW-PROF-0001');
+    expect(useProfiles.getState().profiles.map((p) => p.slotId)).not.toContain('NEW-PROF-0001');
+  });
+
+  it('reports the original failure even if switching back fails too', async () => {
+    mockSaveIdentity.mockRejectedValueOnce(new Error('disk full'));
+    mockSwitchDbSlot
+      .mockResolvedValueOnce(undefined) // into the new slot
+      .mockRejectedValueOnce(new Error('cannot reopen')); // back to the previous one
+    const useProfiles = await freshStore();
+    await expect(useProfiles.getState().createProfile('scratch', '#8b5cf6')).rejects.toThrow('disk full');
+  });
+
   it('registers the slot so a panic wipe can find its key material', async () => {
     const useProfiles = await freshStore();
     await useProfiles.getState().createProfile('scratch', '#8b5cf6');
@@ -211,8 +235,23 @@ describe('removeProfile', () => {
     await useProfiles.getState().removeProfile('BBB-3333-4444');
 
     expect(mockDeleteIdentitySlot).toHaveBeenCalledWith('BBB-3333-4444');
+    // Its encrypted database and DB key go too, not just the renderer-side keys.
+    expect(mockDeleteDbSlot).toHaveBeenCalledWith('BBB-3333-4444');
     // A stale entry sends a later panic wipe hunting for a profile that is gone.
     expect(JSON.parse(store['aegis.slotsList'])).toEqual(['self']);
     expect(useProfiles.getState().profiles).toHaveLength(1);
+  });
+
+  it('does not report a profile as deleted when its database could not be erased', async () => {
+    store['aegis.profiles.v1'] = JSON.stringify([
+      { slotId: 'self', aegisId: 'AAA-1111-2222', displayName: 'a', avatarColor: '#05b875', createdAt: 1 },
+      { slotId: 'BBB-3333-4444', aegisId: 'BBB-3333-4444', displayName: 'b', avatarColor: '#8b5cf6', createdAt: 2 },
+    ]);
+    mockDeleteDbSlot.mockRejectedValueOnce(new Error('file in use'));
+    const useProfiles = await freshStore();
+    await useProfiles.getState().hydrate();
+
+    await expect(useProfiles.getState().removeProfile('BBB-3333-4444')).rejects.toThrow('file in use');
+    expect(useProfiles.getState().profiles).toHaveLength(2);
   });
 });

@@ -16,16 +16,15 @@ import { I } from '../components/icons';
 import { TopBar } from '../components/TopBar';
 import { Avatar } from '../components/Avatar';
 import { createIdentity, type Identity } from '../crypto/identity';
-import { useProfiles, AVATAR_PALETTE } from '../store/profiles';
+import { useProfiles, AVATAR_PALETTE, DISPLAY_NAME_MAX_LEN } from '../store/profiles';
 
 interface Props {
   onBack: () => void;
   onCreated: () => void;
 }
 
-type Step = 'generating' | 'name' | 'color';
+type Step = 'generating' | 'failed' | 'name' | 'color';
 
-const MAX_NAME_LEN = 32;
 
 export function CreateProfileScreen({ onBack, onCreated }: Props) {
   const { t } = useTheme();
@@ -57,6 +56,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
         // Without an identity there is no profile to create. Say so instead of
         // leaving a spinner turning forever.
         setError(e instanceof Error ? e.message : String(e));
+        setStep('failed');
       }
     }, 900);
     return () => clearTimeout(timer);
@@ -144,7 +144,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
           </div>
         )}
 
-        {step !== 'generating' && (
+        {(step === 'name' || step === 'color') && (
           <div style={panel}>
             <Avatar t={t} name={displayName || aegisId} color={avatarColor} size={84} seed={publicKeyB64} />
             <div
@@ -188,7 +188,7 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
             </div>
             <input
               value={displayName}
-              onChange={(e) => setDisplayName(e.target.value.slice(0, MAX_NAME_LEN))}
+              onChange={(e) => setDisplayName(e.target.value.slice(0, DISPLAY_NAME_MAX_LEN))}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && displayName.trim()) setStep('color');
               }}

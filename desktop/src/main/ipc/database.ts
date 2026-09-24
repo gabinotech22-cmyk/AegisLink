@@ -141,6 +141,82 @@ function knownSlots(keystore: Record<string, string>): Set<string> {
   return slots
 }
 
+/**
+ * Every profile slot the keystore can name, not just the ones with a DB key: a
+ * profile whose creation failed half-way has secrets and a roster entry but may
+ * never have minted a DB key. Panic has to find those too.
+ */
+function allProfileSlots(keystore: Record<string, string>): Set<string> {
+  const slots = knownSlots(keystore)
+  slots.add('self')
+  const addIds = (raw: string | undefined, pick: (v: unknown) => unknown): void => {
+    if (!raw) return
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return
+      for (const v of parsed) {
+        const id = pick(v)
+        if (typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id)) slots.add(id)
+      }
+    } catch { /* unreadable roster: the dbEncKey-derived slots still count */ }
+  }
+  addIds(keystore['aegis.slotsList'], (v) => v)
+  addIds(keystore['aegis.profiles.v1'], (v) => (v as { slotId?: unknown } | null)?.slotId)
+  for (const k of Object.keys(keystore)) {
+    const m = /^aegis\.([A-Za-z0-9_-]{1,64})\.(?:secretKey\.b64|signSecretKey\.b64)$/.exec(k)
+    if (m) slots.add(m[1])
+  }
+  return slots
+}
+
+/** The primary profile's identity and profile entries, which carry no slot prefix. */
+const SELF_PROFILE_KEYS = [
+  'aegis.secretKey.b64',
+  'aegis.signSecretKey.b64',
+  'aegis.displayName',
+  'aegis.avatarColor',
+  'aegis.avatarImage',
+  'aegis.profileStatus',
+]
+
+/**
+ * Remove every keystore entry a profile owns: identity secrets, display prefs
+ * and DB key (`aegis.<slot>.*`, or the unprefixed set for the primary profile),
+ * and zeroize its cached DB key.
+ */
+function purgeProfileKeys(keystore: Record<string, string>, slot: string): void {
+  if (slot === 'self') {
+    for (const k of SELF_PROFILE_KEYS) delete keystore[k]
+    delete keystore[getDbEncKeySlot('self')]
+  } else {
+    const prefix = `aegis.${slot}.`
+    for (const k of Object.keys(keystore)) {
+      if (k.startsWith(prefix)) delete keystore[k]
+    }
+  }
+  const cached = cachedDbKeys.get(slot)
+  if (cached) {
+    cached.fill(0)
+    cachedDbKeys.delete(slot)
+  }
+}
+
+/** A profile's database file(s) AND every keystore entry it owns. Not for the open slot. */
+function purgeProfileSlot(keystore: Record<string, string>, slot: string): void {
+  let victimPath = ''
+  try {
+    victimPath = dbPathForSlot(slot)
+  } catch {
+    return // unparseable slot id: no file or key of ours
+  }
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      if (fs.existsSync(victimPath + suffix)) fs.rmSync(victimPath + suffix)
+    } catch { /* best-effort */ }
+  }
+  purgeProfileKeys(keystore, slot)
+}
+
 /** True when ANY profile's key is PIN-wrapped, i.e. the app lock is enabled. */
 function appLockIsOn(keystore: Record<string, string>): boolean {
   for (const slot of knownSlots(keystore)) {
@@ -577,10 +653,21 @@ function assertSlot(slot: string): void {
  */
 function openMainDb(): void {
   if (db) return
-  db = openEncrypted(mainDbPath, currentSlot)
-  db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
-  ensureSchema(db)
+  db = openSlotDb(mainDbPath, currentSlot)
+}
+
+/** Open (and migrate) one profile's database without touching the open handle. */
+function openSlotDb(dbPath: string, slot: string): Database.Database {
+  const handle = openEncrypted(dbPath, slot)
+  try {
+    handle.pragma('journal_mode = WAL')
+    handle.pragma('foreign_keys = ON')
+    ensureSchema(handle)
+  } catch (e) {
+    handle.close()
+    throw e
+  }
+  return handle
 }
 
 /**
@@ -638,13 +725,30 @@ export function registerDatabaseHandlers(): void {
     if (typeof slot !== 'string' || !slot) throw new Error('db:switch-slot needs a slot id')
     const nextPath = dbPathForSlot(slot) // validates the id before anything closes
     if (slot === currentSlot) return
-    if (db) {
-      db.close() // flushes WAL; the next open re-reads from disk
-      db = undefined as unknown as Database.Database
-    }
+    // Open the target FIRST. If that fails (PIN-locked key, no secure storage
+    // in a packaged build, a corrupt file) nothing has changed: the profile the
+    // user is on stays open, and main and renderer (which only moves its own
+    // pointer once this resolves) keep agreeing on the open slot. Closing first
+    // would strand the process with no database and the wrong slot.
+    const next = openSlotDb(nextPath, slot)
+    if (db) db.close() // flushes WAL; a later reopen re-reads from disk
+    db = next
     currentSlot = slot
     mainDbPath = nextPath
-    openMainDb()
+  })
+
+  // Section 11: delete a (non-primary, not open) profile for good: its database
+  // file(s) and every keystore entry under its prefix, identity secrets
+  // included. removeProfile() and a failed createProfile() both end here.
+  ipcMain.handle('db:delete-slot', (event, slot: string): void => {
+    assertTrustedSender(event)
+    if (typeof slot !== 'string' || !slot) throw new Error('db:delete-slot needs a slot id')
+    dbPathForSlot(slot) // validates the id before anything is touched
+    if (slot === 'self') throw new Error('AegisLink: the primary profile is not deleted through db:delete-slot')
+    if (slot === currentSlot) throw new Error('AegisLink: switch away from a profile before deleting it')
+    const keystore = readKeystore()
+    purgeProfileSlot(keystore, slot)
+    writeKeystore(keystore)
   })
 
   ipcMain.handle('db:unlock', (event, kekB64: string): void => {
@@ -1272,28 +1376,24 @@ export function registerDatabaseHandlers(): void {
     // mere presence on disk is the evidence the wipe exists to destroy. The
     // active slot is emptied row-by-row above so the running app keeps a usable
     // handle; the others have no handle, so their files go.
-    const otherSlots = knownSlots(keystore)
+    // Every profile's identity secrets, display prefs and DB key go too, not
+    // just the files: a surviving `aegis.<slot>.secretKey.b64` would still be a
+    // usable identity key.
+    const otherSlots = allProfileSlots(keystore)
     otherSlots.delete(currentSlot)
     for (const slot of otherSlots) {
-      let victimPath = ''
-      try {
-        victimPath = dbPathForSlot(slot)
-      } catch {
-        continue // unparseable slot id: no file of ours to remove
-      }
-      for (const suffix of ['', '-wal', '-shm']) {
-        try {
-          if (fs.existsSync(victimPath + suffix)) fs.rmSync(victimPath + suffix)
-        } catch { /* best-effort */ }
-      }
-      delete keystore[getDbEncKeySlot(slot)]
+      purgeProfileSlot(keystore, slot)
     }
+    // The open profile keeps its (emptied) file and handle; its secrets, prefs
+    // and DB key go like everyone else's.
+    purgeProfileKeys(keystore, currentSlot)
 
     // Zeroize every in-memory DB key and the cached KEK (rule #9).
     resetDbKeyCache()
 
     delete keystore[getDbEncKeySlot(activeSlot)]
     delete keystore['aegis.slotsList']  // the roster itself is metadata: who existed
+    delete keystore['aegis.profiles.v1'] // ...and so are the names and colours in it
     delete keystore['aegis.activeSlotId']
     delete keystore['aegis.activeProfile']
     delete keystore[DBKEK_SALT_KEY] // Fase 2: drop the PIN-KEK salt too (hygiene)

@@ -54,6 +54,14 @@ export async function switchDbSlot(slot: string): Promise<void> {
   activeSlot = slot;
 }
 
+/**
+ * Section 11: erase a profile that is not open — its encrypted database and all
+ * of its key material. Main refuses the primary profile and the open slot.
+ */
+export async function deleteDbSlot(slot: string): Promise<void> {
+  await window.aegis.db.deleteSlot(slot);
+}
+
 export async function closeActiveDatabase(): Promise<void> {
   // Owned by the main process; switchDbSlot() closes and reopens it.
 }

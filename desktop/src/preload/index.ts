@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld('aegis', {
     // FILE with a different key, so nothing can bleed across.
     switchSlot: (slot: string): Promise<void> =>
       ipcRenderer.invoke('db:switch-slot', slot),
+    // Deletes a non-primary, non-open profile: its DB file(s) and every
+    // `aegis.<slot>.*` keystore entry, identity secrets included.
+    deleteSlot: (slot: string): Promise<void> =>
+      ipcRenderer.invoke('db:delete-slot', slot),
     saveIdentity: (activeSlot: string, identity: any): Promise<void> =>
       ipcRenderer.invoke('db:save-identity', activeSlot, identity),
     loadIdentity: (activeSlot: string): Promise<any> =>

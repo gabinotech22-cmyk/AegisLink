@@ -187,6 +187,53 @@ describe('the app lock covers every profile', () => {
     resetDbKeyCache(); // simulates a cold start: nothing unlocked yet
     expect(() => call('db:switch-slot', OTHER)).toThrow(/PIN-locked/i);
   });
+
+  it('leaves the profile you were on open and usable after a refused switch', () => {
+    call('db:save-message', 'self', msg('m1', 'c', 'still here'));
+    // A packaged build without OS secure storage cannot mint OTHER's key, so
+    // opening it fails closed.
+    mockElectronFlags.isPackaged = true;
+    mockElectronFlags.encryptionAvailable = false;
+    expect(() => call('db:switch-slot', OTHER)).toThrow(/secure storage unavailable/i);
+    // The bug: the old handler closed 'self' and moved to OTHER before the open
+    // failed, stranding the app with no database and the wrong slot.
+    const rows = call('db:load-messages-by-chat', 'self', 'c') as { body: string }[];
+    expect(rows.map((r) => r.body)).toEqual(['still here']);
+    expect(() => call('db:save-message', 'self', msg('m2', 'c', 'and writable'))).not.toThrow();
+  });
+});
+
+describe('deleting a profile', () => {
+  function seedOtherProfile(): string {
+    call('db:switch-slot', OTHER);
+    call('db:save-message', OTHER, msg('m2', 'c', 'b'));
+    call('db:switch-slot', 'self');
+    mockKeystore[`aegis.${OTHER}.secretKey.b64`] = 'sk';
+    mockKeystore[`aegis.${OTHER}.signSecretKey.b64`] = 'ssk';
+    mockKeystore[`aegis.${OTHER}.displayName`] = 'work';
+    return path.join(userDataDir, `aegislink-${OTHER}.db`);
+  }
+
+  it('removes its database file and every key it owns', () => {
+    const otherPath = seedOtherProfile();
+    mockKeystore['aegis.secretKey.b64'] = 'primary-sk';
+
+    call('db:delete-slot', OTHER);
+
+    expect(fs.existsSync(otherPath)).toBe(false);
+    expect(Object.keys(mockKeystore).filter((k) => k.startsWith(`aegis.${OTHER}.`))).toEqual([]);
+    // The primary profile is untouched.
+    expect(mockKeystore['aegis.secretKey.b64']).toBe('primary-sk');
+    expect(mockKeystore['aegis.dbEncKey.b64']).toBeTruthy();
+  });
+
+  it('refuses the primary profile and the open one', () => {
+    seedOtherProfile();
+    expect(() => call('db:delete-slot', 'self')).toThrow(/primary profile/i);
+    call('db:switch-slot', OTHER);
+    expect(() => call('db:delete-slot', OTHER)).toThrow(/switch away/i);
+    expect(() => call('db:delete-slot', '../x')).toThrow(/invalid slot id/i);
+  });
 });
 
 describe('panic', () => {
@@ -208,6 +255,44 @@ describe('panic', () => {
     expect(mockKeystore['aegis.dbEncKey.b64']).toBeUndefined();
     // The roster is metadata as well: it records who existed.
     expect(mockKeystore['aegis.slotsList']).toBeUndefined();
+  });
+
+  it('removes every profile’s identity secrets and the profile roster', () => {
+    call('db:switch-slot', OTHER);
+    call('db:switch-slot', 'self');
+    const HALF = 'HALF-3333-4444'; // creation failed before its DB key was minted
+    Object.assign(mockKeystore, {
+      'aegis.profiles.v1': JSON.stringify([{ slotId: 'self' }, { slotId: OTHER }]),
+      'aegis.slotsList': JSON.stringify(['self', OTHER, HALF]),
+      [`aegis.${OTHER}.secretKey.b64`]: 'sk',
+      [`aegis.${OTHER}.signSecretKey.b64`]: 'ssk',
+      [`aegis.${OTHER}.displayName`]: 'work',
+      [`aegis.${OTHER}.avatarColor`]: '#fff',
+      [`aegis.${HALF}.secretKey.b64`]: 'orphan-sk',
+      'aegis.secretKey.b64': 'primary-sk',
+      'aegis.signSecretKey.b64': 'primary-ssk',
+    });
+
+    call('db:wipe-database', 'self');
+
+    // A surviving `aegis.<slot>.secretKey.b64` would still be a usable identity key.
+    expect(Object.keys(mockKeystore).filter((k) => /^aegis\.[^.]+\.(secretKey|signSecretKey)\.b64$/.test(k))).toEqual([]);
+    expect(mockKeystore['aegis.secretKey.b64']).toBeUndefined();
+    expect(mockKeystore['aegis.signSecretKey.b64']).toBeUndefined();
+    expect(mockKeystore[`aegis.${OTHER}.displayName`]).toBeUndefined();
+    expect(mockKeystore['aegis.profiles.v1']).toBeUndefined();
+  });
+
+  it('wipes the primary profile too when panic runs from another profile', () => {
+    call('db:save-message', 'self', msg('m1', 'c', 'a'));
+    mockKeystore['aegis.secretKey.b64'] = 'primary-sk';
+    call('db:switch-slot', OTHER);
+
+    call('db:wipe-database', OTHER);
+
+    expect(fs.existsSync(path.join(userDataDir, 'aegislink.db'))).toBe(false);
+    expect(mockKeystore['aegis.dbEncKey.b64']).toBeUndefined();
+    expect(mockKeystore['aegis.secretKey.b64']).toBeUndefined();
   });
 
   it('empties the active profile', () => {

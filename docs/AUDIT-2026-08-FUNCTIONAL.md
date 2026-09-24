@@ -292,7 +292,7 @@ desbloquear, crear un perfil lo minteaba **sin envolver** — un perfil fuera de
 PIN, junto a otros que sí lo respetan. Ahora falla cerrado.
 
 Evidencia: `desktop/src/main/ipc/__tests__/database.profileIsolation.test.ts`
-(12 tests, cifrado real), `store/__tests__/profiles.test.ts` (9), suite desktop
+(12 tests, cifrado real), `desktop/src/renderer/store/__tests__/profiles.test.ts` (9), suite desktop
 200/200.
 
 De paso: `database.ts` estaba guardado con mojibake (UTF-8 leído como cp1252).

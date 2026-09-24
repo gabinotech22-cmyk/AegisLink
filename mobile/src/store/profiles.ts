@@ -35,6 +35,13 @@ import { encodeBase64 } from 'tweetnacl-util';
 
 const PROFILES_STORE_KEY = 'aegis.profiles.v1';
 
+/**
+ * One limit for a profile's display name, used by both the create wizard and
+ * the Profile edit form. Two limits meant a name created at the longer one could
+ * not be re-saved from the edit form without being cut.
+ */
+export const DISPLAY_NAME_MAX_LEN = 20;
+
 export const AVATAR_PALETTE: string[] = [
   '#05b875', // Emerald (primary default)
   '#8b5cf6', // Purple

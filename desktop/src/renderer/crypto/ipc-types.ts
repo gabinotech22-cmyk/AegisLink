@@ -43,6 +43,12 @@ export interface AegisIPC {
      * further db.* call: main refuses operations whose slot is not the open one.
      */
     switchSlot(slot: string): Promise<void>;
+    /**
+     * Delete a profile for good: its database file(s) and every `aegis.<slot>.*`
+     * keystore entry (identity secrets, prefs, DB key). Refuses 'self' and the
+     * open slot — switch away first.
+     */
+    deleteSlot(slot: string): Promise<void>;
     /** Public channels: persist a channel's projected feed, encrypted at rest. */
     saveChannelFeed(activeSlot: string, channelId: string, postsJson: string): Promise<void>;
     /** Returns the stored JSON, or "[]" when absent or undecryptable. */

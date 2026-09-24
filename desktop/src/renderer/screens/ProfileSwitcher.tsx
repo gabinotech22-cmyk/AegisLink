@@ -84,10 +84,16 @@ export function ProfileSwitcherScreen({ onBack, onCreateProfile }: Props) {
     );
     if (!ok) return;
     setError(null);
+    // Same in-flight flag as a switch: removing the open profile moves the
+    // database slot, and a second slot change racing it is exactly the
+    // "profile mismatch" failure this screen exists to avoid.
+    setSwitching(profile.slotId);
     try {
       await removeProfile(profile.slotId);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSwitching(null);
     }
   }
 
@@ -255,6 +261,8 @@ function ProfileRow({
   onDelete: () => void;
 }) {
   const [hover, setHover] = useState(false);
+  // Keyboard users must see the destructive control before activating it.
+  const [focused, setFocused] = useState(false);
   const seed = activeSeed ?? profile.aegisId;
 
   return (
@@ -370,6 +378,8 @@ function ProfileRow({
         <button
           onClick={onDelete}
           disabled={disabled}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           aria-label={`Delete profile ${profile.displayName}`}
           title="Delete this profile"
           style={{
@@ -378,7 +388,7 @@ function ProfileRow({
             cursor: disabled ? 'default' : 'pointer',
             padding: 12,
             marginRight: 6,
-            opacity: hover ? 1 : 0.35,
+            opacity: hover || focused ? 1 : 0.35,
           }}
         >
           <I.Trash size={16} color={t.danger} />
