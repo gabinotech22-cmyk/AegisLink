@@ -1810,5 +1810,43 @@
     "usePin": "Use PIN",
     "wrongPin": "Wrong PIN.",
     "confirm": "Confirm"
+  },
+  "torConnection": {
+    "title": "Tor connection",
+    "intro": "AegisLink always connects through Tor and never over the normal internet. Here you choose how Tor reaches its network. If your network blocks Tor, a bridge disguises it as ordinary traffic.",
+    "nowSection": "NOW",
+    "connected": "Connected to the Tor network",
+    "modeSection": "HOW TO CONNECT",
+    "mode": {
+      "auto": "Automatic (recommended)",
+      "direct": "Direct Tor",
+      "snowflake": "Snowflake",
+      "obfs4": "obfs4",
+      "meek": "meek",
+      "custom": "My own bridges"
+    },
+    "modeSub": {
+      "auto": "Tries direct Tor and, if the network blocks it, moves on to Snowflake, obfs4 and meek by itself. Remembers what worked.",
+      "direct": "The fastest option when the network does not block Tor.",
+      "snowflake": "Connects through volunteers. Works on many censored networks.",
+      "obfs4": "Makes the traffic look random. Uses Tor Browser’s public bridges.",
+      "meek": "Looks like traffic to a large CDN. Slow, but gets through very restrictive networks.",
+      "custom": "Paste bridges you got yourself. They are harder to block than the public ones."
+    },
+    "customSection": "YOUR BRIDGES",
+    "customHelp": "One per line. Get them at bridges.torproject.org or from the Telegram bot @GetBridgesBot. obfs4, webtunnel, snowflake and meek_lite are accepted.",
+    "apply": "Apply",
+    "applying": "Applying…",
+    "applied": "Done. Tor is reconnecting.",
+    "someRejected": "{{n}} lines that are not valid bridges were ignored.",
+    "noValidBridges": "There is no valid bridge line. Check what you pasted.",
+    "invalid": "The settings could not be applied.",
+    "transport": {
+      "direct": "Direct Tor",
+      "snowflake": "Snowflake",
+      "obfs4": "obfs4",
+      "meek": "meek",
+      "custom": "Your bridges"
+    }
   }
 }

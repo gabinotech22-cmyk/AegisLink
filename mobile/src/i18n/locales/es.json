@@ -1810,5 +1810,43 @@
     "usePin": "Usar PIN",
     "wrongPin": "PIN incorrecto.",
     "confirm": "Confirmar"
+  },
+  "torConnection": {
+    "title": "Conexión a Tor",
+    "intro": "AegisLink se conecta siempre a través de Tor y nunca sale por internet normal. Aquí eliges cómo llega Tor a su red. Si tu red bloquea Tor, un bridge (puente) lo disfraza de tráfico corriente.",
+    "nowSection": "AHORA",
+    "connected": "Conectado a la red Tor",
+    "modeSection": "CÓMO CONECTAR",
+    "mode": {
+      "auto": "Automático (recomendado)",
+      "direct": "Tor directo",
+      "snowflake": "Snowflake",
+      "obfs4": "obfs4",
+      "meek": "meek",
+      "custom": "Mis propios bridges"
+    },
+    "modeSub": {
+      "auto": "Prueba Tor directo y, si la red lo bloquea, pasa solo a Snowflake, obfs4 y meek. Recuerda el que funcionó.",
+      "direct": "La opción más rápida cuando la red no bloquea Tor.",
+      "snowflake": "Se conecta a través de voluntarios. Funciona en muchas redes censuradas.",
+      "obfs4": "Hace que el tráfico parezca aleatorio. Usa los bridges públicos de Tor Browser.",
+      "meek": "Se disfraza de tráfico hacia un gran CDN. Lento, pero atraviesa redes muy restrictivas.",
+      "custom": "Pega bridges que hayas conseguido tú. Son más difíciles de bloquear que los públicos."
+    },
+    "customSection": "TUS BRIDGES",
+    "customHelp": "Uno por línea. Consíguelos en bridges.torproject.org o con el bot de Telegram @GetBridgesBot. Se aceptan obfs4, webtunnel, snowflake y meek_lite.",
+    "apply": "Aplicar",
+    "applying": "Aplicando…",
+    "applied": "Hecho. Tor se está reconectando.",
+    "someRejected": "Se ignoraron {{n}} líneas que no son bridges válidos.",
+    "noValidBridges": "No hay ninguna línea de bridge válida. Revisa lo que has pegado.",
+    "invalid": "No se pudo aplicar la configuración.",
+    "transport": {
+      "direct": "Tor directo",
+      "snowflake": "Snowflake",
+      "obfs4": "obfs4",
+      "meek": "meek",
+      "custom": "Tus bridges"
+    }
   }
 }
