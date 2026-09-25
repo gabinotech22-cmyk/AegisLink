@@ -15,6 +15,7 @@
 
 import { relayFetch, type RelayResponse } from '../net/relayHttp';
 import { nacl, powSha256, POW_DIFFICULTY_MAX } from './sodium';
+import { secretB64Equals } from './secretEquals';
 import { logger } from '../utils/logger';
 import * as SecureStore from 'expo-secure-store';
 import { encodeBase64 } from 'tweetnacl-util';
@@ -422,7 +423,7 @@ async function persistPrekeySecretsDurably(
       try {
         await db.saveSpkSecret(spkKeyId, spkSecretB64);
         const back = await db.loadSpkSecret(spkKeyId);
-        if (back === spkSecretB64) return true;
+        if (secretB64Equals(back, spkSecretB64)) return true;
       } catch (e) {
         if (__DEV__) logger.warn('[registration] SPK secret DB write attempt failed', attempt, e);
       }

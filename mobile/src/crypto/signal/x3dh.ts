@@ -4,6 +4,7 @@ import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { hkdfSHA256 } from './kdf';
 import { type Identity } from '../identity';
 import { verifyDetached } from '../ed25519';
+import { secretB64Equals } from '../secretEquals';
 
 /**
  * Diagnostic-only helper: re-throws any caught value as `[step] Name: message`
@@ -607,7 +608,7 @@ async function persistPqSpkWithReadback(
     try {
       await db.savePqSpkSecret(keyId, b64);
       const back = await db.loadPqSpkSecret(keyId);
-      if (back === b64) {
+      if (secretB64Equals(back, b64)) {
         try { await db.setPqSpkKeyId(keyId); } catch {/* best-effort */}
         return true;
       }
@@ -710,7 +711,7 @@ export async function ensureDevicePreKeys(identity: Identity): Promise<DevicePre
       try {
         await db.saveSpkSecret(set.signedPreKey.keyId, spkSecretB64);
         const back = await db.loadSpkSecret(set.signedPreKey.keyId);
-        if (back === spkSecretB64) { persisted = true; spkLastErr = null; }
+        if (secretB64Equals(back, spkSecretB64)) { persisted = true; spkLastErr = null; }
       } catch (e) {
         spkLastErr = e; // retry once, but remember the exception in case both attempts fail
       }
