@@ -756,6 +756,14 @@ afford), `a2:` and legacy SHA-256 hashes still verify and are re-hashed as `a4:`
 on the next successful unlock (`lock/__tests__/pin.test.ts`; on-device flow
 `mobile/.maestro/03-app-lock-pin.yaml`).
 
+**When the lock engages (mobile and desktop).** On every cold start with the
+lock enabled, decided once per identity and only after the persisted
+preferences (and, on desktop, the stored-PIN check) have loaded — the app shows
+its loading screen until then, so a locked install never renders unlocked. It
+also engages on background → foreground after the chosen timeout. Turning the
+lock on in settings does not lock the app on the spot (`lock/coldLock.ts`, twin
+on desktop, `lock/__tests__/coldLock.test.ts` on both).
+
 ### 7.6 Panic wipe and profile isolation
 
 - **Panic mode** performs an instant local wipe, with an optional **decoy

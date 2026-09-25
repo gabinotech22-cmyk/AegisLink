@@ -31,6 +31,7 @@ import { LockConfigScreen } from './screens/LockConfig';
 import { LockSettingsScreen } from './screens/LockSettings';
 import { LockScreen } from './screens/Lock';
 import { hasStoredPIN } from './lock/pin';
+import { coldLockAction } from './lock/coldLock';
 import { PanicScreen } from './screens/Panic';
 import { EphemeralScreen } from './screens/Ephemeral';
 import { DataExportScreen } from './screens/DataExport';
@@ -133,7 +134,8 @@ function Shell() {
   const [pendingLinkAfterOnboarding, setPendingLinkAfterOnboarding] = useState(false);
   const [netError, setNetError] = useState(false);
   const [appLocked, setAppLocked] = useState(false);
-  const [pinAvailable, setPinAvailable] = useState(false);
+  // null = not checked yet: the cold-start lock waits for it (src/renderer/lock/coldLock.ts).
+  const [pinAvailable, setPinAvailable] = useState<boolean | null>(null);
   // C-2 Fase 2: null = checking lock-state, false = needs cold PIN unlock, true = DB open.
   const [dbUnlocked, setDbUnlocked] = useState<boolean | null>(null);
   const [isBackgroundShieldActive] = useState(false);
@@ -207,22 +209,34 @@ function Shell() {
   // Whether a PIN hash actually exists. Guards the lock so a stray
   // appLockEnabled=true with no stored PIN can never show an unenterable
   // LockScreen (verifyPIN would always fail → soft-brick).
+  // Re-checked when the lock is turned on or off too: before, it was read only
+  // when the identity changed, so a lock enabled in settings did not engage on
+  // background → foreground until the next restart.
   useEffect(() => {
     void (async () => {
       try { setPinAvailable(await hasStoredPIN()); } catch { setPinAvailable(false); }
     })();
-  }, [identity]);
+  }, [identity, appLockEnabled]);
 
+  // Cold-start lock: decided once per identity, with the preferences and the
+  // stored-PIN check loaded. Turning the lock on later does not lock the app on
+  // the spot; background → foreground (below) and the next cold start do.
   useEffect(() => {
-    if (identity && status === 'ready' && appLockEnabled && pinAvailable && !didColdLockRef.current) {
-      didColdLockRef.current = true;
-      setAppLocked(true);
-    }
-    if (!identity) {
+    const action = coldLockAction({
+      hasIdentity: identity !== null,
+      identityReady: status === 'ready',
+      prefsHydrated: prefsHydrated && pinAvailable !== null,
+      appLockEnabled: appLockEnabled && pinAvailable === true,
+      alreadyDecided: didColdLockRef.current,
+    });
+    if (action === 'reset') {
       didColdLockRef.current = false;
       setAppLocked(false);
+    } else if (action === 'lock' || action === 'keep') {
+      if (!didColdLockRef.current) didColdLockRef.current = true;
+      if (action === 'lock') setAppLocked(true);
     }
-  }, [identity, status, appLockEnabled, pinAvailable]);
+  }, [identity, status, prefsHydrated, appLockEnabled, pinAvailable]);
 
   useEffect(() => {
     if (!appLockEnabled || !pinAvailable || !identity) return;
@@ -388,7 +402,11 @@ function Shell() {
     );
   }
 
-  const isLoading = !showSplash && status === 'loading';
+  // With an identity, also wait until the cold-start lock can be decided
+  // (preferences and the stored-PIN check loaded): until then appLockEnabled is
+  // the store default (false) and a locked install would render unlocked.
+  const isLoading =
+    !showSplash && (status === 'loading' || (identity !== null && (!prefsHydrated || pinAvailable === null)));
 
   const mainContent = (() => {
     if (isLoading) {
