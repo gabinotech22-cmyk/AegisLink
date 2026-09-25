@@ -30,7 +30,6 @@
     "@expo-google-fonts/jetbrains-mono": "^0.4.1",
     "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@noble/hashes": "^1.6.1",
-    "@noble/post-quantum": "^0.7.1",
     "@react-native-clipboard/clipboard": "^1.16.3",
     "@scure/base": "^2.2.0",
     "@testing-library/react-native": "^13.3.3",
@@ -81,6 +80,7 @@
   },
   "devDependencies": {
     "@config-plugins/react-native-webrtc": "^13.0.0",
+    "@noble/post-quantum": "^0.7.1",
     "@resvg/resvg-js": "^2.6.2",
     "@types/jest": "^29.5.14",
     "@types/react": "~19.1.0",

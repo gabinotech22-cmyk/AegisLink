@@ -63,6 +63,18 @@ public class AegisSodiumModule: Module {
     Function("hkdfSha256") { (out: Uint8Array, ikm: Uint8Array, salt: Uint8Array, info: Uint8Array) -> Int in
       Int(aegis_hkdf_sha256(mp(out), n(out), p(ikm), n(ikm), p(salt), n(salt), p(info), n(info)))
     }
+    Function("mlkem768Keypair") { (pk: Uint8Array, sk: Uint8Array) -> Int in
+      Int(aegis_mlkem768_keypair(mp(pk), n(pk), mp(sk), n(sk)))
+    }
+    Function("mlkem768SeedKeypair") { (pk: Uint8Array, sk: Uint8Array, seed: Uint8Array) -> Int in
+      Int(aegis_mlkem768_seed_keypair(mp(pk), n(pk), mp(sk), n(sk), p(seed), n(seed)))
+    }
+    Function("mlkem768Enc") { (ct: Uint8Array, ss: Uint8Array, pk: Uint8Array) -> Int in
+      Int(aegis_mlkem768_enc(mp(ct), n(ct), mp(ss), n(ss), p(pk), n(pk)))
+    }
+    Function("mlkem768Dec") { (ss: Uint8Array, ct: Uint8Array, sk: Uint8Array) -> Int in
+      Int(aegis_mlkem768_dec(mp(ss), n(ss), p(ct), n(ct), p(sk), n(sk)))
+    }
     // Hundreds of milliseconds of work: async (off the JS thread), so it cannot
     // touch JS memory. Expo copies the password and salt into `Data` on the JS
     // thread; the key comes back as an int array. Copies made here are zeroed.

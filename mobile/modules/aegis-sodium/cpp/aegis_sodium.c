@@ -228,3 +228,50 @@ int aegis_pow_sha256(uint8_t *nonce, size_t noncelen, const uint8_t *challenge, 
   }
   return AEGIS_EFAIL;
 }
+
+/* dk = dk_PKE (384 * k bytes, k = 3) || ek || H(ek) || z  (FIPS 203 Algorithm 16). */
+#define MLKEM768_DK_PKE 1152
+
+int aegis_mlkem768_keypair(uint8_t *pk, size_t pklen, uint8_t *sk, size_t sklen) {
+  if (pklen != AEGIS_MLKEM768_PK || sklen != AEGIS_MLKEM768_SK || pk == NULL || sk == NULL) return AEGIS_EBADLEN;
+  return crypto_kem_mlkem768_keypair(pk, sk) == 0 ? AEGIS_OK : AEGIS_EFAIL;
+}
+
+int aegis_mlkem768_seed_keypair(uint8_t *pk, size_t pklen, uint8_t *sk, size_t sklen, const uint8_t *seed,
+                                size_t seedlen) {
+  if (pklen != AEGIS_MLKEM768_PK || sklen != AEGIS_MLKEM768_SK || pk == NULL || sk == NULL) return AEGIS_EBADLEN;
+  if (seedlen != AEGIS_MLKEM768_SEED || seed == NULL) return AEGIS_EBADLEN;
+  return crypto_kem_mlkem768_seed_keypair(pk, sk, seed) == 0 ? AEGIS_OK : AEGIS_EFAIL;
+}
+
+int aegis_mlkem768_enc(uint8_t *ct, size_t ctlen, uint8_t *ss, size_t sslen, const uint8_t *pk, size_t pklen) {
+  if (ctlen != AEGIS_MLKEM768_CT || sslen != AEGIS_MLKEM768_SS || ct == NULL || ss == NULL) return AEGIS_EBADLEN;
+  if (pklen != AEGIS_MLKEM768_PK || pk == NULL) return AEGIS_EBADLEN;
+  if (crypto_kem_mlkem768_enc(ct, ss, pk) != 0) {
+    sodium_memzero(ss, sslen);
+    return AEGIS_EFAIL;
+  }
+  return AEGIS_OK;
+}
+
+int aegis_mlkem768_dec(uint8_t *ss, size_t sslen, const uint8_t *ct, size_t ctlen, const uint8_t *sk, size_t sklen) {
+  if (sslen != AEGIS_MLKEM768_SS || ss == NULL) return AEGIS_EBADLEN;
+  if (ctlen != AEGIS_MLKEM768_CT || ct == NULL || sklen != AEGIS_MLKEM768_SK || sk == NULL) return AEGIS_EBADLEN;
+  /* FIPS 203 decapsulation-key check (as @noble does): the dk embeds ek and
+   * H(ek) = SHA3-256(ek); a corrupted key fails here instead of yielding a
+   * wrong secret. The hash of a public key needs no constant time, but
+   * sodium_memcmp costs nothing. */
+  {
+    uint8_t h[32];
+    const uint8_t *ek = sk + MLKEM768_DK_PKE;
+    if (crypto_hash_sha3256(h, ek, AEGIS_MLKEM768_PK) != 0 || sodium_memcmp(h, ek + AEGIS_MLKEM768_PK, sizeof h) != 0) {
+      sodium_memzero(ss, sslen);
+      return AEGIS_EFAIL;
+    }
+  }
+  if (crypto_kem_mlkem768_dec(ss, ct, sk) != 0) {
+    sodium_memzero(ss, sslen);
+    return AEGIS_EFAIL;
+  }
+  return AEGIS_OK;
+}

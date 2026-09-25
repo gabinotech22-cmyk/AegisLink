@@ -21,12 +21,13 @@
  * kept — fail closed): `scalarMult` / `box.before` / `box` THROW on a low-order
  * public key, and Ed25519 verification rejects small-order public keys.
  *
- * Argon2id (PIN and backup KDFs) and the relay's proof-of-work miner run
- * natively too, off the JS thread (`argon2id`, `powSha256`, below). Single
- * unkeyed SHA-256/512 calls stay on @noble (no secret-dependent
- * branches or table lookups to leak through timing), as on desktop. Out of
- * scope (stay on @noble, see docs/ROADMAP.md): PBKDF2 (legacy v1/v2 backups
- * only) and ML-KEM-768.
+ * ML-KEM-768 (PQXDH prekeys and the PQ ratchet) runs natively too, with
+ * @noble/post-quantum's API and bytes (`ml_kem768`, below). Argon2id (PIN and
+ * backup KDFs) and the relay's proof-of-work miner run natively off the JS
+ * thread (`argon2id`, `powSha256`, below). Single unkeyed SHA-256/512 calls
+ * stay on @noble (no secret-dependent branches or table lookups to leak
+ * through timing), as on desktop. Out of scope (stays on @noble, see
+ * docs/ROADMAP.md): PBKDF2 (legacy v1/v2 backups only).
  *
  * If the native module is missing from the binary (Expo Go, a stale dev
  * client), importing this file THROWS: there is no JavaScript fallback.
@@ -363,6 +364,68 @@ export async function argon2id(password: Uint8Array, salt: Uint8Array, opts: Arg
     if (Array.isArray(bytes)) bytes.fill(0);
   }
 }
+
+const MLKEM_PK = 1184;
+const MLKEM_SK = 2400;
+const MLKEM_CT = 1088;
+const MLKEM_SS = 32;
+const MLKEM_SEED = 64;
+/** Offset of ek inside a FIPS 203 dk: dk_PKE (384 * k bytes, k = 3) || ek || H(ek) || z. */
+const MLKEM_EK_OFFSET = 1152;
+
+export interface MlKemKeyPair {
+  publicKey: Uint8Array;
+  secretKey: Uint8Array;
+}
+
+/**
+ * ML-KEM-768 (FIPS 203) on native libsodium, with the @noble/post-quantum API
+ * the app used before and the same bytes: same seed -> key pair, same 2400-byte
+ * secret key, same ciphertexts and shared secrets, same implicit rejection — so
+ * stored PQ prekeys and ratchet states keep working (pinned by the C core's
+ * differential test). Wrong lengths throw; so does a public key that fails
+ * FIPS 203's encapsulation-key check or a secret key that fails its hash check,
+ * as with @noble.
+ */
+export const ml_kem768 = {
+  keygen(seed?: Uint8Array): MlKemKeyPair {
+    const publicKey = new Uint8Array(MLKEM_PK);
+    const secretKey = new Uint8Array(MLKEM_SK);
+    if (seed === undefined) {
+      must(AegisSodium.mlkem768Keypair(publicKey, secretKey), 'mlkem768 keygen');
+    } else {
+      checkArrayTypes(seed);
+      if (seed.length !== MLKEM_SEED) throw new Error('ml_kem768.keygen: seed must be 64 bytes');
+      must(AegisSodium.mlkem768SeedKeypair(publicKey, secretKey, seed), 'mlkem768 keygen');
+    }
+    return { publicKey, secretKey };
+  },
+
+  encapsulate(publicKey: Uint8Array): { cipherText: Uint8Array; sharedSecret: Uint8Array } {
+    checkArrayTypes(publicKey);
+    if (publicKey.length !== MLKEM_PK) throw new Error('ml_kem768.encapsulate: bad public key size');
+    const cipherText = new Uint8Array(MLKEM_CT);
+    const sharedSecret = new Uint8Array(MLKEM_SS);
+    must(AegisSodium.mlkem768Enc(cipherText, sharedSecret, publicKey), 'mlkem768 encapsulate');
+    return { cipherText, sharedSecret };
+  },
+
+  decapsulate(cipherText: Uint8Array, secretKey: Uint8Array): Uint8Array {
+    checkArrayTypes(cipherText, secretKey);
+    if (cipherText.length !== MLKEM_CT) throw new Error('ml_kem768.decapsulate: bad ciphertext size');
+    if (secretKey.length !== MLKEM_SK) throw new Error('ml_kem768.decapsulate: bad secret key size');
+    const sharedSecret = new Uint8Array(MLKEM_SS);
+    must(AegisSodium.mlkem768Dec(sharedSecret, cipherText, secretKey), 'mlkem768 decapsulate');
+    return sharedSecret;
+  },
+
+  /** The public key embedded in a secret key (a copy). */
+  getPublicKey(secretKey: Uint8Array): Uint8Array {
+    checkArrayTypes(secretKey);
+    if (secretKey.length !== MLKEM_SK) throw new Error('ml_kem768.getPublicKey: bad secret key size');
+    return secretKey.slice(MLKEM_EK_OFFSET, MLKEM_EK_OFFSET + MLKEM_PK);
+  },
+};
 
 /** Highest proof-of-work difficulty the native miner accepts (the relay asks for 12-18). */
 export const POW_DIFFICULTY_MAX = 32;

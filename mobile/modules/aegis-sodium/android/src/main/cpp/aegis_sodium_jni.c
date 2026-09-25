@@ -155,3 +155,27 @@ FN(powSha256)(JNIEnv *env, jclass cls, jobject nonce, jobject challenge, jint di
   if (difficulty < 0) return AEGIS_EBADLEN;
   return aegis_pow_sha256(S(0), S(1), (uint32_t) difficulty);
 }
+
+FN(mlkem768Keypair)(JNIEnv *env, jclass cls, jobject pk, jobject sk) {
+  (void) cls;
+  SPANS(2, pk, sk)
+  return aegis_mlkem768_keypair(S(0), S(1));
+}
+
+FN(mlkem768SeedKeypair)(JNIEnv *env, jclass cls, jobject pk, jobject sk, jobject seed) {
+  (void) cls;
+  SPANS(3, pk, sk, seed)
+  return aegis_mlkem768_seed_keypair(S(0), S(1), S(2));
+}
+
+FN(mlkem768Enc)(JNIEnv *env, jclass cls, jobject ct, jobject ss, jobject pk) {
+  (void) cls;
+  SPANS(3, ct, ss, pk)
+  return aegis_mlkem768_enc(S(0), S(1), S(2));
+}
+
+FN(mlkem768Dec)(JNIEnv *env, jclass cls, jobject ss, jobject ct, jobject sk) {
+  (void) cls;
+  SPANS(3, ss, ct, sk)
+  return aegis_mlkem768_dec(S(0), S(1), S(2));
+}
