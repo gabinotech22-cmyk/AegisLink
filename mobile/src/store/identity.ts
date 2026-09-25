@@ -213,8 +213,23 @@ async function runPublish(identity: Identity, slotId: string, silent = false): P
   // only reliable channel here. Silent background refreshes of an
   // already-published identity intentionally do NOT alert — see the `silent`
   // doc comment on runPublish.
+  //
+  // The alert speaks to the user: a translated sentence, never the technical
+  // error (e.g. "[fetchPowChallenge] TypeError: Network request failed"). The
+  // raw text stays in publishError for the Home banner detail and the dev log.
   if (!silent) {
-    themedAlert(i18n.t('onboarding.registrationFailedTitle'), errorMsg);
+    const retryAfterMs = result.retryAfterMs;
+    if (retryAfterMs != null) {
+      themedAlert(
+        i18n.t('onboarding.registrationFailedTitle'),
+        i18n.t('home.registrationRateLimited', { minutes: Math.max(1, Math.ceil(retryAfterMs / 60000)) }),
+      );
+    } else {
+      themedAlert(i18n.t('onboarding.registrationFailedTitle'), i18n.t('onboarding.registrationFailed'), [
+        { text: i18n.t('common.cancel'), style: 'cancel' },
+        { text: i18n.t('onboarding.retryBtn'), onPress: () => void useIdentity.getState().retryPublish() },
+      ]);
+    }
   }
 }
 
