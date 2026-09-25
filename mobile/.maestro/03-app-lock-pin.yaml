@@ -24,15 +24,17 @@ appId: com.aegislink.app
 - scrollUntilVisible:
     element: "Continue"
 - tapOn: "Continue"
+# Registration (proof-of-work in JS) runs alongside on a software-rendered
+# emulator, so screen transitions here can take tens of seconds.
 - extendedWaitUntil:
     visible: "ALMOST DONE"
-    timeout: 15000
+    timeout: 120000
 - scrollUntilVisible:
     element: "Skip for now"
 - tapOn: "Skip for now"
 - extendedWaitUntil:
     visible: "PRIVACY"
-    timeout: 60000
+    timeout: 120000
 - tapOn: "PRIVACY"
 - scrollUntilVisible:
     element: "Lock screen"
@@ -41,7 +43,7 @@ appId: com.aegislink.app
     id: "lockConfig-appLock"
 - extendedWaitUntil:
     visible: "Enter a 6-digit PIN"
-    timeout: 15000
+    timeout: 30000
 - tapOn: "1"
 - tapOn: "4"
 - tapOn: "7"
@@ -50,7 +52,7 @@ appId: com.aegislink.app
 - tapOn: "8"
 - extendedWaitUntil:
     visible: "Confirm your PIN"
-    timeout: 15000
+    timeout: 30000
 - tapOn: "1"
 - tapOn: "4"
 - tapOn: "7"
