@@ -109,9 +109,10 @@ services:
       # leak path. The network firewall is defence-in-depth; this is the fix.
       - "127.0.0.1:${PORT:-3001}:${PORT:-3001}"
     healthcheck:
-      # Use 127.0.0.1, not localhost: in Alpine localhost resolves to ::1 first
-      # and the relay binds IPv4 only, so localhost yields a false "unhealthy".
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:${PORT:-3001}/health"]
+      # node, not wget: the relay image is Debian slim (sodium-native needs glibc)
+      # and ships no wget/curl. 127.0.0.1, not localhost: localhost may resolve to
+      # ::1 first and the relay binds IPv4 only (a false "unhealthy").
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/health').then(r=>r.json()).then(j=>process.exit(j.ok===true?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3

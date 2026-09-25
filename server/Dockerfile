@@ -59,6 +59,6 @@ EXPOSE 3001
 # Health check — no user data, just liveness. Uses node's fetch: the slim image
 # has no wget/curl.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://localhost:'+process.env.PORT+'/health').then(r=>r.json()).then(j=>process.exit(j.ok===true?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/health').then(r=>r.json()).then(j=>process.exit(j.ok===true?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "--import", "tsx", "src/index.ts"]
