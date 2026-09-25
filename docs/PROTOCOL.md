@@ -858,7 +858,10 @@ on desktop, `lock/__tests__/coldLock.test.ts` on both).
   itself visible to the network observer.
 - **Call media IP on mobile.** WebRTC media is UDP and cannot ride Tor; with
   the default relay-only ICE (`hideCallIp`) the peer never sees the device IP,
-  but the TURN server does. Desktop forces TURN-over-TCP through Tor.
+  but the TURN server does. Desktop forces TURN-over-TCP through Tor. The TURN
+  credential carries no identity: its username is `<expiry>:<random 128 bits>`
+  (`server/src/routes/turn.ts`, test `turn.auth.test.ts`), so the TURN server
+  sees an IP but never the Aegis ID behind it.
 - **Endpoint compromise.** Malware or a physically compromised, unlocked device
   with the keystore unsealed can read plaintext. Panic-wipe and decoy modes
   mitigate coercion scenarios but are not cryptographic defenses.

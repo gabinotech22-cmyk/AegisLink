@@ -123,7 +123,9 @@ short version:
 - **Calls on mobile expose your IP to our TURN server.** Call media is UDP,
   which Tor cannot carry. By default, 1:1 calls relay all media through our
   TURN server (*Hide IP in calls*), so the other person does not see your IP,
-  but the TURN server does. The desktop client sends TURN over TCP through Tor.
+  but the TURN server does. It does not learn your Aegis ID: TURN credentials
+  carry a random name, not your identity. The desktop client sends TURN over TCP
+  through Tor.
 - **Expo's update server is contacted directly, outside Tor.** The app checks
   `u.expo.dev` for over-the-air fixes on launch, so Expo sees your IP and that
   the app is installed. The check carries no messages, contacts or Aegis ID.

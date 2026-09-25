@@ -4,6 +4,7 @@ import { z } from 'zod';
 import tweetnaclUtil from 'tweetnacl-util';
 import { identityRepo } from '../db/client.js';
 import { verifyDetached } from '../crypto/ed25519.js';
+import { nacl } from '../crypto/sodium/index.js';
 import { relayLimiter, queryField } from '../http/relayLimiter.js';
 
 const { decodeBase64 } = tweetnaclUtil;
@@ -33,13 +34,15 @@ const CredentialsQuery = z.object({
  * GET /turn/credentials?aegisId=&sig=&ts=
  *
  * Returns short-lived TURN credentials using coturn's use-auth-secret mechanism:
- *   username = "<expiry_unix_ts>:<aegisId>"
+ *   username = "<expiry_unix_ts>:<128-bit random hex>"
  *   password = HMAC-SHA1(TURN_SECRET, username) encoded as base64
  *
  * Requires a valid Ed25519 signature over `${aegisId}:turn:${floor(ts/30_000)}`
- * by the identity's registered signing key (anti-abuse). The server never logs
- * the aegisId — it is used only for username uniqueness within the TTL window
- * and to look up the signing key for verification.
+ * by the identity's registered signing key (anti-abuse). The aegisId is used
+ * only to look up that key: it never goes into the credential. coturn receives
+ * call media from the caller's real IP (UDP cannot ride Tor), so a username
+ * carrying the aegisId would hand the TURN server an identity↔IP pair on every
+ * call. The random part keeps usernames unique and unlinkable.
  */
 const turnLimiter = relayLimiter({
   windowMs: 60 * 1000,
@@ -96,7 +99,7 @@ router.get('/credentials', turnLimiter, async (req, res) => {
   }
 
   const expiresAt = Math.floor(Date.now() / 1000) + TTL_SECS;
-  const username = `${expiresAt}:${aegisId}`;
+  const username = `${expiresAt}:${Buffer.from(nacl.randomBytes(16)).toString('hex')}`;
   // lgtm[js/weak-cryptographic-algorithm]
   const credential = createHmac('sha1', secret).update(username).digest('base64');
 

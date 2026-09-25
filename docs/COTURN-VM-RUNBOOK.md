@@ -150,7 +150,9 @@ para verificar alcance.
 `TURN_SECRET` pasa a ser un secreto **compartido entre dos máquinas**:
 
 - El relay lo usa para **firmar** credenciales efímeras (`server/src/routes/turn.ts`,
-  `HMAC-SHA1(TURN_SECRET, "<expiry>:<aegisId>")`).
+  `HMAC-SHA1(TURN_SECRET, "<expiry>:<128 bits aleatorios>")`). El username **no**
+  lleva el aegisId: coturn ve la IP real del móvil en cada llamada y no debe poder
+  ligarla a una identidad.
 - coturn lo usa para **verificar** ese HMAC (`use-auth-secret`).
 
 Si no coinciden byte a byte, **toda llamada relayed falla con 401**.
