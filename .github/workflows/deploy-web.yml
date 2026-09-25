@@ -1,0 +1,57 @@
+# Deploy the public site (web/: landing, legal pages, self-host guide, lang.js)
+# to the VM — MANUAL ONLY (workflow_dispatch), same model as deploy.yml.
+#
+# Runs infra/deploy-web.sh unchanged (nginx config + pages, reload), with the
+# SAME secrets as the relay deploy — no new credential:
+#   DEPLOY_HOST     — public IP or hostname of the VM
+#   DEPLOY_USER     — SSH user
+#   DEPLOY_SSH_KEY  — private key authorized on the VM (dedicated CI key)
+# The key only exists in the runner for the length of the job (0600, deleted
+# at the end). Then every published page is smoke-tested over HTTPS.
+
+name: Deploy web (manual)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-web:
+    name: Deploy web via SSH
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy (infra/deploy-web.sh)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: SSH_KEY="$HOME/.ssh/deploy_key" bash infra/deploy-web.sh
+
+      - name: Smoke test (every page must answer 200)
+        run: |
+          fail=0
+          for p in index.html privacy.html terms.html legal.html donate.html selfhost.html lang.js; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://aegis-link.it/$p")
+            echo "  $code  https://aegis-link.it/$p"
+            [ "$code" = "200" ] || fail=1
+          done
+          exit $fail
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

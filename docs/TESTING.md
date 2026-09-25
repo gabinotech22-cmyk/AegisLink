@@ -290,6 +290,12 @@ de humo), comprueba que **ningún** servicio publica un puerto (el relay propio
 es solo `.onion`) y hace `bash -n` de `up.sh`/`print-onion.sh`/
 `backup-onion-key.sh`/`show-qr.sh`. Ver `docs/SELF-HOSTING.md`.
 
+## Workflow `deploy-web.yml` (manual)
+
+Publica la web (`web/`: landing, páginas legales, guía de self-hosting, `lang.js`) con
+`infra/deploy-web.sh` y los mismos secretos que `deploy.yml` (`DEPLOY_HOST`, `DEPLOY_USER`,
+`DEPLOY_SSH_KEY`); después exige HTTP 200 en cada página publicada. Solo `workflow_dispatch`.
+
 ## Semgrep (`.github/workflows/semgrep.yml`)
 
 Packs `p/secrets`, `p/security-audit`, `p/typescript` y las reglas de oro de `.semgrep/`; el
