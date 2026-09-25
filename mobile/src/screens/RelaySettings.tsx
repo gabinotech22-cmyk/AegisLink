@@ -8,9 +8,13 @@
  * itself is `net/relayMigration.ts` (register on the new relay → announce to
  * contacts → switch → reconnect, with a 7-day grace window on the old one).
  * Reachable only with the FEDERATION flag on (App.tsx / Privacy.tsx gate).
+ *
+ * The "how do I run one?" card is the in-app entry to docs/SELF-HOSTING.md:
+ * three steps inline plus a link to the rendered guide on the product site
+ * (web/selfhost.html), so a user who has never seen the repo can set one up.
  */
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, ActivityIndicator, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -21,6 +25,11 @@ import { useIdentity } from '../store/identity';
 import { useLockConfirm } from '../components/LockConfirm';
 import { relayRefFromOnion, shortOnion, type RelayRef } from '../net/relayRef';
 import { describeHome, migrateHomeRelay, verifyRelay, type RelayInfo, type MigrateError, type VerifyRelayResult } from '../net/relayMigration';
+
+// Public self-hosting guide on the product site (web/selfhost.html, the
+// rendered twin of docs/SELF-HOSTING.md). Opened in the external browser, like
+// the legal links in Privacy.tsx — the app itself fetches nothing.
+export const SELFHOST_GUIDE_URL = 'https://aegis-link.it/selfhost.html';
 
 interface Props {
   onBack: () => void;
@@ -140,6 +149,27 @@ export function RelaySettingsScreen({ onBack }: Props) {
         <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19, marginBottom: 12 }}>
           {i18nT('relaySettings.ownDesc')}
         </Text>
+        <View style={{ backgroundColor: t.surface2, borderRadius: t.radiusS, padding: 12, marginBottom: 12 }} testID="relay-howto">
+          <Text style={{ fontFamily: t.font, fontSize: 13, color: t.text, fontWeight: '600', marginBottom: 8 }}>
+            {i18nT('relaySettings.howToTitle')}
+          </Text>
+          {(['howTo1', 'howTo2', 'howTo3'] as const).map((k, idx) => (
+            <View key={k} style={{ flexDirection: 'row', gap: 8, marginBottom: 6 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent, lineHeight: 18 }}>{idx + 1}.</Text>
+              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 18, flex: 1 }}>{i18nT(`relaySettings.${k}`)}</Text>
+            </View>
+          ))}
+          <Pressable
+            onPress={() => { void Linking.openURL(SELFHOST_GUIDE_URL).catch(() => {}); }}
+            accessibilityRole="link"
+            accessibilityHint={i18nT('relaySettings.guideHint')}
+            testID="relay-guide-link"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 6 }}
+          >
+            <Text style={{ fontFamily: t.font, fontSize: 13, color: t.accent, fontWeight: '600' }}>{i18nT('relaySettings.guideCta')}</Text>
+            <I.Chevron size={14} color={t.accent} />
+          </Pressable>
+        </View>
         <View style={{ backgroundColor: t.surface, borderWidth: 1, borderColor: t.border, borderRadius: t.radius, paddingHorizontal: 14 }}>
           <TextInput
             value={onionInput}

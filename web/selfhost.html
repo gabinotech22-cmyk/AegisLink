@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run your own relay — AegisLink</title>
+<meta name="description" content="Run your own AegisLink relay as a Tor hidden service with Docker, and point the app at it. No domain, no certificate, no open ports.">
+<style>
+  :root {
+    --bg: #07090a; --bg-2: #0d1112; --text: #e8f5ef; --dim: #9fb8ac;
+    --accent: #5bf2b9; --border: rgba(91,242,185,0.18);
+    --sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono: 'Cascadia Code', 'JetBrains Mono', monospace;
+  }
+  * { margin: 0; box-sizing: border-box; }
+  html { background: var(--bg); }
+  body { font-family: var(--sans); color: var(--text); line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 48px 22px 80px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; }
+  header a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 20px; display: flex; align-items: center; gap: 12px; }
+  h1 { font-size: 34px; line-height: 1.15; margin-bottom: 10px; }
+  .meta { font-family: var(--mono); font-size: 13px; color: var(--accent); margin-bottom: 36px; }
+  h2 { font-size: 21px; margin: 40px 0 12px; padding-top: 22px; border-top: 1px solid var(--border); }
+  p, li { color: var(--dim); font-size: 16px; }
+  p { margin: 12px 0; }
+  strong { color: var(--text); }
+  ul { padding-left: 22px; margin: 12px 0; }
+  li { margin: 6px 0; }
+  a { color: var(--accent); }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 10px 12px; border: 1px solid var(--border); color: var(--dim); vertical-align: top; }
+  th { color: var(--text); background: var(--bg-2); }
+  .note { font-style: italic; margin-top: 42px; color: var(--dim); font-size: 14.5px; }
+  pre { background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 14px 0; }
+  code { font-family: var(--mono); font-size: 14px; color: var(--text); }
+  p code, li code { background: var(--bg-2); padding: 1px 5px; border-radius: 4px; }
+  ol { padding-left: 22px; margin: 12px 0; }
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a href="/">
+      <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/><rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/><rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/></svg>
+      AegisLink
+    </a>
+  </header>
+
+  <h1>Run your own relay</h1>
+  <p class="meta">For AegisLink 1.0.7+ · Privacy → Network → My relay</p>
+
+  <p>An AegisLink relay is a blind mailbox: it receives sealed envelopes (it never sees who writes to whom) and holds them until the recipient collects them. Running your own means <strong>your messages never pass through the official relay</strong>. Your identity and your mailbox live on your machine, and your contacts &mdash; on the official relay or any other &mdash; write to it directly over Tor. There is no network between relays and no global directory.</p>
+
+  <ul>
+    <li><strong>Onion only.</strong> The relay is published as a Tor v3 hidden service. No clearnet listener, no TLS certificate, no domain, no port opened on your router. Your machine never learns anyone's IP, and nobody needs to know where it runs.</li>
+    <li><strong>Not a Tor relay or exit.</strong> The Tor sidecar only publishes your service.</li>
+    <li><strong>Same code as the official relay</strong>, open source and auditable.</li>
+  </ul>
+
+  <h2>1. What you need</h2>
+  <ul>
+    <li>A machine that is on when you want to receive messages: a 2&nbsp;GB VPS, a home mini-PC or a Raspberry Pi&nbsp;4. No public IP, no domain.</li>
+    <li>Docker with the <code>compose</code> plugin (Docker 24+).</li>
+    <li>Outbound Internet access (Tor needs to reach the Tor network; nothing comes in).</li>
+  </ul>
+
+  <h2>2. Start it</h2>
+<pre><code>git clone https://github.com/gabinotech22-cmyk/AegisLink.git
+cd AegisLink/infra/selfhost
+./up.sh</code></pre>
+  <p><code>up.sh</code> is idempotent: it creates <code>.env</code>, generates the required secrets, builds and starts the relay, Tor and the wake-up notifier, waits for Tor to publish the service and prints your address:</p>
+<pre><code>  Your relay:  http://xxxxxxxx&hellip;xxxxxxxx.onion</code></pre>
+  <p>The first publication can take 1&ndash;3 minutes. Print it again any time with <code>./print-onion.sh</code>. To update after a <code>git pull</code>, run <code>./up.sh</code> again &mdash; data and onion key are kept.</p>
+
+  <h2>3. Point the app at it</h2>
+  <ol>
+    <li>In AegisLink, open <strong>Privacy &rarr; Network &rarr; My relay</strong>, paste the <code>.onion</code> address and tap <strong>Verify relay</strong>. The app checks over Tor that it is an AegisLink relay with mailboxes and prekeys.</li>
+    <li>Tap <strong>Switch to &hellip;onion</strong>, read the consequences and confirm (with your PIN or biometrics if the app lock is on).</li>
+    <li>The app registers on your relay, tells all your contacts your new address inside the encrypted channel, and switches. For <strong>7 days</strong> it keeps receiving on the previous relay too; anyone who doesn't open the app in that time will need your new link.</li>
+  </ol>
+  <p>You can always go back with <strong>Back to the official relay</strong> &mdash; the same migration in reverse.</p>
+
+  <h2>4. Back up the onion key</h2>
+  <p>The <code>.onion</code> address <strong>is</strong> a key, and it lives only on your machine. If you lose it, your address changes and everyone using your relay has to switch again. Keep a copy off the machine:</p>
+<pre><code>./backup-onion-key.sh          # &rarr; tor_keys-&lt;date&gt;.tar.gz (mode 600)</code></pre>
+  <p>Anyone holding that file can impersonate your relay: treat it like a private key.</p>
+
+  <h2>Calls</h2>
+  <p>Signalling goes sealed through your relay, but audio and video travel phone to phone, not over Tor. Without a TURN server, two users behind strict NATs may fail to connect (chat is unaffected). For reliable calls, run coturn on a machine with a public IP and set <code>TURN_HOST</code> in the relay's <code>.env</code>.</p>
+
+  <h2>What the operator can see</h2>
+  <p>Exactly what the official relay sees of its users, no more: opaque mailbox ids that rotate daily, encrypted envelopes, and when they are collected. Never IPs (Tor), never who writes to whom (sealed sender), never content.</p>
+
+  <h2>Full guide</h2>
+  <p>Every option, troubleshooting and the design behind it are in the repository: <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/SELF-HOSTING.md">docs/SELF-HOSTING.md</a> (Spanish) and the self-host package in <a href="https://github.com/gabinotech22-cmyk/AegisLink/tree/main/infra/selfhost">infra/selfhost</a>.</p>
+
+  <footer>&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacy</a> &middot; <a href="/terms.html">Terms</a> &middot; <a href="/donate.html">Support</a></footer>
+</div>
+</body>
+</html>

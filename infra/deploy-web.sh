@@ -35,6 +35,7 @@ echo "[deploy-web] Uploading landing page and nginx config..."
 "${SCP[@]}" "$ROOT/web/terms.html" "$USER@$HOST:/tmp/aegislink-web-terms.html"
 "${SCP[@]}" "$ROOT/web/legal.html" "$USER@$HOST:/tmp/aegislink-web-legal.html"
 "${SCP[@]}" "$ROOT/web/donate.html" "$USER@$HOST:/tmp/aegislink-web-donate.html"
+"${SCP[@]}" "$ROOT/web/selfhost.html" "$USER@$HOST:/tmp/aegislink-web-selfhost.html"
 "${SCP[@]}" "$SCRIPT_DIR/nginx/aegislink-web.conf" "$USER@$HOST:/tmp/aegislink-web.conf"
 
 # Optional donation QR images — uploaded only if present locally (the page
@@ -54,6 +55,7 @@ sudo mv /tmp/aegislink-web-privacy.html /var/www/aegislink-web/privacy.html
 sudo mv /tmp/aegislink-web-terms.html /var/www/aegislink-web/terms.html
 sudo mv /tmp/aegislink-web-legal.html /var/www/aegislink-web/legal.html
 sudo mv /tmp/aegislink-web-donate.html /var/www/aegislink-web/donate.html
+sudo mv /tmp/aegislink-web-selfhost.html /var/www/aegislink-web/selfhost.html
 # Move any donation QR images that were uploaded this run.
 for qr in qr-xmr.png qr-lightning.png; do
   [ -f "/tmp/aegislink-web-$qr" ] && sudo mv "/tmp/aegislink-web-$qr" "/var/www/aegislink-web/$qr"

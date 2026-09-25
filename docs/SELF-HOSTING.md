@@ -4,7 +4,11 @@
 > defecto** en los clientes desde 1.0.7 (F7). Este doc es la fuente canónica de cómo
 > montar un relay propio; el diseño y el estado de la federación viven en
 > `docs/FEDERATION-DESIGN.md`. Los usuarios lo eligen desde la app en
-> **Privacidad → Red → "Mi relay"**.
+> **Privacidad → Red → "Mi relay"**, que también explica cómo montarlo: tarjeta
+> "¿Cómo monto mi propio relay?" con 3 pasos + enlace a la versión pública de
+> esta guía, **`https://aegis-link.it/selfhost.html`** (`web/selfhost.html`,
+> desplegada con `infra/deploy-web.sh`). Si cambias los pasos aquí, cambia
+> también esa página y las claves `relaySettings.howTo*` de la app.
 
 ## Qué es (y qué no)
 

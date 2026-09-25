@@ -3,7 +3,9 @@
  * docs/FEDERATION-DESIGN.md D4). Desktop twin of mobile/src/screens/RelaySettings.tsx:
  * shows the current home, verifies a self-hosted (.onion) relay before offering
  * the switch, spells out the consequences, and runs net/relayMigration.
- * Reachable only with the FEDERATION flag on.
+ * Reachable only with the FEDERATION flag on. The "how do I run one?" card
+ * mirrors mobile: three inline steps + a link to web/selfhost.html (opened in
+ * the OS browser by main's setWindowOpenHandler, https only).
  */
 import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +18,10 @@ import { useIdentity } from '../store/identity';
 import { useLockConfirm } from '../components/LockConfirm';
 import { relayRefFromOnion, shortOnion, type RelayRef } from '../net/relayRef';
 import { describeHome, migrateHomeRelay, verifyRelay, type RelayInfo, type MigrateError, type VerifyRelayResult } from '../net/relayMigration';
+
+// Public self-hosting guide on the product site (web/selfhost.html, the
+// rendered twin of docs/SELF-HOSTING.md).
+export const SELFHOST_GUIDE_URL = 'https://aegis-link.it/selfhost.html';
 
 interface Props {
   onBack: () => void;
@@ -120,6 +126,25 @@ export function RelaySettingsScreen({ onBack }: Props) {
 
         <span style={sectionLabel}>{i18n.t('relaySettings.ownSection')}</span>
         <p style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: '19px', margin: '0 0 12px' }}>{i18n.t('relaySettings.ownDesc')}</p>
+        <div data-testid="relay-howto" style={{ backgroundColor: t.surface2, borderRadius: t.radiusS, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontFamily: t.font, fontSize: 13, color: t.text, fontWeight: 600, marginBottom: 8 }}>{i18n.t('relaySettings.howToTitle')}</div>
+          <ol style={{ margin: 0, paddingLeft: 20, fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: '18px' }}>
+            {(['howTo1', 'howTo2', 'howTo3'] as const).map((k) => (
+              <li key={k} style={{ marginBottom: 6 }}>{i18n.t(`relaySettings.${k}`)}</li>
+            ))}
+          </ol>
+          <a
+            data-testid="relay-guide-link"
+            href={SELFHOST_GUIDE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={i18n.t('relaySettings.guideHint')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, paddingTop: 6, fontFamily: t.font, fontSize: 13, color: t.accent, fontWeight: 600, textDecoration: 'none' }}
+          >
+            {i18n.t('relaySettings.guideCta')}
+            <I.Chevron size={14} color={t.accent} />
+          </a>
+        </div>
         <input
           value={onionInput}
           onChange={(e) => { setOnionInput(e.target.value.trim().toLowerCase()); if (verify.kind !== 'idle') setVerify({ kind: 'idle' }); }}
