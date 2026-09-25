@@ -275,3 +275,46 @@ int aegis_mlkem768_dec(uint8_t *ss, size_t sslen, const uint8_t *ct, size_t ctle
   }
   return AEGIS_OK;
 }
+
+int aegis_pbkdf2_sha256(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdlen, const uint8_t *salt,
+                        size_t saltlen, uint32_t iterations) {
+  static const uint8_t empty = 0;
+  crypto_auth_hmacsha256_state keyed, st;
+  uint8_t u[crypto_auth_hmacsha256_BYTES], t[crypto_auth_hmacsha256_BYTES], be[4];
+  size_t done = 0;
+  uint32_t block = 1, j;
+  size_t k;
+  if (outlen == 0 || outlen > AEGIS_PBKDF2_OUT_MAX || out == NULL) return AEGIS_EBADLEN;
+  if (pwdlen > AEGIS_PBKDF2_PWD_MAX || saltlen > AEGIS_PBKDF2_SALT_MAX) return AEGIS_EBADLEN;
+  NEED(pwd, pwdlen);
+  NEED(salt, saltlen);
+  if (iterations < 1 || iterations > AEGIS_PBKDF2_ITER_MAX) return AEGIS_EBADLEN;
+  /* HMAC keyed once with the password; each PRF call starts from a copy. */
+  crypto_auth_hmacsha256_init(&keyed, pwdlen ? pwd : &empty, pwdlen);
+  while (done < outlen) {
+    be[0] = (uint8_t) (block >> 24);
+    be[1] = (uint8_t) (block >> 16);
+    be[2] = (uint8_t) (block >> 8);
+    be[3] = (uint8_t) block;
+    st = keyed; /* U1 = PRF(P, S || INT(i)) */
+    crypto_auth_hmacsha256_update(&st, saltlen ? salt : &empty, saltlen);
+    crypto_auth_hmacsha256_update(&st, be, sizeof be);
+    crypto_auth_hmacsha256_final(&st, u);
+    memcpy(t, u, sizeof t);
+    for (j = 1; j < iterations; j++) { /* Uj = PRF(P, Uj-1); T ^= Uj */
+      st = keyed;
+      crypto_auth_hmacsha256_update(&st, u, sizeof u);
+      crypto_auth_hmacsha256_final(&st, u);
+      for (k = 0; k < sizeof t; k++) t[k] ^= u[k];
+    }
+    k = outlen - done < sizeof t ? outlen - done : sizeof t;
+    memcpy(out + done, t, k);
+    done += k;
+    block++;
+  }
+  sodium_memzero(&keyed, sizeof keyed);
+  sodium_memzero(&st, sizeof st);
+  sodium_memzero(u, sizeof u);
+  sodium_memzero(t, sizeof t);
+  return AEGIS_OK;
+}

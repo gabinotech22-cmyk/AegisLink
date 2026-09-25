@@ -1,18 +1,18 @@
 /**
  * Cross-platform Known-Answer Test (KAT) for @noble/hashes.
  *
- * Audit-finding H3: mobile pins @noble/hashes v1.x while desktop pins v2.x.
- * The algorithms (SHA-256, HMAC, HKDF, PBKDF2) are version-independent, but to
- * guarantee mobile↔desktop crypto parity (golden rule #5) this test asserts the
- * library produces the exact bytes of public RFC test vectors. The desktop suite
+ * Audit-finding H3: mobile and desktop both pin @noble/hashes 2.x (mobile was
+ * on 1.x until 2026-09). To guarantee mobile↔desktop crypto parity (golden
+ * rule #5) this test asserts the library produces the exact bytes of public RFC
+ * test vectors. The desktop suite
  * (`desktop/src/renderer/crypto/__tests__/noble-kat.test.ts`) asserts the SAME
- * vectors against its v2 build — if either platform's library ever changes output,
+ * vectors — if either platform's library ever changes output,
  * its KAT fails. Keep the two files in lock-step.
  */
-import { sha256 } from '@noble/hashes/sha2';
-import { hmac } from '@noble/hashes/hmac';
-import { hkdf } from '@noble/hashes/hkdf';
-import { pbkdf2 } from '@noble/hashes/pbkdf2';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { hmac } from '@noble/hashes/hmac.js';
+import { hkdf } from '@noble/hashes/hkdf.js';
+import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
 
 const ascii = (s: string): Uint8Array => Uint8Array.from(s, (c) => c.charCodeAt(0));
 const hex = (s: string): Uint8Array =>

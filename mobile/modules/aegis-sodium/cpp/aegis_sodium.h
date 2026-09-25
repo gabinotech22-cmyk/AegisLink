@@ -120,6 +120,18 @@ int aegis_mlkem768_enc(uint8_t *ct, size_t ctlen, uint8_t *ss, size_t sslen, con
  * fails FIPS 203's hash check (H(ek) embedded in dk), as @noble's decapsulate does. */
 int aegis_mlkem768_dec(uint8_t *ss, size_t sslen, const uint8_t *ct, size_t ctlen, const uint8_t *sk, size_t sklen);
 
+/*
+ * PBKDF2-HMAC-SHA256 (RFC 8018), for restoring legacy v1/v2 backups (100k and
+ * 600k iterations). Byte-identical to @noble/hashes pbkdf2(sha256, ...), which
+ * wrote them. Slow by design: the bindings run it off the JS thread.
+ */
+#define AEGIS_PBKDF2_OUT_MAX 64
+#define AEGIS_PBKDF2_PWD_MAX 65536
+#define AEGIS_PBKDF2_SALT_MAX 1024
+#define AEGIS_PBKDF2_ITER_MAX 10000000
+int aegis_pbkdf2_sha256(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdlen, const uint8_t *salt,
+                        size_t saltlen, uint32_t iterations);
+
 #ifdef __cplusplus
 }
 #endif

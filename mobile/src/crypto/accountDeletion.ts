@@ -19,7 +19,7 @@
 
 import { nacl } from './sodium';
 import { encodeBase64 } from 'tweetnacl-util';
-import { utf8ToBytes } from '@noble/hashes/utils';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
 import type { Identity } from './identity';
 import { homeRelayBaseUrl } from '../net/homeRelay';
 import { relayFetch, type RelayResponse } from '../net/relayHttp';

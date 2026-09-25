@@ -4,12 +4,12 @@ import Foundation
 
 /// F-1 B2: native libsodium for `src/crypto/sodium` (see ../index.ts).
 ///
-/// Every function but argon2id and powSha256 is synchronous (JSI) and writes into
+/// Every function but argon2id, pbkdf2Sha256 and powSha256 is synchronous (JSI) and writes into
 /// caller-allocated output arrays, returning the C core's code: 0 ok,
 /// 1 verification failed, -1 bad length, -2 libsodium failure. The pointers
 /// are the JS arrays' own memory (expo-modules-core `rawPointer`, byteOffset
 /// already applied); no key material is copied. aegis_sodium.c validates every
-/// length. argon2id and powSha256 are the exceptions (async; see below).
+/// length. Those three are the exceptions (async; see below).
 public class AegisSodiumModule: Module {
   public func definition() -> ModuleDefinition {
     Name("AegisSodium")
@@ -98,6 +98,29 @@ public class AegisSodiumModule: Module {
       }
       guard rc == 0 else {
         throw Exception(name: "ERR_AEGIS_ARGON2", description: "aegis_argon2id failed: \(rc)")
+      }
+      return out.map { Int($0) }
+    }
+    // PBKDF2-HMAC-SHA256 for legacy backups (up to 600k iterations): async
+    // like argon2id, with the same zeroing of the password and key copies.
+    AsyncFunction("pbkdf2Sha256") { (pwd: Data, salt: Data, iterations: Int, outLen: Int) throws -> [Int] in
+      defer { wipe(pwd) }
+      guard (1...64).contains(outLen), iterations >= 0, iterations <= Int(UInt32.max) else {
+        throw Exception(name: "ERR_AEGIS_PBKDF2", description: "aegis_pbkdf2_sha256: bad parameters")
+      }
+      var out = [UInt8](repeating: 0, count: outLen)
+      defer { out.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) } }
+      let rc = pwd.withUnsafeBytes { (pw: UnsafeRawBufferPointer) -> Int32 in
+        salt.withUnsafeBytes { (sa: UnsafeRawBufferPointer) -> Int32 in
+          aegis_pbkdf2_sha256(
+            &out, outLen,
+            pw.count == 0 ? nil : pw.bindMemory(to: UInt8.self).baseAddress, pw.count,
+            sa.count == 0 ? nil : sa.bindMemory(to: UInt8.self).baseAddress, sa.count,
+            UInt32(iterations))
+        }
+      }
+      guard rc == 0 else {
+        throw Exception(name: "ERR_AEGIS_PBKDF2", description: "aegis_pbkdf2_sha256 failed: \(rc)")
       }
       return out.map { Int($0) }
     }

@@ -24,17 +24,17 @@
  * ML-KEM-768 (PQXDH prekeys and the PQ ratchet) runs natively too, with
  * @noble/post-quantum's API and bytes (`ml_kem768`, below). Argon2id (PIN and
  * backup KDFs) and the relay's proof-of-work miner run natively off the JS
- * thread (`argon2id`, `powSha256`, below). Single unkeyed SHA-256/512 calls
- * stay on @noble (no secret-dependent branches or table lookups to leak
- * through timing), as on desktop. Out of scope (stays on @noble, see
- * docs/ROADMAP.md): PBKDF2 (legacy v1/v2 backups only).
+ * thread (`argon2id`, `powSha256`, below), and so does PBKDF2 for legacy
+ * backups (`pbkdf2Sha256`). Single unkeyed SHA-256/512 calls stay on @noble
+ * (no secret-dependent branches or table lookups to leak through timing), as
+ * on desktop.
  *
  * If the native module is missing from the binary (Expo Go, a stale dev
  * client), importing this file THROWS: there is no JavaScript fallback.
  *
  * Same API: `desktop/src/renderer/crypto/sodium/index.ts`.
  */
-import { sha256 as nobleSha256, sha512 as nobleSha512 } from '@noble/hashes/sha2';
+import { sha256 as nobleSha256, sha512 as nobleSha512 } from '@noble/hashes/sha2.js';
 import AegisSodium, { AEGIS_OK, AEGIS_EVERIFY, AEGIS_EFAIL } from '../../../modules/aegis-sodium';
 
 export interface BoxKeyPair {
@@ -359,6 +359,31 @@ export async function argon2id(password: Uint8Array, salt: Uint8Array, opts: Arg
   const bytes = await AegisSodium.argon2id(password, salt, opts.t, opts.m, opts.dkLen);
   try {
     if (!Array.isArray(bytes) || bytes.length !== opts.dkLen) throw new Error('aegis-sodium: argon2id failed');
+    return Uint8Array.from(bytes);
+  } finally {
+    if (Array.isArray(bytes)) bytes.fill(0);
+  }
+}
+
+/**
+ * PBKDF2-HMAC-SHA256 (RFC 8018), native and off the JS thread, byte-identical
+ * to @noble/hashes `pbkdf2(sha256, ...)`. Only legacy v1/v2 backups use it
+ * (100k / 600k iterations); on Hermes the JavaScript loop froze the UI.
+ */
+export async function pbkdf2Sha256(
+  password: Uint8Array,
+  salt: Uint8Array,
+  iterations: number,
+  dkLen: number,
+): Promise<Uint8Array> {
+  checkArrayTypes(password, salt);
+  if (!inRange(dkLen, [1, 64])) throw new Error('pbkdf2Sha256: dkLen must be 1..64');
+  if (!inRange(iterations, [1, 10_000_000])) throw new Error('pbkdf2Sha256: iterations must be 1..10000000');
+  if (password.length > 65536) throw new Error('pbkdf2Sha256: password too long');
+  if (salt.length > 1024) throw new Error('pbkdf2Sha256: salt too long');
+  const bytes = await AegisSodium.pbkdf2Sha256(password, salt, iterations, dkLen);
+  try {
+    if (!Array.isArray(bytes) || bytes.length !== dkLen) throw new Error('aegis-sodium: pbkdf2Sha256 failed');
     return Uint8Array.from(bytes);
   } finally {
     if (Array.isArray(bytes)) bytes.fill(0);

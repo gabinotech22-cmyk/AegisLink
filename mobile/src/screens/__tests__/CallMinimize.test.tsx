@@ -22,7 +22,7 @@ jest.mock('../../crypto/sodium', () => ({
   sha256: jest.fn(() => new Uint8Array(32)),
 }));
 
-jest.mock('@noble/hashes/utils', () => ({
+jest.mock('@noble/hashes/utils.js', () => ({
   bytesToHex: jest.fn(() => '0'.repeat(64)),
 }));
 

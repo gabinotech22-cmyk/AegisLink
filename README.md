@@ -108,9 +108,10 @@ short version:
   classical X25519.
 - **Some crypto still runs in JavaScript, and keys pass through JS memory.**
   The core primitives (X25519, XSalsa20-Poly1305, Ed25519, HMAC/HKDF, RNG) run
-  on native libsodium on every platform, and so do ML-KEM-768 and Argon2id
-  (PIN, backup) on mobile. Desktop ML-KEM-768, legacy-backup PBKDF2 and desktop
-  Argon2id are still constant-time JS (`@noble`), whose guarantee is source-level, not verified
+  on native libsodium on every platform, and so do ML-KEM-768, Argon2id (PIN,
+  backup) and legacy-backup PBKDF2 on mobile. On desktop, ML-KEM-768,
+  legacy-backup PBKDF2 and Argon2id are still constant-time JS (`@noble`),
+  whose guarantee is source-level, not verified
   through the JIT+GC; and private keys are still
   handed to native code from JS memory rather than living only in native memory
   (follow-up F-1b). Practical exploitation would require an already-compromised

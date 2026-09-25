@@ -19,7 +19,7 @@ import { secretB64Equals } from './secretEquals';
 import { logger } from '../utils/logger';
 import * as SecureStore from 'expo-secure-store';
 import { encodeBase64 } from 'tweetnacl-util';
-import { utf8ToBytes } from '@noble/hashes/utils';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
 import type {
   Identity,
   OneTimePreKeyPublic,

@@ -10,10 +10,11 @@
  * `modules/aegis-sodium/test/differential.mjs` (CI job `aegis-sodium-native`).
  */
 import tweetnacl from 'tweetnacl';
-import { hmac } from '@noble/hashes/hmac';
-import { hkdf } from '@noble/hashes/hkdf';
-import { sha256 as nobleSha256 } from '@noble/hashes/sha2';
-import { argon2id as nobleArgon2id } from '@noble/hashes/argon2';
+import { hmac } from '@noble/hashes/hmac.js';
+import { hkdf } from '@noble/hashes/hkdf.js';
+import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
+import { argon2id as nobleArgon2id } from '@noble/hashes/argon2.js';
+import { pbkdf2 as noblePbkdf2 } from '@noble/hashes/pbkdf2.js';
 import { ml_kem768 as nobleMlKem } from '@noble/post-quantum/ml-kem.js';
 import { nacl, hmacSha256, hkdfSha256, argon2id } from '../sodium';
 import { verifyDetached } from '../ed25519';
@@ -313,5 +314,26 @@ describe('ml_kem768 (native)', () => {
     corrupt[1152 + 1184] ^= 1;
     expect(() => ml_kem768.decapsulate(e.cipherText, corrupt)).toThrow(/mlkem768 decapsulate failed/);
     expect(() => ml_kem768.encapsulate('x' as unknown as Uint8Array)).toThrow(TypeError);
+  });
+});
+
+describe('pbkdf2Sha256 (native, async)', () => {
+  it('matches @noble pbkdf2(sha256) and RFC 7914 §11', async () => {
+    const { pbkdf2Sha256 } = await import('../sodium');
+    const enc = new TextEncoder();
+    const rfc = await pbkdf2Sha256(enc.encode('passwd'), enc.encode('salt'), 1, 64);
+    expect(Buffer.from(rfc).toString('hex')).toBe(
+      '55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783',
+    );
+    for (const [pwd, salt, c] of [[rand(20), rand(32), 1000], [new Uint8Array(0), rand(16), 3], [rand(200), new Uint8Array(0), 2]] as const) {
+      expect(await pbkdf2Sha256(pwd, salt, c, 32)).toEqual(noblePbkdf2(nobleSha256, pwd, salt, { c, dkLen: 32 }));
+    }
+  });
+
+  it('rejects out-of-range parameters before calling native code', async () => {
+    const { pbkdf2Sha256 } = await import('../sodium');
+    await expect(pbkdf2Sha256(rand(4), rand(16), 0, 32)).rejects.toThrow(/iterations/);
+    await expect(pbkdf2Sha256(rand(4), rand(16), 1, 65)).rejects.toThrow(/dkLen/);
+    await expect(pbkdf2Sha256(rand(4), rand(1025), 1, 32)).rejects.toThrow(/salt/);
   });
 });
