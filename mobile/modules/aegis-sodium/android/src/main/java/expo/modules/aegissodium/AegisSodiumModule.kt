@@ -9,11 +9,11 @@ import java.nio.ByteBuffer
 /**
  * F-1 B2: native libsodium for `src/crypto/sodium` (see ../../../../../../../index.ts).
  *
- * Every function but argon2id is synchronous (JSI) and writes into
+ * Every function but argon2id and powSha256 is synchronous (JSI) and writes into
  * caller-allocated output arrays, returning the C core's code: 0 ok,
  * 1 verification failed, -1 bad length, -2 libsodium failure. No key material
  * is copied into the JVM heap: buffers are direct views of the JS arrays.
- * argon2id is the exception (async; see below).
+ * argon2id and powSha256 are the exceptions (async; see below).
  */
 internal object AegisSodiumNative {
   init {
@@ -38,6 +38,7 @@ internal object AegisSodiumNative {
   @JvmStatic external fun hmacsha256(out: ByteBuffer?, m: ByteBuffer?, k: ByteBuffer?): Int
   @JvmStatic external fun hkdfSha256(out: ByteBuffer?, ikm: ByteBuffer?, salt: ByteBuffer?, info: ByteBuffer?): Int
   @JvmStatic external fun argon2id(out: ByteBuffer?, pwd: ByteBuffer?, salt: ByteBuffer?, t: Int, m: Int): Int
+  @JvmStatic external fun powSha256(nonce: ByteBuffer?, challenge: ByteBuffer?, difficulty: Int): Int
 }
 
 /** A direct view of the JS array's memory, or null when it is empty (Hermes may give it no storage). */
@@ -76,6 +77,18 @@ private fun argon2id(pwd: ByteArray, salt: ByteArray, t: Int, mKib: Int, outLen:
     wipe(out)
     wipe(p)
   }
+}
+
+/**
+ * The registration proof-of-work: up to a few hundred thousand SHA-256 hashes,
+ * so it runs off the JS thread like argon2id. The challenge is public (it came
+ * from the relay); the nonce comes back as its 8 ASCII hex characters.
+ */
+private fun powSha256(challenge: ByteArray, difficulty: Int): String {
+  val nonce = ByteBuffer.allocateDirect(8)
+  val rc = AegisSodiumNative.powSha256(nonce, direct(challenge), difficulty)
+  if (rc != 0) throw CodedException("ERR_AEGIS_POW", "aegis_pow_sha256 failed: $rc", null)
+  return String(ByteArray(8) { nonce.get(it) }, Charsets.US_ASCII)
 }
 
 class AegisSodiumModule : Module() {
@@ -124,5 +137,6 @@ class AegisSodiumModule : Module() {
     AsyncFunction("argon2id") { pwd: ByteArray, salt: ByteArray, t: Int, mKib: Int, outLen: Int ->
       argon2id(pwd, salt, t, mKib, outLen)
     }
+    AsyncFunction("powSha256") { challenge: ByteArray, difficulty: Int -> powSha256(challenge, difficulty) }
   }
 }

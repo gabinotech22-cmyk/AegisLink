@@ -155,6 +155,30 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
     expectBytes(argon2id(new Uint8Array(0), enc.encode('somesalt'), { t: 1, m: 64, p: 1, dkLen: 32 })));
 }
 
+// Registration proof-of-work: the C miner returns the SAME nonce as the
+// JavaScript miner it replaced (first 8-hex-digit counter, in order), and the
+// relay's check (server/src/pow/challenge.ts: SHA-256 of the string
+// nonce + challenge) accepts it.
+{
+  const enc = new TextEncoder();
+  const zeroBits = (d, bits) => {
+    for (let i = 0; i < Math.floor(bits / 8); i++) if (d[i] !== 0) return false;
+    return bits % 8 === 0 || (d[Math.floor(bits / 8)] & (0xff << (8 - (bits % 8)))) === 0;
+  };
+  const jsMiner = (challenge, difficulty) => {
+    for (let c = 0; ; c++) {
+      const nonce = c.toString(16).padStart(8, '0');
+      if (zeroBits(sha256(enc.encode(nonce + challenge)), difficulty)) return nonce;
+    }
+  };
+  const pow = (challenge, difficulty) =>
+    call('pow_sha256', ['#8', enc.encode(challenge), le32(difficulty)], expectBytes(enc.encode(jsMiner(challenge, difficulty))));
+  for (let i = 0; i < Math.min(ITER, 40); i++) pow(Buffer.from(rand(32)).toString('hex'), randInt(14));
+  pow(Buffer.from(rand(32)).toString('hex'), 18); // the relay's production registration difficulty
+  pow('ñ-desafío-😀', 10); // non-ASCII challenge: hashed as UTF-8, like the relay
+  pow('x'.repeat(512), 4); // longest accepted challenge
+}
+
 // Empty messages, with the NULL a binding passes for an empty JS array.
 {
   const nonce = rand(24);
@@ -222,6 +246,13 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
     ['argon2id', ['#32', 'aa', rand(16), le32(1), le32(7)]],
     ['argon2id', ['#32', 'aa', rand(16), le32(1), le32(262145)]],
     ['argon2id', ['#32', 'aa', rand(16), 'aabb', le32(64)]],
+    ['pow_sha256', ['#7', 'aa', le32(1)]],
+    ['pow_sha256', ['#9', 'aa', le32(1)]],
+    ['pow_sha256', ['NULL:8', 'aa', le32(1)]],
+    ['pow_sha256', ['#8', 'NULL', le32(1)]],
+    ['pow_sha256', ['#8', 'NULL:4', le32(1)]],
+    ['pow_sha256', ['#8', rand(513), le32(1)]],
+    ['pow_sha256', ['#8', 'aa', le32(33)]],
   ];
   for (const [op, args] of bad) call(op, args, expectRc(EBADLEN));
   call('memcmp', ['NULL', 'NULL'], expectRc(EVERIFY));

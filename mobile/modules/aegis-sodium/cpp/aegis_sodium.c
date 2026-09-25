@@ -10,6 +10,7 @@
 #include "aegis_sodium.h"
 
 #include <sodium.h>
+#include <string.h>
 
 /* libsodium's internal Argon2 API (not part of <sodium.h>), compiled from the same vendored sources. */
 #include "../vendor/libsodium/src/libsodium/crypto_pwhash/argon2/argon2.h"
@@ -194,4 +195,36 @@ int aegis_argon2id(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdle
     return AEGIS_EFAIL;
   }
   return AEGIS_OK;
+}
+
+static int has_leading_zero_bits(const uint8_t *d, uint32_t bits) {
+  uint32_t full = bits / 8, rem = bits % 8, i;
+  for (i = 0; i < full; i++)
+    if (d[i] != 0) return 0;
+  return rem == 0 || (d[full] & (uint8_t) (0xFF << (8 - rem))) == 0;
+}
+
+int aegis_pow_sha256(uint8_t *nonce, size_t noncelen, const uint8_t *challenge, size_t challen, uint32_t difficulty) {
+  static const char hexdigits[] = "0123456789abcdef";
+  uint8_t buf[AEGIS_POW_NONCE_LEN + AEGIS_POW_CHALLENGE_MAX];
+  uint8_t digest[crypto_hash_sha256_BYTES];
+  uint64_t i;
+  if (noncelen != AEGIS_POW_NONCE_LEN || nonce == NULL) return AEGIS_EBADLEN;
+  if (challen == 0 || challen > AEGIS_POW_CHALLENGE_MAX || challenge == NULL) return AEGIS_EBADLEN;
+  if (difficulty > AEGIS_POW_DIFFICULTY_MAX) return AEGIS_EBADLEN;
+  memcpy(buf + AEGIS_POW_NONCE_LEN, challenge, challen);
+  for (i = 0; i <= 0xFFFFFFFFu; i++) {
+    uint32_t v = (uint32_t) i;
+    int k;
+    for (k = AEGIS_POW_NONCE_LEN - 1; k >= 0; k--) {
+      buf[k] = (uint8_t) hexdigits[v & 0xF];
+      v >>= 4;
+    }
+    crypto_hash_sha256(digest, buf, AEGIS_POW_NONCE_LEN + challen);
+    if (has_leading_zero_bits(digest, difficulty)) {
+      memcpy(nonce, buf, AEGIS_POW_NONCE_LEN);
+      return AEGIS_OK;
+    }
+  }
+  return AEGIS_EFAIL;
 }

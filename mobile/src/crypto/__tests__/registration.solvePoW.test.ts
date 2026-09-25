@@ -1,9 +1,11 @@
 /**
- * Tests for the buffer-reuse PoW miner in registration.ts::solvePoW.
+ * Tests for registration.ts::solvePoW, which mines natively (the C core's
+ * `aegis_pow_sha256`; in Jest, its Node stand-in `jest/nodeBackend.ts`). The C
+ * core itself is checked against the same reference by
+ * `modules/aegis-sodium/test/differential.mjs`.
  *
  * We only assert FUNCTIONAL correctness and protocol compatibility — never
- * timing (that would be flaky in CI). The speedup (fewer allocations per hash)
- * is verified by code inspection.
+ * timing (that would be flaky in CI).
  *
  * Protocol invariant under test: the nonce string that `solvePoW` returns must
  * be byte-for-byte the string it hashed locally, AND the relay must derive the
@@ -49,7 +51,26 @@ function randomHexChallenge(nChars: number): string {
   return s;
 }
 
+/**
+ * The JavaScript miner the native one replaced: counter 0, 1, 2, ... as an
+ * 8-digit zero-padded hex nonce, first hit wins.
+ */
+function referenceMiner(challenge: string, difficulty: number): string {
+  for (let c = 0; ; c++) {
+    const nonce = c.toString(16).padStart(8, '0');
+    if (hasLeadingZeroBits(digestStringPath(nonce, challenge), difficulty)) return nonce;
+  }
+}
+
 describe('solvePoW', () => {
+  it('returns the same nonce as the JavaScript miner it replaced', async () => {
+    for (const difficulty of [0, 1, 4, 8, 12]) {
+      for (const challenge of [...CHALLENGES, 'ñ-desafío-😀']) {
+        expect(await solvePoW(challenge, difficulty)).toBe(referenceMiner(challenge, difficulty));
+      }
+    }
+  });
+
   describe('correctness across low difficulties', () => {
     for (const difficulty of [0, 4, 8]) {
       for (const challenge of CHALLENGES) {
@@ -111,6 +132,14 @@ describe('solvePoW', () => {
       await expect(solvePoW('ab', 1.5)).rejects.toThrow('invalid difficulty');
       await expect(solvePoW('ab', -1)).rejects.toThrow('invalid difficulty');
       await expect(solvePoW('ab', 257)).rejects.toThrow('invalid difficulty');
+      // The native miner's ceiling (the relay asks for 12-18).
+      await expect(solvePoW('ab', 33)).rejects.toThrow('invalid difficulty');
+    });
+
+    it('rejects an empty or oversized challenge instead of mining it', async () => {
+      await expect(solvePoW('', 1)).rejects.toThrow('challenge must be 1..512 bytes');
+      await expect(solvePoW('x'.repeat(513), 1)).rejects.toThrow('challenge must be 1..512 bytes');
+      await expect(solvePoW('ñ'.repeat(257), 1)).rejects.toThrow('challenge must be 1..512 bytes');
     });
   });
 });

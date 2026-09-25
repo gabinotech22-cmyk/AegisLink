@@ -185,6 +185,14 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
       `modules/aegis-sodium/test/differential.mjs` (parámetros exactos del PIN y del backup + vector
       de referencia), `sodium-facade.test.ts`, `lock/__tests__/pin.test.ts`, flujo Maestro
       `.maestro/03-app-lock-pin.yaml` en emulador. Desktop sigue con @noble (V8 lo hace en <1 s).
+- [x] **Prueba de trabajo (PoW) nativa en mobile** ✅ (efectiva desde el primer build nativo que la
+      incluya): el minero del registro, de subidas de blobs y de envíos al mailbox corre en C
+      (`aegis_pow_sha256`, fuera del hilo de JS) en vez de ~260k SHA-256 en JS sobre Hermes. Mismo
+      orden de nonces que el minero JS, así que devuelve el mismo nonce y el relay no cambia. Cierra
+      el fix 1 del sospechoso "PoW vs TTL" de `ROADMAP-2026-07.md` §2. Pruebas:
+      `modules/aegis-sodium/test/differential.mjs` (núcleo C vs minero JS de referencia, incl.
+      dificultad 18 y challenge no ASCII), `crypto/__tests__/registration.solvePoW.test.ts`,
+      `sodium-facade.test.ts`. Desktop sigue en JS (V8 con JIT).
 - [ ] **ML-KEM-768 nativo**: sigue en @noble. libsodium 1.0.22 (ya vendorizado) trae
       `crypto_kem_mlkem768`; moverlo exige probar compatibilidad byte a byte con @noble/post-quantum
       (claves de prekeys PQ ya publicadas) antes de cambiar.

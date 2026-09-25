@@ -21,8 +21,9 @@
  * kept — fail closed): `scalarMult` / `box.before` / `box` THROW on a low-order
  * public key, and Ed25519 verification rejects small-order public keys.
  *
- * Argon2id (PIN and backup KDFs) runs natively too, off the JS thread
- * (`argon2id`, below). Unkeyed SHA-256/512 stay on @noble (no secret-dependent
+ * Argon2id (PIN and backup KDFs) and the relay's proof-of-work miner run
+ * natively too, off the JS thread (`argon2id`, `powSha256`, below). Single
+ * unkeyed SHA-256/512 calls stay on @noble (no secret-dependent
  * branches or table lookups to leak through timing), as on desktop. Out of
  * scope (stay on @noble, see docs/ROADMAP.md): PBKDF2 (legacy v1/v2 backups
  * only) and ML-KEM-768.
@@ -361,4 +362,28 @@ export async function argon2id(password: Uint8Array, salt: Uint8Array, opts: Arg
   } finally {
     if (Array.isArray(bytes)) bytes.fill(0);
   }
+}
+
+/** Highest proof-of-work difficulty the native miner accepts (the relay asks for 12-18). */
+export const POW_DIFFICULTY_MAX = 32;
+const POW_CHALLENGE_MAX = 512;
+
+/**
+ * The relay's proof-of-work, mined natively off the JS thread: resolves to the
+ * first nonce "00000000", "00000001", ... (8 lowercase hex digits) such that
+ * SHA-256(utf8(nonce + challenge)) has `difficulty` leading zero bits. The same
+ * nonce the JavaScript miner found, in a fraction of the time: on Hermes (no
+ * JIT) each of the ~260k hashes of a registration cost microseconds of JS.
+ */
+export async function powSha256(challenge: Uint8Array, difficulty: number): Promise<string> {
+  checkArrayTypes(challenge);
+  if (challenge.length < 1 || challenge.length > POW_CHALLENGE_MAX) {
+    throw new Error('powSha256: challenge must be 1..512 bytes');
+  }
+  if (!Number.isInteger(difficulty) || difficulty < 0 || difficulty > POW_DIFFICULTY_MAX) {
+    throw new Error('powSha256: difficulty must be 0..32');
+  }
+  const nonce = await AegisSodium.powSha256(challenge, difficulty);
+  if (typeof nonce !== 'string' || !/^[0-9a-f]{8}$/.test(nonce)) throw new Error('aegis-sodium: powSha256 failed');
+  return nonce;
 }

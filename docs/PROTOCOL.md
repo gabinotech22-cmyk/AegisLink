@@ -107,7 +107,7 @@ native libsodium everywhere:
   the JS arrays' own memory. Box/secretbox, X25519, Ed25519, HMAC-SHA256,
   HKDF-SHA256 (`crypto_kdf_hkdf_sha256`), constant-time comparison and the
   CSPRNG (`randombytes_buf`, which also backs the `getRandomValues` shim @noble
-  uses) run there; unkeyed SHA-2 stays in JS, as on desktop. There is no
+  uses) run there; single unkeyed SHA-2 hashes stay in JS, as on desktop. There is no
   JavaScript fallback: a binary without the module fails to start its crypto.
   The C core is diffed against TweetNaCl/@noble in CI, optimized and under
   ASan/UBSan (`modules/aegis-sodium/test/differential.mjs`).
@@ -118,6 +118,13 @@ native libsodium everywhere:
   Bytes are identical to the @noble derivation that wrote them, so no format
   changed; a v3 backup restore drops from minutes (JS on Hermes) to well under
   a second.
+  The relay's **proof-of-work** (registration, blob uploads, mailbox
+  submissions) is mined there as well (`powSha256`, async, the C core's
+  `aegis_pow_sha256`): it tries the nonces `00000000`, `00000001`, … in the same
+  order as the JavaScript miner it replaced, so it returns the same nonce and
+  the relay's check is unchanged. The registration's difficulty 18 takes a
+  fraction of a second instead of seconds of JS on Hermes; the native miner
+  accepts difficulties 0–32 and challenges of 1–512 bytes.
 - **Still in JavaScript:** ML-KEM-768 (`@noble/post-quantum`) everywhere; PBKDF2,
   only to restore legacy v1/v2 backups; and Argon2id on desktop (V8 with JIT
   runs it sub-second, and `sodium-native` exposes only the 16-byte-salt

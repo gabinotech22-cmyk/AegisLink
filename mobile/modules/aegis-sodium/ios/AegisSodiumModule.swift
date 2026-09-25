@@ -4,12 +4,12 @@ import Foundation
 
 /// F-1 B2: native libsodium for `src/crypto/sodium` (see ../index.ts).
 ///
-/// Every function but argon2id is synchronous (JSI) and writes into
+/// Every function but argon2id and powSha256 is synchronous (JSI) and writes into
 /// caller-allocated output arrays, returning the C core's code: 0 ok,
 /// 1 verification failed, -1 bad length, -2 libsodium failure. The pointers
 /// are the JS arrays' own memory (expo-modules-core `rawPointer`, byteOffset
 /// already applied); no key material is copied. aegis_sodium.c validates every
-/// length. argon2id is the exception (async; see below).
+/// length. argon2id and powSha256 are the exceptions (async; see below).
 public class AegisSodiumModule: Module {
   public func definition() -> ModuleDefinition {
     Name("AegisSodium")
@@ -88,6 +88,26 @@ public class AegisSodiumModule: Module {
         throw Exception(name: "ERR_AEGIS_ARGON2", description: "aegis_argon2id failed: \(rc)")
       }
       return out.map { Int($0) }
+    }
+    // The registration proof-of-work: up to a few hundred thousand SHA-256
+    // hashes, so async like argon2id. The challenge is public (it came from the
+    // relay); the nonce comes back as its 8 ASCII hex characters.
+    AsyncFunction("powSha256") { (challenge: Data, difficulty: Int) throws -> String in
+      guard difficulty >= 0, difficulty <= Int(UInt32.max) else {
+        throw Exception(name: "ERR_AEGIS_POW", description: "aegis_pow_sha256: bad difficulty")
+      }
+      let nonceLen = 8
+      var nonce = [UInt8](repeating: 0, count: nonceLen)
+      let rc = challenge.withUnsafeBytes { (ch: UnsafeRawBufferPointer) -> Int32 in
+        aegis_pow_sha256(
+          &nonce, nonceLen,
+          ch.count == 0 ? nil : ch.bindMemory(to: UInt8.self).baseAddress, ch.count,
+          UInt32(difficulty))
+      }
+      guard rc == 0 else {
+        throw Exception(name: "ERR_AEGIS_POW", description: "aegis_pow_sha256 failed: \(rc)")
+      }
+      return String(decoding: nonce, as: UTF8.self)
     }
   }
 }

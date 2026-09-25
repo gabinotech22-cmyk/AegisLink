@@ -11,7 +11,8 @@
  * `desktop/src/main/crypto/sodium/boxBefore.ts`) and node:crypto HMAC.
  * Argon2id: libsodium's crypto_pwhash for 16-byte salts; @noble/hashes for the
  * rest (sodium-native exposes no other salt length, and node:crypto has no
- * Argon2 before Node 24.7).
+ * Argon2 before Node 24.7). The proof-of-work miner is the C core's loop over
+ * libsodium's SHA-256.
  *
  * The shipped C core itself is tested against TweetNaCl/@noble by
  * `../test/differential.mjs` (CI job `aegis-sodium-native`).
@@ -187,6 +188,30 @@ const nodeBackend: AegisSodiumNative = {
     }
     return Array.from(argon2id(pwd, salt, { t, m: mKib, p: 1, dkLen: outLen }));
   },
+  // The C core's miner, step for step: nonces "00000000", "00000001", ... hashed
+  // in front of the challenge with libsodium's SHA-256.
+  powSha256: async (challenge, difficulty) => {
+    const ok =
+      isBytes(challenge) && challenge.length >= 1 && challenge.length <= 512 &&
+      Number.isInteger(difficulty) && difficulty >= 0 && difficulty <= 32;
+    if (!ok) throw new Error(`aegis_pow_sha256 failed: ${EBADLEN}`);
+    const buf = new Uint8Array(8 + challenge.length);
+    buf.set(challenge, 8);
+    const digest = new Uint8Array(32);
+    for (let i = 0; i <= 0xffffffff; i++) {
+      const nonce = i.toString(16).padStart(8, '0');
+      for (let k = 0; k < 8; k++) buf[k] = nonce.charCodeAt(k);
+      sodium.crypto_hash_sha256(digest, buf);
+      if (leadingZeroBits(digest, difficulty)) return nonce;
+    }
+    throw new Error(`aegis_pow_sha256 failed: ${EFAIL}`);
+  },
 };
+
+function leadingZeroBits(d: Uint8Array, bits: number): boolean {
+  const full = Math.floor(bits / 8);
+  for (let i = 0; i < full; i++) if (d[i] !== 0) return false;
+  return bits % 8 === 0 || (d[full] & (0xff << (8 - (bits % 8)))) === 0;
+}
 
 export default nodeBackend;

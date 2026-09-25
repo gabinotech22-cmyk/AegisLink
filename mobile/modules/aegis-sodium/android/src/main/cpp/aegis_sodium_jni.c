@@ -148,3 +148,10 @@ FN(argon2id)(JNIEnv *env, jclass cls, jobject out, jobject pwd, jobject salt, ji
   if (t < 0 || m < 0) return AEGIS_EBADLEN;
   return aegis_argon2id(S(0), S(1), S(2), (uint32_t) t, (uint32_t) m);
 }
+
+FN(powSha256)(JNIEnv *env, jclass cls, jobject nonce, jobject challenge, jint difficulty) {
+  (void) cls;
+  SPANS(2, nonce, challenge)
+  if (difficulty < 0) return AEGIS_EBADLEN;
+  return aegis_pow_sha256(S(0), S(1), (uint32_t) difficulty);
+}
