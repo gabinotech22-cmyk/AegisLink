@@ -25,12 +25,10 @@ appId: com.aegislink.app
     element: "Continue"
 - tapOn: "Continue"
 # Registration (proof-of-work in JS) runs alongside on a software-rendered
-# emulator, so screen transitions here can take tens of seconds.
-- extendedWaitUntil:
-    visible: "ALMOST DONE"
-    timeout: 120000
+# emulator, so this transition can take a long time: wait for the button itself.
 - scrollUntilVisible:
     element: "Skip for now"
+    timeout: 180000
 - tapOn: "Skip for now"
 - extendedWaitUntil:
     visible: "PRIVACY"

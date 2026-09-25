@@ -561,7 +561,7 @@ jobs:
             # failing one, so the capture lines below never ran after a red flow. On
             # failure, print the app's own errors and the on-screen texts right here,
             # in the job log (artifacts are not always reachable), then fail.
-            maestro test .maestro/ --format junit --output maestro-report.xml --debug-output maestro-debug || { echo "::group::logcat (app errors)"; grep -E "AndroidRuntime|FATAL EXCEPTION|ReactNativeJS|aegis_sodium|AegisSodium" maestro-logcat.txt | tail -n 150; echo "::endgroup::"; echo "::group::on-screen texts"; adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb shell cat /sdcard/ui.xml | grep -o 'text="[^"]*"' | head -n 80; echo "::endgroup::"; exit 1; }
+            maestro test .maestro/ --format junit --output maestro-report.xml --debug-output maestro-debug || { echo "::group::logcat (app errors)"; grep -E "AndroidRuntime|FATAL EXCEPTION|ReactNativeJS|aegis_sodium|AegisSodium" maestro-logcat.txt | tail -n 150; echo "::endgroup::"; echo "::group::on-screen texts"; adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb shell cat /sdcard/ui.xml | grep -o 'text="[^"]*"' | head -n 80; echo "::endgroup::"; echo "::group::maestro log (tail)"; find maestro-debug -name 'maestro.log' -exec tail -n 120 {} \; ; echo "::endgroup::"; echo "::group::relay log (tail)"; tail -n 60 "$RUNNER_TEMP/e2e-relay.log"; echo "::endgroup::"; exit 1; }
             CODE=$?
             # Snapshot the final on-screen state + rendered UI tree so we can see
             # whether it's a splash spinner, a redbox crash, or raw i18n keys.
