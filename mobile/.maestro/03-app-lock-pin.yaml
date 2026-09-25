@@ -57,9 +57,11 @@ appId: com.aegislink.app
 - tapOn: "2"
 - tapOn: "5"
 - tapOn: "8"
-# setPIN hashes natively; the modal closes when the hash is stored.
+# setPIN hashes natively; the modal closes when the hash is stored. Enabling
+# the lock currently locks the app right away (App.tsx cold-lock effect also
+# fires on the toggle), so either the settings row or the lock screen follows.
 - extendedWaitUntil:
-    visible: "Active · Authentication required to open"
+    visible: "Active · Authentication required to open|Enter your PIN"
     timeout: 30000
 - takeScreenshot: 03-lock-enabled
 # Cold start with the lock on → lock screen.
