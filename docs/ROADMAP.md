@@ -261,7 +261,10 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 
 - [ ] **M5 — `any`** (~40 restantes, triados): reducir al tocar cada archivo; contrato IPC desktop es el cluster grande.
 - [ ] **God-files**: política vigente = NO retro-acortar los 4 aceptados; escribir archivos nuevos <800 desde el inicio.
-- [ ] **Lint `no-console`** en `desktop/src/renderer/**` para prevenir regresión del logger.
+- [x] **Guard `no-console`** en `desktop/src/renderer/**` ✅ (2026-09-25): el desktop no usa ESLint, así
+      que es un test que escanea el código (como `crypto-imports.test.ts`) y falla ante cualquier
+      `console.*` fuera de `utils/logger.ts` (`utils/__tests__/noConsole.test.ts`). Los dos avisos de
+      `socket/calls.ts` pasan por el logger.
 - [x] **SESSION_HANDOFF.md** (fechado 2026-06-05, obsoleto): **archivado** con cabecera
       que enumera qué es falso (relay AWS muerto, §5 ya mergeado) y redirige a
       [`AUDIT-2026-08-FUNCTIONAL.md`](./AUDIT-2026-08-FUNCTIONAL.md). Nota: el archivo
