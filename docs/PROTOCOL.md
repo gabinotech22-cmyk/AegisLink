@@ -111,15 +111,24 @@ native libsodium everywhere:
   JavaScript fallback: a binary without the module fails to start its crypto.
   The C core is diffed against TweetNaCl/@noble in CI, optimized and under
   ASan/UBSan (`modules/aegis-sodium/test/differential.mjs`).
-- **Everywhere:** Argon2id/PBKDF2 and ML-KEM-768 (`@noble/post-quantum`) stay in
-  JavaScript for now.
+  **Argon2id** (app-lock PIN, backup v3) runs there too, off the JS thread
+  (`argon2id`, an async native call): the C core calls libsodium's
+  `argon2id_hash_raw` directly, because the public `crypto_pwhash` only takes
+  16-byte salts and the existing formats use 32-byte and domain-string salts.
+  Bytes are identical to the @noble derivation that wrote them, so no format
+  changed; a v3 backup restore drops from minutes (JS on Hermes) to well under
+  a second.
+- **Still in JavaScript:** ML-KEM-768 (`@noble/post-quantum`) everywhere; PBKDF2,
+  only to restore legacy v1/v2 backups; and Argon2id on desktop (V8 with JIT
+  runs it sub-second, and `sodium-native` exposes only the 16-byte-salt
+  `crypto_pwhash`).
 
 We state this per platform, with the manifests to check (`server/package.json`,
 `desktop/package.json`, `mobile/package.json`), because a blanket "constant-time
 native bindings" claim would be trivially falsifiable, and a falsifiable security
 claim is worse than an honest limitation. The rest of this section describes the
 JavaScript path the clients ran before F-1, and what still runs in JS
-(Argon2id/PBKDF2, ML-KEM-768, the protocol composition itself).
+(ML-KEM-768, legacy PBKDF2, desktop Argon2id, the protocol composition itself).
 
 **Constant-time posture (what is in our favor).**
 
@@ -733,9 +742,19 @@ with a key derived from a user passphrase the relay never sees:
 > **⚠ Disclosure — KDF parameters are implied by version, not stored.**
 > The v3 Argon2id parameters are fixed by the envelope version rather than
 > embedded, so they cannot be tuned without a version bump (changing them would
-> break decryption of existing v3 backups). On Hermes (no JIT) a v3 derivation
-> takes on the order of minutes; the UI runs it async behind a progress
-> indicator. This is a deliberate cost choice, not an accident.
+> break decryption of existing v3 backups). On mobile the derivation runs on
+> native libsodium off the JS thread (§2.1), well under a second; in JavaScript
+> on Hermes it took minutes. Legacy v1/v2 (PBKDF2) restores still run in JS and
+> take tens of seconds.
+
+**App-lock PIN (mobile, `mobile/src/lock/pin.ts`).** The PIN only gates the UI
+(no key derives from it). It is stored as `a4:` = Argon2id(PIN, 16-byte
+per-install salt; m = 19 MiB, t = 2, p = 1, 32 bytes), native, in
+Keystore/Keychain device-only storage; the duress PIN uses the same KDF under a
+domain salt. Older `a3:` (2 MiB, t = 1 — the cost pure JS on Hermes could
+afford), `a2:` and legacy SHA-256 hashes still verify and are re-hashed as `a4:`
+on the next successful unlock (`lock/__tests__/pin.test.ts`; on-device flow
+`mobile/.maestro/03-app-lock-pin.yaml`).
 
 ### 7.6 Panic wipe and profile isolation
 
@@ -822,9 +841,9 @@ with a key derived from a user passphrase the relay never sees:
   (§3.1).
 - **Runtime-level timing side-channels in the remaining JS crypto.** The NaCl,
   HMAC and HKDF primitives run on native libsodium on every platform (§2.1,
-  F-1). What still runs in JavaScript — Argon2id/PBKDF2 (PIN, backup) and
-  ML-KEM-768 — is constant-time at the source level only, not through the JIT
-  and GC. Practical exploitation requires a local co-resident oracle, which
+  F-1), and so does Argon2id on mobile. What still runs in JavaScript —
+  ML-KEM-768, legacy PBKDF2 and desktop Argon2id — is constant-time at the
+  source level only, not through the JIT and GC. Practical exploitation requires a local co-resident oracle, which
   already implies endpoint compromise. Key material still passes through the JS
   heap (follow-up F-1b, §10).
 
@@ -1150,8 +1169,8 @@ current protocol:
    primitives run on native libsodium on the relay, desktop and mobile, so the
    constant-time guarantee is enforced in native code rather than source-level JS
    (§2.1). Implementation substitution behind a stable TypeScript interface, not a
-   protocol change. Next: **F-1b**, private keys only in native memory behind
-   opaque handles, and native Argon2id with a new backup format.
+   protocol change. Mobile Argon2id is native too, with no format change.
+   Next: **F-1b**, private keys only in native memory behind opaque handles.
 6. **Per-device identity keys for linked desktops** (§9.2) so that revoking a
    device revokes cryptographic access instead of relying on the relay's
    `linked_devices` gate.

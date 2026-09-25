@@ -1,8 +1,7 @@
-import { nacl } from './sodium';
+import { nacl, argon2id } from './sodium';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
 import { pbkdf2Async } from '@noble/hashes/pbkdf2';
 import { sha256 } from '@noble/hashes/sha256';
-import { argon2idAsync } from '@noble/hashes/argon2';
 import { KDF_ASYNC_TICK_MS } from './nobleNextTickPatch';
 
 // ─── AegisLink encrypted backup format ────────────────────────────────────────
@@ -28,12 +27,12 @@ import { KDF_ASYNC_TICK_MS } from './nobleNextTickPatch';
 //   ~64 MiB of RAM per attempt, which collapses GPU/ASIC parallelism by
 //   orders of magnitude.
 //
-// Runtime note: all KDFs here run as pure JS on Hermes (no JIT), which is
-// ~60× slower than Node/V8 for this workload — a v3 derivation takes on the
-// order of MINUTES, and even the legacy v2 PBKDF2 takes tens of seconds.
-// Every derivation therefore uses the *Async variants, which yield to the
-// event loop so the UI stays responsive behind a progress indicator. The v3
-// cost itself CANNOT be lowered without a version bump: KDF parameters are
+// Runtime note: the v3 Argon2id runs NATIVELY (libsodium, off the JS thread,
+// crypto/sodium `argon2id`) — well under a second on a phone. In pure JS on
+// Hermes (no JIT) it took on the order of MINUTES. The legacy v1/v2 PBKDF2
+// still runs in JS (@noble pbkdf2Async, which yields to the event loop so the
+// UI stays responsive) and takes tens of seconds; only old backups use it. The
+// v3 cost itself CANNOT be changed without a version bump: KDF parameters are
 // implied by `v`, not stored in the envelope, so changing them would break
 // decryption of every existing v3 backup.
 //
@@ -308,15 +307,17 @@ function derivePbkdf2(passphrase: string, salt: Uint8Array, iterations: number):
   });
 }
 
+// Native libsodium Argon2id, off the JS thread (crypto/sodium `argon2id`): the
+// same bytes the pure-JS derivation produced, so every v3 backup still opens,
+// in well under a second instead of minutes on Hermes.
 function deriveArgon2id(passphrase: string, salt: Uint8Array): Promise<Uint8Array> {
   const pwBytes = decodeUTF8(passphrase);
-  return argon2idAsync(pwBytes, salt, {
+  return argon2id(pwBytes, salt, {
     m: BACKUP_ARGON2_MEMORY,
     t: BACKUP_ARGON2_TIME,
     p: BACKUP_ARGON2_PARALLELISM,
     dkLen: BACKUP_KEY_BYTES,
-    asyncTick: KDF_ASYNC_TICK_MS,
-  });
+  }).finally(() => pwBytes.fill(0));
 }
 
 /**

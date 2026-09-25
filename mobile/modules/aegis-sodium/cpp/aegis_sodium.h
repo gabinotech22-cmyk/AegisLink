@@ -65,6 +65,25 @@ int aegis_hmacsha256(uint8_t *out, size_t outlen, const uint8_t *m, size_t mlen,
 int aegis_hkdf_sha256(uint8_t *out, size_t outlen, const uint8_t *ikm, size_t ikmlen, const uint8_t *salt,
                       size_t saltlen, const uint8_t *info, size_t infolen);
 
+/*
+ * Argon2id (RFC 9106, version 0x13), one lane, raw output. libsodium's public
+ * crypto_pwhash only takes 16-byte salts; this calls the Argon2 implementation
+ * underneath it (argon2id_hash_raw), which takes any salt of 8+ bytes, so the
+ * app's existing formats (32-byte backup salts, the duress PIN's domain salt)
+ * derive natively and byte-identically to @noble/hashes. Slow by design: the
+ * bindings run it off the JS thread.
+ */
+#define AEGIS_ARGON2_OUT_MIN 16
+#define AEGIS_ARGON2_OUT_MAX 64
+#define AEGIS_ARGON2_SALT_MIN 8
+#define AEGIS_ARGON2_SALT_MAX 64
+#define AEGIS_ARGON2_PWD_MAX 65536
+#define AEGIS_ARGON2_T_MAX 16
+#define AEGIS_ARGON2_M_MIN_KIB 8
+#define AEGIS_ARGON2_M_MAX_KIB 262144 /* 256 MiB */
+int aegis_argon2id(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdlen, const uint8_t *salt,
+                   size_t saltlen, uint32_t t_cost, uint32_t m_kib);
+
 #ifdef __cplusplus
 }
 #endif

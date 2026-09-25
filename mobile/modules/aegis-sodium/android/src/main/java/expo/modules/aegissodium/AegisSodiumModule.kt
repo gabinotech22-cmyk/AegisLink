@@ -1,5 +1,6 @@
 package expo.modules.aegissodium
 
+import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.typedarray.Uint8Array
@@ -8,10 +9,11 @@ import java.nio.ByteBuffer
 /**
  * F-1 B2: native libsodium for `src/crypto/sodium` (see ../../../../../../../index.ts).
  *
- * Every function is synchronous (JSI) and writes into caller-allocated output
- * arrays, returning the C core's code: 0 ok, 1 verification failed,
- * -1 bad length, -2 libsodium failure. No key material is copied into the
- * JVM heap: buffers are direct views of the JS arrays.
+ * Every function but argon2id is synchronous (JSI) and writes into
+ * caller-allocated output arrays, returning the C core's code: 0 ok,
+ * 1 verification failed, -1 bad length, -2 libsodium failure. No key material
+ * is copied into the JVM heap: buffers are direct views of the JS arrays.
+ * argon2id is the exception (async; see below).
  */
 internal object AegisSodiumNative {
   init {
@@ -35,10 +37,46 @@ internal object AegisSodiumNative {
   @JvmStatic external fun signVerifyDetached(sig: ByteBuffer?, m: ByteBuffer?, pk: ByteBuffer?): Int
   @JvmStatic external fun hmacsha256(out: ByteBuffer?, m: ByteBuffer?, k: ByteBuffer?): Int
   @JvmStatic external fun hkdfSha256(out: ByteBuffer?, ikm: ByteBuffer?, salt: ByteBuffer?, info: ByteBuffer?): Int
+  @JvmStatic external fun argon2id(out: ByteBuffer?, pwd: ByteBuffer?, salt: ByteBuffer?, t: Int, m: Int): Int
 }
 
 /** A direct view of the JS array's memory, or null when it is empty (Hermes may give it no storage). */
 private fun b(a: Uint8Array): ByteBuffer? = if (a.byteLength == 0) null else a.toDirectBuffer()
+
+/** A native-heap copy of `bytes` for a call made off the JS thread; null when empty. */
+private fun direct(bytes: ByteArray): ByteBuffer? =
+  if (bytes.isEmpty()) null else ByteBuffer.allocateDirect(bytes.size).put(bytes).also { it.flip() }
+
+private fun wipe(buf: ByteBuffer?) {
+  if (buf == null) return
+  buf.clear()
+  while (buf.hasRemaining()) buf.put(0)
+}
+
+/**
+ * Argon2id runs for hundreds of milliseconds, so it is an AsyncFunction (a
+ * background thread) and cannot touch JS memory: Expo copies the password and
+ * salt into ByteArrays on the JS thread, and the key comes back as an int array.
+ * Every copy made here is zeroed before returning.
+ */
+private fun argon2id(pwd: ByteArray, salt: ByteArray, t: Int, mKib: Int, outLen: Int): IntArray {
+  if (outLen <= 0 || outLen > 64) {
+    pwd.fill(0)
+    throw CodedException("ERR_AEGIS_ARGON2", "aegis_argon2id: bad output length", null)
+  }
+  val out = ByteBuffer.allocateDirect(outLen)
+  val p = direct(pwd)
+  pwd.fill(0)
+  val s = direct(salt)
+  try {
+    val rc = AegisSodiumNative.argon2id(out, p, s, t, mKib)
+    if (rc != 0) throw CodedException("ERR_AEGIS_ARGON2", "aegis_argon2id failed: $rc", null)
+    return IntArray(outLen) { out.get(it).toInt() and 0xff }
+  } finally {
+    wipe(out)
+    wipe(p)
+  }
+}
 
 class AegisSodiumModule : Module() {
   override fun definition() = ModuleDefinition {
@@ -82,6 +120,9 @@ class AegisSodiumModule : Module() {
     }
     Function("hkdfSha256") { out: Uint8Array, ikm: Uint8Array, salt: Uint8Array, info: Uint8Array ->
       AegisSodiumNative.hkdfSha256(b(out), b(ikm), b(salt), b(info))
+    }
+    AsyncFunction("argon2id") { pwd: ByteArray, salt: ByteArray, t: Int, mKib: Int, outLen: Int ->
+      argon2id(pwd, salt, t, mKib, outLen)
     }
   }
 }

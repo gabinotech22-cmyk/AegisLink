@@ -3,7 +3,7 @@
  * Differential test of the aegis_sodium C core compiled with the vendored
  * libsodium (F-1 B2) against the JavaScript implementations the app used
  * before (TweetNaCl, @noble/hashes): identical bytes on random inputs and on
- * RFC vectors, plus the C core's own contract (length validation, NULL
+ * RFC vectors (Argon2id also at the app's exact PIN and backup parameters), plus the C core's own contract (length validation, NULL
  * handling, fail-closed on low-order points, rejected small-order signatures).
  *
  *   cmake -S modules/aegis-sodium/test -B build/aegis-sodium-host -G Ninja
@@ -22,6 +22,7 @@ const nacl = require('tweetnacl');
 const { hmac } = require('@noble/hashes/hmac');
 const { hkdf } = require('@noble/hashes/hkdf');
 const { sha256 } = require('@noble/hashes/sha2');
+const { argon2id } = require('@noble/hashes/argon2');
 
 const OK = 0;
 const EVERIFY = 1;
@@ -128,6 +129,32 @@ call('hkdf_sha256', ['#42', '0b'.repeat(22), '000102030405060708090a0b0c', 'f0f1
 call('hkdf_sha256', ['#42', '0b'.repeat(22), 'NULL', 'NULL'],
   expectBytes(unhex('8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8')));
 
+// Argon2id vs @noble/hashes. The cost parameters travel as 4-byte little-endian buffers.
+const le32 = (v) => {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setUint32(0, v, true);
+  return b;
+};
+const argon = (outLen, pwd, salt, t, m) =>
+  call('argon2id', [`#${outLen}`, pwd, salt, le32(t), le32(m)],
+    expectBytes(argon2id(pwd, salt, { t, m, p: 1, dkLen: outLen })));
+for (let i = 0; i < Math.min(ITER, 40); i++) {
+  argon(16 + randInt(48), rand(randInt(64)), rand(8 + randInt(56)), 1 + randInt(3), 8 + randInt(248));
+}
+{
+  const enc = new TextEncoder();
+  // The app's own parameter sets (mobile/src/lock/pin.ts, mobile/src/crypto/backup.ts).
+  argon(32, enc.encode('1234'), rand(16), 1, 2048); // PIN a3, per-install 16-byte salt
+  argon(32, enc.encode('123456'), enc.encode('aegislink:panic:v1:'), 1, 2048); // duress PIN, 19-byte domain salt
+  argon(32, enc.encode('correct horse battery staple'), rand(32), 3, 65536); // backup v3, 32-byte salt
+  // Reference vector (argon2 reference implementation test.c, Argon2id v1.3, m=2^16, t=2, p=1).
+  call('argon2id', ['#32', enc.encode('password'), enc.encode('somesalt'), le32(2), le32(65536)],
+    expectBytes(unhex('09316115d5cf24ed5a15a31a3ba326e5cf32edc24702987c02b6566f61913cf7')));
+  // Empty password, with the NULL a binding passes for an empty JS array.
+  call('argon2id', ['#32', 'NULL', enc.encode('somesalt'), le32(1), le32(64)],
+    expectBytes(argon2id(new Uint8Array(0), enc.encode('somesalt'), { t: 1, m: 64, p: 1, dkLen: 32 })));
+}
+
 // Empty messages, with the NULL a binding passes for an empty JS array.
 {
   const nonce = rand(24);
@@ -183,6 +210,18 @@ call('hkdf_sha256', ['#42', '0b'.repeat(22), 'NULL', 'NULL'],
     ['hkdf_sha256', [`#${255 * 32 + 1}`, 'aa', 'NULL', 'NULL']],
     ['memcmp', ['aabb', 'aa']],
     ['randombytes', ['NULL:8']],
+    ['argon2id', ['#15', 'aa', rand(16), le32(1), le32(64)]],
+    ['argon2id', ['#65', 'aa', rand(16), le32(1), le32(64)]],
+    ['argon2id', ['#32', 'aa', rand(7), le32(1), le32(64)]],
+    ['argon2id', ['#32', 'aa', rand(65), le32(1), le32(64)]],
+    ['argon2id', ['#32', 'aa', 'NULL:16', le32(1), le32(64)]],
+    ['argon2id', ['#32', 'NULL:4', rand(16), le32(1), le32(64)]],
+    ['argon2id', ['#32', rand(65537), rand(16), le32(1), le32(64)]],
+    ['argon2id', ['#32', 'aa', rand(16), le32(0), le32(64)]],
+    ['argon2id', ['#32', 'aa', rand(16), le32(17), le32(64)]],
+    ['argon2id', ['#32', 'aa', rand(16), le32(1), le32(7)]],
+    ['argon2id', ['#32', 'aa', rand(16), le32(1), le32(262145)]],
+    ['argon2id', ['#32', 'aa', rand(16), 'aabb', le32(64)]],
   ];
   for (const [op, args] of bad) call(op, args, expectRc(EBADLEN));
   call('memcmp', ['NULL', 'NULL'], expectRc(EVERIFY));

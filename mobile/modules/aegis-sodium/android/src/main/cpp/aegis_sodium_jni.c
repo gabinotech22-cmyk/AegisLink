@@ -139,3 +139,12 @@ FN(hkdfSha256)(JNIEnv *env, jclass cls, jobject out, jobject ikm, jobject salt, 
   SPANS(4, out, ikm, salt, info)
   return aegis_hkdf_sha256(S(0), S(1), S(2), S(3));
 }
+
+/* Called from a background thread (Kotlin AsyncFunction) with direct buffers
+ * Kotlin allocated and owns — not views of JS memory. */
+FN(argon2id)(JNIEnv *env, jclass cls, jobject out, jobject pwd, jobject salt, jint t, jint m) {
+  (void) cls;
+  SPANS(3, out, pwd, salt)
+  if (t < 0 || m < 0) return AEGIS_EBADLEN;
+  return aegis_argon2id(S(0), S(1), S(2), (uint32_t) t, (uint32_t) m);
+}

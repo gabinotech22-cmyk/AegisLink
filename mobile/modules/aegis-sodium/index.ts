@@ -5,8 +5,8 @@
  * signature-verified libsodium (`vendor/`) into the app on both platforms
  * (Android: `android/`, JNI; iOS: `ios/`, Swift). This file only types it.
  *
- * Calling convention: every function is synchronous (JSI), writes into
- * caller-allocated output arrays, and returns a code (below). Only
+ * Calling convention: every function but `argon2id` is synchronous (JSI),
+ * writes into caller-allocated output arrays, and returns a code (below). Only
  * `src/crypto/sodium` calls it; everything else goes through that facade.
  *
  * `requireNativeModule` THROWS when the module is not in the binary (Expo Go,
@@ -41,6 +41,12 @@ export interface AegisSodiumNative {
   signVerifyDetached(sig: B, m: B, pk: B): number;
   hmacsha256(out: B, m: B, k: B): number;
   hkdfSha256(out: B, ikm: B, salt: B, info: B): number;
+  /**
+   * Argon2id, one lane. The only ASYNC function: it runs on a background thread
+   * for hundreds of milliseconds, so it takes copies and resolves to the key as
+   * an array of byte values; it rejects on any non-OK code.
+   */
+  argon2id(pwd: B, salt: B, t: number, mKib: number, outLen: number): Promise<number[]>;
 }
 
 const AegisSodium = requireNativeModule<AegisSodiumNative>('AegisSodium');

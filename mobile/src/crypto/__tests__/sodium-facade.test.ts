@@ -13,7 +13,8 @@ import tweetnacl from 'tweetnacl';
 import { hmac } from '@noble/hashes/hmac';
 import { hkdf } from '@noble/hashes/hkdf';
 import { sha256 as nobleSha256 } from '@noble/hashes/sha2';
-import { nacl, hmacSha256, hkdfSha256 } from '../sodium';
+import { argon2id as nobleArgon2id } from '@noble/hashes/argon2';
+import { nacl, hmacSha256, hkdfSha256, argon2id } from '../sodium';
 import { verifyDetached } from '../ed25519';
 
 const rand = (n: number): Uint8Array => tweetnacl.randomBytes(n);
@@ -146,6 +147,43 @@ describe('mobile sodium facade (native libsodium)', () => {
   });
 });
 
+describe('argon2id (native, async)', () => {
+  const enc = new TextEncoder();
+
+  it('matches @noble Argon2id, including 32-byte and domain-string salts', async () => {
+    const cases: Array<[Uint8Array, Uint8Array, { t: number; m: number; dkLen: number }]> = [
+      [enc.encode('1234'), rand(16), { t: 2, m: 19456, dkLen: 32 }],
+      [enc.encode('4321'), enc.encode('aegislink:panic:v1:'), { t: 1, m: 2048, dkLen: 32 }],
+      [enc.encode('a passphrase'), rand(32), { t: 1, m: 256, dkLen: 32 }],
+      [new Uint8Array(0), rand(8), { t: 1, m: 8, dkLen: 16 }],
+    ];
+    for (const [pwd, salt, o] of cases) {
+      const want = nobleArgon2id(pwd, salt, { ...o, p: 1 });
+      expect(await argon2id(pwd, salt, { ...o, p: 1 })).toEqual(want);
+    }
+  });
+
+  it('rejects out-of-range parameters before calling native code', async () => {
+    const pwd = enc.encode('x');
+    const bad: Array<[Uint8Array, { t: number; m: number; dkLen: number }, RegExp]> = [
+      [rand(7), { t: 1, m: 64, dkLen: 32 }, /salt/],
+      [rand(65), { t: 1, m: 64, dkLen: 32 }, /salt/],
+      [rand(16), { t: 0, m: 64, dkLen: 32 }, /t must/],
+      [rand(16), { t: 1, m: 7, dkLen: 32 }, /m must/],
+      [rand(16), { t: 1, m: 262145, dkLen: 32 }, /m must/],
+      [rand(16), { t: 1, m: 64, dkLen: 15 }, /dkLen/],
+      [rand(16), { t: 1.5, m: 64, dkLen: 32 }, /t must/],
+    ];
+    for (const [salt, o, msg] of bad) {
+      await expect(argon2id(pwd, salt, { ...o, p: 1 })).rejects.toThrow(msg);
+    }
+    await expect(argon2id(pwd, rand(16), { t: 1, m: 64, dkLen: 32, p: 2 as 1 })).rejects.toThrow(/p = 1/);
+    await expect(argon2id('x' as unknown as Uint8Array, rand(16), { t: 1, m: 64, dkLen: 32, p: 1 })).rejects.toThrow(
+      TypeError,
+    );
+  });
+});
+
 describe('native return codes are never ignored', () => {
   it('a native failure the JS checks did not predict throws instead of returning garbage', () => {
     jest.isolateModules(() => {
@@ -158,6 +196,27 @@ describe('native return codes are never ignored', () => {
       expect(() => facade.nacl.secretbox(new Uint8Array(1), rand(24), rand(32))).toThrow(/secretbox failed/);
       expect(() => facade.hmacSha256(rand(32), rand(8))).toThrow(/hmacSha256 failed/);
     });
+  });
+
+  it('a rejected or malformed native argon2id result throws instead of returning a key', async () => {
+    const results: Array<() => Promise<number[]>> = [
+      () => Promise.reject(new Error('aegis_argon2id failed: -2')),
+      () => Promise.resolve([1, 2, 3]),
+    ];
+    for (const result of results) {
+      let facade!: typeof import('../sodium');
+      jest.isolateModules(() => {
+        jest.doMock('../../../modules/aegis-sodium', () => {
+          const real = jest.requireActual('../../../modules/aegis-sodium/jest/nodeBackend');
+          return { __esModule: true, ...real, default: { ...real.default, argon2id: result } };
+        });
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        facade = require('../sodium') as typeof import('../sodium');
+      });
+      await expect(facade.argon2id(new Uint8Array(1), rand(16), { t: 1, m: 64, p: 1, dkLen: 32 })).rejects.toThrow(
+        /argon2id failed/,
+      );
+    }
   });
 
   it('refuses to load when libsodium does not initialize', () => {

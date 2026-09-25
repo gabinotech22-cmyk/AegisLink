@@ -8,8 +8,9 @@
  * Allowed exceptions:
  *   - `tweetnacl-util` (base64/utf8 codecs, no key material).
  *   - `@noble/hashes/sha2|sha256` in `crypto/backup.ts`: PBKDF2 takes the hash
- *     object, and the password KDFs stay on @noble until the new backup format.
- *   - @noble argon2 / pbkdf2 / utils and @noble/post-quantum (not migrated in F-1).
+ *     object (legacy v1/v2 backups only).
+ *   - @noble pbkdf2 / utils and @noble/post-quantum (not migrated in F-1).
+ * Argon2id is native (the facade's `argon2id`): no @noble argon2 in production.
  * Twin guards: `desktop/src/renderer/crypto/__tests__/crypto-imports.test.ts`,
  * `server/src/__tests__/crypto-imports.test.ts`.
  */
@@ -25,6 +26,7 @@ const NATIVE_MODULE = /(?:from\s+|require\()'[^']*modules\/aegis-sodium[^']*'/;
 const NOBLE_MAC_KDF = /from\s+'@noble\/hashes\/(?:hmac|hkdf)(?:\.js)?'/;
 const NOBLE_HASH = /from\s+'@noble\/hashes\/(?:sha2|sha256|sha512)(?:\.js)?'/;
 const NOBLE_HASH_ALLOWED = [path.join('crypto', 'backup.ts')];
+const NOBLE_ARGON2 = /(?:from\s+|require\()'@noble\/hashes\/argon2(?:\.js)?'/;
 
 function productionFiles(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -71,6 +73,11 @@ describe('crypto primitives come only from src/crypto/sodium', () => {
         !NOBLE_HASH_ALLOWED.some((a) => p.endsWith(path.sep + a)) &&
         NOBLE_HASH.test(fs.readFileSync(p, 'utf8')),
     );
+    expect(offenders).toEqual([]);
+  });
+
+  it('no @noble Argon2 anywhere in production code: the PIN and backup KDFs run natively', () => {
+    const offenders = files.filter((p) => NOBLE_ARGON2.test(fs.readFileSync(p, 'utf8')));
     expect(offenders).toEqual([]);
   });
 

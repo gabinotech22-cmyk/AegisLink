@@ -2,10 +2,11 @@
  * pin.test.ts — app-lock PIN hashing (lock/pin.ts).
  *
  * Covers:
- *   - set/verify round-trip on the current 'a3:' format
+ *   - set/verify round-trip on the current 'a4:' format (native Argon2id)
  *   - wrong PIN rejected
- *   - 'a2:' (old heavyweight Argon2id) hashes verify and upgrade to 'a3:'
- *   - legacy SHA-256 hashes verify and upgrade to 'a3:'
+ *   - 'a3:' and 'a2:' hashes made by the old pure-JS (@noble) derivation
+ *     verify and upgrade to 'a4:'
+ *   - legacy SHA-256 hashes verify and upgrade to 'a4:'
  *   - duress-salt hashing round-trip + old-format acceptance
  */
 
@@ -48,18 +49,12 @@ import {
   setStoredPinLength,
 } from '../pin';
 
-// pin.ts imports nobleNextTickPatch, which swaps noble's nextTick for a
-// setTimeout(0) macrotask so async Argon2id yields to the UI on-device. There
-// is no UI in a Jest run, and paying a setTimeout round-trip every 25 ms turns
-// the 46 MiB a2 derivations into multi-minute runs that blow the test timeout.
-// Restore the cheap microtask yield: the KDF is still computed for real (so the
-// a2→a3 upgrade is genuinely exercised), only the UI-yield overhead is removed.
-(require('@noble/hashes/utils') as { nextTick: () => Promise<void> }).nextTick = () => Promise.resolve();
-
 const PIN_HASH_KEY = 'aegis.pin.hash';
 const PIN_SALT_KEY = 'aegis.pin.salt.v2';
 const LEGACY_PIN_SALT = 'aegislink:pin:v1:';
 const ARGON_V2 = { t: 3, m: 47104, p: 1, dkLen: 32 } as const;
+const ARGON_V3 = { t: 1, m: 2048, p: 1, dkLen: 32 } as const;
+const ARGON_V4 = { t: 2, m: 19456, p: 1, dkLen: 32 } as const;
 const enc = new TextEncoder();
 
 function sha256Hex(s: string): string {
@@ -68,11 +63,11 @@ function sha256Hex(s: string): string {
 
 beforeEach(() => mockStore.clear());
 
-describe('app-lock PIN (a3 format)', () => {
-  it('round-trips set → verify and stores an a3 hash', async () => {
+describe('app-lock PIN (a4 format)', () => {
+  it('round-trips set → verify and stores an a4 hash', async () => {
     await setPIN('1234');
     expect(await hasStoredPIN()).toBe(true);
-    expect(mockStore.get(PIN_HASH_KEY)).toMatch(/^a3:/);
+    expect(mockStore.get(PIN_HASH_KEY)).toMatch(/^a4:/);
     expect(await verifyPIN('1234')).toBe(true);
     expect(await verifyPIN('9999')).toBe(false);
   });
@@ -95,23 +90,43 @@ describe('app-lock PIN (a3 format)', () => {
     expect(await verifyPIN('5678')).toBe(true);
   });
 
-  it('verifies an old a2 hash and upgrades it to a3', async () => {
+  it('stores the same bytes as a @noble Argon2id derivation at the a4 cost', async () => {
+    await setPIN('1234');
+    const salt = decodeBase64(mockStore.get(PIN_SALT_KEY)!);
+    expect(mockStore.get(PIN_HASH_KEY)).toBe('a4:' + encodeBase64(argon2id(enc.encode('1234'), salt, ARGON_V4)));
+  });
+
+  it('verifies an a3 hash made by the old pure-JS derivation and upgrades it to a4', async () => {
+    const salt = new Uint8Array(16).fill(9);
+    mockStore.set(PIN_SALT_KEY, encodeBase64(salt));
+    const a3 = 'a3:' + encodeBase64(argon2id(enc.encode('123456'), salt, ARGON_V3));
+    mockStore.set(PIN_HASH_KEY, a3);
+
+    expect(await verifyPIN('000000')).toBe(false);
+    expect(mockStore.get(PIN_HASH_KEY)).toBe(a3); // a wrong PIN never upgrades
+    expect(await verifyPIN('123456')).toBe(true);
+    expect(mockStore.get(PIN_HASH_KEY)).toMatch(/^a4:/);
+    expect(decodeBase64(mockStore.get(PIN_SALT_KEY)!)).toEqual(salt); // same per-install salt
+    expect(await verifyPIN('123456')).toBe(true);
+  });
+
+  it('verifies an old a2 hash and upgrades it to a4', async () => {
     const salt = new Uint8Array(16).fill(7);
     mockStore.set(PIN_SALT_KEY, encodeBase64(salt));
     const a2 = 'a2:' + encodeBase64(argon2id(enc.encode('1234'), salt, ARGON_V2));
     mockStore.set(PIN_HASH_KEY, a2);
 
     expect(await verifyPIN('1234')).toBe(true);
-    expect(mockStore.get(PIN_HASH_KEY)).toMatch(/^a3:/); // upgraded
+    expect(mockStore.get(PIN_HASH_KEY)).toMatch(/^a4:/); // upgraded
     expect(await verifyPIN('1234')).toBe(true); // still verifies post-upgrade
-    // salt must survive the upgrade (a3 hash uses the same per-install salt)
+    // salt must survive the upgrade (a4 hash uses the same per-install salt)
     expect(decodeBase64(mockStore.get(PIN_SALT_KEY)!)).toEqual(salt);
   });
 
-  it('verifies a legacy SHA-256 hash and upgrades it to a3', async () => {
+  it('verifies a legacy SHA-256 hash and upgrades it to a4', async () => {
     mockStore.set(PIN_HASH_KEY, sha256Hex(LEGACY_PIN_SALT + '1234'));
     expect(await verifyPIN('1234')).toBe(true);
-    expect(mockStore.get(PIN_HASH_KEY)).toMatch(/^a3:/);
+    expect(mockStore.get(PIN_HASH_KEY)).toMatch(/^a4:/);
     expect(await verifyPIN('1234')).toBe(true);
   });
 
@@ -158,11 +173,17 @@ describe('app-lock PIN (a3 format)', () => {
 });
 
 describe('duress PIN (caller-supplied salt)', () => {
-  it('round-trips hash → verify on the a3 format', async () => {
+  it('round-trips hash → verify on the a4 format', async () => {
     const stored = await hashPinWithSalt('4321', DURESS_PIN_SALT);
-    expect(stored).toMatch(/^a3:/);
+    expect(stored).toMatch(/^a4:/);
     expect(await verifyPinWithSalt('4321', DURESS_PIN_SALT, stored)).toBe(true);
     expect(await verifyPinWithSalt('1111', DURESS_PIN_SALT, stored)).toBe(false);
+  });
+
+  it('accepts an a3 duress hash made by the old pure-JS derivation', async () => {
+    const a3 = 'a3:' + encodeBase64(argon2id(enc.encode('4321'), enc.encode(DURESS_PIN_SALT), ARGON_V3));
+    expect(await verifyPinWithSalt('4321', DURESS_PIN_SALT, a3)).toBe(true);
+    expect(await verifyPinWithSalt('1111', DURESS_PIN_SALT, a3)).toBe(false);
   });
 
   it('accepts an old a2 duress hash', async () => {

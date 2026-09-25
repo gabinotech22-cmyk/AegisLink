@@ -4,7 +4,8 @@
  * Input, one call per line:  <op> <arg>...
  *   <arg> is lowercase hex bytes, "_" (empty buffer), "NULL" (NULL pointer,
  *   length 0), "NULL:<n>" (NULL pointer claiming <n> bytes) or "#<n>" (an
- *   output buffer of <n> bytes).
+ *   output buffer of <n> bytes). argon2id's t and m are 4-byte little-endian
+ *   buffers.
  * Output, one line per call:  <return code> <hex of each output buffer>...
  */
 #define _POSIX_C_SOURCE 200809L /* strtok_r */
@@ -56,6 +57,12 @@ static int parse_arg(const char *tok, arg_t *a) {
 
 #define A(i) args[i].p, args[i].len
 
+/* A 4-byte little-endian argument as uint32 (argon2id's cost parameters). */
+static uint32_t u32(const arg_t *a) {
+  if (a->len != 4 || a->p == NULL) return 0xFFFFFFFFu; /* out of every accepted range */
+  return (uint32_t) a->p[0] | (uint32_t) a->p[1] << 8 | (uint32_t) a->p[2] << 16 | (uint32_t) a->p[3] << 24;
+}
+
 static int dispatch(const char *op, arg_t *args, int n) {
 #define OP(name, nargs, call)                                                                                        \
   if (strcmp(op, name) == 0) return n == (nargs) ? (call) : -100;
@@ -76,6 +83,7 @@ static int dispatch(const char *op, arg_t *args, int n) {
   OP("sign_verify_detached", 3, aegis_sign_verify_detached(A(0), A(1), A(2)))
   OP("hmacsha256", 3, aegis_hmacsha256(A(0), A(1), A(2)))
   OP("hkdf_sha256", 4, aegis_hkdf_sha256(A(0), A(1), A(2), A(3)))
+  OP("argon2id", 5, aegis_argon2id(A(0), A(1), A(2), u32(&args[3]), u32(&args[4])))
 #undef OP
   return -101;
 }

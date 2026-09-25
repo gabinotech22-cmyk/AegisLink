@@ -21,9 +21,11 @@
  * kept — fail closed): `scalarMult` / `box.before` / `box` THROW on a low-order
  * public key, and Ed25519 verification rejects small-order public keys.
  *
- * Unkeyed SHA-256/512 stay on @noble (no secret-dependent branches or table
- * lookups to leak through timing), as on desktop. Out of scope (stay on @noble,
- * see docs/ROADMAP.md): Argon2id / PBKDF2 and ML-KEM-768.
+ * Argon2id (PIN and backup KDFs) runs natively too, off the JS thread
+ * (`argon2id`, below). Unkeyed SHA-256/512 stay on @noble (no secret-dependent
+ * branches or table lookups to leak through timing), as on desktop. Out of
+ * scope (stay on @noble, see docs/ROADMAP.md): PBKDF2 (legacy v1/v2 backups
+ * only) and ML-KEM-768.
  *
  * If the native module is missing from the binary (Expo Go, a stale dev
  * client), importing this file THROWS: there is no JavaScript fallback.
@@ -317,4 +319,46 @@ export function hkdfSha256(
     'hkdfSha256',
   );
   return out;
+}
+
+/** Argon2id parameters, same names as @noble/hashes. Only one lane (`p: 1`) is supported. */
+export interface Argon2idOpts {
+  t: number;
+  m: number;
+  p: 1;
+  dkLen: number;
+}
+
+// Mirrors the C core's bounds (modules/aegis-sodium/cpp/aegis_sodium.h), so a
+// bad call fails here with a clear message; the C core checks again.
+const ARGON2_OUT = [16, 64] as const;
+const ARGON2_SALT = [8, 64] as const;
+const ARGON2_PWD_MAX = 65536;
+const ARGON2_T = [1, 16] as const;
+const ARGON2_M_KIB = [8, 262144] as const;
+const inRange = (v: number, [lo, hi]: readonly [number, number]): boolean =>
+  Number.isSafeInteger(v) && v >= lo && v <= hi;
+
+/**
+ * Argon2id (RFC 9106, v1.3), byte-identical to @noble/hashes `argon2id` with the
+ * same parameters, but native and off the JS thread: the app's backup KDF
+ * (64 MiB, 3 passes) took minutes on Hermes in JavaScript. Any salt of 8–64
+ * bytes works (libsodium's public crypto_pwhash only takes 16), so existing
+ * 32-byte backup salts and domain-string salts derive unchanged.
+ */
+export async function argon2id(password: Uint8Array, salt: Uint8Array, opts: Argon2idOpts): Promise<Uint8Array> {
+  checkArrayTypes(password, salt);
+  if (opts.p !== 1) throw new Error('argon2id: only p = 1 is supported');
+  if (!inRange(opts.dkLen, ARGON2_OUT)) throw new Error('argon2id: dkLen must be 16..64');
+  if (!inRange(salt.length, ARGON2_SALT)) throw new Error('argon2id: salt must be 8..64 bytes');
+  if (password.length > ARGON2_PWD_MAX) throw new Error('argon2id: password too long');
+  if (!inRange(opts.t, ARGON2_T)) throw new Error('argon2id: t must be 1..16');
+  if (!inRange(opts.m, ARGON2_M_KIB)) throw new Error('argon2id: m must be 8..262144 KiB');
+  const bytes = await AegisSodium.argon2id(password, salt, opts.t, opts.m, opts.dkLen);
+  try {
+    if (!Array.isArray(bytes) || bytes.length !== opts.dkLen) throw new Error('aegis-sodium: argon2id failed');
+    return Uint8Array.from(bytes);
+  } finally {
+    if (Array.isArray(bytes)) bytes.fill(0);
+  }
 }

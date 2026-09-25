@@ -1,8 +1,6 @@
 import * as Crypto from 'expo-crypto';
-import { argon2idAsync } from '@noble/hashes/argon2';
-import { nacl } from '../crypto/sodium';
+import { nacl, argon2id } from '../crypto/sodium';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import { KDF_ASYNC_TICK_MS } from '../crypto/nobleNextTickPatch';
 import { ss } from '../utils/secureStore';
 
 const PIN_HASH_KEY = 'aegis.pin.hash';
@@ -11,24 +9,22 @@ const PIN_LEN_KEY = 'aegis.pin.len.v1'; // '4' | '6' — closes the silent-4th-d
 const LEGACY_PIN_SALT = 'aegislink:pin:v1:';
 export const DURESS_PIN_SALT = 'aegislink:panic:v1:';
 
-// App-lock PIN hashing, calibrated for the runtime it actually runs on.
+// App-lock PIN hashing. Argon2id runs natively (libsodium, off the JS thread:
+// crypto/sodium `argon2id`), so the cost is set for security again rather than
+// for Hermes' speed.
 //
-// Hermes has no JIT: pure-JS Argon2id at the v2 cost (46 MiB / 3 passes)
-// blocked the JS thread for ~80 s per hash (measured on an emulator release
-// build), freezing PIN setup, EVERY unlock, and the duress check. The PIN
-// only gates the UI (identity and message keys do NOT derive from it), the
-// hash lives in Keystore/Keychain device-bound storage, and the lock screen
-// rate-limits to 5 attempts — so the KDF adds friction against an attacker
-// who already extracted the hash from a compromised device, nothing more.
-// v3 keeps Argon2id with a per-install random salt but at ~1 s of Hermes
-// work, and ALL hashing goes through argon2idAsync, which (with the
-// nobleNextTickPatch side-effect import) yields to the event loop so the UI
-// never freezes regardless of cost.
-const ARGON_V3 = { t: 1, m: 2048, p: 1, dkLen: 32, asyncTick: KDF_ASYNC_TICK_MS } as const;
-// v2 cost kept ONLY to verify (and transparently upgrade) hashes created
-// before the recalibration. Verifying one is slow (~80 s) but non-blocking,
-// and happens at most once per install thanks to the re-hash on success.
-const ARGON_V2 = { t: 3, m: 47104, p: 1, dkLen: 32, asyncTick: KDF_ASYNC_TICK_MS } as const;
+// History: pure-JS Argon2id on Hermes (no JIT) at the v2 cost (46 MiB / 3
+// passes) blocked for ~80 s per hash, so v3 dropped to 2 MiB / 1 pass (~1 s of
+// Hermes work). Natively, v4's OWASP-recommended 19 MiB / 2 passes costs about
+// a tenth of a second on a phone. The PIN only gates the UI (identity and
+// message keys do NOT derive from it), the hash lives in Keystore/Keychain
+// device-bound storage, and the lock screen rate-limits to 5 attempts — the
+// KDF adds cost for an attacker who already extracted the hash.
+const ARGON_V4 = { t: 2, m: 19456, p: 1, dkLen: 32 } as const;
+// Older costs, kept ONLY to verify (and transparently upgrade) existing hashes.
+// Same bytes as the @noble derivations that produced them.
+const ARGON_V3 = { t: 1, m: 2048, p: 1, dkLen: 32 } as const;
+const ARGON_V2 = { t: 3, m: 47104, p: 1, dkLen: 32 } as const;
 const enc = new TextEncoder();
 
 /** Constant-time string comparison to avoid leaking the hash via timing. */
@@ -48,12 +44,16 @@ async function getPinSalt(): Promise<Uint8Array> {
   return decodeBase64(b64);
 }
 
+async function argonPinV4(pin: string, salt: Uint8Array): Promise<string> {
+  return 'a4:' + encodeBase64(await argon2id(enc.encode(pin), salt, ARGON_V4));
+}
+
 async function argonPinV3(pin: string, salt: Uint8Array): Promise<string> {
-  return 'a3:' + encodeBase64(await argon2idAsync(enc.encode(pin), salt, ARGON_V3));
+  return 'a3:' + encodeBase64(await argon2id(enc.encode(pin), salt, ARGON_V3));
 }
 
 async function argonPinV2(pin: string, salt: Uint8Array): Promise<string> {
-  return 'a2:' + encodeBase64(await argon2idAsync(enc.encode(pin), salt, ARGON_V2));
+  return 'a2:' + encodeBase64(await argon2id(enc.encode(pin), salt, ARGON_V2));
 }
 
 async function legacyHash(pin: string): Promise<string> {
@@ -65,26 +65,29 @@ async function legacyHash(pin: string): Promise<string> {
 
 /**
  * Hash a PIN under a caller-supplied domain salt — used to STORE the
- * duress/decoy PIN. Argon2id v3 ('a3:'), async so the UI stays responsive.
+ * duress/decoy PIN. Argon2id v4 ('a4:'), native and off the JS thread.
  * (Per-install salt for duress is a follow-up; the domain salt + Argon2id cost
  * + Keystore THIS_DEVICE_ONLY storage already make offline enumeration hard.)
  */
 export async function hashPinWithSalt(pin: string, salt: string): Promise<string> {
-  return argonPinV3(pin, enc.encode(salt));
+  return argonPinV4(pin, enc.encode(salt));
 }
 
 /**
  * Verify a PIN against a stored duress hash in constant time, accepting the
- * current 'a3:' format plus the old 'a2:' Argon2id and legacy SHA-256 hashes
- * so an already-configured panic PIN keeps working. Callers own the stored
- * value, so old formats are NOT upgraded here — reconfiguring the panic PIN
- * re-stores it as 'a3:'.
+ * current 'a4:' format plus the older 'a3:'/'a2:' Argon2id and legacy SHA-256
+ * hashes so an already-configured panic PIN keeps working. Callers own the
+ * stored value, so old formats are NOT upgraded here — reconfiguring the panic
+ * PIN re-stores it as 'a4:'.
  */
 export async function verifyPinWithSalt(
   pin: string,
   salt: string,
   stored: string,
 ): Promise<boolean> {
+  if (stored.startsWith('a4:')) {
+    return constantTimeEq(stored, await argonPinV4(pin, enc.encode(salt)));
+  }
   if (stored.startsWith('a3:')) {
     return constantTimeEq(stored, await argonPinV3(pin, enc.encode(salt)));
   }
@@ -108,7 +111,7 @@ export async function setPIN(pin: string): Promise<void> {
     throw new Error(`unsupported PIN length: ${pin.length} (must be 4 or 6)`);
   }
   const salt = await getPinSalt();
-  await ss.set(PIN_HASH_KEY, await argonPinV3(pin, salt));
+  await ss.set(PIN_HASH_KEY, await argonPinV4(pin, salt));
   await setStoredPinLength(pin.length === 4 ? 4 : 6);
 }
 
@@ -137,15 +140,16 @@ export async function getStoredPinLength(): Promise<4 | 6 | null> {
 export async function verifyPIN(pin: string): Promise<boolean> {
   const stored = await ss.get(PIN_HASH_KEY);
   if (!stored) return false;
-  if (stored.startsWith('a3:')) {
+  if (stored.startsWith('a4:')) {
     const salt = await getPinSalt();
-    return constantTimeEq(stored, await argonPinV3(pin, salt));
+    return constantTimeEq(stored, await argonPinV4(pin, salt));
   }
-  if (stored.startsWith('a2:')) {
-    // Old heavyweight format: verify once (slow but non-blocking), then
-    // transparently re-hash as 'a3:' so the next unlock is fast.
+  if (stored.startsWith('a3:') || stored.startsWith('a2:')) {
+    // Older Argon2id costs: verify, then transparently re-hash as 'a4:' under
+    // the same per-install salt.
     const salt = await getPinSalt();
-    const ok = constantTimeEq(stored, await argonPinV2(pin, salt));
+    const derived = stored.startsWith('a3:') ? await argonPinV3(pin, salt) : await argonPinV2(pin, salt);
+    const ok = constantTimeEq(stored, derived);
     if (ok) await setPIN(pin);
     return ok;
   }

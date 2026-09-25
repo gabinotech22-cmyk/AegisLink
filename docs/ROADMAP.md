@@ -176,9 +176,16 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
       en memoria nativa (módulo en mobile, proceso main en desktop) y JS recibe un handle, como
       libsignal. Un XSS en el renderer ya no podría leer claves. F-1 cierra el timing del JIT pero no
       saca las claves del heap de JS.
-- [ ] **Argon2id nativo + formato de backup nuevo**: `crypto_pwhash` (mucho más rápido: desbloqueo por
-      PIN y restauración de backup) con salt de 16 B; el formato actual (salt 32 B) se sigue leyendo
-      con @noble. ML-KEM-768 sigue en @noble: libsodium 1.0.22 (ya vendorizado) trae
+- [x] **Argon2id nativo en mobile** ✅ (#549; efectivo desde el primer build nativo que lo incluya):
+      PIN y backup v3 corren en libsodium nativo, fuera del hilo de JS. **Sin formato de backup
+      nuevo**: el núcleo C llama a `argon2id_hash_raw` (acepta salts de 8–64 B), así que los backups
+      existentes (salt 32 B) y el salt de dominio del PIN de pánico dan los mismos bytes que @noble.
+      Restaurar un backup v3 pasa de minutos a menos de un segundo. PIN nuevo `a4` (19 MiB, t=2;
+      antes 2 MiB, t=1 por la lentitud de Hermes); `a3`/`a2` se re-hashean al desbloquear. Pruebas:
+      `modules/aegis-sodium/test/differential.mjs` (parámetros exactos del PIN y del backup + vector
+      de referencia), `sodium-facade.test.ts`, `lock/__tests__/pin.test.ts`, flujo Maestro
+      `.maestro/03-app-lock-pin.yaml` en emulador. Desktop sigue con @noble (V8 lo hace en <1 s).
+- [ ] **ML-KEM-768 nativo**: sigue en @noble. libsodium 1.0.22 (ya vendorizado) trae
       `crypto_kem_mlkem768`; moverlo exige probar compatibilidad byte a byte con @noble/post-quantum
       (claves de prekeys PQ ya publicadas) antes de cambiar.
 - [ ] Cerrar los "partial coverage" de la auditoría: zeroización en intermedios X3DH/PQXDH,
