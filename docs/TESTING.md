@@ -288,7 +288,7 @@ Valida el paquete de self-hosting sin construir imágenes: `docker compose
 config` de `infra/selfhost/docker-compose.yml` con el `.env.example` (+ secretos
 de humo), comprueba que **ningún** servicio publica un puerto (el relay propio
 es solo `.onion`) y hace `bash -n` de `up.sh`/`print-onion.sh`/
-`backup-onion-key.sh`. Ver `docs/SELF-HOSTING.md`.
+`backup-onion-key.sh`/`show-qr.sh`. Ver `docs/SELF-HOSTING.md`.
 
 ## Semgrep (`.github/workflows/semgrep.yml`)
 

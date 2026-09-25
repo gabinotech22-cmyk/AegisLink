@@ -195,7 +195,7 @@ jobs:
           docker compose config --quiet
           # Onion-only: no service may publish a host port.
           if docker compose config | grep -E '^\s+published:'; then echo "self-host compose publishes a port" >&2; exit 1; fi
-          bash -n up.sh print-onion.sh backup-onion-key.sh
+          bash -n up.sh print-onion.sh backup-onion-key.sh show-qr.sh
           # F7: a self-hosted relay must NOT inherit the official relay's
           # single-onion (non-anonymous) mode — its location stays hidden.
           docker compose config | grep -q 'TORRC: torrc.selfhost'

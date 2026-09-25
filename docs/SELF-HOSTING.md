@@ -7,6 +7,7 @@
 > **Privacidad → Red → "Mi relay"**, que también explica cómo montarlo: tarjeta
 > "¿Cómo monto mi propio relay?" con 3 pasos + enlace a la versión pública de
 > esta guía, **`https://aegis-link.it/selfhost.html`** (`web/selfhost.html`,
+> ES/EN/IT vía `web/lang.js`; la app la abre con `?lang=` en su idioma;
 > desplegada con `infra/deploy-web.sh`). Si cambias los pasos aquí, cambia
 > también esa página y las claves `relaySettings.howTo*` de la app.
 
@@ -39,6 +40,8 @@ habla con los relays que necesita).
   2 GB, un mini-PC en casa, una Raspberry Pi 4). Sin IP pública, sin dominio.
 - Docker con el plugin `compose` (Docker 24+).
 - Salida a Internet (Tor necesita conectarse a la red Tor; nada entra).
+- Opcional: `qrencode` (`sudo apt install qrencode`) para que la dirección salga
+  también como **código QR** (terminal + `relay-qr.png`).
 
 ## Levantarlo
 
@@ -56,13 +59,21 @@ secretos obligatorios si están vacíos, construye y levanta `relay`, `tor` y
   Your relay:  http://xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.onion
 ```
 
-Para volver a verla: `./print-onion.sh`. Para actualizar tras un `git pull`:
+y, si tienes `qrencode`, la misma dirección como QR en la terminal y guardada
+en `relay-qr.png` (gitignored) para mandársela a tu familia/amigos por un canal
+de confianza (`show-qr.sh`; sin `qrencode` solo avisa de cómo instalarlo).
+
+Para volver a verla: `./print-onion.sh` (la dirección por stdout, el QR por
+stderr; `--no-qr` para scripts). Para actualizar tras un `git pull`:
 `./up.sh` otra vez (rebuild; datos y clave onion se conservan).
 
 ## Usarlo desde la app
 
-1. **Privacidad → Red → Mi relay** → pega la dirección `.onion` → **Verificar**.
-   La app hace `GET /relay/info` + `/health` por Tor y comprueba que el relay
+1. **Privacidad → Red → Mi relay** → **Escanear QR del relay** (móvil, cámara)
+   o **Importar imagen de QR** (escritorio, captura/foto), o pega la dirección
+   `.onion` → **Verificar**. El escáner solo acepta un onion v3 válido (un QR de
+   contacto o de grupo se rechaza, nunca se interpreta) y verifica en el acto;
+   el cambio sigue exigiendo confirmación. La app hace `GET /relay/info` + `/health` por Tor y comprueba que el relay
    sirve `mailbox` y `prekeys`. Sin verificar no hay botón de cambio.
 2. **Cambiar a …onion** → lee las consecuencias → confirma (con PIN o
    biometría si tienes el bloqueo de la app activado).

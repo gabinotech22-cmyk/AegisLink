@@ -59,6 +59,18 @@ jest.mock('../../components/LockConfirm', () => ({
   useLockConfirm: () => ({ confirm: async () => mockLockConfirm.ok, element: null }),
 }));
 
+// The camera modal has its own suite (components/__tests__/RelayQrScanner);
+// here it is a stub that "scans" whatever the test asks for.
+const mockScan = { value: '' };
+jest.mock('../../components/RelayQrScanner', () => {
+  const React = require('react') as typeof import('react');
+  const { Pressable, Text } = require('react-native') as typeof import('react-native');
+  return {
+    RelayQrScanner: ({ visible, onOnion }: { visible: boolean; onOnion: (o: string) => void }) =>
+      visible ? React.createElement(Pressable, { testID: 'stub-scan', onPress: () => onOnion(mockScan.value) }, React.createElement(Text, null, 'scanner')) : null,
+  };
+});
+
 const mockHome = { official: true, onion: null as string | null, since: 0, previous: null as { onion: string | null; until: number } | null };
 const mockVerify = jest.fn();
 const mockMigrate = jest.fn();
@@ -68,7 +80,7 @@ jest.mock('../../net/relayMigration', () => ({
   migrateHomeRelay: (...a: unknown[]) => mockMigrate(...a),
 }));
 
-import { RelaySettingsScreen, SELFHOST_GUIDE_URL } from '../RelaySettings';
+import { RelaySettingsScreen, SELFHOST_GUIDE_URL, selfhostGuideUrl } from '../RelaySettings';
 
 const MINE = 'm'.repeat(56) + '.onion';
 
@@ -96,9 +108,31 @@ describe('RelaySettingsScreen (F5b)', () => {
     expect(getByTestId('relay-howto')).toBeTruthy();
     for (const k of ['howToTitle', 'howTo1', 'howTo2', 'howTo3']) expect(getByText(`relaySettings.${k}`)).toBeTruthy();
     fireEvent.press(getByTestId('relay-guide-link'));
-    expect(open).toHaveBeenCalledWith(SELFHOST_GUIDE_URL);
+    // The guide is trilingual; it opens in the app's language (mock: 'en').
+    expect(open).toHaveBeenCalledWith('https://aegis-link.it/selfhost.html?lang=en');
     expect(SELFHOST_GUIDE_URL).toBe('https://aegis-link.it/selfhost.html');
     open.mockRestore();
+  });
+
+  it('builds the guide URL only for the languages the page has', () => {
+    expect(selfhostGuideUrl('es-ES')).toBe(`${SELFHOST_GUIDE_URL}?lang=es`);
+    expect(selfhostGuideUrl('it')).toBe(`${SELFHOST_GUIDE_URL}?lang=it`);
+    expect(selfhostGuideUrl('de')).toBe(SELFHOST_GUIDE_URL);
+    expect(selfhostGuideUrl(undefined)).toBe(SELFHOST_GUIDE_URL);
+  });
+
+  it('a scanned relay QR fills the field and verifies it right away — the switch still needs confirmation', async () => {
+    mockScan.value = MINE;
+    mockVerify.mockResolvedValueOnce({ ok: true, info: { name: 'Home relay', version: '1.0.7', features: ['mailbox', 'prekeys'] } });
+    const { getByTestId, queryByTestId } = render(<RelaySettingsScreen onBack={jest.fn()} />);
+    expect(queryByTestId('stub-scan')).toBeNull();
+    fireEvent.press(getByTestId('relay-scan-qr'));
+    await act(async () => { fireEvent.press(getByTestId('stub-scan')); });
+    expect(queryByTestId('stub-scan')).toBeNull(); // modal closed
+    expect(getByTestId('relay-onion-input').props.value).toBe(MINE);
+    expect(mockVerify).toHaveBeenCalledWith({ onion: MINE });
+    await waitFor(() => expect(getByTestId('relay-verify-ok')).toBeTruthy());
+    expect(mockMigrate).not.toHaveBeenCalled();
   });
 
   it('shows the official relay by default and no "back to official" action', () => {

@@ -23,13 +23,21 @@ import { TopBar } from '../components/TopBar';
 import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { useLockConfirm } from '../components/LockConfirm';
+import { RelayQrScanner } from '../components/RelayQrScanner';
 import { relayRefFromOnion, shortOnion, type RelayRef } from '../net/relayRef';
 import { describeHome, migrateHomeRelay, verifyRelay, type RelayInfo, type MigrateError, type VerifyRelayResult } from '../net/relayMigration';
 
 // Public self-hosting guide on the product site (web/selfhost.html, the
 // rendered twin of docs/SELF-HOSTING.md). Opened in the external browser, like
-// the legal links in Privacy.tsx — the app itself fetches nothing.
+// the legal links in Privacy.tsx — the app itself fetches nothing. The page
+// is trilingual (web/lang.js); `?lang=` opens it in the app's language.
 export const SELFHOST_GUIDE_URL = 'https://aegis-link.it/selfhost.html';
+const GUIDE_LANGS = ['es', 'en', 'it'];
+
+export function selfhostGuideUrl(language?: string): string {
+  const l = (language ?? '').slice(0, 2).toLowerCase();
+  return GUIDE_LANGS.includes(l) ? `${SELFHOST_GUIDE_URL}?lang=${l}` : SELFHOST_GUIDE_URL;
+}
 
 interface Props {
   onBack: () => void;
@@ -68,12 +76,15 @@ export function RelaySettingsScreen({ onBack }: Props) {
   const [onionInput, setOnionInput] = useState('');
   const [verify, setVerify] = useState<VerifyState>({ kind: 'idle' });
   const [migrate, setMigrate] = useState<MigrateState>({ kind: 'idle' });
+  const [scanOpen, setScanOpen] = useState(false);
 
   const typedRef = useMemo(() => relayRefFromOnion(onionInput), [onionInput]);
   const verifiedRef = verify.kind === 'ok' && typedRef && typedRef.onion === verify.ref.onion ? verify.ref : null;
 
-  const handleVerify = useCallback(async () => {
-    const ref = relayRefFromOnion(onionInput);
+  // `raw` comes from the QR scanner (verify right away, no typing); the
+  // button verifies what is in the field.
+  const handleVerify = useCallback(async (raw?: string) => {
+    const ref = relayRefFromOnion(raw ?? onionInput);
     if (!ref) { setVerify({ kind: 'error', error: 'invalid_onion' }); return; }
     setVerify({ kind: 'verifying' });
     const r = await verifyRelay(ref);
@@ -160,7 +171,7 @@ export function RelaySettingsScreen({ onBack }: Props) {
             </View>
           ))}
           <Pressable
-            onPress={() => { void Linking.openURL(SELFHOST_GUIDE_URL).catch(() => {}); }}
+            onPress={() => { void Linking.openURL(selfhostGuideUrl(i18n.language)).catch(() => {}); }}
             accessibilityRole="link"
             accessibilityHint={i18nT('relaySettings.guideHint')}
             testID="relay-guide-link"
@@ -185,7 +196,16 @@ export function RelaySettingsScreen({ onBack }: Props) {
             style={{ fontFamily: t.fontMono, fontSize: 13, color: t.text, paddingVertical: 14 }}
           />
         </View>
-        <View style={{ height: 10 }} />
+        <Pressable
+          onPress={() => setScanOpen(true)}
+          disabled={verify.kind === 'verifying' || migrate.kind === 'running'}
+          testID="relay-scan-qr"
+          accessibilityRole="button"
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12 }}
+        >
+          <I.QR size={18} color={t.accent} />
+          <Text style={{ fontFamily: t.font, fontSize: 14, color: t.accent, fontWeight: '600' }}>{i18nT('relaySettings.scanCta')}</Text>
+        </Pressable>
         <PrimaryButton
           t={t}
           label={verify.kind === 'verifying' ? i18nT('relaySettings.verifying') : i18nT('relaySettings.verify')}
@@ -275,6 +295,15 @@ export function RelaySettingsScreen({ onBack }: Props) {
           </View>
         </View>
       </Modal>
+      <RelayQrScanner
+        visible={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onOnion={(onion) => {
+          setScanOpen(false);
+          setOnionInput(onion);
+          void handleVerify(onion);
+        }}
+      />
       {lockConfirmElement}
     </View>
   );

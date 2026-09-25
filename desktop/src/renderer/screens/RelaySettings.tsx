@@ -7,7 +7,7 @@
  * mirrors mobile: three inline steps + a link to web/selfhost.html (opened in
  * the OS browser by main's setWindowOpenHandler, https only).
  */
-import { useCallback, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useMemo, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { useTheme } from '../theme/ThemeContext';
@@ -16,12 +16,20 @@ import { TopBar } from '../components/TopBar';
 import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { useLockConfirm } from '../components/LockConfirm';
-import { relayRefFromOnion, shortOnion, type RelayRef } from '../net/relayRef';
+import { normalizeOnion, relayRefFromOnion, shortOnion, type RelayRef } from '../net/relayRef';
+import { decodeQrFromImage } from '../utils/qrImage';
 import { describeHome, migrateHomeRelay, verifyRelay, type RelayInfo, type MigrateError, type VerifyRelayResult } from '../net/relayMigration';
 
 // Public self-hosting guide on the product site (web/selfhost.html, the
-// rendered twin of docs/SELF-HOSTING.md).
+// rendered twin of docs/SELF-HOSTING.md). The page is trilingual
+// (web/lang.js); `?lang=` opens it in the app's language.
 export const SELFHOST_GUIDE_URL = 'https://aegis-link.it/selfhost.html';
+const GUIDE_LANGS = ['es', 'en', 'it'];
+
+export function selfhostGuideUrl(language?: string): string {
+  const l = (language ?? '').slice(0, 2).toLowerCase();
+  return GUIDE_LANGS.includes(l) ? `${SELFHOST_GUIDE_URL}?lang=${l}` : SELFHOST_GUIDE_URL;
+}
 
 interface Props {
   onBack: () => void;
@@ -31,7 +39,7 @@ type VerifyState =
   | { kind: 'idle' }
   | { kind: 'verifying' }
   | { kind: 'ok'; ref: RelayRef; info: RelayInfo }
-  | { kind: 'error'; error: Exclude<VerifyRelayResult, { ok: true }>['error'] | 'invalid_onion' };
+  | { kind: 'error'; error: Exclude<VerifyRelayResult, { ok: true }>['error'] | 'invalid_onion' | 'qr_not_relay' };
 
 type MigrateState =
   | { kind: 'idle' }
@@ -63,8 +71,10 @@ export function RelaySettingsScreen({ onBack }: Props) {
   const typedRef = useMemo(() => relayRefFromOnion(onionInput), [onionInput]);
   const verifiedRef = verify.kind === 'ok' && typedRef && typedRef.onion === verify.ref.onion ? verify.ref : null;
 
-  const handleVerify = useCallback(async () => {
-    const ref = relayRefFromOnion(onionInput);
+  // `raw` comes from an imported QR image (verify right away); the button
+  // verifies what is in the field.
+  const handleVerify = useCallback(async (raw?: string) => {
+    const ref = relayRefFromOnion(raw ?? onionInput);
     if (!ref) { setVerify({ kind: 'error', error: 'invalid_onion' }); return; }
     setVerify({ kind: 'verifying' });
     const r = await verifyRelay(ref);
@@ -85,6 +95,21 @@ export function RelaySettingsScreen({ onBack }: Props) {
       setMigrate({ kind: 'error', error: r.error, detail: r.detail });
     }
   }, [identity, confirmLock]);
+
+  // The QR printed by infra/selfhost/up.sh, from a screenshot or a photo.
+  // Decoded locally (utils/qrImage); only a valid v3 onion is accepted — a
+  // contact or group QR is rejected, never interpreted.
+  const handleQrImage = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    let decoded: string | null = null;
+    try { decoded = await decodeQrFromImage(file); } catch { decoded = null; }
+    const onion = normalizeOnion(decoded);
+    if (!onion) { setVerify({ kind: 'error', error: 'qr_not_relay' }); return; }
+    setOnionInput(onion);
+    await handleVerify(onion);
+  }, [handleVerify]);
 
   const errorText = (code: string): string => i18n.t(`relaySettings.errors.${code}`, { defaultValue: i18n.t('relaySettings.errors.unknown') });
 
@@ -135,7 +160,7 @@ export function RelaySettingsScreen({ onBack }: Props) {
           </ol>
           <a
             data-testid="relay-guide-link"
-            href={SELFHOST_GUIDE_URL}
+            href={selfhostGuideUrl(i18n.language)}
             target="_blank"
             rel="noopener noreferrer"
             title={i18n.t('relaySettings.guideHint')}
@@ -156,7 +181,14 @@ export function RelaySettingsScreen({ onBack }: Props) {
           spellCheck={false}
           style={{ width: '100%', boxSizing: 'border-box', fontFamily: t.fontMono, fontSize: 13, color: t.text, backgroundColor: t.surface, border: `1px solid ${t.border}`, borderRadius: t.radius, padding: '13px 14px', outline: 'none' }}
         />
-        <div style={{ height: 10 }} />
+        <label
+          data-testid="relay-import-qr"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12, cursor: 'pointer', fontFamily: t.font, fontSize: 14, color: t.accent, fontWeight: 600 }}
+        >
+          <I.QR size={18} color={t.accent} />
+          {i18n.t('relaySettings.importQrCta')}
+          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => void handleQrImage(e)} disabled={verify.kind === 'verifying' || migrate.kind === 'running'} />
+        </label>
         <PrimaryButton
           t={t}
           label={verify.kind === 'verifying' ? i18n.t('relaySettings.verifying') : i18n.t('relaySettings.verify')}
