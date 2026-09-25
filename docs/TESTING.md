@@ -328,7 +328,9 @@ hallazgo sube tal cual.
 - **Argon2id en dispositivo**: el flujo Maestro `mobile/.maestro/03-app-lock-pin.yaml` (job
   *Mobile E2E (Maestro)*, emulador Android con el APK real) pone un PIN, reinicia la app, comprueba
   que un PIN erróneo se rechaza y que el correcto desbloquea. Cada paso deriva el PIN con el
-  Argon2id nativo (llamada asíncrona fuera del hilo de JS), así que un binding roto falla ahí. En
+  Argon2id nativo (llamada asíncrona fuera del hilo de JS), así que un binding roto falla ahí.
+  Si un flujo falla, el propio log del job imprime los errores de la app (logcat: `AndroidRuntime`,
+  `ReactNativeJS`) y los textos que hay en pantalla, sin depender de descargar artefactos. En
   Jest, `nodeBackend.ts` calcula Argon2id con @noble (sodium-native solo expone salts de 16 B).
 - `vendor-manifest.test.ts` (`mobile/modules/aegis-sodium/__tests__`): cada fichero de
   `vendor/libsodium` coincide con el manifiesto (SHA-256) que escribió `scripts/vendor-libsodium.mjs`
