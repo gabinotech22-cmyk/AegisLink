@@ -135,6 +135,27 @@ short version:
   keystore unsealed can read plaintext; panic-wipe and decoy modes mitigate
   coercion but are not cryptographic defenses.
 
+## How AegisLink is built (use of AI)
+
+AegisLink is built by one developer. To move faster, the developer uses AI
+coding assistants, mainly Anthropic's Claude through Claude Code, for a
+significant part of the implementation, tests and documentation.
+
+- **The developer owns every decision.** Design, protocol choices and threat
+  model are decided by the developer and follow proven designs (Signal, SimpleX,
+  Session, Tor Browser/Orbot), which are referenced in the docs.
+- **Every change is reviewed and tested before it merges.** It goes through a
+  pull request, CI (about 360 test files, type checks, CodeQL/Semgrep, a
+  reproducible-build check) and the project's written security rules. Every
+  security fix ships with a regression test.
+- **Why this matters for you.** AI-assisted code needs the same independent
+  scrutiny as any other code, and arguably more. This is why an **independent
+  security audit** is the project's top priority (see the status note above), and
+  why review from anyone is welcome ([SECURITY.md](SECURITY.md)).
+
+The goal is to grow a small team of human maintainers. Today the project has no
+revenue, so it is self-funded and maintained by its founder.
+
 ## Repository layout
 
 | Path        | What it is                                              | License   |
