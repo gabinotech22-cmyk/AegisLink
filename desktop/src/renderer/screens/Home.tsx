@@ -406,9 +406,9 @@ function ContactRow({
   let previewText: string;
   if (preview) {
     if (preview.direction === 'out') {
-      previewText = `You: ${preview.body || (preview.type === 'image' ? '📷 Image' : preview.type === 'audio' ? '🎙 Audio' : preview.type === 'file' ? '📎 File' : '...')}`;
+      previewText = `You: ${preview.body || (preview.type === 'image' ? '📷 Image' : preview.type === 'video' ? '🎬 Video' : preview.type === 'album' ? '📎 Album' : preview.type === 'audio' ? '🎙 Audio' : preview.type === 'file' ? '📎 File' : '...')}`;
     } else {
-      previewText = preview.body || (preview.type === 'image' ? '📷 Image' : preview.type === 'audio' ? '🎙 Audio' : preview.type === 'file' ? '📎 File' : '...');
+      previewText = preview.body || (preview.type === 'image' ? '📷 Image' : preview.type === 'video' ? '🎬 Video' : preview.type === 'album' ? '📎 Album' : preview.type === 'audio' ? '🎙 Audio' : preview.type === 'file' ? '📎 File' : '...');
     }
   } else {
     previewText = i18n.t('home.noMessages');

@@ -230,9 +230,9 @@ function ChatItem({
     previewText = i18n.t('chat.deletedMessage');
   } else if (preview) {
     if (preview.direction === 'out') {
-      previewText = `You: ${preview.body || (preview.type === 'image' ? 'Image' : preview.type === 'audio' ? 'Audio' : '...')}`;
+      previewText = `You: ${preview.body || (preview.type === 'image' ? 'Image' : preview.type === 'video' ? 'Video' : preview.type === 'album' ? 'Album' : preview.type === 'audio' ? 'Audio' : '...')}`;
     } else {
-      previewText = preview.body || (preview.type === 'image' ? 'Image' : preview.type === 'audio' ? 'Audio' : '...');
+      previewText = preview.body || (preview.type === 'image' ? 'Image' : preview.type === 'video' ? 'Video' : preview.type === 'album' ? 'Album' : preview.type === 'audio' ? 'Audio' : '...');
     }
   } else {
     previewText = i18n.t('home.noMessages');

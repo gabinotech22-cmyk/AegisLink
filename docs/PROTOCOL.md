@@ -705,7 +705,14 @@ deleted together with the message row — delete for me, delete for everyone
 (receiver side), ephemeral expiry and a chat/contact wipe call
 `utils/mediaFiles.ts` on the URIs of the affected rows (main and multi-
 attachment). The decrypted cache is additionally purged 30 s after the app goes
-to background. Desktop keeps no attachment on disk.
+to background. Desktop keeps no attachment on disk: a message row stores the
+attachment's wire reference (`blob:` URI, encrypted at rest with the rest of the
+row), and the bubble downloads and decrypts it into a memory-only object URL
+when it renders (`hooks/useMediaUrl.ts`, bounded session cache). It reads every
+format mobile sends — `[image:<uri>]caption`, `[video:…]`, `[audio:Ns:…]`,
+`[file:<name>:…]`, `[multi:N]…` albums, blob URIs v1/v2/v3
+(`utils/incomingMedia.ts`, test `incomingMedia.test.ts`). With no local copy,
+an attachment older than the relay's 24 h TTL shows "attachment expired".
 
 ### 7.4b Local database at rest (SQLCipher) and the lost-key case
 

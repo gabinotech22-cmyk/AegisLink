@@ -189,7 +189,7 @@ export async function decryptBody(encryptedBody: string): Promise<string> {
 
 // ─── Messages ────────────────────────────────────────────────────────────────
 
-export type MessageType = 'text' | 'image' | 'audio' | 'file' | 'poll' | 'location' | 'view_once';
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'file' | 'album' | 'poll' | 'location' | 'view_once';
 
 export interface MessageReactions {
   [emoji: string]: string[];

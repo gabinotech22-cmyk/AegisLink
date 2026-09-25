@@ -247,7 +247,12 @@
     "pauseAudio": "Pausar audio",
     "playAudio": "Reproducir audio",
     "typingIndicatorShort": "escribiendo…",
-    "queuedStatus": "en cola"
+    "queuedStatus": "en cola",
+    "attachmentLoading": "Descifrando…",
+    "attachmentExpired": "Adjunto caducado",
+    "attachmentUnavailable": "Adjunto no disponible",
+    "videoMessage": "mensaje de vídeo",
+    "downloadFile": "Guardar {{name}}"
   },
   "contacts": {
     "title": "Contactos",

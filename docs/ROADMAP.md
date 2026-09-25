@@ -222,7 +222,18 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 
 - [x] **iOS**: publicado en App Store desde 1.0.x (release 1.0.6 live, iOS build 33); el pinning TLS
       cubre ambas plataformas (`mobile/app.json` + `app.plugin.js`).
-- [ ] **Desktop media wiring**: cerrar `[[bug_desktop_media_not_wired]]` (UI de adjuntos desktop).
+- [x] **Desktop media wiring** ✅ (2026-09-25): el desktop solo reconocía la URI `blob:` v1 (4 partes)
+      y la imagen sin pie, así que los adjuntos de los clientes actuales (v2/v3) salían rotos o como
+      texto, y guardaba una URL temporal que moría al reiniciar. Ahora lee todos los formatos del
+      móvil (imagen con pie, vídeo, audio, archivo, álbum `[multi:N]`), guarda la referencia cifrada
+      y descifra al pintar (`utils/incomingMedia.ts`, `hooks/useMediaUrl.ts`,
+      `components/MediaBubbles.tsx`); los archivos se guardan con un clic y los caducados avisan.
+      Al enviar, el desktop metía todo lo elegido (PDF, ZIP…) en `[image:…]`; ahora manda vídeo y
+      archivo con su formato (`utils/outgoingMedia.ts`), y las imágenes del botón directo del chat
+      salen sin metadatos EXIF/GPS (`utils/stripImageMetadata.ts`, fail-closed; antes solo las
+      limpiaba la hoja de adjuntos). Tests `incomingMedia.test.ts`, `outgoingMedia.test.ts`,
+      `useMediaUrl.test.ts`. Pendiente: copia local cifrada (como mobile) para que los adjuntos
+      sobrevivan al TTL de 24 h del relay.
 - [ ] **Paridad mobile↔desktop** continua: mantener los parity-tests de los dos `socket/client.ts` como
       lever (no refactor cosmético — decisión M4).
 - [ ] **F-2 — UnifiedPush**: transporte wake-up sin Google/Apple (ntfy/Gotify), FCM/APNs como fallback.
