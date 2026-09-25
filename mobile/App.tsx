@@ -81,6 +81,7 @@ import { ProfileSwitcherScreen } from './src/screens/ProfileSwitcher';
 import { CreateProfileScreen } from './src/screens/CreateProfile';
 import { useIdentity } from './src/store/identity';
 import { usePreferences } from './src/store/preferences';
+import { coldLockAction } from './src/lock/coldLock';
 import { useProfiles } from './src/store/profiles';
 
 import { useCall } from './src/store/call';
@@ -224,6 +225,7 @@ function Shell() {
   const hideRecents = usePreferences((s) => s.hideRecents);
   const hydratePrefs = usePreferences((s) => s.hydrate);
   const appLockEnabled = usePreferences((s) => s.appLockEnabled);
+  const prefsHydrated = usePreferences((s) => s.hydrated);
   const duressActive = usePreferences((s) => s.duressActive);
   const lockTimeoutMin = usePreferences((s) => s.lockTimeoutMin);
   const [tab, setTab] = useState<Tab>('home');
@@ -269,17 +271,25 @@ function Shell() {
   const lastBgTimeRef = useRef<number | null>(null);
   const didColdLockRef = useRef(false);
 
-  // Cold-start lock: lock once when identity is confirmed and lock is enabled
+  // Cold-start lock: decided once per identity, with the persisted preferences
+  // loaded (src/lock/coldLock.ts). Turning the lock on later does not lock the
+  // app on the spot; background → foreground (below) and the next cold start do.
   useEffect(() => {
-    if (identity && status === 'ready' && appLockEnabled && !didColdLockRef.current) {
-      didColdLockRef.current = true;
-      setAppLocked(true);
-    }
-    if (!identity) {
+    const action = coldLockAction({
+      hasIdentity: identity !== null,
+      identityReady: status === 'ready',
+      prefsHydrated,
+      appLockEnabled,
+      alreadyDecided: didColdLockRef.current,
+    });
+    if (action === 'reset') {
       didColdLockRef.current = false;
       setAppLocked(false);
+    } else if (action === 'lock' || action === 'keep') {
+      if (!didColdLockRef.current) didColdLockRef.current = true;
+      if (action === 'lock') setAppLocked(true);
     }
-  }, [identity, status, appLockEnabled]);
+  }, [identity, status, prefsHydrated, appLockEnabled]);
 
   // Background → foreground lock enforcement
   useEffect(() => {
@@ -1300,7 +1310,9 @@ function Shell() {
     );
   }
 
-  if (status === 'loading' || showOnboarding === null) {
+  // Also wait for the persisted preferences: until they load, appLockEnabled is
+  // the store default (false) and a locked install would render unlocked.
+  if (status === 'loading' || showOnboarding === null || !prefsHydrated) {
     return (
       <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator color={t.accent} />
