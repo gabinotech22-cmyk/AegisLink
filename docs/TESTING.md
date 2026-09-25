@@ -326,7 +326,8 @@ hallazgo sube tal cual.
   `cmake -S modules/aegis-sodium/test -B build/aegis-sodium -G Ninja && ninja -C build/aegis-sodium && node modules/aegis-sodium/test/differential.mjs build/aegis-sodium/aegis_sodium_cli`
   (desde `mobile/`). Android arm64 lo compila el job de build smoke.
 - **Argon2id en dispositivo**: el flujo Maestro `mobile/.maestro/03-app-lock-pin.yaml` (job
-  *Mobile E2E (Maestro)*, emulador Android con el APK real) pone un PIN, reinicia la app, comprueba
+  *Mobile E2E (Maestro)*, emulador Android con el APK real y un relay desechable arrancado en el
+  propio runner, al que el emulador llega por `10.0.2.2:3001`) se registra, pone un PIN, reinicia la app, comprueba
   que un PIN erróneo se rechaza y que el correcto desbloquea. Cada paso deriva el PIN con el
   Argon2id nativo (llamada asíncrona fuera del hilo de JS), así que un binding roto falla ahí.
   Si un flujo falla, el propio log del job imprime los errores de la app (logcat: `AndroidRuntime`,

@@ -464,14 +464,13 @@ jobs:
         # release builds never set it, so production keeps screenshots blocked.
         #
         # EXPO_PUBLIC_SERVER_URL pins the relay to the emulator loopback, where
-        # nothing is listening. This is NOT cosmetic: the bundle is built with
-        # `--dev false`, so `__DEV__` is false and config.ts would otherwise
-        # resolve SERVER_URL to SERVER_URL_PROD — meaning every CI run mined a
-        # PoW and registered a REAL identity against the live relay, and burned
-        # its 5-per-15-min registration budget from a shared runner IP.
-        # The 02-onboarding flow already documents "no server in CI"; this makes
-        # that true. Registration fails fast, Onboarding falls through to Home
-        # exactly as the flow expects, and CI never writes to production.
+        # the job's own throwaway relay listens (step "Start a local relay").
+        # This is NOT cosmetic: the bundle is built with `--dev false`, so
+        # `__DEV__` is false and config.ts would otherwise resolve SERVER_URL to
+        # SERVER_URL_PROD — meaning every CI run mined a PoW and registered a
+        # REAL identity against the live relay, and burned its 5-per-15-min
+        # registration budget from a shared runner IP. CI never writes to
+        # production.
         env:
           EXPO_PUBLIC_E2E: '1'
           EXPO_PUBLIC_SERVER_URL: 'http://10.0.2.2:3001'
@@ -490,6 +489,35 @@ jobs:
         working-directory: mobile/android
         env:
           ORG_GRADLE_PROJECT_reactNativeArchitectures: x86_64
+
+      # A local relay on the runner, reached from the emulator at 10.0.2.2:3001
+      # (the loopback the E2E bundle is pinned to; cleartext to it is allowed by
+      # the app's network_security_config). Without it registration fails, a
+      # "Registration failed" alert covers onboarding and, 5 s later, the
+      # network-error screen covers Home — so no flow past onboarding could run.
+      # Its database lives in the runner's temp dir and dies with the job.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Start a local relay for the E2E flows
+        working-directory: server
+        env:
+          PORT: '3001'
+          AEGIS_DB_PATH: ${{ runner.temp }}/e2e-relay/aegislink.db
+          TRUST_PROXY: '0'
+          AEGIS_REG_RATELIMIT_MAX: '50'
+        run: |
+          npm ci --no-audit --no-fund
+          nohup npm start > "$RUNNER_TEMP/e2e-relay.log" 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3001/health >/dev/null; then echo "relay up"; exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/e2e-relay.log"
+          exit 1
 
       - name: Install Maestro
         run: |

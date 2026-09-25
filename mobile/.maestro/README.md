@@ -10,8 +10,8 @@ exercise the actual APK: native modules, storage, navigation, the works.
 | File | What it proves | Needs network? |
 |------|----------------|----------------|
 | `01-launch-smoke.yaml` | App builds, installs, boots, renders onboarding | No |
-| `02-onboarding.yaml` | Real identity generation → reaches main app | No (relay optional) |
-| `03-app-lock-pin.yaml` | Set a PIN, cold restart, wrong PIN refused, right PIN unlocks (native Argon2id) | No |
+| `02-onboarding.yaml` | Real identity generation → reaches main app | Relay optional |
+| `03-app-lock-pin.yaml` | Registration against a relay, set a PIN, cold restart, wrong PIN refused, right PIN unlocks (native Argon2id) | Yes: a relay at `10.0.2.2:3001` (CI starts one) |
 
 ## Run locally (against an emulator or a plugged-in phone)
 
@@ -27,8 +27,10 @@ maestro test .maestro/
 
 ## Run in CI
 
-The `mobile-e2e` job in `.github/workflows/ci.yml` builds a debug APK, boots a
-headless Android emulator, and runs every flow in this folder. It runs on
+The `mobile-e2e` job in `.github/workflows/ci.yml` builds a debug APK, starts a
+throwaway relay on the runner (the emulator reaches it at `10.0.2.2:3001`, the
+URL the E2E bundle is pinned to), boots a headless Android emulator, and runs
+every flow in this folder. It runs on
 `pull_request`, `workflow_dispatch`, and a nightly `schedule`, but is marked
 `continue-on-error: true` while we stabilise the native build — a red run is
 visible but does not block merging. You can also trigger it manually from the
