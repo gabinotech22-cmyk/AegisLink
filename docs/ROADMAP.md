@@ -208,8 +208,15 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
       BoringSSL de Electron 42 genera claves ML-KEM pero **no importa la clave pública de otro**
       (no puede encapsular; probado en DER/SPKI, PEM, raw y JWK). Decisión del dueño (2026-09-25):
       se resuelve dentro de F-1b, cuando las claves del desktop salgan del renderer.
-- [ ] Cerrar los "partial coverage" de la auditoría: zeroización en intermedios X3DH/PQXDH,
-      `assertNonZero` ML-KEM, barrido constant-time de comparaciones restantes.
+- [x] **"Partial coverage" de la auditoría 2026-06-30** ✅ (2026-09-25), verificado contra el código:
+      - Zeroización de intermedios X3DH/PQXDH y `assertNonZero` del secreto ML-KEM: ya estaban en
+        las dos plataformas (`x3dh.ts` y `ratchet.ts`, en `try/finally`). El único hueco era que
+        `ratchetEncrypt` de desktop no borraba la clave de mensaje si el sellado lanzaba; ahora sí,
+        como mobile. Test gemelo `crypto/signal/__tests__/ratchet.zeroize.test.ts` (mobile y desktop).
+      - Barrido constant-time: las comprobaciones de escritura-y-relectura de secretos de prekeys
+        en mobile (`x3dh.ts`, `registration.ts`, `socket/client.ts`) comparaban la clave con `===`;
+        pasan a `secretB64Equals` (`crypto/secretEquals.ts`, test `secretEquals.test.ts`). El resto
+        ya usaba `nacl.verify` / `timingSafeEqual`; lo que queda con `===` son datos públicos.
 
 ## Hito 4 — Paridad de plataforma y alcance 🟡
 

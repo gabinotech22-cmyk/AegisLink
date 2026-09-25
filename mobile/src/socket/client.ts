@@ -1,6 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { logger } from '../utils/logger';
 import { nacl, ml_kem768 } from '../crypto/sodium';
+import { secretB64Equals } from '../crypto/secretEquals';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -881,7 +882,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
       try {
         await saveSpkSecret(nextSpkKeyId, newSecretB64);
         const back = await loadSpkSecret(nextSpkKeyId);
-        if (back === newSecretB64) return true;
+        if (secretB64Equals(back, newSecretB64)) return true;
       } catch (e) {
         if (__DEV__) logger.warn('[socket] SPK secret DB write attempt failed', attempt, e);
       }
@@ -908,7 +909,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
       try {
         await savePqSpkSecret(nextPqSpkKeyId, newPqSecretB64);
         const back = await loadPqSpkSecret(nextPqSpkKeyId);
-        if (back === newPqSecretB64) return true;
+        if (secretB64Equals(back, newPqSecretB64)) return true;
       } catch (e) {
         if (__DEV__) logger.warn('[socket] PQSPK secret DB write attempt failed', attempt, e);
       }
