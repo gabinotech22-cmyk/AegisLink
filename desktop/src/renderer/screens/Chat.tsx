@@ -7,6 +7,10 @@ import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/vault';
 import { I } from '../components/icons';
 import { Avatar } from '../components/Avatar';
+import { MediaImage, MediaVideo, MediaAlbum, FileRow } from '../components/MediaBubbles';
+import { useMediaUrl, primeMediaUrl } from '../hooks/useMediaUrl';
+import { mediaKindOf, outgoingMediaWire, wireFileName } from '../utils/outgoingMedia';
+import { stripImageMetadata } from '../utils/stripImageMetadata';
 import { useIdentity } from '../store/identity';
 import { useMessages } from '../store/messages';
 import { useConnection } from '../store/connection';
@@ -43,6 +47,12 @@ interface Props {
   onContactDetail: () => void;
   onAttach: () => void;
   onEphemeral: () => void;
+}
+
+/** Index of the last image among staged items (-1 if none): it carries the caption. */
+function lastImageIndex(items: Array<{ blob: Blob }>): number {
+  for (let i = items.length - 1; i >= 0; i--) if (mediaKindOf(items[i].blob.type) === 'image') return i;
+  return -1;
 }
 
 export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphemeral }: Props) {
@@ -239,32 +249,39 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
 
       if (capturedItems.length > 0) {
         const { encryptAndUploadMedia } = await import('../crypto/media');
+        let captionSent = false;
         for (let i = 0; i < capturedItems.length; i++) {
           const item = capturedItems[i];
-          const wireUri = await encryptAndUploadMedia(item.blob);
-          const isLast = i === capturedItems.length - 1;
-          // Attach caption to last attachment — mirrors mobile's send pattern
-          const caption = isLast && capturedDraft ? capturedDraft : '';
-          const plaintext = caption ? `[image:${wireUri}]${caption}` : `[image:${wireUri}]`;
+          const kind = mediaKindOf(item.blob.type);
+          // Images leave without metadata (EXIF/GPS). stripImageMetadata throws
+          // rather than fall back to the original bytes.
+          const blob = kind === 'image' ? await stripImageMetadata(item.blob) : item.blob;
+          const wireUri = await encryptAndUploadMedia(blob);
+          // Only an image carries a caption on the wire (mobile's format): put it
+          // on the last image; otherwise it goes as its own message below.
+          const caption = kind === 'image' && !captionSent && i === lastImageIndex(capturedItems) ? capturedDraft : '';
+          if (caption) captionSent = true;
+          const plaintext = outgoingMediaWire(kind, wireUri, caption, item.name ?? 'file');
 
           // Local append BEFORE sendMessage so the sender sees the rendered
-          // image bubble (with caption) instead of the raw wire URI as text.
-          // A fresh objectURL is created here because the staging previewUrl
-          // was revoked by clearStagedItems() above.
-          const localMediaUrl = URL.createObjectURL(item.blob);
+          // bubble instead of the raw wire text. Store the wire URI (it survives
+          // a restart; the DB encrypts it at rest) and seed the render cache with
+          // a local object URL, so this bubble shows at once without downloading
+          // what we just uploaded (the staging previewUrl was revoked above).
+          primeMediaUrl(wireUri, URL.createObjectURL(blob));
           const id = crypto.randomUUID();
           await append({
             id,
             chatId: contact.aegisId,
             direction: 'out',
-            body: caption,
+            body: kind === 'file' ? wireFileName(item.name ?? 'file') : caption,
             createdAt: Date.now(),
-            type: 'image',
-            mediaUri: localMediaUrl,
+            type: kind,
+            mediaUri: wireUri,
           });
 
-          // skipLocalAppend so socket/client doesn't re-append with the raw
-          // [image:blob:…]caption plaintext on top of our optimistic bubble.
+          // skipLocalAppend so socket/client doesn't re-append the raw wire text
+          // on top of our optimistic bubble.
           await sendMessage({
             ...base,
             plaintext,
@@ -272,6 +289,9 @@ export function ChatScreen({ contact, onBack, onContactDetail, onAttach, onEphem
             skipLocalAppend: true,
             messageId: id,
           });
+        }
+        if (capturedDraft && !captionSent) {
+          await sendMessage({ ...base, plaintext: capturedDraft });
         }
       } else {
         await sendMessage({ ...base, plaintext: capturedDraft, replyToId: capturedReplyTo });
@@ -781,15 +801,21 @@ function Bubble({ t, m, online, quotedMsg, onContextMenu }: BubbleProps) {
     );
   }
 
-  // Image bubble
-  if (m.type === 'image' && m.mediaUri) {
+  // Image, video and album bubbles (decrypted on demand: components/MediaBubbles)
+  if ((m.type === 'image' || m.type === 'video' || m.type === 'album') && m.mediaUri) {
+    const textColor = me ? t.bubbleOutText : t.bubbleInText;
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: me ? 'flex-end' : 'flex-start' }}>
         <div
           onContextMenu={(e) => { e.preventDefault(); onContextMenu(); }}
-          style={{ borderRadius: t.radius, borderTopRightRadius: me ? t.radiusS : t.radius, borderTopLeftRadius: me ? t.radius : t.radiusS, overflow: 'hidden', opacity: queued ? 0.55 : 1, cursor: 'context-menu' }}
+          style={{ backgroundColor: m.body ? (me ? t.bubbleOut : t.bubbleIn) : undefined, borderRadius: t.radius, borderTopRightRadius: me ? t.radiusS : t.radius, borderTopLeftRadius: me ? t.radius : t.radiusS, overflow: 'hidden', opacity: queued ? 0.55 : 1, cursor: 'context-menu' }}
         >
-          <img src={m.mediaUri} alt={i18n.t('chat.imageMessage')} style={{ width: 220, height: 180, objectFit: 'cover', display: 'block', backgroundColor: t.surface2 }} />
+          {m.type === 'image' && <MediaImage t={t} uri={m.mediaUri} />}
+          {m.type === 'video' && <MediaVideo t={t} uri={m.mediaUri} />}
+          {m.type === 'album' && <MediaAlbum t={t} mediaUri={m.mediaUri} color={textColor} />}
+          {m.body && (
+            <span style={{ display: 'block', maxWidth: 220, padding: '8px 12px', color: textColor, fontFamily: t.font, fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body}</span>
+          )}
         </div>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
@@ -810,8 +836,7 @@ function Bubble({ t, m, online, quotedMsg, onContextMenu }: BubbleProps) {
           onContextMenu={(e) => { e.preventDefault(); onContextMenu(); }}
           style={{ maxWidth: '80%', backgroundColor: me ? t.bubbleOut : t.bubbleIn, paddingLeft: 13, paddingRight: 13, paddingTop: 10, paddingBottom: 10, borderRadius: t.radius, borderTopRightRadius: me ? t.radiusS : t.radius, borderTopLeftRadius: me ? t.radius : t.radiusS, display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10, opacity: queued ? 0.55 : 1, cursor: 'context-menu' }}
         >
-          <I.Attach size={20} color={me ? t.bubbleOutText : t.bubbleInText} />
-          <span style={{ color: me ? t.bubbleOutText : t.bubbleInText, fontFamily: t.font, fontSize: 14 }}>{m.body || 'file'}</span>
+          <FileRow t={t} uri={m.mediaUri} name={m.body || 'file'} color={me ? t.bubbleOutText : t.bubbleInText} />
         </div>
         <ReactionPills t={t} reactions={reactions} me={me} />
         <TimestampRow t={t} queued={queued} time={time} starred={m.starred} deliveryStatus={me ? m.deliveryStatus : undefined} />
@@ -865,9 +890,11 @@ function AudioBubble({ t, m, me, queued, time, reactions, onContextMenu }: Audio
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
 
+  const { url: audioUrl } = useMediaUrl(m.mediaUri, 'audio/mp4');
+
   useEffect(() => {
-    if (!m.mediaUri) return;
-    const audio = new Audio(m.mediaUri);
+    if (!audioUrl) return;
+    const audio = new Audio(audioUrl);
     audioRef.current = audio;
 
     audio.addEventListener('loadedmetadata', () => setDuration(audio.duration));
@@ -885,7 +912,7 @@ function AudioBubble({ t, m, me, queued, time, reactions, onContextMenu }: Audio
       audio.pause();
       audio.src = '';
     };
-  }, [m.mediaUri]);
+  }, [audioUrl]);
 
   function togglePlay() {
     const audio = audioRef.current;

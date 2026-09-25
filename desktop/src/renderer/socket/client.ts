@@ -74,6 +74,7 @@ import { showIncomingNotification } from '../notifications/push';
 import { useTyping } from '../store/typing';
 import { useCall } from '../store/call';
 import { verifyDetached } from '../crypto/ed25519';
+import { parseIncomingMedia } from '../utils/incomingMedia';
 
 const DEV = import.meta.env.DEV;
 
@@ -2079,64 +2080,32 @@ async function decryptAndAppendLocked(
   await saveSessionState(contact.aegisId, ratchetState);
 
   // ── Detect and save media payloads ──────────────────────────────────────────
-  // Desktop: media caching uses fetch + URL.createObjectURL / ArrayBuffer
-  // instead of expo-file-system. For blob: URIs we download and re-objectURL.
-  // For data: URIs we leave them as-is (Chromium can render data URIs natively).
+  // Attachments keep their wire reference (`blob:` URI, or a small `data:` URI);
+  // the bubble decrypts on demand (`hooks/useMediaUrl`). See utils/incomingMedia.
   let detectedType: string = parsedPayload?.type ?? 'text';
   let detectedMediaUri: string | null = null;
   let cleanBody = finalBody;
 
   /**
-   * Resolve a media URI to a renderable object URL.
-   *
-   * Two cases:
-   *  - Wire format `blob:<id>:<keyB64>:<nonceB64>` (4 colon-separated parts):
-   *    download ciphertext from relay and decrypt locally.
-   *  - Browser object URL `blob:http://...` (>4 parts) or any other URI:
-   *    fetch directly and re-wrap (e.g. same-device audio sent as objectURL).
+   * View-once media only: download and decrypt at receive time (a view-once
+   * bubble opens its object URL once). Every other attachment keeps its wire
+   * reference and is decrypted when its bubble renders (`hooks/useMediaUrl`).
    */
-  async function resolveBlobUri(uri: string): Promise<string> {
-    const parts = uri.split(':');
-    if (parts.length === 4 && parts[0] === 'blob') {
-      try {
-        const { downloadAndDecryptMedia } = await import('../crypto/media');
-        return await downloadAndDecryptMedia(uri);
-      } catch {
-        return uri;
-      }
-    }
+  async function resolveViewOnce(uri: string): Promise<string | null> {
+    const { parseBlobUri, downloadAndDecryptMedia } = await import('../crypto/media');
+    if (!parseBlobUri(uri)) return null;
     try {
-      const resp = await fetch(uri);
-      const blob = await resp.blob();
-      return URL.createObjectURL(blob);
+      return await downloadAndDecryptMedia(uri);
     } catch {
-      return uri;
+      return null;
     }
   }
 
-  if (finalBody.startsWith('[audio:') && finalBody.endsWith(']')) {
-    const durEnd = finalBody.indexOf('s:', 7);
-    if (durEnd > 7) {
-      const durStr = finalBody.slice(7, durEnd);
-      const dataUri = finalBody.slice(durEnd + 2, -1);
-      detectedType = 'audio';
-      cleanBody = `[audio:${durStr}s]`;
-      if (dataUri.startsWith('blob:')) {
-        detectedMediaUri = await resolveBlobUri(dataUri);
-      } else if (dataUri.startsWith('data:')) {
-        detectedMediaUri = dataUri; // Chromium renders data: URIs natively
-      }
-    }
-  } else if (finalBody.startsWith('[image:blob:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(7, -1);
-    detectedType = 'image';
-    cleanBody = '';
-    detectedMediaUri = await resolveBlobUri(dataUri);
-  } else if (finalBody.startsWith('[image:data:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(7, -1);
-    detectedType = 'image';
-    cleanBody = '';
-    detectedMediaUri = dataUri;
+  const media = parseIncomingMedia(finalBody);
+  if (media) {
+    detectedType = media.type;
+    cleanBody = media.body;
+    detectedMediaUri = media.mediaUri;
   } else if (finalBody.startsWith('[viewonce:audio:') && finalBody.endsWith(']')) {
     const inner = finalBody.slice(16, -1);
     const colonIdx = inner.indexOf(':');
@@ -2150,31 +2119,13 @@ async function decryptAndAppendLocked(
       }
     }
   } else if (finalBody.startsWith('[viewonce:blob:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(10, -1);
     detectedType = 'view_once';
     cleanBody = '[viewonce]';
-    detectedMediaUri = await resolveBlobUri(dataUri);
+    detectedMediaUri = await resolveViewOnce(finalBody.slice(10, -1));
   } else if (finalBody.startsWith('[viewonce:data:') && finalBody.endsWith(']')) {
-    const dataUri = finalBody.slice(10, -1);
-    detectedMediaUri = dataUri;
+    detectedMediaUri = finalBody.slice(10, -1);
     cleanBody = '[viewonce]';
     detectedType = 'view_once';
-  } else if (finalBody.startsWith('[file:') && finalBody.endsWith(']')) {
-    const inner = finalBody.slice(6, -1);
-    const blobColonIdx = inner.indexOf(':blob:');
-    if (blobColonIdx !== -1) {
-      const fileName = inner.slice(0, blobColonIdx);
-      const blobUri = inner.slice(blobColonIdx + 1);
-      detectedType = 'file';
-      cleanBody = fileName;
-      detectedMediaUri = await resolveBlobUri(blobUri);
-    } else {
-      const plainColonIdx = inner.indexOf(':');
-      if (plainColonIdx !== -1) {
-        cleanBody = inner.slice(0, plainColonIdx);
-        detectedType = 'file';
-      }
-    }
   }
 
   await useMessages.getState().append({

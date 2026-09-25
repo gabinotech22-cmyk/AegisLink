@@ -247,7 +247,12 @@
     "pauseAudio": "Pause audio",
     "playAudio": "Play audio",
     "typingIndicatorShort": "typing…",
-    "queuedStatus": "queued"
+    "queuedStatus": "queued",
+    "attachmentLoading": "Decrypting…",
+    "attachmentExpired": "Attachment expired",
+    "attachmentUnavailable": "Attachment unavailable",
+    "videoMessage": "video message",
+    "downloadFile": "Save {{name}}"
   },
   "contacts": {
     "title": "Contacts",
